@@ -167,7 +167,13 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
                 except (ELFError, OSError, ValueError, KeyError) as exc:
                     meta.cu_failed += 1
                     log.warning("parse_advanced_dwarf: skipping CU: %s", exc)
-            if meta.cu_failed:
+            if meta.cu_total == 0:
+                # Mirrors dwarf_unified.parse_dwarf_from_session's/
+                # dwarf_metadata._parse's identical zero-CU check: an
+                # empty/truncated .debug_info section iterates to zero
+                # CUs without raising.
+                meta.evidence_state = "failed"
+            elif meta.cu_failed:
                 meta.evidence_state = (
                     "failed" if meta.cu_failed == meta.cu_total else "partial"
                 )

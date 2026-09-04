@@ -616,4 +616,91 @@ class TestSplitDwarfSkeletonDetection:
         finally:
             sess.close()
         assert meta.evidence_state == "parsed"
-        assert adv.evidence_state == "parsed"
+
+
+class TestZeroCuDwarfIsNeverParsed:
+    """An empty or truncated ``.debug_info`` section makes ``iter_CUs()``
+    yield zero compilation units without raising -- the pyelftools-level
+    presence check (``has_real_dwarf_info``) only confirmed the section
+    exists, not that it holds anything. Before this fix ``cu_total`` and
+    ``cu_failed`` both stayed 0 in that case, so none of the post-loop
+    ``cu_failed``/skeleton downgrades fired and the constructor's
+    ``evidence_state="parsed"`` default leaked through unchanged -- a false
+    claim of complete DWARF evidence (P1 review: reproduced with an ELF
+    carrying an empty ``.debug_info`` section --
+    ``--require-complete-analysis`` exited 0). Covers all three DWARF entry
+    points that independently do this cu_total/cu_failed accounting."""
+
+    def test_unified_session_pass_marks_zero_cu_failed(self) -> None:
+        class _EmptyDwarfInfo:
+            def iter_CUs(self) -> list:
+                return []
+
+        sess = DwarfSession(
+            path=Path("libzerocu.so"),
+            _file=object(),  # type: ignore[arg-type]
+            elf=object(),
+            dwarf=_EmptyDwarfInfo(),
+            arch="x86_64",  # type: ignore[arg-type]
+        )
+        meta, adv = parse_dwarf_from_session(sess)
+        assert meta.cu_total == 0
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "failed"
+        assert adv.cu_total == 0
+        assert adv.cu_failed == 0
+        assert adv.evidence_state == "failed"
+
+    def test_standalone_dwarf_metadata_marks_zero_cu_failed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck import dwarf_metadata as dm
+
+        class _EmptyDwarfInfo:
+            def iter_CUs(self) -> list:
+                return []
+
+        class _FakeElf:
+            def get_dwarf_info(self) -> _EmptyDwarfInfo:
+                return _EmptyDwarfInfo()
+
+        so = tmp_path / "libzerocu_meta.so"
+        so.write_bytes(b"\x7fELF" + b"\x00" * 128)
+
+        monkeypatch.setattr(dm, "has_real_dwarf_info", lambda _elf: True)
+        monkeypatch.setattr(dm, "ELFFile", lambda _f: _FakeElf())
+
+        meta = dm.parse_dwarf_metadata(so)
+        assert meta.has_dwarf is True
+        assert meta.cu_total == 0
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "failed"
+
+    def test_standalone_advanced_dwarf_marks_zero_cu_failed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck import dwarf_advanced as da
+
+        class _EmptyDwarfInfo:
+            def iter_CUs(self) -> list:
+                return []
+
+        class _FakeElf:
+            def get_dwarf_info(self) -> _EmptyDwarfInfo:
+                return _EmptyDwarfInfo()
+
+            def get_section_by_name(self, _name: str) -> None:
+                return None
+
+        so = tmp_path / "libzerocu_adv.so"
+        so.write_bytes(b"\x7fELF" + b"\x00" * 128)
+
+        monkeypatch.setattr(da, "has_real_dwarf_info", lambda _elf: True)
+        monkeypatch.setattr(da, "ELFFile", lambda _f: _FakeElf())
+        monkeypatch.setattr(da, "_normalize_arch", lambda _elf: "x86_64")
+
+        meta = da.parse_advanced_dwarf(so)
+        assert meta.has_dwarf is True
+        assert meta.cu_total == 0
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "failed"

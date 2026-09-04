@@ -160,7 +160,13 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
             meta.cu_failed += 1
             log.warning("parse_dwarf_metadata: skipping CU in %s: %s", so_path, exc)
 
-    if meta.cu_failed:
+    if meta.cu_total == 0:
+        # An empty/truncated .debug_info section iterates to zero CUs
+        # without raising -- has_real_dwarf_info() only confirmed the
+        # section exists, not that it holds anything. Mirrors
+        # dwarf_unified.parse_dwarf_from_session's identical zero-CU check.
+        meta.evidence_state = "failed"
+    elif meta.cu_failed:
         meta.evidence_state = "failed" if meta.cu_failed == meta.cu_total else "partial"
 
     return meta

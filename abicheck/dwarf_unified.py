@@ -216,7 +216,16 @@ def parse_dwarf_from_session(
         )
 
     for channel in (meta, adv):
-        if channel.cu_failed or skeleton_cus:
+        if channel.cu_total == 0:
+            # iter_CUs() yielded nothing -- an empty or truncated
+            # .debug_info section still "succeeds" at the iterator level
+            # (this branch, not the elf.get_dwarf_info() exception path
+            # above), so without this check a real zero-CU parse reads as
+            # "parsed" with cu_total/cu_failed both 0 (P1 review, fresh
+            # evidence: reproduced with an ELF carrying an empty
+            # .debug_info section -- --require-complete-analysis exited 0).
+            channel.evidence_state = "failed"
+        elif channel.cu_failed or skeleton_cus:
             channel.evidence_state = (
                 "failed"
                 if channel.cu_failed and channel.cu_failed == channel.cu_total
