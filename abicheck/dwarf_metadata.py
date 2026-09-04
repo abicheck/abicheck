@@ -667,7 +667,14 @@ def _compute_type_info(
 
     if tag == "DW_TAG_pointer_type":
         return _compute_pointer_like_info(
-            die, CU, depth, cache, suffix=" *", fallback="void *", incomplete=incomplete
+            die,
+            CU,
+            depth,
+            cache,
+            suffix=" *",
+            fallback="void *",
+            incomplete=incomplete,
+            missing_type_is_legitimate=True,
         )
 
     if tag in ("DW_TAG_reference_type", "DW_TAG_rvalue_reference_type"):
@@ -680,23 +687,43 @@ def _compute_type_info(
             suffix=suffix,
             fallback=f"?{suffix}",
             incomplete=incomplete,
+            missing_type_is_legitimate=True,
         )
 
     if tag in ("DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_restrict_type"):
         qualifier = tag.split("_")[2].lower()
         return _compute_qualified_type_info(
-            die, CU, depth, cache, qualifier, incomplete=incomplete
+            die,
+            CU,
+            depth,
+            cache,
+            qualifier,
+            incomplete=incomplete,
+            missing_type_is_legitimate=True,
         )
 
     if tag == "DW_TAG_atomic_type":
         # Spelled "_Atomic" (not the generic tag.split() lowercase form) so it
         # matches the C11 keyword diff_atomic.py's _has_atomic() looks for.
         return _compute_qualified_type_info(
-            die, CU, depth, cache, "_Atomic", incomplete=incomplete
+            die,
+            CU,
+            depth,
+            cache,
+            "_Atomic",
+            incomplete=incomplete,
+            missing_type_is_legitimate=True,
         )
 
     if tag == "DW_TAG_typedef":
-        return _compute_typedef_info(die, CU, depth, cache, incomplete=incomplete)
+        return _compute_typedef_info(
+            die,
+            CU,
+            depth,
+            cache,
+            incomplete=incomplete,
+            missing_type_is_legitimate=True,
+        )
 
     if tag == "DW_TAG_array_type":
         return _compute_array_type_info(die, CU, depth, cache, incomplete=incomplete)
@@ -724,8 +751,16 @@ def _compute_pointer_like_info(
     fallback: str,
     *,
     incomplete: list[bool] | None = None,
+    missing_type_is_legitimate: bool = False,
 ) -> tuple[str, int]:
-    pointee = _resolve_inner_type_name(die, CU, depth, cache, incomplete=incomplete)
+    pointee = _resolve_inner_type_name(
+        die,
+        CU,
+        depth,
+        cache,
+        incomplete=incomplete,
+        missing_type_is_legitimate=missing_type_is_legitimate,
+    )
     size = _attr_int(die, "DW_AT_byte_size") or 0
     if pointee is None:
         return (fallback, size)
@@ -740,8 +775,16 @@ def _compute_qualified_type_info(
     qualifier: str,
     *,
     incomplete: list[bool] | None = None,
+    missing_type_is_legitimate: bool = False,
 ) -> tuple[str, int]:
-    inner = _resolve_inner_type_info(die, CU, depth, cache, incomplete=incomplete)
+    inner = _resolve_inner_type_info(
+        die,
+        CU,
+        depth,
+        cache,
+        incomplete=incomplete,
+        missing_type_is_legitimate=missing_type_is_legitimate,
+    )
     if inner is None:
         return (qualifier, 0)
     inner_name, size = inner
@@ -755,9 +798,17 @@ def _compute_typedef_info(
     cache: dict[tuple[int, int], tuple[str, int]],
     *,
     incomplete: list[bool] | None = None,
+    missing_type_is_legitimate: bool = False,
 ) -> tuple[str, int]:
     name = _attr_str(die, "DW_AT_name")
-    inner = _resolve_inner_type_info(die, CU, depth, cache, incomplete=incomplete)
+    inner = _resolve_inner_type_info(
+        die,
+        CU,
+        depth,
+        cache,
+        incomplete=incomplete,
+        missing_type_is_legitimate=missing_type_is_legitimate,
+    )
     if inner is None:
         return (name or "typedef", 0)
     inner_name, size = inner
@@ -784,8 +835,28 @@ def _resolve_inner_type_info(
     cache: dict[tuple[int, int], tuple[str, int]],
     *,
     incomplete: list[bool] | None = None,
+    missing_type_is_legitimate: bool = False,
 ) -> tuple[str, int] | None:
     if "DW_AT_type" not in die.attributes:
+        # P2 review, fresh evidence (Codex): a wrapper DIE with no
+        # DW_AT_type at all was previously always treated as a legitimate
+        # DWARF "void" encoding (mirroring DW_TAG_pointer_type's own
+        # `void *` convention), with no completeness signal for a
+        # genuinely truncated wrapper. That convention is real and applies
+        # more broadly than pointer_type alone -- the DWARF5 spec extends
+        # "no DW_AT_type" to reference types (a would-be `void&`, an
+        # otherwise-invalid C++ construct DWARF can still encode this way)
+        # and to qualified/typedef types (`const void`, `volatile void`,
+        # `typedef void X;`) -- and real compiled evidence confirms both:
+        # glibc's own `<bits/libio.h>` emits `typedef void _IO_lock_t;`
+        # with no DW_AT_type on the typedef DIE, and libstdc++ template
+        # code emits bare `const void`-qualified DW_TAG_const_type DIEs
+        # the same way. `DW_TAG_array_type` has no such convention (there
+        # is no "void array" in C/C++), so it is the one wrapper tag this
+        # branch still marks incomplete by default; every other wrapper
+        # tag's own call site opts out via `missing_type_is_legitimate`.
+        if incomplete is not None and not missing_type_is_legitimate:
+            incomplete.append(True)
         return None
     try:
         inner_die = _resolve_ref(die, "DW_AT_type", CU)
@@ -807,8 +878,16 @@ def _resolve_inner_type_name(
     cache: dict[tuple[int, int], tuple[str, int]],
     *,
     incomplete: list[bool] | None = None,
+    missing_type_is_legitimate: bool = False,
 ) -> str | None:
-    inner = _resolve_inner_type_info(die, CU, depth, cache, incomplete=incomplete)
+    inner = _resolve_inner_type_info(
+        die,
+        CU,
+        depth,
+        cache,
+        incomplete=incomplete,
+        missing_type_is_legitimate=missing_type_is_legitimate,
+    )
     return inner[0] if inner is not None else None
 
 

@@ -1370,6 +1370,88 @@ def _extract_cfa_reg_from_fde(
         return None
 
 
+def _row_governing_pc(table: list[Any], pc: int) -> Any | None:
+    """Return the last decoded CFI row whose own ``pc`` is <= *pc*.
+
+    pyelftools' ``get_decoded().table`` is piecewise-constant in increasing
+    program-order PC: each row is a full state *snapshot* (every register
+    with a currently-active rule, not merely the ones that just changed),
+    valid from that row's own ``pc`` until the next row's. Returns ``None``
+    if no row's own pc is <= *pc* (a malformed/out-of-order table, or *pc*
+    before the FDE's first row).
+    """
+    governing = None
+    governing_pc = -1
+    for row in table:
+        try:
+            row_pc = int(row.get("pc", 0))
+        except (TypeError, ValueError):
+            continue
+        if row_pc <= pc and row_pc >= governing_pc:
+            governing = row
+            governing_pc = row_pc
+    return governing
+
+
+def _cfa_reg_and_saved_from_row(
+    row: Any, arch_key: str
+) -> tuple[str | None, frozenset[str]]:
+    """Extract the CFA register name and the set of currently-saved
+    callee registers from one decoded CFI table row (a full state
+    snapshot, not a diff -- see ``_row_governing_pc``'s own docstring)."""
+    reg: str | None = None
+    cfa = row.get("cfa")
+    if cfa is not None:
+        cfa_reg = getattr(cfa, "reg", None)
+        if cfa_reg is not None:
+            reg = _reg_name(int(cfa_reg), arch_key)
+    saved: set[str] = set()
+    for reg_key, rule in row.items():
+        if reg_key in ("pc", "cfa"):
+            continue
+        rule_type = getattr(rule, "type", None)
+        if rule_type and str(rule_type).lower() in ("offset", "reg_rule_offset"):
+            if isinstance(reg_key, int):
+                saved.add(_reg_name(reg_key, arch_key))
+    return reg, frozenset(saved)
+
+
+def _cfa_facts_at_pc(
+    entry: Any, arch_key: str, pc: int, *, decode_failed: list[bool] | None = None
+) -> tuple[str | None, frozenset[str] | None]:
+    """Extract the CFA register and callee-saved register set actually in
+    effect at *pc* within this FDE -- the precise per-PC state, not the
+    whole-FDE "dominant register" / "union of ever-saved registers"
+    summary ``_extract_cfa_reg_from_fde``/``_extract_callee_saved_regs``
+    compute for the FDE's own primary entry point (a deliberate choice
+    there, to capture the settled function-body convention rather than one
+    row -- see that function's own docstring).
+
+    P2 review, fresh evidence, round three (Codex): an exported *alternate*
+    entry point -- covered by this FDE's range but placed past a CFI row
+    transition (e.g. past the enclosing function's own prologue, where the
+    CFA register or the set of already-spilled registers can differ from
+    the function-wide summary) -- previously received that same FDE-wide
+    summary via the round-two alternate-entry-point fix, silently hiding
+    any CFI difference specific to that one entry point. Returns
+    ``(None, None)`` when no row governs *pc* at all (a legitimately empty
+    decoded table, mirroring the sibling whole-FDE helpers' own "no CFA
+    data" contract -- not appended to ``decode_failed``).
+    """
+    try:
+        decoded = entry.get_decoded()
+        if not decoded.table:
+            return (None, None)
+        row = _row_governing_pc(decoded.table, pc)
+        if row is None:
+            return (None, None)
+        return _cfa_reg_and_saved_from_row(row, arch_key)
+    except (ELFError, OSError, ValueError, KeyError, IndexError):
+        if decode_failed is not None:
+            decode_failed.append(True)
+        return (None, None)
+
+
 def _addrs_in_fde_range(
     sorted_sym_addrs: list[int], pc_begin: int, address_range: object
 ) -> list[int]:
@@ -1543,7 +1625,7 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
                     # this FDE's facts to every exported symbol its own
                     # range covers, not only one placed exactly at
                     # pc_begin -- an alternate entry point (no FDE of its
-                    # own) shares the identical CFI state this FDE
+                    # own) shares the same unwind information this FDE
                     # describes, since there is no other unwind
                     # information for it anywhere. Marking it merely
                     # "covered" without also attaching facts would let a
@@ -1551,12 +1633,28 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
                     # undetected, since the advanced diff only compares
                     # names present in both sides' frame_registers/
                     # callee_saved_regs maps.
+                    #
+                    # P2 review, fresh evidence, round three (Codex): an
+                    # alternate entry placed past a CFI row transition
+                    # (e.g. past the enclosing function's own prologue)
+                    # can have a materially different CFA register / saved-
+                    # register set than the FDE-wide dominant/union summary
+                    # (reg/saved above) reports -- so only pc_begin itself
+                    # gets that whole-FDE summary; every other covered
+                    # address gets facts derived from the CFI row actually
+                    # governing its own PC (_cfa_facts_at_pc).
                     for addr in covered_addrs:
+                        if addr == pc_begin:
+                            addr_reg, addr_saved = reg, saved
+                        else:
+                            addr_reg, addr_saved = _cfa_facts_at_pc(
+                                entry, arch_key, addr, decode_failed=decode_failed
+                            )
                         for sym_name in addr_to_syms.get(addr, []):
-                            if reg is not None:
-                                meta.frame_registers[sym_name] = reg
-                            if saved is not None:
-                                meta.callee_saved_regs[sym_name] = saved
+                            if addr_reg is not None:
+                                meta.frame_registers[sym_name] = addr_reg
+                            if addr_saved is not None:
+                                meta.callee_saved_regs[sym_name] = addr_saved
                     if decode_failed:
                         # P1 review, fresh evidence: both helpers above catch and
                         # swallow their own decode errors (so callers of them

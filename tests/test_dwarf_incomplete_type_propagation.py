@@ -419,6 +419,130 @@ class TestStandaloneParserFlagsIncompleteTypeResolution:
         assert field.type_name == "decltype(nullptr)"
         assert field.byte_size == 0
 
+    def test_array_missing_type_marks_partial(self) -> None:
+        """P2 review, fresh evidence (Codex): a bare DW_TAG_array_type DIE
+        with no DW_AT_type at all -- unlike every other wrapper tag below,
+        DWARF has no "void array" convention (there is no legal `void[]`
+        in C/C++), so this genuinely is malformed/truncated debug info.
+        Previously fell through _resolve_inner_type_info's own
+        `"DW_AT_type" not in die.attributes` branch with no completeness
+        signal, since that branch has no reference to resolve and so
+        never reached the adjacent except-branch accounting the
+        malformed-reference sibling case already covers."""
+        array_die = _Die("DW_TAG_array_type", {}, offset=82)
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "field", "DW_AT_type": _Attr(82, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "HasBareArray", "DW_AT_byte_size": 8},
+            children=[member],
+        )
+        die_map = {82: array_die}
+
+        result = _run_parse([struct], die_map)
+        assert result.cu_failed == 0
+        assert result.evidence_state == "partial"
+        assert result.structs["HasBareArray"].fields[0].type_name == "array"
+
+    def test_qualifier_missing_type_stays_parsed(self) -> None:
+        """Positive control, P2 review round two (Codex, real-compile
+        evidence): a bare DW_TAG_const_type DIE with no DW_AT_type at all
+        is DWARF's own legitimate encoding for qualified void (`const
+        void`) -- the identical "omitted DW_AT_type means void" convention
+        DW_TAG_pointer_type already gets, just extended to qualifiers too.
+        A first attempt at this fix (round one) flagged every wrapper tag
+        including this one, but a real g++-compiled libstdc++ template
+        instantiation emits exactly this shape (a bare, type-less
+        DW_TAG_const_type from `const void*`-adjacent allocator code),
+        which the round-one fix wrongly downgraded to "partial" -- caught
+        by tests/test_dwarf_unified.py's own real-compile integration
+        tests, not by this file's mock-based ones."""
+        const_die = _Die("DW_TAG_const_type", {}, offset=80)
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "field", "DW_AT_type": _Attr(80, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "HasBareConst", "DW_AT_byte_size": 8},
+            children=[member],
+        )
+        die_map = {80: const_die}
+
+        result = _run_parse([struct], die_map)
+        assert result.cu_failed == 0
+        assert result.evidence_state == "parsed"
+        assert result.structs["HasBareConst"].fields[0].type_name == "const"
+
+    def test_typedef_missing_type_stays_parsed(self) -> None:
+        """Positive control, sibling to the qualifier case above: a bare
+        DW_TAG_typedef DIE with no DW_AT_type at all is DWARF's own
+        legitimate encoding for `typedef void X;` -- real evidence:
+        glibc's own <bits/libio.h> emits exactly this shape for
+        `typedef void _IO_lock_t;`, reproduced by
+        tests/test_dwarf_unified.py's real-compile integration tests."""
+        typedef_die = _Die("DW_TAG_typedef", {"DW_AT_name": "MyAlias"}, offset=81)
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "field", "DW_AT_type": _Attr(81, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "HasBareTypedef", "DW_AT_byte_size": 8},
+            children=[member],
+        )
+        die_map = {81: typedef_die}
+
+        result = _run_parse([struct], die_map)
+        assert result.cu_failed == 0
+        assert result.evidence_state == "parsed"
+        assert result.structs["HasBareTypedef"].fields[0].type_name == "MyAlias"
+
+    def test_reference_missing_type_stays_parsed(self) -> None:
+        """Positive control, sibling to the qualifier case above: DWARF's
+        "omitted DW_AT_type means void" convention extends to reference
+        types too (a would-be `void&`, an otherwise-invalid C++ construct
+        DWARF can still encode this way) -- must NOT be flagged, the same
+        as DW_TAG_pointer_type."""
+        ref_die = _Die("DW_TAG_reference_type", {"DW_AT_byte_size": 8}, offset=83)
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "field", "DW_AT_type": _Attr(83, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "HasBareRef", "DW_AT_byte_size": 8},
+            children=[member],
+        )
+        die_map = {83: ref_die}
+
+        result = _run_parse([struct], die_map)
+        assert result.cu_failed == 0
+        assert result.evidence_state == "parsed"
+
+    def test_pointer_missing_type_stays_parsed(self) -> None:
+        """Positive control: DW_TAG_pointer_type with no DW_AT_type at
+        all is DWARF's own legitimate encoding for `void *` -- must NOT
+        be flagged, the original case this convention is best known for."""
+        ptr_die = _Die("DW_TAG_pointer_type", {"DW_AT_byte_size": 8}, offset=84)
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "field", "DW_AT_type": _Attr(84, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "HasVoidPtr", "DW_AT_byte_size": 8},
+            children=[member],
+        )
+        die_map = {84: ptr_die}
+
+        result = _run_parse([struct], die_map)
+        assert result.cu_failed == 0
+        assert result.evidence_state == "parsed"
+        assert result.structs["HasVoidPtr"].fields[0].type_name == "void *"
+
 
 # ---------------------------------------------------------------------------
 # Unified single-pass entry point (dumper.py's real ELF-dump path)

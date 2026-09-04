@@ -731,6 +731,74 @@ class TestAlternateEntryPointCoverage:
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
 
 
+class TestAlternateEntryPointOwnPcFacts:
+    """P2 review, fresh evidence, round three (Codex): the round-two
+    alternate-entry-point fix (``TestAlternateEntryPointCoverage`` above)
+    attached the *whole-FDE* dominant-register/union-of-saved-registers
+    summary uniformly to every covered address, including an alternate
+    entry placed past a CFI row transition (e.g. past the enclosing
+    function's own prologue) -- so a CFI difference specific to that one
+    entry point (a different CFA register, or a register no longer saved
+    by that point) was invisible, since the advanced diff only compares
+    the attached facts. Fixed by deriving an alternate entry's own facts
+    from the CFI row actually governing its own PC, rather than reusing
+    the primary entry's whole-FDE summary."""
+
+    def test_alternate_entry_past_row_transition_gets_its_own_facts(self) -> None:
+        """``foo`` is the FDE's primary entry (0x1000); ``bar`` is an
+        alternate entry point 4 bytes later (0x1004), exactly at a row
+        transition where the CFA register changes from rbp to rsp and
+        rbx is no longer saved. The whole-FDE dominant register is rbp
+        (2 of 3 rows), and the whole-FDE saved-register union is {rbx}
+        (present on 2 of 3 rows) -- both correct for ``foo``, but wrong
+        for ``bar``, whose own governing row (the third) reports rsp with
+        nothing saved."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        foo = _sym("foo", 0x1000)
+        bar = _sym("bar", 0x1004)
+        dyn.iter_symbols.return_value = [foo, bar]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        def _cfa(reg_num: int) -> MagicMock:
+            cfa = MagicMock()
+            cfa.reg = reg_num
+            return cfa
+
+        def _offset_rule() -> MagicMock:
+            rule = MagicMock()
+            rule.type = "offset"
+            return rule
+
+        fde = MagicMock()
+        fde.__class__ = type("FDE", (), {})
+        fde.__class__.__name__ = "FDE"
+        fde.__getitem__ = MagicMock(side_effect=_fde_getitem(0x1000, address_range=16))
+        decoded = MagicMock()
+        decoded.table = [
+            # Prologue: CFA via rbp, rbx already spilled.
+            {"pc": 0x1000, "cfa": _cfa(6), 3: _offset_rule()},
+            {"pc": 0x1002, "cfa": _cfa(6), 3: _offset_rule()},
+            # bar's own entry: CFA via rsp, rbx restored (no longer saved).
+            {"pc": 0x1004, "cfa": _cfa(7)},
+        ]
+        fde.get_decoded.return_value = decoded
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [fde]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        # foo keeps the whole-FDE "settled convention" summary.
+        assert meta.frame_registers["foo"] == "rbp"
+        assert meta.callee_saved_regs["foo"] == frozenset({"rbx"})
+        # bar gets facts derived from its own governing row, not foo's.
+        assert meta.frame_registers["bar"] == "rsp"
+        assert meta.callee_saved_regs["bar"] == frozenset()
+
+
 class TestCoverageRestrictedToRealExports:
     """P2 review, fresh evidence (Codex): CFI coverage iterated
     ``.dynsym`` and ``.symtab`` unconditionally, admitting any
