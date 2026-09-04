@@ -48,8 +48,11 @@ from ..project_snapshot_legacy import (
     materialize_release_variant_artifacts,
 )
 from ..project_snapshot_store import read_manifest_summary
+from ..storage.import_bundle_facts import read_variant_composition_library_filenames
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from ..storage.package import ArtifactRef
 
 __all__ = [
@@ -116,7 +119,9 @@ def is_multi_artifact_package(path: str | Path) -> bool:
     return len(summary.artifact_ids) != 1 or len(summary.variant_ids) != 1
 
 
-def _release_match_key(artifact: ArtifactRef) -> str:
+def _release_match_key(
+    artifact: ArtifactRef, library_filenames: Mapping[str, str] | None = None
+) -> str:
     """The canonical `cli_compare_release` matching key for *artifact*,
     matching the same `binary_utils._canonical_library_key()` a live
     directory-of-`.so`-files operand's own `_build_match_map` uses -- the
@@ -129,17 +134,36 @@ def _release_match_key(artifact: ArtifactRef) -> str:
     e.g. `libfoo.so.1.2`, when the writer captured it) over the bare SONAME/
     library name (`_NATIVE_IDENTITY_LIBRARY_NAME_KEY`) since the filename is
     what `_canonical_library_key` is actually built to canonicalize (a
-    version suffix, a vendored hash, ...); falls back to the library name,
-    then -- for a package whose writer recorded neither -- to the artifact's
-    own opaque `artifact_id`, which at least keeps matching deterministic
-    (if unable to pair with a differently-produced package) rather than
-    raising.
+    version suffix, a vendored hash, ...).
+
+    *library_filenames*, when given, is `storage.import_bundle_facts.
+    read_variant_composition_library_filenames`'s own `{bundle_key: real
+    filename}` mapping for the selected variant -- `import_bundle_facts`'s
+    own writer never stamps a real filename onto a per-artifact
+    `native_identity` the way `bundle_facts_store.write_bundle_facts_
+    package` does, only the bundle key itself
+    (`_NATIVE_IDENTITY_LIBRARY_NAME_KEY`), which can differ from the real,
+    possibly-versioned filename a live directory operand's own key is
+    derived from (e.g. bundle key `"provider"` for on-disk `libfoo.so.1`).
+    Consulted only once the artifact's own `native_identity` has no
+    filename to offer, and only for the recovered library name -- a
+    package written by the *other* writer, which already stamps a real
+    filename directly, never needs this lookup at all (Codex review, fresh
+    evidence).
+
+    Falls back to the bare library name, then -- for a package whose
+    writer recorded neither -- to the artifact's own opaque `artifact_id`,
+    which at least keeps matching deterministic (if unable to pair with a
+    differently-produced package) rather than raising.
     """
     from ..binary_utils import _canonical_library_key
 
-    name = artifact.native_identity.get(
-        _NATIVE_IDENTITY_FILENAME_KEY
-    ) or artifact.native_identity.get(_NATIVE_IDENTITY_LIBRARY_NAME_KEY)
+    name = artifact.native_identity.get(_NATIVE_IDENTITY_FILENAME_KEY)
+    library_name = artifact.native_identity.get(_NATIVE_IDENTITY_LIBRARY_NAME_KEY)
+    if not name and library_name and library_filenames:
+        name = library_filenames.get(library_name)
+    if not name:
+        name = library_name
     if name:
         return _canonical_library_key(Path(name))
     return artifact.artifact_id
@@ -169,10 +193,22 @@ def resolve_release_package_map(
     by_artifact_id = materialize_release_variant_artifacts(
         root, variant_id=variant_id, dest_root=dest_root
     )
+    # `materialize_release_variant_artifacts` above already resolved (and
+    # validated) a `None` *variant_id* to the package's sole declared
+    # variant, or raised -- so by construction exactly this resolution
+    # succeeds here too, and is the same variant `_release_match_key`
+    # below needs `import_bundle_facts`'s own real-filename evidence for
+    # (Codex review, fresh evidence).
+    resolved_variant_id = variant_id
+    if resolved_variant_id is None:
+        resolved_variant_id = read_manifest_summary(root).variant_ids[0]
+    library_filenames = read_variant_composition_library_filenames(
+        root, resolved_variant_id
+    )
     keyed: list[tuple[str, str, Path, ArtifactRef]] = []
     owners: dict[str, str] = {}
     for artifact_id, (sub_dir, artifact) in by_artifact_id.items():
-        key = _release_match_key(artifact)
+        key = _release_match_key(artifact, library_filenames)
         existing_owner = owners.setdefault(key, artifact_id)
         if existing_owner != artifact_id:
             raise ValueError(
@@ -184,21 +220,39 @@ def resolve_release_package_map(
             )
         keyed.append((key, artifact_id, sub_dir, artifact))
 
-    # Two-phase rename (Codex review, fresh evidence): renaming straight
-    # from each raw artifact_id directory to its own display name can
-    # target a *different*, still-unrenamed artifact's raw directory --
-    # e.g. artifact_id "a" resolving to key "foo" renames to "foo-a",
-    # which collides with a real, not-yet-processed artifact_id "foo-a"
-    # directory, raising ENOTEMPTY/FileExistsError. Staging every sub-
-    # package under a name outside `_display_dirname`'s own output space
-    # first (that function's output never starts with `.`) makes the two
-    # namespaces disjoint, so no second-phase rename can ever collide with
-    # a first-phase staging name or an unprocessed raw directory.
+    # Two-phase rename (Codex review): renaming straight from each raw
+    # artifact_id directory to its own display name can target a
+    # *different*, still-unrenamed artifact's raw directory -- e.g.
+    # artifact_id "a" resolving to key "foo" renames to "foo-a", which
+    # collides with a real, not-yet-processed artifact_id "foo-a"
+    # directory, raising ENOTEMPTY/FileExistsError. Staging every
+    # sub-package under a dedicated container directory first, nested one
+    # level below every raw `dest_root / artifact_id` directory
+    # (`materialize_release_variant_artifacts`'s own contract), makes the
+    # two namespaces disjoint -- *provided* the container's own name is
+    # itself not a real artifact_id (`.resolving-<artifact_id>` alone does
+    # not guarantee that: `storage.ref_ids.safe_ref_id` permits a leading
+    # dot, so a package could legitimately contain an artifact literally
+    # named `.resolving-a` and collide with artifact "a"'s staging name --
+    # Codex review, fresh evidence). Checked against the selected variant's
+    # *actual* artifact_id set below, so the container name is proven
+    # disjoint from every raw directory that can exist at this dest_root,
+    # not merely assumed unlikely.
+    known_ids = set(by_artifact_id)
+    staging_root_name = ".resolving"
+    suffix = 0
+    while staging_root_name in known_ids:
+        suffix += 1
+        staging_root_name = f".resolving-{suffix}"
     staged: list[tuple[str, str, Path, ArtifactRef]] = []
-    for key, artifact_id, sub_dir, artifact in keyed:
-        staging_dir = sub_dir.with_name(f".resolving-{artifact_id}")
-        sub_dir.rename(staging_dir)
-        staged.append((key, artifact_id, staging_dir, artifact))
+    staging_root: Path | None = None
+    if keyed:
+        staging_root = keyed[0][2].parent / staging_root_name
+        staging_root.mkdir(exist_ok=True)
+        for key, artifact_id, sub_dir, artifact in keyed:
+            staging_dir = staging_root / artifact_id
+            sub_dir.rename(staging_dir)
+            staged.append((key, artifact_id, staging_dir, artifact))
 
     result: dict[str, Path] = {}
     for key, artifact_id, staging_dir, artifact in staged:
@@ -211,9 +265,13 @@ def resolve_release_package_map(
         # the full `artifact_id`, so a `key` that only differs from another
         # by a character `_DISPLAY_DIRNAME_UNSAFE` collapses (e.g. a `/` vs
         # `:`) still cannot collide on disk (Codex review).
-        display_dir = staging_dir.with_name(_display_dirname(key, artifact_id))
+        display_dir = staging_dir.parent.parent / _display_dirname(key, artifact_id)
         staging_dir.rename(display_dir)
         result[key] = display_dir
+    if staging_root is not None:
+        # Empty once every staged directory has moved back out to its
+        # final display name.
+        staging_root.rmdir()
     return result
 
 

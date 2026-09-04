@@ -95,6 +95,7 @@ __all__ = [
     "BUNDLE_FACTS_ARTIFACT_TYPE",
     "export_bundle_facts",
     "import_bundle_facts",
+    "read_variant_composition_library_filenames",
     "read_variant_composition_manifest_payload",
 ]
 
@@ -686,3 +687,43 @@ def read_variant_composition_manifest_payload(
             _manifest_entry_for_export(entry) for entry in raw_manifest["provides"]
         ],
     }
+
+
+def read_variant_composition_library_filenames(
+    root: str | Path, variant_id: str
+) -> dict[str, str]:
+    """*variant_id*'s own composition `library_filenames` mapping (the
+    bundle key `import_bundle_facts` stamped onto each artifact's
+    `native_identity[_LIBRARY_NAME_KEY]` -> the real on-disk filename the
+    original capture recorded) -- `{}` for anything genuinely *absent*: no
+    readable variant, or no `BUNDLE_COMPOSITION_SECTION_KIND` section for
+    *variant_id* (this manifest was not produced by `import_bundle_facts`).
+
+    `import_bundle_facts` itself never stamps the real filename onto a
+    per-artifact `native_identity` the way `bundle_facts_store.write_
+    bundle_facts_package`'s own writer does -- only the bundle key, which
+    can differ from the real, possibly-versioned filename a live directory
+    operand's own `_build_match_map` would derive its release-matching key
+    from (e.g. bundle key `"provider"` for on-disk `libfoo.so.1`). This
+    reader is `workflows.release_package._release_match_key`'s own way to
+    recover that real filename for a stored side produced by this writer
+    (Codex review, fresh evidence).
+
+    Matches `read_variant_composition_manifest_payload`'s absent-vs-
+    corrupted distinction: once a composition section is confirmed
+    present, a decode failure raises rather than degrading to `{}`
+    silently -- a corrupted section must not read the same as "no
+    filenames were ever recorded".
+    """
+    from ..project_snapshot_store import DirectoryObjectStore, read_variant_ref
+
+    try:
+        variant = read_variant_ref(root, variant_id)
+    except Exception:
+        return {}
+    composition_ref = variant.sections.get(BUNDLE_COMPOSITION_SECTION_KIND)
+    if composition_ref is None:
+        return {}
+    raw = DirectoryObjectStore(root).get(composition_ref.digest)
+    composition = bundle_composition_from_dto(SectionDTO.from_dict(raw))
+    return dict(composition.get("library_filenames", {}))

@@ -719,12 +719,21 @@ def compare_release_cmd(
                     old_map,
                     resolve_stranded_library=_resolve_stranded_library,
                     # ADR-062 A1.7: the same explicit-or-embedded manifest
-                    # resolution the bundle-analysis call below applies,
-                    # so a stored side's manifest-drift contract is
-                    # captured into this baseline too (Codex review,
-                    # fresh evidence).
+                    # resolution the bundle-analysis call below applies, so
+                    # a stored OLD side's own manifest-drift contract is
+                    # captured into this baseline too -- old_side_only=True
+                    # (Codex review, fresh evidence): this baseline
+                    # describes OLD alone, so NEW's own embedded manifest
+                    # must never be attributed to it.
                     resolved_manifest=_resolve_bundle_manifest(
-                        manifest_path, old_dir, new_dir, old_map, new_map
+                        manifest_path,
+                        old_dir,
+                        new_dir,
+                        old_map,
+                        new_map,
+                        old_variant=old_variant,
+                        new_variant=new_variant,
+                        old_side_only=True,
                     ),
                 )
 
@@ -789,6 +798,8 @@ def compare_release_cmd(
                     ),
                     old_root=old_dir,
                     new_root=new_dir,
+                    old_variant=old_variant,
+                    new_variant=new_variant,
                 )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.

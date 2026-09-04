@@ -706,6 +706,8 @@ def read_bundle_facts_package(
 
 def read_embedded_instantiation_manifest(
     root: str | Path,
+    *,
+    variant_id: str | None = None,
 ) -> InstantiationManifest | None:
     """Best-effort read of a `ProjectSnapshot` package (or a single-artifact
     sub-package materialized from one)'s own embedded `InstantiationManifest`
@@ -726,6 +728,17 @@ def read_embedded_instantiation_manifest(
     side sourced from that writer still lost its own manifest-drift
     evidence here even after the composition section itself was preserved
     through materialization).
+
+    *variant_id*, when given, restricts the `import_bundle_facts` fallback
+    to that one variant's own composition section -- a multi-variant
+    package can carry a different manifest per variant, and scanning every
+    variant in package order (the previous, unconditional behavior) could
+    silently enforce a *different* variant's symbols than the one
+    `--old-variant`/`--new-variant` actually selected, letting a real
+    required-symbol removal in the selected variant go unreported (Codex
+    review, fresh evidence). `None` keeps the previous first-match-in-
+    package-order search, for a caller (or a genuinely single-variant
+    package) with no selection to thread through.
 
     Returns `None` for anything genuinely *absent*: no `manifest.json`, or
     a package that simply never had an instantiation manifest to begin
@@ -754,6 +767,9 @@ def read_embedded_instantiation_manifest(
         assert manifest_ref is not None
         raw = DirectoryObjectStore(root_path).get(manifest_ref.digest)
         return manifest_from_dict(_manifest_document_from_storage(raw))
+    if variant_id is not None:
+        payload = read_variant_composition_manifest_payload(root_path, variant_id)
+        return None if payload is None else manifest_from_dict(payload)
     for variant in manifest.variant_refs:
         payload = read_variant_composition_manifest_payload(
             root_path, variant.variant_id

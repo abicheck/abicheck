@@ -47,6 +47,7 @@ import click
 from .bundle import BundleDiffResult, render_bundle_findings_markdown
 from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
+from .errors import SnapshotError
 from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 from .model import AbiSnapshot
 from .workflows.gate import (
@@ -247,6 +248,10 @@ def _resolve_bundle_manifest(
     new_root: Path | None,
     old_map: dict[str, Path],
     new_map: dict[str, Path],
+    *,
+    old_variant: str | None = None,
+    new_variant: str | None = None,
+    old_side_only: bool = False,
 ) -> InstantiationManifest | None:
     """The one place `--manifest`/embedded-manifest resolution happens for
     a release comparison -- shared by `_run_bundle_analysis` and
@@ -267,14 +272,11 @@ def _resolve_bundle_manifest(
     artifacts still has its own manifest consulted; *old_map*/*new_map*'s
     member sub-packages are the fallback for a caller that predates the
     root parameters. `old_root`/`old_map` before `new_root`/`new_map` (the
-    side a manifest more naturally describes as a baseline). Best-effort:
-    a package written by `storage.import_bundle_facts` stores its own
-    captured manifest in a different shape `read_embedded_instantiation_
-    manifest` does not translate and simply yields `None`, same as no
-    manifest at all -- but a *declared*, corrupted section raises
-    `click.UsageError` rather than degrading silently (CodeRabbit review,
-    security finding: a corrupted section must not silently disable the
-    manifest-drift check it was meant to enforce).
+    side a manifest more naturally describes as a baseline).
+    *old_variant*/*new_variant* select the matching root's own variant.
+    *old_side_only*, when true (`write_bundle_facts_out`'s own baseline
+    capture, Codex review), restricts the fallback to OLD alone -- the
+    shared search could otherwise attribute NEW's manifest to an OLD baseline lacking its own; live-comparison enforcement keeps both.
     """
     from .bundle import load_manifest
     from .bundle_facts_store import read_embedded_instantiation_manifest
@@ -287,14 +289,19 @@ def _resolve_bundle_manifest(
                 f"Failed to load manifest {manifest_path}: {exc}",
             ) from exc
 
-    roots: list[Path] = [r for r in (old_root, new_root) if r is not None]
-    if not roots:
-        roots = [p for m in (old_map, new_map) for p in m.values()]
-    for candidate_root in roots:
+    all_roots = ((old_root, old_variant), (new_root, new_variant))
+    roots = all_roots[:1] if old_side_only else all_roots
+    candidates: list[tuple[Path, str | None]] = [(r, v) for r, v in roots if r is not None]
+    if not candidates:
+        maps = (old_map,) if old_side_only else (old_map, new_map)
+        candidates = [(p, None) for m in maps for p in m.values()]
+    for candidate_root, candidate_variant in candidates:
         if not candidate_root.is_dir():
             continue
         try:
-            manifest = read_embedded_instantiation_manifest(candidate_root)
+            manifest = read_embedded_instantiation_manifest(
+                candidate_root, variant_id=candidate_variant
+            )
         except Exception as exc:
             raise click.UsageError(
                 f"{candidate_root}: embedded instantiation manifest is "
@@ -318,6 +325,8 @@ def _run_bundle_analysis(
     new_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
     old_root: Path | None = None,
     new_root: Path | None = None,
+    old_variant: str | None = None,
+    new_variant: str | None = None,
 ) -> BundleDiffResult | None:
     """Run bundle-level (ADR-023) analysis on a compare-release run.
 
@@ -365,7 +374,7 @@ def _run_bundle_analysis(
     artifacts has no entry in *old_map*/*new_map* at all to search for one
     (Codex review, fresh evidence: a valid empty ``BundleFacts`` package
     can still carry a manifest, and the required-symbol check was silently
-    skipped for it).
+    skipped for it). *old_variant*/*new_variant* select which variant's manifest that fallback reads.
     """
     from .bundle import build_bundle_snapshot_mixed
     from .bundle_analysis import analyze_bundle
@@ -391,7 +400,13 @@ def _run_bundle_analysis(
         return None
 
     manifest = _resolve_bundle_manifest(
-        manifest_path, old_root, new_root, old_map, new_map
+        manifest_path,
+        old_root,
+        new_root,
+        old_map,
+        new_map,
+        old_variant=old_variant,
+        new_variant=new_variant,
     )
 
     system_extra: list[str] = [
@@ -720,7 +735,8 @@ def write_bundle_facts_out(
             per_library_snapshots, manifest=manifest, library_paths=dict(old_map)
         )
         save_bundle_facts(facts, bundle_facts_out)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, SnapshotError) as exc:
+        # SnapshotError too -- a declared-but-malformed filesystem_aliases array (Codex review).
         raise click.UsageError(f"--bundle-facts-out {bundle_facts_out}: {exc}") from exc
 
 
@@ -734,6 +750,8 @@ def _collect_bundle_result(
     bundle_cohorts: tuple[str, ...] = (), policy: str = "strict_abi", policy_file: PolicyFile | None = None,
     old_root: Path | None = None,
     new_root: Path | None = None,
+    old_variant: str | None = None,
+    new_variant: str | None = None,
 ) -> tuple[BundleDiffResult | None, str]:
     """Extract stashed DiffResults, run bundle analysis, update worst verdict.
 
@@ -747,8 +765,7 @@ def _collect_bundle_result(
     :func:`~abicheck.bundle_signature_evidence.find_unverified_signature_
     findings` reads, so both are folded into the same ``old_snapshots``/
     ``new_snapshots`` mapping this function has always built. *policy_file* (G38 Phase 16) is set on the result before ``bundle_verdict`` is read.
-    *old_root*/*new_root* (ADR-062 A1.7) are forwarded unchanged to
-    :func:`_run_bundle_analysis`'s own embedded-manifest fallback.
+    *old_root*/*new_root*/*old_variant*/*new_variant* (ADR-062 A1.7) forward unchanged to :func:`_run_bundle_analysis`'s own fallback.
     """
     stashed_diffs: list[DiffResult] = []
     old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] = {}
@@ -781,6 +798,8 @@ def _collect_bundle_result(
         new_snapshots=new_snapshots,
         old_root=old_root,
         new_root=new_root,
+        old_variant=old_variant,
+        new_variant=new_variant,
     )
     if bundle_result is not None:
         bundle_result.policy_file = policy_file  # G38 Phase 16

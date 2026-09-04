@@ -393,16 +393,34 @@ def _stored_library_identity(
     `bundle_facts_store.read_bundle_facts_package`'s own `alias_nodes_so_far`
     already uses.
 
-    Returns `(None, (), nodes_so_far)` -- never raises -- for anything that
-    doesn't parse as a single-artifact package with that evidence recorded:
-    a stored package produced by something other than `project_snapshot_
-    legacy.materialize_release_variant_artifacts` (`build_bundle_snapshot_
-    mixed`'s own docstring accepts "any other pre-resolved package
-    directory") may simply not carry it, which is not itself an error --
+    Returns `(None, (), nodes_so_far)` for anything that doesn't parse as a
+    single-artifact package with that evidence recorded: a stored package
+    produced by something other than `project_snapshot_legacy.
+    materialize_release_variant_artifacts` (`build_bundle_snapshot_mixed`'s
+    own docstring accepts "any other pre-resolved package directory") may
+    simply not carry it, which is not itself an error --
     `build_bundle_snapshot_from_metadata` already degrades to a synthetic
     `Path(name)` when `paths` has no entry for a name.
+
+    A *declared* `filesystem_aliases` value that fails to decode is not
+    treated the same way: `decode_native_identity_aliases` raising
+    `JsonContainerBudgetExceeded`/`JsonNestingTooDeepError` (an oversized or
+    too-deeply-nested array, an accepted resource-limit degrade -- see
+    `TestAliasNodeBudgetAggregation`) still degrades to no aliases, but any
+    other decode failure (malformed JSON, the wrong shape) now propagates
+    instead -- a corrupted/hand-edited alias array must not silently read
+    the same as "no aliases were ever recorded", the same distinction every
+    other declared-but-corrupted evidence section in this codebase already
+    makes (Codex review, fresh evidence: a no-`DT_SONAME` provider reached
+    only through a sibling's `DT_NEEDED`-named alias could otherwise lose
+    that intra-bundle edge and silently drop a real dependency finding).
     """
+    from .errors import SnapshotError
     from .project_snapshot_store import read_artifact_ref, read_manifest_summary
+    from .storage.json_budget import (
+        JsonContainerBudgetExceeded,
+        JsonNestingTooDeepError,
+    )
     from .storage.native_identity_aliases import (
         NATIVE_IDENTITY_ALIASES_KEY,
         NATIVE_IDENTITY_FILENAME_KEY,
@@ -428,9 +446,17 @@ def _stored_library_identity(
             aliases, nodes_so_far = decode_native_identity_aliases(
                 aliases_text, nodes_so_far
             )
-        except Exception as exc:
-            log.debug("bundle: malformed filesystem_aliases for %s: %s", path, exc)
+        except (JsonContainerBudgetExceeded, JsonNestingTooDeepError) as exc:
+            # An accepted resource-limit degrade, not malformed evidence --
+            # the aggregate alias-node budget (or a too-deeply-nested
+            # array) is a legitimate reason to stop trusting this array,
+            # not a sign the producer recorded nothing.
+            log.debug("bundle: filesystem_aliases over budget for %s: %s", path, exc)
             aliases = ()
+        except Exception as exc:
+            raise SnapshotError(
+                f"{path}: declared filesystem_aliases could not be decoded: {exc}"
+            ) from exc
 
     if real_filename is None and not aliases:
         # `bundle_facts_store.py`'s own per-artifact writer (above) is one of
