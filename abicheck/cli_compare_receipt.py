@@ -447,17 +447,37 @@ def resolve_release_pack_application(
     ``apply_to_compare_config`` -- see
     ``cli_scan._resolve_scan_evaluation_config``.
 
-    Also rejects ``contract.unresolved`` unconditionally -- not merely when
-    ``contract_evaluation`` is false, the way :func:`~abicheck.
-    pack_application.check_resolved_config_applies_packs`'s own
-    ``CONTRACT_EVALUATION_ONLY_FIELDS`` check does for the single-pair path.
-    ``service.run_compare`` already creates a per-library
-    ``PersistedContractContext`` that field's consumer could read, and
-    :func:`record_release_resolved_config` (this module) already merges the
-    pack's resolved config into it, so the rejection is not about missing
-    plumbing; whether it is still needed is unverified, not lifted here on
-    static reasoning
-    alone. Full trace and review history: the same ledger entry above.
+    **No longer rejects a pack asserting ``contract.unresolved`` (Track 2 7B
+    residual, closed).** An earlier revision rejected it unconditionally --
+    not merely when ``contract_evaluation`` is false, the way
+    :func:`~abicheck.pack_application.check_resolved_config_applies_packs`'s
+    own ``CONTRACT_EVALUATION_ONLY_FIELDS`` check does for the single-pair
+    path -- while leaving *why* an open question for a future slice
+    (ADR-063 Track 4's 7B ledger entry). Re-reading that question against the
+    plumbing settles it: ``service.run_compare`` already creates a
+    per-library ``PersistedContractContext`` when this release invocation
+    passed ``--contract``, and :func:`record_release_resolved_config` (this
+    module) already merges *this* function's resolved config -- pack
+    contribution included -- into that context via
+    ``contract_context.with_resolved_config``, read back by
+    ``contract_coverage_exit._accepts_unresolved``. So a pack-asserted
+    ``contract.unresolved=warn`` reaches the same consumer, through the same
+    merge, that a single-pair ``compare --pack`` already goes through --
+    there is no release-specific consumer or semantics to get wrong, and no
+    per-library-vs-release-wide hazard the way there could be for a field
+    with library-specific *content* (a symbol list, a namespace):
+    ``contract.unresolved=warn`` changes nothing about evidence, labels, or
+    ``GateDecision`` for any library (ADR-049 Section 6.2) -- only the
+    orthogonal contract-coverage exit-floor contribution
+    (``policy.contract_coverage_exit.coverage_exit_for_context``), the same
+    uniform accept-incomplete-assurance decision ``policy.overrides``/
+    ``surface.internal_namespaces`` already apply release-wide. A library's
+    own ``contract_coverage_failures`` ledger stays untouched either way, so
+    nothing is hidden; only the exit code's willingness to fail on that gap
+    is. So this now applies the same ``contract_evaluation`` gate the
+    single-pair path uses: a pack asserting ``contract.unresolved`` without
+    ``--contract`` is still rejected as decorative, and with ``--contract``
+    it is accepted and threaded through like every other pack field.
 
     Raises what the canonical resolver and the pack loader raise (a D7
     same-tier conflict, a D8 pack conflict, an inapplicable, gate-only, or
@@ -467,10 +487,7 @@ def resolve_release_pack_application(
     if not pack_paths:
         return None
     config = resolve_cli_config(params, **kwargs)
-    from .errors import PackManifestError
     from .pack_application import (
-        PACK_SOURCE_KIND,
-        _supplying_pack,
         check_resolved_config_applies_packs,
         pack_application,
     )
@@ -483,24 +500,13 @@ def resolve_release_pack_application(
         # raw severity inputs (`cli_compare_release_helpers.
         # apply_release_gate_pack`) the same way `compare --pack` folds them
         # into `ResolvedCompareConfig` -- see this function's own docstring.
-        # `contract_evaluation=True` here is deliberate, not a copy-paste of
-        # the release-wide value: it only widens what the *shared* resolver
-        # accepts (so `--contract` genuinely unlocks `contract.unresolved`
-        # there), and the unconditional check just below closes the release-
-        # specific gap that widening reopens.
-        contract_evaluation=True,
+        # `contract_evaluation` is this release invocation's own real value
+        # (whether *this* run passed `--contract`) -- the same gate the
+        # single-pair path applies via `resolve_and_apply`, now that this
+        # function's own docstring has confirmed there is no release-specific
+        # hazard left to guard against beyond that.
+        contract_evaluation=contract_evaluation,
     )
-    unresolved_provenance = getattr(config, "provenance", {}).get("contract.unresolved")
-    if getattr(unresolved_provenance, "source_kind", None) == PACK_SOURCE_KIND:
-        raise PackManifestError(
-            f"{_supplying_pack(config, 'contract.unresolved')}: "
-            "'contract.unresolved' cannot be applied to a directory/package "
-            "(release) comparison yet: whether it can safely apply per "
-            "library (unlike policy.overrides/surface.internal_namespaces, "
-            "which do apply uniformly) is still under investigation -- see "
-            "this function's own docstring. Compare the specific library "
-            "individually with --pack to use it."
-        )
     return pack_application(config, policy_file=kwargs.get("policy_file"))
 
 

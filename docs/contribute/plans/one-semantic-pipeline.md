@@ -925,6 +925,38 @@ plan's own P0 `EffectiveGate`/`EffectiveEvaluationConfig` target (not
 ADR-064's own `GateOptions` rewrite, which already landed 2026-09-02 and is
 what this fold already builds on), not attempted here.
 
+**The other 7B gap -- the `contract.unresolved` rejection -- closed
+(2026-09-04, Track 2).** Re-reading `resolve_release_pack_application`'s own
+reasoning against the plumbing this section already confirmed (`service.
+run_compare`/`record_release_resolved_config` genuinely build and merge a
+per-library `PersistedContractContext`) found no hazard the plumbing doesn't
+already cover: `contract.unresolved=warn` never touches evidence, labels, or
+`GateDecision` for any library (ADR-049 Section 6.2), only the orthogonal
+contract-coverage exit floor, so applying it release-wide carries the same
+"one pack value, threaded identically into every library's own resolved
+config" shape `policy.overrides`/`surface.internal_namespaces` already use
+without issue -- there was no genuine per-library-vs-release-wide semantics
+mismatch to guard against, just an unconfirmed hazard the earlier round
+correctly declined to assume away without checking. The unconditional
+rejection is gone; `resolve_release_pack_application` now applies the same
+`contract_evaluation`-gated `CONTRACT_EVALUATION_ONLY_FIELDS` check the
+single-pair path already uses (rejecting the field only when *this*
+release invocation has no `--contract` for anything to read it), using the
+release's own real `contract_evaluation` value instead of the
+hard-coded `True` that reopened the gap the manual check then had to close.
+`tests/test_pack_application.py::TestReleasePackApplication::
+test_contract_unresolved_pack_now_applies_to_a_release_comparison` proves it
+end to end -- a release comparison whose `--contract public` domain cannot
+prove its own evidence complete for hand-built snapshots (no real header-AST
+provenance), which exits `1` from the coverage floor alone without the pack
+and `0` with it, while `contract_coverage_failures` stays populated in both
+(the ledger stays unsuppressible; only the exit's willingness to fail on it
+changes). The sibling test
+`test_contract_unresolved_pack_rejected_without_contract_on_a_release`
+pins that a pack asserting the field is still rejected as decorative when
+this release invocation passes no `--contract` at all. `run_outcome`'s
+ledger row above is updated to reflect this as closed rather than open.
+
 **8B's first PR landed (2026-09-03).** `storage.types_section_codec
 .TypesSection` is the `"types"` D8 legacy section's own typed DTO, wired
 through `storage.dto.types_to_dto`/`types_from_dto` in place of the generic

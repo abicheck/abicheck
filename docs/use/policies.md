@@ -340,13 +340,14 @@ exit code has honoured the resolved severity config since
 the fix that closed the "scan never consults severity" gap, and a gate pack
 is one more source for that same gate.
 A `kind: policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/
-`surface.internal_namespaces`/`gate.*`, similarly, all apply uniformly to
-every library on a directory/package (release) `compare` — the gate half
-folds into the release fan-out's own resolved `GateOptions` object
-(ADR-064, landed 2026-09-02). `contract.unresolved` is still rejected on a
-release comparison, pending verification that lifting it is safe (see the
+`surface.internal_namespaces`/`contract.unresolved`/`gate.*`, similarly, all
+apply uniformly to every library on a directory/package (release) `compare`
+— the gate half folds into the release fan-out's own resolved `GateOptions`
+object (ADR-064, landed 2026-09-02), and `contract.unresolved` still needs
+`--contract` on that same release comparison, exactly as above (see the
 "7B's release-fan-out investigation landed" section of
-[the ADR-063 implementation plan](../contribute/plans/one-semantic-pipeline.md)).
+[the ADR-063 implementation plan](../contribute/plans/one-semantic-pipeline.md)
+for the history of that rejection's own removal).
 `scan --pack` also requires `--against`, since a pack's only application
 there is the baseline comparison. Each rejection above is a usage error
 rather than a silently ignored flag.
