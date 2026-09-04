@@ -257,7 +257,8 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
         # has_dwarf block degrades to "presence_only" (the cheapest tier,
         # not "parsed" -- has_dwarf alone never proved a completed parse),
         # and no block at all degrades to "not_available". Mirrors the
-        # pre-merge dwarf_metadata_codec.legacy_dwarf_evidence_kwargs().
+        # pre-merge dwarf_metadata_codec.legacy_dwarf_evidence_kwargs() (that
+        # module was dead/orphaned duplicate logic and has since been deleted).
         evidence_source=d.get("evidence_source", "unknown"),
         evidence_state=d.get(
             "evidence_state", "presence_only" if has_dwarf else "not_available"

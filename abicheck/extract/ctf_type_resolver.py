@@ -13,7 +13,10 @@
 # limitations under the License.
 
 """CTF raw type model and name/size resolution, split out of ``ctf_metadata.py``
-to keep that module under the architecture debt-no-growth ceiling (ADR-061).
+to keep that module under the architecture debt-no-growth ceiling (ADR-061),
+and placed directly under its canonical owner package: parsing raw CTF type
+data into resolved names/sizes is a "read a debug fact" responsibility
+(``extract/``), not a flat-root addition.
 
 Owns the constants and the raw ``CtfType`` record that both the low-level
 parser (``_parse_types`` et al., still in ``ctf_metadata.py``) and the
@@ -27,7 +30,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
-from .type_metadata import read_null_terminated_string
+from ..type_metadata import read_null_terminated_string
 
 CTF_MAGIC = 0xCFF1
 CTF_VERSION_2 = 2

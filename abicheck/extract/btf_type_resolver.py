@@ -15,7 +15,9 @@
 """BTF raw type model and name/size resolution, split out of
 ``btf_metadata.py`` to keep that module under the architecture debt-no-growth
 ceiling (ADR-061) -- mirrors ``ctf_metadata.py``'s own identical split into
-``ctf_type_resolver.py``.
+``extract/ctf_type_resolver.py``. Placed directly under its canonical owner
+package: parsing raw BTF type data into resolved names/sizes is a "read a
+debug fact" responsibility (``extract/``), not a flat-root addition.
 
 Owns the BTF constants and the raw ``BtfType`` record that both the
 low-level parser (``_parse_types`` et al., still in ``btf_metadata.py``) and
@@ -31,7 +33,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeVar
 
-from .type_metadata import read_null_terminated_string
+from ..type_metadata import read_null_terminated_string
 
 _T = TypeVar("_T")
 

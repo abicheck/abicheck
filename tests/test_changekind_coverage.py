@@ -418,7 +418,7 @@ class TestTypeVisibilityChanged:
     """TYPE_VISIBILITY_CHANGED is emitted via diff_advanced_dwarf.
 
     checker.py imports diff_advanced_dwarf at module level:
-        from .dwarf_advanced import diff_advanced_dwarf
+        from .compare.dwarf_advanced_diff import diff_advanced_dwarf
     So the correct monkeypatch target is abicheck.checker.diff_advanced_dwarf —
     that is where the already-bound reference lives at call time.
     Tests inject pre-built tuples without needing real .so files.

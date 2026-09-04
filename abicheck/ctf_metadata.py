@@ -42,7 +42,7 @@ import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .ctf_type_resolver import (
+from .extract.ctf_type_resolver import (
     CTF_F_COMPRESS as CTF_F_COMPRESS,
     CTF_INT_BOOL as CTF_INT_BOOL,
     CTF_INT_CHAR as CTF_INT_CHAR,
@@ -77,11 +77,13 @@ log = logging.getLogger(__name__)
 # CTF constants (from sys/ctf.h)
 #
 # The kind/version/int-encoding/header-flag constants and the raw CtfType
-# record, plus _read_string and _TypeResolver, live in ctf_type_resolver.py
-# to keep this module under the architecture debt-no-growth ceiling
-# (ADR-061). Explicitly re-exported above (the `X as X` spelling, same
-# convention checker_policy.py uses for ChangeKind) since existing callers
-# -- including this module's own tests -- import them from here.
+# record, plus _read_string and _TypeResolver, live in
+# extract/ctf_type_resolver.py -- its canonical ADR-061 owner package, since
+# this is a read-a-debug-fact responsibility -- to keep this module under
+# the architecture debt-no-growth ceiling. Explicitly re-exported above (the
+# `X as X` spelling, same convention checker_policy.py uses for ChangeKind)
+# since existing callers -- including this module's own tests -- import
+# them from here.
 # ---------------------------------------------------------------------------
 
 # Cap on zlib-decompressed CTF payload size, to prevent a zip-bomb DoS.

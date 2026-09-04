@@ -55,6 +55,11 @@ from abicheck.checker_policy import (
     RISK_KINDS,
     ChangeKind,
 )
+from abicheck.compare.dwarf_advanced_diff import (
+    AdvancedDwarfMetadata,
+    _diff_value_abi_traits,
+    _returns_in_registers,
+)
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 
@@ -1683,8 +1688,6 @@ def test_exceptions_mode_unknown_language_requires_both_explicit():
 
 
 def test_struct_return_convention_change_from_return_trait_flip():
-    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
-
     old = AdvancedDwarfMetadata()
     new = AdvancedDwarfMetadata()
     old.value_abi_traits["_Z3getv"] = "ret:trivial"
@@ -1699,8 +1702,6 @@ def test_large_aggregate_return_flip_stays_value_abi_trait():
     # Codex P2: a >16-byte aggregate is memory-returned both before and after a
     # triviality change (no register<->sret flip), so it must NOT be labelled a
     # struct-return convention change.
-    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
-
     old = AdvancedDwarfMetadata()
     new = AdvancedDwarfMetadata()
     old.value_abi_traits["_Z3getv"] = "ret:trivial"
@@ -1713,8 +1714,6 @@ def test_large_aggregate_return_flip_stays_value_abi_trait():
 
 
 def test_small_aggregate_return_flip_is_struct_return():
-    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
-
     old = AdvancedDwarfMetadata()
     new = AdvancedDwarfMetadata()
     old.value_abi_traits["_Z3getv"] = "ret:trivial"
@@ -1730,8 +1729,6 @@ def test_mixed_size_and_triviality_flip_stays_value_abi():
     # Codex P2: old trivial @24B (memory, >16) → new nontrivial @8B (memory,
     # nontrivial) is memory-returned on BOTH sides — no register<->sret flip — so
     # it must NOT be labelled a struct-return convention change.
-    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
-
     old = AdvancedDwarfMetadata()
     new = AdvancedDwarfMetadata()
     old.value_abi_traits["_Z3getv"] = "ret:trivial"
@@ -1744,8 +1741,6 @@ def test_mixed_size_and_triviality_flip_stays_value_abi():
 
 
 def test_returns_in_registers_helper():
-    from abicheck.dwarf_advanced import _returns_in_registers
-
     assert _returns_in_registers("trivial", 8) is True
     assert _returns_in_registers("trivial", 16) is True
     assert _returns_in_registers("trivial", 24) is False  # large trivial → memory
@@ -1760,8 +1755,6 @@ def test_return_aggregate_added_or_removed_is_not_struct_return():
     # Codex P2: when the return aggregate component is only added/removed
     # (aggregate <-> scalar return), the scalar side can still be register-
     # returned, so it is not a register<->sret flip.
-    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
-
     old = AdvancedDwarfMetadata()
     new = AdvancedDwarfMetadata()
     # Aggregate return removed; a by-value aggregate parameter still differs so
@@ -1776,8 +1769,6 @@ def test_return_aggregate_added_or_removed_is_not_struct_return():
 def test_small_packed_aggregate_return_flip_stays_value_abi():
     # Codex P2: a small packed struct (unaligned member) is memory-returned both
     # before and after gaining a destructor — no register<->sret flip.
-    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
-
     old = AdvancedDwarfMetadata()
     new = AdvancedDwarfMetadata()
     old.value_abi_traits["_Z3getv"] = "ret:trivial"
@@ -1794,8 +1785,6 @@ def test_small_packed_aggregate_return_flip_stays_value_abi():
 def test_unknown_size_return_flip_stays_struct_return():
     # No recorded size (older snapshots / non-DWARF mocks) → stay conservative
     # and keep the struct-return label (the pre-gate behaviour).
-    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
-
     old = AdvancedDwarfMetadata()
     new = AdvancedDwarfMetadata()
     old.value_abi_traits["_Z3getv"] = "ret:trivial"
@@ -1805,8 +1794,6 @@ def test_unknown_size_return_flip_stays_struct_return():
 
 
 def test_param_only_trait_flip_stays_value_abi_trait():
-    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
-
     old = AdvancedDwarfMetadata()
     new = AdvancedDwarfMetadata()
     old.value_abi_traits["_Z3fooP1S"] = "ret:trivial|p0:trivial"

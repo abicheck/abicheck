@@ -13,11 +13,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
+from abicheck.compare.dwarf_advanced_diff import diff_advanced_dwarf
 from abicheck.dwarf_advanced import (
     AdvancedDwarfMetadata,
     ToolchainInfo,
     _parse_producer,
-    diff_advanced_dwarf,
     parse_advanced_dwarf,
 )
 from abicheck.model import AbiSnapshot

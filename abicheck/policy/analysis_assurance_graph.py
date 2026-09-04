@@ -14,7 +14,9 @@
 
 """L5 source-graph completeness rollup for ``analysis_assurance.py``, split
 out to keep that module under the architecture debt-no-growth ceiling
-(ADR-061).
+(ADR-061), and placed directly under its canonical owner package: deciding
+whether evidence is complete enough to trust is a "decide relevance/
+classification" responsibility (``policy/``), not a flat-root addition.
 
 ``_graph_completeness`` and the extractor-family vocabulary it reads
 (``_L5_GRAPH_EXTRACTOR_FAMILIES``/``_is_l5_graph_extractor_record``/

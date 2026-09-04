@@ -118,13 +118,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-from .analysis_assurance_graph import _graph_completeness as _graph_completeness
 from .buildsource.fact_set import check_fact_compatibility
 from .buildsource.model import CoverageStatus, DataLayer
 from .checker_policy import ChangeKind, EvidenceTier
 from .checker_types import DiffResult
 from .evidence_depth import DEPTH_RANK, depth_label_for, weaker_depth
 from .model import AbiSnapshot
+from .policy.analysis_assurance_graph import _graph_completeness as _graph_completeness
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack

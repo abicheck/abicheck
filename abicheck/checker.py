@@ -42,6 +42,9 @@ from .checker_types import (  # noqa: F401
     LibraryMetadata,
 )
 from .comparability import check_contracts_comparable
+from .compare.dwarf_advanced_diff import (
+    diff_advanced_dwarf,  # noqa: F401 — re-export for monkeypatching
+)
 from .confidence import _compute_confidence
 from .contract_pipeline import (
     ContractEvaluationStage,
@@ -128,9 +131,6 @@ from .diff_versioning import (  # noqa: F401 — re-export for testing
 )
 from .diff_vtable_layout import (  # noqa: F401 — triggers detector registration
     _diff_vtable_layout,
-)
-from .dwarf_advanced import (
-    diff_advanced_dwarf,  # noqa: F401 — re-export for monkeypatching
 )
 from .model import AbiSnapshot
 from .policy_file import PolicyFile

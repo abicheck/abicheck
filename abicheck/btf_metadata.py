@@ -39,7 +39,7 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .btf_type_resolver import (
+from .extract.btf_type_resolver import (
     BTF_INT_BOOL as BTF_INT_BOOL,
     BTF_INT_CHAR as BTF_INT_CHAR,
     BTF_INT_SIGNED as BTF_INT_SIGNED,
@@ -78,12 +78,12 @@ log = logging.getLogger(__name__)
 # BTF constants (from include/uapi/linux/btf.h)
 #
 # The kind/int-encoding constants and the raw BtfType record, plus
-# _read_string and _TypeResolver, live in btf_type_resolver.py to keep this
-# module under the architecture debt-no-growth ceiling (ADR-061) -- mirrors
-# ctf_metadata.py's own identical split. Explicitly re-exported above (the
-# `X as X` spelling, same convention checker_policy.py uses for ChangeKind)
-# since existing callers -- including this module's own tests -- import
-# them from here.
+# _read_string and _TypeResolver, live in extract/btf_type_resolver.py --
+# its canonical ADR-061 owner package -- to keep this module under the
+# architecture debt-no-growth ceiling; mirrors ctf_metadata.py's own
+# identical split. Explicitly re-exported above (the `X as X` spelling, same
+# convention checker_policy.py uses for ChangeKind) since existing callers
+# -- including this module's own tests -- import them from here.
 # ---------------------------------------------------------------------------
 
 # Header size

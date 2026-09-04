@@ -14,21 +14,26 @@
 
 """Diff logic for :class:`~abicheck.model.dwarf_facts.AdvancedDwarfMetadata`,
 split out of ``dwarf_advanced.py`` to keep that module under the architecture
-debt-no-growth ceiling (ADR-061).
+debt-no-growth ceiling (ADR-061), and placed directly under its canonical
+owner package: matching two already-parsed sides and identifying a raw
+change is a ``compare/`` responsibility, not a flat-root addition
+(``dwarf_advanced.py`` stays classified ``extract``, so it may not import
+back from here -- ADR-061's dependency direction only allows
+``extract -> model, storage`` -- which is why the diff functions moved
+rather than staying a re-exported facade in ``dwarf_advanced.py``).
 
 Operates purely on two already-parsed ``AdvancedDwarfMetadata`` objects --
-no DWARF-parsing internals -- so it has no dependency on the rest of
-``dwarf_advanced.py``. ``dwarf_advanced.py`` imports everything back via
-explicit ``X as X`` re-exports (the same convention ``ctf_metadata.py`` uses
-for its own split, and ``checker_policy.py`` for ``ChangeKind``) since
-``checker.py`` re-exports ``diff_advanced_dwarf`` for monkeypatching and a
-couple of tests import ``_diff_value_abi_traits``/``_returns_in_registers``
-directly from ``dwarf_advanced``.
+no DWARF-parsing internals -- so it has no dependency on
+``dwarf_advanced.py`` at all. ``checker.py`` (``compare`` family) imports
+``diff_advanced_dwarf`` directly from here for monkeypatching, and
+``tests/test_build_source_pack.py``/``tests/test_changekind_coverage.py``/
+``tests/test_sprint4_dwarf_advanced.py`` import the pieces they need the
+same way.
 """
 
 from __future__ import annotations
 
-from .model.dwarf_facts import AdvancedDwarfMetadata
+from ..model.dwarf_facts import AdvancedDwarfMetadata
 
 
 def _diff_calling_conventions(

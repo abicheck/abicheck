@@ -50,20 +50,6 @@ from typing import Any
 from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
-from .dwarf_advanced_diff import (
-    _diff_callee_saved_regs as _diff_callee_saved_regs,
-    _diff_calling_conventions as _diff_calling_conventions,
-    _diff_frame_registers as _diff_frame_registers,
-    _diff_struct_packing as _diff_struct_packing,
-    _diff_toolchain_flags as _diff_toolchain_flags,
-    _diff_value_abi_traits as _diff_value_abi_traits,
-    _diff_vector_abi_flags as _diff_vector_abi_flags,
-    _diff_wchar_flags as _diff_wchar_flags,
-    _ret_component as _ret_component,
-    _returns_in_registers as _returns_in_registers,
-    _sysv_amd64_return_model as _sysv_amd64_return_model,
-    diff_advanced_dwarf as diff_advanced_dwarf,
-)
 from .dwarf_utils import (
     BASE_PRUNE_TAGS,
     attr_bool as _attr_bool,
