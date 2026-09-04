@@ -9,7 +9,8 @@
   `dump` path. The shared decision of when recording it is safe (a
   header-AST parse actually ran, the binary format was detected, and the
   side isn't a manifest-driven dump) is now one function,
-  `workflows.artifact.execute.side_effective_compile_context`, used by both
-  paths instead of the dump path's own hand-written copy. Behavior-preserving
+  `workflows.artifact.compile_context_gate.side_effective_compile_context`,
+  used by both paths instead of the dump path's own hand-written copy.
+  Behavior-preserving
   for every existing caller — `compile_contexts` was always empty before this
   on the `compare` path, and stays empty for any side this predicate excludes.
