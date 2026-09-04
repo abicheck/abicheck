@@ -114,6 +114,80 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > is already tracked here and is re-confirmed still open. Two of its items
 > were already fixed in `94be22ad..2598d0d` and are corrected rather than
 > re-opened. Full account: **"Review checkpoint (2026-09-01)"** below.
+>
+> **Update (2026-09-04, fresh re-review, `main` at `23c7808`, merge of
+> [#1042](https://github.com/abicheck/abicheck/pull/1042)).** A broader
+> architecture review (not scoped to this plan) was cross-checked against
+> this file; the parts of it that bear on this plan are recorded here so
+> a future pass does not re-derive them.
+>
+> **PR I's classification + flag deletion is confirmed actually landed on
+> `main`**, not merely landed on its own branch as the 2026-09-03 update
+> above states — #1042 (`feat(compare): classify a stored BundleFacts
+> OLD_INPUT automatically, delete --old-bundle-facts`) merged into `main`
+> at `23c7808`, base `48152645` (#1052). `--old-bundle-facts` is gone,
+> `workflows/bundle_compare_operand.py`/`bundle_compare_operand_marker.py`
+> do the classification (hardened across 11 adversarial review rounds per
+> that PR's own description), `compare_bundle_operand_dispatch.py` wires it
+> into `compare_cmd`. **The full `BundleCompareRequest` unification is
+> still explicitly out of scope of #1042 and remains this row's open
+> item** — live/stored and stored/stored still have no execution engine,
+> and the evaluation/gate/report/dry-run surface is still answered per
+> operand-shape branch rather than once.
+>
+> **Corrected the "Ordering" block's PR C row**, which had gone stale in
+> the other direction from #1042/#1053 landing: it still read "ELF done,
+> PE/Mach-O open" and named `handle_non_elf_dump` as unmigrated, but the
+> 2026-08-27 checkpoint above already recorded PE/Mach-O's migration via
+> #980. Re-verified directly against `service_dump_pipeline.py`'s own
+> docstring on current `main`: both binary formats now route through
+> `execute_dump_request` via `frontends.cli.dump_execute.
+> execute_dump_cli_run`, and `handle_non_elf_dump` is kept only for its own
+> direct unit tests. PR C's row now reads DONE — see the row itself for the
+> corrected text. This is exactly the "generated status, not hand-kept
+> prose" gap the 2026-09-01 checkpoint's "Generated plan status" bullet
+> already named as a durable problem, caught here as a live instance of it.
+>
+> **New context for PR I/PR J from #1053** (merged the same day, just
+> before #1042, base also `48152645`): ADR-062/ADR-063 Track C 8B folded
+> persisted `BundleFacts` documents and `actions/baseline`-produced
+> baseline sets into `ProjectSnapshot`'s sectioned representation
+> (`storage/import_bundle_facts.py`, `storage/import_baseline_set.py`,
+> `VariantRef.sections`). This does not change anything this plan commits
+> to, but it is a live candidate for what `BundleCompareRequest`'s
+> `StoredBundleFactsInput` side eventually reads once storage v2's own
+> "standard CLI input" gap (`abicheck compare old.project.zst
+> new.project.zst`, tracked in `docs/contribute/plans/storage-format-v2.md`,
+> not here) closes — worth a cross-reference when PR I's full unification
+> is actually scoped, not a reason to change PR I's own target shape today.
+> Likewise relevant background for PR J's "topology out of CLI flags": a
+> `ProjectSnapshot`-shaped bundle artifact is now a real storage primitive,
+> which is one more reason `BundleSpec`/`.abicheck.yml` topology (not a
+> flag) should be what a bundle comparison resolves against, rather than
+> designing PR J's topology model in ignorance of where the stored side is
+> headed.
+>
+> **Everything else the broader review raised — `ResolvedExecutionContext`
+> authority, `RunOutcome`/gate unification beyond PR G2's own scope,
+> SemanticIR consumer authority, the producer/consumer compiler split
+> (G34), storage v2 scale work — is real but is not this plan's scope**;
+> it belongs to `docs/contribute/plans/one-semantic-pipeline.md`,
+> `duplication-and-convergence-assessment.md`, and
+> `storage-format-v2.md` respectively, and is not duplicated here.
+> One item from that review *is* already tracked here and re-confirmed
+> unchanged: `contract=public`'s remaining unresolved-loss count (see the
+> 2026-09-01 checkpoint's own bullet) — still blocked on the same
+> `EntityId`-based public-closure work, still not a string-heuristic fix.
+>
+> **Net effect on "what remains" in this plan, unchanged in shape from the
+> 2026-09-01 checkpoint, narrower in substance:** PR G2 (delete
+> `--exit-code-scheme`, most of the prerequisite work landed, see PR 4's
+> own section for the exact remaining `--format text`/`--artifact-set`
+> signal gap), PR H (artifact-set provider-ownership semantics — not
+> started), PR I's full `BundleCompareRequest` unification (classification
+> + flag deletion done; the unification itself not started), and PR J
+> (bundle topology out of CLI flags — not started). PR A/B/C/D/E/F and PR
+> 1/1b/2 are done.
 
 ## Problem
 
@@ -4967,17 +5041,27 @@ PR B  effective configuration parity  — packs resolved once into one
                                        deliberately reassigned to PR G2,
                                        see PR B's own section for why
 PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
-      (ELF done, PE/Mach-O open)       ResolvedDumpRequest → DumpResult, one
-                                       resolver for dump CLI/Python/Action
+      (DONE — ELF and PE/Mach-O both    ResolvedDumpRequest → DumpResult, one
+       migrated)                       resolver for dump CLI/Python/Action
                                        *and* scan_engine's candidate
                                        resolution, JSON dry-run rendered
                                        from that object. The real ELF `dump`
                                        run now executes through
                                        execute_dump_request (scan's
-                                       candidate resolution already did);
-                                       handle_non_elf_dump (PE/Mach-O) is
-                                       unmigrated -- no PE/Mach-O toolchain
-                                       was available to verify against
+                                       candidate resolution already did),
+                                       and PE/Mach-O followed via #980 (see
+                                       the 2026-09-04 checkpoint above):
+                                       `frontends.cli.dump_execute.
+                                       execute_dump_cli_run` routes both
+                                       binary formats through the same
+                                       function, so `cli_dump_non_elf.
+                                       handle_non_elf_dump` is no longer
+                                       called from `dump_cmd` for either
+                                       format (kept only for its own direct
+                                       unit tests) — verified only via
+                                       mock-based CLI/unit tests, no real
+                                       PE/Mach-O toolchain was available to
+                                       verify against a real binary
 PR D  build-context completeness      = PR 3B — matched compile-unit
       (DONE)                           selection, forced includes, provenance
                                        tests
