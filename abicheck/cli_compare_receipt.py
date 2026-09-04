@@ -453,32 +453,27 @@ def resolve_release_pack_application(
     (ADR-063 Track 4's 7B ledger entry). Re-reading that question against the
     plumbing settles it: ``service.run_compare`` already creates a
     per-library ``PersistedContractContext`` when this release invocation
-    passed ``--contract``, :func:`record_release_resolved_config` (this
+    passed ``--contract``, and :func:`record_release_resolved_config` (this
     module) already merges *this* function's resolved config -- pack
     contribution included -- into that context via
-    ``contract_context.with_resolved_config``, and
-    ``contract_coverage_exit._accepts_unresolved`` reads the merged
-    ``contract.unresolved`` back off exactly that per-library context. So a
-    pack-asserted ``contract.unresolved=warn`` reaches the same consumer,
-    through the same merge, that a single-pair ``compare --pack`` already
-    goes through -- there is no release-specific consumer or semantics for
-    this field to get wrong. Nor is there a per-library-vs-release-wide
-    hazard the way there could be for a field with library-specific
-    *content* (a symbol list, a namespace): ``contract.unresolved=warn``
-    changes nothing about evidence, labels, or ``GateDecision`` for any
-    library (ADR-049 Section 6.2) -- its only effect is to zero the
+    ``contract_context.with_resolved_config``, read back by
+    ``contract_coverage_exit._accepts_unresolved``. So a pack-asserted
+    ``contract.unresolved=warn`` reaches the same consumer, through the same
+    merge, that a single-pair ``compare --pack`` already goes through --
+    there is no release-specific consumer or semantics to get wrong, and no
+    per-library-vs-release-wide hazard the way there could be for a field
+    with library-specific *content* (a symbol list, a namespace):
+    ``contract.unresolved=warn`` changes nothing about evidence, labels, or
+    ``GateDecision`` for any library (ADR-049 Section 6.2) -- only the
     orthogonal contract-coverage exit-floor contribution
     (``policy.contract_coverage_exit.coverage_exit_for_context``), the same
     uniform accept-incomplete-assurance decision ``policy.overrides``/
-    ``surface.internal_namespaces`` already apply release-wide today. A
-    library's own ``contract_coverage_failures`` ledger entries -- the
-    unsuppressible record of what evidence was actually missing -- are
-    untouched either way, so nothing is hidden library-by-library; only the
-    exit code's willingness to fail *on* that gap is. So this now applies
-    the same ``contract_evaluation`` gate the single-pair path already uses
-    (``CONTRACT_EVALUATION_ONLY_FIELDS``): a pack asserting
-    ``contract.unresolved`` without ``--contract`` on this release is still
-    rejected as decorative (nothing would read it), and with ``--contract``
+    ``surface.internal_namespaces`` already apply release-wide. A library's
+    own ``contract_coverage_failures`` ledger stays untouched either way, so
+    nothing is hidden; only the exit code's willingness to fail on that gap
+    is. So this now applies the same ``contract_evaluation`` gate the
+    single-pair path uses: a pack asserting ``contract.unresolved`` without
+    ``--contract`` is still rejected as decorative, and with ``--contract``
     it is accepted and threaded through like every other pack field.
 
     Raises what the canonical resolver and the pack loader raise (a D7

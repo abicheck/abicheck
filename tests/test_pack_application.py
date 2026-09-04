@@ -1228,14 +1228,10 @@ class TestOnlyAppliedFieldsAreAccepted:
     def test_contract_unresolved_pack_rejected_without_contract_on_a_release(
         self, tmp_path: Path
     ) -> None:
-        """Without `--contract`, `resolve_release_pack_application` still
-        rejects a `--pack` asserting `contract.unresolved` -- the same
-        `CONTRACT_EVALUATION_ONLY_FIELDS` decorative-pack rejection the
-        single-pair path applies via `check_resolved_config_applies_packs`,
-        now that the release fan-out uses its own real `contract_evaluation`
-        value instead of hard-coding `True`. Nothing would read the field: no
-        release library builds a `PersistedContractContext` without
-        `--contract`."""
+        """Without `--contract`, a pack asserting `contract.unresolved` is
+        still rejected -- the same `CONTRACT_EVALUATION_ONLY_FIELDS` check
+        the single-pair path applies, now using the release's own real
+        `contract_evaluation` instead of a hard-coded `True`."""
         pack = _pack(
             tmp_path,
             "unresolved.yml",
@@ -1256,23 +1252,14 @@ class TestOnlyAppliedFieldsAreAccepted:
     def test_contract_unresolved_pack_now_applies_to_a_release_comparison(
         self, tmp_path: Path
     ) -> None:
-        """Track 2 7B residual, closed: `contract.unresolved: warn` asserted
-        by a `--pack` now resolves on a directory/package (release)
-        comparison instead of raising `PackManifestError` -- the earlier
-        unconditional rejection is gone (see `resolve_release_pack_
-        application`'s own docstring for why it was safe to lift: the
-        per-library `PersistedContractContext` plumbing this field's
-        consumer needs already existed, and the field itself never touches
-        evidence, labels, or `GateDecision` for any library -- only the
-        orthogonal contract-coverage exit floor).
-
-        These hand-built snapshots carry no real header-AST evidence (same
-        as this module's own `pair` fixture), so `--contract public` alone
-        already produces a real, non-hypothetical coverage-incomplete exit
-        contribution for this release -- proving the pack's value actually
-        reached the per-library context and changed the outcome, not merely
-        that no exception was raised.
-        """
+        """Track 2 7B residual, closed: `contract.unresolved: warn` from a
+        `--pack` now resolves on a release comparison instead of raising
+        `PackManifestError` (see `resolve_release_pack_application`'s own
+        docstring for why lifting the rejection was safe). These hand-built
+        snapshots carry no real header-AST evidence, so `--contract public`
+        alone already produces a real coverage-incomplete exit contribution
+        -- proving the pack's value reached the per-library context, not
+        merely that no exception was raised."""
         pack = _pack(
             tmp_path,
             "unresolved.yml",

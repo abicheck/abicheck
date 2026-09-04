@@ -1923,12 +1923,12 @@
     },
     {
       "path": "tests/test_pack_application.py",
-      "baseline_lines": 1604,
+      "baseline_lines": 1678,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Baseline raised by 74 lines (Track 2 7B residual: cli_compare_receipt.resolve_release_pack_application no longer unconditionally rejects a --pack asserting contract.unresolved on a release comparison). The one prior parametrized test asserting the unconditional rejection (both with and without --contract) was replaced by two full end-to-end tests -- the negative control (still rejected with no --contract) and a new positive case proving the release comparison now resolves the field and zeros the orthogonal contract-coverage exit floor while the ledger stays populated -- since the acceptance case is new observable behavior a parametrize-and-assert-64 test cannot express; no smaller diff was found that keeps both cases real end-to-end CliRunner assertions rather than shrinking one to a thinner unit check.",
       "review_by": "2026-11-30"
     },
     {
