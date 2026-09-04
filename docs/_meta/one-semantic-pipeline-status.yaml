@@ -342,14 +342,16 @@ concepts:
       this sub-phase's scope was investigated 2026-09-03 (see the plan's
       own "7B's release-fan-out investigation landed" note) rather than
       rewritten wholesale: depth, suppression, pack policy/namespace
-      overrides, compile context, and contract evaluation already route
-      through one service.run_compare chokepoint per pair; report
-      composition has nothing to unify (compare-release exposes neither
-      --use-cases nor a suppression-audit equivalent for a shared executor
-      to fold in); and the build-config matrix's own third
+      overrides, compile context, and --contract mode/domain (the
+      contract_evaluation/contract_mode booleans) already route through one
+      service.run_compare chokepoint per pair; report composition has
+      nothing to unify (compare-release exposes neither --use-cases nor a
+      suppression-audit equivalent for a shared executor to fold in); and
+      the build-config matrix's own third
       _load_suppression_and_policy/policy_file_with_packs call site is a
-      structurally-required pseudo-pair, not a divergent duplicate. The one
-      concrete gap that investigation found -- policy.release_gate_options.
+      structurally-required pseudo-pair, not a divergent duplicate. Two
+      concrete gaps remain (a second found on review, Codex, PR #1050 --
+      not one, as first recorded). First: policy.release_gate_options.
       apply_release_gate_pack mirrors, rather than calls,
       pack_application.apply_to_compare_config, because the release
       fan-out has no ResolvedCompareConfig-shaped object of its own to fold
@@ -362,7 +364,17 @@ concepts:
       target (docs/contribute/plans/duplication-and-convergence-
       assessment.md), guarded meanwhile against silent drift by
       tests/test_release_gate_pack_fold_parity.py's Hypothesis property
-      test pinning both fold implementations to agree on outcome.
+      test pinning both fold implementations to agree on outcome. Second:
+      cli_compare_receipt.resolve_release_pack_application unconditionally
+      rejects a --pack asserting contract.unresolved for a release
+      comparison (a hard PackManifestError, not a silent no-op) because
+      that field's consumer (contract_coverage_exit._accepts_unresolved)
+      reads it off a persisted PersistedContractContext only
+      checker.compare's own record_resolved_config installs, which the
+      release fan-out never builds per library -- so a release comparison
+      cannot use contract.unresolved at all today, unlike single-pair
+      compare. No landed or proposed fix yet; a live boundary-consumer gap
+      for a future slice to close, not merely a duplication risk.
 
   sectioned_storage:
     primitive: complete
