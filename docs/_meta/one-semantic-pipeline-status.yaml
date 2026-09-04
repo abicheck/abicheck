@@ -399,15 +399,17 @@ concepts:
       (ADR-063 Track B "8B"), abicheck/bundle_facts_store.py's
       write_bundle_facts_package/read_bundle_facts_package landed a second
       real multi-artifact producer/reader, from a *live* BundleFacts object
-      rather than an already-persisted document, using
+      rather than an already-persisted document, originally using
       PackageManifest.project_sections/ArtifactRef.native_identity instead
       of VariantRef.sections. The two tracks solved the identical plan item
-      without visibility into each other and now carry two
+      without visibility into each other and briefly carried two
       non-interoperable physical layouts for the same composition facts --
-      not yet reconciled; see storage-format-v2.md's A1.4 entry for the
-      proposed follow-up (rebuild bundle_facts_store.py as a thin wrapper
-      over import_bundle_facts, retiring project_sections/native_identity
-      for this use).
+      reconciled (Track 1, 2026-09-04): bundle_facts_store.py is now a thin
+      wrapper over bundle_facts_serialization.bundle_facts_to_dict/
+      bundle_facts_from_dict plus import_bundle_facts.import_bundle_facts/
+      export_bundle_facts, so both entry points (live object, persisted
+      document) produce and consume the identical VariantRef.sections
+      layout; see storage-format-v2.md's A1.4 entry for the closure record.
 
       The single-artifact sectioned document (Phase 8, distinct from this
       concept's own Phase 8B) is already `dump`/`compare`/`scan`'s default
