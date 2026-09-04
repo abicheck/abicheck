@@ -339,20 +339,27 @@ concepts:
       investigated 2026-09-03 and found substantially already unified
       (depth, suppression, pack policy/namespace overrides, compile
       context, and --contract mode/domain all already route through one
-      service.run_compare chokepoint per pair), with two concrete,
-      still-open gaps: policy.release_gate_options.apply_release_gate_pack
-      mirrors, rather than calls, pack_application.apply_to_compare_config
-      (deferred to the duplication-and-convergence-assessment plan's own
-      P0 EffectiveGate/EffectiveEvaluationConfig target, guarded meanwhile
-      by tests/test_release_gate_pack_fold_parity.py's parity property);
-      and cli_compare_receipt.resolve_release_pack_application
-      unconditionally rejects a --pack asserting contract.unresolved for a
-      release comparison, with no landed fix yet. Full investigation,
-      evidence, and this content's own review history (Codex, PR #1050,
-      several rounds correcting this same account) live in
-      docs/contribute/plans/one-semantic-pipeline.md's "7B's
-      release-fan-out investigation landed" section -- the narrative owner
-      for this concept per docs/AGENTS.md's fact-owner/narrative-owner
+      service.run_compare chokepoint per pair), with two concrete gaps:
+      policy.release_gate_options.apply_release_gate_pack mirrored, rather
+      than called, pack_application.apply_to_compare_config (deferred to
+      the duplication-and-convergence-assessment plan's own P0
+      EffectiveGate/EffectiveEvaluationConfig target); and
+      cli_compare_receipt.resolve_release_pack_application unconditionally
+      rejects a --pack asserting contract.unresolved for a release
+      comparison, with no landed fix yet. The first gap's exit-code-scheme
+      half closed 2026-09-04: policy.release_gate_options.
+      resolve_gate_pack_exit_code_scheme is now the one function both
+      callers use for that piece, guarded by tests/
+      test_release_gate_pack_fold_parity.py's parity property; the
+      *severity-level* application itself (a dataclasses.replace on an
+      already-resolved SeverityConfig vs. six raw-string overrides) remains
+      expressed twice against its two different pre-resolution shapes,
+      still the P0 EffectiveGate/EffectiveEvaluationConfig target's job to
+      collapse for real. Full investigation, evidence, and this content's
+      own review history (Codex, PR #1050, several rounds correcting this
+      same account) live in docs/contribute/plans/one-semantic-pipeline.md's
+      "7B's release-fan-out investigation landed" section -- the narrative
+      owner for this concept per docs/AGENTS.md's fact-owner/narrative-owner
       split; not reproduced here in full, to avoid the exact
       ledger-vs-plan drift this same PR exists to fix.
 

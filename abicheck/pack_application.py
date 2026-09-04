@@ -446,6 +446,14 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
     contributes an ``EXPLICIT_CLI`` candidate that outranks it. So the fix is
     the same one this module's docstring states as its first rule -- read the
     resolved value instead of re-deriving one.
+
+    This scheme resolution is shared, not re-derived a second time for this
+    shape: :func:`~abicheck.policy.release_gate_options.
+    resolve_gate_pack_exit_code_scheme` is the identical function the
+    release fan-out's own :func:`~abicheck.policy.release_gate_options.
+    apply_release_gate_pack` calls for its raw-string equivalent of this
+    same fold (ADR-063 Track A, 7B) -- see that function's own docstring
+    for the three-tier precedence this paragraph restates in prose.
     """
     if application.exit_code_scheme is None and not application.severity_levels:
         return resolved_cfg
@@ -454,14 +462,14 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
     if application.severity_levels:
         severity = replace(severity, **application.severity_levels)
         severity_active = True
-    scheme = application.exit_code_scheme
-    if scheme is None and application.severity_levels:
-        # The resolver folded these very levels into its own `auto` decision,
-        # and let any stated scheme outrank it. Fall back to the pre-pack
-        # value only if it somehow resolved nothing.
-        scheme = application.resolved_exit_code_scheme
-    if scheme is None:
-        scheme = resolved_cfg.exit_code_scheme
+    from .policy.release_gate_options import resolve_gate_pack_exit_code_scheme
+
+    scheme = resolve_gate_pack_exit_code_scheme(
+        pack_exit_code_scheme=application.exit_code_scheme,
+        pack_resolved_exit_code_scheme=application.resolved_exit_code_scheme,
+        severity_levels_present=bool(application.severity_levels),
+        current_scheme=resolved_cfg.exit_code_scheme,
+    )
     return replace(
         resolved_cfg,
         severity=severity,
