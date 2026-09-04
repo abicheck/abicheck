@@ -468,22 +468,23 @@ def resolve_release_pack_application(
     :func:`~abicheck.contract_context.with_resolved_config`, called from
     ``cli_compare_release_pairwise._run_compare_pair`` after every pair, so
     that plumbing is not actually missing (Codex review, fresh evidence,
-    correcting this docstring's own prior claim that it was). The rejection
-    is kept anyway, pending investigation of whether it is still needed now
-    that the context exists: lifting it without re-verifying
-    ``contract_coverage_exit.coverage_exit_floor``'s per-library read
-    against a release's *many*-libraries `warn` semantics (a single-pair
-    comparison has exactly one) is exactly the kind of reactive, unverified
-    change this module exists to avoid making outside a dedicated slice --
-    see ADR-063 Track 4's 7B ledger entry
-    (``docs/_meta/one-semantic-pipeline-status.yaml``) for the open
-    investigation this leaves for a future PR. Until then, a pack asserting
-    ``contract.unresolved=warn`` under ``--contract`` on a release
-    comparison stays rejected rather than risk being silently accepted and
-    scoring nothing -- an incomplete coverage floor would still contribute 1
-    to every library's exit code regardless of the pack -- exactly the
-    decorative-``--pack`` failure this whole module exists to prevent
-    (Codex review, fresh evidence).
+    correcting this docstring's own prior claim that it was). Tracing the
+    merge further (Codex review, a second round, fresh evidence) shows it
+    reaches exactly what ``_accepts_unresolved`` reads
+    (``ctx.evaluation_context.resolved_config.contract.unresolved``) --
+    which means this rejection's own original "would be silently accepted
+    and score nothing" justification may *also* no longer hold: static
+    tracing suggests ``contract.unresolved=warn`` would now correctly zero
+    :func:`~abicheck.policy.contract_coverage_exit.coverage_exit_floor`'s
+    per-library contribution, the same way it does for single-pair
+    ``compare``. That has not been verified against a real end-to-end
+    release comparison (multiple libraries, a real merged
+    ``PersistedContractContext``, a real ``coverage_exit_floor`` read), so
+    the rejection stays in place rather than being lifted on static
+    reasoning alone -- removing it, or replacing it with such a test, is
+    the concrete next step for a dedicated slice; see ADR-063 Track 4's 7B
+    ledger entry (``docs/_meta/one-semantic-pipeline-status.yaml``) for the
+    open investigation this leaves.
 
     Raises what the canonical resolver and the pack loader raise (a D7
     same-tier conflict, a D8 pack conflict, an inapplicable, gate-only, or

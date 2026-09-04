@@ -1229,16 +1229,24 @@ class TestOnlyAppliedFieldsAreAccepted:
     def test_contract_unresolved_pack_still_rejected_on_a_release_comparison(
         self, tmp_path: Path, with_contract: bool
     ) -> None:
-        """Codex review, fresh evidence: `contract.unresolved`'s consumer
+        """Codex review, fresh evidence, corrected on a second review round:
+        `contract.unresolved`'s consumer
         (`contract_coverage_exit._accepts_unresolved`) reads a per-comparison
-        `PersistedContractContext` only `checker.compare`'s own
-        `record_resolved_config` installs -- which the release fan-out never
-        builds per library. Accepting the pack here would score nothing: an
-        incomplete coverage floor would still contribute 1 to every
-        library's exit code regardless of `contract.unresolved=warn`, the
-        exact decorative-``--pack`` failure this module exists to prevent.
-        Rejected unconditionally -- with or without --contract, since even
-        --contract does not make the release fan-out apply this field."""
+        `PersistedContractContext` -- `record_release_resolved_config`
+        already builds and merges one per library
+        (`cli_compare_release_pairwise._run_compare_pair`), so the earlier
+        "release fan-out never builds one" premise was wrong, and static
+        tracing of that merge path suggests `contract.unresolved=warn` would
+        now correctly zero the coverage floor if applied, not silently score
+        nothing. `resolve_release_pack_application` still rejects it
+        unconditionally anyway, pending an end-to-end test verifying that
+        tracing against a real release comparison rather than lifting the
+        rejection on static reasoning alone -- see that function's own
+        docstring and ADR-063 Track 4's 7B ledger entry
+        (`docs/_meta/one-semantic-pipeline-status.yaml`) for the open
+        investigation. Rejected unconditionally -- with or without
+        --contract, since even --contract does not make the release fan-out
+        apply this field."""
         pack = _pack(
             tmp_path,
             "unresolved.yml",
