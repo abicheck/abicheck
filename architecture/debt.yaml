@@ -1002,6 +1002,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "abicheck/project_snapshot_store.py",
+      "baseline_lines": 816,
+      "target": "storage (already home; ADR-061 D1 layering keeps this filesystem-facing writer outside storage/ itself)",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "Not legacy debt: ADR-062 A1.4/A1.5's first real multi-artifact PackageManifest writer (abicheck/bundle_facts_store.py) needed manifest.json to also carry PackageManifest.project_sections (cross-artifact evidence refs), so write_project_manifest/ManifestSummary/read_manifest_summary/read_project_manifest grew to publish and read that field back, crossing the 800-line adoption baseline by a small, reviewed amount rather than being split across a second module for a cohesive, single-document read/write contract.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "abicheck/reporter.py",
       "baseline_lines": 2000,
       "target": "report",
@@ -1089,6 +1099,16 @@
       "category": "legacy_model_or_catalog_monolith",
       "owner": "abicheck maintainers",
       "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/storage/package.py",
+      "baseline_lines": 833,
+      "target": "storage (already home)",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "Not legacy debt: ADR-062 A1.4/A1.5 added PackageManifest.project_sections (cross-artifact evidence stored once and referenced by every ArtifactRef that shares it), the schema addition abicheck/bundle_facts_store.py's first real multi-artifact package writer needed. A shared _object_ref_mapping helper (also used by ArtifactRef.sections) kept the net growth to a small, reviewed amount past the 800-line adoption baseline rather than splitting one cohesive object-model file.",
       "review_by": "2026-11-30"
     },
     {

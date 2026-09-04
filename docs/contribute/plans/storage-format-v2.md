@@ -108,14 +108,20 @@ and `BundleFacts` document is bit-for-bit unchanged.
 
 ### Phase 1 — unified project and multibuild storage
 
-**Status: A1.1/A1.2/A1.3 implemented** (this change) — the object model
-(`PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`), a
-real directory-backed store (`abicheck/project_snapshot_store.py`'s
-`DirectoryObjectStore` plus its manifest/ref writer/reader — everything but
-the `.tar.zst` transport form), the v1-v25 import adapter
-(`storage/import_v1.py`), and a single-library snapshot round-tripping
-through the store as a one-artifact project are all landed. A1.4-A1.8 remain
-open. See "Landed in Phase 1" below.
+**Status: A1.1/A1.2/A1.3 implemented**, and **A1.4/A1.5's first slice
+implemented** (ADR-063 Track B "8B") — the object model
+(`PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`,
+`PackageManifest.project_sections`), a real directory-backed store
+(`abicheck/project_snapshot_store.py`'s `DirectoryObjectStore` plus its
+manifest/ref writer/reader, now also publishing/reading `project_sections`
+— everything but the `.tar.zst` transport form), the v1-v25 import adapter
+(`storage/import_v1.py`), a single-library snapshot round-tripping through
+the store as a one-artifact project, and the first real multi-artifact
+writer/reader (`abicheck/bundle_facts_store.py`'s `write_bundle_facts_
+package`/`read_bundle_facts_package`, covering `BundleFacts`'s per-library
+snapshots and instantiation manifest) are all landed. `BuildSourcePack`/
+source-graph dedup, `bundle_variants:`/A1.6-A1.8 remain open. See "Landed in
+Phase 1" below.
 
 - **A1.1** `ProjectSnapshotStore` reads and writes the D6 layout over a
   directory abstraction, with a deterministic `.tar.zst` transport form.
@@ -182,11 +188,18 @@ nothing in the existing pipeline changes behavior.
    — `project_snapshot_store.py`/`project_snapshot_legacy.py`; see
    `docs/contribute/adr/063-one-semantic-pipeline.md`'s Phase 8 note for the
    single-file-by-default CLI wiring this actually shipped as.
-4. **Open, designed below**: the `.tar.zst` transport form (the remainder of
-   A1.1), folding baseline sets and `BundleFacts` into sections plus
-   digest-deduplicated shared evidence (A1.4/A1.5), `bundle_variants:` CLI
-   wiring (A1.6), stored/live release-comparison reachability (A1.7), and
-   non-ELF artifact membership (A1.8).
+4. Express a `BundleFacts` (N libraries plus an instantiation manifest) as a
+   multi-artifact project (A1.4/A1.5's per-library-facts and
+   instantiation-manifest halves). **Landed** — `bundle_facts_store.py`'s
+   `write_bundle_facts_package`/`read_bundle_facts_package`, plus
+   `PackageManifest.project_sections` (`storage/package.py`) and its
+   `write_project_manifest`/`read_project_manifest` publish/read support
+   (`project_snapshot_store.py`).
+5. **Open, designed below**: the `.tar.zst` transport form (the remainder of
+   A1.1), `BuildSourcePack`/source-graph digest-deduplicated shared evidence
+   (the remainder of A1.4/A1.5), `bundle_variants:` CLI wiring (A1.6),
+   stored/live release-comparison reachability (A1.7), and non-ELF artifact
+   membership (A1.8).
 
 `AvailabilityLedger.declare` and `.override` rebuild, revalidate, and
 re-sort the whole mapping per call, so building a ledger of *n* overrides
@@ -268,12 +281,27 @@ is transparently decompressed today).
 
 #### A1.4/A1.5 — folding baseline sets/`BundleFacts` into sections, digest-deduplicated shared evidence
 
-**Status: not implemented.** This is the item this plan's "Relationship to
+**Status: first slice implemented** (ADR-063 Track B "8B") — see "What
+landed" below; the `BuildSourcePack`/source-graph half remains not
+implemented. This is the item this plan's "Relationship to
 G38" section flags as a coordination point: *whichever* of this plan's
 Phase 1 or G38's own Phase 2 lands first decides which document the other
 targets. Written here on the assumption G38 Phase 2 has not landed a second
 persisted bundle shape first — if it has, this section's target is
 `BundleFacts` document fields becoming a section, not a fresh design.
+
+**What landed.** `abicheck/bundle_facts_store.py`'s
+`write_bundle_facts_package`/`read_bundle_facts_package` implement the
+per-library-ABI-facts half of the Design below exactly as specified (one
+`ArtifactRef` per library under a shared `VariantRef`, via
+`import_legacy_snapshot` against one shared `store`), plus the
+`BundleFacts.manifest`/`filesystem_aliases`/`library_filenames` half of the
+cross-library-facts split (the first real `PackageManifest.project_sections`
+entry, and `ArtifactRef.native_identity`, respectively — both exactly as
+this section's Design already specified). **Not** landed: a shared
+`BuildSourcePack`/project source graph as a `project_sections` entry —
+closing finding #6's "~57-59 MB graph repeated per artifact" needs that
+half specifically, which this slice does not touch.
 
 **Goal.** A release directory (today: N per-library `.abi.json[.zst]`
 files, sometimes a `manifest.json`, sometimes a `BundleFacts` document
