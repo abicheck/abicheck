@@ -46,29 +46,21 @@ only so an old monkeypatch path continues to work.
 
 ## Existing-to-target map
 
-A quick-reference summary of the flat-namespace families and where new code
-in that area belongs — `architecture/modules.yaml`'s `legacy_paths` is the
-machine-checked version this table must stay consistent with:
+There is no reliable prefix-based rule here: most flat-namespace families
+(`dumper_*`, `bundle_*`, `service*`, `diff_*`/`type_*`/`source_*`,
+`snapshot_*`, `pack_*`, `report_*`, `scan_*`, `checker_*`, and others) are
+already split across two or three target layers by responsibility, not by
+filename. **Look up the specific file in `architecture/modules.yaml`'s
+`legacy_paths` (per-layer lists) rather than assuming its prefix** — an
+earlier version of this table generalized several families wholesale and
+was repeatedly wrong for a specific existing file (`dumper_cache.py` is
+`storage`, not `extract`; `bundle_manifest.py` is `model`, not `workflows`;
+`service_metadata_attach.py` is `extract` and `service_render.py` is
+`frontends`, not `workflows`).
 
-- `cli.py`, `cli_*.py`, `compat/cli.py` -> `frontends`.
-- `service*.py`, `scan_engine.py`, `bundle.py` and most other `bundle_*.py`
-  orchestration/detection modules, `dumper_hybrid.py` -> `workflows`. This is
-  not a whole-family rule: `dumper_cache.py` is `storage` and
-  `bundle_manifest.py` is `model` — check `architecture/modules.yaml`'s
-  `legacy_paths` for a specific file rather than assuming its prefix.
-- most `dumper_*.py` parsing/AST-config modules, platform/debug metadata
-  parsers, `buildsource` extraction -> `extract` (again excluding
-  `dumper_cache.py`/`dumper_hybrid.py` above).
-- `diff_*.py`, comparability, reachability -> `compare`.
-- policy, suppression, severity, contract evaluation -> `policy`.
-- `reporter*.py`, `html_report.py`, `sarif.py`, `junit_report.py` -> `report`.
-- serialization, snapshot I/O, caches, schemas -> `storage`.
-- shared models, finding identity, change-kind catalog -> `model`.
-
-This map is directional, not permission for a bulk rename. Move one vertical
-slice at a time and preserve the typed request/result pipelines already used
-by `service_compare_pipeline.py`, `service_dump_pipeline.py`, and
-`service_scan.py`.
+Move one vertical slice at a time and preserve the typed request/result
+pipelines already used by `service_compare_pipeline.py`,
+`service_dump_pipeline.py`, and `service_scan.py`.
 
 ## Common task recipes
 
