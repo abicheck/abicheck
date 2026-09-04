@@ -187,6 +187,30 @@ one record's constructor simply omitted the field," which
 ``vtable_fact.status`` alone cannot do -- not a per-record ``FactStatus``
 branch, and not a different way of reading the fields already here for
 the DWARF per-TU ambiguity itself.
+
+**A second, distinct fabrication path, surfaced by review on this same
+closure and deliberately left out of scope: the owned-virtual-function
+fallback stream, not just the size-delta one, can also fire against a
+PE/PDB-derived side.** ``pe_metadata.py``/``pdb_metadata.py`` never set
+``Function.is_virtual`` explicitly (confirmed by inspection: neither
+module assigns it), so it reads its dataclass default (``False``) for
+*every* function recovered from export-table/symbol data alone -- not
+because those functions are confirmed non-virtual, but because that
+evidence was never collected, the identical "default reads as confirmed
+absence" ambiguity this whole closure investigated for ``vtable_fact``
+itself, one projection over. A PE/PDB side compared against a header-AST
+side can therefore differ on `_owned_virtual_signatures` for a class whose
+real virtual surface never changed, evidencing a transition via
+``vtable_transition_is_evidenced``'s "class's own virtual functions"
+branch the same way the size-delta branch does for PDB's ``vtable_fact``.
+This is real (verified, not assumed) and pre-existing -- part of the
+original heuristic this closure's round 3 reverted back to, unrelated to
+any change on this PR, and not attempted here for the same reason round 2
+was reverted: a narrow fix in this exact area was just shown, twice on
+this one PR, to need more scrutiny than a single pass gives it before it
+can be trusted not to regress real coverage. Recorded rather than left
+implicit, per this file's own "say so explicitly" convention -- its own
+dedicated, higher-scrutiny slice, not a drive-by extension of this one.
 """
 
 from __future__ import annotations
