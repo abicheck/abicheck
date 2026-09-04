@@ -4611,6 +4611,10 @@ baseline is now reachable from the CLI instead of only from the Python API /
 a private driver, which is what an oneDAL-scale release scan needs:
 
 ```bash
+# Pre-removal invocation (Phase 17, superseded 2026-09-03 by PR I's
+# automatic operand classification — the flag no longer exists; the same
+# comparison is now just `abicheck compare old.bundle-facts.json
+# new-release/`, with OLD_INPUT's own artifact_type marker classifying it).
 abicheck compare old.bundle-facts.json new-release/ --old-bundle-facts
 ```
 

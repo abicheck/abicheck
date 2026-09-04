@@ -25,6 +25,7 @@ import io
 import json
 import tarfile
 import zipfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -400,7 +401,7 @@ class TestLooksLikeStoredBundleFacts:
         # Premise check: a direct large-window decode of this exact stream
         # really does fail outright (proves the fixture reproduces the
         # finding, not just that the classifier happens to already cope).
-        with pytest.raises(Exception):
+        with pytest.raises((EOFError, zlib.error, gzip.BadGzipFile)):
             gzip.GzipFile(fileobj=io.BytesIO(raw[: 1024 * 1024])).read(1024 * 1024)
         assert looks_like_stored_bundle_facts(p) is True
 

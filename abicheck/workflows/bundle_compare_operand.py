@@ -66,8 +66,8 @@ per-invocation escape hatch to weigh against a whole-document parse on every
 ordinary ``compare`` call (CLAUDE.md's "no deprecation aliases" stance is the
 other half of why an escape hatch was not added back in a different shape).
 
-**Four review-caught refinements on top of the plain marker scan (Codex,
-PR #1042, three rounds):**
+**Review-caught refinements on top of the plain marker scan (Codex, PR
+#1042, rounds 1-11):**
 
 1. **The G40 content-addressed zip archive format
    (``bundle_facts.write_bundle_facts_archive`` / ``save_bundle_facts(...,
@@ -466,9 +466,14 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
     # allows, failing outright even though the marker sits in the first
     # few hundred bytes -- a small probe's much lower output target avoids
     # that failure mode entirely for the overwhelmingly common case (the
-    # marker near the front), and only pays the larger decode when it is
-    # actually warranted (this module's own docstring, point 5's reordered-
-    # document scenario).
+    # marker near the front). The larger decode still runs for any
+    # ordinary document -- stored bundle facts or not -- whose small probe
+    # doesn't close its own root object within SMALL_MARKER_SCAN_BYTES
+    # (CodeRabbit review: this is not rare, an ordinary AbiSnapshot larger
+    # than the small window escalates too), not only for the reordered-
+    # document scenario this module's own docstring, point 5, names as the
+    # motivating case -- what the small probe actually saves is the
+    # failure mode above, not the escalation itself.
     is_stored, definitive = _marker_lookup_at_window(path, SMALL_MARKER_SCAN_BYTES)
     if definitive:
         return bool(is_stored)
