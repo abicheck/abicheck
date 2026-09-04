@@ -153,12 +153,12 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
 
     *new_is_stored* (CLI cleanup phase two, PR I), when true, means
     NEW_INPUT classified as a stored BundleFacts document too -- both sides
-    are then diffed by
-    ``bundle_side_input.compare_stored_bundle_facts_pair`` (a pure in-memory
-    per-library diff, no binaries read, no header AST parsed on either
-    side) instead of ``compare_release_against_bundle_facts`` (which
-    extracts and dumps NEW_INPUT as a live directory/package). The default
-    ``False`` is the original stored/live shape, unchanged.
+    are then diffed by ``workflows.bundle_stored_pair_compare.
+    compare_stored_bundle_facts_pair`` (a pure in-memory per-library diff,
+    no binaries read, no header AST parsed on either side) instead of
+    ``compare_release_against_bundle_facts`` (which extracts and dumps
+    NEW_INPUT as a live directory/package). The default ``False`` is the
+    original stored/live shape, unchanged.
 
     *kwargs* is ``compare_cmd``'s already-parsed, already-``normalize_sided_
     options``-processed option dict -- the same dict that would otherwise be
@@ -197,9 +197,17 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         _bundle_side_input.compare_release_against_bundle_facts
     )
     # PR I: same importlib indirection as compare_release_against_bundle_
-    # facts above, and for the identical reason -- both live in
-    # bundle_side_input.py.
-    compare_stored_bundle_facts_pair = _bundle_side_input.compare_stored_bundle_facts_pair
+    # facts above, and for the identical reason -- workflows.bundle_stored_
+    # pair_compare also transitively imports `service` (Codex review moved
+    # the function itself out of bundle_side_input.py into this real
+    # workflows/ module, but the import-cycle-growth concern documented
+    # above is unrelated to which module hosts the function).
+    _bundle_stored_pair_compare = importlib.import_module(
+        "abicheck.workflows.bundle_stored_pair_compare"
+    )
+    compare_stored_bundle_facts_pair = (
+        _bundle_stored_pair_compare.compare_stored_bundle_facts_pair
+    )
     from ....cli_compare_release_helpers import _exit_compare_release
 
     # known_libraries_for_new_side lives in workflows/bundle_facts_library_

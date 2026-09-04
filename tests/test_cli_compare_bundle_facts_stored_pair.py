@@ -25,9 +25,11 @@ NEW-side-specific rejections (``compare_bundle_facts_rejections.
 _reject_new_side_extraction_options_for_stored_pair``), and one real
 end-to-end comparison through the actual CLI entry point. No gcc/castxml
 needed anywhere here: both sides are already resolved, stored documents, so
-``compare_stored_bundle_facts_pair`` (``bundle_side_input.py``) reads no
-binaries and parses no header AST on either side -- see that function's own
-docstring.
+``compare_stored_bundle_facts_pair``
+(``workflows/bundle_stored_pair_compare.py``) reads no binaries and parses
+no header AST on either side -- see that function's own docstring. Its own
+direct-call unit tests (including the variant-fingerprint mismatch check)
+live in ``tests/test_bundle_stored_pair_compare.py``.
 """
 
 from __future__ import annotations
@@ -64,7 +66,12 @@ def _write_stub(tmp_path: Path, name: str) -> Path:
 
 
 def _write_facts(
-    tmp_path: Path, name: str, version: str, visibility: Visibility
+    tmp_path: Path,
+    name: str,
+    version: str,
+    visibility: Visibility,
+    *,
+    variant_fingerprint: str | None = None,
 ) -> Path:
     fn = Function(
         name="core_fn", mangled="core_fn", return_type="int", visibility=visibility
@@ -78,7 +85,8 @@ def _write_facts(
         ),
         functions=[fn],
     )
-    facts = capture_bundle_facts({"libcore.so": snapshot})
+    kwargs = {} if variant_fingerprint is None else {"variant_fingerprint": variant_fingerprint}
+    facts = capture_bundle_facts({"libcore.so": snapshot}, **kwargs)
     path = tmp_path / name
     save_bundle_facts(facts, path)
     return path
@@ -235,6 +243,18 @@ class TestStoredPairEarlyRejections:
         assert code == 64
         assert "--include-system-declarations" in out
 
+    def test_depth_binary_is_rejected(self, tmp_path: Path) -> None:
+        """Unlike the stored/live shape (where --depth binary is a
+        legitimate, supported combination), neither side here has any way
+        to be projected down to symbols-only evidence -- both are already
+        fully-resolved snapshots."""
+        old_path, new_path = self._both_stored(tmp_path)
+
+        code, out = _invoke("compare", str(old_path), str(new_path), "--depth", "binary")
+
+        assert code == 64
+        assert "--depth binary" in out
+
     def test_default_invocation_is_not_rejected_by_any_new_side_check(
         self, tmp_path: Path
     ) -> None:
@@ -300,3 +320,27 @@ class TestStoredPairEndToEnd:
         )
 
         assert "NEW (stored facts)" in out
+
+    def test_mismatched_variant_is_refused_through_the_real_cli(
+        self, tmp_path: Path
+    ) -> None:
+        old_path = _write_facts(
+            tmp_path,
+            "old.bundlefacts.json",
+            "old",
+            Visibility.PUBLIC,
+            variant_fingerprint="cpu",
+        )
+        new_path = _write_facts(
+            tmp_path,
+            "new.bundlefacts.json",
+            "new",
+            Visibility.PUBLIC,
+            variant_fingerprint="sycl",
+        )
+
+        code, out = _invoke("compare", str(old_path), str(new_path), "--format", "json")
+
+        assert code != 0
+        assert code != 64  # a real ValueError, not a usage error
+        assert "different build variants" in out

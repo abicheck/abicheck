@@ -40,7 +40,6 @@ from abicheck.bundle_side_input import (
     StoredBundleFactsInput,
     compare_bundle_sides,
     compare_release_against_bundle_facts,
-    compare_stored_bundle_facts_pair,
     resolve_bundle_side,
 )
 from abicheck.checker_policy import ChangeKind, Verdict
@@ -301,113 +300,10 @@ class TestCompareBundleSidesManifestPrecedence:
         )
 
 
-# ---------------------------------------------------------------------------
-# compare_stored_bundle_facts_pair -- the stored/stored driver (CLI cleanup
-# phase two, PR I). No binaries, no header AST, no live extraction on
-# either side -- so unlike compare_release_against_bundle_facts's own
-# end-to-end class below (@pytest.mark.integration, needs gcc), this class
-# needs no compiler at all: both sides are already plain, hand-built
-# AbiSnapshots.
-# ---------------------------------------------------------------------------
-
-
-class TestCompareStoredBundleFactsPair:
-    def _facts_path(
-        self, tmp_path: Path, name: str, version: str, visibility: Visibility
-    ) -> Path:
-        fn = Function(
-            name="core_fn", mangled="core_fn", return_type="int", visibility=visibility
-        )
-        snapshot = AbiSnapshot(
-            library="libcore.so",
-            version=version,
-            elf=_meta(soname="libcore.so", exports=["core_fn"]),
-            functions=[fn],
-        )
-        facts = capture_bundle_facts({"libcore.so": snapshot})
-        path = tmp_path / name
-        save_bundle_facts(facts, path)
-        return path
-
-    def test_visibility_change_is_detected_with_no_binaries_read(
-        self, tmp_path: Path
-    ) -> None:
-        old_path = self._facts_path(
-            tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
-        )
-        new_path = self._facts_path(
-            tmp_path, "new.bundlefacts.json", "new", Visibility.HIDDEN
-        )
-
-        result = compare_stored_bundle_facts_pair(old_path, new_path)
-
-        assert [d.library for d in result.per_library] == ["libcore.so"]
-        assert result.per_library[0].changes
-        assert result.verdict != Verdict.NO_CHANGE
-
-    def test_unchanged_pair_is_no_change(self, tmp_path: Path) -> None:
-        old_path = self._facts_path(
-            tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
-        )
-        new_path = self._facts_path(
-            tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
-        )
-
-        result = compare_stored_bundle_facts_pair(old_path, new_path)
-
-        assert [d.library for d in result.per_library] == ["libcore.so"]
-        assert result.verdict == Verdict.NO_CHANGE
-
-    def test_library_present_on_only_one_side_is_not_diffed(
-        self, tmp_path: Path
-    ) -> None:
-        old_metadata = {
-            "libcore.so": _meta(soname="libcore.so", exports=["core_fn"]),
-            "libonly_old.so": _meta(soname="libonly_old.so", exports=["only_old_fn"]),
-        }
-        new_metadata = {
-            "libcore.so": _meta(soname="libcore.so", exports=["core_fn"]),
-            "libonly_new.so": _meta(soname="libonly_new.so", exports=["only_new_fn"]),
-        }
-        old_path = tmp_path / "old.bundlefacts.json"
-        new_path = tmp_path / "new.bundlefacts.json"
-        save_bundle_facts(
-            capture_bundle_facts(_per_library_snapshots(old_metadata)), old_path
-        )
-        save_bundle_facts(
-            capture_bundle_facts(_per_library_snapshots(new_metadata)), new_path
-        )
-
-        result = compare_stored_bundle_facts_pair(old_path, new_path)
-
-        assert [d.library for d in result.per_library] == ["libcore.so"]
-
-    def test_policy_file_override_reaches_the_per_library_diff(
-        self, tmp_path: Path
-    ) -> None:
-        """Mirrors ``TestCompareReleaseAgainstBundleFactsResolutionUnit.
-        test_policy_file_override_genuinely_demotes_a_real_verdict`` below,
-        for the stored/stored driver: a real ``overrides`` rule must reach
-        each per-library ``service.compare_snapshots()`` call, not just a
-        bare *policy* string."""
-        from abicheck.policy_file import PolicyFile
-
-        old_path = self._facts_path(
-            tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
-        )
-        new_path = self._facts_path(
-            tmp_path, "new.bundlefacts.json", "new", Visibility.HIDDEN
-        )
-        baseline = compare_stored_bundle_facts_pair(old_path, new_path)
-        assert baseline.verdict != Verdict.NO_CHANGE
-        demoted_kind = baseline.per_library[0].changes[0].kind
-
-        policy_file = PolicyFile(overrides={demoted_kind: Verdict.NO_CHANGE})
-        result = compare_stored_bundle_facts_pair(
-            old_path, new_path, policy_file=policy_file
-        )
-        assert result.verdict != baseline.verdict
-        assert result.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE)
+# compare_stored_bundle_facts_pair (the stored/stored driver, CLI cleanup
+# phase two, PR I) moved to abicheck/workflows/bundle_stored_pair_compare.py
+# (Codex review, PR #1060) -- its own tests now live in
+# tests/test_bundle_stored_pair_compare.py.
 
 
 # ---------------------------------------------------------------------------
