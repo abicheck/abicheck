@@ -428,63 +428,31 @@ def resolve_release_pack_application(
     once per library, rather than one merged object upfront.
 
     **Accepts a ``kind: gate`` pack (CLI cleanup phase two, "PR B" slice 2).**
-    The release fan-out's severity/exit-code-scheme resolution now goes
-    through one resolved :class:`~abicheck.policy.release_gate_options.
-    GateOptions` object (``resolve_release_gate_options``, ADR-064, landed
-    2026-09-02) instead of the raw CLI-or-config strings this note used to
-    describe -- ``GateOptions`` *is* the "no ``GateOptions``-shaped object
-    of its own" gap's own fix. So the returned ``PackApplication``'s
-    ``exit_code_scheme``/``severity_levels`` (already populated by
-    :func:`~abicheck.pack_application.pack_application` regardless of
-    ``gate_supported``) are folded into that resolution by
-    ``cli_compare_release_helpers.apply_release_gate_pack`` -- the same
-    "smallest additive fold point" discipline slice 1 used for
-    ``policy.overrides``/``surface.internal_namespaces``, but itself still
-    *mirroring*, rather than *calling*,
+    Folds ``PackApplication``'s ``exit_code_scheme``/``severity_levels``
+    into the release fan-out's own resolved
+    :class:`~abicheck.policy.release_gate_options.GateOptions`
+    (``resolve_release_gate_options``, ADR-064, landed 2026-09-02) via
+    ``cli_compare_release_helpers.apply_release_gate_pack`` -- which still
+    *mirrors*, rather than *calls*,
     :func:`~abicheck.pack_application.apply_to_compare_config`'s identical
-    fold logic, since the release fan-out still has no
-    ``ResolvedCompareConfig``-shaped object of its own to fold packs onto --
-    deferred to the duplication-and-convergence-assessment plan's own P0
-    ``EffectiveGate``/``EffectiveEvaluationConfig`` target, not to ADR-064's
-    own PR G2 (a different, unrelated deferred item -- see ADR-063 Track 4's
-    7B ledger entry, ``docs/_meta/one-semantic-pipeline-status.yaml``, for
-    the full account).
-    ``scan --against`` now accepts a ``kind: gate`` pack too (CLI cleanup
-    phase two, "PR B", a later slice than this one): unlike the release
-    fan-out, ``scan`` already has a real ``ResolvedCompareConfig`` object
-    (via ``resolve_compare_config``, the same function single-pair
-    ``compare`` uses) to fold the pack's contribution into with
-    :func:`~abicheck.pack_application.apply_to_compare_config` directly --
-    see ``cli_scan._resolve_scan_evaluation_config``.
+    logic, a distinct, smaller residual than ``GateOptions`` itself. Full
+    account, including why this isn't ADR-064's own PR G2: ADR-063 Track 4's
+    7B ledger entry, ``docs/_meta/one-semantic-pipeline-status.yaml``.
+    ``scan --against`` accepts a ``kind: gate`` pack too (a later "PR B"
+    slice): unlike the release fan-out, it already has a real
+    ``ResolvedCompareConfig`` to fold into directly via
+    ``apply_to_compare_config`` -- see
+    ``cli_scan._resolve_scan_evaluation_config``.
 
     Also rejects ``contract.unresolved`` unconditionally -- not merely when
     ``contract_evaluation`` is false, the way :func:`~abicheck.
     pack_application.check_resolved_config_applies_packs`'s own
     ``CONTRACT_EVALUATION_ONLY_FIELDS`` check does for the single-pair path.
-    That field's consumer (``contract_coverage_exit._accepts_unresolved``)
-    reads it off a per-comparison ``PersistedContractContext`` --
     :func:`record_release_resolved_config` (this module) already builds and
-    merges one per library, via
-    :func:`~abicheck.contract_context.with_resolved_config`, called from
-    ``cli_compare_release_pairwise._run_compare_pair`` after every pair, so
-    that plumbing is not actually missing (Codex review, fresh evidence,
-    correcting this docstring's own prior claim that it was). Tracing the
-    merge further (Codex review, a second round, fresh evidence) shows it
-    reaches exactly what ``_accepts_unresolved`` reads
-    (``ctx.evaluation_context.resolved_config.contract.unresolved``) --
-    which means this rejection's own original "would be silently accepted
-    and score nothing" justification may *also* no longer hold: static
-    tracing suggests ``contract.unresolved=warn`` would now correctly zero
-    :func:`~abicheck.policy.contract_coverage_exit.coverage_exit_floor`'s
-    per-library contribution, the same way it does for single-pair
-    ``compare``. That has not been verified against a real end-to-end
-    release comparison (multiple libraries, a real merged
-    ``PersistedContractContext``, a real ``coverage_exit_floor`` read), so
-    the rejection stays in place rather than being lifted on static
-    reasoning alone -- removing it, or replacing it with such a test, is
-    the concrete next step for a dedicated slice; see ADR-063 Track 4's 7B
-    ledger entry (``docs/_meta/one-semantic-pipeline-status.yaml``) for the
-    open investigation this leaves.
+    merges a per-library ``PersistedContractContext`` that field's consumer
+    could read, so the rejection is not about missing plumbing; whether it
+    is still needed is unverified, not lifted here on static reasoning
+    alone. Full trace and review history: the same ledger entry above.
 
     Raises what the canonical resolver and the pack loader raise (a D7
     same-tier conflict, a D8 pack conflict, an inapplicable, gate-only, or
