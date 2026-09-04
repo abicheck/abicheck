@@ -102,21 +102,53 @@ class DwarfSession:
     elf: Any  # elftools.elf.elffile.ELFFile
     dwarf: Any  # elftools.dwarf.dwarfinfo.DWARFInfo
     arch: str
+    # P1 review, fresh evidence (Codex): when *path* is a detached-debug
+    # sidecar resolved via --debug-root/--debuginfod (objcopy
+    # --only-keep-debug), its own .eh_frame/.debug_frame retain only
+    # SHT_NOBITS section headers -- the real unwind data (and, often, the
+    # only intact .dynsym/.symtab for address-to-symbol correlation) lives
+    # in the *primary* stripped binary alongside it. cfi_elf/cfi_dwarf, when
+    # set, are a second ELFFile/DWARFInfo opened against that primary
+    # binary specifically for CFI extraction -- DIE-based analysis (structs,
+    # calling conventions, packed-typedef checks) still reads from
+    # elf/dwarf (the sidecar) as before. ``None`` (the default, and every
+    # caller not resolving a detached-debug artifact) means "use elf/dwarf
+    # for CFI too", unchanged from before this field existed.
+    cfi_elf: Any | None = None
+    cfi_dwarf: Any | None = None
+    _cfi_file: BinaryIO | None = None
 
     def close(self) -> None:
         try:
             self._file.close()
         except OSError:
             pass
+        if self._cfi_file is not None:
+            try:
+                self._cfi_file.close()
+            except OSError:
+                pass
 
 
-def open_dwarf_session(so_path: Path) -> DwarfSession | None:
+def open_dwarf_session(
+    so_path: Path, *, cfi_source_path: Path | None = None
+) -> DwarfSession | None:
     """Open *so_path* and return a :class:`DwarfSession`, or ``None``.
 
     Returns ``None`` (having released any handle) when the path is not a
     regular file, carries no real DWARF, or cannot be opened/parsed — the same
     conditions under which :func:`parse_dwarf` yields empty metadata. Never
     raises. The caller must :meth:`~DwarfSession.close` a non-``None`` result.
+
+    ``cfi_source_path`` (P1 review, fresh evidence): the *primary* binary a
+    detached-debug *so_path* was resolved from (``--debug-root``/
+    ``--debuginfod``), when they differ. Opened as a second ELF file whose
+    ``.eh_frame``/``.debug_frame`` and symbol table back CFI extraction
+    instead of the sidecar's own (typically ``SHT_NOBITS``) copies. Best-
+    effort: any failure to open it is logged and leaves
+    ``cfi_elf``/``cfi_dwarf`` unset (falling back to the sidecar's own
+    ``elf``/``dwarf``, the pre-existing behaviour) rather than failing the
+    whole DWARF session over an enhancement.
     """
     try:
         f = open(so_path, "rb")
@@ -138,13 +170,16 @@ def open_dwarf_session(so_path: Path) -> DwarfSession | None:
             return None
 
         dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
-        return DwarfSession(
+        session = DwarfSession(
             path=Path(so_path),
             _file=f,
             elf=elf,
             dwarf=dwarf,
             arch=_normalize_arch(elf),
         )
+        if cfi_source_path is not None and Path(cfi_source_path) != Path(so_path):
+            _attach_cfi_source(session, cfi_source_path)
+        return session
     except Exception as exc:  # noqa: BLE001 - never raise; always release the handle
         # pyelftools can raise beyond (ELFError, OSError, ValueError) on corrupt
         # DWARF (struct.error, KeyError, …). The legacy parse_dwarf used a
@@ -153,6 +188,42 @@ def open_dwarf_session(so_path: Path) -> DwarfSession | None:
         log.warning("parse_dwarf: failed to open/parse %s: %s", so_path, exc)
         f.close()
         return None
+
+
+def _attach_cfi_source(session: DwarfSession, cfi_source_path: Path) -> None:
+    """Best-effort: open *cfi_source_path* and attach it to *session* as the
+    CFI-extraction source. Never raises; any failure just leaves
+    ``session.cfi_elf``/``session.cfi_dwarf`` unset."""
+    try:
+        cfi_f = open(cfi_source_path, "rb")
+    except OSError as exc:
+        log.warning(
+            "parse_dwarf: failed to open CFI source %s for %s: %s",
+            cfi_source_path,
+            session.path,
+            exc,
+        )
+        return
+    try:
+        st = os.fstat(cfi_f.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            log.warning(
+                "parse_dwarf: CFI source not a regular file: %s", cfi_source_path
+            )
+            cfi_f.close()
+            return
+        cfi_elf = ELFFile(cfi_f)  # type: ignore[no-untyped-call]
+        session.cfi_elf = cfi_elf
+        session.cfi_dwarf = cfi_elf.get_dwarf_info()  # type: ignore[no-untyped-call]
+        session._cfi_file = cfi_f
+    except Exception as exc:  # noqa: BLE001 - best-effort enhancement, never fatal
+        log.warning(
+            "parse_dwarf: failed to parse CFI source %s for %s: %s",
+            cfi_source_path,
+            session.path,
+            exc,
+        )
+        cfi_f.close()
 
 
 def parse_dwarf_from_session(
@@ -246,8 +317,17 @@ def parse_dwarf_from_session(
     # truncated/empty .debug_info section carries no real ELF/DWARFInfo.
     cfi_complete = True
     if meta.cu_total:
+        # P1 review, fresh evidence: a detached-debug sidecar's own
+        # .eh_frame/.debug_frame are typically SHT_NOBITS -- read CFI (and
+        # its address-to-symbol correlation) from the primary binary when
+        # one was attached, per DwarfSession.cfi_elf/cfi_dwarf's own
+        # docstring.
+        cfi_elf = session.cfi_elf if session.cfi_elf is not None else session.elf
+        cfi_dwarf = (
+            session.cfi_dwarf if session.cfi_dwarf is not None else session.dwarf
+        )
         try:
-            cfi_complete = _parse_frame_registers(session.elf, session.dwarf, adv)
+            cfi_complete = _parse_frame_registers(cfi_elf, cfi_dwarf, adv)
         except Exception as exc:  # noqa: BLE001
             log.warning(
                 "parse_dwarf: frame-register extraction failed in %s: %s",
@@ -321,6 +401,7 @@ def parse_dwarf(
     so_path: Path,
     *,
     _session_out: list[DwarfSession] | None = None,
+    cfi_source_path: Path | None = None,
 ) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
     """Open *so_path* once and extract both DwarfMetadata and AdvancedDwarfMetadata.
 
@@ -336,8 +417,14 @@ def parse_dwarf(
     caller to reuse (e.g. the DWARF snapshot build) and then close. When it is
     ``None`` (the default, and every external caller) the session is closed
     before returning, so behaviour is unchanged.
+
+    ``cfi_source_path`` (P1 review, fresh evidence): forwarded to
+    :func:`open_dwarf_session` -- the primary binary a detached-debug
+    *so_path* was resolved from, when they differ, so CFI extraction reads
+    real (not ``SHT_NOBITS``) ``.eh_frame``/``.debug_frame`` data. See
+    ``DwarfSession.cfi_elf``'s own docstring.
     """
-    session = open_dwarf_session(so_path)
+    session = open_dwarf_session(so_path, cfi_source_path=cfi_source_path)
     if session is None:
         return DwarfMetadata(), AdvancedDwarfMetadata()
 

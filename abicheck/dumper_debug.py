@@ -111,7 +111,11 @@ def _resolve_debug_metadata(
         from .dwarf_unified import parse_dwarf
 
         _resolved("dwarf")
-        return parse_dwarf(dwarf_path, _session_out=_session_out)
+        return parse_dwarf(
+            dwarf_path,
+            _session_out=_session_out,
+            cfi_source_path=so_path if dwarf_source is not None else None,
+        )
 
     if debug_format is not None:
         raise ValueError(
@@ -137,7 +141,11 @@ def _resolve_debug_metadata(
                 )
 
     # DWARF > BTF > CTF for userspace (or kernel fallback)
-    dwarf_meta, dwarf_adv = parse_dwarf(dwarf_path, _session_out=_session_out)
+    dwarf_meta, dwarf_adv = parse_dwarf(
+        dwarf_path,
+        _session_out=_session_out,
+        cfi_source_path=so_path if dwarf_source is not None else None,
+    )
     if dwarf_meta.has_dwarf:
         _resolved("dwarf")
         return dwarf_meta, dwarf_adv

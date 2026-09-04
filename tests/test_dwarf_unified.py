@@ -11,6 +11,7 @@ compilers produce Mach-O/PE, and DWARF parsing requires ELF.
 from __future__ import annotations
 
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -1002,3 +1003,108 @@ class TestUnifiedPassDowngradesOnIncompletePackedTypedef:
         assert adv.cu_failed == 0
         assert adv.evidence_state == "partial"
         assert "MyAlias" not in adv.all_struct_names
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)",
+)
+class TestDetachedDebugCfiSource:
+    """P1 review, fresh evidence (Codex): a detached-debug sidecar resolved
+    via --debug-root/--debuginfod (objcopy --only-keep-debug) retains its
+    own .eh_frame/.debug_frame as SHT_NOBITS -- real unwind data lives only
+    in the primary (stripped) binary alongside it. Reading CFI from the
+    sidecar alone (the shape before this fix) either fails outright or
+    finds no FDEs, stamping the advanced channel "partial" and making
+    --require-complete-analysis fail for this repository's own supported
+    detached-debug workflow. Verified against real objcopy-produced
+    files, not synthetic section-flag mocks."""
+
+    @staticmethod
+    def _split_debug(tmp_path: Path, so: Path) -> tuple[Path, Path]:
+        """Split *so* into (primary, sidecar) the way a real packaging
+        pipeline does: objcopy --only-keep-debug + --strip-debug."""
+        primary = tmp_path / "primary.so"
+        sidecar = tmp_path / "primary.debug"
+        shutil.copy(so, primary)
+        subprocess.run(
+            ["objcopy", "--only-keep-debug", str(so), str(sidecar)],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                "objcopy",
+                "--strip-debug",
+                f"--add-gnu-debuglink={sidecar}",
+                str(primary),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return primary, sidecar
+
+    def test_sidecar_alone_reports_partial(self, tmp_path: Path) -> None:
+        """Baseline: parsing the sidecar alone (no CFI source attached) is
+        the shape the reviewer reported -- CFI extraction cannot succeed
+        from the sidecar's own NOBITS .eh_frame."""
+        _require_tool("gcc")
+        _require_tool("objcopy")
+        from abicheck.dwarf_unified import parse_dwarf
+
+        so = _compile_so(
+            tmp_path, "libsplit", "int add(int a, int b) { return a + b; }"
+        )
+        _primary, sidecar = self._split_debug(tmp_path, so)
+
+        meta, adv = parse_dwarf(sidecar)
+        assert meta.has_dwarf is True
+        assert adv.evidence_state == "partial"
+        assert adv.frame_registers == {}
+
+    def test_cfi_source_path_reads_real_unwind_data_from_primary(
+        self, tmp_path: Path
+    ) -> None:
+        """The fix: pointing cfi_source_path at the primary binary reads
+        real CFI data and reports the advanced channel complete."""
+        _require_tool("gcc")
+        _require_tool("objcopy")
+        from abicheck.dwarf_unified import parse_dwarf
+
+        so = _compile_so(
+            tmp_path, "libsplit2", "int add(int a, int b) { return a + b; }"
+        )
+        primary, sidecar = self._split_debug(tmp_path, so)
+
+        meta, adv = parse_dwarf(sidecar, cfi_source_path=primary)
+        assert meta.has_dwarf is True
+        assert adv.evidence_state == "parsed"
+        assert "add" in adv.frame_registers
+
+    def test_cfi_source_path_equal_to_so_path_is_a_no_op(self, tmp_path: Path) -> None:
+        """Positive control: the ordinary (non-split-debug) case, where
+        cfi_source_path is unset or equals so_path, is unaffected."""
+        _require_tool("g++")
+        so = _compile_so(tmp_path, "libnosplit", _SESSION_SRC, lang="cpp")
+
+        meta, adv = parse_dwarf(so, cfi_source_path=so)
+        meta2, adv2 = parse_dwarf(so)
+        assert adv.evidence_state == adv2.evidence_state == "parsed"
+        assert adv.frame_registers == adv2.frame_registers
+
+    def test_missing_cfi_source_falls_back_gracefully(self, tmp_path: Path) -> None:
+        """A cfi_source_path that cannot be opened must not break the
+        DWARF session -- it degrades to the sidecar's own (NOBITS) CFI,
+        same as not passing cfi_source_path at all, rather than raising."""
+        _require_tool("gcc")
+        _require_tool("objcopy")
+        from abicheck.dwarf_unified import parse_dwarf
+
+        so = _compile_so(
+            tmp_path, "libsplit3", "int add(int a, int b) { return a + b; }"
+        )
+        _primary, sidecar = self._split_debug(tmp_path, so)
+
+        meta, adv = parse_dwarf(sidecar, cfi_source_path=tmp_path / "nope.so")
+        assert meta.has_dwarf is True
+        assert adv.evidence_state == "partial"
