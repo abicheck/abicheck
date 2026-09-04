@@ -865,10 +865,10 @@ def _has_fde(entries: Any) -> bool:
     return any(e.__class__.__name__ == "FDE" for e in entries)
 
 
-def _get_cfi_source(dwarf: Any) -> Any:
+def _get_cfi_source(dwarf: Any, *, source_failed: list[bool] | None = None) -> Any:
     """Return CFI entry iterator, preferring .eh_frame over .debug_frame.
 
-    P1 review, fresh evidence (two rounds against this same function):
+    P1 review, three rounds of fresh evidence against this same function:
 
     1. pyelftools' real ``DWARFInfo`` API is
        ``EH_CFI_entries()``/``CFI_entries()`` -- there is no
@@ -881,34 +881,47 @@ def _get_cfi_source(dwarf: Any) -> Any:
     2. Calling the *real* method names exposed two more real
        absent/empty-section semantics an unconditional
        ``if src is not None: return src`` could not handle: pyelftools
-       raises ``AssertionError`` (not ``AttributeError``/``ELFError``) when
-       the underlying section is entirely absent (``EH_CFI_entries()``
-       asserts ``self.eh_frame_sec is not None``) -- which would have
-       violated ``parse_advanced_dwarf()``'s "never raises" contract -- and
-       an *empty*-of-real-data ``.eh_frame`` section (e.g. a binary built
-       with ``-fno-asynchronous-unwind-tables``, which GCC can still emit a
-       CIE/ZERO-only ``.eh_frame`` for) returns a non-``None``,
+       raises ``AssertionError`` when the underlying section is entirely
+       absent, and an *empty*-of-real-data ``.eh_frame`` section (e.g.
+       ``-fno-asynchronous-unwind-tables``) returned a non-``None``,
        no-real-FDE list that the old code accepted immediately, never
-       falling back to a ``.debug_frame`` section that does carry real
-       FDEs. Fixed by checking section presence via ``has_EH_CFI()``/
-       ``has_CFI()`` before calling either entries accessor (also guarding
-       against ``AssertionError`` defensively, for an older pyelftools that
-       lacks the ``has_*`` methods), and only accepting the ``.eh_frame``
-       result when it actually contains an FDE -- otherwise falling
-       through to ``.debug_frame``.
+       falling back to ``.debug_frame``. Fixed by checking section
+       presence via ``has_EH_CFI()``/``has_CFI()`` first, and only
+       accepting the ``.eh_frame`` result when a real FDE is present.
+    3. A section that genuinely *is* present but whose entries raise on
+       decode (a malformed/truncated ``.eh_frame``, ``ELFParseError``)
+       was caught by the same broad ``except`` as the legitimate
+       "section absent" case, so this function returned ``None`` either
+       way -- indistinguishable to the caller, which treats ``None`` as
+       "no CFI section at all, nothing to be incomplete about" and
+       reports ``complete=True``. ``source_failed``, when given, has
+       ``True`` appended whenever entries actually failed to decode
+       (never for a section that was legitimately never present), so
+       ``_parse_frame_registers`` can downgrade completeness for this
+       shape too.
     """
     try:
-        if dwarf.has_EH_CFI():
+        has_eh = dwarf.has_EH_CFI()
+    except (AttributeError, ELFError):
+        has_eh = False
+    if has_eh:
+        try:
             entries = dwarf.EH_CFI_entries()
             if _has_fde(entries):
                 return entries
-    except (AttributeError, AssertionError, ELFError):
-        pass
+        except (AttributeError, AssertionError, ELFError):
+            if source_failed is not None:
+                source_failed.append(True)
     try:
-        if dwarf.has_CFI():
+        has_dbg = dwarf.has_CFI()
+    except (AttributeError, ELFError):
+        has_dbg = False
+    if has_dbg:
+        try:
             return dwarf.CFI_entries()
-    except (AttributeError, AssertionError, ELFError):
-        pass
+        except (AttributeError, AssertionError, ELFError):
+            if source_failed is not None:
+                source_failed.append(True)
     return None
 
 
@@ -999,9 +1012,14 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
     try:
         arch_key = _normalize_arch(elf)
         addr_to_sym = _build_addr_to_sym(elf)
-        cfi_src = _get_cfi_source(dwarf)
+        source_failed: list[bool] = []
+        cfi_src = _get_cfi_source(dwarf, source_failed=source_failed)
         if cfi_src is None:
-            return True
+            # P1 review, fresh evidence: "no source" and "a present source
+            # whose entries failed to decode" both reach here as None --
+            # source_failed distinguishes them, since only the latter is
+            # actually incomplete evidence.
+            return not source_failed
 
         complete = True
         for entry in cfi_src:
@@ -1124,3 +1142,46 @@ def _parse_producer(producer: str) -> ToolchainInfo:
 
 # Public alias for dwarf_unified — keeps the contract visible to mypy.
 _process_cu_impl = _process_cu
+
+
+# ---------------------------------------------------------------------------
+# Compatibility shim — old `from abicheck.dwarf_advanced import
+# diff_advanced_dwarf`-shaped imports (P1 review)
+# ---------------------------------------------------------------------------
+# diff_advanced_dwarf and its diff-only siblings moved to
+# compare/dwarf_advanced_diff.py (ADR-061 canonical-package migration): this
+# module stays classified extract/, so it may not statically import back
+# from compare/ (extract -> model, storage only). A downstream caller still
+# importing `from abicheck.dwarf_advanced import diff_advanced_dwarf`
+# (this module's own tests included, historically) would otherwise see a
+# hard ImportError; resolved lazily instead, per AGENTS.md's "Moving
+# helpers out of a module that re-exports them?" guidance (see
+# cli_buildsource.py's own shim for the identical pattern) -- a static
+# `from .compare.dwarf_advanced_diff import ...` re-export would reintroduce
+# the same reverse-dependency this split was meant to avoid.
+_DWARF_ADVANCED_DIFF_REEXPORTS = frozenset(
+    {
+        "diff_advanced_dwarf",
+        "_diff_calling_conventions",
+        "_diff_callee_saved_regs",
+        "_sysv_amd64_return_model",
+        "_diff_value_abi_traits",
+        "_returns_in_registers",
+        "_ret_component",
+        "_diff_struct_packing",
+        "_diff_toolchain_flags",
+        "_diff_vector_abi_flags",
+        "_diff_wchar_flags",
+        "_diff_frame_registers",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _DWARF_ADVANCED_DIFF_REEXPORTS:
+        import importlib
+
+        return getattr(
+            importlib.import_module("abicheck.compare.dwarf_advanced_diff"), name
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

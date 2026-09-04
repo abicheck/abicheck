@@ -118,3 +118,41 @@ class TestHelperLevelDecodeFailurePropagates:
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
         assert "exported_fn" not in meta.callee_saved_regs
+
+
+class TestCfiSourceDecodeFailurePropagates:
+    """P1 review, fresh evidence (round 3 against this same completeness
+    chain): a *present* CFI section whose entries fail to decode (a real
+    ``ELFParseError`` from a malformed/truncated ``.eh_frame``/
+    ``.debug_frame``) was previously indistinguishable, from
+    ``_parse_frame_registers``'s point of view, from "no CFI section at
+    all" -- both make ``_get_cfi_source`` return ``None``, and the caller
+    unconditionally treated that as a legitimate, complete absence.
+    """
+
+    def test_source_decode_failure_is_not_reported_complete(self) -> None:
+        from elftools.common.exceptions import ELFParseError
+
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        mock_dwarf = MagicMock()
+        mock_dwarf.has_EH_CFI.return_value = True
+        mock_dwarf.EH_CFI_entries.side_effect = ELFParseError("corrupt eh_frame")
+        mock_dwarf.has_CFI.return_value = True
+        mock_dwarf.CFI_entries.side_effect = ELFParseError("corrupt debug_frame")
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
+        assert len(meta.frame_registers) == 0
+
+    def test_legitimately_absent_source_is_still_reported_complete(self) -> None:
+        """Positive control: neither section present at all remains a
+        legitimate, complete absence -- must not regress to False."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        mock_dwarf = MagicMock()
+        mock_dwarf.has_EH_CFI.return_value = False
+        mock_dwarf.has_CFI.return_value = False
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True

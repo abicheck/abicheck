@@ -82,15 +82,21 @@ class DwarfMetadata:
     # Provenance for assurance receipts.  ``has_dwarf`` alone deliberately
     # cannot say whether this is a full type parse or binary-depth's cheap
     # section-presence probe, nor whether BTF/CTF was adapted into this
-    # DWARF-shaped compatibility model.
-    evidence_source: str = "dwarf"  # dwarf | btf | ctf | pdb | unknown
-    evidence_state: str = (
-        "not_available"  # parsed | partial | presence_only | failed | not_available
-    )
+    # DWARF-shaped compatibility model. P1 review: appended after every
+    # pre-existing field and marked keyword-only (mirrors
+    # AdvancedDwarfMetadata's identical provenance fields below) so an
+    # external caller still constructing this dataclass positionally
+    # cannot silently bind a value to the wrong field.
+    evidence_source: str = field(
+        default="dwarf", kw_only=True
+    )  # dwarf | btf | ctf | pdb | unknown
+    evidence_state: str = field(
+        default="not_available", kw_only=True
+    )  # parsed | partial | presence_only | failed | not_available
     # Extraction accounting.  These remain zero for formats/producers which
     # cannot expose CU-level progress (and for old serialized snapshots).
-    cu_total: int = 0
-    cu_failed: int = 0
+    cu_total: int = field(default=0, kw_only=True)
+    cu_failed: int = field(default=0, kw_only=True)
 
     # TypeMetadataSource protocol methods
     @property

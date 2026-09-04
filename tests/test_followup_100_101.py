@@ -223,6 +223,56 @@ class TestGetCfiSource:
         dwarf.EH_CFI_entries.assert_not_called()
         dwarf.CFI_entries.assert_not_called()
 
+    def test_legitimately_absent_section_does_not_set_source_failed(self) -> None:
+        """Positive control for the P1 round-3 fix: neither section present
+        at all is not a failure -- source_failed must stay empty."""
+        dwarf = MagicMock()
+        dwarf.has_EH_CFI.return_value = False
+        dwarf.has_CFI.return_value = False
+        source_failed: list[bool] = []
+        assert _get_cfi_source(dwarf, source_failed=source_failed) is None
+        assert source_failed == []
+
+    def test_eh_frame_decode_failure_sets_source_failed_and_falls_back(
+        self,
+    ) -> None:
+        """P1 review, fresh evidence (round 3): a present ``.eh_frame``
+        section whose entries raise on decode (a malformed/truncated
+        section, real pyelftools ``ELFParseError``) was previously
+        indistinguishable from a legitimately absent section -- both
+        returned a plain ``None``. ``source_failed`` now records that this
+        was a real decode failure, and the function must still attempt the
+        ``.debug_frame`` fallback rather than giving up immediately."""
+        from elftools.common.exceptions import ELFParseError
+
+        dwarf = MagicMock()
+        dwarf.has_EH_CFI.return_value = True
+        dwarf.EH_CFI_entries.side_effect = ELFParseError("corrupt CFI stream")
+        dwarf.has_CFI.return_value = True
+        dbg_entries = [_fake_entry("CIE"), _fake_entry("FDE")]
+        dwarf.CFI_entries.return_value = dbg_entries
+
+        source_failed: list[bool] = []
+        result = _get_cfi_source(dwarf, source_failed=source_failed)
+        assert result is dbg_entries
+        assert source_failed == [True]
+
+    def test_both_sources_fail_to_decode_sets_source_failed_and_returns_none(
+        self,
+    ) -> None:
+        from elftools.common.exceptions import ELFParseError
+
+        dwarf = MagicMock()
+        dwarf.has_EH_CFI.return_value = True
+        dwarf.EH_CFI_entries.side_effect = ELFParseError("corrupt eh_frame")
+        dwarf.has_CFI.return_value = True
+        dwarf.CFI_entries.side_effect = ELFParseError("corrupt debug_frame")
+
+        source_failed: list[bool] = []
+        result = _get_cfi_source(dwarf, source_failed=source_failed)
+        assert result is None
+        assert source_failed == [True, True]
+
 
 # ── _extract_cfa_reg_from_fde ─────────────────────────────────────────────────
 
@@ -585,3 +635,40 @@ class TestCompatPolicyExposure:
         result = CliRunner().invoke(main, ["compat", "--help"])
         assert result.exit_code == 0, result.output
         assert "--policy" not in result.output
+
+
+class TestDwarfAdvancedDiffCompatShim:
+    """P1 review, fresh evidence: diff_advanced_dwarf and its diff-only
+    siblings moved to compare/dwarf_advanced_diff.py (ADR-061 canonical-
+    package migration); a downstream caller still doing
+    ``from abicheck.dwarf_advanced import diff_advanced_dwarf`` would
+    otherwise see a hard ImportError. dwarf_advanced.py's module-level
+    ``__getattr__`` resolves these lazily instead (mirrors
+    cli_buildsource.py's own shim for the identical pattern)."""
+
+    def test_diff_advanced_dwarf_importable_from_old_path(self) -> None:
+        from abicheck.compare.dwarf_advanced_diff import (
+            diff_advanced_dwarf as canonical,
+        )
+        from abicheck.dwarf_advanced import diff_advanced_dwarf as via_shim
+
+        assert via_shim is canonical
+
+    def test_every_documented_reexport_resolves_to_the_canonical_module(
+        self,
+    ) -> None:
+        import abicheck.compare.dwarf_advanced_diff as canonical_mod
+        import abicheck.dwarf_advanced as shim_mod
+
+        for attr_name in shim_mod._DWARF_ADVANCED_DIFF_REEXPORTS:
+            assert getattr(shim_mod, attr_name) is getattr(canonical_mod, attr_name)
+
+    def test_unknown_attribute_still_raises_attribute_error(self) -> None:
+        import abicheck.dwarf_advanced as shim_mod
+
+        try:
+            shim_mod._not_a_real_attribute_anywhere
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError("expected AttributeError")
