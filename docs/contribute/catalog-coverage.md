@@ -8,7 +8,7 @@ Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the ca
 
 - **177 distinct compatibility rules** in total -- **160** demonstrated by at least one rule-entity case (across **167 rule-entity cases**), plus **17** named only in a scenario's own `related_rules` (a generic mechanism no single-library case demonstrates alone yet).
 - **4 of the rule-entity-backed rules** have a demonstrated *variant* beyond their canonical case -- a genuine robustness demonstration under a different condition (4 variant cases total -- see the per-family breakdown below); these are robustness demonstrations of an already-counted rule, not additional rules.
-- **3 of the rule-entity-backed rules** instead have a *duplicate* -- the same demonstration restated with no distinguishing condition (3 duplicate cases total); these don't add robustness coverage and are candidates for eventual removal, not a variant to keep.
+- **3 of the rule-entity-backed rules** also have a *duplicate* -- the same demonstration restated with no distinguishing condition (3 duplicate cases total); these don't add robustness coverage and are candidates for eventual removal, not a variant to keep. (A family can appear in both this count and the variant count above if it has one of each.)
 - **153 rule-entity-backed rules** have exactly one demonstrated case so far, with no variant or duplicate yet.
 
 | Rule | Canonical case | Variant case(s) | Duplicate case(s) |

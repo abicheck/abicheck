@@ -119,7 +119,13 @@ def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
     # separately -- collapsing the two is exactly what let three duplicate
     # restatements count as three robustness variants before this split. A
     # family with 2 cases has exactly 1 variant or 1 duplicate, not "more
-    # than one".
+    # than one". Case counts are filtered by each case's own relation_type
+    # directly (never by which bucket its whole family fell into) so a
+    # hypothetical mixed family -- one variant case plus one duplicate case
+    # sharing the same rule_slug, not present in today's data but not ruled
+    # out by the schema either -- can't have its duplicate silently
+    # miscounted as a variant or vice versa; a family that mixes the two
+    # legitimately appears in both family sets below, not just one.
     multi_case_families = {
         slug: cases for slug, cases in slug_cases.items() if len(cases) > 1
     }
@@ -131,19 +137,14 @@ def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
     duplicate_families = {
         slug: cases
         for slug, cases in multi_case_families.items()
-        if slug not in variant_families
+        if any(rules[c]["relation_type"] == "duplicate" for c in cases)
     }
+    multi_case_ids = [c for cases in multi_case_families.values() for c in cases]
     variant_case_ids = [
-        c
-        for cases in variant_families.values()
-        for c in cases
-        if rules[c]["variant_of"]
+        c for c in multi_case_ids if rules[c]["relation_type"] == "variant"
     ]
     duplicate_case_ids = [
-        c
-        for cases in duplicate_families.values()
-        for c in cases
-        if rules[c]["variant_of"]
+        c for c in multi_case_ids if rules[c]["relation_type"] == "duplicate"
     ]
 
     lines = [
@@ -162,10 +163,12 @@ def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
         "breakdown below); these are robustness demonstrations of an "
         "already-counted rule, not additional rules.",
         f"- **{len(duplicate_families)} of the rule-entity-backed rules** "
-        f"instead have a *duplicate* -- the same demonstration restated "
+        f"also have a *duplicate* -- the same demonstration restated "
         f"with no distinguishing condition ({len(duplicate_case_ids)} "
         "duplicate cases total); these don't add robustness coverage and "
-        "are candidates for eventual removal, not a variant to keep.",
+        "are candidates for eventual removal, not a variant to keep. (A "
+        "family can appear in both this count and the variant count above "
+        "if it has one of each.)",
         f"- **{len(slug_cases) - len(multi_case_families)} rule-entity-backed "
         "rules** have exactly one demonstrated case so far, with no "
         "variant or duplicate yet.",

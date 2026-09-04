@@ -65,7 +65,7 @@ unaffected. Each of the 197 entries carries:
 | Field | Meaning |
 |---|---|
 | `entity` | `rule` or `scenario` |
-| `scenario_kind` | (scenarios only) `case-study`, `project-topology`, or `capability` — never `audit`; an audit case stays `entity: rule` (`operation` carries audit-ness instead, below). An earlier revision of this table listed `audit` as a fourth `scenario_kind` value, but the generator never emits it that way and no real audit *scenario* family exists yet — corrected here after an external review caught the doc/implementation mismatch. |
+| `scenario_kind` | (scenarios only) `case-study`, `project-topology`, or `capability` — never `audit`; audit-ness doesn't determine `entity` (`operation` carries it instead, below) — the G20 rule cases (143-146) are `entity: rule` with `operation: audit`, but the G20 capability scenarios (147, 148, 151) are `entity: scenario` and *also* carry `operation: audit`. An earlier revision of this table listed `audit` as a fourth `scenario_kind` value, but the generator never emits it that way; corrected here after an external review caught the doc/implementation mismatch. |
 | `operation` | `compare` (an old/new comparison — the default) or `audit` (a single-release scan, `ground_truth.json`'s own `mode: "audit"`) — orthogonal to `entity`/`scenario_kind` |
 | `ecosystem` | `generic`, `onetbb`, `sycl`, `onemkl`, or `linux-kernel` |
 | `topics` | derived from `expected_kinds` via the existing `abicheck/model/change_catalog/{symbols,types,platform,build,source}.py` split (AGENTS.md's own "Adding a new ChangeKind" categorization) — reused rather than re-invented; `controls` for a `NO_CHANGE` case with no kinds to derive from; `audit` added for the four G20 audit rules |
@@ -256,13 +256,14 @@ doc pages — never as directory ownership:
 ```text
 examples/
 ├── README.md
-├── compare-release/          # Phase 5's curated, task-oriented workflows
-├── audit-release/
-├── compare-project/
-├── source-aware-analysis/
-├── python-api/
-├── github-actions/
-└── suppressions/
+└── workflows/                # Phase 5's curated, task-oriented workflows
+    ├── compare-release/      # already landed (Phase 5, 1 of 8)
+    ├── audit-release/
+    ├── compare-project/
+    ├── source-aware-analysis/
+    ├── python-api/
+    ├── github-actions/
+    └── suppressions/
 
 catalog/
 ├── README.md

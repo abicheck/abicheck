@@ -62,12 +62,14 @@ are orthogonal to implementation language and independent of the physical
                      any case with no variant_of.
     operation       "compare" (an old/new comparison -- the default) or
                      "audit" (a single-release scan, ground_truth.json's own
-                     `mode: "audit"`). Orthogonal to `scenario_kind`: an
-                     audit case stays entity="rule" (see
-                     _entity_and_scenario_kind's own comment) with
-                     operation="audit", so "which release-evaluation
-                     operation does this case exercise" doesn't have to be
-                     inferred from the "audit" topics entry.
+                     `mode: "audit"`). Orthogonal to `entity`/`scenario_kind`:
+                     an audit case may be either entity -- the G20 rule
+                     cases (143-146) stay entity="rule", but the G20
+                     capability scenarios (147, 148, 151) are entity=
+                     "scenario" and also carry mode="audit" -- so "which
+                     release-evaluation operation does this case exercise"
+                     doesn't have to be inferred from either the entity or
+                     the "audit" topics entry.
 
 Run `python scripts/gen_catalog_taxonomy.py` to regenerate; `--check` fails
 (exit 1) if regeneration would change the file, without writing anything.
