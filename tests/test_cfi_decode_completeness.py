@@ -676,11 +676,15 @@ class TestAlternateEntryPointCoverage:
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
-        # foo received its own frame-register facts (the exact FDE match);
-        # bar is recognized as covered but never gets its own facts, since
-        # no FDE names it directly -- there is nothing to attach.
-        assert "foo" in meta.frame_registers
-        assert "bar" not in meta.frame_registers
+        # P2 review, fresh evidence, round two (Codex): bar must receive
+        # this FDE's own facts too, not merely be marked covered -- it
+        # shares the identical CFI state foo's FDE describes (there is no
+        # other unwind information for it), and the advanced diff only
+        # compares names present in both sides' frame_registers maps, so
+        # "covered but factless" would silently miss a real CFI change at
+        # bar's own address.
+        assert meta.frame_registers == {"foo": "rsp", "bar": "rsp"}
+        assert meta.callee_saved_regs == {"foo": frozenset(), "bar": frozenset()}
 
     def test_address_past_fde_range_is_still_uncovered(self) -> None:
         """Negative control: an address just past the FDE's own range
@@ -725,3 +729,72 @@ class TestAlternateEntryPointCoverage:
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
+
+
+class TestCoverageRestrictedToRealExports:
+    """P2 review, fresh evidence (Codex): CFI coverage iterated
+    ``.dynsym`` and ``.symtab`` unconditionally, admitting any
+    STB_GLOBAL/STB_WEAK symbol regardless of visibility or definedness.
+    An unstripped shared library's ``.symtab`` is a strict superset of its
+    real ``.dynsym`` exports -- it also carries hidden/internal-visibility
+    global functions that are real code but never part of the DSO's ABI
+    surface (the canonical ELF export parser, elf_metadata._parse_dynsym,
+    already excludes these). Such a function commonly has no FDE of its
+    own (e.g. a hidden assembly entry point built without unwind
+    metadata), so admitting it here wrongly downgraded an otherwise fully
+    -instrumented binary's advanced evidence to "partial"."""
+
+    def test_hidden_visibility_symtab_function_excluded_from_coverage(
+        self,
+    ) -> None:
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+
+        dyn = MagicMock()
+        exported = _sym("real_export", 0x1000)
+        exported.entry.st_shndx = "SHN_TEXT"
+        exported.entry.st_other.visibility = "STV_DEFAULT"
+        dyn.iter_symbols.return_value = [exported]
+
+        symtab = MagicMock()
+        hidden = _sym("internal_helper", 0x2000)
+        hidden.entry.st_shndx = "SHN_TEXT"
+        hidden.entry.st_other.visibility = "STV_HIDDEN"  # not a real export
+        symtab.iter_symbols.return_value = [exported, hidden]
+
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else symtab if name == ".symtab" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [_fde_for(0x1000, cfa_reg=7)]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        # internal_helper has no FDE at all -- if it were wrongly counted
+        # against coverage, this would read False.
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        assert set(meta.frame_registers) == {"real_export"}
+
+    def test_relocatable_object_falls_back_to_symtab(self) -> None:
+        """Positive control: a relocatable object (.o) genuinely has no
+        .dynsym at all -- .symtab must still be used, mirroring
+        elf_metadata.py's own identical fallback rule."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+
+        symtab = MagicMock()
+        exported = _sym("obj_fn", 0x1000)
+        exported.entry.st_shndx = "SHN_TEXT"
+        exported.entry.st_other.visibility = "STV_DEFAULT"
+        symtab.iter_symbols.return_value = [exported]
+
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            symtab if name == ".symtab" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [_fde_for(0x1000, cfa_reg=7)]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        assert set(meta.frame_registers) == {"obj_fn"}

@@ -370,8 +370,18 @@ def _parse_types(
 
 def _extra_data_size(kind: int, vlen: int) -> int:
     """Calculate the size of kind-specific extra data following a btf_type."""
-    if kind in (BTF_KIND_INT, BTF_KIND_FLOAT):
+    if kind == BTF_KIND_INT:
         return 4  # encoding info
+    if kind == BTF_KIND_FLOAT:
+        # P2 review, fresh evidence (Codex): unlike BTF_KIND_INT,
+        # include/uapi/linux/btf.h's btf_type layout for BTF_KIND_FLOAT
+        # carries no trailing encoding word at all -- its size is just the
+        # common header's own size_or_type field, the same "no extra data"
+        # shape as PTR/FWD/TYPEDEF/etc. below. Wrongly consuming 4 extra
+        # bytes here shifted every subsequent record's own offset in the
+        # type section, spuriously truncating (or misparsing) the rest of
+        # a perfectly valid type table that contains a real float type.
+        return 0
     if kind == BTF_KIND_ARRAY:
         return 12  # btf_array: type(4) + index_type(4) + nelems(4)
     if kind in (BTF_KIND_STRUCT, BTF_KIND_UNION):

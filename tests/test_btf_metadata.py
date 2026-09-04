@@ -922,7 +922,12 @@ class TestBtfMetadataAccessors:
 
 class TestExtraDataSize:
     def test_float(self) -> None:
-        assert _extra_data_size(BTF_KIND_FLOAT, 0) == 4
+        """P2 review, fresh evidence (Codex): BTF_KIND_FLOAT carries no
+        trailing encoding word at all (unlike BTF_KIND_INT, which this
+        test previously conflated it with) -- per include/uapi/linux/
+        btf.h its size is just the common header's own size_or_type
+        field, the same "no extra data" shape as PTR/FWD/TYPEDEF/etc."""
+        assert _extra_data_size(BTF_KIND_FLOAT, 0) == 0
 
     def test_array(self) -> None:
         assert _extra_data_size(BTF_KIND_ARRAY, 0) == 12
@@ -942,6 +947,29 @@ class TestExtraDataSize:
     def test_typedef_no_extra(self) -> None:
         assert _extra_data_size(BTF_KIND_TYPEDEF, 0) == 0
 
+    def test_normal_float_record_parses_through_public_byte_parser(self) -> None:
+        """P2 review, fresh evidence (Codex): the exact reported scenario,
+        through parse_btf_from_bytes() (the public entry point) rather
+        than _extra_data_size()/the resolver in isolation -- a normal
+        BTF_KIND_FLOAT record followed by a real struct referencing it.
+        Wrongly consuming 4 extra bytes for FLOAT previously shifted the
+        struct record's own offset, truncating the type table and
+        reporting type_count == 0 / evidence_state == "partial" for a
+        perfectly valid blob."""
+        b = BtfBuilder()
+        b.add_type("float", BTF_KIND_FLOAT, 0, 4)  # id 1, no trailing bytes
+        m_name = b.add_string("f")
+        members = struct.pack("<III", m_name, 1, 0)
+        b.add_type("has_float", BTF_KIND_STRUCT, 1, 4, extra=members)  # id 2
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.has_btf is True
+        assert meta.extraction_partial is False
+        assert meta.type_count == 2
+        assert meta.to_dwarf_metadata().evidence_state == "parsed"
+        assert "has_float" in meta.structs
+        assert meta.structs["has_float"].fields[0].type_name == "float"
+
 
 # ---------------------------------------------------------------------------
 # Extended type resolver coverage
@@ -959,17 +987,19 @@ class TestTypeResolverExtended:
         return _TypeResolver(types, data[str_start:str_end])
 
     def test_float_name_and_size(self) -> None:
+        """P2 review, fresh evidence (Codex): BTF_KIND_FLOAT carries no
+        trailing encoding word (unlike BTF_KIND_INT) -- previously passed
+        a bogus 4-byte `extra` here, which shifted every subsequent
+        record's own offset in the type section by 4 bytes."""
         b = BtfBuilder()
-        enc = struct.pack("<I", 32)
-        b.add_type("float", BTF_KIND_FLOAT, 0, 4, extra=enc)
+        b.add_type("float", BTF_KIND_FLOAT, 0, 4)
         r = self._build_and_resolve(b)
         assert r.name(1) == "float"
         assert r.size(1) == 4
 
     def test_float_anonymous(self) -> None:
         b = BtfBuilder()
-        enc = struct.pack("<I", 64)
-        b.add_type("", BTF_KIND_FLOAT, 0, 8, extra=enc)
+        b.add_type("", BTF_KIND_FLOAT, 0, 8)
         r = self._build_and_resolve(b)
         assert r.name(1) == "float"
 
@@ -1151,9 +1181,10 @@ class TestTypeResolverExtended:
         assert r.size(1) == 8
 
     def test_size_float(self) -> None:
+        """See test_float_name_and_size's own note: BTF_KIND_FLOAT carries
+        no trailing encoding word."""
         b = BtfBuilder()
-        float_enc = struct.pack("<I", 64)
-        b.add_type("double", BTF_KIND_FLOAT, 0, 8, extra=float_enc)
+        b.add_type("double", BTF_KIND_FLOAT, 0, 8)
         r = self._build_and_resolve(b)
         assert r.size(1) == 8
 
@@ -1325,7 +1356,7 @@ class TestBtfEdgeCases:
         b = BtfBuilder()
         int_enc = struct.pack("<I", 32)
         b.add_type("int", BTF_KIND_INT, 0, 4, extra=int_enc)
-        b.add_type("float", BTF_KIND_FLOAT, 0, 4, extra=int_enc)
+        b.add_type("float", BTF_KIND_FLOAT, 0, 4)
         meta = parse_btf_from_bytes(b.build())
         assert meta.type_count == 2
 

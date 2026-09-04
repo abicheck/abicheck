@@ -1067,6 +1067,52 @@ def _code_entry_addr(st_value: int, sym_type: str, arch: str) -> int:
     return st_value
 
 
+# P2 review, fresh evidence (Codex): mirrors elf_metadata.py's own
+# _HIDDEN_VISIBILITIES/_is_export_sym -- not imported directly (a private
+# helper from a sibling module; sycl_metadata.py's own identical
+# _HIDDEN_VISIBILITIES duplication is the established precedent here
+# rather than a new cross-module import). A hidden/internal-visibility
+# STB_GLOBAL/STB_WEAK function symbol is real but not part of the DSO's
+# exported ABI surface -- iterating .symtab unconditionally (below)
+# previously counted it against CFI coverage anyway, alongside a real
+# .dynsym export, wrongly downgrading a fully-instrumented binary that
+# simply happens to keep an unstripped .symtab.
+_HIDDEN_VISIBILITIES = frozenset({"STV_HIDDEN", "STV_INTERNAL"})
+
+
+def _is_real_export(sym: Any) -> bool:
+    """Whether *sym* is a real, defined, exported symbol of the DSO --
+    the same predicate elf_metadata._is_export_sym applies to .dynsym,
+    reused here so CFI coverage counts exactly the ABI surface the
+    canonical ELF extraction path does, not an unfiltered .symtab/.dynsym
+    union."""
+    if sym.entry.st_shndx in ("SHN_UNDEF", "SHN_ABS"):
+        return False
+    if sym.entry.st_info.bind not in ("STB_GLOBAL", "STB_WEAK"):
+        return False
+    return sym.entry.st_other.visibility not in _HIDDEN_VISIBILITIES
+
+
+def _exported_symbol_section(elf: Any) -> Any:
+    """Return the one symbol table CFI coverage should iterate.
+
+    Mirrors elf_metadata.py's own dynsym/symtab selection: a normal
+    shared library's exported surface lives entirely in ``.dynsym``, and
+    ``.symtab`` (when also present, e.g. an unstripped build) is a
+    strict superset that includes non-exported internal symbols --
+    counting both would double-count real exports and admit symbols
+    ``_is_real_export`` alone cannot filter out (``.symtab`` entries
+    carry no meaningful export visibility of their own the way a real
+    ``.dynsym`` entry does). Only a relocatable object (``.o``, no
+    ``.dynsym`` at all) falls back to ``.symtab``, the same shape
+    elf_metadata.parse_elf_metadata's own fallback covers.
+    """
+    dynsym = elf.get_section_by_name(".dynsym")
+    if dynsym is not None:
+        return dynsym
+    return elf.get_section_by_name(".symtab")
+
+
 def _build_addr_to_syms(elf: Any, arch: str) -> dict[int, list[str]]:
     """Every exported (STB_GLOBAL/STB_WEAK) symbol name at each address.
 
@@ -1086,16 +1132,15 @@ def _build_addr_to_syms(elf: Any, arch: str) -> dict[int, list[str]]:
     """
     addr_to_syms: dict[int, list[str]] = {}
     seen: set[tuple[int, str]] = set()
-    for section_name in (".dynsym", ".symtab"):
-        sect = elf.get_section_by_name(section_name)
-        if sect is None:
-            continue
+    sect = _exported_symbol_section(elf)
+    if sect is not None:
         for sym in sect.iter_symbols():
+            if not _is_real_export(sym):
+                continue
             st_value = _code_entry_addr(
                 sym.entry.st_value, sym.entry.st_info.type, arch
             )
-            bind = sym.entry.st_info.bind
-            if bind in ("STB_GLOBAL", "STB_WEAK") and st_value > 0:
+            if st_value > 0:
                 key = (st_value, sym.name)
                 if key in seen:
                     continue
@@ -1114,14 +1159,11 @@ def _build_exported_func_addrs(elf: Any, arch: str) -> set[int]:
     is not this analysis' concern.
     """
     addrs: set[int] = set()
-    for section_name in (".dynsym", ".symtab"):
-        sect = elf.get_section_by_name(section_name)
-        if sect is None:
-            continue
+    sect = _exported_symbol_section(elf)
+    if sect is not None:
         for sym in sect.iter_symbols():
-            bind = sym.entry.st_info.bind
             if (
-                bind in ("STB_GLOBAL", "STB_WEAK")
+                _is_real_export(sym)
                 and sym.entry.st_value > 0
                 and sym.entry.st_info.type == "STT_FUNC"
             ):
@@ -1320,46 +1362,30 @@ def _extract_cfa_reg_from_fde(
         return None
 
 
-def _uncovered_after_range_check(
-    uncovered_funcs: set[int], fde_ranges: list[tuple[int, int]]
-) -> set[int]:
-    """Drop from *uncovered_funcs* every address that falls inside some
-    FDE's own covered address range, not only an address an FDE names
-    exactly via ``initial_location``.
+def _addrs_in_fde_range(
+    sorted_sym_addrs: list[int], pc_begin: int, address_range: object
+) -> list[int]:
+    """Return every address in *sorted_sym_addrs* covered by one FDE.
 
     P2 review, fresh evidence (Codex): a valid assembly library can expose
     an *alternate entry point* -- a second global symbol placed a few
     bytes into another function's FDE range (e.g. a fast-path variant
     sharing its slow-path sibling's unwind info) -- with no FDE of its
     own. Every instruction at that address is still covered by the
-    enclosing FDE and its CFI state is derivable there, but the exact-
-    match check above (``uncovered_funcs.discard(pc_begin)``) never
-    recognizes it, wrongly reporting a fully-instrumented binary as
-    incomplete.
-
-    Ranges are merged before the sweep so an address correctly resolves
-    even when it falls under a range that isn't the closest-starting one
-    (overlapping FDE ranges are not expected in practice, but merging
-    costs little and removes the assumption entirely).
+    enclosing FDE and its CFI state is the same one this FDE describes,
+    but an exact match against ``initial_location`` alone never
+    recognizes it. A missing/non-positive ``address_range`` (a malformed
+    or legacy entry) degrades to exact-match-only, the single-address
+    range ``[pc_begin, pc_begin + 1)``.
     """
-    if not fde_ranges:
-        return uncovered_funcs
-    fde_ranges = sorted(fde_ranges)
-    merged: list[list[int]] = []
-    for start, end in fde_ranges:
-        if merged and start <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], end)
-        else:
-            merged.append([start, end])
-    starts = [r[0] for r in merged]
-
-    still_uncovered: set[int] = set()
-    for addr in uncovered_funcs:
-        idx = bisect.bisect_right(starts, addr) - 1
-        if idx >= 0 and merged[idx][0] <= addr < merged[idx][1]:
-            continue  # covered by this FDE's range as an alternate entry point
-        still_uncovered.add(addr)
-    return still_uncovered
+    range_end = (
+        pc_begin + address_range
+        if isinstance(address_range, int) and address_range > 0
+        else pc_begin + 1
+    )
+    lo = bisect.bisect_left(sorted_sym_addrs, pc_begin)
+    hi = bisect.bisect_left(sorted_sym_addrs, range_end)
+    return sorted_sym_addrs[lo:hi]
 
 
 def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) -> bool:
@@ -1469,29 +1495,33 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
         # already-seen function is skipped rather than silently
         # overwriting it.
         seen_funcs: set[int] = set()
-        # P2 review, fresh evidence (Codex): every FDE's own covered
-        # address range ([initial_location, initial_location+address_range)),
-        # collected alongside the per-FDE loop below so an exported
-        # *alternate entry point* -- a second global symbol placed a few
-        # bytes into another function's FDE range, a real shape in
-        # hand-written assembly libraries -- can be recognized as covered
-        # even though no FDE's own initial_location names it exactly.
-        # Resolved once, after the loop, via _uncovered_after_range_check.
-        fde_ranges: list[tuple[int, int]] = []
+        # P2 review, fresh evidence, round two (Codex): sorted once so
+        # every FDE can look up which exported symbols its own covered
+        # range contains -- see _addrs_in_fde_range's own docstring for
+        # why this must be a range membership test, not only an exact
+        # match against initial_location.
+        sorted_sym_addrs = sorted(addr_to_syms)
         for cfi_src in cfi_sources:
             for entry in cfi_src:
                 try:
                     if entry.__class__.__name__ != "FDE":
                         continue
                     pc_begin: int = entry["initial_location"]
-                    uncovered_funcs.discard(pc_begin)
                     address_range = entry["address_range"]
-                    if isinstance(address_range, int) and address_range > 0:
-                        fde_ranges.append((pc_begin, pc_begin + address_range))
+                    covered_addrs = _addrs_in_fde_range(
+                        sorted_sym_addrs, pc_begin, address_range
+                    )
+                    # Coverage is recorded for every real source's own FDE,
+                    # even a later, duplicate one for an already-seen
+                    # pc_begin -- only fact *extraction* below is limited
+                    # to the first source, matching the file-level
+                    # docstring's own "first source wins" contract.
+                    for addr in covered_addrs:
+                        uncovered_funcs.discard(addr)
+                    uncovered_funcs.discard(pc_begin)
                     if pc_begin in seen_funcs:
                         continue
-                    sym_names = addr_to_syms.get(pc_begin, [])
-                    if not sym_names:
+                    if not covered_addrs:
                         continue
                     decode_failed: list[bool] = []
                     reg = _extract_cfa_reg_from_fde(
@@ -1501,16 +1531,24 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
                     saved = _extract_callee_saved_regs(
                         entry, arch_key, decode_failed=decode_failed
                     )
-                    # P1 review, fresh evidence (Codex): attach this FDE's
-                    # facts to every exported alias at pc_begin, not just
-                    # one -- address coverage (uncovered_funcs, above) must
-                    # mean every alias actually received its own facts,
-                    # not merely that *a* name did.
-                    for sym_name in sym_names:
-                        if reg is not None:
-                            meta.frame_registers[sym_name] = reg
-                        if saved is not None:
-                            meta.callee_saved_regs[sym_name] = saved
+                    # P2 review, fresh evidence, round two (Codex): attach
+                    # this FDE's facts to every exported symbol its own
+                    # range covers, not only one placed exactly at
+                    # pc_begin -- an alternate entry point (no FDE of its
+                    # own) shares the identical CFI state this FDE
+                    # describes, since there is no other unwind
+                    # information for it anywhere. Marking it merely
+                    # "covered" without also attaching facts would let a
+                    # later CFI change specific to that entry point go
+                    # undetected, since the advanced diff only compares
+                    # names present in both sides' frame_registers/
+                    # callee_saved_regs maps.
+                    for addr in covered_addrs:
+                        for sym_name in addr_to_syms.get(addr, []):
+                            if reg is not None:
+                                meta.frame_registers[sym_name] = reg
+                            if saved is not None:
+                                meta.callee_saved_regs[sym_name] = saved
                     if decode_failed:
                         # P1 review, fresh evidence: both helpers above catch and
                         # swallow their own decode errors (so callers of them
@@ -1523,9 +1561,6 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
                 except (ELFError, OSError, ValueError, KeyError, IndexError) as exc:
                     log.debug("_parse_frame_registers: skipping FDE: %s", exc)
                     complete = False
-
-        if uncovered_funcs:
-            uncovered_funcs = _uncovered_after_range_check(uncovered_funcs, fde_ranges)
 
         if uncovered_funcs:
             # At least one exported function symbol's address was never
