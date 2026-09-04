@@ -269,3 +269,98 @@ class TestCompareStoredBundleFactsPair:
             f.kind.name == "BUNDLE_MANIFEST_INSTANTIATION_REMOVED"
             for f in result.bundle_findings
         )
+
+    def test_depth_is_forwarded_to_project_pair_to_depth(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An explicit *depth* must reach ``policy.depth_projection.
+        project_pair_to_depth()`` for every matched library, and its
+        *projected* return value -- not the raw stored snapshot -- must be
+        what actually reaches ``compare_snapshots()`` (Codex review, PR
+        #1060, fresh evidence: an earlier version of this function rejected
+        --depth binary outright on the mistaken premise that no projection
+        primitive existed; this pins the real wiring instead of only
+        exercising the ``None``/no-op default every other test here uses)."""
+        old_path = self._facts_path(
+            tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
+        )
+        new_path = self._facts_path(
+            tmp_path, "new.bundlefacts.json", "new", Visibility.HIDDEN
+        )
+
+        import abicheck.policy.depth_projection as depth_projection_module
+
+        real_project_pair_to_depth = depth_projection_module.project_pair_to_depth
+        calls: list[tuple[object, object, str | None]] = []
+
+        def _fake_project_pair_to_depth(old, new, depth):
+            calls.append((old, new, depth))
+            return real_project_pair_to_depth(old, new, depth)
+
+        monkeypatch.setattr(
+            depth_projection_module, "project_pair_to_depth", _fake_project_pair_to_depth
+        )
+
+        compare_stored_bundle_facts_pair(old_path, new_path, depth="binary")
+
+        assert len(calls) == 1
+        called_old, called_new, called_depth = calls[0]
+        assert called_depth == "binary"
+        assert called_old.library == "libcore.so"
+        assert called_new.library == "libcore.so"
+
+    def test_depth_headers_strips_build_mode_before_diffing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The exact scenario Codex's round-5 review named: a stored
+        document captured with build-mode evidence must reach
+        ``compare_snapshots`` with it stripped under an explicit ``--depth
+        headers`` (``policy.depth_projection.project_snapshot_to_depth``
+        nulls ``build_mode`` below the ``build`` rung), not sent through
+        unprojected -- otherwise a build-mode finding could still surface
+        and change the reported verdict despite the explicit ``headers``
+        ceiling."""
+        from abicheck.model.build_mode_facts import BuildMode, CompilerFamily
+
+        old_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="old",
+            elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            functions=[
+                Function(
+                    name="core_fn",
+                    mangled="core_fn",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            build_mode=BuildMode(compiler_family=CompilerFamily.GCC),
+        )
+        old_path = tmp_path / "old.bundlefacts.json"
+        new_path = tmp_path / "new.bundlefacts.json"
+        save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), old_path)
+        save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), new_path)
+
+        import abicheck.workflows.compare_policy as compare_policy_module
+
+        seen: list[object] = []
+        real_compare_snapshots = compare_policy_module.compare_snapshots
+
+        def _spy_compare_snapshots(old, new, *args, **kwargs):
+            seen.append(old.build_mode)
+            seen.append(new.build_mode)
+            return real_compare_snapshots(old, new, *args, **kwargs)
+
+        monkeypatch.setattr(
+            compare_policy_module, "compare_snapshots", _spy_compare_snapshots
+        )
+
+        compare_stored_bundle_facts_pair(old_path, new_path)
+        assert seen == [
+            BuildMode(compiler_family=CompilerFamily.GCC),
+            BuildMode(compiler_family=CompilerFamily.GCC),
+        ]
+
+        seen.clear()
+        compare_stored_bundle_facts_pair(old_path, new_path, depth="headers")
+        assert seen == [None, None]

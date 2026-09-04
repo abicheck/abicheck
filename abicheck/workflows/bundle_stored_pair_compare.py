@@ -60,6 +60,7 @@ def compare_stored_bundle_facts_pair(
     suppress: SuppressionList | None = None,
     old_max_json_object_nodes: int | None = None,
     new_max_json_object_nodes: int | None = None,
+    depth: str | None = None,
 ) -> BundleDiffResult:
     """End-to-end driver: two stored ``BundleFacts`` documents compared
     against each other -- the stored/stored operand shape (CLI cleanup
@@ -124,21 +125,28 @@ def compare_stored_bundle_facts_pair(
     ``BundleDiffResult.bundle_verdict`` is scored under the same policy as
     every per-library diff, not just the live-NEW-side driver's own case.
 
-    Callers requesting a limited evidence depth (``compare``'s
-    ``--depth binary``) must reject it themselves before calling this
-    function rather than relying on it to project either side down to
-    symbols-only evidence: unlike a live NEW-side dump (which
-    ``service.resolve_input`` can be asked to skip header parsing for),
-    both sides here are *already* fully-resolved ``AbiSnapshot``s with
-    whatever evidence they were captured with baked in, and this module has
-    no general snapshot-projection primitive to strip header-derived facts
-    back out after the fact (Codex review, PR #1060) --
-    ``frontends/cli/commands/compare_bundle_facts_rejections.py`` is where
-    that rejection lives, the same "reject rather than silently diverge"
-    rule every other unsupported flag in that module is held to.
+    *depth*, when given, caps both sides' evidence to what ``compare``'s
+    ``--depth`` requested before diffing (``binary``/``headers`` -- the
+    only two values reachable here at all, since ``--depth build``/
+    ``source`` are rejected unconditionally for a stored OLD_INPUT
+    elsewhere: this driver has no channel to *collect* L3-L5 evidence, only
+    to project already-resolved evidence down). Unlike a live NEW-side dump
+    (which ``service.resolve_input`` can be asked to skip header parsing
+    for), both sides here are *already* fully-resolved ``AbiSnapshot``s
+    with whatever evidence they were captured with baked in -- so this
+    calls the same ``policy.depth_projection.project_pair_to_depth()``
+    ordinary live comparisons use (``service_compare_pipeline.py``,
+    ``cli_compare_helpers.py``, ``cli_scan_baseline.py``) rather than
+    rejecting the flag outright, which an earlier version of this function
+    did on the mistaken premise that no such projection primitive existed
+    (Codex review, PR #1060, fresh evidence: it does, and every other
+    resolved-snapshot comparison path in this codebase already calls it).
+    ``None`` (the default) is a no-op, matching
+    ``project_snapshot_to_depth``'s own documented contract.
     """
     from ..bundle_facts import bundle_snapshot_from_facts, compare_bundle_from_facts
     from ..bundle_manifest import load_manifest
+    from ..policy.depth_projection import project_pair_to_depth
     from ..serialization import load_bundle_facts
     from .compare_policy import compare_snapshots
 
@@ -187,9 +195,12 @@ def compare_stored_bundle_facts_pair(
     )
     per_library_results: list[DiffResult] = []
     for key in matched_keys:
+        old_snapshot, new_snapshot = project_pair_to_depth(
+            old_facts.per_library_snapshots[key], new_facts.per_library_snapshots[key], depth
+        )
         diff = compare_snapshots(
-            old_facts.per_library_snapshots[key],
-            new_facts.per_library_snapshots[key],
+            old_snapshot,
+            new_snapshot,
             suppress,
             policy=policy,
             policy_file=policy_file,

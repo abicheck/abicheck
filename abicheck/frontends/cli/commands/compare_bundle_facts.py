@@ -108,17 +108,16 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
 
     When *new_is_stored* (CLI cleanup phase two, PR I's stored/stored
     shape), this skips ``resolve_compile_context`` entirely and returns
-    ``None``: neither side does any header-frontend extraction, so there is
-    no compile context to resolve, and running it anyway would merge
-    ``.abicheck.yml``'s own ``compile.include_dirs`` into
-    ``kwargs["includes"]`` -- which the stored/stored NEW-side rejections
-    (``compare_bundle_facts_rejections.py``) would then wrongly refuse as
-    an *explicit* ``--include``, breaking every stored/stored invocation
-    run from an ordinary project directory that happens to declare a
-    compile: block (Codex review, PR #1060). ``kwargs["config"]`` is still
-    resolved either way, since the config-block rejection checks in that
-    same module still apply to a stored/stored comparison. An *explicit*
-    ``--config`` whose own ``compile:`` block declares real settings is
+    ``None``: neither side does any header-frontend extraction, so running
+    it anyway would merge ``.abicheck.yml``'s own ``compile.include_dirs``
+    into ``kwargs["includes"]`` -- which the stored/stored NEW-side
+    rejections (``compare_bundle_facts_rejections.py``) would then wrongly
+    refuse as an *explicit* ``--include``, breaking every stored/stored
+    invocation run from a project directory with a compile: block (Codex
+    review, PR #1060). ``kwargs["config"]`` is still resolved either way,
+    since the config-block rejection checks in that same module still
+    apply. An *explicit* ``--config`` whose own ``compile:`` block declares
+    real settings is
     rejected too, via ``compare_bundle_facts_rejections.
     reject_explicit_compile_config_for_stored_pair`` (Codex review, PR
     #1060, fresh evidence) -- unlike an auto-discovered ambient one.
@@ -341,6 +340,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 suppress=suppression,
                 old_max_json_object_nodes=kwargs.get("max_json_object_nodes"),
                 new_max_json_object_nodes=kwargs.get("max_json_object_nodes"),
+                depth=kwargs.get("depth"),
             )
         # Same CLI-boundary translation the stored/live branch below applies
         # to compare_release_against_bundle_facts() -- see its own comments

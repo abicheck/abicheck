@@ -254,17 +254,31 @@ class TestStoredPairEarlyRejections:
         assert code == 64
         assert "--include-system-declarations" in out
 
-    def test_depth_binary_is_rejected(self, tmp_path: Path) -> None:
-        """Unlike the stored/live shape (where --depth binary is a
-        legitimate, supported combination), neither side here has any way
-        to be projected down to symbols-only evidence -- both are already
-        fully-resolved snapshots."""
+    def test_depth_binary_is_not_rejected(self, tmp_path: Path) -> None:
+        """--depth binary is genuinely supported for stored/stored (both
+        sides are projected via policy.depth_projection.
+        project_pair_to_depth() before diffing) -- see
+        TestStoredPairEndToEnd for the actual projection behavior."""
         old_path, new_path = self._both_stored(tmp_path)
 
         code, out = _invoke("compare", str(old_path), str(new_path), "--depth", "binary")
 
-        assert code == 64
-        assert "--depth binary" in out
+        assert code != 64
+        assert "nothing was compared" in out
+
+    def test_depth_headers_is_not_rejected(self, tmp_path: Path) -> None:
+        """--depth headers is the other value reachable for stored/stored
+        (Codex review, PR #1060, round 5: fresh evidence that this specific
+        value still slipped past the earlier --depth binary-only rejection
+        fix) -- both sides are projected via policy.depth_projection.
+        project_pair_to_depth() before diffing, same as --depth binary
+        above."""
+        old_path, new_path = self._both_stored(tmp_path)
+
+        code, out = _invoke("compare", str(old_path), str(new_path), "--depth", "headers")
+
+        assert code != 64
+        assert "nothing was compared" in out
 
     def test_compiler_is_rejected(self, tmp_path: Path) -> None:
         old_path, new_path = self._both_stored(tmp_path)

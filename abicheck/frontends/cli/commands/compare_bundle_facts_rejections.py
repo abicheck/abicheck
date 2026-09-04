@@ -604,23 +604,16 @@ def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) 
             "OLD_INPUT and NEW_INPUT are stored BundleFacts documents: "
             "there is no live NEW-side resolution for it to scope."
         )
-    if kwargs.get("depth") == "binary":
-        # Codex review: --depth build/source is already rejected above,
-        # unconditionally, for a stored OLD_INPUT -- but "binary" is
-        # ordinarily *accepted* (it clears the NEW side's headers before a
-        # live dump, per dispatch()'s own comment). That channel doesn't
-        # exist here: both sides are already fully-resolved AbiSnapshots
-        # with whatever evidence they were captured with baked in, and
-        # compare_stored_bundle_facts_pair() has no snapshot-projection
-        # primitive to strip header-derived facts back out after the fact.
-        # Silently accepting it would let a request for symbols-only
-        # evidence report header-only findings anyway.
-        raise click.UsageError(
-            "--depth binary is not supported when both OLD_INPUT and "
-            "NEW_INPUT are stored BundleFacts documents: both sides are "
-            "already fully-resolved snapshots with no way to project them "
-            "back down to symbols-only evidence."
-        )
+    # --depth binary/headers are genuinely supported for stored/stored
+    # (Codex review, PR #1060, fresh evidence): compare_stored_bundle_
+    # facts_pair() projects both sides via policy.depth_projection.
+    # project_pair_to_depth() before diffing, the same primitive every
+    # other resolved-snapshot comparison path in this codebase already
+    # calls -- an earlier version of this check rejected --depth binary
+    # outright on the mistaken premise that no such projection primitive
+    # existed. --depth build/source are still rejected, unconditionally,
+    # above: this driver has no channel to *collect* L3-L5 evidence on
+    # either side, only to project already-resolved evidence down.
     # Codex review, fresh evidence: compare_cmd builds a real CompileContext
     # from these before calling dispatch() (resolve_compile_context), but
     # this stored/stored branch never consumes compile_context at all --
