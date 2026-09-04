@@ -428,19 +428,27 @@ def resolve_release_pack_application(
     once per library, rather than one merged object upfront.
 
     **Accepts a ``kind: gate`` pack (CLI cleanup phase two, "PR B" slice 2).**
-    The release fan-out still has no ``GateOptions``-shaped object of its
-    own -- ``compare-release``'s severity/exit-code-scheme resolution
-    (``_resolve_release_severity_config`` and friends, in
-    ``cli_compare_release_helpers.py``) is a set of raw CLI-or-config
-    strings, re-derived at several call sites, not one resolved object the
-    way ``ResolvedCompareConfig`` is for a single-pair ``compare``. So the
-    returned ``PackApplication``'s ``exit_code_scheme``/``severity_levels``
-    (already populated by :func:`~abicheck.pack_application.pack_application`
-    regardless of ``gate_supported``) are folded into those raw strings by
+    The release fan-out's severity/exit-code-scheme resolution now goes
+    through one resolved :class:`~abicheck.policy.release_gate_options.
+    GateOptions` object (``resolve_release_gate_options``, ADR-064, landed
+    2026-09-02) instead of the raw CLI-or-config strings this note used to
+    describe -- ``GateOptions`` *is* the "no ``GateOptions``-shaped object
+    of its own" gap's own fix. So the returned ``PackApplication``'s
+    ``exit_code_scheme``/``severity_levels`` (already populated by
+    :func:`~abicheck.pack_application.pack_application` regardless of
+    ``gate_supported``) are folded into that resolution by
     ``cli_compare_release_helpers.apply_release_gate_pack`` -- the same
     "smallest additive fold point" discipline slice 1 used for
-    ``policy.overrides``/``surface.internal_namespaces``, not the full
-    ``GateOptions`` unification PR B's own plan section still lists as open.
+    ``policy.overrides``/``surface.internal_namespaces``, but itself still
+    *mirroring*, rather than *calling*,
+    :func:`~abicheck.pack_application.apply_to_compare_config`'s identical
+    fold logic, since the release fan-out still has no
+    ``ResolvedCompareConfig``-shaped object of its own to fold packs onto --
+    deferred to the duplication-and-convergence-assessment plan's own P0
+    ``EffectiveGate``/``EffectiveEvaluationConfig`` target, not to ADR-064's
+    own PR G2 (a different, unrelated deferred item -- see ADR-063 Track 4's
+    7B ledger entry, ``docs/_meta/one-semantic-pipeline-status.yaml``, for
+    the full account).
     ``scan --against`` now accepts a ``kind: gate`` pack too (CLI cleanup
     phase two, "PR B", a later slice than this one): unlike the release
     fan-out, ``scan`` already has a real ``ResolvedCompareConfig`` object
@@ -454,16 +462,28 @@ def resolve_release_pack_application(
     pack_application.check_resolved_config_applies_packs`'s own
     ``CONTRACT_EVALUATION_ONLY_FIELDS`` check does for the single-pair path.
     That field's consumer (``contract_coverage_exit._accepts_unresolved``)
-    reads it off a per-comparison ``PersistedContractContext`` that only
-    ``checker.compare``'s own ``record_resolved_config`` installs -- which the
-    release fan-out never builds per library (only ``contract_evaluation``/
-    ``contract_mode`` booleans reach ``service.run_compare``, never a full
-    resolved contract configuration). A pack asserting
-    ``contract.unresolved=warn`` under ``--contract`` on a release comparison
-    would therefore be accepted and silently score nothing -- an incomplete
-    coverage floor would still contribute 1 to every library's exit code
-    regardless of the pack -- exactly the decorative-``--pack`` failure this
-    whole module exists to prevent (Codex review, fresh evidence).
+    reads it off a per-comparison ``PersistedContractContext`` --
+    :func:`record_release_resolved_config` (this module) already builds and
+    merges one per library, via
+    :func:`~abicheck.contract_context.with_resolved_config`, called from
+    ``cli_compare_release_pairwise._run_compare_pair`` after every pair, so
+    that plumbing is not actually missing (Codex review, fresh evidence,
+    correcting this docstring's own prior claim that it was). The rejection
+    is kept anyway, pending investigation of whether it is still needed now
+    that the context exists: lifting it without re-verifying
+    ``contract_coverage_exit.coverage_exit_floor``'s per-library read
+    against a release's *many*-libraries `warn` semantics (a single-pair
+    comparison has exactly one) is exactly the kind of reactive, unverified
+    change this module exists to avoid making outside a dedicated slice --
+    see ADR-063 Track 4's 7B ledger entry
+    (``docs/_meta/one-semantic-pipeline-status.yaml``) for the open
+    investigation this leaves for a future PR. Until then, a pack asserting
+    ``contract.unresolved=warn`` under ``--contract`` on a release
+    comparison stays rejected rather than risk being silently accepted and
+    scoring nothing -- an incomplete coverage floor would still contribute 1
+    to every library's exit code regardless of the pack -- exactly the
+    decorative-``--pack`` failure this whole module exists to prevent
+    (Codex review, fresh evidence).
 
     Raises what the canonical resolver and the pack loader raise (a D7
     same-tier conflict, a D8 pack conflict, an inapplicable, gate-only, or
@@ -501,11 +521,11 @@ def resolve_release_pack_application(
         raise PackManifestError(
             f"{_supplying_pack(config, 'contract.unresolved')}: "
             "'contract.unresolved' cannot be applied to a directory/package "
-            "(release) comparison yet: the per-library fan-out has no "
-            "persisted contract-coverage context to fold it into (unlike "
-            "policy.overrides/surface.internal_namespaces, which do apply "
-            "uniformly). Compare the specific library individually with "
-            "--pack to use it."
+            "(release) comparison yet: whether it can safely apply per "
+            "library (unlike policy.overrides/surface.internal_namespaces, "
+            "which do apply uniformly) is still under investigation -- see "
+            "this function's own docstring. Compare the specific library "
+            "individually with --pack to use it."
         )
     return pack_application(config, policy_file=kwargs.get("policy_file"))
 
