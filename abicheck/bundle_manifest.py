@@ -198,21 +198,6 @@ def _parse_manifest_entry(path: Path, raw: dict[str, object]) -> ManifestEntry:
             f"(got {type(optional_provider).__name__} {optional_provider!r}): {raw!r}",
         )
     library = str(raw["library"]) if raw.get("library") else None
-    if not optional_provider and library is None:
-        # Codex review, security P2, PR H: `optional_provider: false` with
-        # no `library` is a malformed promise, not a permissive one -- every
-        # `_manifest_ownership_findings`/`_detect_manifest_drift` wrong-
-        # provider check is itself gated on `entry.library is not None`
-        # (there is no library to compare a matched provider against), so
-        # silently accepting this shape here would have any matching
-        # library satisfy what the manifest declared a *required*, named
-        # provider for -- indistinguishable from the always-permissive
-        # `optional_provider: true` default despite explicitly opting out
-        # of it.
-        raise ValueError(
-            f"manifest {path}: 'optional_provider: false' requires a "
-            f"'library' naming the expected provider: {raw!r}",
-        )
     if shape == "template":
         insts = _parse_template_instantiations(path, raw)
         return ManifestEntry(
@@ -264,7 +249,41 @@ def load_manifest(path: Path) -> InstantiationManifest:
     data = _load_manifest_data(path)
     provides = cast("list[dict[str, object]]", data["provides"])
     entries = [_parse_manifest_entry(path, raw) for raw in provides]
+    _require_library_for_required_providers(path, entries)
     return InstantiationManifest(entries=tuple(entries))
+
+
+def _require_library_for_required_providers(
+    path: Path, entries: list[ManifestEntry]
+) -> None:
+    """Reject a fresh, user-authored ``optional_provider: false`` entry with
+    no ``library``.
+
+    Every wrong-provider check downstream (``_manifest_ownership_findings``)
+    is itself gated on ``entry.library is not None`` -- a required-provider
+    entry with no library silently behaves exactly like the always-
+    permissive ``optional_provider: true`` default, so this shape is
+    rejected at load time instead of loading a promise that can never
+    actually be enforced.
+
+    Deliberately **not** part of :func:`_parse_manifest_entry` itself:
+    that parser is also reused by :func:`manifest_entry_from_dict` to
+    round-trip an already-persisted ``BundleFacts`` manifest, and
+    rejecting a previously-valid persisted representation there would
+    break backward compatibility with facts written before this check
+    existed. This validation applies only to freshly-authored manifest
+    input: :func:`load_manifest` (file loading) and, for the typed-API
+    path a direct ``ScanRequest(bundle_manifest=...)`` construction can
+    otherwise bypass entirely, :func:`abicheck.service_scan.run_scan_set`
+    (both call this function directly rather than each re-implementing
+    the check).
+    """
+    for entry in entries:
+        if not entry.optional_provider and entry.library is None:
+            raise ValueError(
+                f"manifest {path}: 'optional_provider: false' requires a "
+                f"'library' naming the expected provider: {entry!r}",
+            )
 
 
 def manifest_entry_to_dict(entry: ManifestEntry) -> dict[str, object]:

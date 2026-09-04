@@ -413,14 +413,23 @@ def _manifest_ownership_findings(
                 )
                 continue
             if not entry.optional_provider and entry.library is not None:
+                expected_library: str = entry.library
 
-                def _matches(
-                    prov: ProviderEntry, _entry: ManifestEntry = entry
-                ) -> bool:
-                    if prov.library == _entry.library:
+                def _matches(prov: ProviderEntry, _lib: str = expected_library) -> bool:
+                    if prov.library == _lib:
                         return True
                     meta = snapshot.metadata.get(prov.library)
-                    return meta is not None and meta.soname == _entry.library
+                    if meta is not None and meta.soname == _lib:
+                        return True
+                    # The manifest may name the literal on-disk filename
+                    # (e.g. "libfoo.so.1.2.3") rather than either the
+                    # discovery key or the DT_SONAME -- ResolutionGraph's
+                    # own soname_to_name reverse map already indexes every
+                    # symlink/hard-link alias basename discovered for each
+                    # provider (see _compute_resolution_graph), so reuse it
+                    # here instead of a second, narrower alias lookup
+                    # (Codex review, fresh evidence, PR H).
+                    return snapshot.resolution.soname_to_name.get(_lib) == prov.library
 
                 if not any(_matches(p) for p in providers):
                     got = ", ".join(sorted(p.library for p in providers))

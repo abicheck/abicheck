@@ -37,13 +37,31 @@
   symbol/pattern/template promise as satisfied, closing a false-negative
   path an attacker-crafted ELF could otherwise exploit to make a broken
   ownership contract read as `COMPATIBLE` with zero findings.
-- **Security**: `load_manifest` now rejects a `provides:` entry that sets
-  `optional_provider: false` without also naming a `library` -- every
-  wrong-provider check downstream is itself gated on the entry having a
-  declared library, so this shape previously loaded silently and behaved
-  exactly like the always-permissive `optional_provider: true` default,
-  letting any matching library satisfy what was declared a required,
-  named-provider promise.
+- **Security**: `load_manifest` and `run_scan_set` (the typed-API entry
+  point a caller can reach with a directly-constructed
+  `ScanRequest(bundle_manifest=...)`, bypassing `load_manifest` entirely)
+  both now reject a `provides:` entry that sets `optional_provider: false`
+  without also naming a `library` -- every wrong-provider check downstream
+  is itself gated on the entry having a declared library, so this shape
+  previously loaded silently and behaved exactly like the
+  always-permissive `optional_provider: true` default, letting any
+  matching library satisfy what was declared a required, named-provider
+  promise. The check lives in one shared
+  `_require_library_for_required_providers` helper, called from both
+  entry points -- but deliberately *not* from `_parse_manifest_entry`
+  itself, which is also reused by `manifest_entry_from_dict` to round-trip
+  an already-persisted `BundleFacts` manifest; rejecting there would have
+  broken backward compatibility with facts written before this check
+  existed.
+- **Security**: expected-provider matching (`optional_provider: false` +
+  `library:`) now also recognizes a manifest entry naming the literal
+  on-disk filename of a provider (e.g. a versioned real file behind a dev
+  symlink) rather than only its discovery key or `DT_SONAME` -- reusing
+  `ResolutionGraph.soname_to_name`, the same symlink/hard-link alias
+  reverse map `_compute_resolution_graph` already builds for `DT_NEEDED`
+  resolution, instead of a second, narrower alias lookup that previously
+  missed this shape and could misreport a correctly-provided symbol as a
+  wrong-provider violation.
 - `_match_entry`'s per-target manifest-matching loop now calls
   `deadline.check()`, so a large pattern/template manifest can no longer
   overrun a small `--budget` well past the point `run_scan_set` would

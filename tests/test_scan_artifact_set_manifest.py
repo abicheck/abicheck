@@ -36,6 +36,25 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from abicheck.elf_metadata import ElfSymbol
+from abicheck.model import AbiSnapshot, AccessLevel, Function, ScopeOrigin, Visibility
+from abicheck.serialization import snapshot_to_json
+
+
+def _write_snapshot(path: Path, snap: AbiSnapshot) -> Path:
+    path.write_text(snapshot_to_json(snap), encoding="utf-8")
+    return path
+
+
+def _func(name: str, mangled: str) -> Function:
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+        access=AccessLevel.PUBLIC,
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
 
 
 def _write_elf_shared_object_stub(path: Path) -> None:
@@ -137,5 +156,102 @@ class TestArtifactSetManifest:
         req = captured["req"]
         assert req.bundle_manifest is not None
         assert req.bundle_manifest.entries[0].symbol == "shared_util"
-        assert req.bundle_manifest.entries[0].library == "libutil.so"
-        assert req.bundle_manifest.entries[0].optional_provider is False
+
+
+class TestRunScanSetRejectsTypedApiBypass:
+    """P2 (Codex review, fresh evidence, PR H follow-up): a directly-
+    constructed ``ScanRequest(bundle_manifest=...)`` reaches
+    ``audit_bundle()`` without ever going through ``load_manifest()``'s own
+    ``optional_provider: false`` / no-``library`` validation -- the CLI
+    path (``load_artifact_set_manifest``) always routes through
+    ``load_manifest``, but a Python API caller building the manifest
+    in-process (``InstantiationManifest``/``ManifestEntry`` constructed
+    directly, never touching a file) can skip it entirely. ``run_scan_set``
+    must re-check the same invariant itself.
+    """
+
+    def test_rejects_required_provider_with_no_library(self, tmp_path: Path) -> None:
+        from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+        from abicheck.service import ScanRequest, run_scan_set
+
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        manifest = InstantiationManifest(
+            entries=(ManifestEntry(symbol="foo", optional_provider=False),)
+        )
+        with pytest.raises(ValueError, match="requires a 'library'"):
+            run_scan_set(
+                ScanRequest(binaries=[p1, p2], mode="audit", bundle_manifest=manifest)
+            )
+
+    def test_required_provider_with_library_is_not_rejected_here(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A well-formed manifest must not be rejected by this guard --
+        # regression-guards against an overly-broad check that flags every
+        # bundle_manifest instead of only the malformed shape. Mirrors
+        # tests/test_scan_artifact_set.py::TestRunScanSetAmbiguousSoname's
+        # own real-per-member-scan-then-mocked-audit_bundle pattern.
+        import abicheck.bundle as bundle_mod
+        from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+        from abicheck.checker_types import Verdict
+        from abicheck.elf_metadata import ElfMetadata as _ElfMeta
+        from abicheck.service import ScanRequest
+        from abicheck.service_scan import ScanSetResult, run_scan_set
+
+        snap_a = _write_snapshot(
+            tmp_path / "a.abi.json",
+            AbiSnapshot(
+                library="liba.so",
+                version="1.0",
+                from_headers=True,
+                functions=[_func("a_run", "_Z5a_runv")],
+                elf=_ElfMeta(symbols=[ElfSymbol(name="_Z5a_runv")]),
+            ),
+        )
+        snap_b = _write_snapshot(
+            tmp_path / "b.abi.json",
+            AbiSnapshot(
+                library="libb.so",
+                version="1.0",
+                from_headers=True,
+                functions=[_func("b_run", "_Z5b_runv")],
+                elf=_ElfMeta(symbols=[ElfSymbol(name="_Z5b_runv")]),
+            ),
+        )
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(
+                    symbol="foo", library="liba.so", optional_provider=False
+                ),
+            )
+        )
+
+        from abicheck.bundle import BundleSnapshot
+
+        def _fake_discover(paths, *, explicit):
+            return {"liba.so": snap_a, "libb.so": snap_b}
+
+        class _FakeAudit:
+            findings: list = []
+            verdict = Verdict.COMPATIBLE
+            snapshot = BundleSnapshot(
+                root=snap_a.parent,
+                libraries={"liba.so": snap_a, "libb.so": snap_b},
+                metadata={},
+                resolution=None,
+            )
+
+        def _fake_audit_bundle(libraries, *, bundle_system_providers=(), manifest=None):
+            assert manifest is not None
+            return _FakeAudit()
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+        monkeypatch.setattr(bundle_mod, "audit_bundle", _fake_audit_bundle)
+        result = run_scan_set(
+            ScanRequest(
+                binaries=[snap_a, snap_b], mode="audit", bundle_manifest=manifest
+            )
+        )
+        assert isinstance(result, ScanSetResult)

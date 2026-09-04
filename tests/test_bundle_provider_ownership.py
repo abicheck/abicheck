@@ -259,6 +259,55 @@ class TestDetectManifestOwnership:
         )
         assert self._detect(new, manifest) == []
 
+    def test_expected_provider_matches_via_filename_alias(self) -> None:
+        # Codex review, fresh evidence, PR H follow-up: a manifest may name
+        # the literal on-disk filename (e.g. a versioned real file behind a
+        # dev symlink) rather than either the discovery key ("libutil.so")
+        # or the DT_SONAME -- ResolutionGraph.soname_to_name is the reverse
+        # map _compute_resolution_graph() already builds from exactly this
+        # kind of symlink/hard-link alias probing; _matches must consult it
+        # instead of only comparing the discovery key and the SONAME.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),
+                "libutil.so": _meta(soname="libutil.so.1", exports=["shared_util"]),
+            }
+        )
+        new.resolution.soname_to_name["libutil.so.1.2.3"] = "libutil.so"
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(
+                    symbol="shared_util",
+                    library="libutil.so.1.2.3",
+                    optional_provider=False,
+                ),
+            )
+        )
+        assert self._detect(new, manifest) == []
+
+    def test_filename_alias_does_not_mask_a_real_wrong_provider(self) -> None:
+        # Sibling of the above: an alias resolving to a *different* library
+        # than the one that actually provides the symbol must still flag.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["shared_util"]),
+                "libutil.so": _meta(soname="libutil.so.1"),
+            }
+        )
+        new.resolution.soname_to_name["libutil.so.1.2.3"] = "libutil.so"
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(
+                    symbol="shared_util",
+                    library="libutil.so.1.2.3",
+                    optional_provider=False,
+                ),
+            )
+        )
+        findings = self._detect(new, manifest)
+        assert len(findings) == 1
+        assert findings[0].new_value == "libcore.so"
+
 
 class TestAuditBundleWiring:
     """`audit_bundle()` wires in the PR H audit-mode detectors: duplicate-

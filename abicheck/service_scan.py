@@ -1729,6 +1729,10 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     # flags only mean anything with --against" guard -- req.mode is already forced to "audit" above, so this always
     # applies here (unlike run_scan, where it's conditional on baseline/mode).
     _reject_comparison_only_fields(req)
+    if req.bundle_manifest is not None:
+        # P2 (Codex review): a direct ScanRequest(bundle_manifest=...) bypasses load_manifest()'s own validation.
+        from .bundle_manifest import _require_library_for_required_providers
+        _require_library_for_required_providers(Path("<typed-api>"), list(req.bundle_manifest.entries))
 
     from .workflows.plan import scan_bazel_scoping_failure  # ADR-063 Phase 4
 
