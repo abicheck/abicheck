@@ -1062,16 +1062,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/service_compare_pipeline.py",
-      "baseline_lines": 832,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "category": "workflow_consumer_wiring",
-      "owner": "abicheck maintainers",
-      "rationale": "One Semantic Pipeline plan, sub-phase 4B (ADR-063 Track 3, 2026-09-04): resolve_compare_request now threads each side's resolved CompileContext into ResolvedExecutionContext.compile_contexts (mirroring execute_dump_request's identical, already-landed dump-path fold via the new shared abicheck.workflows.artifact.execute.side_effective_compile_context predicate), and _resolve_side/_resolve_old_side/_resolve_new_side were switched from resolve_side_snapshot to _resolve_side_snapshot_impl to get the SideResolution.effective_compile_context back. This is real, non-incidental typed-field wiring closing a documented ADR-063 gap (compile_contexts stayed empty on every real ResolvedComparePair before this), not growth from padding -- the docstring for ResolvedComparePair.resolved_execution_context was tightened in the same change to offset part of the cost. Raised again 822 -> 832 (2026-09-04, Codex review, fresh evidence on the same PR): the first cut of this slice passed old_fmt/new_fmt (detected without following a GNU ld linker script) into side_effective_compile_context, which silently dropped a real compile context for a linker-script operand whose resolved target really did drive a header-AST parse. Fixed by having side_effective_compile_context detect the format itself (following the script), so the compare path now passes required_path(...) instead of a precomputed fmt -- a few more lines here, and a net simplification on the dump-path caller and the shared predicate itself.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/service_scan.py",
       "baseline_lines": 1947,
       "target": "workflows-or-frontends",
@@ -1149,16 +1139,6 @@
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
       "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/workflows/artifact/execute.py",
-      "baseline_lines": 844,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "category": "workflow_consumer_wiring",
-      "owner": "abicheck maintainers",
-      "rationale": "One Semantic Pipeline plan, sub-phase 4B (ADR-063 Track 3, 2026-09-04): side_effective_compile_context, a small shared predicate answering whether a side's SideResolution.effective_compile_context is safe to record onto ResolvedExecutionContext.compile_contexts, was lifted out of service_dump_pipeline.execute_dump_request's own inline conditional (Codex review, PR #1037) once service_compare_pipeline.resolve_compare_request needed the identical gate -- a genuine dedup (one predicate, two callers) rather than a second hand-copy, landed here since this module already owns SideResolution/_resolve_side_snapshot_impl. Net line cost after the dedup: this file grew by the new function; service_dump_pipeline.py's own line count dropped by more than this file grew, since its inline conditional and surrounding prose were replaced by a single call. Raised again 828 -> 844 (2026-09-04, Codex review, fresh evidence on the same PR): side_effective_compile_context's fmt parameter was replaced with path -- the function now does its own format detection (including following a GNU ld linker script to its real target) instead of trusting an already-detected format from the caller, closing a real gap where the compare path's un-followed old_fmt/new_fmt silently dropped a genuine compile context for a linker-script operand. This also let service_dump_pipeline.py's own caller drop its now-redundant parsed_fmt computation entirely (net line reduction there, back under the production cap with no debt entry needed).",
       "review_by": "2026-11-30"
     },
     {

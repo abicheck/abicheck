@@ -50,10 +50,10 @@ from typing import TYPE_CHECKING
 
 from .errors import AstContextMissingError, ValidationError
 from .workflows.artifact import ResolvedArtifactPlan
+from .workflows.artifact.compile_context_gate import side_effective_compile_context
 from .workflows.artifact.execute import (
     _resolve_side_snapshot_impl,
     enforce_requested_depth,
-    side_effective_compile_context,
 )
 from .workflows.artifact.resolve import (
     is_raw_source_tree,
@@ -729,7 +729,10 @@ def execute_dump_request(
         # linker script to its real target). `side.path` is guaranteed
         # non-None here -- the `is None` branch above already raised.
         side_ctx = side_effective_compile_context(
-            resolution, snap, side.path, dump_manifest=side.dump_manifest
+            resolution.effective_compile_context,
+            snap,
+            side.path,
+            dump_manifest=side.dump_manifest,
         )
         if side_ctx is not None:
             resolved_execution_context = dataclasses.replace(

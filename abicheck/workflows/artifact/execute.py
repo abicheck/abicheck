@@ -76,7 +76,6 @@ __all__ = [
     "embed_side_build_source",
     "enforce_requested_depth",
     "resolve_side_snapshot",
-    "side_effective_compile_context",
 ]
 
 
@@ -795,50 +794,3 @@ def enforce_requested_depth(
                 "declarations) or lower depth to match what is actually "
                 "available."
             )
-
-
-def side_effective_compile_context(
-    resolution: SideResolution,
-    snapshot: AbiSnapshot,
-    path: Path,
-    *,
-    dump_manifest: object | None,
-) -> CompileContext | None:
-    """The `CompileContext` to record for one side's `ResolvedExecutionContext.
-    compile_contexts`, or `None` when recording it would be wrong or absent.
-
-    Shared by ``service_dump_pipeline.execute_dump_request`` and
-    ``service_compare_pipeline.resolve_compare_request`` (Codex review,
-    PR #1037; lifted out of the dump path's own inline conditional once the
-    compare path needed the identical gate). Only when a header-AST parse
-    actually ran *this invocation* (``snapshot.from_headers``), the binary
-    format was successfully detected, and the side isn't a manifest-driven
-    dump -- whose own real header-AST parse runs under its own
-    manifest-authoritative ``frontend_context`` (e.g. ``"device"``), not the
-    request-derived context this fold resolved, so recording it here would
-    risk stating a wrong (``"host"``) toolchain.
-
-    *path* is the side's own input, detected here -- following a GNU ld
-    linker script to its real target first, mirroring ``resolve_input``'s
-    own dispatch order -- rather than accepting an already-detected format
-    from the caller (Codex review, PR #1047, fresh evidence): a linker
-    script's own bytes are text, so a raw, un-followed format detection on
-    it reads `None` even when the resolved target -- what actually drove
-    the header-AST parse -- is a real binary, which silently dropped a real
-    compile context for exactly this input shape when the compare path
-    first passed its own un-followed `old_fmt`/`new_fmt` here.
-    """
-    if (
-        resolution.effective_compile_context is None
-        or not snapshot.from_headers
-        or dump_manifest is not None
-    ):
-        return None
-    import abicheck.service as service
-
-    fmt = service.detect_binary_format(path)
-    if fmt is None and service.sniff_text_format(path) not in ("json", "perl"):
-        from ...binary_utils import resolve_linker_script_chain
-
-        fmt = service.detect_binary_format(resolve_linker_script_chain(path))
-    return resolution.effective_compile_context if fmt is not None else None
