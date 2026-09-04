@@ -127,14 +127,11 @@ _DEFAULT_VARIANT_FINGERPRINT = "default"
 
 
 #: Sentinel distinguishing "key absent from the document" from "key present
-#: with an explicit `None`/`null` value" -- `bundle_facts_from_dict`'s own
-#: `validated_alias_map`/`validated_filename_map` reject a present `None`
-#: (it fails their `isinstance(raw, dict)` check) while `.get(key, {})`
-#: only ever defaults a truly *absent* key. Passing `None` through
-#: unconditionally for both cases would silently launder an explicit-null
-#: document -- one the canonical reader rejects -- into a valid empty
-#: mapping (Codex review, fresh evidence beyond the non-mapping-value
-#: finding this same pair of functions already fixed).
+#: with an explicit `None`/`null` value" -- `validated_alias_map`/
+#: `validated_filename_map` reject a present `None` but `.get(key, {})`
+#: alone only defaults a truly *absent* key; passing `None` through
+#: unconditionally would launder an explicit-null document into a valid
+#: empty mapping (Codex review, fresh evidence).
 _ABSENT = object()
 
 
@@ -332,14 +329,13 @@ def _manifest_entry_for_export(entry: Mapping[str, Any]) -> dict[str, Any]:
     unconditionally would raise on export for a document that import
     itself accepted unchanged (Codex review, fresh evidence).
 
-    *entry* itself is checked against `Mapping` before conversion: a stored
-    `provides` entry that is instead a JSON list of `[key, value]` pairs
-    (e.g. `[["symbol", "foo"]]`) would otherwise convert via a plain
-    `dict(entry)` into a valid-looking mapping, silently accepting contract
-    evidence `manifest_from_dict` itself rejects outright -- the identical
-    "untrusted stored shape must not convert for free" risk
-    `_decode_template_instantiation_pairs` already guards for the nested
-    instantiation pairs, one level up (Codex review, fresh evidence)."""
+    *entry* itself is checked against `Mapping` before conversion (a stored
+    `[[key, value], ...]` list would otherwise convert via a plain
+    `dict(entry)` into a valid-looking mapping, Codex review), and
+    `exported["instantiations"]` is checked against `list` the same way
+    before iterating it -- a stored scalar (e.g. `1`) would otherwise raise
+    an unhandled `TypeError` instead of this function's own `ValueError`
+    (CodeRabbit review)."""
     if not isinstance(entry, Mapping):
         raise ValueError(
             "a stored manifest 'provides' entry must be a mapping, not "
@@ -347,9 +343,15 @@ def _manifest_entry_for_export(entry: Mapping[str, Any]) -> dict[str, Any]:
         )
     exported = dict(entry)
     if "template" in exported and "instantiations" in exported:
+        instantiations = exported["instantiations"]
+        if not isinstance(instantiations, list):
+            raise ValueError(
+                "a stored manifest template entry's 'instantiations' must "
+                f"be a list, not {type(instantiations).__name__} "
+                f"({instantiations!r})"
+            )
         exported["instantiations"] = [
-            _decode_template_instantiation_pairs(pairs)
-            for pairs in exported["instantiations"]
+            _decode_template_instantiation_pairs(pairs) for pairs in instantiations
         ]
     return exported
 
@@ -625,11 +627,10 @@ def export_bundle_facts(
     or a section -- the composition one or any artifact's -- absent from
     `section_schema_versions`), or for untrusted stored content that fails
     validation this reader applies symmetrically with its own import-side
-    counterpart (a non-string `variant_fingerprint`, a `manifest` that
-    isn't a mapping with a list-valued `provides`, a `provides` entry that
-    isn't a mapping, or a template instantiation naming one parameter
-    twice) -- or whatever *on_document* itself raises.
-    """
+    counterpart (a non-string `variant_fingerprint`, a `manifest` that isn't
+    a mapping with a list-valued `provides`, a `provides` entry that isn't a
+    mapping, or a template instantiation naming one parameter twice) -- or
+    whatever *on_document* itself raises."""
     variant = next(
         (v for v in manifest.variant_refs if v.variant_id == variant_id), None
     )
@@ -641,10 +642,9 @@ def export_bundle_facts(
             f"variant {variant_id!r} has no {BUNDLE_COMPOSITION_SECTION_KIND!r} "
             "section -- this manifest was not produced by import_bundle_facts"
         )
-    # `variant.sections`' own key and the `ObjectRef.kind` it maps to are
-    # two independent fields -- checked before `store.get()` ever runs, not
-    # only via the fetched `SectionDTO`'s own internal `section_kind`
-    # afterward (Codex review).
+    # `variant.sections`' own key and its `ObjectRef.kind` are independent
+    # fields -- checked before `store.get()` runs, not only via the fetched
+    # `SectionDTO`'s own `section_kind` afterward (Codex review).
     if composition_ref.kind != BUNDLE_COMPOSITION_SECTION_KIND:
         raise ValueError(
             f"variant {variant_id!r}'s {BUNDLE_COMPOSITION_SECTION_KIND!r} "
@@ -677,11 +677,19 @@ def export_bundle_facts(
         )
 
     source_schema_version = manifest.versions.source_schema_version
+    # Built once, up front -- a fresh linear scan *inside* the loop below
+    # (an earlier version) makes reconstruction quadratic in artifact count
+    # (Codex review).
+    artifacts_by_id = {a.artifact_id: a for a in manifest.artifact_refs}
     per_library_snapshots: dict[str, Any] = {}
     for artifact_id in variant.artifact_ids:
-        artifact = next(
-            a for a in manifest.artifact_refs if a.artifact_id == artifact_id
-        )
+        artifact = artifacts_by_id.get(artifact_id)
+        if artifact is None:
+            raise ValueError(
+                f"variant {variant_id!r} names artifact_id {artifact_id!r}, "
+                "which is not among this manifest's artifact_refs -- the "
+                "package is corrupted or was hand-edited"
+            )
         extra_sections = set(artifact.sections) - advertised_sections
         if extra_sections:
             raise ValueError(

@@ -268,36 +268,97 @@ class TestReadBundleFactsPackage:
     ) -> None:
         """The decoded-byte budget must be checked *as* each artifact is
         reconstructed, not only after every member of the variant has
-        already been retained in memory -- a budget set just above one
-        artifact's own size must still reject a second, later artifact
-        rather than letting the whole (over-budget) bundle through because
-        the check only ran once, at the end."""
-        import json
+        already been retained in memory. Three same-sized libraries, a
+        budget that admits the composition section plus one full artifact
+        charge and half of a second: the *second* artifact's own charge
+        must cross the budget (it is still reconstructed before its charge
+        raises, matching the write-side incremental test's own reasoning),
+        but the third must never even be reconstructed -- proving the check
+        runs incrementally, not as one charge over an already-fully-
+        materialized bundle.
+
+        The budget margin is calibrated against the exact
+        `bounded_encode_utf8` (indent=2) primitive the real charge uses, and
+        against the *charged* shapes -- the bundle-composition section
+        first, then each artifact as `{"library_name": ..., "snapshot":
+        ...}` -- not a compact `json.dumps` estimate of the bare snapshot
+        alone. A too-tight two-library margin can make the *first*
+        artifact's own (omitted-from-the-estimate) charges already cross
+        the budget, so the test would pass without the second artifact ever
+        proving anything (CodeRabbit review) -- `export_legacy_snapshot`
+        call-count instrumentation proves the third artifact is never
+        reconstructed, the same way the write-side incremental test proves
+        conversion order rather than trusting a single assert-raises."""
+        import sys
 
         import abicheck.bundle_facts_store as module
-        from abicheck.storage.import_v1 import export_legacy_snapshot
+        from abicheck.storage.bundle_archive_json_guard import bounded_encode_utf8
+        from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
+        from abicheck.storage.import_v1 import export_legacy_snapshot as real_export
 
         facts = capture_bundle_facts(
-            {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
+            {
+                "liba.so": _snapshot("liba.so"),
+                "libb.so": _snapshot("libb.so"),
+                "libc.so": _snapshot("libc.so"),
+            }
         )
         store = InMemoryObjectStore()
         manifest = write_bundle_facts_package(facts, store=store)
 
-        one_artifact_document = export_legacy_snapshot(
-            manifest.artifact_refs[0],
+        composition_ref = manifest.variant_refs[0].sections[
+            BUNDLE_COMPOSITION_SECTION_KIND
+        ]
+        composition_bytes = len(
+            bounded_encode_utf8(store.get(composition_ref.digest), 2**31)
+        )
+        first_artifact = manifest.artifact_refs[0]
+        first_document = real_export(
+            first_artifact,
             store=store,
             source_schema_version=manifest.versions.source_schema_version,
         )
-        one_artifact_bytes = len(json.dumps(one_artifact_document).encode("utf-8"))
-        # Comfortably above one artifact's own size (plus the small
-        # bundle-composition section charged first), too small once a
-        # second, same-sized artifact is also charged.
+        first_wrapped = {
+            "library_name": first_artifact.native_identity["library_name"],
+            "snapshot": first_document,
+        }
+        first_wrapped_bytes = len(bounded_encode_utf8(first_wrapped, 2**31))
+        # Room for the composition section plus one fully-charged artifact,
+        # plus half of a second -- the second artifact's own charge must
+        # cross the budget, not the third's.
         monkeypatch.setattr(
-            module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", one_artifact_bytes + 64
+            module,
+            "DEFAULT_MAX_BUNDLE_DECODED_BYTES",
+            composition_bytes + first_wrapped_bytes + first_wrapped_bytes // 2,
+        )
+
+        exported: list[str] = []
+
+        def counting_export(artifact: Any, **kwargs: Any) -> Any:
+            exported.append(artifact.native_identity["library_name"])
+            return real_export(artifact, **kwargs)
+
+        # `abicheck.storage.__init__` re-exports `import_bundle_facts` (the
+        # function) as a package attribute, shadowing the submodule of the
+        # same name -- both a plain `import abicheck.storage
+        # .import_bundle_facts as ...` and monkeypatch's own dotted-string
+        # attribute resolution land on that function instead of the
+        # submodule this patch needs. `sys.modules` still holds the real
+        # submodule regardless of what shadows its parent's attribute.
+        monkeypatch.setattr(
+            sys.modules["abicheck.storage.import_bundle_facts"],
+            "export_legacy_snapshot",
+            counting_export,
         )
 
         with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
             read_bundle_facts_package(manifest, store=store)
+
+        assert exported == ["liba.so", "libb.so"], (
+            "libc.so must never be reconstructed -- its own budget check "
+            "should never be reached once libb.so's charge already crosses "
+            f"the limit, but export order was {exported!r}"
+        )
 
     def test_charges_the_recovered_library_name_against_the_decoded_size_budget(
         self, monkeypatch: Any
@@ -369,6 +430,48 @@ class TestReadBundleFactsPackage:
 
         with pytest.raises(ValueError, match="DEFAULT_MAX_JSON_CONTAINER_NODES"):
             read_bundle_facts_package(manifest, store=store)
+
+    def test_a_malformed_stored_alias_value_defers_to_the_real_validator(
+        self,
+    ) -> None:
+        """A hand-corrupted store can carry a `filesystem_aliases` value
+        that isn't a list (e.g. a stray integer) for one library, bypassing
+        `import_bundle_facts`'s own `_validated_filesystem_aliases` check --
+        `read_bundle_facts_package`'s own node-count budget must not crash
+        with an unhandled `TypeError` on that shape before
+        `bundle_facts_from_dict`'s `validated_alias_map` ever gets a chance
+        to report the documented `ValueError` (CodeRabbit review;
+        `_alias_element_count`'s own malformed-input contract)."""
+        import dataclasses
+
+        from abicheck.storage.dto import (
+            BUNDLE_COMPOSITION_SECTION_KIND,
+            bundle_composition_to_dto,
+        )
+
+        facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+
+        real_ref = manifest.variant_refs[0].sections[BUNDLE_COMPOSITION_SECTION_KIND]
+        real_payload = dict(store.get(real_ref.digest)["payload"])
+        real_payload["filesystem_aliases"] = {"liba.so": 1}
+        doctored_dto = bundle_composition_to_dto(real_payload)
+        doctored_digest = store.put(doctored_dto.to_dict())
+        doctored_ref = dataclasses.replace(real_ref, digest=doctored_digest)
+        doctored_variant = dataclasses.replace(
+            manifest.variant_refs[0],
+            sections={
+                **manifest.variant_refs[0].sections,
+                BUNDLE_COMPOSITION_SECTION_KIND: doctored_ref,
+            },
+        )
+        doctored_manifest = dataclasses.replace(
+            manifest, variant_refs=(doctored_variant,)
+        )
+
+        with pytest.raises(ValueError, match="filesystem_aliases"):
+            read_bundle_facts_package(doctored_manifest, store=store)
 
 
 class TestBundleFactsPackageThroughDirectoryStore:
@@ -482,17 +585,24 @@ class TestWriteBundleFactsPackageMirrorsReaderLimits:
         """The decoded-byte budget must be checked *as* each library's
         snapshot is converted, not only after every member of `facts` has
         already been converted and retained in one combined document. Three
-        libraries, a budget that admits roughly two snapshots' worth of
-        bytes: the third must never even be *converted* -- proving the
-        check runs incrementally, not as one charge over an already-fully-
-        materialized document (Codex review). A plain assert-raises test
-        alone cannot distinguish the two: both eventually raise the same
-        error for a budget this tight; only the conversion *call count* can
-        show the difference."""
-        import json
-
+        libraries, a budget that admits exactly two charged snapshots: the
+        third must never even be *converted* -- proving the check runs
+        incrementally, not as one charge over an already-fully-materialized
+        document (Codex review). A plain assert-raises test alone cannot
+        distinguish the two: both eventually raise the same error for a
+        budget this tight; only the conversion *call count* can show the
+        difference. Note that the *offending* item (the second one here,
+        which crosses the budget) is itself still converted before its own
+        charge raises -- only items *after* it are never reached; a naive
+        `len(converted) < 3` assertion would not actually distinguish
+        incremental from non-incremental charging if the budget instead
+        happened to admit the third item's own conversion too, which is why
+        the budget here is calibrated (via the exact `bounded_encode_utf8`
+        primitive the real charge uses, not an approximate compact
+        `json.dumps`) to cross specifically on the second item."""
         import abicheck.bundle_facts_store as module
         import abicheck.serialization as serialization_module
+        from abicheck.storage.bundle_archive_json_guard import bounded_encode_utf8
 
         facts = capture_bundle_facts(
             {
@@ -503,16 +613,17 @@ class TestWriteBundleFactsPackageMirrorsReaderLimits:
         )
         store = InMemoryObjectStore()
 
-        one_snapshot_bytes = len(
-            json.dumps(
-                serialization_module.snapshot_to_dict(_snapshot("liba.so"))
-            ).encode("utf-8")
-        )
-        # Room for roughly two snapshots, not three.
+        wrapped = {
+            "library_name": "liba.so",
+            "snapshot": serialization_module.snapshot_to_dict(_snapshot("liba.so")),
+        }
+        wrapped_bytes = len(bounded_encode_utf8(wrapped, 2**31))
+        # Room for exactly one full charge plus half of a second -- the
+        # second item's own charge must cross the budget, not the third's.
         monkeypatch.setattr(
             module,
             "DEFAULT_MAX_BUNDLE_DECODED_BYTES",
-            2 * one_snapshot_bytes + 64,
+            wrapped_bytes + wrapped_bytes // 2,
         )
 
         real_snapshot_to_dict = serialization_module.snapshot_to_dict
@@ -529,9 +640,10 @@ class TestWriteBundleFactsPackageMirrorsReaderLimits:
         with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
             write_bundle_facts_package(facts, store=store)
 
-        assert len(converted) < 3, (
-            "all three snapshots were converted before the budget was ever "
-            "checked -- the check is not incremental"
+        assert converted == ["liba.so", "libb.so"], (
+            "libc.so must never be converted -- its own budget check should "
+            "never be reached once libb.so's charge already crosses the "
+            f"limit, but conversion order was {converted!r}"
         )
 
     def test_charges_the_library_name_against_the_write_side_decoded_size_budget(

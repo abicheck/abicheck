@@ -133,10 +133,27 @@ def _alias_element_count(aliases_by_library: object) -> int:
     CONTAINER_NODES` guards against elsewhere (many short strings can stay
     well under a byte budget while still costing one Python-object
     allocation per element).
-    """
+
+    A malformed value (not a mapping, or a per-library value that isn't a
+    list/tuple) contributes `0` here rather than raising -- this function is
+    only ever an aggregate node-count *estimate*, not the authority on
+    `filesystem_aliases`' shape (`bundle_facts_from_dict`'s own
+    `validated_alias_map` is, and always runs downstream of this call). A
+    bare `len(aliases)` on a non-`list`/`tuple` value (e.g. a stored `1`)
+    would otherwise raise an unhandled `TypeError` here, before that real
+    validator ever gets a chance to report the documented `ValueError`
+    (Codex review). Both container types are accepted since this helper is
+    called against two different shapes: the live `facts.filesystem_aliases`
+    (`dict[str, tuple[str, ...]]`, per `bundle_facts.py`'s own field type)
+    on the write path, and an already-JSON-decoded piece (`dict[str,
+    list[...]]`) on the read path."""
     if not isinstance(aliases_by_library, dict):
         return 0
-    return sum(len(aliases) + 1 for aliases in aliases_by_library.values())
+    return sum(
+        len(aliases) + 1
+        for aliases in aliases_by_library.values()
+        if isinstance(aliases, (list, tuple))
+    )
 
 
 def write_bundle_facts_package(

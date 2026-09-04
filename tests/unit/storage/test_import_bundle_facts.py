@@ -406,6 +406,35 @@ class TestImportBundleFacts:
         with pytest.raises(ValueError, match="no variant"):
             export_bundle_facts(manifest, store=store, variant_id="does-not-exist")
 
+    def test_export_looks_up_each_artifact_by_id_not_by_linear_scan_position(
+        self,
+    ) -> None:
+        """The artifact lookup must resolve every `variant.artifact_ids`
+        entry to the *matching* `ArtifactRef` regardless of where in
+        `manifest.artifact_refs` it sits -- a regression a naive rewrite of
+        the removed `next(a for a in manifest.artifact_refs if ...)` scan
+        into a single dict built once could get wrong (e.g. building the
+        dict keyed by list position instead of `artifact_id`). Two
+        libraries (`_bundle_document`'s own default `liba.so`/`libb.so`
+        pair), with `variant_refs[0].artifact_ids` deliberately reversed
+        from `artifact_refs`' own order, so a position-keyed lookup would
+        recover the wrong library name for at least one of them."""
+        import dataclasses
+
+        doc = _bundle_document()
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        assert len(manifest.artifact_refs) == 2
+        reversed_variant = dataclasses.replace(
+            manifest.variant_refs[0],
+            artifact_ids=tuple(reversed(manifest.variant_refs[0].artifact_ids)),
+        )
+        reversed_manifest = dataclasses.replace(
+            manifest, variant_refs=(reversed_variant,)
+        )
+        exported = export_bundle_facts(reversed_manifest, store=store)
+        assert set(exported["per_library_snapshots"]) == {"liba.so", "libb.so"}
+
     def test_export_rejects_duplicate_recovered_library_names(self) -> None:
         """`PackageManifest` enforces unique `artifact_id`s but not unique
         recovered `native_identity['library_name']` values -- a manifest
@@ -664,6 +693,28 @@ class TestImportBundleFacts:
             }
         )
         with pytest.raises(ValueError, match="more than once"):
+            export_bundle_facts(doctored, store=store)
+
+    def test_export_rejects_a_non_list_stored_instantiations_value(self) -> None:
+        """A stored `template` entry whose `instantiations` value is a
+        scalar (e.g. `1`) rather than a list must raise the documented
+        `ValueError`, not an unhandled `TypeError` from the list
+        comprehension that otherwise tries to iterate it directly
+        (CodeRabbit review)."""
+        doctored, store = self._doctored_composition_manifest(
+            {
+                "variant_fingerprint": "default",
+                "manifest": {
+                    "provides": [
+                        {
+                            "template": "acme::train_ops",
+                            "instantiations": 1,
+                        }
+                    ]
+                },
+            }
+        )
+        with pytest.raises(ValueError, match="instantiations"):
             export_bundle_facts(doctored, store=store)
 
     def test_export_rejects_a_non_mapping_stored_manifest_entry(self) -> None:

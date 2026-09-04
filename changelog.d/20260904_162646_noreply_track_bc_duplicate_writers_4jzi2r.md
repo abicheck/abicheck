@@ -47,4 +47,14 @@
   `BundleFacts` has already been converted and retained in one combined
   document -- including the library name itself (a `per_library_snapshots`
   dict key), not only its snapshot document, mirroring the read side's
-  identical charge.
+  identical charge. `bundle_facts_store.py`'s own alias node-count estimator
+  (`_alias_element_count`) now tolerates a malformed per-library
+  `filesystem_aliases` value (e.g. a stray integer instead of a list),
+  contributing `0` instead of raising an unhandled `TypeError` before
+  `bundle_facts_from_dict`'s own validator gets a chance to report the
+  documented `ValueError`. `storage.import_bundle_facts.export_bundle_facts`
+  likewise now validates a stored template entry's `instantiations` value is
+  a list before iterating it, and looks up each `variant.artifact_ids` entry
+  against a `dict` built once rather than a fresh linear scan per artifact
+  (an earlier version of this reconciliation made reconstruction quadratic
+  in artifact count).
