@@ -192,6 +192,37 @@ class TestAPackActuallyConfiguresTheRun:
         # The finding is still reported -- only the gate moved.
         assert json.loads(result.output)["verdict"] == "BREAKING"
 
+    def test_a_gate_pack_category_applies_alongside_a_discarded_profile_placeholder(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1062: a discarded `ci-gate` placeholder preset
+        used to still count as "a preset is stated", pinning every category
+        and silently dropping a gate pack's assignment to a category the
+        project never touched (pre-fix: silently exit 0; post-fix: 1)."""
+        old_p, new_p = pair
+        config = tmp_path / ".abicheck.yml"
+        config.write_text("severity:\n  abi_breaking: warning\n", encoding="utf-8")
+        gate = _pack(
+            tmp_path,
+            "strict-additions.yml",
+            "id: strict_additions\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.addition: error\n",
+        )
+        result = _compare(
+            CliRunner(),
+            (new_p, old_p),
+            "--format",
+            "json",
+            "--profile",
+            "ci-gate",
+            "--config",
+            str(config),
+            "--pack",
+            str(gate),
+        )
+        assert result.exit_code == 1, result.output
+        assert json.loads(result.output)["severity"]["config"]["addition"] == "error"
+
     def test_a_contract_pack_internal_namespace_reaches_the_comparison(
         self, tmp_path: Path
     ) -> None:

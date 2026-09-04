@@ -1464,7 +1464,7 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
             f"--profile {name} is not supported for directory/package (release) "
             "comparisons: profiles bundle single-pair-only knobs (--depth, "
             "--severity-preset, the 'review' format). Configure release defaults "
-            "in .abicheck.yml (the fan-out reads format/severity/scheme from it), "
+            "in .abicheck.yml (the fan-out reads format/severity from it), "
             "or compare the libraries individually to use a profile."
         )
 

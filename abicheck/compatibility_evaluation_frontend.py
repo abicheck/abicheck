@@ -1060,9 +1060,31 @@ def resolve_compatibility_evaluation_config(
     # (Codex review, fresh evidence). One expression decides this and the
     # `default_is_stated` gate below, so the exemption and the precedence it
     # anticipates cannot drift apart.
+    # Computed here (not just below, next to the candidate list it also
+    # gates) because `preset_stated`'s own profile clause needs it: a
+    # profile's placeholder preset is discarded once the project states its
+    # own severity policy (see the candidate-building comment below), so
+    # counting the placeholder as "stated" here regardless would pin every
+    # category as `_STATED_ELSEWHERE` even though nothing downstream ever
+    # used the profile's value -- silently blocking a gate pack's own
+    # category assignment from applying (Codex review, fresh evidence).
+    project_states_severity = project is not None and any(
+        getattr(project, attr) is not None
+        for attr in (
+            "severity_preset",
+            "severity_abi_breaking",
+            "severity_potential_breaking",
+            "severity_quality_issues",
+            "severity_addition",
+        )
+    )
     preset_stated = (
         explicit.severity_preset is not None
-        or (profile is not None and profile.severity_preset is not None)
+        or (
+            profile is not None
+            and profile.severity_preset is not None
+            and not project_states_severity
+        )
         or (project is not None and project.severity_preset is not None)
     )
     for category, field_name in SEVERITY_CATEGORY_FIELDS.items():
@@ -1329,17 +1351,8 @@ def resolve_compatibility_evaluation_config(
     # match) -- once the project states its own severity policy, THAT is
     # what actually scores the run, so omit the placeholder here too rather
     # than let the receipt record a `run_profile`-attributed value the live
-    # gate never used.
-    project_states_severity = project is not None and any(
-        getattr(project, attr) is not None
-        for attr in (
-            "severity_preset",
-            "severity_abi_breaking",
-            "severity_potential_breaking",
-            "severity_quality_issues",
-            "severity_addition",
-        )
-    )
+    # gate never used. `project_states_severity` is computed once, above
+    # (next to `preset_stated`, which needs the identical predicate).
     if (
         profile is not None
         and profile.severity_preset is not None
