@@ -78,7 +78,7 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`ifunc-transition`](ifunc-transition.md) | [case29_ifunc_transition](../case29_ifunc_transition.md) | — | — | — | — |
 | [`inherited-override-reuses-slot`](inherited-override-reuses-slot.md) | [case185_inherited_override_reuses_slot](../case185_inherited_override_reuses_slot.md) | — | — | — | — |
 | [`inline-accessor-renamed-pimpl-member`](inline-accessor-renamed-pimpl-member.md) | [case89_inline_accessor_renamed_pimpl_member](../case89_inline_accessor_renamed_pimpl_member.md) | — | — | — | — |
-| [`inline-function-outlined`](inline-function-outlined.md) | [case16_inline_to_non_inline](../case16_inline_to_non_inline.md) | [case47_inline_to_outlined](../case47_inline_to_outlined.md) | — | — | — |
+| [`inline-function-outlined`](inline-function-outlined.md) | [case16_inline_to_non_inline](../case16_inline_to_non_inline.md) | — | [case47_inline_to_outlined](../case47_inline_to_outlined.md) | — | — |
 | [`inline-function-removed`](inline-function-removed.md) | [case157_inline_function_removed](../case157_inline_function_removed.md) | — | — | — | — |
 | [`inline-namespace-moved`](inline-namespace-moved.md) | [case71_inline_namespace_moved](../case71_inline_namespace_moved.md) | — | — | — | — |
 | [`inline-namespace-version-bumped`](inline-namespace-version-bumped.md) | [case101_inline_namespace_version_bumped](../case101_inline_namespace_version_bumped.md) | — | — | — | — |

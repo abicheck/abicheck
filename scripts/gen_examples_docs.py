@@ -534,6 +534,15 @@ def _render_index(cases: list[Case]) -> str:
     for c in cases:
         by_eco[c.ecosystem].append(c)
     bundle_by_eco = _bundle_cases_by_ecosystem()
+    lines.append(
+        "> Ecosystem counts also include the multi-library bundle scenarios "
+        "(ADR-023) that this page's own headline and **All cases** table "
+        "don't -- those cases have no single verdict/category and no "
+        "generated page of their own (see `examples/README.md` for their "
+        "own index), so they're deliberately excluded above but included "
+        "here to match the taxonomy and "
+        "[catalog-coverage.md](../../contribute/catalog-coverage.md).\n\n"
+    )
     lines.append("| Ecosystem | Cases |\n")
     lines.append("|-----------|-------|\n")
     for eco in ECOSYSTEM_ORDER:

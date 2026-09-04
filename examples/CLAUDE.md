@@ -158,7 +158,7 @@ for the full rationale and remaining phases.
 is a *duplicate* — the two are not the same claim.** Every `rule`-entity
 case carries a `rule_slug`: a mechanically derived, ecosystem-neutral name
 by default, or a hand-reviewed shared slug when a genuine duplicate/variant
-was found. Seven pairs share a slug so far — three duplicates, four
+was found. Seven pairs share a slug so far — two duplicates, five
 variants (`relation_type`/`relation_axis` records which; see
 `scripts/gen_catalog_taxonomy.py`'s `RULE_FAMILIES` for the full read
 behind each):
@@ -168,7 +168,7 @@ behind each):
 | `exported-function-removed` | case01_symbol_removal | duplicate | case12_function_removed |
 | `enum-member-value-changed` | case08_enum_value_change | variant (public-surface) | case20_enum_member_value_changed |
 | `embedded-type-size-increased` | case07_struct_layout | variant (language) | case14_cpp_class_size |
-| `inline-function-outlined` | case16_inline_to_non_inline | duplicate | case47_inline_to_outlined |
+| `inline-function-outlined` | case16_inline_to_non_inline | variant (callable-kind) | case47_inline_to_outlined |
 | `executable-stack-flag-changed` | case49_executable_stack | duplicate | case136_executable_stack_removed |
 | `symbol-version-node-removed` | case65_symbol_version_removed | variant (symbol-versioning) | case139_symbol_version_node_removed |
 | `public-api-gains-internal-dependency` | case160_public_api_internal_dep_added | variant (specialization) | case190_public_inline_function_references_internal_constant |

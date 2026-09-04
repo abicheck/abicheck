@@ -6701,8 +6701,8 @@
    "related_rules": [],
    "rule_slug": "inline-function-outlined",
    "variant_of": "case16_inline_to_non_inline",
-   "relation_type": "duplicate",
-   "relation_axis": null
+   "relation_type": "variant",
+   "relation_axis": "callable-kind"
   },
   "case48_leaf_struct_through_pointer": {
    "entity": "rule",

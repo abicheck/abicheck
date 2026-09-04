@@ -53,6 +53,8 @@ Several cases demonstrate the same atomic compatibility rule under a different c
 
 ## Browse by ecosystem
 
+> Ecosystem counts also include the multi-library bundle scenarios (ADR-023) that this page's own headline and **All cases** table don't -- those cases have no single verdict/category and no generated page of their own (see `examples/README.md` for their own index), so they're deliberately excluded above but included here to match the taxonomy and [catalog-coverage.md](../../contribute/catalog-coverage.md).
+
 | Ecosystem | Cases |
 |-----------|-------|
 | [Generic (language/platform-level, no specific project)](by-ecosystem/generic.md) | 184 |

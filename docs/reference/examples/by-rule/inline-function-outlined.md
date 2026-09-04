@@ -7,9 +7,9 @@ _Canonical rule slug:_ `inline-function-outlined`. [← back to all rules](index
 
 - [case16_inline_to_non_inline](../case16_inline_to_non_inline.md) — Inline → Non-inline (ODR / Symbol Appearance) (🟢 COMPATIBLE)
 
-## Duplicate fixtures
+## Variants
 
-_Same demonstration restated with no distinguishing condition — not additional robustness coverage._
+_The same rule demonstrated under a different condition._
 
-- [case47_inline_to_outlined](../case47_inline_to_outlined.md) — Inline Method Moved Out-of-Line
+- [case47_inline_to_outlined](../case47_inline_to_outlined.md) — Inline Method Moved Out-of-Line (callable-kind)
 

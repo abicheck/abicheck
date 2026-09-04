@@ -1,6 +1,6 @@
 # Examples/catalog split — taxonomy first, no directory move yet
 
-**Effort:** XL (six phases) · **Status:** Phase 1 implemented (now also distinguishing `operation` from `scenario_kind`); Phase 2 complete (every `rule`-entity case carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded — now split into 3 duplicates and 4 genuine variants via `relation_type`/`relation_axis`, see "What Phase 2 implements" below — and every one of the 30 `scenario`-entity cases now carries `related_rules`); Phase 3 complete (every path resolver in the codebase now routes through `example_catalog.case_dir`); Phase 6 implemented (now reporting duplicate/variant families separately); Phase 5 in progress; Phase 4 **redesigned, not started** — an external review found the original four-subtree target model unsound before any move landed; see "Corrected Phase 4 target model" below for the replacement flat `catalog/cases/` model. See the table below for per-phase detail.
+**Effort:** XL (six phases) · **Status:** Phase 1 implemented (now also distinguishing `operation` from `scenario_kind`); Phase 2 complete (every `rule`-entity case carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded — now split into 2 duplicates and 5 genuine variants via `relation_type`/`relation_axis`, see "What Phase 2 implements" below — and every one of the 30 `scenario`-entity cases now carries `related_rules`); Phase 3 complete (every path resolver in the codebase now routes through `example_catalog.case_dir`); Phase 6 implemented (now reporting duplicate/variant families separately); Phase 5 in progress; Phase 4 **redesigned, not started** — an external review found the original four-subtree target model unsound before any move landed; see "Corrected Phase 4 target model" below for the replacement flat `catalog/cases/` model. See the table below for per-phase detail.
 
 ## Problem
 
@@ -104,21 +104,26 @@ candidate cases) and reading each cluster's actual README content — not
 just the shared `ChangeKind` — to separate a true duplicate/variant from a
 case that merely shares a `ChangeKind` while demonstrating a different
 mechanism or reaching a different verdict. A second read (prompted by an
-external review of this plan) then split those seven further, into **3
+external review of this plan) then split those seven further, into **2
 exact duplicates** (no meaningful distinguishing condition — the same
-demonstration restated) and **4 genuine variants** (a real robustness
+demonstration restated) and **5 genuine variants** (a real robustness
 demonstration under a named condition, recorded as `relation_axis`):
 collapsing that distinction, as the original single "Variant" column below
 did, counted a duplicate restatement as robustness coverage it doesn't
 actually add — `docs/contribute/catalog-coverage.md`'s Rule coverage
-section now reports the two counts separately for this reason.
+section now reports the two counts separately for this reason. A Codex
+review round on the PR that first classified case16/case47 as a duplicate
+caught a misread: the two aren't byte-for-byte the same demonstration —
+case16 is a free function on Linux only, case47 a C++ *member* function
+(name-mangled export) exercised on Linux, macOS, *and* Windows — a real
+callable-kind/platform-breadth variant, corrected below.
 
 | Rule | Canonical | Relation | Other case |
 |---|---|---|---|
 | `exported-function-removed` | case01_symbol_removal | duplicate | case12_function_removed |
 | `enum-member-value-changed` | case08_enum_value_change | variant (public-surface) | case20_enum_member_value_changed |
 | `embedded-type-size-increased` | case07_struct_layout | variant (language) | case14_cpp_class_size |
-| `inline-function-outlined` | case16_inline_to_non_inline | duplicate | case47_inline_to_outlined (confirmed by diffing the two READMEs byte-for-byte, not just matching `expected_kinds`) |
+| `inline-function-outlined` | case16_inline_to_non_inline | variant (callable-kind) | case47_inline_to_outlined (free function on Linux only vs. a C++ member function on Linux/macOS/Windows) |
 | `executable-stack-flag-changed` | case49_executable_stack | duplicate | case136_executable_stack_removed (identical transition and library source, despite the README framing it as a separate "fix direction" case) |
 | `symbol-version-node-removed` | case65_symbol_version_removed | variant (symbol-versioning) | case139_symbol_version_node_removed (adds the "symbol name persists, folded into a different node" nuance) |
 | `public-api-gains-internal-dependency` | case160_public_api_internal_dep_added | variant (specialization) | case190_public_inline_function_references_internal_constant (narrows to the inline-function case) |

@@ -55,12 +55,13 @@ are orthogonal to implementation language and independent of the physical
                      robustness demonstration of the same rule under a
                      different condition). See RULE_FAMILIES below --
                      collapsing this distinction is exactly what let the
-                     coverage report count three duplicate restatements as
-                     three robustness variants.
+                     coverage report count a duplicate restatement as a
+                     robustness variant.
     relation_axis   set only when relation_type == "variant": which
                      condition the variant demonstrates the rule under
                      ("language", "evidence", "public-surface",
-                     "symbol-versioning", "specialization", ...). Null for a
+                     "symbol-versioning", "specialization",
+                     "callable-kind", ...). Null for a
                      "duplicate" (there is no distinguishing axis) and for
                      any case with no variant_of.
     operation       "compare" (an old/new comparison -- the default) or
@@ -267,11 +268,21 @@ RELATED_RULES: dict[str, list[str]] = {
 #   case07/case14  -- VARIANT (axis: language). Same
 #                      embedded-type-size-increased rule; case14 is the C++
 #                      class-size restatement of case07's plain C struct.
-#   case16/case47  -- DUPLICATE. Byte-for-byte the same mechanism (an inline
-#                      method moved out-of-line gains a real exported
-#                      symbol) under different demo names -- confirmed by
-#                      diffing the two READMEs, not just matching
-#                      expected_kinds.
+#   case16/case47  -- VARIANT (axis: callable-kind). The same underlying
+#                      mechanism (an inline function/method moved
+#                      out-of-line gains a real exported symbol) -- but not
+#                      a duplicate: case16 is a free function on Linux only
+#                      (platforms: [linux]); case47 is a C++ *member*
+#                      function (`Calculator::add()`, name-mangled export)
+#                      exercised on Linux, macOS, and Windows (platforms:
+#                      [linux, macos, windows]). A second review pass
+#                      (prompted by a Codex finding on the PR that first
+#                      classified this pair) corrected the original
+#                      byte-for-byte-README read: the *demonstration* text
+#                      is similarly worded, but the callable kind and
+#                      platform breadth are real, distinguishing robustness
+#                      conditions, not just a restatement under a different
+#                      demo name.
 #   case49/case136 -- DUPLICATE. case136's own README calls itself "the fix
 #                      counterpart to case49", but the technical
 #                      demonstration (GNU_STACK RWE -> RW) and even the
@@ -329,7 +340,7 @@ RULE_FAMILIES: dict[str, tuple[str, str | None, str | None]] = {
     "case47_inline_to_outlined": (
         "inline-function-outlined",
         "case16_inline_to_non_inline",
-        None,
+        "callable-kind",
     ),
     "case49_executable_stack": ("executable-stack-flag-changed", None, None),
     "case136_executable_stack_removed": (
