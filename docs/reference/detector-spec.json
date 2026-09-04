@@ -169,7 +169,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "bundle_duplicate_provider",
       "examples": ""
     },
@@ -241,7 +241,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "bundle_manifest_entry_unsatisfied",
       "examples": ""
     },

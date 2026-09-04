@@ -28,3 +28,12 @@
   (`bundle_manifest_instantiation_removed`) now shares its matching logic
   with the new audit-mode check via one `_manifest_ownership_findings`
   helper, rather than a second, independently-maintained copy.
+- **Security**: a manifest entry naming a bare symbol was previously
+  considered satisfied by a definition that exists only as a non-default
+  versioned export (e.g. `foo@V1`, never `foo@@V1`) -- a shape an
+  unversioned consumer cannot actually link against. Both
+  `compare --manifest` and the new `scan --artifact-set --manifest` now
+  require a *default* (`is_default`) definition before treating a
+  symbol/pattern/template promise as satisfied, closing a false-negative
+  path an attacker-crafted ELF could otherwise exploit to make a broken
+  ownership contract read as `COMPATIBLE` with zero findings.

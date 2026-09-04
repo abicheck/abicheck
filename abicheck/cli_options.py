@@ -1350,9 +1350,10 @@ def artifact_set_options(func: F) -> F:
         "--manifest, ADR-023) asserting which library in the set is the "
         "expected provider of a symbol/pattern/template instantiation. "
         "Checked against this one declared set (no old side to diff): an "
-        "unmatched entry, or one matched by a library other than its "
-        "declared provider, is bundle_manifest_entry_unsatisfied. Only "
-        "meaningful with --artifact-set.",
+        "unmatched entry, or a non-optional entry (optional_provider: "
+        "false) matched by a library other than its declared provider, is "
+        "bundle_manifest_entry_unsatisfied. Only meaningful with "
+        "--artifact-set.",
     )(func)
     return func
 

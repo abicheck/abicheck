@@ -24,7 +24,7 @@ One row per `ChangeKind` (399 total). Columns fuse the verdict partition (`check
 | `branch_protection_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `branch_protection_weakened` | — |
 | `build_context_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `build_context_changed` | — |
 | `build_option_reaches_public_symbol` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `build_option_reaches_public_symbol` | — |
-| `bundle_duplicate_provider` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `bundle_duplicate_provider` | — |
+| `bundle_duplicate_provider` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_duplicate_provider` | — |
 | `bundle_intra_dep_removed` | breaking | `BREAKING` | `error` | L0 | `bundle_intra_dep_removed` | — |
 | `bundle_intra_dep_resolved_to_different_version` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `bundle_intra_dep_resolved_to_different_version` | — |
 | `bundle_intra_dep_signature_changed` | breaking | `BREAKING` | `error` | L0 | `bundle_intra_dep_signature_changed` | — |
@@ -32,7 +32,7 @@ One row per `ChangeKind` (399 total). Columns fuse the verdict partition (`check
 | `bundle_intra_type_changed` | breaking | `BREAKING` | `error` | unspecified | `bundle_intra_type_changed` | — |
 | `bundle_library_added` | addition | `COMPATIBLE` | `warning` | unspecified | `bundle_library_added` | — |
 | `bundle_library_removed` | breaking | `BREAKING` | `error` | unspecified | `bundle_library_removed` | — |
-| `bundle_manifest_entry_unsatisfied` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `bundle_manifest_entry_unsatisfied` | — |
+| `bundle_manifest_entry_unsatisfied` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_manifest_entry_unsatisfied` | — |
 | `bundle_manifest_instantiation_added` | addition | `COMPATIBLE` | `warning` | unspecified | `bundle_manifest_instantiation_added` | — |
 | `bundle_manifest_instantiation_removed` | breaking | `BREAKING` | `error` | L0 | `bundle_manifest_instantiation_removed` | — |
 | `bundle_provider_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_provider_changed` | — |

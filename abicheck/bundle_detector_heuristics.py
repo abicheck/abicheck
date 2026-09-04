@@ -213,6 +213,16 @@ def _build_demangled_index(snapshot: BundleSnapshot) -> list[tuple[str, str]]:
     Demangling uses :func:`abicheck.demangle.demangle`; when the
     demangler is unavailable, the mangled name is recorded so
     ``extern "C"`` symbols still match.
+
+    Only ``is_default`` symbols are indexed (Codex review, security P1,
+    PR H): a manifest entry always matches by bare/unversioned name (see
+    :func:`_match_target_against_index`'s ``symbol`` branch, which keys
+    :attr:`~abicheck.bundle_models.ResolutionGraph.provides` the identical
+    way), and the dynamic linker can only satisfy an unversioned reference
+    against a default (``@@version`` or unversioned) definition -- a DSO
+    exporting only a non-default ``@version`` definition of the name
+    cannot actually be linked against by an unversioned consumer, even
+    though the bare name is technically present in ``.dynsym``.
     """
     from .demangle import demangle as _demangle
 
@@ -220,6 +230,8 @@ def _build_demangled_index(snapshot: BundleSnapshot) -> list[tuple[str, str]]:
     for lib_name, meta in snapshot.metadata.items():
         for sym in meta.symbols:
             if sym.visibility not in ("default", "protected"):
+                continue
+            if not sym.is_default:
                 continue
             index.append((_demangle(sym.name) or sym.name, lib_name))
     return index
@@ -245,7 +257,11 @@ def _match_target_against_index(
     import fnmatch
 
     if kind == "symbol":
-        providers = snapshot.resolution.providers_for(target)
+        # Only a *default* definition satisfies a manifest's own
+        # unversioned/bare-name promise (Codex review, security P1, PR H)
+        # -- see _build_demangled_index()'s identical guard for the
+        # pattern/template branch below and its docstring for why.
+        providers = [p for p in snapshot.resolution.providers_for(target) if p.is_default]
         return ([target] if providers else []), providers
 
     if index is None:

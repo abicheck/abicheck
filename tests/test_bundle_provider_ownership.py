@@ -190,6 +190,26 @@ class TestDetectManifestOwnership:
         assert findings[0].kind == ChangeKind.BUNDLE_MANIFEST_ENTRY_UNSATISFIED
         assert findings[0].symbol == "promised_but_absent"
 
+    def test_nondefault_only_export_does_not_satisfy_promise(self) -> None:
+        # Security P1 (Codex review, fresh evidence): a symbol that exists
+        # in .dynsym only as a non-default versioned definition (foo@V1,
+        # never foo@@V1) cannot actually be linked against by an
+        # unversioned consumer -- it must not silently satisfy a manifest
+        # promise. A CLI reproduction before this fix returned COMPATIBLE,
+        # zero bundle findings, exit 0, while `ld` failed to resolve `foo`.
+        provider = _meta(soname="liba.so.1")
+        provider.symbols.append(
+            ElfSymbol(
+                name="foo", visibility="default", version="V1", is_default=False
+            )
+        )
+        new = _snapshot({"liba.so": provider})
+        manifest = InstantiationManifest(entries=(ManifestEntry(symbol="foo"),))
+        findings = self._detect(new, manifest)
+        assert len(findings) == 1
+        assert findings[0].kind == ChangeKind.BUNDLE_MANIFEST_ENTRY_UNSATISFIED
+        assert findings[0].symbol == "foo"
+
     def test_wrong_provider_flagged(self) -> None:
         new = _snapshot(
             {
