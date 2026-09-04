@@ -234,6 +234,20 @@ class TestBuildConfigBundleBlock:
         cfg = BuildConfig.from_dict({"bundle": {"cohorts": ["libfoo_", "   "]}})
         assert cfg.bundle_cohorts == ["libfoo_"]
 
+    def test_to_dict_round_trips_the_bundle_block(self) -> None:
+        # Codecov patch-coverage gap: _bundle_block() (to_dict()'s own
+        # serialization half) had no test at all.
+        cfg = BuildConfig.from_dict(
+            {"bundle": {"system_providers": ["libvendor.so.1"], "cohorts": ["libfoo_"]}}
+        )
+        assert cfg.to_dict()["bundle"] == {
+            "system_providers": ["libvendor.so.1"],
+            "cohorts": ["libfoo_"],
+        }
+
+    def test_to_dict_omits_bundle_block_when_empty(self) -> None:
+        assert "bundle" not in BuildConfig().to_dict()
+
 
 # ── end-to-end: a bad .abicheck.yml exits 64 through a real command ─────────
 
