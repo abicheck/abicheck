@@ -364,17 +364,26 @@ concepts:
       target (docs/contribute/plans/duplication-and-convergence-
       assessment.md), guarded meanwhile against silent drift by
       tests/test_release_gate_pack_fold_parity.py's Hypothesis property
-      test pinning both fold implementations to agree on outcome. Second:
-      cli_compare_receipt.resolve_release_pack_application unconditionally
-      rejects a --pack asserting contract.unresolved for a release
-      comparison (a hard PackManifestError, not a silent no-op) because
-      that field's consumer (contract_coverage_exit._accepts_unresolved)
-      reads it off a persisted PersistedContractContext only
-      checker.compare's own record_resolved_config installs, which the
-      release fan-out never builds per library -- so a release comparison
-      cannot use contract.unresolved at all today, unlike single-pair
-      compare. No landed or proposed fix yet; a live boundary-consumer gap
-      for a future slice to close, not merely a duplication risk.
+      test pinning both fold implementations to agree on outcome. Second
+      (found on review, then itself corrected on a second review round --
+      Codex, PR #1050, two rounds): cli_compare_receipt.
+      resolve_release_pack_application unconditionally rejects a --pack
+      asserting contract.unresolved for a release comparison (a hard
+      PackManifestError, not a silent no-op) -- but not for lack of a
+      per-library PersistedContractContext for that field's consumer
+      (contract_coverage_exit._accepts_unresolved) to read, the first
+      round's premise. cli_compare_release_pairwise._run_compare_pair calls
+      record_release_resolved_config after every pair, which merges the
+      pack's resolved config into result.contract_context via
+      contract_context.with_resolved_config whenever --contract produced
+      one, and _compare_one_library reads coverage_exit_floor(result) off
+      exactly that context afterward -- so the context-plumbing already
+      exists; the rejection itself is the only blocker. Whether it remains
+      necessary now that the plumbing exists is unverified, not attempted
+      here. A release comparison cannot use contract.unresolved today,
+      unlike single-pair compare. No landed fix or confirmed-necessary
+      rationale yet; a live boundary-consumer gap for a future slice to
+      investigate and close, not merely a duplication risk.
 
   sectioned_storage:
     primitive: complete
