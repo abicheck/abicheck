@@ -310,43 +310,52 @@ def _match_entry(
     return out
 
 
-def _detect_manifest_drift(
-    old: BundleSnapshot,
-    new: BundleSnapshot,
+def _manifest_ownership_findings(
+    snapshot: BundleSnapshot,
     manifest: InstantiationManifest,
+    *,
+    kind: ChangeKind,
+    scope_desc: str,
+    index: list[tuple[str, str]] | None = None,
 ) -> list[BundleFinding]:
-    """Enforce a release manifest against the new bundle.
+    """Check whether *manifest*'s ownership promises hold against *snapshot*.
 
-    Decomposes template entries into one virtual target per
-    instantiation so each instantiation is checked independently.
-    Per-snapshot demangle indexes are built once and reused across
-    every manifest entry — manifest enforcement scales O(symbols +
-    Σtargets) rather than O(symbols × Σtargets).
+    The one-sided "does this contract hold right now" half shared by
+    :func:`_detect_manifest_drift` (``compare --manifest``, two-sided: this
+    is its "missing in new"/"wrong provider" pass) and
+    :func:`abicheck.bundle_detectors._detect_manifest_ownership`
+    (``scan --artifact-set --manifest``, audit-mode: no old side, so this
+    *is* the whole check). *kind* and *scope_desc* let each caller emit its
+    own :class:`~abicheck.checker_policy.ChangeKind` and wording
+    (``"the new bundle"`` vs. ``"this artifact set"``) over the identical
+    matching logic, so the two callers cannot silently diverge on what
+    "wrong provider" means.
 
-    For each target:
-      - If no exported symbol matches → ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED``.
+    Decomposes template entries into one virtual target per instantiation
+    so each instantiation is checked independently. For each target:
+      - If no exported symbol matches → *kind*.
       - If matched but at the wrong provider (when ``optional_provider=False``)
-        → ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED`` (contract names the lib).
+        → *kind* (contract names the expected library).
 
-    Symbols in the new bundle but not in the manifest are not flagged
-    here (out-of-manifest exports are not necessarily promised).
+    Symbols in *snapshot* but not in the manifest are not flagged here
+    (out-of-manifest exports are not necessarily promised).
     """
     findings: list[BundleFinding] = []
-    # Build the per-snapshot demangle indexes once; both the
-    # "missing in new" and "newly promised" passes reuse them.
-    new_index = _build_demangled_index(new)
-    old_index = _build_demangled_index(old)
+    if index is None:
+        index = _build_demangled_index(snapshot)
 
     for entry in manifest.entries:
-        for target, kind, matched, providers in _match_entry(entry, new, new_index):
+        for target, kind_word, matched, providers in _match_entry(
+            entry, snapshot, index
+        ):
             if not matched:
                 findings.append(
                     BundleFinding(
-                        kind=ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED,
+                        kind=kind,
                         symbol=target,
                         description=(
-                            f"Manifest promises {kind} {target!r} but no "
-                            f"exported symbol in the new bundle matches it."
+                            f"Manifest promises {kind_word} {target!r} but no "
+                            f"exported symbol in {scope_desc} matches it."
                         ),
                         provider_library=entry.library,
                     ),
@@ -359,24 +368,53 @@ def _detect_manifest_drift(
                 ) -> bool:
                     if prov.library == _entry.library:
                         return True
-                    meta = new.metadata.get(prov.library)
+                    meta = snapshot.metadata.get(prov.library)
                     return meta is not None and meta.soname == _entry.library
 
                 if not any(_matches(p) for p in providers):
                     got = ", ".join(sorted(p.library for p in providers))
                     findings.append(
                         BundleFinding(
-                            kind=ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED,
+                            kind=kind,
                             symbol=target,
                             description=(
-                                f"Manifest requires {kind} {target!r} to be "
-                                f"provided by {entry.library}, but it is "
-                                f"provided by {got} instead."
+                                f"Manifest requires {kind_word} {target!r} to "
+                                f"be provided by {entry.library}, but "
+                                f"{scope_desc} provides it via {got} instead."
                             ),
                             provider_library=entry.library,
                             new_value=got,
                         ),
                     )
+    return findings
+
+
+def _detect_manifest_drift(
+    old: BundleSnapshot,
+    new: BundleSnapshot,
+    manifest: InstantiationManifest,
+) -> list[BundleFinding]:
+    """Enforce a release manifest against the new bundle.
+
+    Per-snapshot demangle indexes are built once and reused across every
+    manifest entry — manifest enforcement scales O(symbols + Σtargets)
+    rather than O(symbols × Σtargets). The "missing in new"/"wrong
+    provider" half is :func:`_manifest_ownership_findings`; this function
+    adds the two-sided "newly promised" pass that only makes sense with an
+    old side to diff against.
+    """
+    # Build the per-snapshot demangle indexes once; both the
+    # "missing in new" and "newly promised" passes reuse them.
+    new_index = _build_demangled_index(new)
+    old_index = _build_demangled_index(old)
+
+    findings = _manifest_ownership_findings(
+        new,
+        manifest,
+        kind=ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED,
+        scope_desc="the new bundle",
+        index=new_index,
+    )
 
     # Newly-promised targets — matched in new bundle but not in old.
     for entry in manifest.entries:

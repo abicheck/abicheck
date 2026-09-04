@@ -254,6 +254,7 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `build_targets` | `tuple[str, ...]` | `()` |
 | `severity_preset` | `str \| None` | `None` |
 | `exit_code_scheme` | `str \| None` | `None` |
+| `bundle_manifest` | `InstantiationManifest \| None` | `None` |
 
 ## `ScanResult`
 

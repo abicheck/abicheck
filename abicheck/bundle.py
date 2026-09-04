@@ -83,10 +83,12 @@ from .bundle_detector_heuristics import (  # noqa: F401  (re-exported for back-c
     _strip_namespace_prefix as _strip_namespace_prefix,
 )
 from .bundle_detectors import (
+    _detect_duplicate_providers,
     _detect_intra_dep_removed,
     _detect_intra_dep_signature_changed,
     _detect_intra_type_changed,
     _detect_library_structural_changes,
+    _detect_manifest_ownership,
     _detect_provider_changed,
     _detect_unresolved_intra_dependency,
     _detect_version_drift,
@@ -558,13 +560,20 @@ def audit_bundle(
     libraries: dict[str, Path],
     *,
     bundle_system_providers: Iterable[str] = (),
+    manifest: InstantiationManifest | None = None,
 ) -> BundleAuditResult:
     """Run the audit-mode (no old side) bundle analysis for a declared set.
 
     ADR-056: the ``scan --artifact-set`` entry point into the bundle layer.
     ``libraries`` is expected to already be collision-free and ELF-validated
     (:func:`discover_artifact_set`) — this function does not re-validate
-    that, it only builds the snapshot and runs the audit-mode detector.
+    that, it only builds the snapshot and runs the audit-mode detectors:
+    unresolved intra-dependencies (:func:`_detect_unresolved_intra_dependency`),
+    ownership ambiguity within the declared set
+    (:func:`_detect_duplicate_providers`, PR H), and, when *manifest* is
+    given, opt-in expected-provider enforcement
+    (:func:`_detect_manifest_ownership`, PR H — the audit-mode sibling of
+    ``compare --manifest``'s two-sided drift check).
     """
     snapshot = build_bundle_snapshot(libraries)
     # P2 regression (Codex review): two distinct set members advertising the
@@ -590,6 +599,9 @@ def audit_bundle(
         )
     sys_providers = set(DEFAULT_SYSTEM_PROVIDERS) | set(bundle_system_providers)
     findings = _detect_unresolved_intra_dependency(snapshot, sys_providers)
+    findings.extend(_detect_duplicate_providers(snapshot))
+    if manifest is not None:
+        findings.extend(_detect_manifest_ownership(snapshot, manifest))
     return BundleAuditResult(snapshot=snapshot, findings=findings)
 
 

@@ -393,6 +393,11 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     # G38 Phase 4 C-boundary signature-evidence gate.
     # Exercised in tests/test_bundle_signature_evidence.py.
     ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED,
+    # PR H (CLI cleanup phase two, ADR-056 D2): --artifact-set audit-mode
+    # provider-ownership semantics. Exercised in
+    # tests/test_bundle_provider_ownership.py.
+    ChangeKind.BUNDLE_DUPLICATE_PROVIDER,
+    ChangeKind.BUNDLE_MANIFEST_ENTRY_UNSATISFIED,
     # Explicit specifier transitions — exercised in tests/test_explicit_ctor.py
     ChangeKind.CTOR_EXPLICIT_ADDED,
     ChangeKind.CTOR_EXPLICIT_REMOVED,

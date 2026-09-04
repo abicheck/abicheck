@@ -53,6 +53,7 @@ def reject_incoherent_scan_operands(
     artifact_set: tuple[str, ...],
     against: Path | None,
     bundle_system_providers: str,
+    manifest_path: Path | None = None,
 ) -> None:
     """Reject operand/flag combinations ``scan`` cannot serve.
 
@@ -73,7 +74,9 @@ def reject_incoherent_scan_operands(
     :func:`abicheck.frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`
     -- so it is no longer rejected here.
     ``--bundle-system-providers`` is the mirror case: it only means
-    something *for* a set.
+    something *for* a set. ``--manifest`` (PR H, ADR-056 D2) is the same
+    shape again -- an expected-provider ownership assertion only means
+    something checked against a declared set.
     """
     if any(not member.strip() for member in artifact_set):
         raise click.UsageError("--artifact-set must not be empty.")
@@ -88,8 +91,67 @@ def reject_incoherent_scan_operands(
                 "--against is not supported with --artifact-set "
                 "(audit-only -- no old side for a set)."
             )
-    elif bundle_system_providers:
-        raise click.UsageError("--bundle-system-providers requires --artifact-set.")
+    else:
+        if bundle_system_providers:
+            raise click.UsageError(
+                "--bundle-system-providers requires --artifact-set."
+            )
+        if manifest_path is not None:
+            raise click.UsageError("--manifest requires --artifact-set.")
+
+
+def load_artifact_set_manifest(manifest_path: Path | None) -> Any:
+    """Load ``scan --artifact-set --manifest``'s optional ownership manifest.
+
+    Split out of ``cli_scan._run_artifact_set`` purely to keep that module
+    under the AI-readiness 2000-line hard cap -- the load itself mirrors
+    ``compare --manifest``'s own
+    ``cli_compare_release_helpers._analyze_release_bundle`` exactly: a
+    malformed ``--manifest`` is an explicit user input error, not an
+    environmental quirk, so it fails loudly (``click.ClickException``)
+    rather than degrading. Returns ``None`` when *manifest_path* is
+    ``None`` (the common case -- no ``--manifest`` given).
+    """
+    if manifest_path is None:
+        return None
+    from .bundle import load_manifest
+
+    try:
+        return load_manifest(manifest_path)
+    except Exception as exc:
+        raise click.ClickException(
+            f"Failed to load manifest {manifest_path}: {exc}",
+        ) from exc
+
+
+def resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool]:
+    """``--artifact-set`` values → ``(paths, explicit)`` (ADR-056).
+
+    ``spec`` is the tuple Click's repeatable ``--artifact-set`` collects (CLI
+    cleanup phase two, PR 5 -- the comma-separated single-string form this
+    replaced is gone, no alias). A single value naming a directory expands
+    to every discoverable shared library in it (``explicit=False`` -- an
+    unsupported file found this way is silently skipped, mirroring
+    ``build_bundle_snapshot``'s directory-scan behavior); anything else is
+    an explicit path list, one member per occurrence, every member of which
+    must resolve (``explicit=True``, per :func:`bundle.discover_artifact_set`).
+
+    Moved here from ``cli_scan.py`` (PR H, CLI cleanup phase two) purely to
+    keep that module under its 2000-line hard cap -- unchanged otherwise.
+    """
+    from .workflows.extraction import discover_shared_libraries
+
+    if len(spec) == 1:
+        candidate = Path(spec[0])
+        if candidate.is_dir():
+            return discover_shared_libraries(candidate), False
+    paths: list[Path] = []
+    for part in spec:
+        p = Path(part)
+        if not p.exists():
+            raise click.UsageError(f"--artifact-set member not found: {part}")
+        paths.append(p)
+    return paths, True
 
 
 def reject_incoherent_scan_secondary_output(

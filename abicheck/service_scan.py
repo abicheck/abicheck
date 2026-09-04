@@ -64,6 +64,7 @@ from .workflows.scan_subprocess import (
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
+    from .bundle_manifest import InstantiationManifest
     from .environment_matrix import EnvironmentMatrix
     from .policy_file import PolicyFile
     from .suppression import SuppressionList
@@ -254,6 +255,7 @@ class ScanRequest:
     build_targets: tuple[str, ...] = field(default=(), kw_only=True)
     severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
     exit_code_scheme: str | None = field(default=None, kw_only=True)
+    bundle_manifest: InstantiationManifest | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1840,7 +1842,8 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         # AGENTS.md's exit code table).
         with _deadline.deadline_scope(remaining):
             audit = audit_bundle(
-                libraries, bundle_system_providers=req.bundle_system_providers
+                libraries, bundle_system_providers=req.bundle_system_providers,
+                manifest=req.bundle_manifest,
             )
     except _deadline.DeadlineExceeded:
         return ScanSetResult(

@@ -1312,12 +1312,15 @@ def set_input_options(func: F) -> F:
 def artifact_set_options(func: F) -> F:
     """``scan --artifact-set`` knobs (ADR-056).
 
-    A small, dedicated pair rather than reuse of `release_options` wholesale
-    — `scan` doesn't need `--no-bundle-analysis`/`--bundle-cohort`/
-    `--manifest`, only the set operand and the system-provider allow-list.
-    `--bundle-system-providers`' option text matches `release_options`'
-    below verbatim (same flag, same meaning, just declared for a different
-    command) rather than being redefined with different wording.
+    A small, dedicated set rather than reuse of `release_options` wholesale
+    — `scan` doesn't need `--no-bundle-analysis`/`--bundle-cohort`, only the
+    set operand, the system-provider allow-list, and (PR H, CLI cleanup
+    phase two) the same expected-provider ownership manifest `compare
+    --manifest` already enforces two-sided, applied here single-sided
+    (audit mode has no old side to diff). `--bundle-system-providers`' and
+    `--manifest`'s option text otherwise matches `release_options`' below
+    (same flag, same meaning, just declared for a different command)
+    rather than being redefined with different wording.
     """
     func = click.option(
         "--artifact-set",
@@ -1337,6 +1340,19 @@ def artifact_set_options(func: F) -> F:
         help="Comma-separated extra sonames to treat as system-provided "
         "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list). "
         "Only meaningful with --artifact-set.",
+    )(func)
+    func = click.option(
+        "--manifest",
+        "manifest_path",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="ABI ownership manifest (YAML/JSON, same format as compare "
+        "--manifest, ADR-023) asserting which library in the set is the "
+        "expected provider of a symbol/pattern/template instantiation. "
+        "Checked against this one declared set (no old side to diff): an "
+        "unmatched entry, or one matched by a library other than its "
+        "declared provider, is bundle_manifest_entry_unsatisfied. Only "
+        "meaningful with --artifact-set.",
     )(func)
     return func
 

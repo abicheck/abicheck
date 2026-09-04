@@ -108,6 +108,7 @@ from .cli_scan_helpers import (  # noqa: F401 - coverage/depth helpers re-export
     _source_abi_coverage,
     _uses_debug_presence_only,
     l4_coverage_advisories,
+    load_artifact_set_manifest,
     reject_incoherent_scan_operands as _reject_incoherent_scan_operands,
     reject_incoherent_scan_secondary_output as _reject_incoherent_secondary_output,
     render_baseline_lines,
@@ -117,6 +118,7 @@ from .cli_scan_helpers import (  # noqa: F401 - coverage/depth helpers re-export
     render_preprocessor_lines,
     render_summary_lines,
     render_verdict_lines,
+    resolve_artifact_set_paths as _resolve_artifact_set_paths,
     resolve_effective_allow_query,
     scan_pattern_roots,
 )
@@ -562,33 +564,6 @@ def _emit_scan_abort_report(
         click.echo(f"Secondary report written to {secondary_output}", err=True)
 
 
-def _resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool]:
-    """``--artifact-set`` values → ``(paths, explicit)`` (ADR-056).
-
-    ``spec`` is the tuple Click's repeatable ``--artifact-set`` collects (CLI
-    cleanup phase two, PR 5 -- the comma-separated single-string form this
-    replaced is gone, no alias). A single value naming a directory expands
-    to every discoverable shared library in it (``explicit=False`` -- an
-    unsupported file found this way is silently skipped, mirroring
-    ``build_bundle_snapshot``'s directory-scan behavior); anything else is
-    an explicit path list, one member per occurrence, every member of which
-    must resolve (``explicit=True``, per :func:`bundle.discover_artifact_set`).
-    """
-    from .workflows.extraction import discover_shared_libraries
-
-    if len(spec) == 1:
-        candidate = Path(spec[0])
-        if candidate.is_dir():
-            return discover_shared_libraries(candidate), False
-    paths: list[Path] = []
-    for part in spec:
-        p = Path(part)
-        if not p.exists():
-            raise click.UsageError(f"--artifact-set member not found: {part}")
-        paths.append(p)
-    return paths, True
-
-
 def _render_member_findings_lines(result: Any) -> list[str]:
     """Render one artifact-set member's cross-check/pattern/preprocessor
     findings for text output (P2, Codex review): the artifact-set text
@@ -720,6 +695,7 @@ def _run_artifact_set(
     artifact_set: tuple[str, ...],
     dry_run: bool,
     bundle_system_providers: str,
+    manifest_path: Path | None,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
     public_header_dirs: tuple[Path, ...],
@@ -833,6 +809,7 @@ def _run_artifact_set(
     abi3_floor = _parse_abi3_floor(abi3)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
     bsp = tuple(s.strip() for s in bundle_system_providers.split(",") if s.strip())
+    bundle_manifest = load_artifact_set_manifest(manifest_path)  # PR H, ADR-056 D2
 
     req = ScanRequest(
         binaries=list(discovered.values()),
@@ -860,6 +837,7 @@ def _run_artifact_set(
         allow_build_query=allow_build_query,
         risk_rules_path=risk_rules_path,
         bundle_system_providers=bsp,
+        bundle_manifest=bundle_manifest,
         changed_src=changed_src,
         build_targets=build_targets,
     )
@@ -1357,6 +1335,7 @@ def scan_cmd(
     artifact: Path | None,
     artifact_set: tuple[str, ...],
     bundle_system_providers: str,
+    manifest_path: Path | None,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
     public_header_dirs: tuple[Path, ...],
@@ -1471,7 +1450,7 @@ def scan_cmd(
     # historical) -- a tuple has no such falsy-but-present state.
     _reject_incoherent_scan_operands(
         artifact=artifact, artifact_set=artifact_set, against=against,
-        bundle_system_providers=bundle_system_providers,
+        bundle_system_providers=bundle_system_providers, manifest_path=manifest_path,
     )
     _reject_incoherent_secondary_output(
         dry_run=dry_run, output=output, secondary_fmt=secondary_fmt,
@@ -1484,6 +1463,7 @@ def scan_cmd(
             artifact_set=artifact_set,
             dry_run=dry_run,
             bundle_system_providers=bundle_system_providers,
+            manifest_path=manifest_path,
             header_pairs=header_pairs,
             include_pairs=include_pairs,
             public_header_dirs=public_header_dirs,

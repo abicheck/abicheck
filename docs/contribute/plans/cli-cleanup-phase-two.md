@@ -4534,13 +4534,48 @@ closing an import cycle back through `service -> service_scan ->
 scan_engine -> cli_scan_helpers`). Tests in
 `tests/test_scan_artifact_set_coverage.py`.
 
-**Still open, per the sequencing note below:** `--artifact-set-manifest`
-(no real domain contract proposed for it yet) and the remaining set-mode
-*semantics* items (expected provider DSO, a symbol moved between sibling
-libraries, duplicated providers, L4 symbol reconciliation) — the first
-slice touched only the value syntax and the second only the dry-run/cost
-item; the review itself called the syntax change "the only part of this
-section worth doing on its own."
+**A third slice (PR H) shipped the audit-mode ownership semantics.**
+`scan --artifact-set` gained two audit-mode-only detectors, both scoped by
+ADR-056 D2 to what a single declared set (no old side) can actually prove:
+
+- **Duplicated providers** — `_detect_duplicate_providers`
+  (`abicheck/bundle_detectors.py`), unconditional: the same default-bound
+  symbol name exported by 2+ set members is `bundle_duplicate_provider`
+  (`COMPATIBLE_WITH_RISK`) — an unversioned reference to it resolves to
+  whichever library the dynamic linker's load-order/symbol-interposition
+  rules pick first, not a declared contract. Linker-synthesized per-object
+  boilerplate (`_edata`/`_end`/...) and libstdc++-shaped mangled names are
+  excluded so it doesn't fire on every real multi-library set.
+- **Expected provider DSO** — a new opt-in `scan --artifact-set --manifest
+  PATH` flag, reusing `compare --manifest`'s own `InstantiationManifest`
+  schema unchanged (no new manifest format): an entry naming
+  `optional_provider: false` + `library: X` is checked against this one
+  set (no diff), emitting `bundle_manifest_entry_unsatisfied`
+  (`COMPATIBLE_WITH_RISK`) when unmatched entirely or matched by a
+  different library than declared. `_detect_manifest_ownership`
+  delegates to the same `_manifest_ownership_findings` helper
+  `_detect_manifest_drift` (`compare --manifest`'s two-sided check) now
+  also uses, split out so the two entry points can't diverge on what
+  "wrong provider" means.
+
+**Still open:** `--artifact-set-manifest` as a *member-identity* form (a
+JSON/YAML file naming the set's own members, as an alternative to a
+directory or repeated `--artifact-set`) remains unimplemented — no real
+domain contract was proposed for that half beyond nicer syntax, unlike the
+ownership-manifest half above, which now has one via plain `--manifest`.
+**A symbol moved between sibling libraries** is intentionally *not*
+audit-mode surface: it needs an old side to confirm a move (removed here,
+added there) rather than a snapshot of ambiguous ownership, and
+`compare`'s two-sided bundle layer already reports it as
+`bundle_provider_changed` (`_detect_provider_changed`, see
+`examples/case92_bundle_provider_changed`). **L4 symbol reconciliation**
+is a known, documented, deliberately-deferred gap on the new duplicate-
+provider detector (see its own docstring and
+`abicheck/bundle.artifact_set_member_exports`'s identical, pre-existing
+gap) — the bundle layer builds its resolution graph from raw ELF metadata
+alone, with no per-member `AbiSnapshot` to read an L4
+`source_decl_to_binary_symbol` mapping from; closing it needs that
+mapping threaded through, a materially larger change than this slice.
 
 The draft proposed dispatching on the operand type:
 
@@ -5037,9 +5072,20 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        secondary for --artifact-set runs
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
-      (syntax slice DONE)               duplicated symbols, cost and dry-run;
-                                       syntax refinement (DONE) was the one
-                                       piece independent of the semantics work
+      (syntax + cost/dry-run + audit-    duplicated symbols, cost and dry-run;
+       mode ownership DONE; member-      syntax refinement (DONE) was the one
+       identity manifest form still      piece independent of the semantics
+       open)                             work. Audit-mode ownership shipped:
+                                       bundle_duplicate_provider (unconditional)
+                                       + scan --artifact-set --manifest ->
+                                       bundle_manifest_entry_unsatisfied
+                                       (opt-in, reuses compare --manifest's
+                                       existing InstantiationManifest schema).
+                                       "Moved" stays compare-only
+                                       (bundle_provider_changed, needs an old
+                                       side); L4 reconciliation on the new
+                                       duplicate-provider detector is a
+                                       documented, deferred gap.
 PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
       (prerequisite DONE; operand        explicit artifact_type discriminator
        classification + flag deletion    on BundleFacts, operand classification

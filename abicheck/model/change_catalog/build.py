@@ -63,6 +63,12 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
        impact="Non-ABI-relevant build metadata changed between versions (e.g. "
               "include-path ordering, output paths, or generator version). "
               "Informational quality signal; no ABI impact on its own."),
+    _E("bundle_duplicate_provider", _R,
+       impact="The same default-visibility symbol name is exported by 2+ "
+              "libraries in one --artifact-set audit. Which library a "
+              "consumer resolves against depends on load order / symbol "
+              "interposition, not a declared contract -- an ODR-style "
+              "ownership ambiguity within one release."),
     _E("bundle_intra_dep_removed", _B,
        impact="A sibling library in this bundle still imports a symbol that no "
               "library in the new bundle exports. Loading the consumer will fail "
@@ -102,6 +108,13 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
        impact="A library present in the old bundle is absent in the new bundle "
               "and at least one of its exported symbols was consumed by a sibling. "
               "Loading any consumer fails with NEEDED-library-not-found."),
+    _E("bundle_manifest_entry_unsatisfied", _R,
+       impact="Audit-mode (scan --artifact-set --manifest, no old side): an "
+              "opt-in ownership manifest entry is unsatisfied by this "
+              "declared set -- either no exported symbol matches it at "
+              "all, or it matches but is provided by a library other than "
+              "the one the manifest names as the expected provider. RISK, "
+              "not BREAKING -- there is no diff to confirm a regression."),
     _E("bundle_manifest_instantiation_added", _C, is_addition=True,
        impact="A symbol present in the new manifest is not in the old one; "
               "new instantiation now publicly promised."),
