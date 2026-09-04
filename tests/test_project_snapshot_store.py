@@ -354,6 +354,82 @@ class TestManifestRoundTrip:
             write_project_manifest(tmp_path, manifest)
         assert not (tmp_path / "manifest.json").exists()
 
+    def test_a_manifest_naming_a_variant_section_object_never_put_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """`VariantRef.sections` (ADR-063 Track C 8B) must be checked
+        exactly the way `ArtifactRef.sections` already is -- a
+        `BundleFacts`/baseline-set composition object never `put()` into
+        `objects/` must refuse publication here, not surface only once a
+        later `export_bundle_facts`/`export_baseline_set` calls
+        `store.get()` against a package this function already reported as
+        published (Codex review)."""
+        store = DirectoryObjectStore(tmp_path)
+        artifact_digest = store.put({"a": 1})
+        never_put_digest = "sha256:" + "cd" * 32
+        manifest = PackageManifest(
+            variant_refs=(
+                VariantRef(
+                    variant_id="default",
+                    artifact_ids=("libfoo",),
+                    sections={
+                        "bundle_composition": ObjectRef(
+                            kind="bundle_composition", digest=never_put_digest
+                        )
+                    },
+                ),
+            ),
+            artifact_refs=(
+                ArtifactRef(
+                    artifact_id="libfoo",
+                    variant_id="default",
+                    kind="elf",
+                    sections={
+                        "semantic_ir": ObjectRef(
+                            kind="semantic_ir", digest=artifact_digest
+                        )
+                    },
+                ),
+            ),
+        )
+        with pytest.raises(ValueError, match="not yet durable"):
+            write_project_manifest(tmp_path, manifest)
+        assert not (tmp_path / "manifest.json").exists()
+
+    def test_a_manifest_naming_a_variant_section_object_already_put_succeeds(
+        self, tmp_path: Path
+    ) -> None:
+        store = DirectoryObjectStore(tmp_path)
+        artifact_digest = store.put({"a": 1})
+        variant_section_digest = store.put({"variant_fingerprint": "default"})
+        manifest = PackageManifest(
+            variant_refs=(
+                VariantRef(
+                    variant_id="default",
+                    artifact_ids=("libfoo",),
+                    sections={
+                        "bundle_composition": ObjectRef(
+                            kind="bundle_composition", digest=variant_section_digest
+                        )
+                    },
+                ),
+            ),
+            artifact_refs=(
+                ArtifactRef(
+                    artifact_id="libfoo",
+                    variant_id="default",
+                    kind="elf",
+                    sections={
+                        "semantic_ir": ObjectRef(
+                            kind="semantic_ir", digest=artifact_digest
+                        )
+                    },
+                ),
+            ),
+        )
+        write_project_manifest(tmp_path, manifest)
+        assert (tmp_path / "manifest.json").exists()
+
     def test_manifest_json_is_small_and_does_not_embed_full_records(
         self, tmp_path: Path
     ) -> None:

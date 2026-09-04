@@ -79,8 +79,10 @@ from .sparse_section_codec import (
 from .types_section_codec import TypesSection
 
 __all__ = [
+    "BASELINE_SET_SECTION_KIND",
     "BINARY_SECTION_KIND",
     "BUILD_SECTION_KIND",
+    "BUNDLE_COMPOSITION_SECTION_KIND",
     "DEBUG_SECTION_KIND",
     "DECLARATIONS_SECTION_KIND",
     "GRAPH_SECTION_KIND",
@@ -90,10 +92,14 @@ __all__ = [
     "SEMANTIC_IR_SECTION_KIND",
     "TYPES_SECTION_KIND",
     "SectionDTO",
+    "baseline_set_metadata_from_dto",
+    "baseline_set_metadata_to_dto",
     "binary_from_dto",
     "binary_to_dto",
     "build_from_dto",
     "build_to_dto",
+    "bundle_composition_from_dto",
+    "bundle_composition_to_dto",
     "debug_from_dto",
     "debug_to_dto",
     "declarations_from_dto",
@@ -133,6 +139,22 @@ SEMANTIC_IR_SECTION_KIND = "semantic_ir"
 #: kind) -- only its *DTO encoding function* is specialized here, not its
 #: membership in that vocabulary.
 TYPES_SECTION_KIND = "types"
+
+#: ADR-063 Track C 8B: two more section kinds, each independent of the
+#: eight-member `LEGACY_SECTION_KINDS` vocabulary the same way
+#: `SEMANTIC_IR_SECTION_KIND` is -- neither describes a single `AbiSnapshot`
+#: field-partition, so folding either into that vocabulary (or into the
+#: generic `legacy_section_to_dto` pass-through, which `legacy_section_from
+#: _dto` restricts to `LEGACY_SECTION_KINDS` members specifically) would
+#: misfile it. Both hold *variant*-level, not artifact-level, content --
+#: `storage.package.VariantRef.sections`, never `ArtifactRef.sections` --
+#: since neither names a single binary/header-only member of the matched
+#: build, the same reasoning `VariantRef.declared`/`.captured` already state
+#: for `variant_fingerprint`-shaped coordinates. `storage.
+#: import_bundle_facts`/`storage.import_baseline_set` are the only
+#: producers/consumers of either.
+BUNDLE_COMPOSITION_SECTION_KIND = "bundle_composition"
+BASELINE_SET_SECTION_KIND = "baseline_set_metadata"
 
 #: ADR-063 Track 4 (8B), second slice: the second `LEGACY_SECTION_KINDS`
 #: member with a real, dedicated DTO (`GraphSection`) instead of the generic
@@ -174,6 +196,8 @@ _SPECIALIZED_SECTION_KINDS = frozenset(
         DEBUG_SECTION_KIND,
         BUILD_SECTION_KIND,
         PROVENANCE_SECTION_KIND,
+        BUNDLE_COMPOSITION_SECTION_KIND,
+        BASELINE_SET_SECTION_KIND,
     }
 )
 
@@ -190,6 +214,10 @@ SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
     # producer — each is its own independent axis from here on, so a future
     # `"binary"` schema change never forces a bump on `"declarations"`.
     **{kind: 1 for kind in LEGACY_SECTION_KINDS},
+    # ADR-063 Track C 8B: the two variant-level section kinds, independent
+    # of every axis above for the identical reason.
+    BUNDLE_COMPOSITION_SECTION_KIND: 1,
+    BASELINE_SET_SECTION_KIND: 1,
 }
 
 #: Per-section-kind migration chains, keyed by the DTO version a step reads
@@ -464,6 +492,89 @@ def legacy_section_from_dto(dto: SectionDTO) -> dict[str, Any]:
         raise ValueError(
             f"{dto.section_kind!r} is not a legacy section kind -- expected "
             f"one of {sorted(set(LEGACY_SECTION_KINDS) - _SPECIALIZED_SECTION_KINDS)}"
+        )
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return payload
+
+
+def bundle_composition_to_dto(payload: Mapping[str, Any]) -> SectionDTO:
+    """The small set of bundle-composition facts a persisted `BundleFacts`
+    document (`abicheck.bundle_facts_serialization.bundle_facts_to_dict()`)
+    carries beyond its `per_library_snapshots` -- `variant_fingerprint`,
+    `manifest`, `filesystem_aliases`, `library_filenames` -- as a
+    `SectionDTO` (ADR-063 Track C 8B).
+
+    ADR-062's D8 vocabulary is scoped to a single `ArtifactRef`'s own
+    sections; none of these four facts names one particular library, so this
+    is a new, independent section kind rather than a squeeze into one of
+    D8's eight. `storage.import_bundle_facts.import_bundle_facts` attaches
+    the resulting object to the `VariantRef` that owns every per-library
+    `ArtifactRef` the same bundle produced, the same way
+    `variant_fingerprint` alone would already be a `VariantRef.captured`
+    coordinate if it stood alone.
+
+    There is nothing to encode beyond the version stamp, for the same
+    reason `legacy_section_to_dto` gives: `bundle_manifest.manifest_to_dict()`/
+    `bundle_facts_serialization.bundle_facts_to_dict()` already produce this
+    payload as flat JSON, and `storage/` may not import either module to
+    re-derive it (`storage/AGENTS.md`, "Permitted imports") -- the caller
+    hands this function the already-produced sub-mapping, the same
+    "storage takes an already-serialized document" contract `import_v1.py`'s
+    own module docstring establishes for the whole legacy document.
+    """
+    return SectionDTO(
+        section_kind=BUNDLE_COMPOSITION_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[BUNDLE_COMPOSITION_SECTION_KIND],
+        payload=payload,
+    )
+
+
+def bundle_composition_from_dto(dto: SectionDTO) -> dict[str, Any]:
+    """The inverse of `bundle_composition_to_dto` -- migrates *dto* to its
+    section's current version first, then returns a fresh, mutable dict of
+    its payload."""
+    if dto.section_kind != BUNDLE_COMPOSITION_SECTION_KIND:
+        raise ValueError(
+            f"expected section kind {BUNDLE_COMPOSITION_SECTION_KIND!r}, got "
+            f"{dto.section_kind!r}"
+        )
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return payload
+
+
+def baseline_set_metadata_to_dto(payload: Mapping[str, Any]) -> SectionDTO:
+    """An `actions/baseline`-produced baseline set's own `manifest.json`
+    metadata (`manifest_version`, `project_ref`, `profile`, `snapshot_schema`,
+    `fact_set`, `baseline_generation`, `generator` -- everything in that
+    document other than its `artifacts[]` list, which
+    `storage.import_baseline_set.import_baseline_set` instead resolves into
+    one per-library `ArtifactRef` each, via `storage.import_v1.
+    import_legacy_snapshot`) as a `SectionDTO` (ADR-063 Track C 8B).
+
+    Mirrors `bundle_composition_to_dto` exactly: none of these facts names a
+    single library, so they are attached to the owning `VariantRef` rather
+    than any one `ArtifactRef`, and there is nothing to encode beyond the
+    version stamp -- this is already the flat JSON `buildsource.baseline_set
+    .load_baseline_manifest` itself reads, and `storage/` may not import
+    that module to re-derive it.
+    """
+    return SectionDTO(
+        section_kind=BASELINE_SET_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[BASELINE_SET_SECTION_KIND],
+        payload=payload,
+    )
+
+
+def baseline_set_metadata_from_dto(dto: SectionDTO) -> dict[str, Any]:
+    """The inverse of `baseline_set_metadata_to_dto`."""
+    if dto.section_kind != BASELINE_SET_SECTION_KIND:
+        raise ValueError(
+            f"expected section kind {BASELINE_SET_SECTION_KIND!r}, got "
+            f"{dto.section_kind!r}"
         )
     current = migrate_section_dto(dto)
     payload = current.to_dict()["payload"]

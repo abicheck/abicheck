@@ -53,6 +53,8 @@ _MODULES = (
     "abicheck.storage.dto",
     "abicheck.storage.legacy_sections",
     "abicheck.storage.import_v1",
+    "abicheck.storage.import_bundle_facts",
+    "abicheck.storage.import_baseline_set",
     "abicheck.storage.sectioned_document",
 )
 
@@ -65,6 +67,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.availability_status",
     "abicheck.storage.entity_ids",
     "abicheck.storage.fact_availability",
+    "abicheck.storage.ref_ids",
 )
 
 

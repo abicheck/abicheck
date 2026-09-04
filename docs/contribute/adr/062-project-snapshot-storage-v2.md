@@ -26,7 +26,12 @@ each independently versioned and explicitly allowlisted per field (an
 unassigned field is a hard import-time error, never a silent catch-all). What
 remains unsplit is each section's own *internal* shape — `elf`/`dwarf`/
 `build_source`/... still carry the existing JSON encoding inside their own
-section, not a further per-field typed decode.
+section, not a further per-field typed decode. A1.4 is implemented too
+(ADR-063 Track C 8B): `abicheck/storage/import_bundle_facts.py`/
+`import_baseline_set.py` fold a persisted G38 `BundleFacts` document and an
+`actions/baseline` set respectively onto this same sectioned representation,
+calling `import_legacy_snapshot` once per library and attaching each
+container's own composition facts to a new `VariantRef.sections` field.
 
 **This is now wired into `dump`/`compare`/`scan` as the default, single-file
 shape (Phase 8 redesign).** The directory-backed package this ADR
@@ -45,25 +50,57 @@ readable. The directory writer/reader
 `read_legacy_snapshot_document`) remain available as typed-API primitives —
 `compare`/`scan --against` still accept a directory package as an input
 path — but no `dump` CLI flag produces one today.
-**A1.4/A1.5's first slice is now implemented** (ADR-063 Track B "8B"):
-`PackageManifest.project_sections` (`abicheck/storage/package.py`) is the
-cross-artifact-evidence slot D7 describes, and `abicheck/bundle_facts_store
-.py`'s `write_bundle_facts_package`/`read_bundle_facts_package` are the
-first real producer/reader of a multi-`ArtifactRef` `PackageManifest` — one
+**A1.4's document-folding slice is implemented (ADR-063 Track C 8B)**:
+`abicheck/storage/import_bundle_facts.py`/`import_baseline_set.py` fold an
+already-persisted G38 `BundleFacts` document and an `actions/baseline` set
+respectively into this sectioned representation, calling
+`import_legacy_snapshot` once per library and attaching each container's own
+composition facts to `VariantRef.sections` (a new field this track added).
+**Independently, A1.4/A1.5's live-object slice is also implemented**
+(ADR-063 Track B "8B", landed in parallel): `PackageManifest.project_sections`
+(`abicheck/storage/package.py`) is D7's cross-artifact-evidence slot, and
+`abicheck/bundle_facts_store.py`'s `write_bundle_facts_package`/
+`read_bundle_facts_package` are the first real producer/reader of a
+multi-`ArtifactRef` `PackageManifest` from a *live* `BundleFacts` object — one
 `BundleFacts` becomes N `ArtifactRef`s under one shared `VariantRef`, with
 `BundleFacts.manifest` (an `InstantiationManifest`) as the first
-`project_sections` entry, reusing `import_legacy_snapshot`'s per-artifact
-section split so byte-identical section content across libraries is stored
-once. `abicheck/project_snapshot_store.py`'s `write_project_manifest`/
-`read_project_manifest` publish and read `project_sections` back through
-the real D6 directory layout. What remains open: `BuildSourcePack`/project
+`project_sections` entry. `abicheck/project_snapshot_store.py`'s
+`write_project_manifest`/`read_project_manifest` publish and read both
+`VariantRef.sections` and `project_sections` back through the real D6
+directory layout.
+
+**Known gap, not yet reconciled**: these two tracks solved the identical
+plan item (A1.4, "fold `BundleFacts` into the sectioned representation")
+independently and landed with two different, non-interoperable physical
+layouts for the same composition facts — `bundle_facts_store.py` splits
+`variant_fingerprint`/`filesystem_aliases`/`library_filenames` onto
+`VariantRef.captured`/`ArtifactRef.native_identity` and stores only the
+instantiation manifest in `project_sections`, while `import_bundle_facts.py`
+bundles all four facts into one `VariantRef.sections["bundle_composition"]`
+object. A package written by one cannot be read by the other's reader. Since
+`storage/import_bundle_facts.py` already establishes "storage takes an
+already-serialized document" as this area's governing contract (matching
+`import_v1.py`), the follow-up work is to rebuild `bundle_facts_store.py`'s
+live-object writer/reader as a thin wrapper over
+`bundle_facts_serialization.bundle_facts_to_dict`/`bundle_facts_from_dict`
+plus `storage.import_bundle_facts.import_bundle_facts`/`export_bundle_facts`,
+retiring the separate `project_sections`/`native_identity` layout in favor of
+the single `VariantRef.sections` one — not attempted here, since it requires
+rewriting `bundle_facts_store.py`'s own ~30-test suite (much of it pinned to
+the internal layout being retired) with the same adversarial-review rigor
+the original had, rather than as a side effect of a merge-conflict
+resolution.
+
+Digest-deduplicated shared evidence beyond what the two slices above already
+give, variant capture, and the `.tar.zst` transport form (the remainder of
+A1.5-A1.8) remain not implemented, along with `BuildSourcePack`/project
 source-graph dedup (the ~57-59 MB-per-artifact finding this ADR's Context
 names), `bundle_variants:` capture wiring, stored/live release-comparison
-CLI reachability, non-ELF artifact membership, and the `.tar.zst` transport
-form (the remainder of A1.1/A1.4-A1.8) — note this is the **remainder of
-Phase 1**, not Phase 2 (Phase 2 is the separate scale/performance work:
-lazy loading, streaming encode, cache migration, indexes). A full per-item
-design for A1.1's `.tar.zst` remainder and A1.4-A1.8 (Goal/Design/Files/Tests/Acceptance criteria each)
+CLI reachability, and non-ELF artifact membership — note this is the
+**remainder of Phase 1**, not Phase 2 (Phase 2 is the separate
+scale/performance work: lazy loading, streaming encode, cache migration,
+indexes). A full per-item design for A1.1's `.tar.zst` remainder and
+A1.5-A1.8 (Goal/Design/Files/Tests/Acceptance criteria each)
 now exists in `docs/contribute/plans/storage-format-v2.md`'s "Phases" →
 "Phase 1" section — design only, not implemented by that addition; the
 object model these items build on (`PackageManifest.artifact_refs`/
