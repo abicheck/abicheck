@@ -1001,12 +1001,44 @@ class TestTypeDatabaseExtended:
         assert db.type_name(0x1000) == "fn(...)"
 
     def test_simple_type_near32_pointer(self) -> None:
-        """Near32 pointer mode (0x02) should resolve to pointer."""
+        """Near32 pointer mode (0x04, SimpleTypeMode::NearPointer32 per
+        CodeView's own encoding) should resolve to a 4-byte pointer.
+
+        P2 review, fresh evidence (Codex): this test previously used
+        mode=0x02, which is CodeView's legacy 16-bit FarPointer mode, not
+        near32 -- _resolve_type_size() wrongly treated 0x02 as near32
+        (returning 4), which this test then pinned as if it were correct.
+        0x04 is the real near32 mode value; see
+        test_simple_type_far_pointer_legacy_mode_is_not_near32 below for
+        the sibling proving 0x02 now correctly falls to the generic
+        default instead."""
         db = self._make_db([])
-        ti = 0x0274  # mode=0x02 (near32), kind=0x74 (int)
+        ti = 0x0474  # mode=0x04 (near32), kind=0x74 (int)
         name = db.type_name(ti)
         assert "*" in name
         assert db.type_size(ti) == 4
+
+    def test_simple_type_near64_pointer(self) -> None:
+        """Near64 pointer mode (0x06, SimpleTypeMode::NearPointer64)
+        should resolve to an 8-byte pointer -- already correct before this
+        fix; pinned directly since test_simple_type_near32_pointer's own
+        sibling was wrong until now."""
+        db = self._make_db([])
+        ti = 0x0674  # mode=0x06 (near64), kind=0x74 (int)
+        name = db.type_name(ti)
+        assert "*" in name
+        assert db.type_size(ti) == 8
+
+    def test_simple_type_far_pointer_legacy_mode_is_not_near32(self) -> None:
+        """0x02 is CodeView's legacy 16-bit FarPointer mode, not near32 --
+        must not be given near32's 4-byte size. Falls to the generic
+        (unverified-exotic-mode) default, the same as any other
+        unrecognized pointer mode."""
+        db = self._make_db([])
+        ti = 0x0274  # mode=0x02 (FarPointer, legacy), kind=0x74 (int)
+        name = db.type_name(ti)
+        assert "*" in name
+        assert db.type_size(ti) == 8  # default ptr size, not near32's 4
 
     def test_simple_type_other_pointer_mode(self) -> None:
         """Unknown pointer mode should still produce pointer name."""

@@ -1287,8 +1287,10 @@ class TypeDatabase:
             base = _SIMPLE_TYPE_NAMES.get(kind, f"<simple:0x{kind:02x}>")
             if mode == 0:
                 return base
-            if mode in (0x02, 0x06):  # near32 / near64
-                return f"{base} *"
+            # Every non-Direct SimpleTypeMode is some flavor of pointer
+            # (near/far/huge, 16/32/64/128-bit) -- the exact mode doesn't
+            # change the spelling here (only type_size() needs to tell
+            # them apart), so any nonzero mode renders as a pointer.
             return f"{base} *"
 
         s = self._structs.get(ti)
@@ -1351,11 +1353,32 @@ class TypeDatabase:
             mode = (ti >> 8) & 0x0F
             if mode == 0:
                 return _SIMPLE_TYPE_SIZES.get(kind, 0)
-            # Pointer modes: size depends on 32-bit vs 64-bit
-            if mode == 0x02:  # near32
+            # Pointer modes: size depends on 32-bit vs 64-bit. P2 review,
+            # fresh evidence (Codex): this previously checked mode == 0x02
+            # for "near32", but per the CodeView SimpleTypeMode encoding
+            # (Microsoft cvinfo.h / llvm/DebugInfo/CodeView/TypeIndex.h's
+            # SimpleTypeMode enum) 0x02 is the legacy 16-bit FarPointer
+            # mode -- the real, modern 32-bit near-pointer mode every
+            # ordinary x86 CodeView simple-type pointer actually uses is
+            # 0x04 (NearPointer32). A member typed this way previously fell
+            # through to the 8-byte default below, reporting the wrong
+            # byte_size for every 32-bit pointer field while
+            # unresolved_type_ref_count stayed untouched, so the basic
+            # channel still reported "parsed".
+            if mode == 0x04:  # near32 (SimpleTypeMode::NearPointer32)
                 return 4
-            if mode == 0x06:  # near64
+            if mode == 0x06:  # near64 (SimpleTypeMode::NearPointer64)
                 return 8
+            # The legacy 16-bit segmented modes (NearPointer=0x01,
+            # FarPointer=0x02, HugePointer=0x03, FarPointer32=0x05,
+            # NearPointer128=0x07) are unreachable in practice -- no modern
+            # MSVC toolchain emits them for an ordinary x86/x64 build, and
+            # this module has no fixture to verify a dedicated size for
+            # each against. Rather than guess, they fall through to the
+            # same 8-byte default this branch already used before this fix,
+            # the same "unverified exotic case stays approximate" choice
+            # this codebase already makes elsewhere (e.g. PPC64 ELFv1's
+            # .opd descriptors in dwarf_advanced.py).
             return 8  # default pointer size
 
         s = self._structs.get(ti)

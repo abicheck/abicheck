@@ -243,8 +243,20 @@ class CtfHeader:
     str_len: int
 
 
-def _parse_header(data: bytes) -> CtfHeader:
-    """Parse CTF preamble + header."""
+def _parse_preamble(data: bytes) -> tuple[int, int, int]:
+    """Parse just the 4-byte CTF preamble (magic, version, flags).
+
+    P2 review, fresh evidence (Codex): the only portion of a
+    ``CTF_F_COMPRESS`` blob guaranteed to be uncompressed -- everything
+    after it, including the rest of the v3 header's own fields, is zlib
+    body for a compressed blob. ``_parse_header()``'s own full
+    ``_CTF_V3_HEADER_SIZE`` length enforcement cannot run yet at that
+    point without rejecting a perfectly valid small compressed blob
+    (compressing e.g. one integer type record can easily produce a
+    complete file under 36 bytes). Split out so ``parse_ctf_from_bytes``
+    can read the compress flag first, decompress, and only then parse (and
+    length-check) the real header body.
+    """
     if len(data) < _CTF_PREAMBLE_SIZE:
         raise ValueError(f"CTF data too small ({len(data)} bytes)")
 
@@ -253,6 +265,18 @@ def _parse_header(data: bytes) -> CtfHeader:
         raise ValueError(f"Bad CTF magic: 0x{magic:04X} (expected 0x{CTF_MAGIC:04X})")
     if version not in (CTF_VERSION_2, CTF_VERSION_3):
         raise ValueError(f"Unsupported CTF version {version}")
+    return magic, version, flags
+
+
+def _parse_header(data: bytes) -> CtfHeader:
+    """Parse CTF preamble + full header body.
+
+    Callers that might still be looking at a ``CTF_F_COMPRESS`` blob must
+    consult ``_parse_preamble()`` and decompress first -- this function's
+    own header-body length enforcement assumes *data* already holds the
+    real (decompressed, if applicable) header.
+    """
+    magic, version, flags = _parse_preamble(data)
 
     if len(data) < _CTF_V3_HEADER_SIZE:
         raise ValueError(f"CTF header truncated ({len(data)} bytes)")
@@ -283,9 +307,15 @@ def _parse_header(data: bytes) -> CtfHeader:
     )
 
 
-def _decompress_if_needed(data: bytes, header: CtfHeader) -> bytes:
-    """Decompress CTF data if CTF_F_COMPRESS flag is set."""
-    if not (header.flags & CTF_F_COMPRESS):
+def _decompress_if_needed(data: bytes, flags: int) -> bytes:
+    """Decompress CTF data if CTF_F_COMPRESS flag is set.
+
+    Takes the raw *flags* byte (from ``_parse_preamble()``), not a full
+    ``CtfHeader`` -- the header's other fields cannot be trusted yet for a
+    compressed blob (see ``_parse_preamble()``'s own docstring), and this
+    function only ever needed the compress bit.
+    """
+    if not (flags & CTF_F_COMPRESS):
         return data
     # Data after the preamble (4 bytes) is zlib-compressed; _MAX_DECOMPRESS
     # caps the output to prevent a zip-bomb DoS.
@@ -703,20 +733,29 @@ def parse_ctf_from_bytes(data: bytes, pointer_size: int = 8) -> CtfMetadata:
     """
     empty = CtfMetadata()
 
+    # P2 review, fresh evidence (Codex): read only the 4-byte preamble
+    # first -- _parse_header()'s own full v3-header-size enforcement must
+    # not run before decompression, since for a CTF_F_COMPRESS blob
+    # everything past the preamble is still compressed at this point (a
+    # valid compressed blob can easily be under _CTF_V3_HEADER_SIZE bytes
+    # in total). Decompress if needed, then parse (and length-check) the
+    # real header body exactly once, whether or not compression applied.
+    try:
+        _magic, _version, flags = _parse_preamble(data)
+    except ValueError as exc:
+        log.warning("parse_ctf_from_bytes: bad header: %s", exc)
+        return empty
+
+    try:
+        data = _decompress_if_needed(data, flags)
+    except (ValueError, zlib.error) as exc:
+        log.warning("parse_ctf_from_bytes: decompression failed: %s", exc)
+        return empty
+
     try:
         header = _parse_header(data)
     except (ValueError, struct.error) as exc:
         log.warning("parse_ctf_from_bytes: bad header: %s", exc)
-        return empty
-
-    # Decompress if needed
-    try:
-        data = _decompress_if_needed(data, header)
-        # Re-parse header after decompression (offsets may have changed)
-        if header.flags & CTF_F_COMPRESS:
-            header = _parse_header(data)
-    except (ValueError, zlib.error) as exc:
-        log.warning("parse_ctf_from_bytes: decompression failed: %s", exc)
         return empty
 
     hdr_size = _CTF_V3_HEADER_SIZE

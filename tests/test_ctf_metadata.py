@@ -564,44 +564,18 @@ class TestCtfExtraDataSize:
 
 class TestDecompression:
     def test_decompress_not_needed(self) -> None:
-        from abicheck.ctf_metadata import CtfHeader
-
-        hdr = CtfHeader(
-            magic=CTF_MAGIC,
-            version=CTF_VERSION_3,
-            flags=0,
-            parent_label=0,
-            parent_name=0,
-            label_off=0,
-            object_off=0,
-            func_off=0,
-            type_off=0,
-            str_off=0,
-            str_len=0,
-        )
+        # _decompress_if_needed takes the raw flags byte, not a full
+        # CtfHeader (P2 review, fresh evidence, Codex -- see its own
+        # docstring: the header's other fields cannot be trusted before
+        # decompression for a compressed blob).
         data = b"some data"
-        result = _decompress_if_needed(data, hdr)
+        result = _decompress_if_needed(data, 0)
         assert result == data
 
     def test_decompress_exceeds_size_limit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Zip bomb guard: decompression must fail when output exceeds the cap."""
-        from abicheck.ctf_metadata import CtfHeader
-
-        hdr = CtfHeader(
-            magic=CTF_MAGIC,
-            version=CTF_VERSION_3,
-            flags=CTF_F_COMPRESS,
-            parent_label=0,
-            parent_name=0,
-            label_off=0,
-            object_off=0,
-            func_off=0,
-            type_off=0,
-            str_off=0,
-            str_len=0,
-        )
         # What is under test is the unconsumed_tail guard, not the production
         # value of the cap. Crossing the real 256 MiB ceiling meant allocating
         # 257 MiB of zeros and zlib-compressing them, which cost ~4.4s and made
@@ -615,30 +589,56 @@ class TestDecompression:
         preamble = struct.pack("<HBB", CTF_MAGIC, CTF_VERSION_3, CTF_F_COMPRESS)
         data = preamble + compressed
         with pytest.raises(ValueError, match="exceeds 1 MiB limit"):
-            _decompress_if_needed(data, hdr)
+            _decompress_if_needed(data, CTF_F_COMPRESS)
 
     def test_decompress_bad_data(self) -> None:
-        from abicheck.ctf_metadata import CtfHeader
-
-        hdr = CtfHeader(
-            magic=CTF_MAGIC,
-            version=CTF_VERSION_3,
-            flags=CTF_F_COMPRESS,
-            parent_label=0,
-            parent_name=0,
-            label_off=0,
-            object_off=0,
-            func_off=0,
-            type_off=0,
-            str_off=0,
-            str_len=0,
-        )
         # Preamble + garbage (not valid zlib)
         data = (
             struct.pack("<HBB", CTF_MAGIC, CTF_VERSION_3, CTF_F_COMPRESS) + b"garbage"
         )
         with pytest.raises(ValueError, match="decompression failed"):
-            _decompress_if_needed(data, hdr)
+            _decompress_if_needed(data, CTF_F_COMPRESS)
+
+
+class TestSmallCompressedBlobPreDecompressionLength:
+    """P2 review, fresh evidence (Codex): a valid CTF_F_COMPRESS blob can
+    easily be smaller in total than _CTF_V3_HEADER_SIZE (36 bytes) --
+    everything past the 4-byte preamble is zlib body, not the real header.
+    parse_ctf_from_bytes previously called the old _parse_header() (which
+    enforced the full header length) BEFORE decompression, so a small-but-
+    valid compressed blob was rejected as "truncated" before decompression
+    ever ran."""
+
+    def test_small_compressed_blob_with_one_type_parses(self) -> None:
+        b = CtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", CTF_K_INTEGER, 0, 4, extra=int_enc)
+        data = b.build(compress=True)
+        # Confirms this is genuinely the small-blob shape the finding
+        # describes, not accidentally padded past the header size by the
+        # test fixture itself.
+        assert len(data) < ctf_metadata._CTF_V3_HEADER_SIZE
+
+        meta = parse_ctf_from_bytes(data)
+        assert meta.has_ctf is True
+        assert meta.extraction_partial is False
+
+    def test_larger_compressed_blob_still_parses(self) -> None:
+        """Positive control: a compressed blob whose total size already
+        exceeds the header size must keep working -- proving the fix
+        didn't disturb the already-correct larger-blob path."""
+        b = CtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", CTF_K_INTEGER, 0, 4, extra=int_enc)
+        for i in range(20):
+            m_name = b.add_string(f"field_{i}")
+            members = struct.pack("<II", m_name, (1 << 16) | (i * 4))
+            b.add_type(f"s{i}", CTF_K_STRUCT, 1, 4, extra=members)
+        data = b.build(compress=True)
+        assert len(data) >= ctf_metadata._CTF_V3_HEADER_SIZE
+
+        meta = parse_ctf_from_bytes(data)
+        assert meta.has_ctf is True
 
 
 # ---------------------------------------------------------------------------
