@@ -259,6 +259,7 @@ def compare_bundle_from_facts(
     policy: str = "strict_abi",
     policy_file: Any = None,
     new_signature_evidence: dict[str, Any] | None = None,
+    old_signature_evidence: dict[str, Any] | None = None,
 ) -> BundleDiffResult:
     """Bundle-level comparison with the *old* side loaded from a stored
     :class:`BundleFacts` instead of live ``.so`` files (G38 Phase 2).
@@ -275,18 +276,17 @@ def compare_bundle_from_facts(
     ``compare_bundle()``'s own ``manifest=`` parameter); otherwise the
     manifest captured in *old_facts* is reused.
 
-    *new_signature_evidence* (G38 stabilization Phase 12), when given and
-    non-empty, is the NEW side's bundle-canonical-key -> ``AbiSnapshot``
-    map for ``find_unverified_signature_findings`` -- the OLD side's own
-    map is always *old_facts.per_library_snapshots* itself. Omitted (the
-    default): the Phase 4 gate does not run, matching every pre-Phase-12
-    caller -- there is not yet a CLI producer for a live NEW-side evidence
-    map here (G38 Phase 13 is separate, not-yet-implemented).
+    *new_signature_evidence* (G38 Phase 12) is the NEW side's bundle-
+    canonical-key -> ``AbiSnapshot`` map for ``find_unverified_signature_
+    findings``. *old_signature_evidence* (Codex review, PR #1060, round 6)
+    overrides the OLD side's map, falling back to *old_facts.per_library_
+    snapshots* -- needed by a depth-projecting caller. Omitted: no gate.
     """
     from .bundle_analysis import analyze_bundle
 
     old_snapshot = bundle_snapshot_from_facts(old_facts)
     effective_manifest = manifest if manifest is not None else old_facts.manifest
+    effective_old_evidence = old_facts.per_library_snapshots if old_signature_evidence is None else old_signature_evidence
     return analyze_bundle(
         old_snapshot,
         new_snapshot,
@@ -296,7 +296,7 @@ def compare_bundle_from_facts(
         cohorts=cohorts,
         policy=policy,
         policy_file=policy_file,
-        old_signature_evidence=old_facts.per_library_snapshots,
+        old_signature_evidence=effective_old_evidence,
         new_signature_evidence=new_signature_evidence,
     )
 

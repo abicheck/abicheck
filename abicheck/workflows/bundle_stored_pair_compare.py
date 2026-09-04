@@ -125,29 +125,42 @@ def compare_stored_bundle_facts_pair(
     ``BundleDiffResult.bundle_verdict`` is scored under the same policy as
     every per-library diff, not just the live-NEW-side driver's own case.
 
-    *depth*, when given, caps both sides' evidence to what ``compare``'s
-    ``--depth`` requested before diffing (``binary``/``headers`` -- the
-    only two values reachable here at all, since ``--depth build``/
-    ``source`` are rejected unconditionally for a stored OLD_INPUT
-    elsewhere: this driver has no channel to *collect* L3-L5 evidence, only
-    to project already-resolved evidence down). Unlike a live NEW-side dump
-    (which ``service.resolve_input`` can be asked to skip header parsing
-    for), both sides here are *already* fully-resolved ``AbiSnapshot``s
-    with whatever evidence they were captured with baked in -- so this
-    calls the same ``policy.depth_projection.project_pair_to_depth()``
-    ordinary live comparisons use (``service_compare_pipeline.py``,
-    ``cli_compare_helpers.py``, ``cli_scan_baseline.py``) rather than
-    rejecting the flag outright, which an earlier version of this function
-    did on the mistaken premise that no such projection primitive existed
+    *depth*, when given, is enforced as a floor (``workflows.artifact.
+    execute.enforce_requested_depth`` -- raises ``ValueError`` when a
+    matched pair's resolved evidence falls short of what was requested)
+    and then applied as a ceiling to every stored snapshot on both sides
+    (``policy.depth_projection.project_snapshot_to_depth``) before diffing
+    -- the same floor-then-ceiling pairing ``classify_compare_pair``
+    (``service_compare_pipeline.py``) applies for every other
+    resolved-snapshot comparison path (``cli_compare_helpers.py``,
+    ``cli_scan_baseline.py``). Only ``binary``/``headers`` are reachable
+    here at all, since ``--depth build``/``source`` are rejected
+    unconditionally for a stored OLD_INPUT elsewhere: this driver has no
+    channel to *collect* L3-L5 evidence, only to enforce and project
+    already-resolved evidence. Unlike a live NEW-side dump (which
+    ``service.resolve_input`` can be asked to skip header parsing for),
+    both sides here are *already* fully-resolved ``AbiSnapshot``s with
+    whatever evidence they were captured with baked in -- rejecting the
+    flag outright, which an earlier version of this function did on the
+    mistaken premise that no such projection primitive existed, was wrong
     (Codex review, PR #1060, fresh evidence: it does, and every other
     resolved-snapshot comparison path in this codebase already calls it).
-    ``None`` (the default) is a no-op, matching
-    ``project_snapshot_to_depth``'s own documented contract.
+    Both projected maps -- not the raw, unprojected
+    ``old_facts``/``new_facts.per_library_snapshots`` -- are also what
+    reaches ``compare_bundle_from_facts()``'s own signature-evidence gate
+    below (Codex review, PR #1060, round 6): otherwise a header-complete
+    stored snapshot could still satisfy ``find_unverified_signature_
+    findings``'s type-evidence check under an explicit depth ceiling the
+    per-library diff itself was capped to. ``None`` (the default) is a
+    no-op for both the floor check and the projection, matching
+    ``enforce_requested_depth``'s/``project_snapshot_to_depth``'s own
+    documented contracts.
     """
     from ..bundle_facts import bundle_snapshot_from_facts, compare_bundle_from_facts
     from ..bundle_manifest import load_manifest
-    from ..policy.depth_projection import project_pair_to_depth
+    from ..policy.depth_projection import project_snapshot_to_depth
     from ..serialization import load_bundle_facts
+    from .artifact.execute import enforce_requested_depth
     from .compare_policy import compare_snapshots
 
     old_facts = load_bundle_facts(
@@ -193,14 +206,50 @@ def compare_stored_bundle_facts_pair(
     matched_keys = sorted(
         set(old_facts.per_library_snapshots) & set(new_facts.per_library_snapshots)
     )
+
+    # Codex review, PR #1060, round 6: project *every* library's stored
+    # snapshot (not just the matched pairs fed to compare_snapshots below)
+    # down to the requested depth once, up front, and reuse the same
+    # projected maps both for the per-library diff and for the bundle-level
+    # signature-evidence gate a few lines down -- previously that gate read
+    # old_facts.per_library_snapshots/new_facts.per_library_snapshots
+    # (raw, unprojected) directly, so a header-complete stored snapshot
+    # could still satisfy find_unverified_signature_findings' type-evidence
+    # check under an explicit --depth binary/headers ceiling even though the
+    # equivalent live binary-depth view would mark those exports ELF_ONLY
+    # and flag BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED. project_snapshot_to_
+    # depth is a pure per-snapshot projection (no cross-side interaction),
+    # so projecting the whole map here is equivalent to -- and replaces --
+    # the previous per-matched-pair project_pair_to_depth() call.
+    projected_old_snapshots = {
+        key: project_snapshot_to_depth(snap, depth)
+        for key, snap in old_facts.per_library_snapshots.items()
+    }
+    projected_new_snapshots = {
+        key: project_snapshot_to_depth(snap, depth)
+        for key, snap in new_facts.per_library_snapshots.items()
+    }
+
     per_library_results: list[DiffResult] = []
     for key in matched_keys:
-        old_snapshot, new_snapshot = project_pair_to_depth(
-            old_facts.per_library_snapshots[key], new_facts.per_library_snapshots[key], depth
-        )
+        raw_old = old_facts.per_library_snapshots[key]
+        raw_new = new_facts.per_library_snapshots[key]
+        # Codex review, PR #1060, round 6: the floor half of the same
+        # binary/headers/build/source contract project_snapshot_to_depth()
+        # (the ceiling half, applied above) already enforces below --
+        # classify_compare_pipeline pairs the two unconditionally
+        # (enforce_requested_depth() confirms the resolved evidence
+        # *reaches* depth, then the projection caps it back down), and this
+        # driver had only ever picked up the second half. Without this,
+        # --depth headers over two binary-only stored documents silently
+        # reported NO_CHANGE instead of failing loudly: the projection is a
+        # no-op ceiling on evidence that was already at or below the
+        # requested rung, so the comparison would proceed on binary-only
+        # facts as if headers-level evidence had genuinely backed it.
+        enforce_requested_depth(depth, ((f"old:{key}", raw_old), (f"new:{key}", raw_new)))
         diff = compare_snapshots(
-            old_snapshot,
-            new_snapshot,
+            projected_old_snapshots[key],
+            projected_new_snapshots[key],
             suppress,
             policy=policy,
             policy_file=policy_file,
@@ -232,5 +281,13 @@ def compare_stored_bundle_facts_pair(
         cohorts=cohorts,
         policy=policy,
         policy_file=policy_file,
-        new_signature_evidence=dict(new_facts.per_library_snapshots),
+        # Codex review, PR #1060, round 6: both maps must be the same
+        # depth-projected snapshots the per-library diff above just used --
+        # passing the raw, unprojected old_facts.per_library_snapshots (the
+        # old_signature_evidence default) or new_facts.per_library_snapshots
+        # here would let find_unverified_signature_findings judge type-
+        # evidence completeness against evidence richer than what --depth
+        # actually allowed the comparison to see.
+        old_signature_evidence=dict(projected_old_snapshots),
+        new_signature_evidence=dict(projected_new_snapshots),
     )

@@ -270,17 +270,21 @@ class TestCompareStoredBundleFactsPair:
             for f in result.bundle_findings
         )
 
-    def test_depth_is_forwarded_to_project_pair_to_depth(
+    def test_depth_is_forwarded_to_project_snapshot_to_depth(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """An explicit *depth* must reach ``policy.depth_projection.
-        project_pair_to_depth()`` for every matched library, and its
-        *projected* return value -- not the raw stored snapshot -- must be
-        what actually reaches ``compare_snapshots()`` (Codex review, PR
-        #1060, fresh evidence: an earlier version of this function rejected
-        --depth binary outright on the mistaken premise that no projection
-        primitive existed; this pins the real wiring instead of only
-        exercising the ``None``/no-op default every other test here uses)."""
+        project_snapshot_to_depth()`` for both sides of every matched
+        library, and its *projected* return value -- not the raw stored
+        snapshot -- must be what actually reaches ``compare_snapshots()``
+        (Codex review, PR #1060, fresh evidence: an earlier version of this
+        function rejected --depth binary outright on the mistaken premise
+        that no projection primitive existed; this pins the real wiring
+        instead of only exercising the ``None``/no-op default every other
+        test here uses). Both fixtures carry no header evidence
+        (``from_headers`` unset), so ``binary`` is the rung both sides
+        genuinely reach -- the floor check ``enforce_requested_depth`` now
+        also runs (round 6) does not reject it."""
         old_path = self._facts_path(
             tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
         )
@@ -290,24 +294,24 @@ class TestCompareStoredBundleFactsPair:
 
         import abicheck.policy.depth_projection as depth_projection_module
 
-        real_project_pair_to_depth = depth_projection_module.project_pair_to_depth
-        calls: list[tuple[object, object, str | None]] = []
+        real_project_snapshot_to_depth = depth_projection_module.project_snapshot_to_depth
+        calls: list[tuple[object, str | None]] = []
 
-        def _fake_project_pair_to_depth(old, new, depth):
-            calls.append((old, new, depth))
-            return real_project_pair_to_depth(old, new, depth)
+        def _fake_project_snapshot_to_depth(snap, depth):
+            calls.append((snap, depth))
+            return real_project_snapshot_to_depth(snap, depth)
 
         monkeypatch.setattr(
-            depth_projection_module, "project_pair_to_depth", _fake_project_pair_to_depth
+            depth_projection_module,
+            "project_snapshot_to_depth",
+            _fake_project_snapshot_to_depth,
         )
 
         compare_stored_bundle_facts_pair(old_path, new_path, depth="binary")
 
-        assert len(calls) == 1
-        called_old, called_new, called_depth = calls[0]
-        assert called_depth == "binary"
-        assert called_old.library == "libcore.so"
-        assert called_new.library == "libcore.so"
+        assert len(calls) == 2
+        assert {c[1] for c in calls} == {"binary"}
+        assert {c[0].library for c in calls} == {"libcore.so"}
 
     def test_depth_headers_strips_build_mode_before_diffing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -319,7 +323,10 @@ class TestCompareStoredBundleFactsPair:
         nulls ``build_mode`` below the ``build`` rung), not sent through
         unprojected -- otherwise a build-mode finding could still surface
         and change the reported verdict despite the explicit ``headers``
-        ceiling."""
+        ceiling. ``from_headers=True`` so the round-6 floor check
+        (``enforce_requested_depth``) accepts ``--depth headers`` -- the
+        fixture genuinely reached that rung, it's the *build_mode* ceiling
+        this test is pinning, not the floor."""
         from abicheck.model.build_mode_facts import BuildMode, CompilerFamily
 
         old_snapshot = AbiSnapshot(
@@ -335,6 +342,7 @@ class TestCompareStoredBundleFactsPair:
                 )
             ],
             build_mode=BuildMode(compiler_family=CompilerFamily.GCC),
+            from_headers=True,
         )
         old_path = tmp_path / "old.bundlefacts.json"
         new_path = tmp_path / "new.bundlefacts.json"

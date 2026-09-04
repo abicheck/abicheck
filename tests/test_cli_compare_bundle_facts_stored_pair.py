@@ -436,3 +436,48 @@ class TestStoredPairEndToEnd:
         assert code != 0
         assert code != 64  # a real ValueError, not a usage error
         assert "different build variants" in out
+
+    def test_depth_binary_over_binary_only_evidence_is_a_clean_exit(
+        self, tmp_path: Path
+    ) -> None:
+        """The floor half of the depth contract (Codex review, PR #1060,
+        round 6): --depth binary over two stored documents that genuinely
+        only carry binary-level evidence must succeed, not be rejected by
+        the new ``enforce_requested_depth`` floor check -- that check must
+        only reject a depth the resolved evidence falls *short* of, never
+        one it already meets."""
+        old_path = _write_facts(
+            tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
+        )
+        new_path = _write_facts(
+            tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
+        )
+
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--depth", "binary", "--format", "json"
+        )
+
+        assert code == 0
+        assert json.loads(out)["verdict"] == "NO_CHANGE"
+
+    def test_depth_headers_over_binary_only_evidence_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The floor half of the depth contract (Codex review, PR #1060,
+        round 6): --depth headers over two stored documents that only
+        reached binary-level evidence (no ``from_headers``) must fail
+        loudly -- ``enforce_requested_depth`` -- rather than silently
+        report ``NO_CHANGE`` as if headers-level evidence had genuinely
+        backed the comparison."""
+        old_path = _write_facts(
+            tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
+        )
+        new_path = _write_facts(
+            tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
+        )
+
+        code, out = _invoke("compare", str(old_path), str(new_path), "--depth", "headers")
+
+        assert code != 0
+        assert code != 64  # a real ValidationError, not a Click usage error
+        assert "evidence depth" in out
