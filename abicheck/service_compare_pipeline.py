@@ -554,29 +554,29 @@ def classify_compare_pair(
     # P0.4 follow-up (P2 review, discussion_r3787839902): `DiffResult.
     # requested_depth`/`analysis_assurance.requested_depth`/`depth_satisfied`
     # were only ever stamped by the CLI's own `cli_compare_helpers.
-    # _report_compare_result` -- this shared classification half of
-    # `run_compare_request` (the typed Python API / MCP `abi_compare` entry
-    # point) never populated either, so a direct caller passing an explicit,
-    # successfully-resolved `CompareRequest.depth` still read
-    # `requested_depth=None`/`depth_satisfied=None` and could report
-    # `status="complete"` even though a depth was genuinely requested.
-    # Recomputes `analysis_assurance` the same way `checker.compare()` itself
-    # does (`old_pack`/`new_pack` from each snapshot's own *embedded*
-    # `build_source`, since `InputSpec.sources`/`build_info` are embedded
-    # into `old`/`new` before `resolve_compare_request` ever returns), so
-    # `layer_coverage`/`requested_depth` are reflected too.
+    # _report_compare_result` -- this shared classification half never
+    # populated either, so a direct caller's successfully-resolved
+    # `CompareRequest.depth` still read `requested_depth=None` and could
+    # report `status="complete"` despite a depth genuinely being requested.
+    # Recomputes `analysis_assurance` the same way `checker.compare()` does
+    # (`old_pack`/`new_pack` from each snapshot's own embedded
+    # `build_source`), so `layer_coverage`/`requested_depth` reflect it too.
     #
     # One Semantic Pipeline plan, sub-phase 4B's first real consumer: reads
     # the already-lower-cased value off `pair.resolved_execution_context`
-    # (built from the same `AnalysisPlan` this function already resolves for
-    # its pre-flight check) instead of re-normalizing `request.depth` a
-    # second time -- the two were always identical, so this retires a
-    # duplicate normalization. Falls back to the direct computation for a
-    # caller whose hand-built `ResolvedComparePair` carries no context.
-    if pair.resolved_execution_context is not None:
-        result.requested_depth = pair.resolved_execution_context.requested_depth
-    elif request.depth is not None:
-        result.requested_depth = request.depth.lower()
+    # instead of re-normalizing `request.depth` again -- but only when the
+    # two agree. A caller may pass a *different* `request` than built `pair`
+    # (this function's own docstring), and `old`/`new` above were just
+    # projected to *this* `request.depth`, so a disagreement defers to it
+    # (Codex review) instead of reporting a depth never actually seen.
+    normalized_request_depth = (
+        request.depth.lower() if request.depth is not None else None
+    )
+    context = pair.resolved_execution_context
+    if context is not None and context.requested_depth == normalized_request_depth:
+        result.requested_depth = context.requested_depth
+    elif normalized_request_depth is not None:
+        result.requested_depth = normalized_request_depth
     from .analysis_assurance import compute_analysis_assurance
 
     result.analysis_assurance = compute_analysis_assurance(

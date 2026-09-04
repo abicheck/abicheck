@@ -343,44 +343,19 @@ class TestRequestedDepthPropagationSharedPipeline:
         assert aa.depth_satisfied is False, aa
         assert aa.status != "complete", aa
 
-    def test_classify_compare_pair_reads_requested_depth_from_resolved_execution_context(
-        self, tmp_path: Path
-    ) -> None:
-        """ADR-063 Track 3 (One Semantic Pipeline plan, sub-phase 4B's first
-        real consumer): ``classify_compare_pair`` must stamp ``DiffResult.
-        requested_depth`` off ``pair.resolved_execution_context.
-        requested_depth`` when one is attached, rather than re-normalizing
-        ``request.depth`` a second time. Proven the only way that is
-        distinguishable from "both happen to agree": attach a context whose
-        own ``requested_depth`` deliberately disagrees with what
-        ``request.depth.lower()`` would independently compute -- the result
-        must follow the object, not the re-derivation."""
-        from abicheck.api_types import CompareRequest, InputSpec
+    def _pair_with_context(
+        self,
+        old: AbiSnapshot,
+        new: AbiSnapshot,
+        context: object,
+    ) -> object:
         from abicheck.service_compare_evidence import SideEvidence
-        from abicheck.service_compare_pipeline import (
-            ResolvedComparePair,
-            classify_compare_pair,
-        )
-        from abicheck.workflows.resolved_execution_context import (
-            EvidenceView,
-            ResolvedExecutionContext,
-        )
+        from abicheck.service_compare_pipeline import ResolvedComparePair
 
-        old, new = _header_pair()
-        old_p, new_p = self._snapshot_files(tmp_path)
-        request = CompareRequest(
-            old=InputSpec.of(old_p),
-            new=InputSpec.of(new_p),
-            depth="source",
-        )
         evidence = SideEvidence(
             headers=[], compile=None, collect_mode="off", dump_manifest=None
         )
-        context = ResolvedExecutionContext(
-            operation="compare",
-            evidence=EvidenceView.for_request("headers"),
-        )
-        pair = ResolvedComparePair(
+        return ResolvedComparePair(
             old=old,
             new=new,
             old_fmt=None,
@@ -389,11 +364,67 @@ class TestRequestedDepthPropagationSharedPipeline:
             new_evidence=evidence,
             resolved_execution_context=context,
         )
+
+    def test_classify_compare_pair_reads_requested_depth_from_resolved_execution_context(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-063 Track 3 (One Semantic Pipeline plan, sub-phase 4B's first
+        real consumer): ``classify_compare_pair`` stamps ``DiffResult.
+        requested_depth`` off ``pair.resolved_execution_context.
+        requested_depth`` when one is attached and agrees with
+        ``request.depth`` -- the ordinary case, since both are seeded from
+        the same request in every real invocation."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_pipeline import classify_compare_pair
+        from abicheck.workflows.resolved_execution_context import (
+            EvidenceView,
+            ResolvedExecutionContext,
+        )
+
+        old, new = _header_pair()
+        old_p, new_p = self._snapshot_files(tmp_path)
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="headers"
+        )
+        context = ResolvedExecutionContext(
+            operation="compare", evidence=EvidenceView.for_request("headers")
+        )
+        pair = self._pair_with_context(old, new, context)
         result = classify_compare_pair(request, pair).diff
 
-        # Follows the attached context's own value ("headers"), not
-        # request.depth.lower() ("source") -- the re-derivation this fix
-        # retires.
+        assert result.requested_depth == "headers", result
+
+    def test_classify_compare_pair_prefers_request_depth_over_a_stale_context(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review (PR #1047): a caller may pass a *different*
+        ``request`` than the one that built ``pair`` (``classify_compare_
+        pair``'s own docstring names this split as the whole reason ADR-055
+        D1 exists). ``old``/``new`` are projected to *this* request's depth
+        (``project_pair_to_depth``), so a context whose own ``requested_
+        depth`` disagrees must not win -- reporting it would claim a depth
+        this classification never actually saw. Must defer to
+        ``request.depth`` instead."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service_compare_pipeline import classify_compare_pair
+        from abicheck.workflows.resolved_execution_context import (
+            EvidenceView,
+            ResolvedExecutionContext,
+        )
+
+        old, new = _header_pair()
+        old_p, new_p = self._snapshot_files(tmp_path)
+        # The context was resolved for "source"; this call classifies at
+        # "headers" instead.
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="headers"
+        )
+        context = ResolvedExecutionContext(
+            operation="compare", evidence=EvidenceView.for_request("source")
+        )
+        pair = self._pair_with_context(old, new, context)
+        result = classify_compare_pair(request, pair).diff
+
         assert result.requested_depth == "headers", result
 
 
