@@ -55,14 +55,31 @@ so there is no slot for a path here. `export_baseline_set` returns the
 metadata document and the per-library snapshot documents; a caller that
 owns path assignment (the actual `actions/baseline` writer, or a future one)
 builds `manifest.json`'s own `artifacts[]` list from those two return
-values itself. `artifacts[].binary`/`.sha256` (a staged binary's own path
-and the *snapshot's* stable-content digest) are likewise not carried
-through — the latter is exactly what `ObjectRef.digest` already gives once
-the snapshot is stored, made redundant rather than dropped; only
-`binary_sha256` (the staged binary's own content identity, independent of
-anything this package format already derives) is preserved, on the owning
-`ArtifactRef.native_identity` — the field ADR-062 D6 names for exactly this
-kind of artifact-level content/build identity fact.
+values itself. `artifacts[].binary` (a staged binary's own path) is
+likewise not carried through, for the identical reason.
+
+`artifacts[].sha256`/`.binary_sha256` (the *snapshot's* own
+`compute_snapshot_content_hash` stable-content digest, and the staged
+binary's raw-byte digest, respectively) **are** preserved, verbatim, on
+the owning `ArtifactRef.native_identity` as `snapshot_sha256`/
+`binary_sha256` -- the field ADR-062 D6 names for exactly this kind of
+artifact-level content/build identity fact. An earlier version of this
+module assumed `sha256` was redundant with `ObjectRef.digest` (the
+storage layer's own content digest, computed once the snapshot is
+already converted to its stored DTO form) and dropped it; that assumption
+was wrong -- the two digests are over different representations of the
+data (raw legacy JSON with volatile fields stripped, vs. the stored DTO
+form), so they can disagree, and `sha256` is the one signal
+`buildsource.baseline_set._snapshot_digest_issue` uses to detect a
+snapshot altered or replaced after `manifest.json` was written. This
+adapter cannot recompute and verify it itself (`storage/` may not import
+`buildsource/`, a flat-root module, and hand-duplicating that function's
+own multi-field volatile-key stripping would be exactly the kind of
+independently-tuned second encoding this package's other adapters
+already avoid) -- preserving the recorded value, unverified, at least
+keeps a real mismatch detectable by a caller that does have that
+function, rather than silently discarding the one signal that would
+catch it (Codex review, fresh evidence).
 """
 
 from __future__ import annotations
@@ -299,6 +316,16 @@ def import_baseline_set(
                 )
         else:
             binary_sha256 = ""
+        if "sha256" in entry:
+            snapshot_sha256 = entry["sha256"]
+            if not isinstance(snapshot_sha256, str):
+                raise ValueError(
+                    f"manifest_document['artifacts'][{index}]['sha256'] "
+                    f"must be a string, not {type(snapshot_sha256).__name__} "
+                    f"({snapshot_sha256!r})"
+                )
+        else:
+            snapshot_sha256 = ""
         # `""` (absent key, or `BaselineArtifact.binary_sha256`'s own
         # documented default) means "no staged binary" -- folded into
         # `native_identity` only when present. A fresh `ArtifactRef`
@@ -308,6 +335,26 @@ def import_baseline_set(
         native_identity = {_LIBRARY_NAME_KEY: library}
         if binary_sha256:
             native_identity["binary_sha256"] = binary_sha256
+        if snapshot_sha256:
+            # `artifacts[].sha256` records `compute_snapshot_content_hash`'s
+            # expected stable-content digest of *this* library's own
+            # snapshot document (`buildsource.baseline_set
+            # ._snapshot_digest_issue`, the resolver's own tamper/
+            # corruption check) -- `storage/` cannot import
+            # `buildsource.baseline_set` to recompute and verify it here
+            # (a flat-root module outside this package's permitted imports,
+            # `storage/AGENTS.md`), and re-implementing that function's own
+            # multi-field volatile-key stripping by hand would be exactly
+            # the "second, independently-tuned encoding kept in sync by
+            # hand" this package's own docstrings elsewhere reject.
+            # Preserving the *recorded* digest here (verified nowhere in
+            # this adapter) still keeps the mismatch detectable by a
+            # caller that does have that function -- silently discarding
+            # it instead would launder a manifest a real resolver would
+            # reject as corrupt/tampered into a self-consistent package
+            # with no trace of the discrepancy (Codex review, fresh
+            # evidence).
+            native_identity["snapshot_sha256"] = snapshot_sha256
         artifact = ArtifactRef(
             artifact_id=artifact.artifact_id,
             variant_id=artifact.variant_id,

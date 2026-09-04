@@ -154,6 +154,30 @@ class TestImportBaselineSet:
         assert liba.native_identity["binary_sha256"] == "bbbb"
         assert "binary_sha256" not in libb.native_identity
 
+    def test_carries_snapshot_sha256_onto_native_identity(self) -> None:
+        """`artifacts[].sha256` records `compute_snapshot_content_hash`'s
+        expected digest of the snapshot -- the one signal
+        `buildsource.baseline_set._snapshot_digest_issue` uses to detect a
+        snapshot altered after `manifest.json` was written. This adapter
+        cannot verify it (no access to that function), but must not
+        silently discard it either -- preserved, unverified, on
+        `native_identity` so the mismatch stays detectable by a caller
+        that can check it (Codex review, fresh evidence)."""
+        doc = _manifest_document()
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(doc, _snapshot_documents(), store=store)
+        liba = next(a for a in manifest.artifact_refs if a.artifact_id == "liba.so")
+        libb = next(a for a in manifest.artifact_refs if a.artifact_id == "libb.so")
+        assert liba.native_identity["snapshot_sha256"] == "aaaa"
+        assert "snapshot_sha256" not in libb.native_identity
+
+    @pytest.mark.parametrize("bad_value", [0, 1234, 0.0, [], {}])
+    def test_rejects_a_non_string_snapshot_sha256(self, bad_value: Any) -> None:
+        doc = _manifest_document()
+        doc["artifacts"][0]["sha256"] = bad_value
+        with pytest.raises(ValueError, match="sha256"):
+            import_baseline_set(doc, _snapshot_documents(), store=InMemoryObjectStore())
+
     @pytest.mark.parametrize("bad_value", [0, 1234, 0.0, [], {}])
     def test_rejects_a_non_string_binary_sha256(self, bad_value: Any) -> None:
         doc = _manifest_document()
