@@ -516,6 +516,59 @@ class TestLooksLikeStoredBundleFacts:
         assert payload.encode()[4095:4096] not in (b" ", b'"')
         assert looks_like_stored_bundle_facts(p) is True
 
+    def test_marker_after_a_string_truncated_right_after_an_escape_backslash_is_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 16): round 13's own fix for a
+        string truncated mid-character had the identical gap one
+        character earlier -- when the small probe's window ends
+        immediately after a lone backslash (the escaped byte itself cut
+        off), `\\.` can't match either, for the same "one required piece
+        missing from the buffer" reason a complete string token can't
+        match a truncated one. Without round 16's own fix, this alone is
+        merely inconclusive (`re.finditer` simply finds no further tokens
+        to compare against, so the scan falls off the end rather than
+        flagging a violation) -- reproducing the actual reported failure
+        (a *definitive*, false structural-violation verdict) needs a
+        coincidental digit run earlier in the same unterminated string, so
+        a real subsequent token match exists whose start position creates
+        a non-whitespace gap against the unclosed string's own content.
+        Constructed so byte 4095 (0-indexed, the small probe's window's
+        last included byte) is exactly the first backslash of an
+        escaped-backslash pair, with its partner byte the very next one,
+        past the window."""
+        header = '{"padding_field":"'
+        # A coincidental digit run well before the truncation point --
+        # without round 16's fix, this is what the scan spuriously
+        # matches as a bare numeric token once the unterminated-string
+        # alternative fails to match the (trailing-backslash-truncated)
+        # string at all.
+        mid = "x" * 50 + "42" + "x" * 50
+        prefix_len = len(header.encode()) + len(mid.encode())
+        # `header + mid + "x" * padding_len` is exactly 4095 bytes -- one
+        # short of the small probe's window, so the escape pair's first
+        # backslash lands precisely at byte index 4095 (the window's last
+        # included byte) and its partner lands at index 4096 (just past
+        # it).
+        padding_len = 4095 - prefix_len
+        assert padding_len > 0
+        tail = (
+            "\\\\" + "z" * 40 + '","artifact_type":"abicheck.bundle-facts",'
+            '"schema_version":2,"per_library_snapshots":{}}'
+        )
+        payload = header + mid + "x" * padding_len + tail
+        p = tmp_path / "truncated_after_escape_backslash.json"
+        p.write_text(payload)
+        b = payload.encode()
+        # Premise check: json.loads() really does accept this document
+        # (a literal escaped backslash inside padding_field), and the cut
+        # point really does fall where intended.
+        assert json.loads(payload)["artifact_type"] == "abicheck.bundle-facts"
+        assert len(b) > 4096
+        assert b[4095:4096] == b"\\"
+        assert b[4096:4097] == b"\\"
+        assert looks_like_stored_bundle_facts(p) is True
+
     def test_gzip_fextra_forging_a_zip_eocd_is_still_stored(
         self, tmp_path: Path
     ) -> None:

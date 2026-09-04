@@ -374,6 +374,17 @@ other half of why an escape hatch was not added back in a different shape).
    (scalar and nested-container alike), not only the scalar case the
    review itself reported.
 
+19. **Point 16's own unterminated-string fix had the identical gap one
+   level down: a scan window ending right after a lone trailing backslash
+   (Codex review, round 16, fresh evidence).** ``\\.`` requires both the
+   backslash and its escaped byte, so a scanned prefix ending immediately
+   after a bare backslash inside a string couldn't match that alternative
+   either -- the same failure mode point 16 fixed for a string ending
+   mid-character, one byte earlier. Answered by letting the unterminated-
+   string alternative also consume a trailing lone backslash with no
+   escaped byte left to pair it with (``_JSON_STRUCTURE_TOKEN_RE``'s own
+   updated docstring has the full account).
+
 **Residual, accepted gap (zip/gzip nesting, not chased further):** a gzip
 stream's ``FEXTRA`` header sub-field (or, structurally analogously, a zstd
 skippable frame) can embed not just a forged central-directory record

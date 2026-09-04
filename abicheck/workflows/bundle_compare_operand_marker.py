@@ -84,8 +84,24 @@ from pathlib import Path
 #: fallback (this scan simply runs out of tokens with nothing more to
 #: examine) then correctly reports the answer as inconclusive
 #: (``definitive=False``) rather than a false structural violation.
+#:
+#: **The unterminated-string alternative itself had the identical gap one
+#: level down (Codex review, round 16, fresh evidence).** ``\\.`` requires
+#: *both* the backslash and its escaped byte -- so when the scanned prefix
+#: ends immediately after a lone trailing backslash (no byte left to pair
+#: it with), that alternative fails to match at that position too, for the
+#: same reason the *complete*-string alternative fails to match a
+#: truncated string: one required piece is missing from the buffer.
+#: ``re.finditer`` then resumes inside the string's own raw content
+#: exactly as round 13 described, and the whitespace-only gap check can
+#: again misreport a truncated-but-otherwise-valid document as
+#: definitively invalid. Closed the same way as round 13's own fix, one
+#: level deeper: ``\\?`` before ``\Z`` lets the unterminated-string
+#: alternative also consume a trailing lone backslash with no partner
+#: byte, rather than requiring a complete escape pair right up to the
+#: buffer's own end.
 _JSON_STRUCTURE_TOKEN_RE = re.compile(
-    rb'"(?:[^"\\]|\\.)*"|"(?:[^"\\]|\\.)*\Z|[{}\[\]:,]|-?\d[\d.eE+-]*|true|false|null',
+    rb'"(?:[^"\\]|\\.)*"|"(?:[^"\\]|\\.)*\\?\Z|[{}\[\]:,]|-?\d[\d.eE+-]*|true|false|null',
     re.DOTALL,
 )
 
