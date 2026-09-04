@@ -1,0 +1,3 @@
+### Added
+
+- **`entity_id_is_cross_snapshot_stable(entity_id)` gating primitive** (`abicheck/model/identity_stability.py`) — ADR-063 Phase 2's third design for promoting `entity:` toward a real match tier. Rather than a third attempt at stabilizing `Anonymous`/`LocalToFunction` scope segments' per-parse-only ordinals (both prior stabilization attempts were reverted), this predicate excludes any `EntityId` touched by that instability from being treated as cross-snapshot-authoritative. Real, tested infrastructure (Hypothesis-driven primitive-level property tests), but deliberately not yet wired into any consumer — that requires the same adversarial review rigor this codebase's identity/dedup logic has historically needed.

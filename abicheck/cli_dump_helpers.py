@@ -85,6 +85,7 @@ from .workflows.extraction import (
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
     from .model import AbiSnapshot
+    from .service_dump_pipeline import ResolvedDumpRequest
     from .service_scan import CompileContext
 
 
@@ -350,17 +351,17 @@ def write_snapshot_payload(
     """One JSON encode + one canonical, atomic, possibly-compressed write
     (ADR-059) for the already-decoded ``dump`` payload dict — the write
     chokepoint the real (non-dry) `dump` write path routes through so a
-    100+ MB snapshot is serialized exactly once, straight from the dict
-    ``snapshot_to_dict``/``fold_dump_provenance_into_dict`` already built
-    (no second ``json.loads``/``json.dumps`` round trip).
-
-    *compression* is a :class:`~abicheck.snapshot_io.SnapshotCompression`.
-    Returns a :class:`~abicheck.snapshot_io.SnapshotWriteResult`.
+    100+ MB snapshot is serialized exactly once. Writes the single-file
+    sectioned shape (``storage.sectioned_document``). *compression* is a
+    :class:`~abicheck.snapshot_io.SnapshotCompression`; returns a
+    :class:`~abicheck.snapshot_io.SnapshotWriteResult`.
     """
     import json
 
-    from .snapshot_io import write_snapshot_text
+    from .serialization import SCHEMA_VERSION
+    from .workflows.storage import to_sectioned_document, write_snapshot_text
 
+    payload = to_sectioned_document(payload, max_known_schema_version=SCHEMA_VERSION)
     text = json.dumps(payload, indent=2)
     return write_snapshot_text(text, path, compression=compression)
 
@@ -380,7 +381,7 @@ def reject_snapshot_compression_conflict(
     if output is None:
         return
     from .errors import SnapshotError
-    from .snapshot_io import SnapshotCompression, resolve_write_compression
+    from .workflows.storage import SnapshotCompression, resolve_write_compression
 
     try:
         resolve_write_compression(output, SnapshotCompression(snapshot_compression))
@@ -401,7 +402,7 @@ def write_snapshot_and_report(
     readiness file-size gate.
     """
     from .errors import SnapshotError
-    from .snapshot_io import SnapshotCompression
+    from .workflows.storage import SnapshotCompression
 
     try:
         write_result = write_snapshot_payload(
@@ -750,28 +751,21 @@ def _add_dump_depth_feasibility(
 
 
 def render_dump_dry_run(
+    resolved: ResolvedDumpRequest,
     *,
-    so_path: Path | None,
-    headers: tuple[Path, ...],
-    sources: Path | None,
-    build_info: Path | None,
-    build_config: Path | None,
-    depth: str | None,
-    collect_mode: str,
-    header_backend: str,
     output: Path | None,
+    build_config: Path | None = None,
     snapshot_compression: str = "auto",
     has_compile_db: bool = False,
     compile_db_matched: bool | None = None,
     build_info_is_pack: bool = False,
-    dump_manifest: Any | None = None,
 ) -> Any:
     """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
 
     Cheap, read-only resolution only: classifies the inputs, discovers config,
     shows the resolved depth/collect-mode and available data layers, and
-    checks tool availability on PATH. Never runs castxml/clang, a build query,
-    or any I/O beyond stat()/PATH lookups.
+    checks tool availability on PATH. Never runs castxml/clang, a build
+    query, or I/O beyond stat()/PATH lookups.
 
     ``has_compile_db`` (Codex review): whether ``-p``/``--compile-db`` was
     given at all -- a bare presence flag, kept for the "nothing was given at
@@ -843,6 +837,13 @@ def render_dump_dry_run(
     from .cli_helpers_compare import discover_project_config
     from .dry_run import DryRunResult, tool_status
 
+    side = resolved.request.input
+    so_path, sources, build_info = side.path, side.sources, side.build_info
+    headers = resolved.headers
+    depth = resolved.requested_depth
+    collect_mode = resolved.collect_mode
+    dump_manifest = side.dump_manifest  # raw; evidence's clears at --depth binary
+
     result = DryRunResult(command="dump")
     result.add(
         "Inputs",
@@ -861,7 +862,7 @@ def render_dump_dry_run(
     )
     result.add(
         "Headers and compile context",
-        f"ast-frontend: {header_backend}",
+        f"ast-frontend: {resolved.effective_header_backend}",
     )
     result.add(
         "Build/source inputs",
@@ -887,7 +888,7 @@ def render_dump_dry_run(
     )
     if output is not None:
         from .errors import SnapshotError
-        from .snapshot_io import SnapshotCompression, resolve_write_compression
+        from .workflows.storage import SnapshotCompression, resolve_write_compression
 
         try:
             resolved_compression = resolve_write_compression(

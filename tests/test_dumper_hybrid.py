@@ -1571,6 +1571,67 @@ class TestTypedefsQualifiedMerge:
         assert directly_referenced_stdlib_types(merged) == frozenset({"std::string"})
 
 
+class TestConstantEntityIdSidecarStaysAlignedWithConstants:
+    """Codex review: unlike ``typedefs_qualified`` (unioned above, so its
+    ``typedef_entity_ids`` sidecar unioning the same way stays exact-key
+    aligned with it), ``constants`` itself is deliberately left
+    castxml-only, verbatim -- so unioning ``constant_entity_ids`` the same
+    way ``typedef_entity_ids`` is would leave a clang-only key in the
+    sidecar with no corresponding entry in ``merged.constants``, a phantom
+    identity violating the sidecar's own exact-key contract."""
+
+    def test_clang_only_constant_identity_is_dropped_not_left_phantom(self):
+        from abicheck.model.identity import entity_id_for_constant
+
+        clang_only_id = entity_id_for_constant((), "kClangOnly")
+        castxml = _snap(ast_producer="castxml", constants={"kShared": "1"})
+        clang = _snap(
+            ast_producer="clang",
+            constants={"kClangOnly": "2"},
+            constant_entity_ids={"kClangOnly": clang_only_id},
+        )
+        merged = merge_snapshots(castxml, clang)
+        # constants itself stays castxml-only (pre-existing, unchanged
+        # behavior) -- the clang-only constant is not retained.
+        assert merged.constants == {"kShared": "1"}
+        # So its identity must not survive into the sidecar either.
+        assert "kClangOnly" not in merged.constant_entity_ids
+
+    def test_shared_constant_keeps_its_identity_from_either_side(self):
+        from abicheck.model.identity import entity_id_for_constant
+
+        castxml_id = entity_id_for_constant((), "kShared")
+        clang_id = entity_id_for_constant((), "kShared")
+        castxml = _snap(
+            ast_producer="castxml",
+            constants={"kShared": "1"},
+            constant_entity_ids={"kShared": castxml_id},
+        )
+        clang = _snap(
+            ast_producer="clang",
+            constants={"kShared": "1"},
+            constant_entity_ids={"kShared": clang_id},
+        )
+        merged = merge_snapshots(castxml, clang)
+        assert merged.constant_entity_ids == {"kShared": castxml_id}
+
+    def test_every_sidecar_key_names_a_retained_constant(self):
+        from abicheck.model.identity import entity_id_for_constant
+
+        castxml = _snap(
+            ast_producer="castxml",
+            constants={"kKept": "1"},
+            constant_entity_ids={"kKept": entity_id_for_constant((), "kKept")},
+        )
+        clang = _snap(
+            ast_producer="clang",
+            constants={"kDropped": "2"},
+            constant_entity_ids={"kDropped": entity_id_for_constant((), "kDropped")},
+        )
+        merged = merge_snapshots(castxml, clang)
+        assert set(merged.constant_entity_ids) <= set(merged.constants)
+
+
 class TestFactProvenanceHelpers:
     def test_castxml_producer_is_always_backed(self):
         snap = _snap(ast_producer="castxml")

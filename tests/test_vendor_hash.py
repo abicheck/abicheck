@@ -61,3 +61,29 @@ class TestStripVendorHash:
         # Only the matched hash/extension span is affected -- the rest of
         # the name keeps its original case.
         assert strip_vendor_hash("LibFoo-ABCDEF123456.so.1") == "LibFoo.so.1"
+
+    def test_numeric_suffix_without_a_library_extension_is_untouched(self) -> None:
+        # Bug class (CodeRabbit review, PR #942): the numeric-version
+        # lookahead branch matched *any* ``.<digits>`` continuation
+        # regardless of what followed, so a non-library filename that merely
+        # happens to contain a hyphenated hex run before a numeric segment
+        # was mis-stripped -- exercised across several sibling shapes, not
+        # just the one reported input, since a single fixed example only
+        # forecloses that exact string.
+        assert strip_vendor_hash("plugin-abcdef.1.json") == "plugin-abcdef.1.json"
+        assert (
+            strip_vendor_hash("libfoo-abcdef123456.1.txt")
+            == "libfoo-abcdef123456.1.txt"
+        )
+        assert strip_vendor_hash("data-cafebabe.2.tar") == "data-cafebabe.2.tar"
+        assert strip_vendor_hash("libfoo-abcdef123456.1") == "libfoo-abcdef123456.1"
+
+    def test_numeric_version_segment_before_the_library_extension_is_still_stripped(
+        self,
+    ) -> None:
+        # The lookahead branch this bug lives in exists precisely for a
+        # version segment genuinely sitting between the hash and the
+        # extension (e.g. auditwheel's own multi-component SONAME) -- the
+        # fix must not regress that real, intended case.
+        assert strip_vendor_hash("libfoo-abcdef123456.1.2.so") == "libfoo.1.2.so"
+        assert strip_vendor_hash("libfoo-abcdef123456.1.dylib") == "libfoo.1.dylib"

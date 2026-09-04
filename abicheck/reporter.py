@@ -23,7 +23,8 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from .severity import KindSets, SeverityConfig
+    from .severity import GateDecision, KindSets, SeverityConfig
+from . import reporter_contract_blocks as _reporter_contract_blocks
 from .checker import (
     Change,
     DiffResult,
@@ -39,8 +40,7 @@ from .checker_policy import (
 )
 from .checker_types import validate_check_id, validate_evidence_depth
 from .impact import assess_change
-from .report.document import ReportDocument
-from .report.render_json import render_json
+from .policy.gate_decision import gate_decision_for_result
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
 from .reporter_contract_blocks import add_contract_context as _add_contract_context
@@ -66,8 +66,6 @@ from .reporter_markdown import (
     _build_impact_table as _build_impact_table,
     _build_internal_rtti_note as _build_internal_rtti_note,
     _build_leaf_type_sections as _build_leaf_type_sections,
-    _build_library_files_section as _build_library_files_section,
-    _build_severity_sections as _build_severity_sections,
     _build_severity_summary_md as _build_severity_summary_md,
     _finding_id as _finding_id,
     _fmt_size as _fmt_size,
@@ -160,6 +158,7 @@ def to_stat_json(
     *,
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
+    show_only: str | None = None, contract_evaluation: bool = False,
 ) -> str:
     """JSON output for --stat mode: summary only, no changes array.
 
@@ -169,6 +168,9 @@ def to_stat_json(
     the compatibility verdict. Without it, ``--stat`` output has historically
     bypassed severity handling entirely (it short-circuits in
     ``service.render_output`` before format dispatch).
+
+    *show_only*/*contract_evaluation* feed only the scoped-gate fold at the
+    tail of ``render_json_with_side_facts`` -- no ``changes`` array here to filter.
     """
     summary = build_summary(result)
     effective_policy = result.policy or "strict_abi"
@@ -190,10 +192,13 @@ def to_stat_json(
         },
     }
     _add_check_identity(d, result)
-    if severity_config is not None:
+    gate = gate_decision_for_result(result, severity_config)
+    if gate is not None:
+        assert severity_config is not None  # gate is None otherwise
         d["severity"] = _build_severity_json(
             result.changes,
             severity_config,
+            gate=gate,
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
@@ -226,7 +231,7 @@ def to_stat_json(
     # summary. `compare` rejects `--stat --use-cases` outright rather than
     # dropping the manifest silently; this keeps the same promise for a
     # direct caller of the renderer (Codex review).
-    return render_json(ReportDocument.from_mapping(d), indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
@@ -329,7 +334,7 @@ def _to_json_leaf(
     show_only: str | None = None,
     *,
     severity_config: SeverityConfig | None = None,
-    require_complete_analysis: bool = False, include_exit_decision: bool = True,
+    require_complete_analysis: bool = False, include_exit_decision: bool = True, contract_evaluation: bool = False,
 ) -> str:
     """Leaf-change mode JSON output.
 
@@ -523,11 +528,13 @@ def _to_json_leaf(
         "changes": leaf_changes_list + non_type_list,
     }
     _add_check_identity(d, result)
-    if severity_config is not None:
+    gate = gate_decision_for_result(result, severity_config)
+    if gate is not None:
+        assert severity_config is not None  # gate is None otherwise
         d["severity"] = _build_severity_json(
             changes,
             severity_config,
-            all_changes=list(result.changes),
+            gate=gate,
             policy=result.policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
@@ -557,7 +564,7 @@ def _to_json_leaf(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return render_json(ReportDocument.from_mapping(d), indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 def _add_entries_to_root_causes(
@@ -640,7 +647,7 @@ def _to_json_root_cause(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
-    require_complete_analysis: bool = False, include_exit_decision: bool = True,
+    require_complete_analysis: bool = False, include_exit_decision: bool = True, contract_evaluation: bool = False,
 ) -> str:
     """``--report-mode root-cause`` JSON output (G29 Phase 3, ADR-052 slice 3).
 
@@ -726,11 +733,13 @@ def _to_json_root_cause(
     d["policy"] = effective_policy
     if show_only:
         _add_show_only_filter(d, result, changes, show_only)
-    if severity_config is not None:
+    gate = gate_decision_for_result(result, severity_config)
+    if gate is not None:
+        assert severity_config is not None  # gate is None otherwise
         d["severity"] = _build_severity_json(
             changes,
             severity_config,
-            all_changes=list(result.changes),
+            gate=gate,
             policy=result.policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
@@ -763,7 +772,7 @@ def _to_json_root_cause(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return render_json(ReportDocument.from_mapping(d), indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 def _metadata_dict(meta: object | None) -> dict[str, object] | None:
@@ -1134,26 +1143,24 @@ def to_json(
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
     include_exit_decision: bool = True,  # exit block (2.41); see exit_decision.py
+    contract_evaluation: bool = False,  # ADR-061 P2 item 5
 ) -> str:
     if stat:
         return to_stat_json(
             result, indent=indent, severity_config=severity_config,
-            require_complete_analysis=require_complete_analysis,
-        )
+            require_complete_analysis=require_complete_analysis, show_only=show_only, contract_evaluation=contract_evaluation)
 
     if report_mode == "leaf":
         return _to_json_leaf(
-            result, indent=indent, show_only=show_only,
-            severity_config=severity_config,
+            result, indent=indent, show_only=show_only, severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
-            include_exit_decision=include_exit_decision)
+            include_exit_decision=include_exit_decision, contract_evaluation=contract_evaluation)
 
     if report_mode == "root-cause":
         return _to_json_root_cause(
-            result, indent=indent, show_only=show_only,
-            severity_config=severity_config,
+            result, indent=indent, show_only=show_only, severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
-            include_exit_decision=include_exit_decision)
+            include_exit_decision=include_exit_decision, contract_evaluation=contract_evaluation)
 
     changes = list(result.changes)
     if show_only:
@@ -1177,11 +1184,13 @@ def to_json(
         _add_show_only_filter(d, result, changes, show_only)
 
     # Severity-categorized summary when severity config is provided
-    if severity_config is not None:
+    gate = gate_decision_for_result(result, severity_config)
+    if gate is not None:
+        assert severity_config is not None  # gate is None otherwise
         d["severity"] = _build_severity_json(
             changes,
             severity_config,
-            all_changes=list(result.changes),
+            gate=gate,
             policy=result.policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
@@ -1207,7 +1216,7 @@ def to_json(
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
     _add_trailing_fields(d, result, show_impact, show_only)
-    return render_json(ReportDocument.from_mapping(d), indent=indent)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {
@@ -1635,20 +1644,21 @@ def _build_severity_json(
     changes: list[Change],
     severity_config: SeverityConfig,
     *,
-    all_changes: list[Change] | None = None,
+    gate: GateDecision,
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
 ) -> dict[str, object]:
     """Build severity information for JSON output.
 
-    *changes* are the (possibly filtered) changes for display counts.
-    *all_changes*, when provided, is the unfiltered set used to compute
-    the exit code so that ``--show-only`` does not affect the exit code.
-    *kind_sets* from ``DiffResult._effective_kind_sets()`` includes
-    PolicyFile overrides.
+    *changes* are the (possibly filtered) changes for display counts. *gate*
+    is the caller's already-computed :func:`gate_decision_for_result` value
+    (ADR-061 D9: this function projects a decision, it does not recompute
+    one) -- always derived from the *unfiltered* change set, so
+    ``--show-only`` does not affect the exit code it reports. *kind_sets*
+    from ``DiffResult._effective_kind_sets()`` includes PolicyFile overrides.
     """
-    from .severity import SeverityLevel, categorize_changes, compute_gate_decision
+    from .severity import SeverityLevel, categorize_changes
 
     categorized = categorize_changes(
         changes,
@@ -1688,24 +1698,12 @@ def _build_severity_json(
     # build" from ``config``/``categories`` itself; this makes that answer a
     # first-class, versioned part of the report.
     #
-    # Derived from *exit_changes* (the unfiltered gate set), not ``changes``
-    # (the possibly --show-only-filtered *display* set) — otherwise hiding
-    # the one category that's actually failing the build (e.g.
-    # ``--show-only=breaking`` when an addition promoted to ``error`` is
-    # what's blocking) would report ``blocking: true`` alongside
-    # ``blocking_categories: []`` (Codex review on #557). Routed through
-    # ``compute_gate_decision`` — the single canonical gate computation —
-    # rather than hand-rolling exit_code and blocking_categories as two
-    # independent computations that could drift apart from each other.
-    exit_changes = all_changes if all_changes is not None else changes
-    gate = compute_gate_decision(
-        exit_changes,
-        severity_config,
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
-    )
-
+    # ``gate`` was computed once by the caller from the unfiltered change
+    # set, not ``changes`` (the possibly --show-only-filtered *display*
+    # set) — otherwise hiding the one category that's actually failing the
+    # build (e.g. ``--show-only=breaking`` when an addition promoted to
+    # ``error`` is what's blocking) would report ``blocking: true`` alongside
+    # ``blocking_categories: []`` (Codex review on #557).
     return {
         "config": config_dict,
         "categories": categories,

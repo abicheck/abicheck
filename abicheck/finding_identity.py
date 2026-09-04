@@ -37,9 +37,9 @@ mangled-primary + name-based extern-C fallback in ``_diff_functions``,
 independently-tested primitive -- following the same "most specific
 available identity, ambiguity-safe fallback" principle ADR-045 already
 established for flat type matching (``diff_helpers.TypeMap``) and ADR-048
-established for L5 source-graph nodes
-(``buildsource/entity_identity.py``). This is the L0-L2 flat-finding
-analogue of those two, not a third independent implementation of the
+established for L5 source-graph nodes (``buildsource/entity_identity.py``).
+This is the L0-L2 flat-finding analogue of those two, not a third
+independent implementation of the
 underlying principle -- and deliberately does not import
 ``buildsource.entity_identity`` (the optional L3-L5 layer must depend on
 this core package, never the other way around).
@@ -57,14 +57,13 @@ this core package, never the other way around).
 That second wiring waited for the piece this module was missing rather than
 for the refactor to get smaller: :func:`resolve_function_identity` resolves
 *one* declaration's identity and has no notion of "this identity is
-ambiguous within its own snapshot, so do not join on it" -- which is the
-whole of what made the ``extern "C"`` fallback safe. :class:`SymbolIdentityIndex`
+ambiguous within its own snapshot, so do not join on it" -- the whole of
+what made the ``extern "C"`` fallback safe. :class:`SymbolIdentityIndex`
 supplies it, so the matching engine states the rule instead of
-re-implementing it. Matching behavior is deliberately unchanged; the
-hand-tuned logic around the join (elf-only-mode, unconfirmed-parameter and
-LLP64 threading, virtual-method-addition, inline transitions, hidden
-friends) is untouched, and the golden/FP-rate/tier-accuracy/detector-oracle
-suites pin that.
+re-implementing it. Matching behavior is deliberately unchanged -- the
+hand-tuned join logic (elf-only-mode, unconfirmed-parameter/LLP64
+threading, virtual-method-addition, inline transitions, hidden friends) is
+untouched, pinned by the golden/FP-rate/tier-accuracy/detector-oracle suites.
 
 NEVER invents a fact a producer did not supply: a tier is only claimed
 when the corresponding input field is actually present.
@@ -79,6 +78,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 from .finding_identity_atomic import canonicalize_atomic_slot
+from .model.signature_normalization import canonicalize_function_signature_param_type
 from .name_classification import canonicalize_type_name
 
 if TYPE_CHECKING:
@@ -691,23 +691,21 @@ def resolve_function_identity(func: Function) -> FindingIdentity:
     ``ref_qualifier``, which alone distinguish legal overloads with
     otherwise identical names and parameter types (``void f()`` vs.
     ``void f() const``, ``void f() &`` vs. ``void f() &&``; Codex review).
+
+    Per-parameter canonicalization delegates to ``model.signature_
+    normalization.canonicalize_function_signature_param_type`` -- the same
+    primitive ``entity_id_for_function`` uses (ADR-063 Phase 2's
+    "finding_identity.py algorithm migration") -- rather than
+    ``canonicalize_type_name`` alone, which keeps a top-level by-value
+    cv-qualifier distinguishing where the shared primitive correctly drops
+    it (``void f(int)``/``void f(const int)`` are the same function). A
+    *pointee* cv-qualifier still distinguishes either way.
     """
     param_types = (
         ()
         if func.is_extern_c
         else (
-            # canonicalize_type_name: castxml ("char const*") and clang's
-            # -ast-dump=json ("char const *") spell an otherwise-identical
-            # parameter type differently -- name_classification.py's own
-            # docstring documents this as a real, confirmed cross-producer
-            # discrepancy, and diff_symbols.py's _params_differ already
-            # compares parameter types through this function for exactly
-            # that reason. Without it, the same declaration seen from two
-            # producers would get different NORMALIZED-tier signatures
-            # here, fragmenting identity across evidence tiers the same
-            # way an uncanonicalized qualified_name/source_location would
-            # (Codex review).
-            *(canonicalize_type_name(p.type) for p in func.params),
+            *(canonicalize_function_signature_param_type(p.type) for p in func.params),
             f"const:{func.is_const}",
             f"volatile:{func.is_volatile}",
             f"ref:{func.ref_qualifier}",
@@ -1230,9 +1228,8 @@ def _stringify_change_value(value: object) -> str:
 # Only the bit-valued half of each _EQUIVALENT_CHANGE_CATEGORIES size/
 # alignment pair needs converting -- diff_platform.py's byte-valued
 # STRUCT_SIZE_CHANGED/STRUCT_ALIGNMENT_CHANGED are already the target unit.
-# Used only by _change_discriminator's canonicalize_values=True path to
-# fold a category-collapsed kind's old/new into the discriminator in a
-# unit that agrees regardless of which detector supplied the finding
+# Used only by _change_discriminator's canonicalize_values=True path, so a
+# category-collapsed kind's old/new agree regardless of the detector
 # (Codex review, fresh evidence -- see that call site's own comment).
 _CATEGORY_VALUE_UNIT_DIVISOR = {
     "type_size_changed": 8,
@@ -1302,12 +1299,10 @@ def _change_discriminator(
     ``description`` embeds the arbitrary sampled symbol via its
     ``description_template`` (``diff_platform_elf_symbols.py``'s
     ``_check_gained_gnu_unique``: ``"Symbol binding became GNU_UNIQUE:
-    {name} ..."`` where ``name`` is the sample). Clearing
-    ``entity_symbol`` alone (see :func:`resolve_change_identity`) is not
-    enough, since ``description`` still varies with the sample even
-    though ``old_value``/``new_value`` do not (Codex review: verified
-    changing only the sampled export still produced a different synthetic
-    primary id).
+    {name} ..."`` where ``name`` is the sample). Clearing ``entity_symbol``
+    alone is not enough, since ``description`` still varies with the sample
+    even though ``old_value``/``new_value`` do not (Codex review: verified
+    changing only the sampled export still produced a different id).
 
     ``canonicalize_values=True`` -- used only by
     :func:`report_canonical_finding_id`'s call into
@@ -1329,17 +1324,13 @@ def _change_discriminator(
     ``type_field_type_changed`` -- embed a per-item identity, such as a
     field name, in ``description`` via ``change_registry``'s ``{detail}``
     template placeholder, with no other structured field carrying it;
-    dropping description collapsed two distinct findings on the same
-    symbol/kind/old/new differing only by which field/parameter changed).
-    Canonicalizing the whole description sentence for an allowlisted kind
-    is safe rather than corrupting: :func:`canonicalize_type_name`'s
-    struct/const-prefix rewrites only ever match at the very start of the
-    string, and its pointer/reference-sigil spacing pass only touches
-    ``*``/``&`` characters -- neither construct appears in an ordinary
-    field/parameter name, so the identifying part of the sentence survives
-    untouched while any embedded raw type spelling (e.g.
-    ``struct_field_type_changed``'s own template embeds ``{old} → {new}``)
-    normalizes the same way ``old_value``/``new_value`` do.
+    dropping description collapsed two distinct findings differing only by
+    which field/parameter changed). Canonicalizing the whole sentence for
+    an allowlisted kind is safe rather than corrupting: ``canonicalize_
+    type_name``'s struct/const-prefix rewrites only match at the string's
+    start, and its pointer/reference-sigil pass only touches ``*``/``&`` --
+    neither appears in an ordinary field/parameter name, so any embedded
+    raw type spelling normalizes the same way ``old_value``/``new_value`` do.
     """
     category = _EQUIVALENT_CHANGE_CATEGORIES.get(kind_value)
     if category is not None:
@@ -1482,21 +1473,23 @@ def resolve_change_identity(
     (which identify one *entity*, so a bare mangled name is already
     unambiguous), this identifies one *finding* -- two distinct findings
     routinely share a symbol. :func:`_change_discriminator` is folded into
-    ``primary_id`` at every tier, including CANONICAL, mirroring the
-    discriminator ``reporter_markdown._finding_id`` already established as
-    the minimal set that disambiguates one finding from another on the same
-    symbol (Codex review: a bare ``mangled:<symbol>`` canonical id would
-    collapse unrelated findings and violate this module's stated dedup-key
+    ``primary_id`` at every tier, including CANONICAL, mirroring
+    ``reporter_markdown._finding_id``'s own established minimal
+    disambiguating set (Codex review: a bare ``mangled:<symbol>`` canonical
+    id would collapse unrelated findings, violating this module's dedup-key
     contract).
 
     ``canonicalize_values=False`` (the default) preserves this function's
     pre-existing, exact-value discriminator for its established callers
     (``diff_filtering.py``'s cross-detector dedup, ``aggregate_findings.py``,
-    ``contract_evaluation.py``) -- none of which need, or were verified
-    against, a type-spelling-insensitive comparison. Pass ``True`` only for
-    a genuinely cross-backend use (:func:`report_canonical_finding_id`),
-    where :func:`_change_discriminator`'s own docstring explains why the
-    raw value must not leak into a "backend-independent" identity.
+    ``contract_evaluation.py``) -- none verified against a type-spelling-
+    insensitive comparison. Pass ``True`` only for a genuinely cross-backend
+    use (:func:`report_canonical_finding_id`), where
+    :func:`_change_discriminator`'s own docstring explains why the raw
+    value must not leak into a "backend-independent" identity.
+
+    ``change.entity_id``, when set, folds in as an additional ``entity:``
+    alias (ADR-063 Phase 2) -- additive, never ``primary_id``/tier.
     """
     kind_value = str(getattr(change.kind, "value", change.kind))
     is_batch = _is_batch_shaped_change(change, kind_value)
@@ -1526,6 +1519,9 @@ def resolve_change_identity(
     # would still make the supposedly library-level identity change
     # whenever the sampled export's file changes.
     source_location = None if is_batch else change.source_location
+    # Same is_batch guard as the three fields above, defensively -- no
+    # producer sets entity_id on a batch-shaped Change today.
+    entity_id = None if is_batch else change.entity_id
     is_symbol_level = _is_symbol_level_kind(kind_value) and not is_batch
     # For a symbol-level change, `entity_symbol` (the raw exported name) is
     # the more tier-stable NORMALIZED-tier basis than `qualified_name` --
@@ -1565,11 +1561,10 @@ def resolve_change_identity(
     # Every alias below is qualified with `discriminator`, matching `primary`/
     # `sig`: a bare `mangled:<x>`/`symbol:<x>`/`qualified:<x>` alias would
     # identify the *entity*, not this *finding* -- two distinct findings on
-    # the same entity (e.g. a return-type change and a param-type change on
-    # the same function) would then share every entity-scoped alias despite
-    # being unrelated changes, and a future alias-match reconciliation tier
-    # (this field's documented purpose) would wrongly pair them whenever
-    # each side has only one candidate (Codex review).
+    # the same entity (e.g. a return-type and a param-type change on the
+    # same function) would share every entity-scoped alias, and a future
+    # alias-match reconciliation tier would wrongly pair them whenever each
+    # side has only one candidate (Codex review).
     aliases: list[str] = []
     if real_mangled:
         aliases.append(f"mangled:{real_mangled}\x1f{discriminator}")
@@ -1580,6 +1575,11 @@ def resolve_change_identity(
     aliases.append(sig)
     if source_location:
         aliases.append(f"relsrc:{rel}\x1f{discriminator}")
+    if entity_id is not None:
+        # ADR-063 Phase 2: first real read of Change.entity_id. Additive
+        # only -- EntityId.key isn't yet proven stable across releases
+        # enough to replace what stored suppression rules key against.
+        aliases.append(f"entity:{entity_id.key}\x1f{discriminator}")
 
     if real_mangled:
         primary = f"mangled:{real_mangled}\x1f{discriminator}"

@@ -1,3 +1,15 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: intermediate
+summarizes:
+  - verdicts
+depends_on:
+  - abicheck/policy_file.py
+lifecycle: active
+generated: false
+---
 # Part 7 — Designing for Stability
 
 > **Series navigation:** [0. Product Contract](00-product-contract.md) ·
@@ -7,8 +19,7 @@
 > [4. C++ ABI](04-cpp-abi.md) ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> **7. Designing for Stability** ·
-> [Detecting Breaks](08-detection.md)
+> **7. Designing for Stability**
 
 **What you'll learn on this page**
 
@@ -341,6 +352,36 @@ itself (a new `ICodec2`, or the inline-namespace generation pattern above).
 
 ---
 
+## Pattern 7 — Let the checker see the pattern
+
+Every pattern above leaves a trace in the declarations: an opaque pointer
+type that is only ever forward-declared, a class whose one data member is a
+pointer to an incomplete type, a `create`/`destroy` pair around a handle, a
+C-linkage factory returning an interface, a callback typedef. abicheck
+recognises those idioms from the header facts, and the anti-patterns beside
+them — an STL container passed by value across the boundary, a polymorphic
+type with no virtual destructor. With `--pattern-verdicts` it uses that
+evidence to *modulate* a verdict: a layout change inside a type the header
+proves opaque is demoted with a stated reason rather than reported as a
+break, and it is never deleted — the finding stays in the report with its
+modulation recorded in a ledger. The reverse holds too: losing an opacity
+or handle guarantee, so that a hidden layout becomes reachable, is raised
+as `opaque_invariant_broken` or `handle_type_changed`.
+
+```bash
+abicheck compare old.so new.so -H include/ --pattern-verdicts --explain-patterns
+```
+
+`--explain-patterns` prints the idiom evidence behind each modulation. Two
+cases show the two directions: a Pimpl switching its pointer type, which
+the checker judges hidden ([case80](../../reference/examples/case80_pimpl_shared_to_unique.md)),
+and a `detail::` Pimpl whose vtable change *does* reach consumers
+([case76](../../reference/examples/case76_detail_pimpl_vtable_changed.md)).
+Flag semantics and the ledger are owned by
+[API Surface Intelligence](../../use/api-surface-intelligence.md).
+
+---
+
 ## The five rules that subsume everything
 
 1. **Treat public headers as ABI contracts.** Anything reachable from a public
@@ -365,36 +406,14 @@ itself (a new `ICodec2`, or the inline-namespace generation pattern above).
 
 ## Wiring abicheck into CI
 
-The minimal gate compares the candidate against the last released `.so`:
-
-```bash
-abicheck compare libfoo.so.old libfoo.so.new \
-  --header old=include/old/foo.h \
-  --header new=include/new/foo.h \
-  --policy strict_abi
-```
-
-It exits non-zero on any 🔴 BREAKING or 🟠 API_BREAK finding. Add
-`--suppress suppressions.yaml` to allowlist changes you've consciously accepted.
-
-For a ready-to-paste GitHub Actions workflow that dumps the previous release and
-fails the build on regressions, see the
-[GitHub Action guide](../../use/github-action.md). For the full CLI surface
-and policy options, see [CLI Usage](../../use/cli-usage.md) and
-[Policy Profiles](../../use/policies.md).
-
-**Reading the verdict in CI:**
-
-| Verdict | Exit behavior | What to do |
-|---------|--------------|------------|
-| ✅ `NO_CHANGE` / 🟢 `COMPATIBLE` | pass | merge |
-| 🟡 `COMPATIBLE_WITH_RISK` | configurable | review the deployment risk (e.g. new GLIBC requirement, `noexcept` removal) |
-| 🟠 `API_BREAK` | non-zero | intended? bump minor and document; else revert |
-| 🔴 `BREAKING` | non-zero | bump SONAME major, or revert the change |
-
-Ship your release builds **with debug info** (or feed abicheck the public
-headers) — the [transitive breaks](06-transitive-breaks.md) in Part 6 are
-invisible to any tool working from a stripped `.so` alone.
+The minimal gate compares the candidate against the last release with the
+public headers, and fails on any `BREAKING` or `API_BREAK` finding. Which
+moment to run it at, what each costs, and how to roll it out without a flag
+day are the subject of [Where in the Pipeline](../where-in-the-pipeline.md)
+and [Rollout and Governance](../rollout-and-governance.md). Reading the
+result: ✅ `NO_CHANGE` · 🟢 `COMPATIBLE` · 🟡 `COMPATIBLE_WITH_RISK` · 🟠
+`API_BREAK` · 🔴 `BREAKING` — what each means and the exit code it maps to
+are owned by [Verdicts](../verdicts.md).
 
 ---
 
@@ -406,16 +425,9 @@ You now have the full picture: how a library becomes a running process
 ([Part 6](06-transitive-breaks.md)), and the patterns that make a library
 evolvable (this page).
 
-**Where to go next:**
-
-- [ABI Cheat Sheet](../abi-cheat-sheet.md) — the 2-minute scannable card of all
-  of the above.
-- [Examples & Case Encyclopedia](../../reference/examples/index.md) — every mechanism here
-  as a minimal, runnable v1/v2 reproduction with a real failure demo.
-- [Verdicts](../verdicts.md) & [Exit Codes](../../reference/exit-codes.md) — the
-  full classification and CI-integration semantics.
-- [Change Kind Reference](../../reference/change-kinds.md) — the authoritative,
-  always-current taxonomy of every detected change.
+The [ABI Cheat Sheet](../abi-cheat-sheet.md) is the two-minute card of
+everything above. From here the series turns from mechanism to your own
+library: which promise you are making, to whom, and how to check it.
 
 ---
 
@@ -443,8 +455,10 @@ real release decision, these are where to verify it:
   of its checklist and additionally covers enums, unions, bitfields, alignment,
   TLS, and transitive/dependency leaks.
 
-*This is the last part of the sequential Learning Series. Next: leave the
-mechanism-by-mechanism track and read
-[Detecting Breaks](08-detection.md) — the Verification & Assurance
-capstone that turns Parts 0–7's mechanisms into an evidence-gathering and
-tooling strategy — or go back to the [series overview](../abi-api-handling.md).*
+*Next on the ladder: [Compatibility Direction](../compatibility-direction.md)
+opens Step 5, Define Your Contract — or go back to the
+[series overview](../abi-api-handling.md).*
+
+---
+
+**Ladder:** ← [Part 6 — Subtle & Transitive Breaks](06-transitive-breaks.md) · Step 4 · Designing for Stability · [Compatibility Direction](../compatibility-direction.md) →

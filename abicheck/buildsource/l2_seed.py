@@ -37,6 +37,7 @@ from typing import Any
 
 from .._compiler_options import split_gcc_options
 from ..compile_context import CompileContext
+from . import pack_io
 from .inline import (
     BuildConfig,
     _run_cleanups,
@@ -45,7 +46,6 @@ from .inline import (
     is_pack_dir,
     load_build_config,
 )
-from .pack import BuildSourcePack
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ def _l2_seed_pack_build_evidence(path: Path) -> Any:
     function does not need its own catch.
     """
     if is_pack_dir(path):
-        return BuildSourcePack.load(path).build_evidence
+        return pack_io.load(path).build_evidence
     from .inputs_pack import _load_build_evidence, load_inputs_manifest
 
     manifest = load_inputs_manifest(path)
@@ -338,6 +338,8 @@ def derive_l2_include_dirs(
     path. Purely best-effort: any failure drains the cleanups and returns
     ``([], [])`` so a scan that works today never regresses.
     """
+    from ..errors import ValidationError
+
     if sources is None and build_info is None:
         return [], []
     cleanups: list[Callable[[], None]] = []
@@ -387,6 +389,11 @@ def derive_l2_include_dirs(
             _run_cleanups(cleanups)
             return [], []
         return out, cleanups
+    except ValidationError:
+        # A deliberate usage error (ADR-063 Phase 4), not "best-effort hint
+        # failed" -- must propagate; mirrors the carve-out below.
+        _run_cleanups(cleanups)
+        raise
     except Exception:  # noqa: BLE001 — best-effort include hint, never fatal
         _run_cleanups(cleanups)
         return [], []
@@ -428,7 +435,7 @@ def derive_l2_compile_context(
 
     Sibling of :func:`derive_l2_include_dirs`, sharing its exact pack-
     resolution precedence (explicit ``--build-info``/``--sources`` pack ->
-    trusted ``--config``/``--build-query`` -> ``build.compile_db`` ->
+    trusted ``--config`` (or a programmatic ``build_query``) -> ``build.compile_db`` ->
     auto-discovered ``compile_commands.json`` -> the inferred build-system
     query) via the same :func:`abicheck.buildsource.inline.collect_inline_pack`
     call — kept as an independent call (rather than folded into
@@ -459,7 +466,7 @@ def derive_l2_compile_context(
     to hand the exception a value along with it, so the caller receives none
     and has nothing left to run.
     """
-    from ..errors import HeaderCompileContextAmbiguousError
+    from ..errors import HeaderCompileContextAmbiguousError, ValidationError
     from .header_compile_context import resolve_header_compile_context
 
     if (sources is None and build_info is None) or not headers:
@@ -503,9 +510,9 @@ def derive_l2_compile_context(
             _run_cleanups(cleanups)
             return None, []
         return resolution.context, cleanups
-    except HeaderCompileContextAmbiguousError:
-        # P0.3's fail-closed case: release any temp build dir this attempt
-        # created, then propagate — never resolved by silently guessing.
+    except (HeaderCompileContextAmbiguousError, ValidationError):
+        # P0.3's fail-closed case, or a deliberate usage error (ADR-063
+        # Phase 4) -- release any temp build dir, then propagate.
         _run_cleanups(cleanups)
         raise
     except Exception:  # noqa: BLE001 -- best-effort, mirrors derive_l2_include_dirs
@@ -822,7 +829,7 @@ def seed_includes_and_fold_compile_context(
     one of the documented ways to resolve exactly that -- and, before it was
     threaded here, the one the error message named without it working.
     """
-    from ..errors import HeaderCompileContextAmbiguousError
+    from ..errors import HeaderCompileContextAmbiguousError, ValidationError
     from ..header_utils import _context_tokens, _has_include_build_context
     from .header_compile_context import (
         filter_units_by_source,
@@ -939,9 +946,9 @@ def seed_includes_and_fold_compile_context(
         if cleanups:
             pending_cleanups.extend(cleanups)
         return incs, True, merged, dirs
-    except HeaderCompileContextAmbiguousError:
-        # P0.3's fail-closed case: release any temp build dir this attempt
-        # created, then propagate -- never resolved by silently guessing.
+    except (HeaderCompileContextAmbiguousError, ValidationError):
+        # P0.3's fail-closed case, or a deliberate usage error (ADR-063
+        # Phase 4) -- release any temp build dir, then propagate.
         _run_cleanups(cleanups)
         raise
     except Exception:  # noqa: BLE001 -- best-effort, mirrors derive_l2_include_dirs

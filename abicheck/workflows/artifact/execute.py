@@ -223,6 +223,8 @@ def _resolve_side_snapshot_impl(
     source_frontend_from_folded_context: bool = False,
     l4_public_headers: list[Path] | None = None,
     l4_public_header_dirs: list[Path] | None = None,
+    legacy_compile_db_tokens: tuple[str, ...] = (),
+    legacy_compile_db_matched: bool = False,
 ) -> SideResolution:
     """The real implementation behind :func:`resolve_side_snapshot`.
 
@@ -235,8 +237,11 @@ def _resolve_side_snapshot_impl(
     leaves them at their no-op defaults, so this is a strict superset of the
     prior behavior, not a new decision point. *build_config*/*build_query*/
     *build_compile_db* are the equivalent pass-through for ``dump``'s ELF
-    path, which still has live ``--build-query``/``--build-compile-db``/
-    ``--config`` CLI flags until PR 3C removes them.
+    path, which keeps a live ``--config`` flag plus these programmatic
+    ``build_query``/``build_compile_db`` arguments -- PR 3C removed the CLI
+    flags of those two names, not the parameters themselves, since a
+    programmatic caller is the operator exactly as an explicit ``--config``
+    is.
 
     ``allow_build_query=None`` keeps this Tier-2 primitive's existing
     "never execute a build system as a side effect" default (``False``,
@@ -268,6 +273,16 @@ def _resolve_side_snapshot_impl(
       c`` is never its Click default and so is always a genuine request — it
       therefore guards the seed with ``lang == "c"`` while leaving the parse's
       own auto-detection alone, exactly as it did before this migration.
+
+    *legacy_compile_db_tokens*/*legacy_compile_db_matched* (ADR-063 Phase 1):
+    forwarded verbatim to
+    :func:`~abicheck.workflows.artifact.resolve._seeded_includes_and_compile_context`
+    -- see that function's own docstring for the precedence rule (the P0.3
+    fold's own result wins whenever it applies), why *matched* is a signal
+    independent of whether any tokens were derived (Codex review), and
+    ``docs/contribute/known-gaps.md``'s "ADR-063 Phase 1" entry for the
+    mechanism this closes. Both default to falsy, so every existing caller
+    of this function is unaffected.
 
     *build_config_locally_trusted* -- ``False`` keeps ``build_config``'s
     presence fully gated by *allow_build_query* (unchanged for ``dump``/
@@ -338,6 +353,8 @@ def _resolve_side_snapshot_impl(
                 allow_build_query=bool(allow_build_query),
                 build_config_locally_trusted=build_config_locally_trusted,
                 collect_mode=seed_collect_mode,
+                legacy_compile_db_tokens=legacy_compile_db_tokens,
+                legacy_compile_db_matched=legacy_compile_db_matched,
             )
         )
         _artifact_plan.pending_cleanups.extend(_seed_cleanups)
@@ -751,13 +768,14 @@ def enforce_requested_depth(
     *sides* is ``(label, snapshot)`` pairs so the message names the side that
     fell short: ``compare`` passes both of its own, ``dump`` its single input.
 
-    Known, accepted limitation (Codex review, not fixed here): this is a
-    floor, not a ceiling. An input that is an already-serialized JSON snapshot
-    with richer embedded evidence than ``depth`` requested still carries all of
-    it — ``resolve_input``'s ``fmt == "json"`` branch returns
-    ``load_snapshot(path)`` verbatim, matching the CLI's own long-documented
-    default, which ``--depth`` has never projected down for a pre-built
-    snapshot either.
+    This function is the *floor* half only — it never strips evidence a
+    resolved snapshot carries beyond *depth*. The *ceiling* half is
+    :func:`abicheck.policy.depth_projection.project_snapshot_to_depth`,
+    applied by ``classify_compare_pair`` right after this function confirms
+    the floor — see that function's own docstring and
+    ``docs/contribute/known-gaps.md``'s "``--depth`` is a floor for live
+    extraction, not a ceiling for a pre-built snapshot" entry for the full
+    account, including why ``dump`` deliberately does not apply it.
     """
     if depth is None:
         return

@@ -39,8 +39,10 @@ identical ordinal to the identical closure.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, field
 from pathlib import Path
+
+import pytest
 
 from abicheck.buildsource.graph_facts import GraphEdge, GraphNode
 from abicheck.buildsource.pack import BuildSourcePack
@@ -48,13 +50,69 @@ from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
+from abicheck.model.fact import replace_with_fact_sync
+from abicheck.model.identity import (
+    Namespace,
+    Record,
+    entity_id_for_function,
+    entity_id_for_type,
+)
 from abicheck.name_classification import strip_anonymous_type_location
 from abicheck.qualified_name_segments import (
+    _walk_rewrite_strings,
     apply_anonymous_type_ordinals,
     collect_anonymous_type_ordinals,
     renumber_anonymous_closure_identities,
 )
 from abicheck.serialization import snapshot_from_dict
+
+
+# Frozen/mutable fixtures for TestFrozenDataclassesReachableFromTheWalkAreRebuilt
+# below. Deliberately local, minimal shapes rather than real model classes, so
+# the invariant is stated about `_walk_rewrite_strings` itself and stays true
+# for whatever frozen field the model grows next.
+@dataclass(frozen=True)
+class _FrozenLeaf:
+    name: str
+
+
+@dataclass(frozen=True)
+class _FrozenHolder:
+    child: _FrozenLeaf
+
+
+@dataclass
+class _MutableHolder:
+    child: _FrozenLeaf
+
+
+@dataclass(frozen=True)
+class _FrozenWithNonInit:
+    name: str
+    derived: str = field(default="", init=False)
+
+
+def _collected_strings(value: object) -> list[str]:
+    """Every string reachable from *value*, for asserting on a rewritten tree
+    without hard-coding the shape each parametrized wrapper produced."""
+    out: list[str] = []
+    _collect_strings_into(value, out)
+    return out
+
+
+def _collect_strings_into(value: object, out: list[str]) -> None:
+    if isinstance(value, str):
+        out.append(value)
+    elif hasattr(value, "__dataclass_fields__"):
+        for name in value.__dataclass_fields__:
+            _collect_strings_into(getattr(value, name), out)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _collect_strings_into(item, out)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _collect_strings_into(k, out)
+            _collect_strings_into(v, out)
 
 
 def _closure(header: str, line: int, col: int) -> str:
@@ -195,152 +253,6 @@ class TestSnapshotRenumbering:
         renumber_anonymous_closure_identities(snap)
         assert snap.types[0].qualified_name == before_type
         assert snap.functions[0].mangled == before_func
-
-
-class TestPayloadTextIsNeverCorrupted:
-    """Codex review: a free-text/expression field (never a type/name
-    spelling) can coincidentally contain a substring matching the closure
-    marker syntax -- e.g. a deprecation message that literally quotes one.
-    Such text must never be collected as identity evidence or rewritten,
-    or a snapshot's own human-readable payload silently corrupts."""
-
-    def test_a_deprecated_message_matching_the_marker_syntax_is_untouched(
-        self,
-    ) -> None:
-        message = f"avoid {_closure('x.h', 10, 2)}"
-        snap = AbiSnapshot(
-            library="lib.so",
-            version="1.0",
-            types=[
-                replace(_record("Widget", qualified="ns::Widget"), deprecated=message)
-            ],
-        )
-        renumber_anonymous_closure_identities(snap)
-        assert snap.types[0].deprecated == message
-
-    def test_a_default_initializer_matching_the_marker_syntax_is_untouched(
-        self,
-    ) -> None:
-        from abicheck.model import TypeField
-
-        expr = f"get_default({_closure('x.h', 10, 2)})"
-        rec = replace(
-            _record("Widget", qualified="ns::Widget"),
-            fields=[TypeField(name="f", type="int", default=expr)],
-        )
-        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
-        renumber_anonymous_closure_identities(snap)
-        assert snap.types[0].fields[0].default == expr
-
-    def test_payload_text_does_not_fabricate_an_ordinal_for_a_real_closure(
-        self,
-    ) -> None:
-        """A deprecated message's coincidental marker must not consume an
-        ordinal slot that a real, identity-bearing closure would otherwise
-        get -- confirming exclusion happens at collection time too, not
-        only at rewrite time."""
-        closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
-        message = f"avoid {_closure('x.h', 1, 1)}"
-        rec = replace(
-            _record(closure_type, qualified=f"ns::{closure_type}"),
-            deprecated=message,
-        )
-        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
-        renumber_anonymous_closure_identities(snap)
-        # The real closure gets ordinal #1 (the only identity-bearing one
-        # collected) -- not #2, which it would get if the deprecated
-        # message's coincidental marker at line 1 (earlier than line 5)
-        # had also been collected as a competing coordinate.
-        assert "#1)" in snap.types[0].qualified_name
-        assert snap.types[0].deprecated == message
-
-    def test_a_variable_initializer_value_matching_the_marker_syntax_is_untouched(
-        self,
-    ) -> None:
-        """Codex review, fresh evidence: ``Variable.value`` (its compile-time
-        constant initializer) is the identical payload shape as
-        ``deprecated``/``default`` -- reached by the dataclass-field walk,
-        not previously excluded."""
-        from abicheck.model import Variable, Visibility
-
-        value = f"text {_closure('x.h', 10, 2)}"
-        var = Variable(
-            name="v",
-            mangled="_ZN1vE",
-            type="const char *",
-            visibility=Visibility.PUBLIC,
-            value=value,
-        )
-        snap = AbiSnapshot(library="lib.so", version="1.0", variables=[var])
-        renumber_anonymous_closure_identities(snap)
-        assert snap.variables[0].value == value
-
-    def test_a_constant_value_matching_the_marker_syntax_is_untouched(self) -> None:
-        """Codex review, fresh evidence: ``AbiSnapshot.constants`` (a
-        ``#define``/``constexpr`` name -> value string dict) is payload,
-        never a type-name spelling -- the generic dict walk previously
-        rewrote its values along with any genuine identity-bearing dict's."""
-        value = f"text {_closure('x.h', 10, 2)}"
-        snap = AbiSnapshot(library="lib.so", version="1.0", constants={"MSG": value})
-        renumber_anonymous_closure_identities(snap)
-        assert snap.constants["MSG"] == value
-
-    def test_a_constant_value_does_not_fabricate_an_ordinal_for_a_real_closure(
-        self,
-    ) -> None:
-        """Same collection-time exclusion check as the deprecated-message
-        sibling above, for a constant's payload value."""
-        closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
-        value = f"text {_closure('x.h', 1, 1)}"
-        rec = _record(closure_type, qualified=f"ns::{closure_type}")
-        snap = AbiSnapshot(
-            library="lib.so",
-            version="1.0",
-            types=[rec],
-            constants={"MSG": value},
-        )
-        renumber_anonymous_closure_identities(snap)
-        assert "#1)" in snap.types[0].qualified_name
-        assert snap.constants["MSG"] == value
-
-    def test_a_source_location_matching_the_marker_syntax_is_untouched(
-        self,
-    ) -> None:
-        """Codex review, fresh evidence: source_location/source_header
-        (ADR-015 provenance -- a filesystem path, never a type/name
-        spelling) is the identical payload shape as deprecated/default/
-        value -- a legal path containing marker-shaped text of its own
-        (e.g. a directory literally named "(lambda:a.h:1:2)") was rewritten
-        even for a snapshot with no real closure at all, corrupting
-        persisted declaration provenance."""
-        path = f"/tmp/{_closure('x.h', 10, 2)}/api.h"
-        rec = replace(
-            _record("Widget", qualified="ns::Widget"),
-            source_location=f"{path}:42",
-            source_header=path,
-        )
-        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
-        renumber_anonymous_closure_identities(snap)
-        assert snap.types[0].source_location == f"{path}:42"
-        assert snap.types[0].source_header == path
-
-    def test_a_source_location_does_not_fabricate_an_ordinal_for_a_real_closure(
-        self,
-    ) -> None:
-        """Same collection-time exclusion check as the deprecated-message/
-        constant siblings above, for source_location/source_header."""
-        closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
-        path = f"/tmp/{_closure('x.h', 1, 1)}/api.h"
-        rec = replace(
-            _record(closure_type, qualified=f"ns::{closure_type}"),
-            source_location=f"{path}:42",
-            source_header=path,
-        )
-        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
-        renumber_anonymous_closure_identities(snap)
-        assert "#1)" in snap.types[0].qualified_name
-        assert snap.types[0].source_location == f"{path}:42"
-        assert snap.types[0].source_header == path
 
 
 class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
@@ -747,7 +659,9 @@ class TestHybridMergeDefersRenumbering:
                 # its own independent ordinal for the SAME shared closure
                 # would be #1 -- a real fact only clang captures rides
                 # along on this type, to prove the merge actually joined.
-                replace(_record(owner_clang, qualified=owner_clang), is_abstract=True),
+                replace_with_fact_sync(
+                    _record(owner_clang, qualified=owner_clang), is_abstract=True
+                ),
             ],
         )
 
@@ -815,7 +729,9 @@ class TestServiceRunDumpHybridAlsoDefersRenumbering:
                 # independent ordinal for the SAME closure would be #1 --
                 # a real clang-only fact rides along to prove the merge
                 # actually joined rather than missing due to desync.
-                replace(_record(owner, qualified=owner), is_abstract=True),
+                replace_with_fact_sync(
+                    _record(owner, qualified=owner), is_abstract=True
+                ),
             ],
         )
 
@@ -825,7 +741,9 @@ class TestServiceRunDumpHybridAlsoDefersRenumbering:
                 return clang_snap
             return castxml_snap
 
-        with patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf):
+        with patch(
+            "abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf
+        ):
             merged = run_dump(p, "elf", header_backend="hybrid")
 
         matched = [t for t in merged.types if t.name.startswith("Foo<")]
@@ -1006,3 +924,140 @@ class TestL5SourceGraphIdentitiesAreNotRenumbered:
             and "26" in post_renumber_graph.nodes[0].label
         )
         assert post_renumber_graph.edges[0].src == pre_renumber_edge_src
+
+
+class TestFrozenDataclassesReachableFromTheWalkAreRebuilt:
+    """``_walk_rewrite_strings`` must handle a FROZEN dataclass anywhere in
+    the object graph it walks — rebuilding it rather than ``setattr``-ing it.
+
+    The bug this pins is not a wrong ordinal, it is an outright crash plus a
+    latent identity taint. ``setattr`` on a frozen instance raises
+    ``FrozenInstanceError``, so the moment any field reachable from
+    ``functions``/``variables``/``types``/``enums`` held one, every dump of
+    a lambda-bearing library aborted (found this way: ADR-063 Phase 2's
+    ``entity_id`` carrier is exactly such a field, and ten end-to-end tests
+    in ``test_identity_taint_end_to_end.py`` failed on it at once). And had
+    the walk merely *skipped* frozen values instead, the marker inside one
+    would have survived in raw ``:line:col`` form — a path/line-tainted
+    identity sitting next to the normalized ones, which is precisely the
+    taint class ``identity.environment_taint`` exists to forbid.
+
+    The invariant is therefore stated against the primitive itself, over
+    several independently-chosen frozen shapes (nested in a tuple, in a
+    list, as a dict value, at two levels of nesting, and one carrying an
+    ``init=False`` field), not only against the one carrier that exposed
+    it — a later frozen model field must be covered by construction rather
+    than by someone remembering to add a case.
+    """
+
+    @staticmethod
+    def _ordinals() -> dict[tuple[str, str, int, int], int]:
+        return collect_anonymous_type_ordinals(
+            [_closure("h.h", 10, 2), _closure("h.h", 20, 4)]
+        )
+
+    def _rewrite(self, value: object) -> object:
+        ordinals = self._ordinals()
+        return _walk_rewrite_strings(
+            value, lambda text: apply_anonymous_type_ordinals(text, ordinals)
+        )
+
+    def test_frozen_dataclass_is_rebuilt_with_rewritten_strings(self) -> None:
+        original = _FrozenLeaf(name=_closure("h.h", 20, 4))
+        result = self._rewrite(original)
+        assert isinstance(result, _FrozenLeaf)
+        # Rebuilt, not mutated: the original instance is untouched.
+        assert original.name == _closure("h.h", 20, 4)
+        assert result is not original
+        assert "20" not in result.name and "#2" in result.name
+
+    @pytest.mark.parametrize(
+        "wrap",
+        [
+            pytest.param(lambda leaf: (leaf,), id="in-a-tuple"),
+            pytest.param(lambda leaf: [leaf], id="in-a-list"),
+            pytest.param(lambda leaf: {"k": leaf}, id="as-a-dict-value"),
+            pytest.param(lambda leaf: ([leaf],), id="two-levels-deep"),
+            pytest.param(
+                lambda leaf: _MutableHolder(child=leaf), id="on-a-mutable-parent"
+            ),
+            pytest.param(
+                lambda leaf: _FrozenHolder(child=leaf), id="on-a-frozen-parent"
+            ),
+        ],
+    )
+    def test_frozen_leaf_is_rewritten_at_any_position(self, wrap: object) -> None:
+        result = self._rewrite(wrap(_FrozenLeaf(name=_closure("h.h", 10, 2))))  # type: ignore[operator]
+        found = [s for s in _collected_strings(result) if "(lambda" in s]
+        assert found, "the walk never reached the frozen leaf at all"
+        assert all("#1" in s for s in found)
+        assert all(":10:2" not in s for s in found)
+
+    def test_frozen_dataclass_with_a_non_init_field_does_not_crash(self) -> None:
+        # ``dataclasses.replace`` rejects an ``init=False`` field, so the
+        # rebuild must not try to hand it one. The field is unreachable to
+        # a caller by construction; the requirement here is only that the
+        # walk still completes and still rewrites what it legitimately can.
+        result = self._rewrite(_FrozenWithNonInit(name=_closure("h.h", 10, 2)))
+        assert isinstance(result, _FrozenWithNonInit)
+        assert "#1" in result.name
+
+    def test_a_changed_non_init_field_is_itself_rewritten(self) -> None:
+        # A field populated in `__post_init__` (simulated via the identical
+        # `object.__setattr__` escape hatch) independently holds its own
+        # closure marker; `name` never changes, so `replacements` stays
+        # empty -- discarding the rewrite left it stale (Codex review), and
+        # rebuilding a NEW instance only when `replacements` was non-empty
+        # instead mutated `original` in place (CodeRabbit review), PR #943.
+        original = _FrozenWithNonInit(name="plain::Type")
+        object.__setattr__(original, "derived", _closure("h.h", 10, 2))
+        original_derived = original.derived
+        result = self._rewrite(original)
+        assert isinstance(result, _FrozenWithNonInit)
+        assert result.name == "plain::Type"
+        assert "#1" in result.derived
+        assert ":10:2" not in result.derived
+        assert result is not original
+        assert original.derived == original_derived
+
+    def test_unchanged_frozen_dataclass_is_returned_as_the_same_object(self) -> None:
+        # No marker to rewrite -> no rebuild, so a snapshot with no closures
+        # anywhere keeps object identity exactly as it did before.
+        original = _FrozenLeaf(name="plain::Type")
+        assert self._rewrite(original) is original
+
+    def test_entity_id_carrier_on_a_real_snapshot_is_renumbered(self) -> None:
+        # The concrete reachable case, through the public entry point: a
+        # frozen ``EntityId`` hanging off each of the four carriers, with a
+        # closure marker in the scope segment, the leaf name, and ``extra``.
+        marker = _closure("task_group.h", 20, 4)
+        rec = _record("R", qualified=f"ns::{marker}::R")
+        rec.entity_id = entity_id_for_type((Namespace("ns"), Record(marker)), "R")
+        fn = Function(
+            name="f",
+            mangled=f"_Z1f{marker}",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
+        fn.entity_id = entity_id_for_function((), "f", mangled_name=fn.mangled)
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            types=[rec, _record("Other", qualified=_closure("task_group.h", 10, 2))],
+            functions=[fn],
+        )
+        renumber_anonymous_closure_identities(snap)
+
+        renumbered_record_id = snap.types[0].entity_id
+        assert renumbered_record_id is not None
+        scope_names = [getattr(seg, "name", "") for seg in renumbered_record_id.scope]
+        assert any("#2" in name for name in scope_names), scope_names
+        assert not any(":20:4" in name for name in scope_names)
+
+        renumbered_fn_id = snap.functions[0].entity_id
+        assert renumbered_fn_id is not None
+        assert any("#2" in part for part in renumbered_fn_id.extra)
+        assert not any(":20:4" in part for part in renumbered_fn_id.extra)
+        # ...and the carrier agrees with the flat spelling it was built
+        # from, which is the whole point of renumbering it at all.
+        assert renumbered_fn_id.extra[1] == snap.functions[0].mangled

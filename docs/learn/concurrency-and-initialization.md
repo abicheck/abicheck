@@ -2,7 +2,7 @@
 doc_type: explanation
 audience:
   - library-maintainer
-level: intermediate
+level: advanced
 canonical_for:
   - concurrency-and-initialization
 depends_on:
@@ -13,14 +13,13 @@ generated: false
 
 # Concurrency & Initialization Contracts
 
-A library's threading model and initialization/destruction order are part
-of its contract with every consumer, exactly as much as its symbols and
-types are — but, like
-[behavioral compatibility](behavioral-compatibility.md) and
-[ownership/lifetime contracts](ownership-and-lifetime.md), almost none of it
-is expressible in a signature a static comparer can read. This page names
-the specific sub-questions so they aren't silently dropped from a release
-review just because no tool flags them.
+A static comparison cannot decide this dimension;
+[§5 of Evidence & Detectability](evidence-and-detectability.md#5-what-abi-tools-cannot-prove)
+says why. A library's threading model and initialization/destruction order are
+part of its contract with every consumer, exactly as much as its symbols
+and types are. This page names the specific sub-questions so they are not
+silently dropped from a release review just because no tool flags them.
+
 
 ## The sub-questions
 
@@ -75,20 +74,6 @@ review just because no tool flags them.
   question orthogonal to whatever cancellation API surface (a function, a
   flag, a token type) exists to request it.
 
-## Why this belongs on its own page rather than folded into "behavioral"
-
-Every item above is, in the sense
-[Behavioral & Semantic Compatibility](behavioral-compatibility.md) defines
-it, a behavioral contract — none of it is provable by static comparison for
-the same underlying reason (it's a property of execution, not of
-declarations). This page exists separately because concurrency and
-initialization bugs have a distinct enough failure signature — nondeterministic,
-timing-dependent, often only reproducing under load or on specific
-hardware/toolchain combinations — that they deserve their own checklist
-rather than being buried as one example among many under a general
-"behavior" heading. A reviewer scanning a changelog for behavioral risk
-should be able to check specifically: did anything on *this* list change?
-
 ## What actually verifies these contracts
 
 The same category of tooling
@@ -114,8 +99,19 @@ recommends generally, aimed specifically at concurrency:
   and treat a change to it as release-note-worthy even when nothing else
   about the release touches ABI or API at all.
 
+As one shell line, the check is the consumer run under ThreadSanitizer with
+a workload that actually contends:
+
+```bash
+TSAN_OPTIONS=halt_on_error=1 LD_LIBRARY_PATH=new/lib ./consumer-tsan --threads 16 --stress
+```
+
 See also: [Behavioral & Semantic Compatibility](behavioral-compatibility.md)
 for the broader category and why static analysis structurally cannot decide
 it, and [Ownership & Lifetime Contracts](ownership-and-lifetime.md) for the
 adjacent, similarly signature-invisible contract about who owns what and for
 how long.
+
+---
+
+**Ladder:** ← [Ownership & Lifetime Contracts](ownership-and-lifetime.md) · Step 9 · Beyond Static ABI · [Series overview](abi-api-handling.md) →

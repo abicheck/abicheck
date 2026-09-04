@@ -124,17 +124,22 @@ class TestFieldDefaultsToNone:
         revision inserted this field positionally between
         `contract_evidence_refs` and `compatibility_evaluation_status`,
         which would have silently shifted every later field's position for
-        such a caller)."""
+        such a caller). `entity_id` (ADR-063 Phase 2) is the newest such
+        field, appended immediately after this one -- both must stay
+        keyword-only, and `entity_id` must stay last until some still-newer
+        field is appended after it in turn."""
         import dataclasses
 
-        f = next(
-            field for field in dataclasses.fields(Change) if field.name == "evidence_provenance"
+        by_name = {f.name: f for f in dataclasses.fields(Change)}
+        assert by_name["evidence_provenance"].kw_only is True
+        assert by_name["entity_id"].kw_only is True
+        all_names = [f.name for f in dataclasses.fields(Change)]
+        assert all_names[-1] == "entity_id", (
+            "entity_id must be the last-declared field on Change"
         )
-        assert f.kw_only is True
-        all_names = [field.name for field in dataclasses.fields(Change)]
-        assert all_names[-1] == "evidence_provenance", (
-            "evidence_provenance must be the last-declared field on Change"
-        )
+        assert (
+            all_names.index("entity_id") == all_names.index("evidence_provenance") + 1
+        ), "entity_id must be appended immediately after evidence_provenance"
 
 
 class TestVerifiedBucketsHaveProducerCoverage:
@@ -216,7 +221,9 @@ class TestClassificationTracksRealProducerBehavior:
         old = build_snapshot("1.0", _CONTEXT, old_extra)
         new = build_snapshot("2.0", _CONTEXT, new_extra)
         emitted = [c for c in compare(old, new).changes if c.kind == expected_kind]
-        assert emitted, f"{mutation.__name__}: expected_kind {expected_kind.name} not emitted"
+        assert emitted, (
+            f"{mutation.__name__}: expected_kind {expected_kind.name} not emitted"
+        )
         stamped = [c for c in emitted if c.evidence_provenance is not None]
         assert not stamped, (
             f"{expected_kind.value} is classified PROVENANCE_UNVERIFIED in "
@@ -245,12 +252,16 @@ class TestClassificationTracksRealProducerBehavior:
             old = build_snapshot("1.0", _CONTEXT, old_extra)
             new = build_snapshot("2.0", _CONTEXT, new_extra)
             found = [c for c in compare(old, new).changes if c.kind == expected_kind]
-            assert found, f"{mutation.__name__}: expected_kind {expected_kind.name} not emitted"
+            assert found, (
+                f"{mutation.__name__}: expected_kind {expected_kind.name} not emitted"
+            )
             emitted.extend(found)
         return emitted
 
     @pytest.mark.parametrize("kind_value", sorted(PROVENANCE_STATIC))
-    def test_static_kinds_are_stamped_identically_on_every_finding(self, kind_value: str) -> None:
+    def test_static_kinds_are_stamped_identically_on_every_finding(
+        self, kind_value: str
+    ) -> None:
         """PROVENANCE_STATIC's own definition is "a constant tuple, the
         same value for every instance of this kind" -- checked exhaustively
         across *every* mutation catalogued for this kind (not just one
@@ -281,7 +292,9 @@ class TestClassificationTracksRealProducerBehavior:
         )
 
     @pytest.mark.parametrize("kind_value", sorted(PROVENANCE_PER_FINDING))
-    def test_per_finding_kinds_are_stamped_on_every_finding(self, kind_value: str) -> None:
+    def test_per_finding_kinds_are_stamped_on_every_finding(
+        self, kind_value: str
+    ) -> None:
         """Also checks PROVENANCE_PER_FINDING is not behaviorally
         indistinguishable from PROVENANCE_STATIC (Codex review, fresh
         evidence): a producer that stamps the same constant tuple on

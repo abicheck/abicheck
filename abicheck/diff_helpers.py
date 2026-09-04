@@ -55,6 +55,8 @@ from .model import AbiSnapshot
 # adoption-debt ceiling for a name nothing external currently imports
 # through that path.
 from .model.change_catalog.registry import TEMPLATE_VOCAB as TEMPLATE_VOCAB
+from .model.identity import EntityId
+from .model.qualified_name_split import iter_top_level_chars
 from .qualified_name_segments import strip_inline_abi_namespaces
 
 K = TypeVar("K")
@@ -145,6 +147,7 @@ def bool_transition(
     removed_values: tuple[str | None, str | None] = (None, None),
     skip_none: bool = False,
     caused_by_type: str | None = None,
+    entity_id: EntityId | None = None,
 ) -> list[Change]:
     """Emit a :class:`Change` for a boolean attribute transition.
 
@@ -167,6 +170,9 @@ def bool_transition(
     field when given — used by hidden-friend transitions to carry the
     befriending class's qualified name, so surface classification can key
     demotion off the *owner's* header origin.
+
+    ``entity_id`` (ADR-063 Phase 2) passes through to ``Change.entity_id``
+    unchanged -- resolving one is entirely the caller's job.
     """
     if skip_none and (old_val is None or new_val is None):
         return []
@@ -181,6 +187,7 @@ def bool_transition(
                 old_value=ov,
                 new_value=nv,
                 caused_by_type=caused_by_type,
+                entity_id=entity_id,
             )
         ]
     if old_val and not new_val and removed is not None:
@@ -194,6 +201,7 @@ def bool_transition(
                 old_value=ov,
                 new_value=nv,
                 caused_by_type=caused_by_type,
+                entity_id=entity_id,
             )
         ]
     return []
@@ -247,16 +255,14 @@ def type_map_key(t: _QualifiedNamed) -> str:
     """Key a ``RecordType``/``EnumType`` for old/new matching by its
     namespace-qualified identity, not its bare declaration name.
 
-    The header-mode dumpers (castxml, clang) deliberately keep ``t.name``
-    bare (see its docstring in model.py) and carry the real namespace path in
-    ``t.qualified_name`` instead; the DWARF backend has no such split and
-    already stores the qualified spelling directly in ``name``. Matching
-    old/new maps by bare ``t.name`` alone lets two unrelated types that only
-    share a short/leaf spelling (e.g. two distinct ``std::*::_Impl`` template
-    internals pulled in transitively) collide and diff against each other,
-    producing spurious field/base-class findings. Falling back to ``t.name``
-    when ``qualified_name`` is unset (global-scope types, DWARF-only
-    snapshots) keeps existing behaviour unchanged there.
+    The header-mode dumpers (castxml, clang) keep ``t.name`` bare (see its
+    docstring in model.py) and carry the real namespace path in
+    ``t.qualified_name`` instead; DWARF has no such split and already
+    stores the qualified spelling directly in ``name``. Matching by bare
+    ``t.name`` alone lets two unrelated types sharing only a short/leaf
+    spelling collide and diff against each other, producing spurious
+    field/base-class findings. Falls back to ``t.name`` when
+    ``qualified_name`` is unset (global-scope/DWARF-only snapshots).
     """
     return t.qualified_name or t.name
 
@@ -266,24 +272,19 @@ class TypeMap(Mapping[str, Q]):
     :func:`type_map_key`, with a collision-safe bare-``name`` alias used
     only for lookups.
 
-    The alias exists for schema-evolution compatibility: an older serialized/
-    header snapshot that predates ``qualified_name`` (or a producer that
-    never populates it) keys its own map entries by the bare name alone.
-    Without an alias, matching that against a freshly-dumped snapshot side
-    where the same namespaced type *does* carry ``qualified_name`` would key
-    the two sides differently (``Foo`` vs. ``ns::Foo``) and manufacture a
-    false ``TYPE_REMOVED``/``TYPE_ADDED`` pair for an unchanged type (Codex
-    review, PR #608).
+    The alias exists for schema-evolution compatibility: an older snapshot
+    that predates (or never populates) ``qualified_name`` keys its entries
+    by the bare name alone, so without an alias, matching it against a
+    freshly-dumped side that DOES carry ``qualified_name`` would key the two
+    sides differently (``Foo`` vs. ``ns::Foo``) and manufacture a false
+    ``TYPE_REMOVED``/``TYPE_ADDED`` pair for an unchanged type (PR #608).
 
-    The alias is only used for ``get``/``in`` — deliberately kept OUT of
-    ``items``/``values``/iteration, which stay one entry per type under its
-    canonical key. A dict literally containing both the qualified key and a
-    bare-name alias for the same object would make every ``for name, t in
-    old_map.items()``-style detector loop process that type (and emit its
-    finding) twice. It is also only added when the bare name is unambiguous
-    within *this* snapshot — not already claimed by a distinct qualified
-    identity — so it cannot reopen the short/leaf-name collision
-    :func:`type_map_key` itself was introduced to fix.
+    Only used for ``get``/``in`` — kept OUT of ``items``/``values``/
+    iteration (else a dict containing both the qualified key and the bare
+    alias for one object would make every ``for name, t in
+    old_map.items()``-style loop process it twice) — and only added when
+    the bare name is unambiguous within *this* snapshot, so it cannot
+    reopen the collision :func:`type_map_key` fixes.
     """
 
     def __init__(self, types: Iterable[Q]) -> None:
@@ -525,35 +526,21 @@ def fact_same_producer_qualified(
 def depth_aware_bare_name(qualified: str) -> str:
     """The innermost, fully-unqualified leaf of a ``::``-qualified name.
 
-    Splits only on a depth-zero ``"::"`` (tracking ``<``/``>`` nesting), so
-    a template argument's own qualification is never mistaken for a
-    namespace boundary -- ``rsplit("::", 1)[-1]`` on
-    ``"Wrapper<dep::Tag>"`` wrongly extracts ``"Tag>"`` instead of the
-    whole (unqualified, since it has no depth-zero ``"::"``) name itself
-    (Codex review, fresh evidence: found in both this module's own
-    ``record_canonical_names`` and ``diff_filtering._enum_canonical_names``,
-    each scanning a fully-qualified DWARF key for its bare leaf).
-
-    A small, local duplicate of ``type_reachability_spelling._bare_type_name``
-    rather than an import of it: that module imports ``diff_cxx_rules``,
-    which imports this one, so importing it here (even lazily -- the
-    ``import-cycle-growth`` gate tracks every ``from .x import y``
-    regardless of nesting) would add a real cycle edge back into this
-    module.
-    """
-    depth = 0
+    Splits only on a top-level ``"::"`` -- via
+    :func:`~abicheck.model.qualified_name_split.iter_top_level_chars`,
+    which tracks a bracket-KIND-aware stack over ``()``/``[]``/``<>`` and
+    quoted literals -- so ``"Wrapper<dep::Tag>"``'s own ``::`` isn't
+    mistaken for the outer boundary, and neither is one inside a non-type
+    template argument's own parenthesized/bracketed/quoted expression
+    (Codex review on PR #1041, several rounds). A small, local caller of
+    that shared primitive rather than a second copy of the splitting loop
+    itself: ``type_reachability_spelling._bare_type_name`` would be the
+    natural sibling, but that module imports ``diff_cxx_rules``, which
+    imports this one, so importing it here would add a real cycle."""
     last_split = 0
-    i, n = 0, len(qualified)
-    while i < n:
-        ch = qualified[i]
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth -= 1
-        elif ch == ":" and depth == 0 and i + 1 < n and qualified[i + 1] == ":":
+    for i, ch in iter_top_level_chars(qualified):
+        if ch == ":" and qualified[i + 1 : i + 2] == ":":
             last_split = i + 2
-            i += 1
-        i += 1
     return qualified[last_split:]
 
 

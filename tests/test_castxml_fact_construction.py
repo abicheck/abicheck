@@ -25,6 +25,7 @@ is ``Fact.unsupported()`` — a real, deliberate divergence from what the
 omission bridge alone would produce (``NOT_COLLECTED``), since castxml can
 never determine va_list-ness for any parameter, on any run.
 """
+
 from __future__ import annotations
 
 from xml.etree.ElementTree import Element, SubElement
@@ -126,6 +127,19 @@ def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
     assert rec.vtable != []
     assert rec.vptr_offset_bits_fact.status is FactStatus.PARTIAL
     assert rec.vptr_offset_bits_fact.value == rec.vptr_offset_bits == 0
+    # ADR-063 Phase 5: is_final_fact is constructed directly too, the same
+    # convention as the four fields above — Widget has no `final` attribute.
+    assert rec.is_final is False
+    assert rec.is_final_fact.status is FactStatus.PRESENT
+    assert rec.is_final_fact.value is False
+    # ADR-063 Phase 5 (Codex review, second pass): qualified_name_fact is
+    # also constructed directly, as Fact.present(qualified_name) — Widget
+    # sits directly under the global namespace, so qualified_name is None,
+    # but that None is a confirmed "no enclosing scope" determination, not
+    # missing evidence.
+    assert rec.qualified_name is None
+    assert rec.qualified_name_fact.status is FactStatus.PRESENT
+    assert rec.qualified_name_fact.value is None
 
 
 def test_opaque_record_facts_present_and_match_legacy_empty_values() -> None:
@@ -142,6 +156,95 @@ def test_opaque_record_facts_present_and_match_legacy_empty_values() -> None:
     assert rec.vtable_fact.status is FactStatus.PRESENT
     assert rec.vptr_offset_bits_fact.status is FactStatus.PARTIAL
     assert rec.vptr_offset_bits_fact.value is None
+    assert rec.is_final_fact.status is FactStatus.PRESENT
+    assert rec.is_final_fact.value is False
+
+
+def test_final_record_is_final_fact_present_true() -> None:
+    root = _base_root()
+    SubElement(
+        root,
+        "Struct",
+        attrib={
+            "id": "_30",
+            "name": "Sealed",
+            "context": "_1",
+            "file": "f1",
+            "location": "f1:9",
+            "size": "8",
+            "align": "8",
+            "attributes": "final",
+        },
+    )
+    rec = _record(root, "Sealed")
+    assert rec.is_final is True
+    assert rec.is_final_fact.status is FactStatus.PRESENT
+    assert rec.is_final_fact.value is True
+
+
+def test_namespaced_record_qualified_name_fact_present_with_real_value() -> None:
+    root = _base_root()
+    SubElement(root, "Namespace", attrib={"id": "_2", "name": "ns", "context": "_1"})
+    SubElement(
+        root,
+        "Struct",
+        attrib={
+            "id": "_40",
+            "name": "Nested",
+            "context": "_2",
+            "file": "f1",
+            "location": "f1:11",
+            "size": "8",
+            "align": "8",
+        },
+    )
+    rec = _record(root, "Nested")
+    assert rec.qualified_name == "ns::Nested"
+    assert rec.qualified_name_fact.status is FactStatus.PRESENT
+    assert rec.qualified_name_fact.value == "ns::Nested"
+
+
+def test_enum_qualified_name_fact_present_at_global_scope() -> None:
+    # ADR-063 Phase 5 (third batch): EnumType.qualified_name_fact is
+    # constructed directly too, mirroring RecordType's own pattern.
+    root = _base_root()
+    SubElement(
+        root,
+        "Enumeration",
+        attrib={
+            "id": "_50",
+            "name": "Color",
+            "context": "_1",
+            "file": "f1",
+            "location": "f1:1",
+        },
+    )
+    parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+    (en,) = [e for e in parser.parse_enums() if e.name == "Color"]
+    assert en.qualified_name is None
+    assert en.qualified_name_fact.status is FactStatus.PRESENT
+    assert en.qualified_name_fact.value is None
+
+
+def test_enum_qualified_name_fact_present_with_real_value() -> None:
+    root = _base_root()
+    SubElement(root, "Namespace", attrib={"id": "_2", "name": "ns", "context": "_1"})
+    SubElement(
+        root,
+        "Enumeration",
+        attrib={
+            "id": "_51",
+            "name": "Color",
+            "context": "_2",
+            "file": "f1",
+            "location": "f1:1",
+        },
+    )
+    parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+    (en,) = [e for e in parser.parse_enums() if e.name == "Color"]
+    assert en.qualified_name == "ns::Color"
+    assert en.qualified_name_fact.status is FactStatus.PRESENT
+    assert en.qualified_name_fact.value == "ns::Color"
 
 
 def test_param_is_va_list_fact_is_unsupported_not_not_collected() -> None:

@@ -684,10 +684,8 @@ def ingest_inputs_pack(
 
     graph = None
     if surface is not None or has_build:
-        from .source_graph import (
-            build_source_graph,
-            mark_source_edges_extractor_coverage,
-        )
+        from .source_graph_build import build_source_graph
+        from .source_graph_build_source_abi import mark_source_edges_extractor_coverage
 
         graph = build_source_graph(
             build_evidence or BuildEvidence(), source_abi=surface

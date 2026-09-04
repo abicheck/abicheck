@@ -33,7 +33,7 @@ check is one line either way.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 #: Deliberately *not* re-exported from the package. These are the doors'
 #: internal instruments, not part of what a consumer of `abicheck.storage`
@@ -53,6 +53,7 @@ __all__ = [
     "identity_text",
     "mapping",
     "provenance_text",
+    "strict_int",
 ]
 
 
@@ -420,3 +421,30 @@ def instance_of(raw: Any, expected: type, field_name: str) -> Any:
             f"{type(raw).__name__} ({raw!r})"
         )
     return raw
+
+
+def strict_int(raw: Any, field_name: str) -> int:
+    """An ``int``-typed field, rejecting ``bool`` even though ``bool``
+    subclasses ``int`` in Python — plain ``instance_of(raw, int, ...)``
+    would accept it, so a document carrying JSON ``true``/``false`` for a
+    field like an ordinal or a schema version silently parsed as ``1``/``0``,
+    letting two structurally distinct wire values collapse onto one meaning
+    (a `true` ordinal and a literal `1` ordinal reconstructing to equal,
+    same-hash records; a `true`/`2.0` schema version comparing equal to a
+    real version number and dispatching to the wrong parser) — the identical
+    boundary-only-guard shape this module's other doors already close, just
+    for the one type where Python's own subclass relationship is the trap
+    rather than a missing check (Codex review — this was independently
+    reinvented at two call sites in `storage/entity_ids.py` before landing
+    here, which is exactly the drift this module exists to stop).
+
+    ``float`` is rejected too, for the identical "compares equal to a real
+    int without being one" reason (``2.0 == 2``).
+    """
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise TypeError(
+            f"{field_name} must be an int, not {type(raw).__name__} "
+            f"({raw!r}); a bool or float can compare equal to a real int "
+            "without being interchangeable with one"
+        )
+    return cast(int, raw)

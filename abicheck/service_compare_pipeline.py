@@ -37,19 +37,13 @@ the same resolution the typed path uses instead of a second copy.
 
 Two mechanical notes:
 
-* Everything this module needs from ``service`` is looked up **through the
-  module object at call time** (``from . import service`` inside the function),
-  never bound at import time. That is what keeps
-  ``monkeypatch.setattr(service, "resolve_input", ...)`` — and the same for
-  ``compare_snapshots`` — affecting this code exactly as it did when the body
-  lived in ``service.py``. Helpers ``service`` itself only *re-exports*
-  (``pair_wide_cxx20_std_override``, ``split_public_header_inputs``,
-  ``populate_pair_dependency_info``) are imported straight from the module
-  that defines them instead: nothing patches them through ``service``, and
-  going through a re-export would make them look like public service API
-  (mypy's ``no_implicit_reexport``) when they are not. The import is also
-  function-local so this module does not join ``service``'s import cycle
-  (AGENTS.md "What NOT to do").
+* Everything this module needs from ``service`` is looked up through the
+  module object at call time (``from . import service`` inside the function),
+  never bound at import time — keeps ``monkeypatch.setattr`` affecting this
+  code exactly as when the body lived in ``service.py``. Helpers ``service``
+  only *re-exports* are imported straight from their defining module instead
+  (mypy's ``no_implicit_reexport``); function-local so this module does not
+  join ``service``'s import cycle.
 * This module holds no state and makes no policy decisions of its own; every
   behavioural rule in it moved here verbatim from ``service.run_compare_request``.
 """
@@ -67,6 +61,11 @@ from .compile_context import CompileContext
 from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
 from .errors import ValidationError
+from .policy.depth_projection import (
+    project_build_source_pack_to_depth,
+    project_pair_to_depth,
+    project_snapshot_to_depth,
+)
 from .workflows.artifact.execute import (
     enforce_requested_depth,
     resolve_side_snapshot,
@@ -77,10 +76,14 @@ if TYPE_CHECKING:
 
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
+    from .workflows.resolved_execution_context import ResolvedExecutionContext
 
 __all__ = [
     "ResolvedComparePair",
     "classify_compare_pair",
+    "project_build_source_pack_to_depth",
+    "project_pair_to_depth",
+    "project_snapshot_to_depth",
     "resolve_compare_request",
     "resolve_sides_sequentially",
     "run_compare",
@@ -98,6 +101,20 @@ class ResolvedComparePair:
     end reporting on them) and each side's resolved
     :class:`~abicheck.service_compare_evidence.SideEvidence` (whose
     ``collect_mode`` drives the embedded build-source diff).
+
+    ``resolved_execution_context`` (One Semantic Pipeline PR 1, sub-phase 4B):
+    the :class:`~abicheck.workflows.resolved_execution_context.
+    ResolvedExecutionContext` built from this same request's own, otherwise-
+    discarded :class:`~abicheck.workflows.plan.AnalysisPlan`
+    (:func:`resolve_compare_request` already calls ``AnalysisPlanner.resolve``
+    for its pre-flight check — not a second resolution). Optional and
+    additive — no existing consumer reads it yet, closing 4B's own "no live
+    caller wired" gap for ``compare``. Carries no ``evaluation_config``/
+    ``compile_contexts`` yet: those resolve one layer up
+    (``cli_compare_receipt.py``, past a Click context this shared pipeline
+    lacks) and out of :func:`~abicheck.service_input_resolution.
+    resolve_side_snapshot`'s own internals, respectively — attaching either
+    later is follow-on work this field does not block.
     """
 
     old: AbiSnapshot
@@ -106,6 +123,7 @@ class ResolvedComparePair:
     new_fmt: str | None
     old_evidence: SideEvidence
     new_evidence: SideEvidence
+    resolved_execution_context: ResolvedExecutionContext | None = None
 
 
 def resolve_sides_sequentially(request: CompareRequest) -> bool:
@@ -279,11 +297,22 @@ def resolve_compare_request(
         ValidationError: If the request fails :meth:`CompareRequest.validate`,
             names a frontend with no extractor for its evidence, or requests a
             ``depth`` the resolved snapshots did not reach.
+        PlanningError: If :class:`~abicheck.workflows.plan.AnalysisPlanner`
+            finds a requested evidence input no resolved collector/backend
+            combination can satisfy (ADR-063 Phase 4) — e.g. ``--build-target``
+            combined with a pre-captured Bazel ``aquery``/``cquery`` jsonproto.
         SnapshotError: If either input cannot be loaded.
     """
     from . import service, service_compare_evidence as _sce
+    from .workflows.plan import AnalysisPlanner
 
     request.validate()
+    # ADR-063 Phase 4: reject a request no resolved collector/backend
+    # combination can satisfy before any extraction runs (PlanningError),
+    # rather than discovering the gap mid-run or not at all. See
+    # `abicheck.workflows.plan`'s own module docstring for exactly what this
+    # does and does not check.
+    plan = AnalysisPlanner.resolve(request)
     # validate() accepts lang case-insensitively; the ELF dump path does
     # case-sensitive `lang == "c"` checks, so normalise here. `android` (no
     # header-AST path) falls back to "auto" for the binary dump.
@@ -382,6 +411,8 @@ def resolve_compare_request(
     # gains nothing from the extraction threads.
     populate_pair_dependency_info(request, old, new, old_fmt=old_fmt, new_fmt=new_fmt)
     enforce_requested_depth(request.depth, (("old", old), ("new", new)))
+    from .workflows.resolved_execution_context import ResolvedExecutionContext
+
     return ResolvedComparePair(
         old=old,
         new=new,
@@ -389,6 +420,7 @@ def resolve_compare_request(
         new_fmt=new_fmt,
         old_evidence=old_evidence,
         new_evidence=new_evidence,
+        resolved_execution_context=ResolvedExecutionContext.from_plan(plan),
     )
 
 
@@ -416,20 +448,28 @@ def classify_compare_pair(
         prepare_embedded_build_source,
     )
 
-    old, new = pair.old, pair.new
+    # ADR-063 Phase 8's "--depth floor vs ceiling" gap: `resolve_compare_
+    # request`'s own `enforce_requested_depth` call already confirmed both
+    # sides' *resolved* evidence meets `request.depth` as a floor -- this is
+    # the ceiling half, filtering what this classification is allowed to see
+    # down to that same rung. Deliberately a *view*, not a mutation of
+    # `pair.old`/`pair.new` (see `project_pair_to_depth`'s own docstring) --
+    # `pair` may still be read elsewhere for its unprojected snapshots.
+    old, new = project_pair_to_depth(pair.old, pair.new, request.depth)
     suppression, pf = service.load_suppression_and_policy(
         request.suppress, request.policy, request.policy_file_path
     )
     # CLI cleanup phase two, PR B slice 1: fold an already-resolved pack's
     # policy/contract-surface contributions into the loaded PolicyFile, the
     # same way `pack_application.policy_file_with_packs` already does for the
-    # single-pair `compare` CLI. Every field is `None` for every pre-existing
-    # caller (the CLI's own single-pair path folds its packs before calling
-    # `compare_snapshots` directly and never sets these), so this is a no-op
-    # unless a caller -- today, the directory/package release fan-out --
-    # populated `CompareRequest.pack_policy_overrides`/
-    # `pack_internal_namespaces`. See `CompareRequest.pack_policy_overrides`'s
-    # own docstring for why this is the one chokepoint to apply it at.
+    # single-pair `compare` CLI -- a no-op unless a caller (today, the
+    # release fan-out) populated `CompareRequest.pack_policy_overrides`/
+    # `pack_internal_namespaces`. `pf` is reused for the receipt below too
+    # (Codex review, fresh evidence, three rounds over): the receipt
+    # installer records the forwarded pack's own contribution honestly
+    # (`compare_gate_receipt._with_pack_forwarded_provenance`) rather than
+    # this call site needing to hide or discard the file's real identity --
+    # see that function's own docstring for the full account.
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         from .pack_application import PackApplication, policy_file_with_packs
 
@@ -490,15 +530,25 @@ def classify_compare_pair(
     # target -- resolve_side_snapshot() already followed the identical chain
     # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
     # its target DSO given as the other `CompareRequest` side still reads as
-    # byte-identical (Codex review, fresh evidence; mirrors the same fix on
+    # byte-identical (mirrors the same fix on
     # `cli_scan_baseline._run_baseline_compare`).
     from .binary_utils import resolve_linker_script_chain
 
-    def _hashable_path(p: Path) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
-        return p if service.sniff_text_format(p) in ("json", "perl", "symvers") else resolve_linker_script_chain(p)
+    # A text snapshot/manifest can coincidentally match the INPUT()/GROUP()
+    # probe -- skip linker-script resolution for it.
+    def _hashable_path(p: Path) -> Path:
+        return (
+            p
+            if service.sniff_text_format(p) in ("json", "perl", "symvers")
+            else resolve_linker_script_chain(p)
+        )
 
-    result.old_metadata = service.collect_metadata(_hashable_path(required_path(request.old, "old")))
-    result.new_metadata = service.collect_metadata(_hashable_path(required_path(request.new, "new")))
+    result.old_metadata = service.collect_metadata(
+        _hashable_path(required_path(request.old, "old"))
+    )
+    result.new_metadata = service.collect_metadata(
+        _hashable_path(required_path(request.new, "new"))
+    )
     note_if_same_binary_compared(result)
 
     # P0.4 follow-up (P2 review, discussion_r3787839902): `DiffResult.
@@ -510,35 +560,21 @@ def classify_compare_pair(
     # successfully-resolved `CompareRequest.depth` still read
     # `requested_depth=None`/`depth_satisfied=None` and could report
     # `status="complete"` even though a depth was genuinely requested.
-    # `request.depth` is the same "explicit override, never inferred"
-    # sentinel `CompareRequest.depth`'s own field comment documents (`None`
-    # when the caller never set it -- there is no separate Click
-    # parameter-source concept for a plain dataclass, so `None`-vs-set is
-    # already the request's own "was this explicit" signal); only stamp it
-    # when it is not `None`, mirroring the CLI's identical `if depth is not
-    # None` guard. Recomputes `analysis_assurance` the same way
-    # `checker.compare()` itself does (`old_pack`/`new_pack` from each
-    # snapshot's own *embedded* `build_source` -- this path has no
-    # out-of-band `--old/new-build-info`/`--old/new-sources` pack directory
-    # of the CLI's own to fold in, since `InputSpec.sources`/`build_info`
-    # are embedded into `old`/`new` before `resolve_compare_request` ever
-    # returns), so `layer_coverage`/`requested_depth` -- both only known
-    # after `compare_snapshots` returns -- are reflected too.
+    # `request.depth` is `None` only when the caller never set it, mirroring
+    # the CLI's identical `if depth is not None` guard. Recomputes
+    # `analysis_assurance` the same way `checker.compare()` itself does
+    # (`old_pack`/`new_pack` from each snapshot's own *embedded*
+    # `build_source`, since `InputSpec.sources`/`build_info` are embedded
+    # into `old`/`new` before `resolve_compare_request` ever returns), so
+    # `layer_coverage`/`requested_depth` are reflected too.
     #
-    # P0.4 follow-up (P2 review): `CompareRequest.validation_errors()`
-    # (`_depth_errors` in `api_types.py`) accepts `depth` case-insensitively
-    # (`depth.lower() in USER_DEPTHS`), and every consumer of the *value*
-    # (`enforce_requested_depth`'s own `depth.lower()` lookup into
-    # `_DEPTH_RANK` above, line 194's `request.depth.lower() == "binary"`
-    # check) normalizes case before using it -- so a valid, successfully
-    # validated request like `depth="HEADERS"` reached this assignment with
-    # its original casing preserved. That un-normalized string then broke
-    # every downstream reader that expects the lowercase
-    # `EVIDENCE_DEPTH_VALUES` spelling: `compute_analysis_assurance()`'s
-    # depth-rank lookup silently missed (falling back to a wrong default),
-    # and `validate_evidence_depth()` (every JSON reporter) raised
-    # `ValueError` outright. Stamp the same lowercased form the rest of this
-    # module already normalizes to, not the raw request string.
+    # P0.4 follow-up (P2 review): every consumer of the depth *value*
+    # normalizes case before using it (`enforce_requested_depth`, line 194's
+    # `.lower() == "binary"` check), so a valid request like
+    # `depth="HEADERS"` reached this assignment with its original casing
+    # preserved -- breaking every downstream reader expecting the lowercase
+    # `EVIDENCE_DEPTH_VALUES` spelling. Stamp the same lowercased form the
+    # rest of this module already normalizes to, not the raw request string.
     if request.depth is not None:
         result.requested_depth = request.depth.lower()
     from .analysis_assurance import compute_analysis_assurance
@@ -550,11 +586,45 @@ def classify_compare_pair(
         old_pack=getattr(old, "build_source", None),
         new_pack=getattr(new, "build_source", None),
     )
+    # ADR-064/PR G2: resolve severity/exit-code-scheme into the same
+    # `GateOptions` the release fan-out uses, then the canonical decision.
+    from .policy.exit_decision import resolve_compare_exit_decision
+    from .workflows.gate import resolve_release_gate_options
+
+    gate = resolve_release_gate_options(
+        None,
+        release_exit_code_scheme=request.exit_code_scheme,
+        severity_preset=request.severity_preset,
+        severity_abi_breaking=None,
+        severity_potential_breaking=None,
+        severity_quality_issues=None,
+        severity_addition=None,
+    )
+    # The resolved scheme both calls below score with -- never
+    # gate.exit_code_scheme itself, which can still be "auto" here.
+    effective_scheme = "severity" if gate.severity is not None else "legacy"
+    exit_decision = resolve_compare_exit_decision(
+        result, gate.severity, effective_scheme
+    )
+
+    # Installs the same gate onto result.contract_context; see
+    # workflows.compare_gate_receipt's own docstring for the full account.
+    from .workflows.compare_gate_receipt import install_resolved_gate_receipt
+
+    install_resolved_gate_receipt(
+        result, request, gate, pf, suppression, effective_scheme
+    )
+
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
     # list this call already resolved instead of loading it a second time.
     return CompareResult(
-        diff=result, old_snapshot=old, new_snapshot=new, suppression=suppression
+        diff=result,
+        old_snapshot=old,
+        new_snapshot=new,
+        suppression=suppression,
+        exit_decision=exit_decision,
+        severity_config=gate.severity,
     )
 
 
@@ -582,6 +652,8 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
 
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`.
+        PlanningError: See :func:`resolve_compare_request` — raised from
+            inside its own call here.
         SnapshotError: If either input cannot be loaded.
 
     Moved here from ``service.py`` (CLI cleanup phase two, "PR B" slice 1,
@@ -624,6 +696,10 @@ def run_compare(
     pack_policy_overrides: dict[Any, Any] | None = None,
     pack_internal_namespaces: tuple[str, ...] | None = None,
     compile_context: CompileContext | None = None,
+    depth: str | None = None,
+    *,
+    severity_preset: str | None = None,
+    exit_code_scheme: str | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -631,18 +707,21 @@ def run_compare(
     :class:`CompareRequest` from loose arguments and delegates, so existing
     callers keep working while the typed request is the real chokepoint
     (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
-    Trailing keyword-only params (``debuginfod_url`` onward) are appended
-    after every pre-existing one, never alongside a thematically-closer
-    neighbor, so a positional caller keeps binding each argument to the same
-    parameter it always did (Codex review, PR #551). ``include_dependencies``
-    applies to *both* sides — build a ``CompareRequest`` for a per-side override.
+    Trailing params (``debuginfod_url`` onward) are appended after every
+    pre-existing one, so a positional caller keeps binding each argument to
+    the same parameter it always did (Codex review, PR #551). Only
+    ``severity_preset``/``exit_code_scheme`` (the two newest, never
+    previously released) are actually ``*``-enforced keyword-only --
+    enforcing it retroactively for the older ones too would reject a real
+    caller still passing one positionally, the public-API break that
+    "keeps binding positionally" promise forbids (Codex review, fresh
+    evidence, PR #1032). ``include_dependencies`` applies to *both* sides —
+    build a ``CompareRequest`` for a per-side override.
 
-    ``pack_policy_overrides``/``pack_internal_namespaces`` (CLI cleanup phase
-    two, "PR B" slice 1): an already-resolved ``--pack``'s
-    ``policy.overrides``/``surface.internal_namespaces`` contribution --
-    see ``CompareRequest.pack_policy_overrides``'s own docstring for what
-    folds them in and why. ``None``/empty on both is a no-op, matching every
-    pre-existing caller.
+    ``pack_policy_overrides``/``pack_internal_namespaces``: an already-
+    resolved ``--pack``'s ``policy.overrides``/``surface.internal_namespaces``
+    contribution -- see ``CompareRequest.pack_policy_overrides``'s own
+    docstring for what folds them in and why. ``None``/empty is a no-op.
 
     ``compile_context`` is a both-sides :class:`~abicheck.compile_context.
     CompileContext` (the L2 cross-toolchain/frontend family --
@@ -653,6 +732,13 @@ def run_compare(
     this shim; a caller needing a genuine per-side override should build a
     :class:`CompareRequest` directly instead. ``None`` (the default) is a
     no-op, matching every pre-existing caller.
+
+    ``depth`` forwards straight onto :class:`CompareRequest.depth` -- the
+    release fan-out's ``_run_compare_pair`` needed a way to forward its own
+    resolved ``--depth binary`` per pair; every other caller passes ``None``.
+
+    ``severity_preset``/``exit_code_scheme`` (Codex review): forward onto
+    ``CompareRequest``'s identically-named fields; ``None`` is a no-op.
 
     Returns:
         A :class:`~abicheck.api_types.CompareResult`. This returned the bare
@@ -707,5 +793,8 @@ def run_compare(
             tuple(pack_policy_overrides.items()) if pack_policy_overrides else None
         ),
         pack_internal_namespaces=pack_internal_namespaces,
+        depth=depth,
+        severity_preset=severity_preset,
+        exit_code_scheme=exit_code_scheme,
     )
     return run_compare_request(request)

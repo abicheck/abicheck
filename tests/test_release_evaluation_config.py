@@ -131,11 +131,11 @@ class TestReleaseFanOutStampsResolvedConfig:
         with (
             patch("abicheck.service.run_compare", return_value=fake_result),
             patch(
-                "abicheck.cli_compare_release._normalize_binary_input",
+                "abicheck.cli_compare_release_pairwise._normalize_binary_input",
                 side_effect=lambda p: (p, None),
             ),
         ):
-            from abicheck.cli_compare_release import _run_compare_pair as _rcp
+            from abicheck.cli_compare_release_pairwise import _run_compare_pair as _rcp
 
             returned = _rcp(
                 old,

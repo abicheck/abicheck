@@ -33,7 +33,13 @@ whole decision or none of it.
 Re-export only: every name below keeps its own owner's definition and
 semantics. Nothing is re-implemented here, so there is no second opinion to
 drift, and ``severity``/``contract_coverage_exit``/``analysis_assurance``/
-``exit_decision`` remain the modules to read and to change.
+``exit_decision``/``release_gate_options`` remain the modules to read and to
+change. ``GateOptions``/``resolve_release_gate_options``/
+``apply_release_gate_pack`` (ADR-064) are the directory/package release
+fan-out's own severity/exit-code-scheme resolution -- reached this way
+because the fan-out's frontend module (``cli_compare_release_helpers.py``)
+may not import ``policy`` directly (``frontends -> policy`` is forbidden,
+same rule as every other name here).
 
 ``note_if_same_binary_compared`` (Codex review) is not an exit-code axis, but
 it belongs here rather than in ``extraction.py`` for the same reason as the
@@ -60,7 +66,18 @@ from ..policy.contract_coverage_exit import (
     coverage_exit_for_context,
     fold_coverage_exit,
 )
-from ..policy.exit_decision import resolve_compare_exit_decision
+from ..policy.exit_decision import ExitDecision, resolve_compare_exit_decision
+from ..policy.exit_decision_precedence import (
+    resolve_release_exit_decision,
+    resolve_release_exit_decision_for_report,
+)
+from ..policy.gate_decision import gate_decision_for_result
+from ..policy.release_gate_options import (
+    GateOptions,
+    _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064 (private; __all__ excludes it by convention)
+    apply_release_gate_pack,
+    resolve_release_gate_options,
+)
 from ..policy.severity import (
     PRESET_DEFAULT,
     IssueCategory,
@@ -77,12 +94,15 @@ from ..policy.severity import (
 
 __all__ = [
     "PRESET_DEFAULT",
+    "ExitDecision",
+    "GateOptions",
     "IssueCategory",
     "SeverityConfig",
     "SeverityLevel",
     "analysis_assurance_exit_contribution",
     "analysis_assurance_report_dict",
     "announce_coverage_floor",
+    "apply_release_gate_pack",
     "assurance_floor_diagnostic",
     "categorize_changes",
     "classify_change_object",
@@ -94,9 +114,13 @@ __all__ = [
     "coverage_exit_for_context",
     "fold_analysis_assurance_exit",
     "fold_coverage_exit",
+    "gate_decision_for_result",
     "legacy_exit_code",
     "missing_contract_exit_code",
     "note_if_same_binary_compared",
     "resolve_compare_exit_decision",
+    "resolve_release_exit_decision",
+    "resolve_release_exit_decision_for_report",
+    "resolve_release_gate_options",
     "resolve_severity_config",
 ]

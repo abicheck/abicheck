@@ -51,15 +51,19 @@ from .cli_buildsource_merge import (
     _merge_print_summary as _merge_print_summary,
 )
 from .errors import SnapshotError
-from .workflows.extraction import DEFAULT_REDACTION
+from .workflows.extraction import (
+    DEFAULT_REDACTION,
+    pack_content_hash,
+    purge_external_outputs as purge_external_outputs,
+)
 
 if TYPE_CHECKING:
     from .buildsource.build_evidence import BuildEvidence
     from .buildsource.source_abi import SourceAbiSurface
-    from .buildsource.source_graph import SourceGraphSummary
     from .checker_types import Change, DiffResult
     from .model import AbiSnapshot
-    from .policy_file import PolicyFile
+    from .model.source_graph import SourceGraphSummary
+    from .workflows.policy_file import PolicyFile
 
 
 # ADR-061 Phase 3: these moved to `buildsource.evidence_report`, which is now
@@ -194,9 +198,7 @@ def attach_evidence_metrics(
     """CLI adapter over ``buildsource.evidence_report.attach_evidence_metrics``."""
     from .buildsource.evidence_report import attach_evidence_metrics as _attach
 
-    _attach(
-        result, metrics, injected_changes, on_output=None if quiet else _echo
-    )
+    _attach(result, metrics, injected_changes, on_output=None if quiet else _echo)
 
 
 def echo_evidence_metrics(metrics: dict[str, object]) -> None:
@@ -211,7 +213,6 @@ def echo_evidence_metrics(metrics: dict[str, object]) -> None:
 
     for line in evidence_metrics_lines(metrics):
         _echo(line)
-
 
 
 def _load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:
@@ -452,7 +453,7 @@ def _collect_source_graph(
     if source_graph != "summary":
         return None, ""
 
-    from .buildsource.source_graph import build_source_graph
+    from .workflows.extraction import build_source_graph
 
     # Fold the L4 surface in too when it was collected (--source-abi), so the
     # graph carries the public-reachability + source↔binary slices.
@@ -578,7 +579,7 @@ def _echo_collection_summary(
 ) -> None:
     """Print the per-layer summary for a successfully written evidence pack."""
     click.echo(f"Evidence pack written to {output}")
-    click.echo(f"  content hash: {pack.content_hash()}")
+    click.echo(f"  content hash: {pack_content_hash(pack)}")
     if has_build:
         click.echo(
             f"  L3 build context: {len(merged.compile_units)} compile units, "
@@ -799,6 +800,29 @@ def _run_adapters(
         )
 
 
+def _purge_and_record(
+    pack_root: Path, manifest: object, record: ExtractorRecord, merged: BuildEvidence
+) -> None:
+    """Purge a failed extractor's outputs, aborting if the purge itself fails.
+
+    ``pack_io.write()``'s ``_artifact_digests()`` walks ``normalized/``
+    unconditionally, ignoring extractor ``status`` -- so recording
+    ``status = "failed"`` alone does not stop a surviving file from being
+    hashed into the published pack identity, since permissive mode (the
+    default) lets collection continue past a failed extractor by design
+    (Codex review). A purge failure isn't a missing-evidence gap permissive
+    mode tolerates; it risks publishing corrupt evidence as genuine, so it
+    always raises, in every collection mode.
+    """
+    name = getattr(manifest, "name", "<unknown>")
+    if not purge_external_outputs(pack_root, manifest):
+        record.status = "failed"
+        message = f"{name}: failed to fully remove stale normalized output(s)"
+        record.diagnostics.append(message)
+        merged.diagnostics.append(message)
+        raise click.ClickException(message)
+
+
 def _run_external_extractors(
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
@@ -873,13 +897,13 @@ def _run_external_extractors(
             merged.diagnostics.append(
                 f"{manifest.name}: {record.detail or 'extractor did not complete'}"
             )
-            _purge_external_outputs(pack_root, manifest)
+            _purge_and_record(pack_root, manifest, record, merged)
             continue
 
         # Reject output kinds collect cannot fold yet — only
         # build_evidence is wired into the pack here. A manifest that advertises
         # a source_abi / source_graph_summary output would otherwise be recorded
-        # ok while its evidence is silently dropped (and pack.write() removes the
+        # ok while its evidence is silently dropped (and pack_io.write() removes the
         # canonical source/graph files), so the requested evidence is absent even
         # though the extractor "succeeded" (Codex P2). Fail loudly instead.
         unsupported = sorted(
@@ -897,7 +921,7 @@ def _run_external_extractors(
                 f"{manifest.name}: output kind(s) {', '.join(unsupported)} are not yet "
                 "supported by collect (only build_evidence is folded into the pack)"
             )
-            _purge_external_outputs(pack_root, manifest)
+            _purge_and_record(pack_root, manifest, record, merged)
             continue
 
         # Fold any normalized build_evidence outputs into the merged L3 evidence.
@@ -927,7 +951,7 @@ def _run_external_extractors(
                 fold_ok = False
                 record.status = "failed"
                 record.detail = record.detail or f"invalid build_evidence output: {exc}"
-                # _purge_external_outputs (below) removes these files, so the
+                # purge_external_outputs (below) removes these files, so the
                 # failed ledger row must not keep advertising stale paths to a
                 # missing/replaced artifact (Codex P2).
                 record.artifacts = []
@@ -939,31 +963,7 @@ def _run_external_extractors(
             for build_evidence in parsed:
                 merged.merge(build_evidence)
         else:
-            _purge_external_outputs(pack_root, manifest)
-
-
-def _purge_external_outputs(pack_root: Path, manifest: object) -> None:
-    """Remove a failed external extractor's normalized outputs from the pack.
-
-    A failed/skipped extractor must be isolated from the collected pack: its
-    normalized output files (and its ``normalized/<name>/`` subtree) would
-    otherwise be hashed into ``BuildSourcePack`` ``manifest.artifacts`` and the
-    content hash, so an invalid output would change pack identity and publish a
-    digest for evidence that was never folded (Codex P2). Raw artifacts under
-    ``raw/`` are *not* removed — they are provenance-only, never hashed, and are
-    what audit mode preserves for debugging.
-    """
-    import shutil
-
-    name = getattr(manifest, "name", "")
-    for output in getattr(manifest, "outputs", []):
-        try:
-            (pack_root / output.path).unlink()
-        except OSError:
-            pass
-    norm_dir = pack_root / "normalized" / name
-    if norm_dir.is_dir():
-        shutil.rmtree(norm_dir, ignore_errors=True)
+            _purge_and_record(pack_root, manifest, record, merged)
 
 
 def _ingest_graph_backends(

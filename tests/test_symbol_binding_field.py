@@ -27,7 +27,7 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.diff_symbols import _check_removed_function, _var_removed
 from abicheck.dumper_elf_symbols import _populate_elf_visibility
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding
-from abicheck.model import AbiSnapshot, Function, Variable
+from abicheck.model import AbiSnapshot, FactStatus, Function, Variable
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
 from abicheck.suppression import Suppression
 
@@ -94,11 +94,47 @@ class TestSerializationRoundTrip:
         d = snapshot_to_dict(snap)
         for f in d["functions"]:
             f.pop("elf_binding", None)
+            f.pop("elf_binding_fact", None)
         for v in d["variables"]:
             v.pop("elf_binding", None)
+            v.pop("elf_binding_fact", None)
         loaded = snapshot_from_dict(d)
         assert loaded.functions[0].elf_binding == SymbolBinding.GLOBAL
         assert loaded.variables[0].elf_binding == SymbolBinding.GLOBAL
+        # ADR-063 Phase 5 (Codex/CodeRabbit review, fresh evidence): the
+        # legacy load-time backfill must keep elf_binding_fact in sync with
+        # the recovered legacy value too -- previously it left the fact at
+        # its __post_init__-derived Fact.not_collected() even though the
+        # legacy field itself carried a real, recovered binding, so a
+        # reserialize-then-reload round trip silently reverted the
+        # recovered evidence back to "not collected".
+        assert loaded.functions[0].elf_binding_fact.status is FactStatus.PRESENT
+        assert loaded.functions[0].elf_binding_fact.value == SymbolBinding.GLOBAL
+        assert loaded.variables[0].elf_binding_fact.status is FactStatus.PRESENT
+        assert loaded.variables[0].elf_binding_fact.value == SymbolBinding.GLOBAL
+
+    def test_elf_binding_fact_survives_a_second_round_trip_after_backfill(
+        self,
+    ) -> None:
+        # The bug this closes: backfill_missing_elf_binding recovered
+        # elf_binding but left elf_binding_fact stale at NOT_COLLECTED, so
+        # re-serializing the backfilled snapshot and loading it again
+        # (schema_version now current) silently reset elf_binding to None
+        # -- the recovered evidence disappeared on the *second* round trip,
+        # not the first.
+        snap = _snapshot_with_binding(SymbolBinding.GLOBAL)
+        _populate_elf_visibility(snap)
+        d = snapshot_to_dict(snap)
+        for f in d["functions"]:
+            f.pop("elf_binding", None)
+            f.pop("elf_binding_fact", None)
+        for v in d["variables"]:
+            v.pop("elf_binding", None)
+            v.pop("elf_binding_fact", None)
+        once_loaded = snapshot_from_dict(d)
+        twice_loaded = snapshot_from_dict(snapshot_to_dict(once_loaded))
+        assert twice_loaded.functions[0].elf_binding == SymbolBinding.GLOBAL
+        assert twice_loaded.variables[0].elf_binding == SymbolBinding.GLOBAL
 
     def test_missing_elf_binding_stays_none_without_elf_metadata(self) -> None:
         # No elf block at all (e.g. a non-ELF-format snapshot, or one
@@ -113,15 +149,25 @@ class TestSerializationRoundTrip:
 
     def test_missing_elf_binding_stays_none_when_no_matching_symbol(self) -> None:
         # elf block present, but no .dynsym entry for this declaration's
-        # mangled name -- nothing to backfill from either.
+        # mangled name -- nothing to backfill from either. Covers the
+        # variable branch too (`backfill_missing_elf_binding` walks
+        # functions and variables separately) -- previously exercised only
+        # for functions.
         func = Function(name="f", mangled="_Z1fv", return_type="void")
+        var = Variable(name="g", mangled="g", type="int")
         snap = AbiSnapshot(
-            library="lib.so", version="1.0", functions=[func], elf=ElfMetadata(symbols=[])
+            library="lib.so",
+            version="1.0",
+            functions=[func],
+            variables=[var],
+            elf=ElfMetadata(symbols=[]),
         )
         d = snapshot_to_dict(snap)
         d["functions"][0].pop("elf_binding", None)
+        d["variables"][0].pop("elf_binding", None)
         loaded = snapshot_from_dict(d)
         assert loaded.functions[0].elf_binding is None
+        assert loaded.variables[0].elf_binding is None
 
     def test_explicit_elf_binding_is_not_overwritten_by_backfill(self) -> None:
         # An already-serialized non-None value must be preserved untouched,
@@ -218,7 +264,9 @@ class TestChangeSymbolBindingStamp:
             library="lib.so",
             version="1.0",
             functions=[f_old],
-            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z1fv", binding=SymbolBinding.WEAK)]),
+            elf=ElfMetadata(
+                symbols=[ElfSymbol(name="_Z1fv", binding=SymbolBinding.WEAK)]
+            ),
         )
         new = AbiSnapshot(
             library="lib.so",

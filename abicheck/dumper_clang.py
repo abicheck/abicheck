@@ -58,6 +58,28 @@ arrays) rather than reading a value the AST dump already carries.
 The parser is pure (no subprocess): it consumes an already-parsed JSON dict, so
 every emit path is unit-testable without clang installed. Shelling out to clang
 lives in :func:`abicheck.dumper._clang_header_dump`.
+
+Per ADR-061 D9, ``_Decl`` (the categorized-node-plus-walk-context type every
+entity kind's parsing already received as a parameter) and the
+built-in-file/qualtype/source-location/deprecation-message primitives more
+than one entity kind reads now live in
+:mod:`abicheck.extract.headers.clang.context`, with enum parsing built on
+top of it in :mod:`abicheck.extract.headers.clang.enums`, function-entity
+parsing in :mod:`abicheck.extract.headers.clang.functions`, record-entity
+parsing in :mod:`abicheck.extract.headers.clang.records`, and
+template-specialization parsing (``_index_template_param_kinds``/
+``_index_template_param_defaults``/``_index_template_param_names``/
+``_specialization_spelling``/``build_specialization_index``, imported
+below from their new home rather than from ``dumper_clang_vtable.py``
+directly) in :mod:`abicheck.extract.headers.clang.templates` — this
+closes Phase 5 item 1's parser-split work on this backend. Every name
+below with a counterpart there is a thin delegating wrapper, kept so every
+existing internal and external caller (tests included) that still reads
+this module's private surface directly keeps resolving. ``_walk``/
+``_categorize`` (the shared traversal/categorization dispatch every entity
+kind goes through, template specializations included) stays here — see
+``templates.py``'s own docstring for why it, unlike every other entity's
+parsing, was not itself split out.
 """
 
 from __future__ import annotations
@@ -68,7 +90,12 @@ from pathlib import Path
 from typing import Any
 
 from ._compiler_options import split_gcc_options
-from .dumper_clang_attributes import _clang_contract_attributes
+
+# Re-exported (not just referenced) so the historical
+# ``dumper_clang._clang_contract_attributes`` import path tests use keeps
+# resolving, even though the real call site moved to
+# ``extract.headers.clang.functions``.
+from .dumper_clang_attributes import _clang_contract_attributes  # noqa: F401
 from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _SCOPE_NODE_KINDS,
     _WRAPPER_EXPR_KINDS,
@@ -99,35 +126,39 @@ from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
     _record_kind,
     _reduce_opaque_kind_set,
 )
-from .dumper_clang_vtable import (
+from .errors import AstContextMissingError, SnapshotError
+from .extract.headers.clang import (
+    context as _clang_context,
+    enums as _clang_enums,
+    functions as _clang_functions,
+    records as _clang_records,
+    scope as _clang_scope,
+)
+from .extract.headers.clang.return_type import return_type as _clang_return_type
+from .extract.headers.clang.templates import (
     _index_template_param_defaults,
     _index_template_param_kinds,
     _index_template_param_names,
-    _is_record_definition,
     _specialization_spelling,
-    build_specialization_index as _build_specialization_index,
-    build_vtable as _build_clang_vtable,
 )
-from .errors import AstContextMissingError, SnapshotError
+from .extract.headers.scope_segments import record_segment as _record_scope_segment
 from .model import (
     AccessLevel,
-    EnumMember,
     EnumType,
-    Fact,
     Function,
-    Param,
     RecordType,
-    ScopeOrigin,
     TypeField,
     Variable,
     Visibility,
 )
-from .name_classification import strip_anonymous_type_location
-from .provenance import (
-    build_public_set,
-    classify_origin,
-    header_from_location,
+from .model.identity import (
+    EntityId,
+    ScopePath,
+    entity_id_for_constant,
+    entity_id_for_typedef,
+    entity_id_for_variable,
 )
+from .provenance import build_public_set
 
 
 def _clang_available(clang_bin: str = "clang") -> bool:
@@ -455,118 +486,48 @@ _FUNCTION_NODE_KINDS = frozenset(
     }
 )
 #: Pseudo-files clang attributes builtin / command-line declarations to.
-_BUILTIN_FILES = frozenset(
-    {"<built-in>", "<builtin>", "<command line>", "<scratch space>"}
-)
+#: Single source of truth is now ``extract.headers.clang.context.BUILTIN_FILES``;
+#: kept as a module attribute of the same name for any external reader of it.
+_BUILTIN_FILES = _clang_context.BUILTIN_FILES
 
 
 def _pointer_depth(type_str: str) -> int:
-    """Best-effort pointer nesting depth from a written type spelling.
-
-    castxml computes this from the type graph; on the clang path we count
-    top-level ``*`` tokens in the ``qualType`` spelling (``const char *`` → 1,
-    ``int **`` → 2), ignoring any inside template/array brackets. Stable for the
-    pointer-depth-change detector even though it is a spelling heuristic.
-    """
-    depth = 0
-    bracket = 0
-    for ch in type_str:
-        if ch in "<[(":
-            bracket += 1
-        elif ch in ">])":
-            bracket = max(0, bracket - 1)
-        elif ch == "*" and bracket == 0:
-            depth += 1
-    return depth
+    """See ``extract.headers.clang.functions._pointer_depth`` (the canonical
+    implementation this delegates to) for the full contract."""
+    return _clang_functions._pointer_depth(type_str)
 
 
 def _return_type(qualtype: str) -> str:
-    """The return type spelling of a function ``qualType`` (``ret (params)…``).
-
-    Scans for the first ``(`` at bracket depth 0 — the start of the parameter
-    list — and returns everything before it. Function-pointer return types (rare)
-    degrade to the whole spelling; ordinary returns are exact.
-    """
-    bracket = 0
-    for idx, ch in enumerate(qualtype):
-        if ch in "<[":
-            bracket += 1
-        elif ch in ">]":
-            bracket = max(0, bracket - 1)
-        elif ch == "(" and bracket == 0:
-            return qualtype[:idx].strip()
-    return qualtype.strip()
+    """See ``extract.headers.clang.return_type.return_type`` (the canonical
+    implementation this delegates to) for the full contract."""
+    return _clang_return_type(qualtype)
 
 
 def _is_noexcept_qualifier(quals: str) -> bool:
-    """Whether a function's trailing qualifiers denote a *non-throwing* spec.
-
-    A bare ``noexcept`` (and ``noexcept(true)`` / ``noexcept(1)``) is
-    non-throwing; ``noexcept(false)`` / ``noexcept(0)`` is *throwing* and must
-    not be treated as ``noexcept`` — since C++17 the exception specification is
-    part of the function type, so conflating the two would hide a real ABI break
-    (CodeRabbit review). A dependent ``noexcept(expr)`` keeps its conservative
-    "non-throwing" reading (the spelling is all the header AST exposes).
-    """
-    m = re.search(r"\bnoexcept(?:\s*\(([^)]*)\))?", quals)
-    if m is None:
-        return False
-    expr = m.group(1)
-    if expr is None:
-        return True
-    return expr.strip() not in ("false", "0")
+    """See ``extract.headers.clang.functions._is_noexcept_qualifier`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_functions._is_noexcept_qualifier(quals)
 
 
 def _clang_exception_spec(quals: str) -> str:
-    """The dynamic exception-specification spelling from trailing qualifiers.
-
-    ``""`` when the function has no ``throw(...)`` spec (noexcept is handled
-    separately by :func:`_is_noexcept_qualifier`).
-    """
-    m = re.search(r"\bthrow\s*\(([^)]*)\)", quals)
-    if m is None:
-        return ""
-    inner = ", ".join(p.strip() for p in m.group(1).split(",") if p.strip())
-    return f"throw({inner})"
+    """See ``extract.headers.clang.functions._clang_exception_spec`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_functions._clang_exception_spec(quals)
 
 
 def _clang_record_is_final(node: dict[str, Any]) -> bool:
-    """Whether a ``CXXRecordDecl`` carries the ``final`` class-virt-specifier.
-
-    Unlike castxml (which exposes ``final`` as a plain XML attribute), clang's
-    ``-ast-dump=json`` signals it as a child ``FinalAttr`` node under
-    ``"inner"`` rather than a boolean field on the record itself — there is no
-    ``node["final"]`` key to read.
-    """
-    return any(
-        isinstance(child, dict) and child.get("kind") == "FinalAttr"
-        for child in node.get("inner", []) or []
-    )
+    """See ``extract.headers.clang.records._clang_record_is_final`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_records._clang_record_is_final(node)
 
 
 def _clang_deprecated_message(node: dict[str, Any]) -> str | None:
-    """Deprecation message for *node*, or ``None`` if not deprecated (G31
-    Phase C schema-completeness audit) — the direct-clang backend's
-    counterpart to ``dumper_castxml._deprecation_marker``, matching its exact
-    three-way convention (message text / ``""`` for a bare, messageless
-    ``[[deprecated]]`` / ``None`` for not deprecated) so the two backends'
-    ``Function.deprecated``/``Variable.deprecated``/``TypeField.deprecated``/
-    ``RecordType.deprecated``/``EnumType.deprecated`` agree.
+    """Deprecation message for *node*, or ``None`` if not deprecated.
 
-    Verified against real ``clang -ast-dump=json`` output (Clang 18) before
-    wiring this up: unlike castxml (a compound ``attributes`` string plus a
-    separate ``deprecation="..."`` XML attribute only for a non-empty
-    message), clang emits a ``DeprecatedAttr`` child node under the
-    declaration's own ``"inner"`` list — present for both the bare and
-    messaged forms, with an optional ``message`` string key present *only*
-    for the messaged form (confirmed empirically: a bare ``[[deprecated]]``'s
-    ``DeprecatedAttr`` node carries no ``message`` key at all, not an empty
-    string).
+    See ``extract.headers.clang.context.clang_deprecated_message`` (the
+    canonical implementation this delegates to) for the full contract.
     """
-    for child in node.get("inner", []) or []:
-        if isinstance(child, dict) and child.get("kind") == "DeprecatedAttr":
-            return str(child.get("message", ""))
-    return None
+    return _clang_context.clang_deprecated_message(node)
 
 
 def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
@@ -601,33 +562,9 @@ def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
 
 
 def _function_qualifiers(qualtype: str) -> str:
-    """The trailing cv/ref/exception qualifiers after a function's parameter list.
-
-    Returns the substring after the matching ``)`` of the top-level parameter
-    list — e.g. ``" const noexcept"`` for ``int (int) const noexcept`` — so the
-    caller can detect ``const``/``volatile``/``noexcept`` and the ref-qualifier.
-    """
-    bracket = 0
-    start = -1
-    for idx, ch in enumerate(qualtype):
-        if ch in "<[":
-            bracket += 1
-        elif ch in ">]":
-            bracket = max(0, bracket - 1)
-        elif ch == "(" and bracket == 0 and start == -1:
-            start = idx
-            bracket += 1
-            # consume the parameter-list parentheses
-            depth = 1
-            j = idx + 1
-            while j < len(qualtype) and depth:
-                if qualtype[j] == "(":
-                    depth += 1
-                elif qualtype[j] == ")":
-                    depth -= 1
-                j += 1
-            return qualtype[j:]
-    return ""
+    """See ``extract.headers.clang.functions._function_qualifiers`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_functions._function_qualifiers(qualtype)
 
 
 class _ClangAstParser:
@@ -656,6 +593,18 @@ class _ClangAstParser:
         self._target_triple = target_triple
         self._exported_dynamic = exported_dynamic
         self._exported_static = exported_static
+        # Per-*logical-scope* (not per-walk-frame, and not per-AST-node
+        # either) anonymous-ordinal state, keyed by `child_scope_path` --
+        # the typed `ScopePath` a `_walk` call's children actually enter --
+        # at the point in `_walk` below where it is used. See that site's
+        # own comment for why this must be keyed by the resulting scope
+        # path rather than by a per-call local (a reopened named namespace
+        # is walked as two separate `_walk` calls) or by the walked node's
+        # own identity (a transparent AST wrapper like `LinkageSpecDecl`
+        # contributes no segment of its own, so its anonymous children must
+        # share the counter of whatever real scope contains it) -- both
+        # confirmed by direct compilation, two separate Codex review rounds.
+        self._anonymous_ordinal_state: dict[ScopePath, dict[str, Any]] = {}
         (
             self._pub_header_segs,
             self._pub_dir_segs,
@@ -673,45 +622,35 @@ class _ClangAstParser:
         # paying on every dump when nothing in this TU has a referenced-decl
         # initializer to fingerprint.
         self._decl_id_qualified_names: dict[str, str] | None = None
-        # Built lazily (on first vtable reconstruction, via _record_index())
-        # -- "::".join(scope + [name]) -> node for every CXXRecordDecl/
-        # RecordDecl in this TU, keyed the same way RecordType.qualified_name
-        # itself is built in _build_record. Only needed by
-        # dumper_clang_vtable.build_vtable's base-lookup recursion.
-        self._record_by_qualname: dict[str, dict[str, Any]] | None = None
-        # Built lazily (on first vtable reconstruction, via
-        # _specialization_record_index()) -- the SAME kind of index as
-        # _record_by_qualname above, but over concrete
-        # ClassTemplateSpecializationDecl nodes (`struct D : A<int> {...};`),
-        # a different clang node kind self._records never collects at all.
-        # See _specialization_record_index()'s own docstring.
-        self._specialization_by_qualname: dict[str, dict[str, Any]] | None = None
-        # Built lazily (on first vtable reconstruction, via
-        # _base_lookup_index()) -- the merged _record_index() +
-        # _specialization_record_index() dict (CodeRabbit review: previously
-        # rebuilt on every _base_lookup_index() call, an O(records) cost
-        # since _build_record calls it once per record).
-        self._base_lookup: dict[str, dict[str, Any]] | None = None
-        # Built lazily (on first parse_functions() call, via
-        # _virtual_mangled_names()) -- every mangled name appearing in ANY
-        # record's reconstructed vtable, across the whole TU. Lets
-        # parse_functions() recognize a method as virtual even when clang's
-        # JSON gives it no direct signal at all (no `virtual` keyword, no
-        # `OverrideAttr`) -- see _virtual_mangled_names()'s own docstring.
-        self._virtual_mangled: frozenset[str] | None = None
-        # Computed eagerly (not lazily like the caches above) because
-        # `_walk` itself -- run immediately below, during __init__ -- needs
-        # these to correctly scope a specialization's own members (see the
-        # `ClassTemplateSpecializationDecl` branch below); a per-call lazy
-        # build wouldn't help since the first call IS during this walk.
-        # Cheap: one extra whole-AST pass each, the same shape
+        # Computed eagerly (not lazily like the id-qualified-names cache
+        # above) because `_walk` itself -- run immediately below, during
+        # __init__ -- needs these to correctly scope a specialization's own
+        # members (see the `ClassTemplateSpecializationDecl` branch below);
+        # a per-call lazy build wouldn't help since the first call IS during
+        # this walk. Cheap: one extra whole-AST pass each, the same shape
         # `_id_index()` already pays lazily for a different purpose.
         self._template_param_kinds_by_qualname = _index_template_param_kinds(root)
         self._template_param_defaults_by_qualname = _index_template_param_defaults(root)
         self._template_param_names_by_qualname = _index_template_param_names(root)
+        # Lazily-built, memoized record/specialization/vtable indices shared
+        # between record-entity parsing (_build_record's base-lookup, still
+        # in this module) and function-entity parsing
+        # (extract.headers.clang.functions.parse_functions's is_virtual
+        # override recovery). Constructed here (referencing self._records,
+        # still empty) so its first real read -- after _walk below populates
+        # self._records -- sees the fully-categorized list; see
+        # RecordVtableIndex's own docstring for the full "why" of each cache.
+        self._record_vtable_index = _clang_context.RecordVtableIndex(
+            root,
+            self._records,
+            self._template_param_kinds_by_qualname,
+            self._template_param_defaults_by_qualname,
+            self._template_param_names_by_qualname,
+        )
         self._walk(
             root,
             scope=(),
+            scope_path=(),
             lookup_scope=(),
             current_file="",
             access="public",
@@ -732,6 +671,10 @@ class _ClangAstParser:
         extern_c: bool,
         in_friend: bool,
         in_template: bool = False,
+        scope_path: ScopePath = (),
+        anonymous_ordinal: int | None = None,
+        template_param_kinds: tuple[str, ...] = (),
+        template_type_param_names: tuple[str, ...] = (),
     ) -> str:
         """Pre-order walk that categorizes public decls, threading the sticky file.
 
@@ -746,8 +689,9 @@ class _ClangAstParser:
         template_param_kinds`/`_index_template_param_defaults`/`_index_
         template_param_names` use for their own qualname keys (Codex
         review, fresh evidence, second round: see the identical *lookup_
-        scope* split in `dumper_clang_vtable.build_specialization_index`
-        for the full empirical reasoning -- those three index functions
+        scope* split in `extract.headers.clang.templates.
+        build_specialization_index` for the full empirical reasoning --
+        those three index functions
         register a NESTED template's own `ClassTemplateDecl` under its
         natural, unspelled scope, confirmed empirically to differ from
         *scope*'s own spelled qualname the moment a specialization ancestor
@@ -755,6 +699,29 @@ class _ClangAstParser:
         such entry, degrading a nested specialization's own member back to
         the SAME owner-mismatch false positive the `ClassTemplateSpecial
         izationDecl` branch below was originally built to fix).
+
+        *scope_path* is a THIRD scope representation, running exactly
+        alongside *scope* rather than replacing it (ADR-063 Phase 2, second
+        slice): the same containing scopes, as typed
+        `model.identity.ScopeSegment`s instead of bare names, recorded at
+        the exact point each scope is entered -- which is the only point the
+        node kind (`NamespaceDecl` vs. `CXXRecordDecl`), its `isInline`
+        flag, and its access specifier are still in hand. *scope* itself is
+        untouched, so every `qualified_name` this walk feeds is byte-for-
+        byte what it was; `extract.headers.scope_segments.flat_names` maps
+        the typed path back onto *scope*, which is what pins that parity.
+        Parser-internal state, threaded onto `_Decl` for each entity
+        module's own `parse_*` to read and build an `entity_id_for_*`
+        carrier from -- a runtime-only field on the parsed declaration,
+        never persisted to a snapshot (CodeRabbit review, PR #943, on this
+        docstring going stale once that wiring landed; the plan's
+        carrier-field question is about a DIFFERENT, still-open choice --
+        whether a persisted model object should ever carry one -- and
+        stays open).
+
+        *anonymous_ordinal* is assigned by the PARENT frame's own child
+        loop, not derived here, because the ordinal is a per-parent
+        sequence: a node cannot know its own position among its siblings.
         """
         if not isinstance(node, dict):
             return current_file
@@ -764,7 +731,18 @@ class _ClangAstParser:
 
         if not node.get("isImplicit"):
             self._categorize(
-                node, kind, name, scope, file, access, extern_c, in_friend, in_template
+                node,
+                kind,
+                name,
+                scope,
+                file,
+                access,
+                extern_c,
+                in_friend,
+                in_template,
+                scope_path,
+                template_param_kinds,
+                template_type_param_names,
             )
 
         # A function/method body is not an ABI declaration surface: its
@@ -777,8 +755,37 @@ class _ClangAstParser:
 
         # A record body's children inherit the tag's default access until an
         # AccessSpecDecl switches it; namespaces/linkage-specs impose none.
-        child_extern_c = extern_c or (
-            kind == "LinkageSpecDecl" and node.get("language") == "C"
+        #
+        # A `LinkageSpecDecl` RESETS the linkage state to its own
+        # `language`, rather than only ever OR-ing a `True` in: confirmed
+        # by direct compilation that `extern "C" { extern "C++" { void
+        # cppfun(); } }` places a `language="C++"` `LinkageSpecDecl`
+        # directly inside a `language="C"` one, and clang genuinely
+        # mangles `cppfun` normally (`_Z6cppfunv`) -- real C++ linkage
+        # nested inside a `C` block. The previous sticky-OR form never
+        # reset back to `False` for the inner block, so `cppfun` got
+        # `is_extern_c=True` and collapsed onto the bare `("extern_c",)`
+        # `EntityId`, colliding with every other extern-"C" declaration
+        # (Codex review, PR #943). A `LinkageSpecDecl`'s own `language`
+        # is authoritative for everything beneath it -- linkage specs
+        # don't stack, the innermost one wins -- so a non-`LinkageSpecDecl`
+        # node simply inherits whatever is already in effect.
+        child_extern_c = (
+            node.get("language") == "C" if kind == "LinkageSpecDecl" else extern_c
+        )
+        # The typed counterpart of the flat `child_scope` computed below,
+        # built from the node itself (kind/`isInline`/`tagUsed`/access) and
+        # never reconstructed from the flattened spelling. A `None` segment
+        # means "this node introduces no typed scope", which matches every
+        # branch below that leaves `child_scope` unchanged -- EXCEPT a named
+        # `LinkageSpecDecl`: real clang never emits one (a linkage
+        # specification is spelled with a string literal, never an
+        # identifier), and mapping that unreachable case onto some segment
+        # kind would manufacture exactly the two-node-kinds-one-segment
+        # ambiguity `ScopePath` exists to prevent. See
+        # `extract.headers.clang.scope.scope_segment_for`.
+        segment = _clang_scope.scope_segment_for(
+            node, access=access, anonymous_ordinal=anonymous_ordinal
         )
         if kind in _SCOPE_NODE_KINDS and name:
             child_scope = (*scope, name)
@@ -824,9 +831,16 @@ class _ClangAstParser:
             )
             child_scope = (*scope, spelling) if spelling else scope
             child_lookup_scope = lookup_scope
+            # A specialization's scope spelling is this branch's own
+            # reconstruction; `scope_segment_for` returns None for this node
+            # kind precisely so it cannot form a second, differently-trimmed
+            # opinion about it.
+            if spelling:
+                segment = _record_scope_segment(spelling, access=access)
         else:
             child_scope = scope
             child_lookup_scope = lookup_scope
+        child_scope_path = (*scope_path, segment) if segment is not None else scope_path
         running = (
             _default_record_access(node)
             if kind in ("CXXRecordDecl", "RecordDecl")
@@ -852,21 +866,143 @@ class _ClangAstParser:
             "ClassTemplateDecl",
             "ClassTemplatePartialSpecializationDecl",
         )
+        # Only THIS node's own direct FunctionDecl child needs the
+        # template parameter-KIND discriminator (ADR-063 Phase 2) -- never
+        # inherited further down, since a nested declaration inside that
+        # function's own (non-existent, functions have no body here)
+        # subtree has nothing to do with it. See extract.headers.clang.
+        # functions.function_template_param_kinds's own docstring for why.
+        # (`child_template_type_param_names` just below is a DIFFERENT
+        # story -- it must accumulate, not reset; see its own comment.)
+        # `template_type_param_names` (the ALREADY-accumulated enclosing
+        # scope, not yet including this node's own names) is threaded in
+        # too -- a member function template's own non-type parameter can
+        # legally reference an ENCLOSING class template's parameter name
+        # (`template<class T> struct A { template<T N> void f(); };`,
+        # confirmed by direct compilation), the identical hazard
+        # `class_template_type_param_names` below already fixes for an
+        # ordinary member, one level further in (Codex review, PR #943).
+        child_template_param_kinds = (
+            _clang_functions.function_template_param_kinds(
+                node, template_type_param_names
+            )
+            if kind == "FunctionTemplateDecl"
+            else ()
+        )
+        # UNLIKE `child_template_param_kinds` above, this one MUST be
+        # inherited (accumulated), not reset to `()` for every other node
+        # kind: a class template's own parameter names are needed by every
+        # ORDINARY (non-template) member declared anywhere in its pattern
+        # body, not just a directly-templated member (Codex review, PR
+        # #943 -- confirmed by direct compilation that `template<class T>
+        # struct A { void f(T); };` renamed to `template<class U> struct A
+        # { void f(U); };` is the identical declaration, yet `f`'s own
+        # ordinary parameter spells the ENCLOSING class template's
+        # parameter name literally, and `f` is never itself a
+        # `FunctionTemplateDecl`). `ClassTemplatePartialSpecializationDecl`
+        # carries the identical shape (own parameter list, then its own
+        # member pattern) and needs the same treatment -- confirmed by
+        # direct compilation. A nested member TEMPLATE still sees BOTH the
+        # enclosing class's names and its own (appended, never replacing),
+        # since `type_param_names` is looked up by name -- see
+        # `extract.headers.clang.functions.class_template_type_param_names`'s
+        # own docstring.
+        child_template_type_param_names = (
+            template_type_param_names
+            + _clang_functions.function_template_type_param_names(node)
+            if kind == "FunctionTemplateDecl"
+            else (
+                template_type_param_names
+                + _clang_functions.class_template_type_param_names(node)
+                if kind
+                in ("ClassTemplateDecl", "ClassTemplatePartialSpecializationDecl")
+                else template_type_param_names
+            )
+        )
+        # Per-parent (not global) anonymous-scope counter, assigned here
+        # because an ordinal is a position among THIS node's own children: a
+        # global counter would make one anonymous struct's identity depend on
+        # how many unrelated anonymous scopes happened to be walked before it
+        # anywhere in the translation unit. Counted per *entity*, not per
+        # block: two `namespace { }` blocks reopen ONE unnamed namespace, and
+        # clang links them via `originalNamespace`/`previousDecl` -- numbering
+        # blocks would split one real scope into two identities (see
+        # `_clang_scope.anonymous_scope_key`).
+        #
+        # The counter/seen-set pair itself must be keyed by the *logical C++
+        # scope this node's children are actually entering* -- `child_scope_
+        # path` itself -- not held as a plain per-call local, and not keyed
+        # by `node`'s own identity either (an earlier version of this fix
+        # tried that and was itself wrong, see below). Two real cases prove
+        # this, both confirmed by direct compilation (Codex review, fresh
+        # evidence, two separate rounds):
+        #
+        # (1) A NAMED namespace reopened in two blocks (`namespace N { ... }
+        # ... namespace N { ... }`) is walked as two SEPARATE `_walk` calls,
+        # one per block. A call-local dict resets between those two calls,
+        # so an anonymous struct that is the first anonymous child of block
+        # two collides with the ordinal already given to block one's first
+        # anonymous child.
+        #
+        # (2) A TRANSPARENT AST wrapper -- `LinkageSpecDecl` (`extern "C"
+        # { ... }`) is the confirmed real case, and any future node kind
+        # `scope_segment_for` maps to `None` would be another -- contributes
+        # NO segment of its own (`child_scope_path` for its children is
+        # exactly `scope_path`, unchanged), yet it IS a separate `_walk`
+        # call/node. Keying by `node`'s own identity (this fix's first
+        # attempt) gave the wrapper's anonymous children their own counter,
+        # separate from a sibling anonymous scope declared directly in the
+        # SAME enclosing namespace right next to the `extern "C"` block --
+        # two scopes that are, from `ScopePath`'s own perspective, both
+        # direct children of the identical logical scope.
+        #
+        # `child_scope_path` closes both at once with one rule, since it IS
+        # the value that answers "which logical scope are these children
+        # actually in": two reopened blocks of namespace `N` compute the
+        # identical `(..., Namespace("N"))` tuple (segment construction
+        # depends only on the name/`isInline` flag, never on `node` identity
+        # or which block produced it), and a transparent wrapper's
+        # `child_scope_path` is *by definition* identical to its own
+        # `scope_path` (no segment appended), so its anonymous children
+        # share the counter of whatever real scope contains the wrapper.
+        # `ScopeSegment`s are frozen/hashable, so the tuple itself is a valid
+        # dict key -- no string-identity/objid fallback needed at all, and
+        # none of the "no id available" edge cases the node-identity version
+        # had to account for can arise here.
+        ordinal_state = self._anonymous_ordinal_state.setdefault(
+            child_scope_path, {"next": 0, "seen": {}}
+        )
         for child in node.get("inner", []) or []:
             if not isinstance(child, dict):
                 continue
             if child.get("kind") == "AccessSpecDecl":
                 running = child.get("access", running)
                 continue
+            child_anonymous_ordinal: int | None = None
+            if _clang_scope.anonymous_scope_kind(child) is not None:
+                entity_key = _clang_scope.anonymous_scope_key(child)
+                seen: dict[str, int] = ordinal_state["seen"]
+                already = seen.get(entity_key) if entity_key is not None else None
+                if already is not None:
+                    child_anonymous_ordinal = already
+                else:
+                    child_anonymous_ordinal = ordinal_state["next"]
+                    ordinal_state["next"] += 1
+                    if entity_key is not None:
+                        seen[entity_key] = child_anonymous_ordinal
             file = self._walk(
                 child,
                 scope=child_scope,
                 lookup_scope=child_lookup_scope,
+                scope_path=child_scope_path,
+                anonymous_ordinal=child_anonymous_ordinal,
                 current_file=file,
                 access=child.get("access", running),
                 extern_c=child_extern_c,
                 in_friend=child_in_friend,
                 in_template=child_in_template,
+                template_param_kinds=child_template_param_kinds,
+                template_type_param_names=child_template_type_param_names,
             )
         return file
 
@@ -881,6 +1017,9 @@ class _ClangAstParser:
         extern_c: bool,
         in_friend: bool,
         in_template: bool = False,
+        scope_path: ScopePath = (),
+        template_param_kinds: tuple[str, ...] = (),
+        template_type_param_names: tuple[str, ...] = (),
     ) -> None:
         entry = _Decl(
             node=node,
@@ -890,6 +1029,9 @@ class _ClangAstParser:
             extern_c=extern_c,
             in_friend=in_friend,
             in_template=in_template,
+            scope_path=scope_path,
+            template_param_kinds=template_param_kinds,
+            template_type_param_names=template_type_param_names,
         )
         if kind in _FUNCTION_NODE_KINDS and name:
             self._functions.append(entry)
@@ -913,66 +1055,35 @@ class _ClangAstParser:
     def _visibility(self, mangled: str, name: str = "") -> Visibility:
         """Resolve API visibility from the binary's exported-symbol tables.
 
-        Identical policy to the castxml parser so a clang- and a castxml-derived
-        snapshot classify the same declaration the same way.
-
-        Mach-O quirk: clang's ``mangledName`` carries the platform global-symbol
-        prefix (``__ZN3lib3addEii`` on macOS), but ``_dump_macho`` strips the
-        single leading underscore off the export set to match castxml's
-        prefix-free names. So each mangled candidate is matched both as-is (ELF)
-        **and** with one leading underscore removed (Mach-O), trying the as-is
-        form first so an ELF Itanium ``_Z…`` name never spuriously matches the
-        stripped variant.
+        See ``extract.headers.clang.context.visibility`` (the canonical
+        implementation this delegates to) for the full contract.
         """
-        for cand in self._symbol_candidates(mangled):
-            if cand in self._exported_dynamic:
-                return Visibility.PUBLIC
-        if name and name in self._exported_dynamic:
-            return Visibility.PUBLIC
-        for cand in self._symbol_candidates(mangled):
-            if cand in self._exported_static:
-                return Visibility.ELF_ONLY
-        if name and name in self._exported_static:
-            return Visibility.ELF_ONLY
-        return Visibility.HIDDEN
+        return _clang_context.visibility(
+            self._exported_dynamic, self._exported_static, mangled, name
+        )
 
     @staticmethod
     def _symbol_candidates(mangled: str) -> tuple[str, ...]:
-        """The mangled name plus, on a leading underscore, its de-prefixed form."""
-        if not mangled:
-            return ()
-        if mangled.startswith("_"):
-            return (mangled, mangled[1:])
-        return (mangled,)
+        """See ``extract.headers.clang.context.symbol_candidates``."""
+        return _clang_context.symbol_candidates(mangled)
 
     @staticmethod
     def _access_level(access: str) -> AccessLevel:
-        if access == "protected":
-            return AccessLevel.PROTECTED
-        if access == "private":
-            return AccessLevel.PRIVATE
-        return AccessLevel.PUBLIC
+        """See ``extract.headers.clang.context.access_level``."""
+        return _clang_context.access_level(access)
 
     @staticmethod
     def _source_location(entry: _Decl) -> str | None:
         """``file:line`` for a decl, or the bare file when clang omits the line.
 
-        clang makes ``loc.line`` sticky just like ``loc.file`` — a declaration
-        nested on the same source line as its parent (e.g. a ``static constexpr``
-        member of a one-line ``struct``) often carries the inherited file but no
-        ``line``. Dropping the whole location there would strip provenance and
-        make ``_decl_is_public`` discard an otherwise-public constant/type, so
-        the file is kept (``header_from_location`` tolerates a path with no
-        ``:line`` suffix). Returns ``None`` only when there is no file at all.
+        See ``extract.headers.clang.context.source_location`` (the canonical
+        implementation this delegates to) for the full contract.
         """
-        if not entry.file:
-            return None
-        line = _node_line(entry.node)
-        return f"{entry.file}:{line}" if line else entry.file
+        return _clang_context.source_location(entry)
 
     def _qualified(self, entry: _Decl) -> str:
-        name = entry.node.get("name", "")
-        return "::".join([*entry.scope, name]) if entry.scope else name
+        """See ``extract.headers.clang.context.qualified_name``."""
+        return _clang_context.qualified_name(entry)
 
     def _id_index(self) -> dict[str, str]:
         """Lazily-built, memoized :func:`_index_decl_id_qualified_names`
@@ -982,8 +1093,9 @@ class _ClangAstParser:
         return self._decl_id_qualified_names
 
     def _record_index(self) -> dict[str, dict[str, Any]]:
-        """Lazily-built ``qualified name -> node`` index over every parsed
-        record, for ``dumper_clang_vtable.build_vtable``'s base-lookup
+        """See ``extract.headers.clang.context.RecordVtableIndex.record_index``
+        (the canonical implementation this delegates to) for the full
+        contract, and ``dumper_clang_vtable.build_vtable``'s base-lookup
         recursion.
 
         A forward declaration (``struct A;``) and its later complete
@@ -991,268 +1103,54 @@ class _ClangAstParser:
         land in ``self._records`` -- confirmed with a real clang build that
         clang emits BOTH `CXXRecordDecl` nodes for exactly this shape, the
         forward one carrying neither `completeDefinition` nor any member
-        children. A plain first-registration-wins policy silently kept
-        whichever was encountered first, which is the forward decl whenever
-        one precedes the definition in source order -- the common style --
-        losing every virtual method the real definition carries (Codex
-        review, fresh evidence: `struct A; struct A { virtual void f(); };`
-        resolved to an empty `vtable` for A and any of its derived classes).
-        A complete definition always wins over a forward-declaration stub
-        for the same qualname, regardless of which one was walked first;
-        ties among non-definitions (there's at most one real forward decl
-        in practice, but this stays defensive) keep the first seen.
+        children. See ``RecordVtableIndex.record_index`` (that canonical
+        implementation's own docstring) for the full forward-decl-vs-
+        definition tiebreak this delegates to.
         """
-        if self._record_by_qualname is None:
-            idx: dict[str, dict[str, Any]] = {}
-            for entry in self._records:
-                name = str(entry.node.get("name") or "")
-                if not name:
-                    continue
-                qualname = self._qualified(entry)
-                existing = idx.get(qualname)
-                if existing is None or (
-                    not _is_record_definition(existing)
-                    and _is_record_definition(entry.node)
-                ):
-                    idx[qualname] = entry.node
-            self._record_by_qualname = idx
-        return self._record_by_qualname
+        return self._record_vtable_index.record_index()
 
     def _specialization_record_index(self) -> dict[str, dict[str, Any]]:
-        """Lazily-built, memoized :func:`build_specialization_index` over
-        this parser's own AST root -- see that function's docstring
-        (``dumper_clang_vtable.py``) for the full "why". Passes through the
-        param-kinds/param-defaults indices already computed eagerly in
-        ``__init__`` (for ``_walk``'s own specialization-scoping use)
-        instead of paying for a second whole-AST pass over each.
+        """See ``extract.headers.clang.context.RecordVtableIndex.
+        specialization_record_index`` (the canonical implementation this
+        delegates to) for the full contract.
         """
-        if self._specialization_by_qualname is None:
-            self._specialization_by_qualname = _build_specialization_index(
-                self._root,
-                self._template_param_kinds_by_qualname,
-                self._template_param_defaults_by_qualname,
-                self._template_param_names_by_qualname,
-            )
-        return self._specialization_by_qualname
+        return self._record_vtable_index.specialization_record_index()
 
     def _base_lookup_index(self) -> dict[str, dict[str, Any]]:
-        """Lazily-built, memoized merge of ``_record_index()`` +
-        ``_specialization_record_index()``, for
-        ``dumper_clang_vtable.build_vtable``'s base-lookup recursion.
-
-        Safe to merge into one dict: an ordinary record's qualname never
-        contains ``"<"``, so the two key spaces never collide. An ordinary
-        record wins on the rare case both indexes somehow produced the same
-        key (shouldn't occur given the above, but a plain record is always
-        the more trustworthy of the two if it ever did).
-
-        Memoized (CodeRabbit review, fresh evidence): ``_build_record`` calls
-        this once per record, so leaving it unmemoized meant ``parse_types()``
-        rebuilt the whole merged dict -- and ``_virtual_mangled_names()``
-        separately re-ran ``build_vtable`` over every qualname in it -- once
-        per record in the TU, an O(records × index size) cost for what
-        should be a one-time merge.
+        """See ``extract.headers.clang.context.RecordVtableIndex.
+        base_lookup_index`` (the canonical implementation this delegates to)
+        for the full contract.
         """
-        if self._base_lookup is None:
-            merged = dict(self._specialization_record_index())
-            merged.update(self._record_index())
-            self._base_lookup = merged
-        return self._base_lookup
+        return self._record_vtable_index.base_lookup_index()
 
     def _virtual_mangled_names(self) -> frozenset[str]:
-        """Every mangled name occupying a slot in ANY record's reconstructed
-        vtable, across the whole TU.
-
-        The gap this closes (Codex review, fresh evidence, real end-to-end
-        repro): ``dumper_clang_vtable.build_vtable`` correctly recognizes a
-        signature-matched override with no `virtual`/`override` keyword and
-        replaces the inherited slot with the derived method's own mangled
-        name -- but that knowledge lived only inside the vtable list itself.
-        `parse_functions()`'s own `Function.is_virtual` still read clang's
-        raw, keyword-only `node.get("virtual")` -- the exact signal this
-        whole module exists to work around -- so `diff_cxx_rules.
-        vtable_slot_is_override_reuse()` (which requires both sides'
-        `Function.is_virtual` to be `True` before recognizing a slot as
-        reused rather than changed) rejected the reuse and
-        `diff_types._diff_type_vtable` emitted a spurious
-        `TYPE_VTABLE_CHANGED` BREAKING finding for exactly the no-keyword
-        override case this module was built to recognize. Confirmed
-        end-to-end through the live `dump()`/`compare()` pipeline: adding a
-        keyword-less override in a derived class (with no other change)
-        produced `type_vtable_changed` before this fix.
-
-        Only ever WIDENS `is_virtual` from `False` to `True` (parse_functions
-        still ORs this in, never overrides an already-`True` reading) --
-        purely additive, so it cannot suppress a real virtuality signal, only
-        recover one clang's JSON otherwise drops silently.
+        """See ``extract.headers.clang.context.RecordVtableIndex.
+        virtual_mangled_names`` (the canonical implementation this delegates
+        to) for the full contract.
         """
-        if self._virtual_mangled is None:
-            idx = self._base_lookup_index()
-            names: set[str] = set()
-            for qualname in idx:
-                names.update(_build_clang_vtable(qualname, idx))
-            self._virtual_mangled = frozenset(names)
-        return self._virtual_mangled
+        return self._record_vtable_index.virtual_mangled_names()
 
     # ── parse_* (mirror _CastxmlParser's public surface) ─────────────────────
 
     def parse_functions(self) -> list[Function]:
-        funcs: list[Function] = []
-        for entry in self._functions:
-            node = entry.node
-            if _is_builtin_file(entry.file):
-                continue
-            name = str(node.get("name", ""))
-            if not name:
-                continue
-            if entry.scope and "<" in entry.scope[-1]:
-                # A method of a concrete class-template specialization
-                # (`A<int>::f`) -- unlike an ordinary member, whose name
-                # this backend deliberately leaves bare everywhere else
-                # (`owner_class_of` recovers its owner from the MANGLED
-                # name instead, which works fine there since a plain
-                # class's mangled scope component already IS its matching
-                # spelling). A specialization's own mangled scope component
-                # is the RAW, un-spelled Itanium template-argument encoding
-                # (`"AIiE"`, confirmed with a real clang build) -- which
-                # never matches `RecordType.bases`'s spelled form
-                # (`"A<int>"`, built from clang's own type printer) at all,
-                # so `owner_class_of`'s mangled fallback silently failed to
-                # recognize an inherited-slot override whose base is a
-                # template specialization, producing a false
-                # `TYPE_VTABLE_CHANGED` (Codex review, fresh evidence: found
-                # while verifying the base-lookup fix end to end -- the
-                # vtable itself now resolves correctly, but this SEPARATE
-                # owner-matching gap was still reachable once it did).
-                # Qualifying the name here lets `owner_class_of`'s
-                # PREFERRED (already-qualified-name) branch resolve the
-                # SAME spelling `RecordType.bases` records, sidestepping
-                # the mismatched mangled fallback entirely -- mirroring
-                # what DWARF already does for every member unconditionally
-                # (`owner_class_of`'s own docstring).
-                name = "::".join((*entry.scope, name))
-            qualtype = _qualtype(node)
-            mangled = str(node.get("mangledName", "")) or name
-            quals = _function_qualifiers(qualtype)
-            ret_type = _return_type(qualtype) or "void"
-            params = [
-                Param(
-                    name=str(p.get("name", "")),
-                    type=_qualtype(p),
-                    pointer_depth=_pointer_depth(_qualtype(p)),
-                    # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
-                    is_restrict=_clang_param_is_restrict(p),
-                    # G31 Phase C continued: same shape as `is_restrict` above -- castxml never populated this fact either. See `dumper_clang_qualifiers._clang_param_is_va_list`. is_va_list_fact is `partial`, not `present`: the check only covers x86-64 System V, and conservatively answers `False` -- not "confirmed no" -- on any other target (Codex review; target-scoping residual unchanged, per that function's own docstring).
-                    is_va_list=(_iv := _clang_param_is_va_list(p)),
-                    is_va_list_fact=Fact.partial(_iv),
-                    # Preserve the actual default-argument value (so a changed
-                    # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
-                    # bare presence marker when the value can't be evaluated.
-                    default=(_initializer_value(p, self._id_index) or "default")
-                    if _param_has_default(p)
-                    else None,
-                )
-                for p in node.get("inner", []) or []
-                if isinstance(p, dict) and p.get("kind") == "ParmVarDecl"
-            ]
-            kind = node.get("kind")
-            is_explicit: bool | None
-            if kind in ("CXXConstructorDecl", "CXXConversionDecl"):
-                is_explicit = bool(node.get("explicit"))
-            else:
-                is_explicit = None
-            if "&&" in quals:
-                ref_qualifier = "&&"
-            elif re.search(r"(?<!&)&(?!&)", quals):
-                ref_qualifier = "&"
-            else:
-                ref_qualifier = ""
-            funcs.append(
-                Function(
-                    name=name,
-                    mangled=mangled,
-                    return_type=ret_type,
-                    params=params,
-                    visibility=self._visibility(str(node.get("mangledName", "")), name),
-                    # bool(node.get("virtual")) alone misses a signature-
-                    # matched override with neither `virtual` nor `override`
-                    # written -- clang's JSON gives no direct signal for that
-                    # case at all (see dumper_clang_vtable.py's own
-                    # docstring). _virtual_mangled_names() recovers it from
-                    # the reconstructed vtables, which already do this
-                    # matching; only ever widens False -> True.
-                    #
-                    # Restricted to actual member-function kinds (Codex
-                    # review, fresh evidence): an uninstantiated template
-                    # method carries no `mangledName` at all, so
-                    # `_collect_virtual_slots` falls back to its bare,
-                    # unmangled `name` as the slot's "mangled" identity (e.g.
-                    # `"f"`). A free `extern "C"` function sharing that same
-                    # bare name mangles to the identical string by design (C
-                    # linkage), so the plain `mangled in
-                    # self._virtual_mangled_names()` membership test above
-                    # matched an unrelated global FunctionDecl purely by
-                    # name collision -- confirmed with a real clang dump of
-                    # `template<class T> struct A { virtual void f(); };
-                    # extern "C" void f();`, where both `f`s share the
-                    # identical unmangled fallback string. Only a
-                    # CXXMethodDecl/CXXConstructorDecl/CXXDestructorDecl/
-                    # CXXConversionDecl can be virtual at all in C++, and
-                    # `_collect_virtual_slots` only ever walks those same
-                    # member kinds when building `_virtual_mangled_names()`
-                    # -- a bare `FunctionDecl` (never a class member) can
-                    # never legitimately appear in that set, so excluding it
-                    # here closes the collision without narrowing any real
-                    # member-override case.
-                    is_virtual=bool(node.get("virtual"))
-                    or (
-                        kind != "FunctionDecl"
-                        and mangled in self._virtual_mangled_names()
-                    ),
-                    is_noexcept=_is_noexcept_qualifier(quals),
-                    # An ``extern "C"`` linkage spec is authoritative; fall back
-                    # to the mangled==name heuristic for a plain C-mode parse
-                    # (no LinkageSpecDecl, but C-linkage names equal their symbol).
-                    is_extern_c=entry.extern_c or mangled == name,
-                    vtable_index=None,
-                    source_location=self._source_location(entry),
-                    is_static=node.get("storageClass") == "static",
-                    is_const=bool(re.search(r"\bconst\b", quals)),
-                    is_volatile=bool(re.search(r"\bvolatile\b", quals)),
-                    is_pure_virtual=bool(node.get("pure")),
-                    is_deleted=bool(node.get("explicitlyDeleted")),
-                    is_inline=bool(node.get("inline")),
-                    access=self._access_level(entry.access),
-                    return_pointer_depth=_pointer_depth(ret_type),
-                    ref_qualifier=ref_qualifier,
-                    is_explicit=is_explicit,
-                    is_hidden_friend=entry.in_friend,
-                    # ``entry.scope`` is the enclosing-class scope path at the
-                    # point ``in_friend`` first became True (the FriendDecl's
-                    # own scope, since FriendDecl never pushes a scope level) —
-                    # i.e. exactly the befriending class, mirroring castxml's
-                    # ``befriending`` attribute resolution.
-                    hidden_friend_owner=(
-                        "::".join(entry.scope)
-                        if entry.in_friend and entry.scope
-                        else None
-                    ),
-                    # clang stamps "variadic": true on FunctionDecl; the
-                    # qualtype spelling ("void (int, ...)") is the fallback.
-                    is_variadic=bool(node.get("variadic")) or "..." in qualtype,
-                    contract_attributes=_clang_contract_attributes(
-                        node, target_triple=self._target_triple
-                    ),
-                    exception_spec=_clang_exception_spec(quals),
-                    deprecated=_clang_deprecated_message(node),
-                    # G31 Phase C backend audit -- see _clang_method_is_override.
-                    is_override=(
-                        _clang_method_is_override(node) if kind in _OVERRIDE_ELIGIBLE_KINDS else None
-                    ),
-                    is_compiler_generated=False,
-                )
-            )
-        return funcs
+        """See ``extract.headers.clang.functions.parse_functions`` (the
+        canonical implementation this delegates to) for the full contract.
+
+        ``default_value`` is passed as a bound-method reference (matching
+        the ``self._id_index`` bound-method-reference convention already
+        used for param/field-default extraction elsewhere in this class):
+        the real evaluator lives in ``dumper_clang_expr.py``, which imports
+        ``diff_cxx_rules`` and so cannot be imported from the
+        ``extract``-classified ``functions.py`` module directly.
+        """
+        return _clang_functions.parse_functions(
+            self._functions,
+            exported_dynamic=self._exported_dynamic,
+            exported_static=self._exported_static,
+            virtual_mangled_names=self._virtual_mangled_names(),
+            target_triple=self._target_triple,
+            default_value=lambda p: _initializer_value(p, self._id_index),
+        )
 
     def parse_variables(self) -> list[Variable]:
         variables: list[Variable] = []
@@ -1267,10 +1165,94 @@ class _ClangAstParser:
             if node.get("storageClass") in ("auto", "register"):
                 continue
             name = str(node.get("name", ""))
-            mangled = str(node.get("mangledName", "")) or name
+            # `raw_mangled` distinguishes "clang genuinely emitted this
+            # mangling" from "clang emitted none, and `mangled` fell back
+            # to the bare name" -- see `functions.parse_functions`'s
+            # identical, more-fully-commented fix for the direct-
+            # compilation evidence (Codex/CodeRabbit review, fresh
+            # evidence): a static member of an uninstantiated class-
+            # template pattern carries no `mangledName` either, and the
+            # un-gated `mangled == name` heuristic below wrongly read that
+            # fallback collision as C linkage.
+            raw_mangled = node.get("mangledName")
+            mangled = raw_mangled or name
             if not mangled:
                 continue
             type_name = _qualtype(node)
+            # The plain `raw_mangled == name` case stays UNGATED -- it
+            # holds on every platform for a plain-C declaration clang
+            # mangles as its own bare name, with no leading-underscore
+            # stripping involved at all. The Darwin-gated `symbol_
+            # candidates` de-prefixing is a SEPARATE, additional fallback
+            # layered on top (Codex review, ADR-063 Phase 6, fifteenth AND
+            # sixteenth rounds, fresh evidence each time): a genuinely
+            # plain-C compilation unit has no `LinkageSpecDecl` at all
+            # (that node only exists in C++'s grammar), so `entry.
+            # extern_c` never becomes True for it, and Darwin's linker
+            # prepends a leading underscore to clang's own `mangledName`
+            # ("_foo" for source-level "foo") that castxml's own "pure"
+            # convention never carries -- so the bare-equality check alone
+            # always failed on this platform even though castxml correctly
+            # recognizes the identical declaration as extern "C". Left
+            # unfixed, this variable's `entity_id` stayed tagged
+            # `("mangled", "_foo")` (never retagged by `dumper_hybrid.py`'s
+            # own Mach-O underscore-stripping rewrite, which only
+            # re-spells the mangled tag's VALUE, not its KIND) while
+            # castxml's tags the same declaration `("extern_c",)`, so a
+            # hybrid merge's bare-`EntityId` matching never recognized the
+            # two as one declaration and retained it twice in
+            # `semantic_ir` even though the flat `variables` list (which
+            # matches on the bare mangled string, not `EntityId`) already
+            # unified it.
+            #
+            # The Darwin gate on the de-prefixed fallback is NOT optional
+            # (sixteenth round, fresh evidence, a real regression an
+            # earlier, UNGATED revision of this same fallback introduced):
+            # on a NON-Darwin target, a real, explicit `asm("_foo")` label
+            # genuinely produces `raw_mangled == "_foo"` while `name ==
+            # "foo"` and `entry.extern_c` stays False -- that IS a real,
+            # distinct mangled identity (an asm label), not a linker-
+            # decoration artifact, and castxml's own resolver keeps it
+            # tagged `("mangled", "_foo")` for the identical declaration.
+            # Gating the de-prefixed fallback ALONE on Darwin -- rather
+            # than the whole check, which would also have broken the
+            # plain-equality case above on every non-Darwin platform -- is
+            # what fixes this without reintroducing a different
+            # regression. `symbol_candidates` itself stays
+            # target-agnostic (it is the identical tolerant-match helper
+            # `_visibility` already uses for pure export-table membership,
+            # where trying the de-prefixed form is always safe); the
+            # identity decision built on top of it is what needs the
+            # platform gate.
+            #
+            # The Darwin gate ALONE is still not enough (nineteenth
+            # round, fresh evidence): a real, explicit `asm("_foo")`
+            # label is just as possible ON Darwin as off it, and this
+            # fallback's whole justification -- "a genuinely plain-C
+            # compilation unit has no `LinkageSpecDecl`" -- only holds
+            # for a declaration with NO enclosing scope at all; C has no
+            # namespaces, so a plain-C variable is always global-scope. A
+            # NAMESPACED Darwin C++ declaration is never plain C
+            # regardless of platform, so `entry.scope` gates the
+            # fallback the same way `entry.extern_c`/`raw_mangled ==
+            # name` already implicitly are for a real extern-"C" block.
+            # Requiring `not entry.scope` also preserves both the
+            # genuine asm-label identity AND the namespace
+            # `dumper_hybrid.py`'s Mach-O rewrite would otherwise have
+            # silently dropped by retagging the declaration
+            # `("extern_c",)` (whose own `entity_id_for_variable`
+            # contract always resolves `scope=()`, discarding it
+            # outright).
+            is_extern_c = (
+                entry.extern_c
+                or raw_mangled == name
+                or (
+                    raw_mangled is not None
+                    and not entry.scope
+                    and _clang_context.is_darwin_target(self._target_triple)
+                    and name in _clang_context.symbol_candidates(raw_mangled)
+                )
+            )
             variables.append(
                 Variable(
                     name=name,
@@ -1282,6 +1264,28 @@ class _ClangAstParser:
                     source_location=self._source_location(entry),
                     alignment_bits=_clang_var_alignment_bits(node),
                     deprecated=_clang_deprecated_message(node),
+                    # See Variable.is_static's own comment -- mirrors
+                    # `parse_functions`'s identical `storageClass ==
+                    # "static"` read on the AST-JSON node.
+                    is_static=node.get("storageClass") == "static",
+                    # ADR-063 Phase 2, same routing/bug-fix as
+                    # parse_functions: `mangled_name` is offered only when
+                    # `raw_mangled` is genuinely present, not merely when
+                    # `mangled` (which may itself be the bare-`name`
+                    # fallback) is non-empty -- passing the fallback
+                    # through as a "genuine" mangling would collapse two
+                    # distinct static members of an uninstantiated
+                    # class-template pattern onto one `EntityId`.
+                    entity_id=entity_id_for_variable(
+                        entry.scope_path,
+                        name,
+                        mangled_name=(
+                            raw_mangled
+                            if (raw_mangled is not None and not is_extern_c)
+                            else None
+                        ),
+                        is_extern_c=is_extern_c,
+                    ),
                 )
             )
         return variables
@@ -1294,9 +1298,31 @@ class _ClangAstParser:
         to the public-header surface via provenance; empty when no public set was
         supplied (provenance is opt-in).
         """
+        return {
+            self._qualified(entry): value
+            for entry, value in self._iter_public_constants()
+        }
+
+    def parse_constant_entity_ids(self) -> dict[str, EntityId]:
+        """``EntityId`` sidecar for :meth:`parse_constants` (ADR-063 Phase 2),
+        keyed identically and built from the same filtering pass so the two
+        maps can never disagree about which constants qualify. See
+        ``AbiSnapshot.constant_entity_ids``.
+        """
+        return {
+            self._qualified(entry): entity_id_for_constant(
+                entry.scope_path, str(entry.node.get("name", ""))
+            )
+            for entry, _ in self._iter_public_constants()
+        }
+
+    def _iter_public_constants(self) -> list[tuple[_Decl, str]]:
+        """``(decl, initializer value)`` for every public ``const``/
+        ``constexpr`` — the single filtering pass shared by
+        :meth:`parse_constants` and :meth:`parse_constant_entity_ids`."""
         if not self._have_public_set:
-            return {}
-        out: dict[str, str] = {}
+            return []
+        out: list[tuple[_Decl, str]] = []
         for entry in self._variables:
             node = entry.node
             if _is_builtin_file(entry.file):
@@ -1314,76 +1340,42 @@ class _ClangAstParser:
                 continue
             if not self._decl_is_public(entry):
                 continue
-            out[self._qualified(entry)] = value
+            out.append((entry, value))
         return out
 
     def _decl_is_public(self, entry: _Decl) -> bool:
-        sh = header_from_location(self._source_location(entry))
-        if not sh:
-            return False
-        return (
-            classify_origin(
-                sh,
-                self._pub_header_segs,
-                self._pub_dir_segs,
-                have_public_set=self._have_public_set,
-            )
-            == ScopeOrigin.PUBLIC_HEADER
+        """See ``extract.headers.clang.context.decl_is_public`` (the
+        canonical implementation this delegates to) for the full contract."""
+        return _clang_context.decl_is_public(
+            entry, self._pub_header_segs, self._pub_dir_segs, self._have_public_set
         )
 
     def parse_types(self) -> list[RecordType]:
-        anon_names = self._anon_typedef_names()
-        best: dict[str, tuple[_Decl, str]] = {}
-        order: list[str] = []
-        deprecated: dict[str, str] = {}
-        opaque_kind_sets: dict[str, set[str]] = {}  # raw kinds of non-def redecls
-        for entry in self._records:
-            node = entry.node
-            if _is_builtin_file(entry.file):
-                continue
-            name = str(node.get("name", ""))
-            if not name:
-                name = anon_names.get(str(node.get("id", "")), "")
-                if not name:
-                    continue  # a truly anonymous record (e.g. an inline union member)
-            if name.startswith("__"):
-                continue
-            identity = "::".join([*entry.scope, name]) if entry.scope else name
-            if (msg := _clang_deprecated_message(node)) is not None:  # most recent wins
-                deprecated[identity] = msg
-            if not (node_is_def := _is_record_definition(node)):
-                opaque_kind_sets.setdefault(identity, set()).add(_record_kind(node))
-            if (existing := best.get(identity)) is None:
-                best[identity] = (entry, name)
-                order.append(identity)
-                continue
-            if _is_record_definition(existing[0].node):
-                continue
-            node_pub = self._decl_is_public(entry)
-            if node_is_def or (node_pub and not self._decl_is_public(existing[0])):
-                best[identity] = (entry, name)
-        return [
-            self._build_record(
-                (rec := best[identity])[0],
-                override_name=rec[1],
-                is_opaque=not _is_record_definition(rec[0].node),
-                dep_msg=deprecated.get(identity),
-                override_kind=_reduce_opaque_kind_set(opaque_kind_sets.get(identity)),
-            )
-            for identity in order
-        ]
+        """See ``extract.headers.clang.records.parse_types`` (the canonical
+        implementation this delegates to) for the full contract.
+
+        ``evaluate_bitfield_int``/``field_default_value`` are passed as
+        bound-method/module-function references for the same reason
+        ``parse_functions``'s own ``default_value`` is: the real evaluators
+        live in ``dumper_clang_expr.py``, which imports ``diff_cxx_rules``
+        and so cannot be imported from the ``extract``-classified
+        ``records.py`` module directly.
+        """
+        return _clang_records.parse_types(
+            self._records,
+            self._typedefs,
+            pub_header_segs=self._pub_header_segs,
+            pub_dir_segs=self._pub_dir_segs,
+            have_public_set=self._have_public_set,
+            base_lookup_index=self._base_lookup_index(),
+            evaluate_bitfield_int=_evaluated_int_value,
+            field_default_value=lambda p: _field_initializer_value(p, self._id_index),
+        )
 
     def _anon_typedef_names(self) -> dict[str, str]:
-        """``{anonymous-record-id: typedef-name}`` from the collected typedefs."""
-        out: dict[str, str] = {}
-        for entry in self._typedefs:
-            tname = str(entry.node.get("name", ""))
-            if not tname:
-                continue
-            rid = _owned_tag_id(entry.node)
-            if rid:
-                out.setdefault(rid, tname)
-        return out
+        """See ``extract.headers.clang.records._anon_typedef_names`` (the
+        canonical implementation this delegates to) for the full contract."""
+        return _clang_records._anon_typedef_names(self._typedefs)
 
     def _build_record(
         self,
@@ -1393,121 +1385,27 @@ class _ClangAstParser:
         dep_msg: str | None = None,
         override_kind: str | None = None,
     ) -> RecordType:
-        node = entry.node
-        kind = override_kind if is_opaque and override_kind else _record_kind(node)
-        own_name = override_name or str(node.get("name", ""))
-        deprecated = dep_msg if dep_msg is not None else _clang_deprecated_message(node)
-        if is_opaque:
-            # Mirrors dumper_castxml.py's `incomplete="1"` branch.
-            return RecordType(
-                name=own_name,
-                kind=kind,
-                qualified_name=(
-                    "::".join([*entry.scope, own_name]) if entry.scope else None
-                ),
-                size_bits=None,
-                alignment_bits=None,
-                fields=[],
-                bases=[],
-                virtual_bases=[],
-                vtable=[],
-                vptr_offset_bits=None,
-                is_union=kind == "union",
-                is_opaque=is_opaque,
-                is_final=_clang_record_is_final(node),
-                is_standard_layout=None,
-                is_trivially_copyable=None,
-                is_template_pattern=entry.in_template,
-                has_anonymous_aggregate_fields=False,
-                source_location=self._source_location(entry),
-                deprecated=deprecated,
-                # Empty lists are the parse's own answer -- matches dumper_castxml.py's opaque-record Fact stance.
-                bases_fact=Fact.present([]),
-                virtual_bases_fact=Fact.present([]),
-                vtable_fact=Fact.present([]),
-                vptr_offset_bits_fact=Fact.partial(None),  # heuristic field (see below), partial even here
-            )
-        fields = self._parse_fields(node)
-        bases, virtual_bases, _base_access = _parse_bases(node)
-        injected = _anonymous_member_names(node)
-        is_standard_layout, is_trivially_copyable = _clang_record_type_traits(node)
-        # G31 Phase C: reconstruct the vtable (and, from it, the same
-        # 0-if-polymorphic vptr_offset_bits heuristic castxml already uses)
-        # via dumper_clang_vtable's own signature-matching walk -- see that
-        # module's docstring for why this can't be a simple `node.get
-        # ("virtual")` check the way castxml's real semantic analysis allows.
-        # Keyed by the SAME qualname _base_qualnames'/_record_index's own
-        # lookups use, not `qualified_name` (which is None for a top-level
-        # record) -- an anonymous-record's `override_name` never appears in
-        # a `bases` array, so using it here (rather than the node's own bare
-        # "") is what lets it still resolve if ever referenced as a base.
-        own_qualname = "::".join([*entry.scope, own_name]) if entry.scope else own_name
-        vtable = _build_clang_vtable(own_qualname, self._base_lookup_index())
-        return RecordType(
-            name=own_name,
-            kind=kind,
-            # Namespace/enclosing-class-qualified spelling, set only when it
-            # actually differs from the bare name (mirrors castxml's own
-            # RecordType.qualified_name convention) -- without this, ANY
-            # namespaced/nested clang-parsed type had qualified_name=None, so
-            # a lookup keyed on the tool's own fully-qualified
-            # getQualifiedNameAsString() spelling (e.g. "ns::Foo") fell back
-            # to the bare "Foo" and never matched (Codex review, G28 Phase 4).
-            qualified_name=(
-                "::".join([*entry.scope, own_name]) if entry.scope else None
-            ),
-            # clang's JSON AST does not compute layout — size/align/offsets are
-            # left None so the layout detectors skip an unknown-vs-unknown
-            # comparison (DWARF remains the layout authority on this host).
-            size_bits=None,
-            alignment_bits=None,
-            fields=fields,
-            bases=bases,
-            virtual_bases=virtual_bases,
-            vtable=vtable,
-            # Same convention as dumper_castxml.py: polymorphic (non-empty
-            # vtable) -> vtable pointer at offset 0 (the Itanium ABI's
-            # primary-base-at-offset-0 rule); None (unknown) otherwise. Real
-            # multi-inheritance secondary-vtable placement is still not
-            # tracked by either backend -- see the G31 plan doc.
-            vptr_offset_bits=0 if vtable else None,
-            is_union=kind == "union",
+        """See ``extract.headers.clang.records._build_record`` (the
+        canonical implementation this delegates to) for the full contract."""
+        return _clang_records._build_record(
+            entry,
+            self._base_lookup_index(),
+            _evaluated_int_value,
+            lambda p: _field_initializer_value(p, self._id_index),
+            override_name=override_name,
             is_opaque=is_opaque,
-            is_final=_clang_record_is_final(node),
-            # G31 Phase C: unlike layout (size/align/offsets), these are
-            # semantic type traits clang's AST computes independent of any
-            # layout pass, and are genuinely absent from CastXML's own schema
-            # (see dumper_castxml.py's own is_standard_layout/
-            # is_trivially_copyable comment) — the direct-clang backend is
-            # the one place these can actually be populated.
-            is_standard_layout=is_standard_layout,
-            is_trivially_copyable=is_trivially_copyable,
-            is_template_pattern=entry.in_template,
-            # True only when *every* field came from the anonymous-aggregate
-            # flatten, not merely "at least one did" (Codex review): a mixed
-            # record like `struct Foo { union { int i; }; int tag; };` would
-            # otherwise report the flag for `tag` too, letting the DWARF
-            # layout-backfill exact-match branch trust an unrelated empty
-            # DWARF candidate for a field (`tag`) the flag was never meant to
-            # vouch for.
-            has_anonymous_aggregate_fields=bool(injected)
-            and all(f.name in injected for f in fields),
-            source_location=self._source_location(entry),
-            deprecated=deprecated,
-            # G31 Phase C backend audit -- see _clang_record_is_abstract.
-            is_abstract=_clang_record_is_abstract(node),
-            # Stated explicitly -- this parse genuinely resolved these. vptr_offset_bits_fact is `partial`, not `present`: 0-if-vtable-else-None is the Itanium primary-base heuristic, not a real offset read (matches vptr_offset_bits's own PARTIAL row).
-            bases_fact=Fact.present(bases), virtual_bases_fact=Fact.present(virtual_bases),
-            vtable_fact=Fact.present(vtable), vptr_offset_bits_fact=Fact.partial(0 if vtable else None),
+            dep_msg=dep_msg,
+            override_kind=override_kind,
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:
-        # Members injected from an anonymous struct/union are referenced by
-        # ``IndirectFieldDecl`` siblings; collect their names so the anonymous
-        # record's FieldDecls can be flattened up into this record (and so a
-        # typedef'd anonymous record, which has no IndirectFieldDecl, is not).
-        injected = _anonymous_member_names(node)
-        return self._collect_fields(node, _default_record_access(node), injected)
+        """See ``extract.headers.clang.records._parse_fields`` (the
+        canonical implementation this delegates to) for the full contract."""
+        return _clang_records._parse_fields(
+            node,
+            _evaluated_int_value,
+            lambda p: _field_initializer_value(p, self._id_index),
+        )
 
     def _collect_fields(
         self,
@@ -1517,136 +1415,31 @@ class _ClangAstParser:
         *,
         nested: bool = False,
     ) -> list[TypeField]:
-        fields: list[TypeField] = []
-        for child in node.get("inner", []) or []:
-            if not isinstance(child, dict):
-                continue
-            kind = child.get("kind")
-            if kind == "AccessSpecDecl":
-                running = child.get("access", running)
-                continue
-            if kind in ("RecordDecl", "CXXRecordDecl") and not child.get("name"):
-                # Anonymous struct/union member: its public members live directly
-                # in the enclosing record's namespace, so flatten them here. Keep
-                # only the injected names to avoid pulling in a typedef'd
-                # anonymous record's fields.
-                fields.extend(
-                    self._collect_fields(child, running, injected, nested=True)
-                )
-                continue
-            if kind != "FieldDecl":
-                continue
-            fname = str(child.get("name", ""))
-            if not fname:
-                continue
-            if nested and fname not in injected:
-                # A nested unnamed record contributes only the members that an
-                # IndirectFieldDecl injected (anonymous aggregate); a typedef'd
-                # anonymous record injects nothing, so its fields are dropped.
-                continue
-            fields.append(self._make_field(child, child.get("access", running)))
-        return fields
+        """See ``extract.headers.clang.records._collect_fields`` (the
+        canonical implementation this delegates to) for the full contract."""
+        return _clang_records._collect_fields(
+            node,
+            running,
+            injected,
+            _evaluated_int_value,
+            lambda p: _field_initializer_value(p, self._id_index),
+            nested=nested,
+        )
 
     def _make_field(self, child: dict[str, Any], access: str) -> TypeField:
-        ftype = _qualtype(child)
-        cv_type = _field_own_cv_source(_desugared_qualtype(child))
-        bits, is_bitfield = _bitfield_width(child)
-        return TypeField(
-            name=str(child.get("name", "")),
-            type=ftype,
-            offset_bits=None,
-            is_bitfield=is_bitfield,
-            bitfield_bits=bits,
-            is_const=bool(re.search(r"\bconst\b", cv_type)),
-            is_volatile=bool(re.search(r"\bvolatile\b", cv_type)),
-            is_mutable=bool(child.get("mutable")),
-            access=self._access_level(access),
-            # self._id_index (uncalled -- a bound-method reference, matching
-            # _IdIndexProvider's lazy contract) is only actually invoked deep
-            # inside _canonical_expr, and only for a real referencedDecl --
-            # never for an ordinary literal default or a field with no
-            # initializer at all (Codex review, two rounds: passing the
-            # CALLED self._id_index() built the whole-AST index eagerly for
-            # every field regardless; gating only on hasInClassInitializer
-            # still left every LITERAL default, e.g. `int timeout = 30;`,
-            # paying for it too, since that never reaches the referencedDecl
-            # branch either). The hasInClassInitializer ternary itself stays,
-            # to skip the function call entirely for a field with no
-            # initializer.
-            default=(
-                _field_initializer_value(child, self._id_index)
-                if child.get("hasInClassInitializer")
-                else None
-            ),
-            deprecated=_clang_deprecated_message(child),
+        """See ``extract.headers.clang.records._make_field`` (the canonical
+        implementation this delegates to) for the full contract."""
+        return _clang_records._make_field(
+            child,
+            access,
+            _evaluated_int_value,
+            lambda p: _field_initializer_value(p, self._id_index),
         )
 
     def parse_enums(self) -> list[EnumType]:
-        enums: list[EnumType] = []
-        typedef_names_by_enum_id: dict[str, str] = {}
-        for entry in self._typedefs:
-            node = entry.node
-            if _is_builtin_file(entry.file):
-                continue
-            typedef_name = str(node.get("name", ""))
-            if not typedef_name:
-                continue
-            for child in node.get("inner", []) or []:
-                if not isinstance(child, dict):
-                    continue
-                owned = child.get("ownedTagDecl") or {}
-                if owned.get("kind") == "EnumDecl" and owned.get("id"):
-                    typedef_names_by_enum_id[str(owned["id"])] = typedef_name
-
-        for entry in self._enums:
-            node = entry.node
-            if _is_builtin_file(entry.file):
-                continue
-            name = str(node.get("name", "")) or typedef_names_by_enum_id.get(
-                str(node.get("id", "")), ""
-            )
-            if not name or name.startswith("__"):
-                continue
-            members: list[EnumMember] = []
-            # C/C++ enumerator values auto-increment from the previous one
-            # (starting at 0) unless an explicit initializer overrides them;
-            # clang's JSON only carries the value on an explicit ConstantExpr, so
-            # reconstruct the implicit ones here.
-            next_value = 0
-            for child in node.get("inner", []) or []:
-                if (
-                    not isinstance(child, dict)
-                    or child.get("kind") != "EnumConstantDecl"
-                ):
-                    continue
-                explicit = _enum_constant_value(child)
-                value = explicit if explicit is not None else next_value
-                members.append(EnumMember(name=str(child.get("name", "")), value=value))
-                next_value = value + 1
-            enums.append(
-                EnumType(
-                    name=name,
-                    members=members,
-                    underlying_type=_enum_underlying(node),
-                    source_location=self._source_location(entry),
-                    # See RecordType.qualified_name (_build_record) for why
-                    # this is only set when it differs from the bare name.
-                    qualified_name=(
-                        "::".join([*entry.scope, name]) if entry.scope else None
-                    ),
-                    # G31 Phase C: clang's EnumDecl carries a "scopedEnumTag"
-                    # key ("class"/"struct") only for an `enum class`/`enum
-                    # struct` -- absent (not merely false) for a plain C-style
-                    # enum, confirmed against real clang -ast-dump=json output.
-                    # Unlike is_standard_layout/is_trivially_copyable, a plain
-                    # EnumDecl always has a definitive answer here (there is
-                    # no "not collected" case for a real enum definition), so
-                    # this is a concrete bool, never None, on this backend.
-                    is_scoped="scopedEnumTag" in node,
-                    deprecated=_clang_deprecated_message(node),
-                )
-            )
-        return enums
+        return _clang_enums.parse_enums(
+            self._typedefs, self._enums, _evaluated_int_value
+        )
 
     def parse_typedefs(self) -> dict[str, str]:
         typedefs: dict[str, str] = {}
@@ -1680,88 +1473,43 @@ class _ClangAstParser:
             typedefs[self._qualified(entry)] = underlying or "?"
         return typedefs
 
+    def parse_typedef_entity_ids(self) -> dict[str, EntityId]:
+        """``EntityId`` sidecar for :meth:`parse_typedefs_qualified` (ADR-063
+        Phase 2), keyed identically so the two maps join on the same key.
+
+        The scope is already walked for the qualified key; this keeps it in
+        typed ``ScopePath`` form instead of flattening it to a ``"::"``-joined
+        string. See ``AbiSnapshot.typedef_entity_ids``.
+        """
+        out: dict[str, EntityId] = {}
+        for entry in self._typedefs:
+            if _is_builtin_file(entry.file):
+                continue
+            name = str(entry.node.get("name", ""))
+            if not name:
+                continue
+            out[self._qualified(entry)] = entity_id_for_typedef(entry.scope_path, name)
+        return out
+
 
 # ─── pure node helpers (module-level so they are unit-testable on their own) ──
 
 
-class _Decl:
-    """A categorized clang AST decl node plus its walk context.
-
-    ``__slots__`` keeps the per-decl overhead low on large headers.
-    """
-
-    __slots__ = (
-        "access",
-        "extern_c",
-        "file",
-        "in_friend",
-        "in_template",
-        "node",
-        "scope",
-    )
-
-    def __init__(
-        self,
-        node: dict[str, Any],
-        scope: tuple[str, ...],
-        file: str,
-        access: str,
-        extern_c: bool = False,
-        in_friend: bool = False,
-        in_template: bool = False,
-    ) -> None:
-        self.node = node
-        self.scope = scope
-        self.file = file
-        self.access = access
-        # True when the decl sits inside an ``extern "C"`` linkage spec — an
-        # authoritative C-linkage signal that beats the mangled==name heuristic.
-        self.extern_c = extern_c
-        # True when the decl is reached through a ``friend`` declaration: the
-        # function is ADL-only ("hidden friend") and the diff treats it apart
-        # from the ordinary public surface.
-        self.in_friend = in_friend
-        # True when the decl is the pattern body of a class template (e.g. the
-        # CXXRecordDecl inside a ClassTemplateDecl): same kind and bare name as
-        # an ordinary record, but its members reference dependent template-
-        # parameter types with no fixed layout for any one instantiation. Kept
-        # as a RecordType (its field *names*/*types* are still real public
-        # surface — case17_template_abi's field-added detection relies on it)
-        # but flagged so a name-based match (e.g. DWARF layout backfill)
-        # never treats it as an ordinary concrete type (Codex review).
-        self.in_template = in_template
+# ``_Decl`` now lives in ``extract.headers.clang.context`` (ADR-061 D9
+# "context.py" — the one shared type every entity-parsing module in that
+# package receives). Re-exported under its old name so the many existing
+# ``from abicheck.dumper_clang import _Decl`` call sites (production and
+# tests alike) keep resolving.
+_Decl = _clang_context._Decl
 
 
 def _qualtype(node: dict[str, Any]) -> str:
-    """A declaration's own ``type.qualType`` spelling -- the single choke
-    point every field/param/variable/function type string in this module is
-    built from (`_parse_fields`, `_parse_functions`'s own signature and
-    param loop, `parse_variables`, `parse_constants`).
+    """A declaration's own ``type.qualType`` spelling.
 
-    Stripped via :func:`strip_anonymous_type_location`: verified against
-    real Clang 18 (``-ast-dump=json``) that a lambda closure type embedded in
-    a type spelling -- e.g. a class-template specialization instantiated
-    with a lambda argument, ``Guard<decltype([]{})>`` -- prints its
-    ``qualType`` as ``"(lambda at <path>:<line>:<col>)"`` (Clang's
-    TypePrinter, the same diagnostic-style spelling castxml's own XML `name`
-    attribute uses, confirmed on a `FieldDecl` whose declared type IS the
-    lambda type parameter). Left unstripped, that absolute, checkout-
-    dependent path leaks into `TypeField.type`/`Param.type`/`Variable.type`/
-    `Function.return_type`, so two checkouts of the identical, unchanged
-    declaration would produce two different type spellings and could
-    manufacture a spurious finding on the field/param/variable/function
-    carrying it -- the same class of bug `dumper_castxml.py`'s own
-    `strip_anonymous_type_location` calls guard against for its `name`/
-    `qualified_name` fields, just reached through this backend's type-string
-    printer rather than its declaration-name attribute (which, unlike
-    castxml's, never itself embeds a location -- confirmed empirically: a
-    template specialization's own `name` node stays the bare template name,
-    e.g. ``"Guard"``, never ``"Guard<(lambda at ...)>"``).
+    See ``extract.headers.clang.context.qualtype`` (the canonical
+    implementation this delegates to) for the full contract.
     """
-    type_obj = node.get("type")
-    if isinstance(type_obj, dict):
-        return strip_anonymous_type_location(str(type_obj.get("qualType", "")))
-    return ""
+    return _clang_context.qualtype(node)
 
 
 def _node_file(node: dict[str, Any], current: str) -> str:
@@ -1781,41 +1529,24 @@ def _node_file(node: dict[str, Any], current: str) -> str:
 
 
 def _node_line(node: dict[str, Any]) -> int:
-    loc = node.get("loc")
-    if isinstance(loc, dict):
-        line = loc.get("line")
-        if isinstance(line, int):
-            return line
-        # Mirror _node_file's macro/expansion fallback so a decl whose file comes
-        # from expansionLoc/spellingLoc gets its line from the same place.
-        for sub in ("expansionLoc", "spellingLoc"):
-            s = loc.get(sub)
-            if isinstance(s, dict) and isinstance(s.get("line"), int):
-                return int(s["line"])
-    return 0
+    """See ``extract.headers.clang.context.node_line``."""
+    return _clang_context.node_line(node)
 
 
 def _is_builtin_file(file: str) -> bool:
-    return file in _BUILTIN_FILES
+    return _clang_context.is_builtin_file(file)
 
 
 def _default_record_access(node: dict[str, Any]) -> str:
-    """Default member access before any ``AccessSpecDecl`` (``class`` → private)."""
-    return "private" if node.get("tagUsed") == "class" else "public"
+    """See ``extract.headers.clang.context.default_record_access`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_context.default_record_access(node)
 
 
 def _param_has_default(param: dict[str, Any]) -> bool:
-    """Whether a ``ParmVarDecl`` carries a default argument.
-
-    clang flags it either with ``"init": "c"`` or by nesting the default-value
-    expression as the parameter's lone ``inner`` child.
-    """
-    if param.get("init"):
-        return True
-    return any(
-        isinstance(c, dict) and not str(c.get("kind", "")).endswith(("Attr", "Comment"))
-        for c in param.get("inner", []) or []
-    )
+    """See ``extract.headers.clang.functions._param_has_default`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_functions._param_has_default(param)
 
 
 def _evaluated_int_value(node: dict[str, Any]) -> int | None:
@@ -1840,6 +1571,14 @@ def _evaluated_int_value(node: dict[str, Any]) -> int | None:
     every enumerator after it. Walk the same single-child-wrapper chain
     ``_unwrap_expr`` follows, but check every node passed through, not just
     the endpoints.
+
+    Deliberately NOT delegated to ``extract.headers.clang.context``: this
+    walk depends on ``_WRAPPER_EXPR_KINDS`` (``dumper_clang_expr.py``),
+    which itself imports ``diff_cxx_rules`` (classified ``compare``) for
+    ``itanium_scope_components`` — moving this function into the
+    ``extract``-classified package would create a real ``extract -> compare``
+    edge. ``extract.headers.clang.enums.parse_enums`` instead takes this
+    function as an explicit parameter (see that module's own docstring).
     """
     cur: Any = node
     while isinstance(cur, dict):
@@ -1851,7 +1590,11 @@ def _evaluated_int_value(node: dict[str, Any]) -> int | None:
                 pass
         if cur.get("kind") not in _WRAPPER_EXPR_KINDS:
             break
-        inner = [c for c in raw if isinstance(c, dict)] if isinstance(raw := cur.get("inner"), list) else []
+        inner = (
+            [c for c in raw if isinstance(c, dict)]
+            if isinstance(raw := cur.get("inner"), list)
+            else []
+        )
         if len(inner) != 1:
             break
         cur = inner[0]
@@ -1859,97 +1602,34 @@ def _evaluated_int_value(node: dict[str, Any]) -> int | None:
 
 
 def _bitfield_width(field: dict[str, Any]) -> tuple[int | None, bool]:
-    """``(width, is_bitfield)`` for a ``FieldDecl`` (width from its inner expr)."""
-    if not field.get("isBitfield"):
-        return None, False
-    for child in field.get("inner", []) or []:
-        if isinstance(child, dict):
-            return _evaluated_int_value(child), True
-    return None, True
+    """See ``extract.headers.clang.records._bitfield_width`` (the canonical
+    implementation this delegates to) for the full contract."""
+    return _clang_records._bitfield_width(field, _evaluated_int_value)
 
 
 def _anonymous_member_names(node: dict[str, Any]) -> set[str]:
-    """Names injected into *node* from anonymous struct/union members.
-
-    clang emits an ``IndirectFieldDecl`` for every member that an anonymous
-    aggregate injects into its enclosing record; their names mark exactly which
-    of the anonymous record's fields belong to this record's surface.
-    """
-    names: set[str] = set()
-    for child in node.get("inner", []) or []:
-        if isinstance(child, dict) and child.get("kind") == "IndirectFieldDecl":
-            name = child.get("name")
-            if name:
-                names.add(str(name))
-    return names
+    """See ``extract.headers.clang.records._anonymous_member_names`` (the
+    canonical implementation this delegates to) for the full contract."""
+    return _clang_records._anonymous_member_names(node)
 
 
 def _parse_bases(node: dict[str, Any]) -> tuple[list[str], list[str], dict[str, str]]:
-    """Direct base names, virtual base names, and base→access from a record node.
-
-    clang emits base specifiers as a ``bases`` array on the ``CXXRecordDecl``
-    definition; each entry carries the base ``type.qualType``, its ``access``,
-    and an ``isVirtual`` flag. Absent on a non-polymorphic C ``RecordDecl``.
-    """
-    bases: list[str] = []
-    virtual_bases: list[str] = []
-    access: dict[str, str] = {}
-    for b in node.get("bases", []) or []:
-        if not isinstance(b, dict):
-            continue
-        type_obj = b.get("type")
-        bname = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
-        if not bname:
-            continue
-        if b.get("isVirtual"):
-            virtual_bases.append(bname)
-        else:
-            bases.append(bname)
-        access[bname] = str(b.get("access", "public"))
-    return bases, virtual_bases, access
+    """See ``extract.headers.clang.records._parse_bases`` (the canonical
+    implementation this delegates to) for the full contract."""
+    return _clang_records._parse_bases(node)
 
 
-def _enum_underlying(node: dict[str, Any]) -> str:
-    """The enum's fixed underlying type spelling, defaulting to ``int``."""
-    fixed = node.get("fixedUnderlyingType")
-    if isinstance(fixed, dict) and fixed.get("qualType"):
-        return str(fixed["qualType"])
-    return "int"
-
-
-def _enum_constant_value(node: dict[str, Any]) -> int | None:
-    """The explicit value of an ``EnumConstantDecl``, or ``None`` if implicit."""
-    for child in node.get("inner", []) or []:
-        if not isinstance(child, dict):
-            continue
-        value = _evaluated_int_value(child)
-        if value is not None:
-            return value
-    return None
+# ``_enum_underlying``/``_enum_constant_value`` moved to
+# ``extract.headers.clang.enums`` with ``parse_enums`` itself (ADR-061 D9);
+# re-exported under their old names for any external reader of them.
+_enum_underlying = _clang_enums._enum_underlying
+_enum_constant_value = _clang_enums._enum_constant_value
 
 
 def _owned_tag_id(typedef_node: dict[str, Any]) -> str:
-    """The clang id of an anonymous tag a typedef *owns*, or ``""``.
-
-    For ``typedef struct {…} Foo;`` clang nests an ``ElaboratedType`` under the
-    ``TypedefDecl`` whose ``ownedTagDecl`` points at the unnamed ``RecordDecl``
-    that holds the fields. Returns that record's ``id`` so parse_types can emit
-    the otherwise-anonymous record under the typedef name.
-    """
-
-    def _scan(node: Any) -> str:
-        if not isinstance(node, dict):
-            return ""
-        owned = node.get("ownedTagDecl")
-        if isinstance(owned, dict) and isinstance(owned.get("id"), str):
-            return str(owned["id"])
-        for child in node.get("inner", []) or []:
-            found = _scan(child)
-            if found:
-                return found
-        return ""
-
-    return _scan(typedef_node)
+    """See ``extract.headers.clang.records._owned_tag_id`` (the canonical
+    implementation this delegates to) for the full contract."""
+    return _clang_records._owned_tag_id(typedef_node)
 
 
 def _typedef_underlying(node: dict[str, Any]) -> str:

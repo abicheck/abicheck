@@ -1380,15 +1380,15 @@ class TestAnalysisAssuranceOutOfBandPack:
     so a genuinely partial/failed out-of-band pack was invisible to it --
     ``status`` could read ``"complete"`` and ``--require-complete-analysis``
     would exit 0 despite the real evidence being incomplete. Regression
-    coverage mirrors ``TestFoldEvidenceDepthOutOfBandPack`` in
-    ``tests/test_cov95_cli.py``, the existing test for the identical class of
+    coverage mirrors ``TestEvidenceDepthOutOfBandPack`` in
+    ``tests/test_reporter_side_facts.py``, the existing test for the identical class of
     gap on the ``old_evidence_depth``/``new_evidence_depth`` JSON fields.
     """
 
     def _write_partial_pack(self, tmp_path: Path, name: str) -> Path:
         """A real, on-disk out-of-band pack whose L4 source-ABI surface is
         genuinely partial: 10 compile units selected, only 3 parsed."""
-        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource import BuildSourcePack, pack_io
         from abicheck.buildsource.source_abi import SourceAbiSurface
 
         pack_dir = tmp_path / name
@@ -1401,7 +1401,7 @@ class TestAnalysisAssuranceOutOfBandPack:
                 },
             ),
         )
-        pack.write()
+        pack_io.write(pack)
         return pack_dir
 
     def test_out_of_band_pack_partial_evidence_is_not_complete(

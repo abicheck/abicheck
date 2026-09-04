@@ -362,6 +362,19 @@ def test_is_impl_source_variants():
 # ── _find_opaque_types / _find_by_value_types (991, 1005-1023) ───────────────
 
 
+def _opaque_spellings(index) -> set[str]:
+    """The spelling tier of an ``_OpaqueTypeIndex``, for the assertions below.
+
+    ``_find_opaque_types`` returns a two-tier index rather than the flat
+    ``set[str]`` it used to (ADR-063 Phase 2's post-parse consumer
+    migration); these cases build ``RecordType``s with no ``entity_id``, so
+    the stable tier is empty by construction and the spelling tier is what
+    they are actually about.
+    """
+    assert index.stable == frozenset()
+    return {identity.spelling for identity in index.local}
+
+
 def test_find_opaque_types_impl_source_pointer_only():
     # Type defined in an impl file, used only via pointer → opaque.
     snap = _snap(
@@ -375,7 +388,7 @@ def test_find_opaque_types_impl_source_pointer_only():
             )
         ],
     )
-    assert _find_opaque_types(snap) == {"Hidden"}
+    assert _opaque_spellings(_find_opaque_types(snap)) == {"Hidden"}
 
 
 def test_find_opaque_types_by_value_excluded():
@@ -384,14 +397,14 @@ def test_find_opaque_types_by_value_excluded():
         types=[RecordType(name="Hidden", kind="struct", source_location="impl.c:5")],
         functions=[_fn("ret", "ret", return_type="Hidden")],
     )
-    assert _find_opaque_types(snap) == set()
+    assert _opaque_spellings(_find_opaque_types(snap)) == set()
 
 
 def test_find_opaque_types_empty_when_no_candidates():
     snap = _snap(
         types=[RecordType(name="Pub", kind="struct", source_location="pub.h:1")]
     )
-    assert _find_opaque_types(snap) == set()
+    assert _opaque_spellings(_find_opaque_types(snap)) == set()
 
 
 def test_find_by_value_types_param_and_variable():
@@ -420,6 +433,63 @@ def test_find_by_value_types_param_and_variable():
     assert result == {"Hidden"}
 
 
+def test_find_by_value_types_variable_only_exposure():
+    """A type exposed *only* through a public variable (no function
+    references it at all) -- the one case that reaches the variable loop's
+    own match-and-add, uncontaminated by an earlier function-side match
+    that would short-circuit it first."""
+    opaque = {"Handle"}
+    snap = _snap(variables=[Variable(name="g", mangled="g", type="Handle")])
+    assert _find_by_value_types(snap, opaque) == {"Handle"}
+
+
+def test_find_by_value_types_short_circuits_a_later_return_type_check():
+    """Once a candidate type is confirmed by-value exposed by one function,
+    a *second* function's own return-type check for that same type
+    short-circuits (`if tname in by_value_types: continue`) instead of
+    re-running the token match against its own return type."""
+    opaque = {"Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "exposes",
+                "exposes",
+                return_type="void",
+                params=[Param(name="h", type="Handle", pointer_depth=0)],
+            ),
+            # This function's own return type never mentions "Handle" at
+            # all -- if the short-circuit at the top of the return-type
+            # loop did not fire, the match would simply not trigger either,
+            # so the two are indistinguishable by outcome alone. The
+            # coverage instrumentation is what actually proves the skip
+            # branch executes here, not this assertion by itself.
+            _fn("unrelated", "unrelated", return_type="void"),
+        ],
+    )
+    assert _find_by_value_types(snap, opaque) == {"Handle"}
+
+
+def test_find_by_value_types_short_circuits_a_later_param_check():
+    """The param loop's own short-circuit: once the return-type check
+    already confirmed a type within the same function, that function's own
+    parameter loop skips re-checking the identical type rather than
+    re-running the token match against the parameter's type text."""
+    opaque = {"Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="Handle",
+                # Type text never mentions "Handle" -- proves the skip
+                # fired rather than an (impossible here) real match.
+                params=[Param(name="p", type="Other", pointer_depth=0)],
+            )
+        ],
+    )
+    assert _find_by_value_types(snap, opaque) == {"Handle"}
+
+
 def test_find_by_value_types_pointer_only_returns_empty():
     snap = _snap(
         functions=[
@@ -433,6 +503,319 @@ def test_find_by_value_types_pointer_only_returns_empty():
         variables=[Variable(name="g", mangled="g", type="Hidden*")],
     )
     assert _find_by_value_types(snap, {"Hidden"}) == set()
+
+
+def test_find_by_value_types_recognizes_a_cv_qualified_pointer_no_space():
+    """Regression for the second-round Codex review on PR #1041:
+    ``"Handle *const"`` (and the no-space ``"Handle*const"`` clang/castxml
+    can also emit) previously matched neither ``endswith("*")`` nor
+    ``"* " in text``, so a genuinely pointer-only reference was wrongly
+    treated as a by-value exposure -- dropping a genuinely opaque type out
+    of both identity tiers and reporting its private layout change as
+    breaking. Checked across return type, parameter, and variable, and
+    across both the spaced and unspaced qualifier spelling."""
+    for pointer_spelling in ("Handle *const", "Handle*const", "Handle * const"):
+        snap = _snap(
+            functions=[
+                _fn(
+                    "f",
+                    "f",
+                    return_type=pointer_spelling,
+                    params=[Param(name="p", type=pointer_spelling, pointer_depth=1)],
+                )
+            ],
+            variables=[Variable(name="g", mangled="g", type=pointer_spelling)],
+        )
+        assert _find_by_value_types(snap, {"Handle"}) == set(), pointer_spelling
+
+
+def test_find_by_value_types_recognizes_a_reference_as_indirect():
+    """Regression for the third-round Codex review on PR #1041: a
+    reference declarator (``Handle&``, or the rvalue-reference
+    ``Handle&&``) is indirection too -- it never exposes the referent's own
+    layout by value -- but the original pointer check recognized only
+    ``*``. A genuinely opaque type referenced only by reference was
+    wrongly counted as by-value exposed, dropping it out of both identity
+    tiers and reporting its private layout change as breaking. Checked
+    across return type, parameter, and variable, and across both an
+    lvalue and an rvalue reference."""
+    for reference_spelling in ("Handle&", "Handle &", "Handle&&", "Handle &&"):
+        snap = _snap(
+            functions=[
+                _fn(
+                    "f",
+                    "f",
+                    return_type=reference_spelling,
+                    params=[Param(name="p", type=reference_spelling, pointer_depth=0)],
+                )
+            ],
+            variables=[Variable(name="g", mangled="g", type=reference_spelling)],
+        )
+        assert _find_by_value_types(snap, {"Handle"}) == set(), reference_spelling
+
+
+def test_find_by_value_types_ignores_sigils_inside_a_template_argument():
+    """Regression for the fourth-round Codex review on PR #1041: the
+    indirection check originally looked for ``*``/``&`` *anywhere* in the
+    rendered text, so a by-value template specialization whose *template
+    argument* happens to contain one of those sigils -- a non-type
+    template argument that is itself a pointer/reference
+    (``Callback<&ns::handler>``), or a function-pointer type argument
+    (``Box<void (*)()>``) -- was wrongly treated as pointer/reference
+    indirection at the *outer* declarator. That let a genuinely by-value
+    exposure escape detection, leaving the record wrongly in the opaque
+    index and its real layout change suppressed as a false negative.
+    Only a sigil at template depth zero counts; one nested inside
+    ``<...>`` must not. Checked across return type, parameter, and
+    variable."""
+    for template_spelling in ("Callback<&ns::handler>", "Box<void (*)()>"):
+        opaque = {"Callback", "Box"}
+        snap = _snap(
+            functions=[
+                _fn(
+                    "f",
+                    "f",
+                    return_type=template_spelling,
+                    params=[Param(name="p", type=template_spelling, pointer_depth=0)],
+                )
+            ],
+            variables=[Variable(name="g", mangled="g", type=template_spelling)],
+        )
+        found = _find_by_value_types(snap, opaque)
+        expected = "Callback" if template_spelling.startswith("Callback") else "Box"
+        assert expected in found, template_spelling
+
+
+def test_find_by_value_types_still_recognizes_a_trailing_pointer_after_a_template():
+    """Complement of the template-nesting fix above: a *real* top-level
+    pointer declarator following a template argument list
+    (``Box<void (*)()> *``) must still be recognized as indirection -- the
+    depth-zero check closes back to zero after the template's own closing
+    ``>``, so the trailing ``*`` is outside any nesting and still counts."""
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="Box<void (*)()> *",
+                params=[Param(name="p", type="Box<void (*)()> *", pointer_depth=1)],
+            )
+        ],
+        variables=[Variable(name="g", mangled="g", type="Box<void (*)()> *")],
+    )
+    assert _find_by_value_types(snap, {"Box"}) == set()
+
+
+def test_find_by_value_types_relational_angle_in_a_template_argument_is_not_a_bracket():
+    """Regression for the fifth-round Codex review on PR #1041: a flat
+    ``<``/``>`` counter is fooled by a *relational* comparison used as a
+    non-type template argument -- ``ns::S<(N > 0), &handler>``'s
+    parenthesized ``N > 0`` contains a stray ``>`` that is not a real
+    template delimiter, but the naive counter closed the outer template
+    one ``>`` early on it, leaving the genuinely-nested ``&handler``
+    wrongly read as top-level indirection. A relational comparison used
+    as a non-type template argument must be parenthesized to be valid
+    C++, so tracking parenthesis depth alongside angle-bracket depth --
+    and only letting a `<`/`>` inside zero open parens affect the angle
+    depth -- resolves the ambiguity: the type is genuinely passed by
+    value at the outer declarator, so it must be detected as such."""
+    template_spelling = "ns::S<(N > 0), &handler>"
+    opaque = {"ns::S"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type=template_spelling,
+                params=[Param(name="p", type=template_spelling, pointer_depth=0)],
+            )
+        ],
+        variables=[Variable(name="g", mangled="g", type=template_spelling)],
+    )
+    assert "ns::S" in _find_by_value_types(snap, opaque)
+
+
+def test_find_by_value_types_detects_a_bare_spelling_against_a_qualified_name():
+    """Regression for the Codex review on PR #1041: ``opaque`` is keyed by
+    ``RecordType.name``, which may be qualified (``ns::Handle``), while a
+    signature's rendered type text can spell the identical type bare
+    (``Handle``) -- e.g. when the reference sits inside the same namespace.
+    A plain substring test against the full qualified name misses that
+    exposure entirely, which used to be silently compensated by an
+    equally spelling-based suppression join failing for the same reason;
+    since the join can now also succeed through a stable ``EntityId``
+    (immune to the same mismatch), a missed exposure here would wrongly
+    suppress a real finding. This must still detect the by-value use."""
+    opaque = {"ns::Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "byvalue",
+                "byvalue",
+                return_type="void",
+                params=[Param(name="h", type="Handle", pointer_depth=0)],
+            )
+        ]
+    )
+    assert _find_by_value_types(snap, opaque) == {"ns::Handle"}
+
+
+def test_find_by_value_types_leaf_widening_ignores_an_embedded_collision():
+    """The specific case the P2 follow-up review named: the leaf-spelling
+    widening for ``ns::Handle`` must not treat an unrelated ``OtherHandle``
+    by-value use as exposing ``ns::Handle`` -- that would wrongly drop a
+    genuinely opaque type out of both identity tiers and report a private
+    layout change as breaking."""
+    opaque = {"ns::Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="void",
+                params=[Param(name="h", type="OtherHandle", pointer_depth=0)],
+            )
+        ]
+    )
+    assert _find_by_value_types(snap, opaque) == set()
+
+
+def test_find_by_value_types_leaf_widening_ignores_a_real_scope_collision():
+    """Regression for the second-round Codex review on PR #1041: a *real*,
+    separately-scoped ``other::Handle`` reference must not match the
+    ``ns::Handle`` leaf spelling either. Plain token-boundary matching
+    alone cannot tell the two scopes apart (``::`` is non-word on both
+    sides, so ``Handle`` in ``other::Handle`` is still a token-bounded
+    match) -- the leaf candidate additionally refuses a match immediately
+    preceded by ``::`` (`_unqualified_type_token_match`), since only
+    the trailing segment of a *different* qualified name can be preceded
+    that way. The full, already-qualified candidate is unaffected: a real
+    ``ns::Handle`` reference still matches regardless of what precedes it
+    (see ``test_find_by_value_types_detects_a_bare_spelling_against_a_qualified_name``
+    above for that positive case)."""
+    opaque = {"ns::Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="void",
+                params=[Param(name="h", type="other::Handle", pointer_depth=0)],
+            )
+        ]
+    )
+    assert _find_by_value_types(snap, opaque) == set()
+
+
+def test_find_by_value_types_leaf_widening_splits_at_depth_zero_only():
+    """Regression for the third-round Codex review on PR #1041: the leaf
+    spelling must be extracted with a *depth-aware* split
+    (``diff_helpers.depth_aware_bare_name``), not a naive
+    ``rsplit("::", 1)``. For ``"api::Wrapper<dep::Tag>"``, a naive rsplit
+    lands inside the qualified template argument and extracts ``"Tag>"``
+    instead of the real leaf ``"Wrapper<dep::Tag>"`` -- missing a genuine
+    by-value exposure rendered exactly that way, leaving the type wrongly
+    ``opaque`` and letting the stable tier suppress a real layout change."""
+    opaque = {"api::Wrapper<dep::Tag>"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="void",
+                params=[Param(name="w", type="Wrapper<dep::Tag>", pointer_depth=0)],
+            )
+        ]
+    )
+    assert _find_by_value_types(snap, opaque) == {"api::Wrapper<dep::Tag>"}
+
+
+def test_find_by_value_types_leaf_widening_bare_reference_in_another_scope_is_a_documented_gap():
+    """**Documented, still-open** (Codex review on PR #1041, follow-up
+    round; see ``_type_is_by_value_referenced``'s own docstring): the leaf
+    widening's ``::``-prefix rejection closes the *qualified* collision
+    (``other::Handle``, see the sibling test above), but a genuinely
+    different scope's *bare* same-leaf reference carries no qualifier to
+    reject on at all, so it still matches ``ns::Handle``'s leaf candidate.
+    This mirrors the identical, already-accepted bare-name collision on the
+    suppression side (``TestKnownGapStaysDocumented`` in
+    ``tests/test_opaque_identity_tiers.py``) -- both are the same
+    limitation of spelling-only matching without an entity's real owning
+    scope, which only ``EntityId``-based identity resolution actually
+    closes. Pinned so a future tightening of this predicate doesn't
+    silently start relying on token boundaries to solve a problem only
+    scope-aware identity can solve -- change this assertion when that
+    lands, do not delete it."""
+    opaque = {"ns::Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "other_consume",
+                "other_consume",
+                return_type="void",
+                # In a real header this bare `Handle` would mean
+                # `other::Handle` (a function declared inside a different
+                # namespace) -- indistinguishable, from rendered text
+                # alone, from a bare reference that really does mean
+                # `ns::Handle`.
+                params=[Param(name="h", type="Handle", pointer_depth=0)],
+            )
+        ]
+    )
+    assert _find_by_value_types(snap, opaque) == {"ns::Handle"}
+
+
+def test_type_is_by_value_referenced_handles_an_empty_leaf_spelling():
+    """A degenerate ``RecordType.name`` ending in ``"::"`` (empty leaf
+    after the split) must not raise or fall through to an empty-string
+    match -- the defensive floor `_type_is_by_value_referenced` falls back
+    to False. `find_by_value_types` never constructs such a name itself, so
+    this exercises the guard directly."""
+    from abicheck.compare.opaque_types import _type_is_by_value_referenced
+
+    assert not _type_is_by_value_referenced("ns::", "ns::Handle used here")
+
+
+def test_type_is_by_value_referenced_substring_prefilter_is_behavior_preserving():
+    """The plain substring guard (`tname in text` / `leaf in text`) added
+    ahead of each regex scan (CodeRabbit review on PR #1041) is purely a
+    performance short-circuit -- it must not change the answer for either
+    a genuine miss (the name/leaf is absent entirely) or the token-boundary
+    near-miss case where the substring is present but embedded in a longer
+    identifier, so no real token match exists either way."""
+    from abicheck.compare.opaque_types import _type_is_by_value_referenced
+
+    # Absent entirely -- the substring guard skips the regex scan, same
+    # answer (False) as the unguarded scan would give.
+    assert not _type_is_by_value_referenced("ns::Handle", "totally unrelated text")
+    # Substring present but only as part of a longer identifier -- the
+    # guard lets the regex run (it must, to reject the embedded case), and
+    # the token-boundary regex itself still correctly declines the match.
+    assert not _type_is_by_value_referenced("ns::Handle", "ns::HandleWrapper used")
+
+
+def test_find_by_value_types_does_not_match_a_name_embedded_in_a_longer_identifier():
+    """Regression for the follow-up Codex review on PR #1041: the scan
+    matches a type-name *token*, never a bare substring, so an unrelated
+    identifier that merely contains the spelling (``OtherHandle`` containing
+    ``Handle``) does not count as a by-value exposure. This applies to both
+    scan candidates -- the full (possibly qualified) name and the leaf
+    spelling the qualification-mismatch widening above adds -- since a real
+    C/C++ identifier can never be a substring of another one without an
+    intervening non-identifier character on both sides, so token matching
+    changes nothing for a genuine reference either way."""
+    opaque = {"Handle"}
+    snap = _snap(
+        functions=[
+            _fn(
+                "f",
+                "f",
+                return_type="void",
+                params=[Param(name="h", type="OtherHandle", pointer_depth=0)],
+            )
+        ]
+    )
+    assert _find_by_value_types(snap, opaque) == set()
 
 
 # ── _downgrade_opaque_type_changes (1047, 1049-1054) ─────────────────────────
@@ -758,21 +1141,39 @@ def test_opaque_usage_index_matches_per_candidate_oracle():
     rng = random.Random(99)
     names = ["Foo", "Bar", "Ctx", "SSLCtx", "ns::Foo", "Handle", "T"]
     typestrs = [
-        "Foo *", "Foo", "const Foo &", "ns::Foo", "ns::Foo *", "SSLCtx *",
-        "Ctx", "Bar, Foo", "std::vector<Foo>", "Handle*", "const Ctx &", "T *", "",
+        "Foo *",
+        "Foo",
+        "const Foo &",
+        "ns::Foo",
+        "ns::Foo *",
+        "SSLCtx *",
+        "Ctx",
+        "Bar, Foo",
+        "std::vector<Foo>",
+        "Handle*",
+        "const Ctx &",
+        "T *",
+        "",
     ]
     for _ in range(800):
         funcs = [
             Function(
-                name=f"f{i}", mangled=f"f{i}", return_type=rng.choice(typestrs),
-                params=[Param(name="p", type=rng.choice(typestrs)) for _ in range(rng.randint(0, 2))],
+                name=f"f{i}",
+                mangled=f"f{i}",
+                return_type=rng.choice(typestrs),
+                params=[
+                    Param(name="p", type=rng.choice(typestrs))
+                    for _ in range(rng.randint(0, 2))
+                ],
                 visibility=rng.choice([Visibility.PUBLIC, Visibility.HIDDEN]),
             )
             for i in range(rng.randint(0, 5))
         ]
         varz = [
             Variable(
-                name=f"v{i}", mangled=f"v{i}", type=rng.choice(typestrs),
+                name=f"v{i}",
+                mangled=f"v{i}",
+                type=rng.choice(typestrs),
                 visibility=rng.choice([Visibility.PUBLIC, Visibility.HIDDEN]),
             )
             for i in range(rng.randint(0, 3))

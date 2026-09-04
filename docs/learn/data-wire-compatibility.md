@@ -2,7 +2,7 @@
 doc_type: explanation
 audience:
   - library-maintainer
-level: intermediate
+level: advanced
 canonical_for:
   - data-wire-compatibility
 depends_on:
@@ -13,11 +13,13 @@ generated: false
 
 # Data, Wire & Storage Compatibility
 
-[Compatibility as a Product Contract §2](abi-series/00-product-contract.md#2-compatibility-is-not-one-question-name-which-kind-you-mean)
+A static comparison cannot decide this dimension;
+[§5 of Evidence & Detectability](evidence-and-detectability.md#5-what-abi-tools-cannot-prove)
+says why. [Compatibility as a Product Contract §2](abi-series/00-product-contract.md#2-compatibility-is-not-one-question-name-which-kind-you-mean)
 lists this as its own dimension because it is easy to conflate with binary
-ABI compatibility — both are about layout and values — while actually
-answering a different question with a different, often much longer-lived,
-audience.
+ABI compatibility — both are about layout and values — while answering a
+different question for a different, often much longer-lived, audience.
+
 
 ## The question this dimension answers
 
@@ -132,8 +134,19 @@ about the C/C++ declarations themselves moved.
   the same underlying reason: no static analyzer proves this, execution
   evidence does.
 
+As one shell line, the check is a file written by the old version and read
+back by the new one, then the reverse:
+
+```bash
+./tool-old --write sample.dat && ./tool-new --read sample.dat && ./tool-new --write sample2.dat && ./tool-old --read sample2.dat
+```
+
 See also: [Type Layout](abi-series/03-type-layout.md) for the ABI-layout
 mechanics this dimension frequently piggybacks on, and
 [Behavioral & Semantic Compatibility](behavioral-compatibility.md) for the
 adjacent question of whether an *operation's* meaning, not a *value's*
 meaning, stayed the same.
+
+---
+
+**Ladder:** ← [Behavioral & Semantic Compatibility](behavioral-compatibility.md) · Step 9 · Beyond Static ABI · [Ownership & Lifetime Contracts](ownership-and-lifetime.md) →

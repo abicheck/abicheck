@@ -506,8 +506,6 @@ def test_write_snapshot_output_embeds_inputs_pack(tmp_path: Path) -> None:
     # The dump CLI seam: _write_snapshot_output(..., inputs_pack=pack) folds the
     # pack and serializes an embedded build_source (single-artifact UX), so a plain
     # `dump <binary> --inputs pack/` needs no follow-up merge.
-    import json
-
     from abicheck.cli import _write_snapshot_output
     from abicheck.model import AbiSnapshot, Function
 
@@ -517,7 +515,9 @@ def test_write_snapshot_output_embeds_inputs_pack(tmp_path: Path) -> None:
     out = tmp_path / "baseline.json"
     _write_snapshot_output(snap, out, inputs_pack=pack)
 
-    d = json.loads(out.read_text())
+    from abicheck.serialization import load_snapshot_document
+
+    d = load_snapshot_document(out)
     assert "build_source" in d, "embedded L3/L4/L5 facts should ride inline"
     cov = d["build_source"]["source_abi"]["coverage"]
     assert cov.get("matched_symbols", 0) >= 1

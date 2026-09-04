@@ -32,17 +32,23 @@ regression on an unrelated symbol, and suppressing the finding outright
 throws away evidence a reviewer may still want to see.
 
 ``ReclassifyRule`` is that third form: the same selector grammar
-:class:`~abicheck.suppression.Suppression` already implements (``symbol``/
+:class:`~abicheck.policy.selectors.SelectorSet` implements (``symbol``/
 ``symbol_pattern``/``type_pattern``/``member_name``/``namespace``/
 ``entity_namespace``/``cause_namespace``/``source_location``/
-``change_kind``/``expires``), with ``to:`` instead of deletion. Reuses
-:class:`~abicheck.suppression.Suppression` itself for selector matching
-(via the public :meth:`~abicheck.suppression.Suppression.selector_matches`)
-rather than re-implementing the glob/regex machinery a second time --
-deliberately bypassing that class's reachability / ``allow_public_break``
-gates, since those exist to guard against a rule *hiding* evidence, which
-does not apply here: a reclassified finding stays in the report, just at a
-different verdict.
+``change_kind``/``binding``/``expires``), with ``to:`` instead of deletion.
+Builds a :class:`~abicheck.policy.selectors.SelectorSet` directly (ADR-063
+D10, implementation plan Phase 9) for selector matching rather than
+re-implementing the glob/regex machinery a second time — deliberately
+bypassing :class:`~abicheck.suppression.Suppression`'s reachability /
+``allow_public_break`` gates, since those exist to guard against a rule
+*hiding* evidence, which does not apply here: a reclassified finding stays
+in the report, just at a different verdict. Before Phase 9, this module
+built a :class:`~abicheck.suppression.Suppression` instance purely for its
+selector grammar (resolved via ``importlib.import_module`` — see below for
+why a static import couldn't be used at the time); now that the grammar
+itself lives in a dependency-free leaf module neither this module nor
+``suppression.py`` needs to import the *other*, so this module imports
+``policy/selectors.py`` **statically**, and the workaround is gone.
 
 Loaded as an optional ``reclassify:`` block in a ``--policy-file`` document,
 parsed by :mod:`abicheck.policy_file` (which owns the ``to:`` severity
@@ -59,22 +65,22 @@ example::
         to: risk
         reason: "COMDAT-inline demotions; consumers already embed their own copy"
 
-Deliberately never imports :mod:`abicheck.suppression`/
-:mod:`abicheck.checker_types` at module (or ``TYPE_CHECKING``) scope, even
-though it uses :class:`~abicheck.suppression.Suppression` at runtime and
-type-annotates against ``Change``. ``checker_types.py`` imports ``PolicyFile``
-from ``policy_file.py``, and ``policy_file.py`` is this module's own caller
--- a static edge to either module here would close that loop into a real
-import cycle (``policy_file -> reclassify -> suppression -> checker_types ->
-policy_file``), which ``scripts/check_ai_readiness.py``'s ``import-cycle-
-growth`` gate treats as SCC growth regardless of whether the importing
-statement is function-local (its cycle detector walks the whole AST, not
-just module scope). Resolving ``Suppression`` via ``importlib.import_module``
-at call time (mirroring the lazy ``__getattr__`` shim in
-``cli_buildsource.py``, a runtime call rather than a static import edge) is
-the sanctioned way around that per CLAUDE.md "What NOT to do" -- extending
-``IMPORT_CYCLE_ALLOWLIST`` instead would paper over a real, growing SCC.
-``change``/``Change`` parameters are typed ``Any`` for the same reason.
+Still deliberately never imports :mod:`abicheck.checker_types` at module (or
+``TYPE_CHECKING``) scope, even though it type-annotates against ``Change``.
+``checker_types.py`` imports ``PolicyFile`` from ``policy_file.py``, and
+``policy_file.py`` is this module's own caller -- a static edge to
+``checker_types.py`` here would close that loop into a real import cycle
+(``policy_file -> reclassify -> checker_types -> policy_file``), which
+``scripts/check_ai_readiness.py``'s ``import-cycle-growth`` gate treats as
+SCC growth regardless of whether the importing statement is function-local
+(its cycle detector walks the whole AST, not just module scope).
+``change``/``Change`` parameters stay typed ``Any`` for the same reason.
+:mod:`abicheck.policy.selectors` carries no such risk and is imported
+statically at module scope -- it is a leaf with zero dependency on
+``policy_file.py``/``checker_types.py``/``suppression.py``/this module/
+``finding_identity.py`` (enforced by ``scripts/check_architecture.py``, not
+just documented -- see that module's own docstring), so it cannot
+participate in the cycle above.
 
 **Known gap, deliberately not closed here (Codex review, P2):**
 ``contract_pipeline.ContractEvaluationStage.build_context()`` -- the ADR-049
@@ -120,7 +126,7 @@ re-exports all three, so no caller (in this repo or out of it) moved.
 
 from __future__ import annotations
 
-import importlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, cast
@@ -136,6 +142,8 @@ from .checker_policy import (
     effective_category,
     policy_kind_sets,
 )
+from .model.policy_file_protocol import ReclassifyRuleProtocol
+from .policy.selectors import SelectorSet
 
 #: The four verdicts a `to:` value is allowed to resolve to -- the exact set
 #: `policy_file.parse_severity_value`'s `break`/`warn`/`risk`/`ignore`
@@ -166,12 +174,6 @@ _CANONICAL_TO_SPELLING: dict[Verdict, str] = {
     Verdict.COMPATIBLE_WITH_RISK: "risk",
     Verdict.COMPATIBLE: "ignore",
 }
-
-
-def _suppression_cls() -> Any:
-    """Resolve :class:`abicheck.suppression.Suppression` at call time --
-    see the module docstring for why this can't be a static import."""
-    return importlib.import_module("abicheck.suppression").Suppression
 
 
 #: YAML keys accepted in one ``reclassify:`` entry. ``kind`` is this rule
@@ -226,6 +228,13 @@ class ReclassifyRule:
         reason: Optional human-readable justification, for audit output.
         label: Optional grouping tag, mirroring
             :attr:`Suppression.label`.
+
+    **Selector fields are read once, into an internal ``SelectorSet``, at
+    construction time (``__post_init__``) -- mutating one afterward does not
+    change what :meth:`matches` matches, the identical contract
+    :class:`~abicheck.suppression.Suppression` documents for the same
+    reason.** Construct a new ``ReclassifyRule`` instead of mutating one in
+    place if a rule's selectors need to change.
     """
 
     to_verdict: Verdict
@@ -251,9 +260,12 @@ class ReclassifyRule:
     #: Built at construction time and reused for every :meth:`matches` call
     #: rather than re-validated/re-compiled per call — mirrors how
     #: :class:`~abicheck.suppression.Suppression` itself eagerly compiles its
-    #: own patterns. Typed ``Any`` (really a ``Suppression`` instance) --
-    #: see the module docstring.
-    _selector: Any = field(init=False, repr=False)
+    #: own patterns (it now builds an identical
+    #: :class:`~abicheck.policy.selectors.SelectorSet` internally, ADR-063
+    #: D10). Typed against the real leaf class directly -- unlike
+    #: ``Suppression``, ``policy/selectors.py`` carries no cycle risk for
+    #: this module, so no ``Any``/``importlib`` indirection is needed here.
+    _selector: SelectorSet = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.to_verdict not in _VALID_RECLASSIFY_VERDICTS:
@@ -286,12 +298,13 @@ class ReclassifyRule:
         if isinstance(self.expires, datetime):
             self.expires = self.expires.date()
         # Delegates all selector validation (mutual exclusivity, unknown
-        # change_kind, malformed glob/regex, "at least one selector") to
-        # Suppression's own __post_init__ -- a ValueError raised there
-        # propagates unchanged to this rule's own construction, so a
-        # ReclassifyRule can never exist with an invalid selector any more
-        # than a Suppression can.
-        self._selector = _suppression_cls()(
+        # change_kind, malformed glob/regex, "at least one selector",
+        # malformed binding) to SelectorSet's own __post_init__ -- a
+        # ValueError raised there propagates unchanged to this rule's own
+        # construction, so a ReclassifyRule can never exist with an invalid
+        # selector any more than a Suppression can (both build the identical
+        # leaf class now).
+        self._selector = SelectorSet(
             symbol=self.symbol,
             symbol_pattern=self.symbol_pattern,
             type_pattern=self.type_pattern,
@@ -314,9 +327,12 @@ class ReclassifyRule:
         :class:`Suppression`. Deliberately consults only the selector
         grammar -- see the module docstring for why the reachability /
         ``allow_public_break`` gates :class:`Suppression` layers on top
-        don't apply to reclassification.
+        don't apply to reclassification. Never passes a
+        ``canonical_finding_id`` -- this rule form has no ``finding_id``
+        selector, so :meth:`~abicheck.policy.selectors.SelectorSet.
+        matches_selectors` never needs one.
         """
-        return bool(self._selector.selector_matches(change, today))
+        return bool(self._selector.matches_selectors(change, today=today))
 
     def is_expired(self, today: date | None = None) -> bool:
         """Return True if this rule has passed its ``expires`` date.
@@ -412,8 +428,8 @@ def first_matching_reclassify_verdict(
 
 
 def active_reclassify_rules(
-    rules: list[ReclassifyRule], today: date | None = None
-) -> list[ReclassifyRule]:
+    rules: Sequence[ReclassifyRuleProtocol], today: date | None = None
+) -> list[ReclassifyRuleProtocol]:
     """Return the subset of *rules* not yet past their ``expires`` date.
 
     Every report renderer disclosing the *active* rule set (``reporter.py``'s
@@ -422,6 +438,15 @@ def active_reclassify_rules(
     rule verbatim (Codex review) -- an expired rule can never actually match
     (:meth:`ReclassifyRule.matches`), so disclosing it as active claims a
     downgrade is in effect when it no longer is.
+
+    Typed against :class:`~abicheck.model.policy_file_protocol.
+    ReclassifyRuleProtocol`/``Sequence`` rather than the concrete
+    ``ReclassifyRule``/``list`` (ADR-061 Phase 4's ``PolicyFile``
+    investigation): a real ``list[ReclassifyRule]`` still satisfies this
+    signature structurally (``Sequence`` is covariant), but so does the
+    ``Sequence[ReclassifyRuleProtocol]`` a ``DiffResult.policy_file.
+    reclassify`` read now yields once that field is typed against
+    ``PolicyFileProtocol``.
     """
     return [r for r in rules if not r.is_expired(today)]
 

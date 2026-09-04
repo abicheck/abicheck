@@ -52,11 +52,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from ..model.source_graph import _symbol_node_id
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
-from .source_graph import _symbol_node_id
 
 if TYPE_CHECKING:
-    from .source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
 #: ``!<arch>\n`` — the standard Unix ``ar`` archive (GNU, BSD and Mach-O all
 #: share it; they differ only in the long-name and symbol-index conventions

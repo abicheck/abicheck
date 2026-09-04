@@ -618,9 +618,9 @@ _ANON_TYPE_LOCATION_RE = re.compile(r"\bat\s+\S+:\d+:\d+(?=\s*\))")
 #: extra whitespace to clean up afterward (the previous unconditional
 #: multi-space collapse this function used to apply is gone; see its own
 #: past instance of exactly this over-broad-collision failure mode, fixed
-#: two rounds ago, since fixed generically here at the regex level instead).
+#: two rounds ago, since fixed generically here at the regex level instead). ``anonymous\s+\w+`` mirrors the identical, real-corpus-driven addition to ``model.graph_identity._BARE_ANON_TYPE_LOCATION_RE``.
 _ANON_TYPE_LOCATION_PATH_ONLY_RE = re.compile(
-    r"(\((?:lambda|unnamed\s+\w+))\s+at\s+(.*?)(:\d+:\d+)(?=\s*\))"
+    r"(\((?:lambda|unnamed\s+\w+|anonymous\s+\w+))\s+at\s+(.*?)(:\d+:\d+)(?=\s*\))"
 )
 
 

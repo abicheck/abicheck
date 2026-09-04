@@ -30,11 +30,13 @@ alongside this fix).
 
 from __future__ import annotations
 
+from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.diff_symbols_renames import (
+from abicheck.compare.namespace_move import (
     emit_namespace_move_batches,
     find_namespace_move_groups,
 )
+from abicheck.model import AbiSnapshot, Function, Visibility
 
 
 class TestCrossPositionAmbiguityResolvesViaGlobalSupport:
@@ -161,3 +163,218 @@ class TestCrossPositionAmbiguityResolvesViaGlobalSupport:
         groups = find_namespace_move_groups(removed, added)
         assert groups == {}
         assert emit_namespace_move_batches(groups) == []
+
+
+class TestAddedSideCrossPositionAmbiguityAlsoResolvesViaGlobalSupport:
+    """Follow-up to a later code-review report's own item 6: the corroboration
+    test above (``removed_id_to_added_symbols`` ambiguity -- ONE removed
+    symbol with multiple candidate added targets) was never extended to its
+    exact mirror -- ``added_id_to_removed_symbols`` ambiguity, ONE added
+    symbol claimed by multiple distinct removed identities. That asymmetry
+    silently dropped a real batch member (or, in the case below, an entire
+    batch under its 2+-pair threshold) whenever an unrelated, isolated,
+    uncorroborated removed identity happened to coincidentally collide with
+    one of the batch's own added targets -- reported as "batch still cites
+    7 of 15" against a real oneTBB comparison.
+
+    The fix cannot just reuse the removed-side test's shape: there, every
+    competing key belongs to the SAME removed symbol (its own alternate
+    masking positions), so subtracting that one symbol from a key's
+    supporter set is enough to ask "does anyone else back this option". On
+    the added side, each competing key belongs to a DIFFERENT removed
+    identity, and that competitor may itself never have resolved to any
+    single key at all (see
+    ``TestFindNamespaceMoveGroupsRetainsLocallyAmbiguousCandidatesGlobally``
+    in ``test_batch_rename_namespace_move.py`` -- confirmed unaffected by
+    this fix) -- an unresolved competitor is a live, irreducible threat and
+    must still veto. Only a competitor that DID resolve to its own key can
+    be assessed, and only dismissed when that key carries no support from
+    anyone besides the competitor itself.
+    """
+
+    def test_a_real_batch_below_threshold_is_recovered(self) -> None:
+        """Without the fix: `P::new::f` -> `Q::new::f` is unconditionally
+        rejected because `Q::new::f` is ALSO claimed by the coincidental,
+        single-member `Q::old::f` (an unrelated, uncorroborated "old" ->
+        "new" leaf rename) -- dropping the real "P" -> "Q" substitution to
+        a single supporting pair (`P::new::g` -> `Q::new::g` alone), below
+        `emit_namespace_move_batches`' 2+-pair threshold, so the whole
+        batch silently never gets reported at all."""
+        removed = {"_ZN1P3new1fEv", "_ZN1P3new1gEv", "_ZN1Q3old1fEv"}
+        added = {"_ZN1Q3new1fEv", "_ZN1Q3new1gEv"}
+        groups = find_namespace_move_groups(removed, added)
+        assert groups.get(("P", "Q")) == [
+            ("P::new::f", "Q::new::f"),
+            ("P::new::g", "Q::new::g"),
+        ]
+        # The isolated coincidence itself never forms its own group -- its
+        # own key has no corroboration beyond itself either.
+        assert ("old", "new") not in groups
+
+        changes = emit_namespace_move_batches(groups)
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.SYMBOL_RENAMED_BATCH
+
+    def test_a_real_batch_below_threshold_is_recovered_through_compare(self) -> None:
+        """The same scenario as
+        `test_a_real_batch_below_threshold_is_recovered` above, but through
+        the real public entry point (`compare`), the same way
+        `test_batch_rename_namespace_move.py`'s own end-to-end tests do."""
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="P::new::f",
+                    mangled="_ZN1P3new1fEv",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
+                Function(
+                    name="P::new::g",
+                    mangled="_ZN1P3new1gEv",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
+                Function(
+                    name="Q::old::f",
+                    mangled="_ZN1Q3old1fEv",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
+            ],
+        )
+        new = AbiSnapshot(
+            library="libfoo.so",
+            version="2.0",
+            functions=[
+                Function(
+                    name="Q::new::f",
+                    mangled="_ZN1Q3new1fEv",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
+                Function(
+                    name="Q::new::g",
+                    mangled="_ZN1Q3new1gEv",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
+            ],
+        )
+        result = compare(old, new)
+        batch = [c for c in result.changes if c.kind is ChangeKind.SYMBOL_RENAMED_BATCH]
+        assert batch, "the 'P' -> 'Q' namespace move produced no batch roll-up"
+        assert "P" in batch[0].description and "Q" in batch[0].description
+
+    def test_a_repeated_segment_collision_on_the_added_side_still_rejects(
+        self,
+    ) -> None:
+        """The added-side mirror of `raw_symbol_key_targets`'s
+        repeated-segment guard: `old::new::f` (masked at position 0:
+        "old" -> "new") and `new::old::f` (masked at position 1:
+        "old" -> "new") both key as the IDENTICAL text ("old", "new") AND
+        both converge on the SAME added declaration `new::new::f` -- an
+        irresolvable ambiguity about which removed declaration is the real
+        source, not real corroboration, so this must reject entirely."""
+        removed = {"_ZN3old3new1fEv", "_ZN3new3old1fEv"}
+        added = {"_ZN3new3new1fEv"}
+        groups = find_namespace_move_groups(removed, added)
+        assert groups == {}
+
+    def test_a_genuine_added_side_tie_still_rejects(self) -> None:
+        """When the competing removed identity (`Q::old::f`, proposing an
+        unrelated "old" -> "new" leaf substitution for the SAME added
+        target `Q::new::f` the "P" -> "Q" batch wants) is ITSELF
+        independently corroborated by another member (`R::old::h` ->
+        `R::new::h`, also "old" -> "new"), the ambiguity is real and
+        neither side yields for the contested pair: it drops out of BOTH
+        candidate groups, leaving each at a single, unambiguous
+        supporting pair -- correctly below the 2+-pair batch-emission
+        threshold, not a fabricated 2-pair batch on either side."""
+        removed = {
+            "_ZN1P3new1fEv",
+            "_ZN1P3new1gEv",
+            "_ZN1Q3old1fEv",
+            "_ZN1R3old1hEv",
+        }
+        added = {
+            "_ZN1Q3new1fEv",
+            "_ZN1Q3new1gEv",
+            "_ZN1R3new1hEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        # The contested pair joins neither group...
+        assert ("P::new::f", "Q::new::f") not in groups.get(("P", "Q"), [])
+        assert ("Q::old::f", "Q::new::f") not in groups.get(("old", "new"), [])
+        # ...but each side's own unambiguous, unrelated member still does.
+        assert groups.get(("P", "Q")) == [("P::new::g", "Q::new::g")]
+        assert groups.get(("old", "new")) == [("R::old::h", "R::new::h")]
+        changes = emit_namespace_move_batches(groups)
+        assert changes == []
+
+    def test_a_competitor_resolved_elsewhere_does_not_dismiss_an_unrelated_unresolved_claim(
+        self,
+    ) -> None:
+        """Code review (fresh evidence): the first version of this fix
+        scoped dismissibility per COMPETITOR only ("did this removed
+        symbol resolve to any key at all"), not per (competitor, added
+        identity) pair. `Q::old::f` has TWO masking positions: position 0
+        resolves cleanly to `S::old::f` (key ("Q", "S"), uncorroborated but
+        genuinely resolved -- an entirely unrelated target), while
+        position 1 -- its actual competing claim on `Q::new::f`, the
+        target `P::new::f` wants -- is itself locally ambiguous (it
+        matches BOTH `Q::new::f` and `Q::alt::f`) and never gets its own
+        `entries` row. The unrelated, resolved ("Q", "S") claim must not
+        vouch for the unresolved, still-live ("old", "new") rivalry on
+        `Q::new::f` -- doing so fabricated a 2-pair `P` -> `Q` batch that
+        should not exist (the `Q::old::f` -> `Q::new::f` question is
+        genuinely unresolved, exactly the round-4 scenario's shape, just
+        with the unresolved claim now hidden behind a red-herring resolved
+        one on a different target)."""
+        removed = {
+            "_ZN1P3new1fEv",
+            "_ZN1P3new1gEv",
+            "_ZN1Q3old1fEv",
+        }
+        added = {
+            "_ZN1Q3new1fEv",
+            "_ZN1Q3new1gEv",
+            "_ZN1Q3alt1fEv",
+            "_ZN1S3old1fEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert ("P::new::f", "Q::new::f") not in groups.get(("P", "Q"), [])
+        assert groups.get(("P", "Q")) == [("P::new::g", "Q::new::g")]
+        changes = emit_namespace_move_batches(groups)
+        assert changes == [], "a red-herring resolved claim fabricated a batch"
+
+    def test_a_competitor_with_two_targets_under_the_same_key_still_vetoes(
+        self,
+    ) -> None:
+        """Codex review, second round: `_competitor_is_dismissible` treated
+        ANY `entries` row for the exact (competitor, added_id) pair as proof
+        the competitor was uniquely resolved -- but `Q::Q::f` has TWO
+        masking positions that happen to share the IDENTICAL key tokens
+        ("Q", "new"): position 1 targets `Q::new::f` and position 0 targets
+        `new::Q::f`. An entry existing for `(Q::Q::f, Q::new::f)` does not
+        mean `Q::Q::f`'s candidacy under key ("Q", "new") is unambiguous --
+        it also reaches `new::Q::f` under that same key, so it must still
+        veto `P::new::f -> Q::new::f` rather than being dismissed as an
+        uncorroborated coincidence (which would also let `Q::Q::f` resolve
+        to both `Q::new::f` and the single-claimant `new::Q::f` at once)."""
+        removed = {
+            "_ZN1P3new1fEv",
+            "_ZN1P3new1gEv",
+            "_ZN1Q1Q1fEv",
+        }
+        added = {
+            "_ZN1Q3new1fEv",
+            "_ZN1Q3new1gEv",
+            "_ZN3new1Q1fEv",
+        }
+        groups = find_namespace_move_groups(removed, added)
+        assert ("P::new::f", "Q::new::f") not in groups.get(("P", "Q"), [])
+        assert groups.get(("P", "Q")) == [("P::new::g", "Q::new::g")]
+        changes = emit_namespace_move_batches(groups)
+        assert changes == [], "a multi-target competitor key fabricated a batch"

@@ -391,8 +391,13 @@ def test_sc_ci_quick_profile(tmp_path: Path) -> None:
         "quick",
     )
     assert res.exit_code == 4
-    assert "total" in res.output
-    assert res.output.count("\n") <= 1  # one-line summary
+    # stdout, not the stderr-mixed `res.output`: `quick`'s `depth=binary`
+    # (ADR-063 Phase 8's ceiling fix) means this unscoped-headers fixture no
+    # longer resolves a public-header surface at that depth either, and that
+    # scope-fallback warning is by design routed to stderr so it never
+    # corrupts this one-line stdout contract.
+    assert "total" in res.stdout
+    assert res.stdout.count("\n") <= 1  # one-line summary
 
 
 def _strict_suppressions_config(tmp_path: Path) -> Path:

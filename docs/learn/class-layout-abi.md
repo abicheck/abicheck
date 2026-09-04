@@ -3,6 +3,8 @@ doc_type: explanation
 audience:
   - library-maintainer
 level: advanced
+canonical_for:
+  - class-layout
 depends_on:
   - abicheck/diff_types.py
   - abicheck/diff_platform.py
@@ -315,3 +317,7 @@ abicheck compare old.so new.so \
 See [Designing for Stability](abi-series/07-designing-for-stability.md) for the
 mitigation patterns (opaque handles / pimpl, frozen inheritance, versioned
 interfaces) that make most of this catalog impossible to hit.
+
+---
+
+**Ladder:** ← [Part 4 — C++ ABI Specifics](abi-series/04-cpp-abi.md) · Step 3 · How Breaks Happen · [Part 5 — ELF & Linker-Level Concerns](abi-series/05-linker-elf.md) →

@@ -140,7 +140,7 @@ class TestReleaseAnnotationsPersistence:
         `entry["_old_snapshot"]`, so `_run_compare_pair` is called exactly
         once per library, unconditionally.
         """
-        import abicheck.cli_compare_release as release_mod
+        import abicheck.cli_compare_release_pairwise as release_mod
 
         old_dir = tmp_path / "old"
         old_dir.mkdir()
@@ -212,7 +212,7 @@ class TestReleaseWriteSecondaryOutput:
         """`--write` renders the secondary format from the same
         already-computed per-library results as the primary format --
         `_run_compare_pair` must be called exactly once per library."""
-        import abicheck.cli_compare_release as release_mod
+        import abicheck.cli_compare_release_pairwise as release_mod
 
         old_dir = tmp_path / "old"
         old_dir.mkdir()

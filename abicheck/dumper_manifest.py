@@ -51,7 +51,7 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as _dataclasses_replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -69,7 +69,11 @@ from .dumper_toolchain import (
     _parser_ast_unsupported_reasons,
     _parser_frontend_context_kind,
 )
+from .extract.manifest_semantic_ir import manifest_semantic_ir
+from .extract.semantic_normalizer import normalize_header_ast
 from .model import EnumType, Function, RecordType, Variable
+from .model.identity import EntityId
+from .model.semantic_ir import SemanticIR
 from .tu_fragment import (
     MergedTuFragments as MergedTuFragments,
     TuFragment as TuFragment,
@@ -267,6 +271,8 @@ def run_tu_fragment(
         typedefs=parser.parse_typedefs(),
         typedefs_qualified=parser.parse_typedefs_qualified(),
         constants=parser.parse_constants(),
+        typedef_entity_ids=parser.parse_typedef_entity_ids(),
+        constant_entity_ids=parser.parse_constant_entity_ids(),
         ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         ast_toolchain=_parser_ast_toolchain(parser),
         ast_fallback_reason=_parser_ast_fallback_reason(parser),
@@ -580,11 +586,14 @@ def run_tu_loop(
     contributing_names = {tu.name for tu in tus if tu.contributes_to_abi}
     fragments = [f for f in fragments if f.tu_name in contributing_names]
 
-    return merge_tu_fragments(
+    merged = merge_tu_fragments(
         fragments,
         public_header_paths=explicit_public_paths,
         public_header_dirs=explicit_public_dirs,
     )
+    # ADR-063 Phase 6: built from the raw, pre-merge `fragments`, not
+    # `merged`'s own already-folded flat fields -- see the docstring below.
+    return _dataclasses_replace(merged, semantic_ir=manifest_semantic_ir(fragments))
 
 
 @dataclass(frozen=True)
@@ -602,6 +611,8 @@ class ElfHeaderAstResult:
     typedefs: dict[str, str]
     typedefs_qualified: dict[str, str]
     constants: dict[str, str]
+    typedef_entity_ids: dict[str, EntityId]
+    constant_entity_ids: dict[str, EntityId]
     ast_producer: str
     ast_toolchain: dict[str, str]
     ast_fallback_reason: str | None
@@ -610,6 +621,14 @@ class ElfHeaderAstResult:
     is_clang: bool
     provenance_headers: tuple[Path, ...]
     frontend_context_kind: str | None = None
+    # ADR-063 Phase 6 (second/third/fourth slices): the canonical SemanticIR
+    # projection of this same merged result -- computed once, here, so both
+    # the legacy single-TU dump (`_dump_elf`) and a real manifest dump share
+    # one normalizer call instead of each format handler recomputing it from
+    # `functions`/`variables`/`types`/`enums`/`typedefs_qualified`/
+    # `typedef_entity_ids`/`constants`/`constant_entity_ids` above. See
+    # `extract/semantic_normalizer.py`'s own docstring for each slice's scope.
+    semantic_ir: SemanticIR | None = None
 
 
 def resolve_header_ast_result(
@@ -716,6 +735,8 @@ def resolve_header_ast_result(
             typedefs=fragment.typedefs,
             typedefs_qualified=fragment.typedefs_qualified,
             constants=fragment.constants,
+            typedef_entity_ids=fragment.typedef_entity_ids,
+            constant_entity_ids=fragment.constant_entity_ids,
             ast_producer=fragment.ast_producer,
             ast_toolchain=fragment.ast_toolchain,
             ast_fallback_reason=fragment.ast_fallback_reason,
@@ -733,6 +754,8 @@ def resolve_header_ast_result(
         typedefs=merged.typedefs,
         typedefs_qualified=merged.typedefs_qualified,
         constants=merged.constants,
+        typedef_entity_ids=merged.typedef_entity_ids,
+        constant_entity_ids=merged.constant_entity_ids,
         ast_producer=merged.ast_producer,
         ast_toolchain=merged.ast_toolchain,
         ast_fallback_reason=merged.ast_fallback_reason,
@@ -741,4 +764,22 @@ def resolve_header_ast_result(
         frontend_context_kind=merged.frontend_context_kind,
         is_clang=merged.ast_producer == "clang",
         provenance_headers=provenance_headers,
+        # `run_tu_loop` already populates a richer semantic_ir for the
+        # manifest branch (see `_manifest_semantic_ir`); the legacy
+        # branch's manually-built MergedTuFragments never sets it.
+        semantic_ir=(
+            merged.semantic_ir
+            if merged.semantic_ir is not None
+            else normalize_header_ast(
+                types=merged.types,
+                enums=merged.enums,
+                typedefs_qualified=merged.typedefs_qualified,
+                typedef_entity_ids=merged.typedef_entity_ids,
+                producer=merged.ast_producer,
+                functions=merged.functions,
+                variables=merged.variables,
+                constants=merged.constants,
+                constant_entity_ids=merged.constant_entity_ids,
+            )
+        ),
     )

@@ -107,28 +107,41 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from . import qualified_name_segments
 from .comparability import PROFILE_FIELD_KEYS, _sha256_of
-from .diff_cxx_rules import _skip_template_args, itanium_scope_components
 from .diff_helpers import type_map_key
 from .dumper_castxml import (
     SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,
     is_synthetic_dtor_key,
 )
+from .extract.semantic_ir_merge import merge_semantic_ir
 from .fact_provenance import (
+    backfill_fact,
     enum_fact_key,
     field_fact_key,
     func_fact_key,
     type_fact_key,
     var_fact_key,
 )
-from .model import AbiSnapshot, EnumType, Function, RecordType, TypeField, Variable
+from .model import (
+    AbiSnapshot,
+    EnumType,
+    Function,
+    RecordType,
+    TypeField,
+    Variable,
+    replace_with_fact_sync,
+)
+from .model.identity import EntityId, EntityKind, with_mangled_name
+from .model.mangled_name import _skip_template_args, itanium_scope_components
+from .model.occurrence import OccurrenceId
+from .model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
 from .name_classification import canonicalize_type_name
 
 _CTOR_MARKER = "{ctor}"
@@ -138,31 +151,10 @@ _CALLING_CONVENTION_ATTRIBUTES = frozenset({"ms_abi", "sysv_abi"})
 log = logging.getLogger(__name__)
 
 
-def _backfill_fact(
-    own_value: Any, clang_value: Any, key: str, provenance: dict[str, str]
-) -> Any:
-    """Return the merged value for one castxml-only fact and record its
-    provenance under *key*.
-
-    "Prefer castxml, backfill from clang only when castxml's own value is
-    null" (G28 Phase 3 design). Provenance is recorded as ``"castxml"`` even
-    when *own_value* is ``None`` and no clang value was available to
-    backfill from — the entity itself IS castxml-sourced; a genuinely
-    "not deprecated"/"not overridden"/etc. `None` is not the same as "this
-    entity was never seen by castxml at all" (the latter simply never calls
-    this helper — see :func:`merge_snapshots`'s clang-only-entity handling).
-    """
-    if own_value is None and clang_value is not None:
-        provenance[key] = "clang"
-        return clang_value
-    provenance[key] = "castxml"
-    return own_value
-
-
 def _ctor_dtor_scope(mangled: str) -> tuple[str, str] | None:
     """``(marker, qualified_scope)`` for a REAL Itanium-mangled ctor/dtor, or
     None if *mangled* isn't one (parsed structurally — see
-    ``diff_cxx_rules.itanium_scope_components``, which returns the ctor/dtor
+    ``model.mangled_name.itanium_scope_components``, which returns the ctor/dtor
     marker as the last scope component)."""
     comps = itanium_scope_components(mangled)
     if not comps or comps[-1] not in (_CTOR_MARKER, _DTOR_MARKER):
@@ -221,6 +213,154 @@ def _macho_normalize_mangled(mangled: str) -> str:
     function list (Codex review).
     """
     return mangled[1:] if mangled.startswith("_") else mangled
+
+
+def _rewrite_semantic_ir_entity_ids(
+    ir: SemanticIR | None, rewrites: Mapping[EntityId, EntityId]
+) -> SemanticIR | None:
+    """*ir* with every occurrence whose ``EntityId`` appears as a key in
+    *rewrites* moved to that key's value, leaving every other occurrence
+    untouched (ADR-063 Phase 6 third slice, Codex review, fresh evidence).
+
+    The shared primitive both this module's identity-rewrite sites reduce
+    to: an occurrence built from one backend's own parse can have its
+    identity superseded LATER, by a decision this module itself makes
+    (:func:`_macho_normalize_mangled`'s Darwin-underscore strip;
+    :func:`_merge_functions`'s castxml-synthetic-ctor/dtor-to-real-clang-
+    mangled-name match) -- a rewrite the per-backend `semantic_ir`
+    construction (`extract.semantic_normalizer.normalize_header_ast`, which
+    runs before either of those decisions) cannot see or participate in.
+    Left unrewritten, `merge_semantic_ir`'s bare-`EntityId` matching cannot
+    recognize the pre-rewrite and post-rewrite spellings as "the same
+    declaration," and either retains the affected occurrence twice (once
+    under each identity) or leaves a stale identity in the merged IR that
+    the flat, already-rewritten `functions`/`variables` no longer carry --
+    two different failure shapes, the same root cause.
+
+    ``None`` in, ``None`` out, matching :func:`~abicheck.extract.
+    semantic_ir_merge.merge_semantic_ir`'s own convention for "this backend
+    produced no IR at all". A no-op (returns *ir* unchanged, not a rebuilt-
+    but-equal copy) when *rewrites* is empty or matches nothing, mirroring
+    that same module's "only touch what actually changed" convention.
+    """
+    if ir is None or not rewrites:
+        return ir
+    rewritten: dict[OccurrenceId, CanonicalEntity] = {}
+    changed = False
+    for occ_id, entity in ir.occurrences.items():
+        new_entity_id = rewrites.get(occ_id.entity_id, occ_id.entity_id)
+        new_occ_id = (
+            occ_id
+            if new_entity_id == occ_id.entity_id
+            else OccurrenceId(new_entity_id, occ_id.disambiguator)
+        )
+        # First-observation-wins on a post-rewrite collision, mirroring
+        # `extract.semantic_normalizer._add_occurrence`'s identical
+        # convention -- an exceedingly rare shape rather than a case this
+        # rewrite needs to merge facts for.
+        if new_occ_id != occ_id:
+            changed = True
+        rewritten.setdefault(new_occ_id, entity)
+    if not changed:
+        return ir
+    return SemanticIR(occurrences=rewritten)
+
+
+def _macho_normalize_semantic_ir(ir: SemanticIR | None) -> SemanticIR | None:
+    """*ir* with every ``FUNCTION``/``VARIABLE`` occurrence's ``EntityId``
+    re-spelled through :func:`_macho_normalize_mangled`, mirroring the
+    identical rewrite this module already applies to *clang_functions*/
+    *clang_variables* above (Codex review, ADR-063 Phase 6 third slice,
+    fresh evidence).
+
+    Without this, a Mach-O hybrid dump's ``clang_snap.semantic_ir`` keeps
+    every function/variable occurrence under clang's own Darwin-decorated
+    mangled key (``"__Z..."``) while the flat ``merged_functions``/
+    ``merged_variables`` this same function builds from the ALREADY-
+    normalized *clang_functions*/*clang_variables* carry the prefix-free
+    one (``"_Z..."``) -- so ``merge_semantic_ir``'s bare-``EntityId``
+    matching never recognizes the two as the same declaration, and every
+    affected function/variable is retained TWICE in the merged
+    ``semantic_ir`` (once under each spelling) while the flat snapshot has
+    it once, normalized. Types/enums need no equivalent call: they key on
+    the source-level name, never a mangled linker symbol, so they carry no
+    such platform-specific decoration in the first place (see this
+    module's own comment at the call site below).
+    """
+    if ir is None:
+        return ir
+    rewrites: dict[EntityId, EntityId] = {}
+    for occ_id in ir.occurrences:
+        entity_id = occ_id.entity_id
+        if (
+            entity_id.kind in (EntityKind.FUNCTION, EntityKind.VARIABLE)
+            and len(entity_id.extra) == 2
+            and entity_id.extra[0] == "mangled"
+        ):
+            new_entity_id = with_mangled_name(
+                entity_id, _macho_normalize_mangled(entity_id.extra[1])
+            )
+            if new_entity_id is not None and new_entity_id != entity_id:
+                rewrites[entity_id] = new_entity_id
+    return _rewrite_semantic_ir_entity_ids(ir, rewrites)
+
+
+def _drop_unmatched_constant_occurrences(
+    ir: SemanticIR | None,
+    conflicts: dict[str, str],
+    kept_entity_ids: set[EntityId],
+) -> tuple[SemanticIR | None, dict[str, str]]:
+    """*ir*/*conflicts* with every ``CONSTANT`` occurrence whose ``EntityId``
+    is not in *kept_entity_ids* dropped, every other occurrence untouched
+    (ADR-063 Phase 6 fourth slice, Codex review, fresh evidence).
+
+    ``merged.constants`` (unlike every other flat field this function
+    builds) deliberately stays ``castxml_snap.constants`` verbatim -- see
+    that field's own comment at its ``replace()`` call site for why a
+    clang-only key cannot be unioned in the way ``typedefs_qualified`` is.
+    ``merge_semantic_ir`` has no such special case: it is generic over
+    every ``EntityKind`` and appends an overlay-only occurrence (a clang-
+    only constant) into the merged IR unconditionally, the same as it would
+    for a clang-only function/variable/type/enum -- all of which genuinely
+    ARE unioned into their own flat fields, unlike constants. Left
+    unfiltered, a clang-only constant would surface through ``semantic_ir``
+    with no corresponding entry in ``merged.constants``/``constant_
+    entity_ids`` at all, an occurrence naming a "declaration" the rest of
+    the snapshot does not know exists. *kept_entity_ids* is the exact same
+    set the caller already derives for the final, unioned-then-filtered
+    ``constant_entity_ids`` (filtered to ``castxml_snap.constants``'s own
+    keys) -- passed in rather than recomputed, so the two cannot drift.
+
+    ``None`` in, ``None`` out, mirroring :func:`_rewrite_semantic_ir_
+    entity_ids`'s convention. A no-op (returns *ir*/*conflicts* unchanged)
+    when nothing needed dropping.
+    """
+    if ir is None:
+        return ir, conflicts
+    kept: dict[OccurrenceId, CanonicalEntity] = {}
+    dropped: list[tuple[OccurrenceId, CanonicalEntity]] = []
+    for occ_id, entity in ir.occurrences.items():
+        if (
+            occ_id.entity_id.kind is not EntityKind.CONSTANT
+            or occ_id.entity_id in kept_entity_ids
+        ):
+            kept[occ_id] = entity
+        else:
+            dropped.append((occ_id, entity))
+    if not dropped:
+        return ir, conflicts
+    filtered_ir = SemanticIR(occurrences=kept)
+    if not conflicts:
+        return filtered_ir, conflicts
+    dropped_keys = {
+        semantic_ir_conflict_key(occ_id, fact_name)
+        for occ_id, entity in dropped
+        for fact_name, _fact in entity.fact_items()
+    }
+    filtered_conflicts = {
+        key: value for key, value in conflicts.items() if key not in dropped_keys
+    }
+    return filtered_ir, filtered_conflicts
 
 
 def _strip_itanium_template_suffix(component: str) -> str:
@@ -397,7 +537,7 @@ def _backfill_function_facts(
     updates: dict[str, Any] = {}
     for attr in ("deprecated", "is_override"):
         key = func_fact_key(f.mangled, attr)
-        value = _backfill_fact(
+        value = backfill_fact(
             getattr(f, attr), getattr(clang_f, attr, None), key, provenance
         )
         if value != getattr(f, attr):
@@ -451,7 +591,7 @@ def _backfill_function_facts(
     # evidence). For an ordinary (non-rewritten) function this is a no-op:
     # both sides independently looked up the identical real key, so a
     # genuinely-None castxml value means clang's is None too. Deliberately
-    # NOT routed through _backfill_fact/provenance: this isn't a producer
+    # NOT routed through backfill_fact/provenance: this isn't a producer
     # disagreement to record, just recovering a fact that was always there
     # under the right key.
     if (
@@ -466,14 +606,24 @@ def _backfill_function_facts(
         and clang_f.elf_visibility is not None
     ):
         updates["elf_visibility"] = clang_f.elf_visibility
-    return replace(f, **updates) if updates else f
+    # ADR-063 Phase 5: keeps every fact-bridged field's Fact sibling in sync.
+    return replace_with_fact_sync(f, **updates) if updates else f
 
 
 def _merge_functions(
     castxml_funcs: list[Function],
     clang_funcs: list[Function],
     provenance: dict[str, str],
+    entity_id_rewrites: dict[EntityId, EntityId] | None = None,
 ) -> list[Function]:
+    """*entity_id_rewrites*, when given, is populated with every
+    ``old_entity_id -> new_entity_id`` substitution made below for a
+    castxml synthetic ctor/dtor key matched to a real clang mangled name --
+    the caller applies the identical rewrite to `castxml_snap.semantic_ir`
+    (:func:`_rewrite_semantic_ir_entity_ids`) so that representation isn't
+    left keyed under the stale synthetic identity this function just
+    retired from the flat `functions` list (Codex review, ADR-063 Phase 6
+    third slice, fresh evidence)."""
     clang_ctor_dtor: dict[tuple[str, str], list[Function]] = {}
     for cf in clang_funcs:
         scope = _ctor_dtor_scope(cf.mangled)
@@ -487,7 +637,14 @@ def _merge_functions(
         if is_synthetic_ctor_key(f.mangled) or is_synthetic_dtor_key(f.mangled):
             match = _match_synthetic_ctor_dtor(f, clang_ctor_dtor)
             if match is not None:
-                f = replace(f, mangled=match.mangled)
+                if (
+                    entity_id_rewrites is not None
+                    and f.entity_id is not None
+                    and match.entity_id is not None
+                ):
+                    entity_id_rewrites[f.entity_id] = match.entity_id
+                # Adopt match's entity_id too, or it keeps the synthetic key.
+                f = replace(f, mangled=match.mangled, entity_id=match.entity_id)
         merged.append(f)
 
     clang_by_mangled = {cf.mangled: cf for cf in clang_funcs}
@@ -554,10 +711,15 @@ def _merge_variable(
     v: Variable, clang_v: Variable | None, provenance: dict[str, str]
 ) -> Variable:
     key = var_fact_key(v.mangled, "deprecated")
-    value = _backfill_fact(
+    value = backfill_fact(
         v.deprecated, clang_v.deprecated if clang_v else None, key, provenance
     )
-    return replace(v, deprecated=value) if value != v.deprecated else v
+    # replace_with_fact_sync everywhere this module backfills a Fact[...]-
+    # bridged attr (ADR-063 Phase 5): a bare replace() carries the stale
+    # sibling forward and __post_init__'s "explicit Fact wins" rule then
+    # reverts the backfill (model/fact.py's documented trap; the rule is
+    # enforced for every call site by tests/test_fact_bridged_replace_guard.py).
+    return replace_with_fact_sync(v, deprecated=value) if value != v.deprecated else v
 
 
 #: G28 Phase 4 layout facts castxml either never populates at all
@@ -600,7 +762,7 @@ def _merge_field(
         # baselines keyed bare are still read via
         # diff_helpers.fact_same_producer_qualified's bare fallback.
         key = field_fact_key(type_map_key(t), f.name, attr)
-        value = _backfill_fact(
+        value = backfill_fact(
             getattr(f, attr), getattr(clang_f, attr, None), key, provenance
         )
         if value != getattr(f, attr):
@@ -613,7 +775,8 @@ def _merge_field(
         and clang_f.offset_bits is not None
     ):
         updates["offset_bits"] = clang_f.offset_bits
-    return replace(f, **updates) if updates else f
+    # replace_with_fact_sync: see _merge_variable's comment above.
+    return replace_with_fact_sync(f, **updates) if updates else f
 
 
 def _merge_record_type(
@@ -626,7 +789,7 @@ def _merge_record_type(
         # writes to it), deprecated is qualified (G31 Phase C).
         type_key = type_map_key(t) if attr == "deprecated" else t.name
         key = type_fact_key(type_key, attr)
-        value = _backfill_fact(
+        value = backfill_fact(
             getattr(t, attr), getattr(clang_t, attr, None), key, provenance
         )
         if value != getattr(t, attr):
@@ -646,7 +809,7 @@ def _merge_record_type(
         # clang 18 output, PR #719 follow-up): unlike every other backfilled
         # fact above, these two are plain `bool = False` -- not an Optional
         # tri-state -- so there is no null "castxml doesn't know" state to key
-        # a _backfill_fact()-style None-check off. castxml's own `False` is
+        # a backfill_fact()-style None-check off. castxml's own `False` is
         # ALWAYS structurally correct by construction rather than a placeholder
         # (castxml never emits an uninstantiated template pattern as a
         # declaration at all, and it always computes real per-field offsets
@@ -705,12 +868,15 @@ def _merge_enum_type(
     type_key = type_map_key(e)
     for attr in ("is_scoped", "deprecated"):
         key = enum_fact_key(type_key, attr)
-        value = _backfill_fact(
+        value = backfill_fact(
             getattr(e, attr), getattr(clang_e, attr, None), key, provenance
         )
         if value != getattr(e, attr):
             updates[attr] = value
-    return replace(e, **updates) if updates else e
+    # replace_with_fact_sync: see _merge_variable's comment above. The
+    # `**updates` spelling is why a name-based sweep missed this one site
+    # (Codex review, PR #993) -- hence the guard test named there.
+    return replace_with_fact_sync(e, **updates) if updates else e
 
 
 def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSnapshot:
@@ -748,17 +914,28 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     # variables) -- see _macho_normalize_mangled's docstring. Type/enum
     # merges key on the source-level NAME, not a mangled linker symbol, so
     # they carry no such platform-specific decoration and need no change.
+    # entity_id's "mangled" tag is re-spelled too (Codex review).
     clang_functions = clang_snap.functions
     clang_variables = clang_snap.variables
+    clang_semantic_ir = clang_snap.semantic_ir
     if castxml_snap.platform == "macho":
         clang_functions = [
-            replace(cf, mangled=_macho_normalize_mangled(cf.mangled))
+            replace(cf, mangled=nm, entity_id=with_mangled_name(cf.entity_id, nm))
             for cf in clang_functions
+            for nm in (_macho_normalize_mangled(cf.mangled),)
         ]
         clang_variables = [
-            replace(cv, mangled=_macho_normalize_mangled(cv.mangled))
+            replace(cv, mangled=nm, entity_id=with_mangled_name(cv.entity_id, nm))
             for cv in clang_variables
+            for nm in (_macho_normalize_mangled(cv.mangled),)
         ]
+        # ADR-063 Phase 6 third slice (Codex review, fresh evidence): the
+        # identical rewrite must reach `semantic_ir` too, or its FUNCTION/
+        # VARIABLE occurrences stay keyed under clang's un-normalized
+        # mangled name while the flat lists above (and castxml's own side)
+        # use the normalized one -- see `_macho_normalize_semantic_ir`'s
+        # own docstring for the exact double-counting this produced.
+        clang_semantic_ir = _macho_normalize_semantic_ir(clang_semantic_ir)
 
     # Keyed by type_map_key (namespace-qualified identity), not the bare
     # RecordType.name/EnumType.name: two distinct types sharing only a bare
@@ -771,8 +948,12 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     clang_enums_by_key = {type_map_key(e): e for e in clang_snap.enums}
     clang_vars_by_mangled = {v.mangled: v for v in clang_variables}
 
+    ctor_dtor_entity_id_rewrites: dict[EntityId, EntityId] = {}
     merged_functions = _merge_functions(
-        castxml_snap.functions, clang_functions, provenance
+        castxml_snap.functions,
+        clang_functions,
+        provenance,
+        ctor_dtor_entity_id_rewrites,
     )
 
     merged_types = [
@@ -860,8 +1041,42 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         provenance[var_fact_key(v.mangled, "visibility")] = "clang"
     merged_variables.extend(clang_only_variables)
 
+    # ADR-063 Phase 6: the semantic IR needs the same base-plus-backfill
+    # reconciliation every legacy field above already gets. Carrying
+    # castxml's through unchanged, while `functions`/`types` include
+    # clang-only and clang-backfilled data, would leave one freshly built
+    # snapshot's two representations disagreeing (extract/semantic_ir_merge.py).
+    # `_merge_functions`'s own ctor/dtor identity rewrite (above) must reach
+    # `semantic_ir` too, or a matched castxml declaration stays keyed under
+    # its retired synthetic identity there while `merged_functions` already
+    # carries the real one (Codex review, fresh evidence).
+    castxml_semantic_ir = _rewrite_semantic_ir_entity_ids(
+        castxml_snap.semantic_ir, ctor_dtor_entity_id_rewrites
+    )
+    merged_ir, ir_conflicts = merge_semantic_ir(castxml_semantic_ir, clang_semantic_ir)
+    # `merged.constants` deliberately stays castxml-only (see that field's
+    # own comment below) -- `merged_constant_entity_ids` is exactly its
+    # sidecar, computed here rather than inline in `replace()` below so
+    # `_drop_unmatched_constant_occurrences` can use the identical kept-id
+    # set to filter `merged_ir`'s own CONSTANT occurrences to match, instead
+    # of a clang-only constant occurrence surviving in `semantic_ir` with no
+    # corresponding flat entry at all (Codex review, fresh evidence).
+    merged_constant_entity_ids = {
+        key: value
+        for key, value in {
+            **clang_snap.constant_entity_ids,
+            **castxml_snap.constant_entity_ids,
+        }.items()
+        if key in castxml_snap.constants
+    }
+    merged_ir, ir_conflicts = _drop_unmatched_constant_occurrences(
+        merged_ir, ir_conflicts, set(merged_constant_entity_ids.values())
+    )
+
     merged = replace(
         castxml_snap,
+        semantic_ir=merged_ir,
+        semantic_ir_conflicts={**castxml_snap.semantic_ir_conflicts, **ir_conflicts},
         functions=merged_functions,
         variables=merged_variables,
         types=merged_types,
@@ -885,6 +1100,27 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
             **clang_snap.typedefs_qualified,
             **castxml_snap.typedefs_qualified,
         },
+        # The `EntityId` sidecars (ADR-063 Phase 2) union the same way, in the
+        # same direction, so they cannot desync from the dicts they annotate.
+        typedef_entity_ids={
+            **clang_snap.typedef_entity_ids,
+            **castxml_snap.typedef_entity_ids,
+        },
+        # `constants` itself (unlike `typedefs_qualified`) is NOT merged
+        # above -- it stays castxml_snap's own, verbatim, same as every
+        # other bare-keyed field this function's docstring lists. A clang-
+        # only key unioned into the sidecar the same way `typedef_
+        # entity_ids` is would therefore name a constant `merged.constants`
+        # never retained -- a phantom identity violating the sidecar's own
+        # exact-key contract with its partner dict (Codex review). Keyed
+        # off `castxml_snap.constants` (== `merged.constants`) instead, so
+        # every sidecar key has a real constant behind it; a key clang
+        # alone resolved an identity for, that castxml also kept, still
+        # wins clang's identity as it did before, since clang is spread
+        # first in the union below. Computed above (`merged_constant_
+        # entity_ids`), not inlined here, so `_drop_unmatched_constant_
+        # occurrences` filters `semantic_ir` against the identical set.
+        constant_entity_ids=merged_constant_entity_ids,
         ast_producer="hybrid",
         ast_toolchain={
             **{

@@ -203,6 +203,9 @@ defines:
 ```python
 # manifest.json's shape, as a dict -- not a dataclass:
 {
+    "artifact_type": str,  # BUNDLE_ARCHIVE_ARTIFACT_TYPE (CLI cleanup
+    # phase two, PR I prerequisite) -- required, not defaulted; rejects a
+    # missing/mismatched marker before any other key is trusted
     "schema_version": int,  # the *container's own* layout version
     "bundle_facts_schema_version": int,  # the encoded BundleFacts' own version
     "variant_fingerprint": str,
@@ -573,10 +576,14 @@ with BundleArchiveReader.open(path) as reader:
 **This sketch is incomplete as written, and deliberately corrected here
 rather than left implicit (Codex review, fresh evidence; sharpened by a
 later round of the same review — the first draft of this correction named
-only one of the two axes, see below): a lazy per-library read must check
-**both** `manifest["schema_version"]` (the container's own layout version)
-**and** `manifest["bundle_facts_schema_version"]` (the encoded `BundleFacts`'
-own version) against their respective supported ranges *before* trusting
+only one of the two axes, see below; a still later round added the marker
+check below): a lazy per-library read must check `manifest["artifact_type"]`
+against `BUNDLE_ARCHIVE_ARTIFACT_TYPE` (CLI cleanup phase two, PR I
+prerequisite -- rejecting a missing or mismatched marker outright, the same
+way `read_bundle_facts_archive()` does), and **both**
+`manifest["schema_version"]` (the container's own layout version) **and**
+`manifest["bundle_facts_schema_version"]` (the encoded `BundleFacts`' own
+version) against their respective supported ranges *before* trusting
 anything else the manifest says, exactly where the sketch currently jumps
 straight from `read_manifest()` to indexing `library_blobs`.** Checking only
 `bundle_facts_schema_version` — as an earlier revision of this passage did —
@@ -614,6 +621,12 @@ implementation work on the already-shipped PR #869 branch, out of scope for
 this plan document — recorded here as a Phase 2 acceptance requirement so a
 future lazy-read entry point (CLI or typed API) is built to check both axes
 from the start rather than reproducing the same gap a second time.
+`artifact_type` is a later, additional requirement on top of this
+paragraph's original two-axis gap (CLI cleanup phase two, PR I prerequisite,
+postdating PR #869): `read_bundle_facts_archive()` now validates it via
+`validate_bundle_archive_artifact_type()` before either schema-version
+check, so a lazy per-library reader built against this sketch must add that
+same validation too, not just the two schema-version comparisons.
 
 This per-library read decompresses and parses exactly the one referenced blob member
 (acceptance criterion (a)); a caller wanting every library still pays the

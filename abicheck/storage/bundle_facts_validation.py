@@ -15,32 +15,35 @@
 
 """Persisted ``BundleFacts`` field validators, its JSON container-node
 budget check, and ``load_bundle_facts``'s full dispatch body, split out of
-``bundle_facts.py``/``serialization.py`` (both flat, not-yet-ADR-061-
-migrated root modules) purely to stay under ``bundle_facts.py``'s 800-line
-production cap and ``serialization.py``'s ADR-061 no-growth debt entry
-(``architecture/debt.yaml``). Fits `storage/`'s own ADR-061 D1 remit
-("serialize snapshots/baselines, own their schemas") and its `model`-only
-dependency rule: every function here depends on nothing first-party but
-``errors`` (a `public_root_surfaces` exemption) and `storage.json_budget`
-(same package) -- ``load_bundle_facts_dispatch`` takes its `bundle_facts.py`/
-`snapshot_io.py`/`serialization.py` collaborators as injected callables
-instead of importing them, since none of those three is classified into a
-layer yet and this module, migrated into `storage/`, may not import an
-unclassified first-party module directly. A leaf itself: no import of
-``bundle_facts.py`` or ``serialization.py``, so importing it introduces no
-cycle either way.
+``bundle_facts.py``/``bundle_facts_serialization.py`` purely to stay under
+``bundle_facts.py``'s 800-line production cap and
+``bundle_facts_serialization.py``'s own leaf-module simplicity. Fits
+`storage/`'s own ADR-061 D1 remit ("serialize snapshots/baselines, own
+their schemas") and its `model`-only dependency rule: every function here
+depends on nothing first-party but ``errors`` (a `public_root_surfaces`
+exemption) and `storage.json_budget` (same package) --
+``load_bundle_facts_dispatch`` takes its `bundle_facts.py`/`snapshot_io.py`/
+`serialization.py` collaborators as injected callables instead of importing
+them, since `storage`'s own `may_import: [model]` forbids importing any of
+those three directly (each is `workflows`/unclassified, never `model`),
+regardless of whether they are themselves classified. A leaf itself: no
+import of ``bundle_facts.py``/``bundle_facts_serialization.py``/
+``serialization.py``, so importing it introduces no cycle either way.
 
-``validated_alias_map``/``validated_filename_map`` are duplicated from
-(not imported from) ``serialization._validated_alias_map``/
-``_validated_filename_map`` -- see ``bundle_facts.py``'s own module-level
-comment for why importing that module directly isn't an option.
+``validated_alias_map``/``validated_filename_map`` are the canonical
+implementations -- ``bundle_facts_serialization.bundle_facts_from_dict``
+imports them directly (ADR-061: `bundle_facts_serialization.py` is
+`workflows`-classified, and `workflows -> storage` is allowed) rather than
+keeping its own duplicate, which is what ``serialization.py``'s own
+now-removed ``_validated_alias_map``/``_validated_filename_map`` used to be
+before this module existed.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 def load_bundle_facts_dispatch(
@@ -132,6 +135,87 @@ def check_bundle_facts_json_budget(
         ) from None
     except JsonNestingTooDeepError:
         raise SnapshotError(f"{path}: {description} is too deeply nested to parse") from None
+
+
+#: Self-describing marker for the G40 archive *container*'s own
+#: ``manifest.json`` -- the archive-format counterpart of
+#: ``bundle_facts.BUNDLE_FACTS_ARTIFACT_TYPE`` (CLI cleanup phase two, PR I
+#: prerequisite: "The archive container ... is a separate axis and gets
+#: the same treatment"). Required, not defaulted, on read by
+#: :func:`validate_bundle_archive_artifact_type` below -- the archive
+#: format has never shipped in a release, so there is no pre-existing
+#: archive lacking it that a back-compat default would need to keep
+#: readable. Lives here (not in ``bundle_facts.py``, unlike its plain-JSON
+#: sibling) purely for that module's own 800-line production cap; it is
+#: re-exported from there for callers that only know that module.
+BUNDLE_ARCHIVE_ARTIFACT_TYPE = "abicheck.bundle-facts-archive"
+
+
+def require_int_schema_version(value: Any, *, field: str, path: str | Path) -> int:
+    """Validate a manifest integer field strictly -- a bare ``int()``
+    coercion would silently truncate 1.9, accept True/False as 1/0 (bool
+    is an int subclass), and leak a raw TypeError for None instead of this
+    module's own :class:`~abicheck.errors.SnapshotError` contract (Codex
+    review). Moved here from ``bundle_facts.read_bundle_facts_archive``
+    for that module's own 800-line production cap.
+
+    Returns *value* itself rather than ``int(value)`` (CodeRabbit review):
+    the ``isinstance`` check above already proves it's a real ``int``, and
+    coercing it again would call an ``int`` subclass's own overridden
+    ``__int__()``, which is free to return something other than the value
+    just validated."""
+    from ..errors import SnapshotError
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SnapshotError(f"{path}: manifest {field} must be an integer, got {value!r}")
+    return cast(int, value)
+
+
+def load_bundle_facts_blob_json(
+    raw: bytes, *, max_json_object_nodes: int, path: str | Path, description: str
+) -> Any:
+    """Decode one G40 archive blob's JSON, translating every failure mode
+    into this module's own error vocabulary -- neither invalid JSON nor a
+    ``RecursionError`` may surface raw (mirrors ``read_manifest``'s own
+    translation). The shared pre-scan (:func:`check_bundle_facts_json_budget`)
+    bounds both container-node count and nesting depth before ``json.loads()``
+    ever runs, since relying on that call's own ``RecursionError`` isn't
+    portable (Python 3.14 parses 10,000 levels of ``[[[...]]]`` with none).
+    Moved here from ``bundle_facts.read_bundle_facts_archive`` for that
+    module's own 800-line production cap."""
+    import json as _json
+
+    from ..errors import SnapshotError
+
+    check_bundle_facts_json_budget(raw, max_json_object_nodes, path=path, description=description)
+    try:
+        return _json.loads(raw)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise SnapshotError(f"{path}: {description} is not valid JSON: {exc}") from exc
+    except RecursionError as exc:
+        raise SnapshotError(f"{path}: {description} is too deeply nested to parse") from exc
+
+
+def validate_bundle_archive_artifact_type(
+    manifest: dict[str, Any],
+    *,
+    expected: str = BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+    path: str | Path,
+) -> None:
+    """Reject a G40 archive manifest whose ``artifact_type`` marker is
+    missing or doesn't match *expected* -- the archive container's own
+    counterpart to
+    ``bundle_facts_serialization.looks_like_bundle_facts_document``'s
+    plain-JSON marker check."""
+    from ..errors import IncompatibleSnapshotSchemaError
+
+    artifact_type = manifest.get("artifact_type")
+    if artifact_type != expected:
+        raise IncompatibleSnapshotSchemaError(
+            f"{path}: manifest artifact_type {artifact_type!r} is not "
+            f"{expected!r} -- not a BundleArchiveWriter-produced bundle "
+            "facts archive."
+        )
 
 
 def validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:

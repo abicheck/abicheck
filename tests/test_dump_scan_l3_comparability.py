@@ -60,33 +60,40 @@ had no castxml install; that is no longer a reason to leave the
 default backend unverified in CI, which does have one.
 
 Running this module's ``scan``-comparison tests under castxml for the
-first time surfaced a real, but *different*, pre-existing and already
-self-documented gap -- not the ``NOT_COMPARABLE`` bug this module
-exists to regression-test. ``scan_engine.run_scan_core``'s own comment
-records that ``scan``'s candidate-side L4 source-ABI replay always uses
+first time surfaced a real, but *different*, pre-existing gap -- not the
+``NOT_COMPARABLE`` bug this module exists to regression-test.
+``scan``'s candidate-side L4 source-ABI replay passed a hardcoded
 ``source_extractor="auto"`` (which ``buildsource.inline.
-_make_source_extractor`` resolves to clang), never the
-``--ast-frontend`` the caller actually passed, "a real behaviour change
-for real users, unverifiable without a castxml-capable lane" -- while
-``dump``'s own L4 replay *does* follow ``--ast-frontend`` via
-``service_compare_evidence.effective_frontend``. Under
-``--ast-frontend castxml`` this means the ``dump`` baseline's L4 replay
-runs through castxml while ``scan``'s own candidate replay still runs
-through clang -- two different tools independently replaying the same
-translation unit, which do not always resolve one exported symbol the
-same way; the result is a spurious ``COMPATIBLE_WITH_RISK`` verdict
-(``source_fact_coverage_incomplete``/``source_binary_provenance_
-mismatch``) on completely unchanged source, never ``NOT_COMPARABLE``.
-Since a castxml-capable lane is exactly what was previously missing to
-verify this, it is now pinned as a known-divergent, exact signature
-(mirroring ``tests/test_dump_cli_typed_api_parity.py``'s own
-``_SCAN_KNOWN_DIVERGENT_SHAPES`` pattern) rather than silently
-weakened or left to fail CI outright -- fixing the extractor selection
-itself is the real behaviour change ``run_scan_core``'s own comment
-already declines to make in this same PR, since it would need its own
-dedicated verification against real castxml/clang divergence in
-production usage, not a side effect of hardening this module's test
-coverage.
+_make_source_extractor`` resolves to clang) regardless of the
+``--ast-frontend`` the caller actually passed, while ``dump``'s own L4
+replay follows it via ``service_compare_evidence.effective_frontend``. So
+under ``--ast-frontend castxml`` the ``dump`` baseline's L4 replay ran
+through castxml and ``scan``'s candidate replay through clang -- two
+different tools independently replaying the same translation unit, which
+do not always resolve one exported symbol the same way -- producing a
+spurious ``COMPATIBLE_WITH_RISK``
+(``source_fact_coverage_incomplete``) verdict on completely unchanged
+source. It was pinned here as an xfailed, exact known-divergent signature
+rather than silently weakened.
+
+That pin is now gone, because the gap it described is closed:
+``scan_engine``'s call site resolves an *explicitly* requested frontend
+through ``service_compare_evidence.explicit_source_extractor``,
+which delegates to the same ``effective_frontend`` ``dump``/``compare``
+use, so an explicit ``--ast-frontend`` selects the same L4 backend on both
+sides by construction. Both parametrizations must now come out completely
+clean, asserted against the same exhaustive bucket set the xfail predicate
+used to inspect (``_assert_scan_text_is_clean``/
+``_assert_scan_report_is_clean``).
+
+Deliberately still open, and *not* claimed closed by any test here: the
+**unflagged** default still differs -- ``scan`` resolves an unstated
+``auto`` to clang, ``dump``/``compare`` resolve it to castxml. Matching
+those would newly require castxml for a plain ``scan --depth source`` that
+works with clang today, a real behaviour change tracked as item 2 of the
+plan's PR 3A section (``docs/contribute/plans/cli-cleanup-phase-two.md``).
+Every test in this module passes an explicit ``--ast-frontend``, so none
+of them exercised that half before or after.
 """
 
 from __future__ import annotations
@@ -96,7 +103,6 @@ import re
 import shutil
 import subprocess
 import sys
-from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -127,38 +133,24 @@ def _have_frontend(ast_frontend: str) -> bool:
     return _HAVE_CASTXML if ast_frontend == "castxml" else _HAVE_CLANG
 
 
-# scan's candidate-side L4 replay always uses clang (see module docstring) --
-# only "castxml" is known-divergent for the two scan-comparison tests below.
-# Not "dump-produces-a-different-baseline": the dump-side test above this
-# constant has no scan candidate at all, so it is unaffected and has no
-# xfail list of its own -- a future regression narrowing *that* path's
-# coverage should fail loudly rather than being masked here.
-_SCAN_KNOWN_DIVERGENT_FRONTENDS: frozenset[str] = frozenset({"castxml"})
-
-# The exact, already-diagnosed finding-kind multiset for the L4-extractor
-# divergence -- an exact multiset match, not "these are present among
-# possibly others" (Codex review, round 1: a substring-only check would
-# still xfail past an unrelated additional risk finding riding alongside
-# the known two) and not a bare set either (Codex review, round 2: a set
-# collapses a *second* occurrence of either known kind -- e.g. one more
-# `source_fact_coverage_incomplete` reported per side -- into "no change",
-# silently hiding that regression too).
+# Both frontends must now come out completely clean. `scan`'s candidate-side
+# L4 replay used to ignore `--ast-frontend` entirely and always replay through
+# clang, so a castxml run compared a castxml `dump` baseline against a clang
+# `scan` candidate -- two different tools independently replaying the same
+# translation unit -- and produced a spurious COMPATIBLE_WITH_RISK
+# (`source_fact_coverage_incomplete`) on unchanged source. That was pinned here
+# as an xfailed known-divergent signature; `scan_engine`'s call site now honors
+# an explicit request via `service_compare_evidence.
+# explicit_source_extractor`, so there is no divergent frontend
+# left for these tests to except and the pin is gone rather than weakened.
 #
-# Narrowed from two kinds to one (2026-08-28, AGENTS.md "PR C" known-gaps
-# entry): this shape used to also include `source_binary_provenance_
-# mismatch`, from castxml's compiler-synthesized implicit special members
-# (constructors, destructor, synthesized `operator=`) leaking into the L4
-# reachable-declaration surface and dragging the match ratio down. That
-# extractor bug is fixed (`Function.is_compiler_generated`,
-# `entity_from_function`'s `api_relevant` exclusion) -- the remaining
-# `source_fact_coverage_incomplete` is the separate, still-open item 2
-# divergence this module's own docstring already names (`scan`'s candidate
-# always replays L4 via clang; `dump`'s baseline via castxml's own default),
-# now visible in its own smaller, cleaner shape instead of being swamped by
-# the fixed bug's noise.
-_KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS = Counter(
-    {"source_fact_coverage_incomplete": 1}
-)
+# What is deliberately NOT claimed by its removal: the *unflagged* default
+# still differs (`scan` resolves an unstated "auto" to clang, `dump`/`compare`
+# to castxml) -- see the plan's PR 3A item 2. Every test here passes an
+# explicit `--ast-frontend`, so none of them exercised that half either before
+# or after.
+_CLEAN_TOTALS = (0, 0, 0, 0)  # breaking, api_break, risk, compatible
+
 _RISK_LINE_RE = re.compile(r"^\s*\[risk\]\s+(\S+):", re.MULTILINE)
 #: ``cli_scan_helpers.render_baseline_lines``'s exact counts-line format:
 #: "  breaking=N api_break=N risk=N compatible=N". Checked in addition to
@@ -172,14 +164,6 @@ _RISK_LINE_RE = re.compile(r"^\s*\[risk\]\s+(\S+):", re.MULTILINE)
 _COUNTS_LINE_RE = re.compile(
     r"breaking=(\d+)\s+api_break=(\d+)\s+risk=(\d+)\s+compatible=(\d+)"
 )
-_KNOWN_L4_EXTRACTOR_DIVERGENCE_TOTALS = (
-    0,
-    0,
-    1,
-    0,
-)  # breaking, api_break, risk, compatible
-
-
 #: ``render_crosscheck_lines`` only emits this block at all when
 #: ``out.crosscheck["counts_by_check"]`` is non-empty -- an entirely
 #: separate, always-on block from the baseline ``diff`` this module
@@ -212,83 +196,65 @@ _ADVISORY_HEADINGS = _CROSSCHECK_HEADINGS + (
 )
 
 
-def _is_known_l4_extractor_divergence_text(output: str) -> bool:
-    """Text-output variant: the verdict must be ``COMPATIBLE_WITH_RISK``,
-    the counts line must read exactly ``breaking=0 api_break=0 risk=1
-    compatible=0``, the multiset of ``[risk] <kind>:`` lines must equal
-    exactly the known one-kind multiset, and none of the three advisory
-    blocks (cross-check, pattern, preprocessor) may have anything to
-    report -- no more, no fewer, no duplicates, and no unrelated finding
-    hiding in a bucket this module doesn't otherwise inspect.
+def _assert_scan_text_is_clean(output: str) -> None:
+    """The text-mode scan output must report *nothing at all*: every baseline
+    count zero, no ``[risk] <kind>:`` line, and none of the three advisory
+    blocks (cross-check, pattern, preprocessor) with anything to report.
 
-    Structurally cannot go further than kind-multiset granularity (Codex
-    review, round 5, raised the same concern the JSON variant below
-    closes with a description-substring check): ``cli_scan_helpers.
+    This is the positive form of what used to be an
+    "is this the known L4-extractor divergence?" predicate. The buckets it
+    inspects are unchanged and deliberately exhaustive -- each was added by
+    its own review round after an earlier, narrower check was shown to be
+    blind to a whole finding category: the aggregate counts line catches a
+    *compatible*-category finding (itemized under ``summary["additions"]``/
+    ``["quality"]``, which never touches ``verdict`` or any ``[risk]`` line),
+    and the three advisory headings are each a wholly separate, always-on
+    ``ScanOutcome`` field the ``verdict``/``diff`` never reflect. Asserting
+    "clean" against the same exhaustive bucket set is strictly stronger than
+    asserting ``Verdict: NO_CHANGE`` alone, which is why the bucket knowledge
+    is kept rather than deleted along with the xfail it used to gate.
+
+    Text mode cannot go finer than kind granularity: ``cli_scan_helpers.
     render_baseline_lines`` renders each finding as only
-    ``[<bucket>] <kind>: <symbol><location>`` -- the ``description`` field
-    that actually distinguishes *which* cause produced a given kind is
-    never rendered in text mode at all, so there is no substring left in
-    ``output`` for this variant to check. The JSON variant is the
-    cause-specific one; prefer it in any new test that needs to
-    distinguish this from a same-kind-different-cause regression."""
-    if "COMPATIBLE_WITH_RISK" not in output:
-        return False
-    if any(heading in output for heading in _ADVISORY_HEADINGS):
-        return False
+    ``[<bucket>] <kind>: <symbol><location>``, never the ``description``
+    that distinguishes *which* cause produced a given kind. Prefer the JSON
+    variant below in any new test that needs cause-level distinction.
+    """
+    advisory = [h for h in _ADVISORY_HEADINGS if h in output]
+    assert not advisory, f"unexpected advisory block(s) {advisory}: {output}"
     counts_match = _COUNTS_LINE_RE.search(output)
-    if (
-        counts_match is None
-        or tuple(int(g) for g in counts_match.groups())
-        != _KNOWN_L4_EXTRACTOR_DIVERGENCE_TOTALS
-    ):
-        return False
-    return (
-        Counter(_RISK_LINE_RE.findall(output)) == _KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS
-    )
+    assert counts_match is not None, f"no counts line in output: {output}"
+    assert tuple(int(g) for g in counts_match.groups()) == _CLEAN_TOTALS, output
+    assert not _RISK_LINE_RE.findall(output), output
+    assert "COMPATIBLE_WITH_RISK" not in output, output
 
 
-def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
-    """JSON-report variant: the verdict must be ``COMPATIBLE_WITH_RISK``,
-    the diff summary's ``breaking``/``api_break``/``risk``/``compatible``
-    counts must read exactly ``0``/``0``/``1``/``0``, the multiset of
-    finding kinds must equal exactly the known one-kind multiset, and
-    none of the three advisory blocks (cross-check, pattern, preprocessor)
-    may have anything to report -- no more, no fewer, no duplicates, and
-    no unrelated finding hiding in a bucket this module doesn't otherwise
-    inspect.
+def _assert_scan_report_is_clean(report: dict) -> None:
+    """JSON-report form of :func:`_assert_scan_text_is_clean`: every baseline
+    count zero, no baseline finding of any kind, and none of the three
+    advisory blocks with anything to report.
 
-    Several buckets live entirely outside ``report["diff"]`` and must be
-    checked separately: an unrelated *compatible*-category finding
-    (Codex review, round 3 -- itemized under ``diff.additions``/
-    ``diff.quality``, which the ``verdict``/``findings`` fields alone
-    never reflect, so only the aggregate ``compatible`` count above can
-    see it) and the three advisory blocks (Codex review, round 4 named
-    cross-check specifically; pattern/preprocessor closed proactively
-    alongside it, same shape, same reasoning -- each is a wholly separate,
-    always-on ``ScanOutcome`` field the ``verdict``/``diff`` never
-    reflect, non-empty only when that source actually found something:
-    ``report["crosscheck"]["counts_by_check"]``,
+    Several buckets live entirely outside ``report["diff"]`` and are checked
+    separately, each added by the review round that found the previous check
+    blind to it: an unrelated *compatible*-category finding (itemized under
+    ``diff.additions``/``diff.quality``, which ``verdict``/``findings`` never
+    reflect, so only the aggregate ``compatible`` count can see it), and the
+    three advisory blocks -- ``report["crosscheck"]["counts_by_check"]``,
     ``report["pattern_scan"]["counts_by_kind"]``, and
-    ``report["preprocessor_scan"]["divergences"/"leaks"]``).
+    ``report["preprocessor_scan"]["divergences"/"leaks"]`` -- each a wholly
+    separate, always-on ``ScanOutcome`` field, non-empty only when that
+    source actually found something.
 
     ``scan --format json``'s ``ScanOutcome.to_dict()`` has no top-level
-    ``changes`` array (that's ``compare``'s report shape) -- its baseline
+    ``changes`` array (that is ``compare``'s report shape) -- its baseline
     findings are nested under ``report["diff"]["findings"]``
-    (``cli_scan_baseline._baseline_summary``'s ``summary["findings"]``,
-    each entry's kind read the same tolerant way as everywhere else in
-    that module: ``getattr(kind, "value", str(kind))``). Reading a
-    nonexistent top-level ``changes`` key always saw an empty set, so the
-    known-divergent case fell through to ``pytest.fail()`` instead of
-    ``xfail`` -- Codex review, round 1."""
-    if report.get("verdict") != "COMPATIBLE_WITH_RISK":
-        return False
-    if (report.get("crosscheck") or {}).get("counts_by_check"):
-        return False
-    if (report.get("pattern_scan") or {}).get("counts_by_kind"):
-        return False
+    (``cli_scan_baseline._baseline_summary``'s ``summary["findings"]``).
+    """
+    assert not (report.get("crosscheck") or {}).get("counts_by_check"), report
+    assert not (report.get("pattern_scan") or {}).get("counts_by_kind"), report
     preprocessor_scan = report.get("preprocessor_scan") or {}
-    if preprocessor_scan.get("divergences") or preprocessor_scan.get("leaks"):
-        return False
+    assert not preprocessor_scan.get("divergences"), report
+    assert not preprocessor_scan.get("leaks"), report
     diff = report.get("diff") or {}
     totals = (
         diff.get("breaking"),
@@ -296,42 +262,8 @@ def _is_known_l4_extractor_divergence_report(report: dict) -> bool:
         diff.get("risk"),
         diff.get("compatible"),
     )
-    if totals != _KNOWN_L4_EXTRACTOR_DIVERGENCE_TOTALS:
-        return False
-    findings = diff.get("findings") or []
-    kinds = Counter(f.get("kind") for f in findings)
-    if kinds != _KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS:
-        return False
-    # Codex review, round 5: the kind alone is not cause-specific --
-    # SOURCE_FACT_COVERAGE_INCOMPLETE (buildsource/source_diff.py's
-    # `_coverage_incomplete_change`) is one ChangeKind covering several
-    # distinct underlying incompleteness reasons joined into one
-    # description, and a real regression could reproduce the identical
-    # kind pair/verdict/totals for a genuinely different cause (a
-    # different incomplete fact family, a different side). The
-    # description is the one place that cause is actually recorded, so
-    # match the fixed, distinctive substring the producer emits.
-    #
-    # 2026-08-28: this used to also require a paired
-    # SOURCE_BINARY_PROVENANCE_MISMATCH finding's own distinctive
-    # substrings ("do not map to any exported binary symbol"/"wrong
-    # tag/commit") -- that finding no longer occurs for this scenario
-    # once the castxml L4 phantom-implicit-member fix (this repo's own
-    # AGENTS.md "Known gaps" entry) stopped counting a compiler-
-    # synthesized special member as a reachable declaration needing a
-    # binary-symbol match, so `provenance_desc` is now always "" and
-    # those two `in ""` checks could never pass again -- caught by this
-    # very function silently returning False forever, not by a review
-    # comment. `_KNOWN_L4_EXTRACTOR_DIVERGENCE_COUNTS`/`_TOTALS` above
-    # were narrowed to the single remaining kind at the same time; this
-    # substring check is narrowed to match.
-    descriptions = {f.get("kind"): f.get("description") or "" for f in findings}
-    coverage_desc = descriptions.get("source_fact_coverage_incomplete", "")
-    return (
-        "treat this pair's other source-replay findings as unreliable "
-        "until re-collected"
-        in coverage_desc
-    )
+    assert totals == _CLEAN_TOTALS, report
+    assert not (diff.get("findings") or []), report
 
 
 def _build_library(
@@ -467,7 +399,9 @@ def test_dump_folds_real_l3_evidence_into_ast_compile_context(
     )
     assert result.exit_code == 0, result.output
 
-    snap = json.loads(baseline.read_text(encoding="utf-8"))
+    from abicheck.serialization import load_snapshot_document
+
+    snap = load_snapshot_document(baseline)
     assert snap.get("ast_resolved_standard") == "c++17", snap.get(
         "ast_resolved_standard"
     )
@@ -531,22 +465,7 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
     assert "profile_fingerprint mismatch" not in scan_result.output, scan_result.output
     assert scan_result.exit_code == 0, scan_result.output
 
-    if ast_frontend in _SCAN_KNOWN_DIVERGENT_FRONTENDS:
-        if _is_known_l4_extractor_divergence_text(scan_result.output):
-            pytest.xfail(
-                f"{ast_frontend}: known scan-candidate-L4-extractor-always-"
-                "clang divergence (see this module's own docstring)"
-            )
-        pytest.fail(
-            f"{ast_frontend} is listed in _SCAN_KNOWN_DIVERGENT_FRONTENDS, "
-            "but the previously-diagnosed failure signature "
-            "(COMPATIBLE_WITH_RISK naming exactly "
-            "source_fact_coverage_incomplete, no other risk finding) did "
-            "not reproduce. Either the underlying gap has closed -- remove "
-            "this frontend from _SCAN_KNOWN_DIVERGENT_FRONTENDS and update "
-            "this module's docstring -- or a different failure occurred "
-            f"and needs its own investigation. output={scan_result.output!r}"
-        )
+    _assert_scan_text_is_clean(scan_result.output)
     assert "Verdict: NO_CHANGE" in scan_result.output, scan_result.output
 
 
@@ -633,20 +552,5 @@ def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
     diff = report.get("diff") or {}
     assert diff.get("reason") is None, diff.get("reason")
 
-    if ast_frontend in _SCAN_KNOWN_DIVERGENT_FRONTENDS:
-        if _is_known_l4_extractor_divergence_report(report):
-            pytest.xfail(
-                f"{ast_frontend}: known scan-candidate-L4-extractor-always-"
-                "clang divergence (see this module's own docstring)"
-            )
-        pytest.fail(
-            f"{ast_frontend} is listed in _SCAN_KNOWN_DIVERGENT_FRONTENDS, "
-            "but the previously-diagnosed failure signature "
-            "(COMPATIBLE_WITH_RISK naming exactly "
-            "source_fact_coverage_incomplete, no other change) did not "
-            "reproduce. Either the underlying gap has closed -- remove "
-            "this frontend from _SCAN_KNOWN_DIVERGENT_FRONTENDS and update "
-            f"this module's docstring -- or a different failure occurred. "
-            f"report={report!r}"
-        )
+    _assert_scan_report_is_clean(report)
     assert report.get("verdict") == "NO_CHANGE", report

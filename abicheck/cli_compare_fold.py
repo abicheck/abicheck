@@ -19,13 +19,51 @@ the ``compare`` command's rendered report text.
 Size-split from :mod:`abicheck.cli_compare_helpers` (AI-readiness file-size
 cap). These functions only reach leaf report-formatting modules
 (:mod:`abicheck.reporter`, :mod:`abicheck.reporter_markdown`,
-:mod:`abicheck.severity`, :mod:`abicheck.checker_policy`) -- unlike
-:func:`abicheck.cli_compare_helpers._fold_evidence_depth_into_json` (which
-stayed in ``cli_compare_helpers.py``), none of them touch
-``cli_dump_helpers``/``cli_buildsource_helpers``, so this module does not
-join the CLI-registration import-cycle SCC those do (CLAUDE.md "What NOT to
-do": extending ``IMPORT_CYCLE_ALLOWLIST`` needs an ADR, so the split
+:mod:`abicheck.severity`, :mod:`abicheck.checker_policy`) -- none of them
+touch ``cli_dump_helpers``/``cli_buildsource_helpers``, so this module does
+not join the CLI-registration import-cycle SCC those do (CLAUDE.md "What NOT
+to do": extending ``IMPORT_CYCLE_ALLOWLIST`` needs an ADR, so the split
 boundary was chosen specifically to avoid needing one).
+
+ADR-061 Phase 2 item 5 (post-render mutation): the module used to also host
+``_fold_evidence_depth_into_json`` (moved to a real ``DiffResult`` field,
+``cli_compare_helpers`` computes it before rendering now),
+:func:`_fold_suppression_audit_into_text`'s own JSON branch (moved into
+``reporter.to_json``'s document construction, since
+``result.suppression_audit`` was already attached before rendering here
+too), and :func:`_fold_scoped_compat_into_text`'s own JSON branch (moved to
+:func:`abicheck.report.scoped_gate.apply_scoped_gate`, called from inside
+``reporter.to_json``/``to_stat_json`` themselves once those gained a real
+``contract_evaluation`` parameter -- ``severity_config``/``show_only`` were
+already threaded, and the remaining inputs were already plain ``DiffResult``
+attributes). All three were "inject an already-known fact" cases; the
+scoped-gate one additionally re-derived already-built document sections
+(``summary``/``severity``/``root_causes``), which is why it needed
+restructuring ``reporter.py``'s JSON builders rather than a plain fold-in
+move -- see :mod:`abicheck.report.scoped_gate`'s own docstring. JSON output
+is therefore no longer folded by this module at all: ``fmt == "json"`` falls
+through :func:`_fold_scoped_compat_into_text` untouched.
+
+The markdown/text/review appends run *after* ``to_markdown``'s own single,
+whole-report ``_out()`` demangle pass, so their own content was never
+demangled under ``--demangle`` -- including :func:`_fold_scoped_compat_into_
+text`'s own ``into_text`` append (missing symbol/entrypoint names, scoped-
+only change descriptions), which renders the same kind of mangled C++ name
+as the other two. Rather than moving these fold-ins earlier (which would
+either change that pass's scope for every other section too, or reproduce
+the identical post-render append one file over), all three of
+:func:`_fold_scoped_compat_into_text`, :func:`_fold_suppression_audit_into_
+text`, and :func:`_fold_use_case_impact_into_text` now accept their own
+``demangle`` flag and demangle only the section(s) they add -- never *text*
+itself -- via the same ``demangle_text`` helper ``to_markdown``'s ``_out()``
+calls. This closes this half of item 5 without changing where in the
+pipeline any fold-in runs. ``into_json``/``into_oneline`` are unaffected --
+JSON/one-line output carries raw symbol data by design.
+:func:`_fold_suppression_audit_into_text` demangles less than the other
+two: a rule's own :func:`~abicheck.reporter_contract_blocks.
+suppression_rule_label` selector echo is never demangled, only the
+free-standing symbol prose around it -- see that function's own docstring
+for why (two distinct selectors can demangle to the same display string).
 """
 
 from __future__ import annotations
@@ -33,19 +71,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .contract_gating import zero_scoped_out_gate_contributions
+from .report.scoped_gate import (
+    _SEVERITY_TO_SUMMARY_BUCKET as _SEVERITY_TO_SUMMARY_BUCKET,
+)
 from .service_render import ONELINE_FORMAT
-
-# Maps a rendered change's "severity" label (report_model.VERDICT_PRESENTATION,
-# and the "breaking"/"compatible" literals _resolve_scoped_gate_findings' missing-
-# contract entries use) to the summary-block key it contributes to -- shared by
-# _fold_scoped_compat_into_text's post-append summary recompute.
-_SEVERITY_TO_SUMMARY_BUCKET = {
-    "breaking": "breaking",
-    "api_break": "source_breaks",
-    "risk": "risk_changes",
-    "compatible": "compatible_additions",
-}
 
 
 def _fold_scoped_compat_into_text(
@@ -56,11 +85,17 @@ def _fold_scoped_compat_into_text(
     show_only: str | None = None,
     report_mode: str = "full",
     contract_evaluation: bool = False,
+    *,
+    demangle: bool = False,
 ) -> str:
     """Fold ``--used-by``/``--required-symbol(s)`` summaries into the rendered text.
 
-    JSON gets the summaries as real keys (round-tripped through the existing
-    payload); other text-based formats get a small appended section. Binary/
+    JSON is left untouched here (``fmt == "json"`` falls straight through to
+    the final ``return text``): ``reporter.to_json``/``to_stat_json`` already
+    build the scoped-aware payload natively, via
+    :func:`abicheck.report.scoped_gate.apply_scoped_gate`, before this
+    function ever sees the rendered text (ADR-061 Phase 2 item 5). Other
+    text-based formats still get a small appended section here. Binary/
     structured formats (sarif, junit, html) are left untouched -- the full
     verdict they already carry stays authoritative for those consumers.
 
@@ -70,13 +105,15 @@ def _fold_scoped_compat_into_text(
     missing-contract handling.
 
     *show_only*, when given, filters ``scoped_only_changes`` before they are
-    folded into the JSON ``changes`` array -- ``to_json`` already filtered
-    ``result.changes`` by the same tokens upstream, so leaving the
-    scoped-only fold-in unfiltered would let a `--show-only` run re-surface a
-    finding it explicitly excluded (Codex review, mirrors the identical
-    ``sarif.to_sarif`` fix). Pass ``None`` (the default) for a render that is
-    deliberately always-unfiltered, e.g. the ``--write`` render,
-    which ignores the primary format's own ``--show-only``.
+    folded into the markdown/text/review append below -- ``to_json``/
+    ``to_markdown`` already filtered ``result.changes`` by the same tokens
+    upstream, so leaving the scoped-only fold-in unfiltered would let a
+    `--show-only` run re-surface a finding it explicitly excluded (Codex
+    review, mirrors the identical ``sarif.to_sarif`` fix and
+    ``apply_scoped_gate``'s own JSON-side use of the same parameter). Pass
+    ``None`` (the default) for a render that is deliberately
+    always-unfiltered, e.g. the ``--write`` render, which ignores the
+    primary format's own ``--show-only``.
 
     *report_mode* ``"root-cause"`` skips the markdown/text
     "## Additional scoped-gate findings" append (Codex review):
@@ -99,6 +136,14 @@ def _fold_scoped_compat_into_text(
     matching ``result.changes`` entry) in place before this function runs,
     so ``_change_to_dict`` picks up the decision for free the same way it
     does for any other already-stamped ``Change``.
+
+    *demangle*, when True, demangles the ``into_text`` append (missing
+    symbol/entrypoint names, scoped-only change descriptions) the same way
+    ``reporter_markdown.to_markdown``'s own ``_out()`` pass demangles
+    everything rendered before this fold-in runs (ADR-061 Phase 2 item 5) --
+    this section runs after that pass and previously stayed mangled
+    regardless of ``--demangle``. Never applied to ``into_json``/
+    ``into_oneline``, which carry raw symbol data by design.
     """
     used_by = getattr(result, "used_by", None)
     required_symbols = getattr(result, "required_symbols", None)
@@ -112,9 +157,8 @@ def _fold_scoped_compat_into_text(
         contract_evaluation=contract_evaluation,
         used_by=used_by,
         required_symbols=required_symbols,
+        demangle=demangle,
     )
-    if fmt == "json":
-        return fold.into_json(text)
     if fmt in ("markdown", "text", "review"):
         return fold.into_text(text, fmt)
     if fmt == ONELINE_FORMAT:
@@ -153,6 +197,7 @@ class _ScopedFold:
     contract_evaluation: bool
     used_by: Any
     required_symbols: Any
+    demangle: bool = False
 
     @property
     def scoped_verdict_value(self) -> Any:
@@ -169,50 +214,15 @@ class _ScopedFold:
             self.result, self.severity_config, self.show_only
         )
 
-    # ── JSON ────────────────────────────────────────────────────────────────
-
-    def into_json(self, text: str) -> str:
-        """Rewrite the rendered JSON payload so it describes the scoped gate.
-
-        The full-library verdict/severity/summary move to their ``full_*``
-        siblings and the scoped ones take their place, so the body agrees with
-        the exit code the process is about to use.
-        """
-        import json
-
-        try:
-            payload = json.loads(text)
-        except ValueError:
-            return text
-        payload["full_verdict"] = payload.get("verdict")
-        if self.scoped_verdict_value is not None:
-            payload["verdict"] = self.scoped_verdict_value
-        if self.used_by is not None:
-            payload["used_by"] = self.used_by
-        if self.required_symbols is not None:
-            payload["required_symbol_contract"] = self.required_symbols
-        self._swap_in_scoped_severity(payload)
-        # Scoped-only changes (e.g. PE_ORDINAL_RETARGETED, synthesized fresh
-        # per app/host by scope_diff_to_app/scope_diff_to_required_symbols)
-        # and uncovered missing-contract labels are relevant to the scoped
-        # gate but never land in `result.changes` -- without folding them
-        # into `changes` here too, a --used-by/--required-symbol run whose
-        # only gated issue is one of these reports an empty `changes` array
-        # despite a nonzero scoped exit code/verdict, so a JSON consumer
-        # (e.g. the GitHub Action's `--on changes` PR-comment gate, which
-        # buckets purely off this array) sees nothing to explain the failure
-        # and silently skips posting (Codex review, mirrors
-        # sarif.to_sarif/junit_report._build_testsuite's identical fold-in).
-        changes_list = payload.get("changes")
-        full_summary = payload.get("summary")
-        if isinstance(changes_list, list):
-            self._fold_findings_into_changes(payload, changes_list, full_summary)
-        elif isinstance(full_summary, dict):
-            self._fold_findings_into_stat_summary(payload, full_summary)
-        return json.dumps(payload, indent=2)
-
     # ── One-line (service_render.ONELINE_FORMAT, the built-in `quick`
     #    --profile's output) ──────────────────────────────────────────────
+    #
+    # JSON's own fold used to live here too, as `into_json` +
+    # `_swap_in_scoped_severity`/`_swap_in_scoped_run_outcome`/
+    # `_fold_findings_into_changes`/`_fold_findings_into_stat_summary` --
+    # see :mod:`abicheck.report.scoped_gate` (ADR-061 Phase 2 item 5),
+    # which now applies the identical fold natively, before rendering,
+    # inside `reporter.to_json`/`to_stat_json`.
 
     def into_oneline(self) -> str:
         """The one-line summary, but for the *scoped* gate.
@@ -226,20 +236,22 @@ class _ScopedFold:
         removing an irrelevant symbol while breaking a required one could
         print "BREAKING: 1 breaking" while exiting 0, or the reverse.
 
-        The verdict/exit-code halves reuse :meth:`into_json` over a
-        `to_stat_json`-shaped payload -- the exact same scoped-verdict-swap
-        and severity-recompute logic the JSON path already uses and this
-        module's own tests already cover. The *counts* are deliberately
-        NOT read from that payload's `summary`, though (Codex review, fresh
-        evidence, second round): JSON's own `_fold_findings_into_stat_summary`
-        ADDS scoped-only contributions on top of the full-library counts
-        rather than replacing them -- correct for JSON, which also carries
-        `changes`/`full_summary` so a reader can see *why* an unrelated
-        full-library finding is still counted despite a COMPATIBLE scoped
-        verdict. The one-line format has no such context: a bare
-        "COMPATIBLE: 1 breaking" with nothing explaining the 1 reads as a
-        genuine contradiction, not a nuance. So the counts here are
-        recomputed from scratch out of *only* the findings that actually
+        The verdict/exit-code halves reuse `to_stat_json` itself, called with
+        this fold's own `show_only`/`contract_evaluation` -- the exact same
+        scoped-verdict-swap and severity-recompute logic the JSON path
+        already uses (`report.scoped_gate.apply_scoped_gate`, folded in
+        natively before `to_stat_json` ever returns) and this module's own
+        tests already cover. The *counts* are deliberately NOT read from
+        that payload's `summary`, though (Codex review, fresh evidence,
+        second round): `apply_scoped_gate`'s own
+        `_fold_findings_into_stat_summary` ADDS scoped-only contributions on
+        top of the full-library counts rather than replacing them -- correct
+        for JSON, which also carries `changes`/`full_summary` so a reader
+        can see *why* an unrelated full-library finding is still counted
+        despite a COMPATIBLE scoped verdict. The one-line format has no such
+        context: a bare "COMPATIBLE: 1 breaking" with nothing explaining the
+        1 reads as a genuine contradiction, not a nuance. So the counts here
+        are recomputed from scratch out of *only* the findings that actually
         decide the scoped verdict/exit code: `_scoped_gate_findings()`'s
         `scoped_only` changes and `missing_labels`, mirroring
         `_fold_findings_into_stat_summary`'s own per-finding severity-bucket
@@ -265,19 +277,25 @@ class _ScopedFold:
         from .reporter import _change_to_dict, _finding_id, to_stat_json
         from .reporter_markdown import _VERDICT_LABEL
 
-        base = to_stat_json(self.result, severity_config=self.severity_config)
-        folded = json.loads(self.into_json(base))
+        folded = json.loads(
+            to_stat_json(
+                self.result,
+                severity_config=self.severity_config,
+                show_only=self.show_only,
+                contract_evaluation=self.contract_evaluation,
+            )
+        )
         verdict_value = folded.get("verdict") or _VERDICT_LABEL[self.result.verdict]
         gate_note = ""
         severity_block = folded.get("severity")
         if isinstance(severity_block, dict):
-            # Read back the already-scoped-swapped block `into_json`'s own
-            # `_swap_in_scoped_severity` produced (when the run's exit-code
-            # scheme is severity-aware) instead of recomputing from
-            # `self.result.changes` (full-library) here -- recomputing would
-            # reproduce, for this one-line path, exactly the full-vs-scoped
-            # severity mismatch `_swap_in_scoped_severity` exists to fix for
-            # the JSON path.
+            # Read back the already-scoped-swapped block
+            # `report.scoped_gate._swap_in_scoped_severity` produced (when
+            # the run's exit-code scheme is severity-aware) instead of
+            # recomputing from `self.result.changes` (full-library) here --
+            # recomputing would reproduce, for this one-line path, exactly
+            # the full-vs-scoped severity mismatch that function exists to
+            # fix for the JSON path.
             exit_code = severity_block.get("exit_code", 0)
             gate_note = (
                 f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
@@ -354,357 +372,6 @@ class _ScopedFold:
             redundant_count=0,
             gate_note=gate_note,
         )
-
-    def _swap_in_scoped_severity(self, payload: dict[str, Any]) -> None:
-        """Move the full-library severity block aside for the scoped one.
-
-        Under a severity scheme, `severity.exit_code`/`blocking` describe
-        the *full-library* gate decision -- but the process actually exits
-        with the scoped exit code computed above (Codex review): without
-        this, a scoped-compatible run that exits 0 could still carry
-        `severity.exit_code: 4`/`blocking: true` in its own JSON body, the
-        opposite of what the command that produced it just did. Mirrors the
-        verdict/full_verdict swap above -- the full-library breakdown moves
-        to `full_severity`, `severity` becomes the scoped gate.
-        """
-        scoped_exit_code = getattr(self.result, "scoped_exit_code", None)
-        scoped_exit_code_scheme = getattr(self.result, "scoped_exit_code_scheme", None)
-        severity_block = payload.get("severity")
-        if (
-            scoped_exit_code is None
-            or scoped_exit_code_scheme != "severity"
-            or not isinstance(severity_block, dict)
-        ):
-            return
-        payload["full_severity"] = severity_block
-        # `categories.*.count` must also move to the scoped tally --
-        # otherwise a scoped-compatible `exit_code: 0` could still show
-        # an error-level `categories.abi_breaking.count > 0` left over
-        # from the full-library breakdown, contradicting the now-scoped
-        # `blocking`/`blocking_categories` fields above (Codex review).
-        scoped_counts = getattr(self.result, "scoped_severity_counts", None) or {}
-        full_categories = severity_block.get("categories")
-        scoped_categories = (
-            {
-                cat: (
-                    {**info, "count": scoped_counts.get(cat, 0)}
-                    if isinstance(info, dict)
-                    else info
-                )
-                for cat, info in full_categories.items()
-            }
-            if isinstance(full_categories, dict)
-            else full_categories
-        )
-        payload["severity"] = {
-            **severity_block,
-            "categories": scoped_categories,
-            "exit_code": scoped_exit_code,
-            "blocking": scoped_exit_code != 0,
-            "blocking_categories": list(
-                getattr(self.result, "scoped_blocking_categories", ()) or ()
-            ),
-        }
-
-    def _fold_findings_into_changes(
-        self,
-        payload: dict[str, Any],
-        changes_list: list[Any],
-        full_summary: Any,
-    ) -> None:
-        """Append the scoped gate's own findings to the ``changes`` array.
-
-        Each appended entry also registers its root-cause grouping key, and the
-        summary counts are recomputed afterwards from the now-complete array.
-        """
-        from .checker_policy import EvidenceStatus, ReachabilityState
-        from .reporter import (
-            _add_entries_to_root_causes,
-            _change_to_dict,
-            _finding_id,
-            _root_cause_key_and_display,
-            root_cause_for_change,
-        )
-        from .reporter_markdown import (
-            apply_show_only,
-            root_cause_evidence_lookup_for_changes,
-        )
-
-        result = self.result
-        severity_config = self.severity_config
-        contract_evaluation = self.contract_evaluation
-        eff_sets = result._effective_kind_sets()
-        scoped_only, missing_labels, blocks, missing_kind = self._scoped_gate_findings()
-        # G29 Phase 6 follow-up (Codex review): the scoped-only entries built
-        # below never routed through _add_changes_block's own evidence
-        # lookup (that ran earlier, over `changes` alone, before this
-        # fold-in even has `scoped_only` in hand) -- correlate over the same
-        # combined set sarif.to_sarif uses (`result.changes` filtered by
-        # --show-only, plus `scoped_only`), so a scoped-only finding that is
-        # itself a RootCauseCorrelator group member (e.g. a
-        # CONSUMER_REQUIRED_SYMBOL_REMOVED sibling of a regular
-        # FUNC_REMOVED) carries the same root_cause_evidence JSON's regular
-        # `changes[]` entries do.
-        primary_changes = list(result.changes)
-        if self.show_only:
-            primary_changes = apply_show_only(
-                primary_changes,
-                self.show_only,
-                policy=result.policy,
-                kind_sets=eff_sets,
-                policy_file=result.policy_file,
-            )
-        rc_evidence = root_cause_evidence_lookup_for_changes(
-            primary_changes + scoped_only
-        )
-        # ADR-049 D1: `gate_contribution` is defined as the number that
-        # *actually* gated, and under --used-by/--required-symbol the
-        # scoped gate is what the run exits on -- this fold is where it
-        # replaces the primary verdict and severity block. A full-diff
-        # finding the selected consumer does not use contributes nothing
-        # to that gate, so leaving its full-library number in place
-        # published `gate_contribution: 4` on a run that exited 0 (Codex
-        # review, reproduced with a removal outside the required-symbol
-        # contract). Only entries that already carry the field are
-        # touched, so a run without --contract is unaffected.
-        # Called here, *before* the scoped-only/missing-contract fold-in
-        # below: those are the scoped gate's own findings and only the
-        # ones tracked in `scoped_relevant_finding_ids` would survive it.
-        zero_scoped_out_gate_contributions(payload, result)
-        # G29 Phase 3 slice 3 (ADR-052, Codex review): these synthetic
-        # entries are appended to `changes` after `_to_json_root_cause`
-        # already grouped `result.changes` into `root_causes` -- without
-        # tracking their own grouping key/root here too, a scoped run
-        # whose only gated issue is one of these would report a nonempty
-        # `changes` array next to `root_cause_count: 0`, losing the only
-        # gate failure for a root-cause consumer.
-        # Mirrors _to_json_root_cause's own referenced_causes computation
-        # (Codex review): a symbol only groups when some caused_by_type
-        # actually names it, not merely because it's shared.
-        referenced_causes: frozenset[str] = frozenset(
-            str(entry.get("caused_by_type"))
-            for entry in changes_list
-            if isinstance(entry, dict) and entry.get("caused_by_type")
-        ) | frozenset(c.caused_by_type for c in scoped_only if c.caused_by_type)
-        root_cause_entries: list[tuple[str, str, dict[str, object]]] = []
-        for c in scoped_only:
-            entry = _change_to_dict(
-                c,
-                policy=result.policy or "strict_abi",
-                kind_sets=eff_sets,
-                policy_file=result.policy_file,
-                # ADR-049 D1's per-finding `gate_contribution` is only
-                # truthful if it is computed under the scheme the run
-                # exits on -- a scoped-only finding does reach the scoped
-                # gate, so this is not one of the always-0 ledger cases.
-                severity_config=severity_config,
-                # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
-                # CONSUMER_REQUIRED_SYMBOL_REMOVED) is proven by the real
-                # consumer's own import table,
-                # not by an artifact-level library diff -- evidence_status_for_change
-                # would otherwise report "artifact_proven" purely from the kind's
-                # BREAKING/RISK category, same as appcompat_to_json's own
-                # CONSUMER_PROVEN override for this exact finding shape.
-                evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
-                # G29 Phase 3 follow-up (ADR-052): feeds
-                # impact_assessment.root_cause_id -- None (the singleton
-                # case) for a scoped-only change with no real correlation
-                # signal, same rule root_cause_lookup_for_changes applies
-                # elsewhere; the *entries* below never skip a singleton,
-                # since --report-mode root-cause's own grouping is
-                # deliberately complete, unlike this per-finding field.
-                root_cause=root_cause_for_change(
-                    c, referenced_causes=referenced_causes
-                ),
-                root_cause_evidence=rc_evidence.get(_finding_id(c)),
-            )
-            changes_list.append(entry)
-            key, root_display = _root_cause_key_and_display(
-                c.caused_by_type,
-                c.symbol,
-                c.kind.value,
-                _finding_id(c),
-                referenced_causes=referenced_causes,
-            )
-            root_cause_entries.append((key, root_display, entry))
-        for label in missing_labels:
-            from .workflows.findings import (
-                missing_contract_finding,
-                report_canonical_finding_id,
-                report_finding_id,
-            )
-
-            identity = missing_contract_finding(missing_kind, label)
-            entry = {
-                "kind": missing_kind,
-                "symbol": label,
-                "description": identity.description,
-                # A missing-contract label has no backing Change, so this
-                # entry never routed through `_change_to_dict` and carried
-                # no id at all -- leaving the decision this same loop
-                # stamps below unjoinable to ADR-049's own
-                # `decision_receipt`, which is keyed by exactly this id
-                # (Codex review, fresh evidence).
-                "finding_id": report_finding_id(identity),
-                # Same gap as finding_id above, for canonical_finding_id
-                # (schema 2.35): when a missing-contract label is the
-                # only blocking finding, it was the one entry in the
-                # whole response missing the field every other changes[]
-                # entry carries uniformly (Codex review, fresh evidence).
-                "canonical_finding_id": report_canonical_finding_id(identity),
-                "old_value": None,
-                "new_value": None,
-                "severity": "breaking" if blocks else "compatible",
-                "relevant_to_gate": True,
-                "blocks_gate": blocks,
-                # G29 Phase 3 slice 1 (ADR-052, Codex review): a
-                # missing-contract label has no backing Change for
-                # _change_to_dict/assess_change to read (unlike the
-                # scoped_only loop above, which already routes
-                # through _change_to_dict and picks up
-                # reachability_state for free). reachability_state is
-                # "always present" for every changes[] entry per D3
-                # -- a missing symbol/version is a hard absence, not
-                # a reachability question, so UNKNOWN (not proven
-                # either way) is the honest, consistent value here.
-                "reachability_state": ReachabilityState.UNKNOWN.value,
-            }
-            if contract_evaluation:
-                # ADR-049 D1's full per-finding shape, not just the
-                # relevance: this entry is frequently the *only* blocking
-                # finding in the response, so omitting its decision and
-                # contribution left the one row that explains the exit
-                # code as the least complete one (Codex review).
-                from .contract_scoped_promotion import (
-                    missing_contract_gate_contribution,
-                    stamp_missing_contract_entry,
-                )
-
-                stamp_missing_contract_entry(
-                    entry,
-                    gate_contribution=missing_contract_gate_contribution(
-                        severity_config, blocks
-                    ),
-                )
-            changes_list.append(entry)
-            # A missing-contract label has no caused_by_type; its
-            # `symbol` (the label) only becomes a *grouping* key if some
-            # other finding's caused_by_type names it, same as any other
-            # symbol-only fallback (see referenced_causes above). There is
-            # no real Change/finding_id to disambiguate an unreferenced
-            # label by, so the label itself (always unique per label)
-            # fills that role instead.
-            key, root_display = _root_cause_key_and_display(
-                None,
-                label,
-                missing_kind,
-                label,
-                referenced_causes=referenced_causes,
-            )
-            root_cause_entries.append((key, root_display, entry))
-        _add_entries_to_root_causes(payload, root_cause_entries)
-        # `summary` above was computed from result.changes *before*
-        # scoped_only/missing_labels were appended to `changes` here --
-        # so a scoped run whose only gating issue is one of these
-        # synthetic entries could report e.g. verdict "BREAKING" next to
-        # summary.total_changes: 0, an internally contradictory JSON
-        # body (audit finding: scoped CLI JSON summary can be stale).
-        # Move the pre-scoped summary to `full_summary` (mirrors the
-        # verdict/full_verdict and severity/full_severity swap above)
-        # and recompute the count buckets `summary` reports from the
-        # now-complete `changes` array. `binary_compatibility_pct`/
-        # `affected_pct` describe the full library surface and are left
-        # as-is -- recomputing them for the scoped subset would need
-        # old_symbol_count context this fold-in doesn't have.
-        if isinstance(full_summary, dict):
-            payload["full_summary"] = full_summary
-            bucket_counts = {
-                "breaking": 0,
-                "source_breaks": 0,
-                "risk_changes": 0,
-                "compatible_additions": 0,
-            }
-            for entry in changes_list:
-                severity = entry.get("severity") if isinstance(entry, dict) else None
-                bucket = (
-                    _SEVERITY_TO_SUMMARY_BUCKET.get(severity, "")
-                    if isinstance(severity, str)
-                    else None
-                )
-                if bucket:
-                    bucket_counts[bucket] += 1
-            payload["summary"] = {
-                **full_summary,
-                **bucket_counts,
-                "total_changes": len(changes_list),
-            }
-
-    def _fold_findings_into_stat_summary(
-        self, payload: dict[str, Any], full_summary: dict[str, Any]
-    ) -> None:
-        """Adjust a ``--stat`` payload's summary-only counts for the scoped gate.
-
-        Codex review: `--format json --stat` (to_stat_json) emits a
-        summary-only payload with no `changes` array at all, so the
-        branch above -- gated on `isinstance(changes_list, list)` --
-        never runs for it. Without this, a `--stat --used-by`/
-        `--required-symbol` run still swaps `verdict` to the scoped
-        gate result (above) but leaves `summary` as the stale
-        full-library counts and never adds `full_summary`: a scoped
-        BREAKING verdict sitting next to unrelated full-library
-        summary numbers, the exact contradiction this fold-in exists
-        to remove. There's no per-change list to recompute bucket
-        counts from here, so instead add each scoped-only/missing-
-        contract synthetic finding's own contribution on top of the
-        already-correct full-library counts.
-        """
-        from .checker_policy import EvidenceStatus
-        from .reporter import _change_to_dict
-
-        result = self.result
-        scoped_only, missing_labels, blocks, _missing_kind = (
-            self._scoped_gate_findings()
-        )
-        if scoped_only or missing_labels:
-            payload["full_summary"] = full_summary
-            eff_sets = result._effective_kind_sets()
-            added_counts = {
-                "breaking": 0,
-                "source_breaks": 0,
-                "risk_changes": 0,
-                "compatible_additions": 0,
-            }
-            for c in scoped_only:
-                entry = _change_to_dict(
-                    c,
-                    policy=result.policy or "strict_abi",
-                    kind_sets=eff_sets,
-                    policy_file=result.policy_file,
-                    severity_config=self.severity_config,
-                    evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
-                )
-                severity = entry.get("severity")
-                bucket = (
-                    _SEVERITY_TO_SUMMARY_BUCKET.get(severity)
-                    if isinstance(severity, str)
-                    else None
-                )
-                if bucket:
-                    added_counts[bucket] += 1
-            for _label in missing_labels:
-                bucket = _SEVERITY_TO_SUMMARY_BUCKET[
-                    "breaking" if blocks else "compatible"
-                ]
-                added_counts[bucket] += 1
-            payload["summary"] = {
-                **full_summary,
-                **{k: full_summary.get(k, 0) + v for k, v in added_counts.items()},
-                "total_changes": (
-                    full_summary.get("total_changes", 0)
-                    + len(scoped_only)
-                    + len(missing_labels)
-                ),
-            }
 
     # ── markdown / text / review ───────────────────────────
 
@@ -870,96 +537,30 @@ class _ScopedFold:
     def into_text(self, text: str, fmt: str) -> str:
         """Append the scoped-gate sections to a markdown/text/review report.
 
-        The report itself is left exactly as rendered; what follows it is a
-        scoped-verdict header (only when the two verdicts disagree), the
-        per-consumer summaries, and the scoped gate's own findings.
+        The report itself is left exactly as rendered; what precedes/follows
+        it is a scoped-verdict header (only when the two verdicts disagree,
+        prepended) and the per-consumer summaries plus the scoped gate's own
+        findings (appended) -- both demangled under ``self.demangle`` the
+        same way ``to_markdown``'s own ``_out()`` pass demangles everything
+        rendered before this fold-in runs (ADR-061 Phase 2 item 5): missing
+        symbol/entrypoint names and scoped-only change descriptions can be
+        mangled C++ names, same as anything else in the report. *text*
+        itself is never re-demangled here.
         """
-        return "\n".join(
-            [
-                *self._scoped_verdict_header(),
-                text,
-                "",
-                *self._used_by_lines(),
-                *self._required_symbols_lines(),
-                *self._scoped_gate_finding_lines(fmt),
-            ]
-        )
+        header_lines = self._scoped_verdict_header()
+        footer_lines = [
+            "",
+            *self._used_by_lines(),
+            *self._required_symbols_lines(),
+            *self._scoped_gate_finding_lines(fmt),
+        ]
+        if self.demangle:
+            from .demangle import demangle_text
 
-
-def _suppression_rule_label(rule: Any, index: int) -> str:
-    """A human-readable identifier for a suppression rule with no index of
-    its own (``SuppressionAudit``'s per-bucket lists don't carry the rule's
-    position in the original file, so *index* is only this bucket's own
-    position -- misleading as a rule identifier, e.g. the second rule in
-    the file being the only stale one renders as ``rule#0`` -- Codex/
-    CodeRabbit review, fresh evidence).
-
-    Always appends the rule's own matching selectors (every populated one,
-    not just the first -- ``Suppression`` selectors combine conjunctively)
-    alongside ``label``/``reason`` when either is set, not only as a
-    fallback for an unlabeled rule (Codex review, fresh evidence, third
-    round): a ``label``/``reason`` is a free-form grouping tag with no
-    uniqueness guarantee, so two distinct rules sharing one would otherwise
-    still render as the identical, ambiguous identifier. Falls back to
-    *index* only for a rule with none of label/reason/any selector set at
-    all."""
-    label: str | None = getattr(rule, "label", None) or getattr(rule, "reason", None)
-    parts = [
-        f"{field}={value}"
-        for field in (
-            "symbol",
-            "symbol_pattern",
-            "type_pattern",
-            "member_name",
-            "change_kind",
-            "source_location",
-            "namespace",
-            "entity_namespace",
-            "cause_namespace",
-            # Canonical (backend-independent) identity selector (Codex
-            # review, fresh evidence, PR #753): a finding_id-only rule with
-            # no label/reason previously rendered as a bare `rule#<index>`,
-            # indistinguishable from every other unlabeled rule in the same
-            # bucket -- the exact ambiguity every other selector here
-            # already avoids.
-            "finding_id",
-            # Symbol-linkage selector (Codex review, fresh evidence): two
-            # rules sharing every other selector but differing on `binding`
-            # (e.g. one `weak`, one `global`) match disjoint findings and
-            # must not render identically -- same reasoning as every other
-            # selector in this tuple.
-            "binding",
-            # ADR-044 D2 reachability gates (Codex review, fresh evidence):
-            # these affect which findings a rule matches exactly like the
-            # selectors above -- two rules sharing every selector but
-            # differing on reachability (e.g. "public-only" vs.
-            # "unreachable-only") match disjoint findings and must not
-            # render identically. allow_public_break/allow_unknown_reachability
-            # default False, so they're omitted (same "if truthy" convention
-            # as every other field here) unless a rule actually opted in.
-            "reachability",
-            "allow_public_break",
-            "allow_unknown_reachability",
-        )
-        if (value := getattr(rule, field, None))
-    ]
-    # expires (Codex review, fresh evidence) is not a matching selector --
-    # two rules with identical selectors but different expiry dates match
-    # the exact same findings -- but it's exactly what distinguishes them
-    # in the expired_rules/near_expiry_rules buckets themselves, where an
-    # otherwise-identical pair would otherwise render as the same label
-    # with no way to tell which deadline belongs to which rule.
-    expires = getattr(rule, "expires", None)
-    if expires is not None:
-        parts.append(f"expires={expires.isoformat()}")
-    selectors = ", ".join(parts)
-    if label and selectors:
-        return f"{label} ({selectors})"
-    if label:
-        return label
-    if selectors:
-        return selectors
-    return f"rule#{index}"
+            if header_lines:
+                header_lines = demangle_text("\n".join(header_lines)).split("\n")
+            footer_lines = demangle_text("\n".join(footer_lines)).split("\n")
+        return "\n".join([*header_lines, text, *footer_lines])
 
 
 #: The formats a ``--use-cases`` attribution actually reaches a reader
@@ -1002,7 +603,12 @@ def format_carries_use_case_impact(fmt: str | None) -> bool:
 
 
 def _fold_use_case_impact_into_text(
-    text: str, fmt: str, result: Any, show_only: str | None = None
+    text: str,
+    fmt: str,
+    result: Any,
+    show_only: str | None = None,
+    *,
+    demangle: bool = False,
 ) -> str:
     """Fold ``compare --use-cases``'s attribution into the rendered report.
 
@@ -1018,6 +624,14 @@ def _fold_use_case_impact_into_text(
     removed (Codex review) -- the same thing
     :func:`_fold_scoped_compat_into_text` does for its own scoped-only
     changes, and the same projection the JSON paths apply.
+
+    *demangle*, when True, demangles this function's own appended section
+    the same way ``reporter_markdown.to_markdown``'s single whole-report
+    ``_out()`` pass demangles everything rendered *before* this fold-in runs
+    (ADR-061 Phase 2 item 5) -- this section runs after that pass, on text
+    it never saw, so without this it silently stayed mangled under
+    ``--demangle``. Only the newly-appended lines are demangled, never
+    *text* itself (already correctly demangled or not by the caller).
     """
     from .impact.use_case_impact import UseCaseImpact, render_use_case_impact_lines
 
@@ -1050,50 +664,57 @@ def _fold_use_case_impact_into_text(
             )
             + scoped_only_changes_filtered(result, show_only)
         )
-    return "\n".join([text, *render_use_case_impact_lines(impact)])
+    appended = "\n".join(render_use_case_impact_lines(impact))
+    if demangle:
+        from .demangle import demangle_text
+
+        appended = demangle_text(appended)
+    return "\n".join([text, appended])
 
 
-def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
-    """Fold a ``--audit-suppressions`` ``SuppressionAudit`` into the rendered
-    report text.
+def _fold_suppression_audit_into_text(
+    text: str, fmt: str, audit: Any, *, demangle: bool = False
+) -> str:
+    """Fold a ``--audit-suppressions`` ``SuppressionAudit`` into a rendered
+    markdown/text/review report.
 
-    JSON gets a ``suppression_audit`` key; markdown/text/review get an
-    appended ``## Suppression Audit`` section. Binary/structured formats
-    (sarif, junit, html) are left untouched -- the same scope boundary
-    :func:`_fold_scoped_compat_into_text` already uses.
+    Markdown/text/review get an appended ``## Suppression Audit`` section.
+    Binary/structured formats (sarif, junit, html) are left untouched -- the
+    same scope boundary :func:`_fold_scoped_compat_into_text` already uses.
+
+    ADR-061 Phase 2 item 5: JSON is no longer folded here -- ``result.
+    suppression_audit`` (the same *audit* object this function receives) is
+    now a real ``DiffResult`` field, attached before rendering, and
+    ``reporter.to_json``'s JSON builders emit the ``suppression_audit`` key
+    directly from it. This function's remaining job -- appending a section
+    to already-rendered markdown/text/review text -- stays post-render
+    because ``to_markdown``'s single whole-report ``_out()`` demangle pass
+    already ran by the time this appends. *demangle*, when True, demangles
+    the free-standing symbol prose this section adds (``audit.summary()``,
+    a high-risk match's own ``{kind}: {symbol}`` tail) the same way
+    ``_out()`` demangles everything rendered before this fold-in runs --
+    but never a rule's own :func:`_suppression_rule_label` output (Codex
+    review: two distinct selectors, e.g. Itanium C1/C2 constructor
+    variants, can demangle to the identical display string, which would
+    silently defeat that label's whole reason to exist -- disambiguating
+    rules a bare selector alone cannot).
     """
     if audit is None:
         return text
 
-    if fmt == "json":
-        import json
+    from .reporter_contract_blocks import (
+        suppression_rule_label as _suppression_rule_label,
+    )
 
-        payload = json.loads(text)
-        payload["suppression_audit"] = {
-            "total_rules": audit.total_rules,
-            "stale_rules": [
-                _suppression_rule_label(r, i) for i, r in enumerate(audit.stale_rules)
-            ],
-            "high_risk_matches": [
-                {
-                    "rule": _suppression_rule_label(rule, i),
-                    "kind": change.kind.value,
-                    "symbol": change.symbol,
-                }
-                for i, (rule, change) in enumerate(audit.high_risk_matches)
-            ],
-            "expired_rules": [
-                _suppression_rule_label(r, i) for i, r in enumerate(audit.expired_rules)
-            ],
-            "near_expiry_rules": [
-                _suppression_rule_label(r, i)
-                for i, r in enumerate(audit.near_expiry_rules)
-            ],
-        }
-        return json.dumps(payload, indent=2)
+    def _maybe_demangle(s: str) -> str:
+        if not demangle:
+            return s
+        from .demangle import demangle_text
+
+        return demangle_text(s)
 
     if fmt in ("markdown", "text", "review"):
-        lines = [text, "", "## Suppression Audit", "", audit.summary()]
+        lines = ["", "## Suppression Audit", "", _maybe_demangle(audit.summary())]
         # audit.summary() only reports the stale-rule count (Codex review,
         # fresh evidence: its own per-rule detail lines named a rule by only
         # its first selector, misidentifying two rules that share it but
@@ -1112,7 +733,7 @@ def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
             for i, (rule, change) in enumerate(audit.high_risk_matches):
                 lines.append(
                     f"- `{_suppression_rule_label(rule, i)}` suppressed "
-                    f"{change.kind.value}: {change.symbol}"
+                    f"{change.kind.value}: {_maybe_demangle(change.symbol)}"
                 )
         # audit.summary() only reports counts for these two buckets (Codex
         # review, fresh evidence) -- the JSON branch above already names each
@@ -1129,6 +750,6 @@ def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
             lines.append("Rules expiring soon:")
             for i, rule in enumerate(audit.near_expiry_rules):
                 lines.append(f"- `{_suppression_rule_label(rule, i)}`")
-        return "\n".join(lines)
+        return "\n".join([text, "\n".join(lines)])
 
     return text

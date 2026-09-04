@@ -429,6 +429,42 @@ def prewarm_demangle_batch(
         demangle_batch(sorted(tokens), accept_macho_prefix=True)
 
 
+def prewarm_demangle_from_json_value(value: object) -> None:
+    """Pre-warm :func:`demangle_batch`'s process-wide cache by scanning
+    every string reachable inside a JSON-shaped *value* -- a dict/list/tuple
+    tree of scalars, e.g. a :class:`~abicheck.report.document.ReportDocument`'s
+    ``to_mapping()`` -- for embedded mangled tokens.
+
+    :func:`prewarm_demangle_batch` needs typed objects with named attributes
+    (``obj.symbol``, ``obj.description``); a caller holding only a document's
+    already-JSON-shaped mapping has no such objects, and re-typing every
+    field the document happens to carry would drift out of sync with the
+    document's own schema as it grows. Walking the tree instead stays
+    correct by construction: any string field a document adds later is
+    covered automatically, with no second list of attribute names to keep in
+    sync (Codex review: ``render_html_document`` -- the first
+    ``ReportDocument`` projection whose whole-document render entry point
+    can run standalone, with no compute-side prewarm ever having run in this
+    process -- rendered a 1,000-row document via ``c++filt`` subprocess per
+    row instead of one batched call).
+    """
+    tokens: set[str] = set()
+
+    def walk(v: object) -> None:
+        if isinstance(v, str):
+            tokens.update(extract_mangled_tokens(v))
+        elif isinstance(v, dict):
+            for item in v.values():
+                walk(item)
+        elif isinstance(v, (list, tuple)):
+            for item in v:
+                walk(item)
+
+    walk(value)
+    if tokens:
+        demangle_batch(sorted(tokens), accept_macho_prefix=True)
+
+
 def demangle_text(text: str) -> str:
     """Demangle every Itanium-mangled symbol token embedded in *text*.
 

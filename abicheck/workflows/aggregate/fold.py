@@ -89,6 +89,43 @@ class AggregateResult:
             return tuple(t for t in self.unexpected_targets if t.analyzed)
         return ()
 
+    @property
+    def _forced_gate_targets(self) -> tuple[TargetReport, ...]:
+        """Unavailable targets whose report still carries a forced gate.
+
+        A scan that aborted (budget overflow / evidence-contract violation)
+        reports a real gate decision without an analyzed compatibility
+        verdict (Codex review: the earlier design forced a synthetic
+        ``BREAKING`` verdict for these, which invented an ABI-break result
+        and an analyzed-target count for a comparison that never ran -- see
+        :func:`~abicheck.workflows.aggregate.load._load_report_file`). That
+        gate must still count toward the CI decision regardless of the
+        target's own required/optional declaration -- the same reason
+        operational-error/not-comparable reports force a blocking gate --
+        so it is folded in here rather than through :attr:`required_gap`,
+        which only fires for *required* targets. Respects
+        ``on_unexpected_target`` for the unexpected half exactly like
+        :attr:`_gated_unexpected` does, so the two stay consistent about
+        which unexpected reports count at all.
+        """
+        candidates: tuple[TargetReport, ...] = self.targets
+        if self.on_unexpected_target in (
+            OnUnexpectedTarget.INCLUDE,
+            OnUnexpectedTarget.FAIL,
+        ):
+            candidates = candidates + self.unexpected_targets
+        return tuple(t for t in candidates if not t.analyzed and t.gate is not None)
+
+    @property
+    def _gated(self) -> tuple[TargetReport, ...]:
+        """Every target whose own gate decision counts toward the CI exit
+        code -- analyzed targets, gated unexpected targets, and unavailable
+        targets carrying a :attr:`_forced_gate_targets` gate. The common
+        fold shared by :meth:`exit_code`, :attr:`blocking_targets`,
+        :attr:`contract_coverage_exit`, and :attr:`analysis_assurance_exit`.
+        """
+        return self.analyzed + self._gated_unexpected + self._forced_gate_targets
+
     # --- compatibility axis (reporting only) --------------------------------
     @property
     def _compat_targets(self) -> tuple[TargetReport, ...]:
@@ -141,7 +178,7 @@ class AggregateResult:
     # --- gate axis (the CI decision) ----------------------------------------
     @property
     def blocking_targets(self) -> tuple[str, ...]:
-        gated = list(self.analyzed) + list(self._gated_unexpected)
+        gated = list(self._gated)
         return tuple(
             sorted(
                 t.target_id
@@ -165,7 +202,7 @@ class AggregateResult:
         ``max`` over targets rather than "any", so the axis stays a floor
         rather than a count, matching the per-command fold.
         """
-        gated = list(self.analyzed) + list(self._gated_unexpected)
+        gated = list(self._gated)
         return max((t.contract_coverage_exit for t in gated), default=0)
 
     @property
@@ -187,7 +224,7 @@ class AggregateResult:
         own ``contract_coverage_exit`` — so no reader loses the narrower
         question by this answering the broader one.
         """
-        gated = list(self.analyzed) + list(self._gated_unexpected)
+        gated = list(self._gated)
         return tuple(
             sorted(
                 t.target_id
@@ -202,14 +239,14 @@ class AggregateResult:
         :attr:`contract_coverage_exit`. Without this a target whose
         ``--require-complete-analysis`` gate raised its own exit to ``1``
         fed this aggregate a green ``0`` (Codex review)."""
-        gated = list(self.analyzed) + list(self._gated_unexpected)
+        gated = list(self._gated)
         return max((t.analysis_assurance_exit for t in gated), default=0)
 
     @property
     def analysis_assurance_targets(self) -> tuple[str, ...]:
         """Targets short of analysis assurance -- the *why* behind
         :attr:`analysis_assurance_exit`."""
-        gated = list(self.analyzed) + list(self._gated_unexpected)
+        gated = list(self._gated)
         return tuple(
             sorted(t.target_id for t in gated if t.analysis_assurance_exit > 0)
         )
@@ -231,7 +268,7 @@ class AggregateResult:
         break's ``2``/``4``. ``64`` / malformed-input errors are raised as
         :class:`AggregateError`, never returned here.
         """
-        gated = list(self.analyzed) + list(self._gated_unexpected)
+        gated = list(self._gated)
         code = max((t.gate.exit_code for t in gated if t.gate is not None), default=0)
         if self.coverage_blocking:
             code = max(code, COVERAGE_INCOMPLETE_EXIT)
@@ -638,7 +675,18 @@ class AggregateResult:
         if t.unexpected:
             tag = " (unexpected)"
         if not t.analyzed:
-            return f"{t.target_id}{tag}: ⚠ unavailable — {t.reason or 'no report'}"
+            forced_gate = ""
+            if t.gate is not None and (t.gate.blocking or t.gate.exit_code > 0):
+                # A forced-gate-but-unavailable target (a scan abort) still
+                # gates the CI decision even though nothing was compared --
+                # say so here too, not only in the JSON `gate` block, so the
+                # text rendering doesn't read as a plain coverage gap.
+                cats = ", ".join(t.gate.blocking_categories)
+                forced_gate = f" [gate: blocking{f' ({cats})' if cats else ''}]"
+            return (
+                f"{t.target_id}{tag}: ⚠ unavailable — "
+                f"{t.reason or 'no report'}{forced_gate}"
+            )
         assert t.compatibility_verdict is not None
         verdict = t.compatibility_verdict.value
         if t.gate is not None and t.gate.blocking:

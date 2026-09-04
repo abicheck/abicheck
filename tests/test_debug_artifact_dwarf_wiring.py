@@ -119,7 +119,9 @@ class TestDumpUsesResolvedDebugArtifact:
             main, ["dump", str(so_path), "-o", str(out)],
         )
         assert result.exit_code == 0, result.output
-        snap = json.loads(out.read_text())
+        from abicheck.serialization import load_snapshot_document
+
+        snap = load_snapshot_document(out)
         assert snap["dwarf"]["has_dwarf"] is False
 
     def test_stripped_binary_with_debug_root_gets_dwarf(self, tmp_path: Path) -> None:
@@ -133,7 +135,9 @@ class TestDumpUsesResolvedDebugArtifact:
         )
         assert result.exit_code == 0, result.output
         assert "Debug info:" in result.output
-        snap = json.loads(out.read_text())
+        from abicheck.serialization import load_snapshot_document
+
+        snap = load_snapshot_document(out)
         assert snap["dwarf"]["has_dwarf"] is True
         assert len(snap["functions"]) >= 1
 

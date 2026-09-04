@@ -37,8 +37,9 @@ needs:
 1. **Learn the problem** — [ABI/API Compatibility](learn/abi-api-handling.md)
    is educational material that needs no abicheck knowledge: what ABI/API
    compatibility is, why libraries break their consumers, and how to design
-   against it. Start with the [learning series](learn/abi-series/00-product-contract.md)
-   (part 0 assumes nothing; part 7 is expert-level design guidance) and keep the
+   against it. Start at Step 1 — [ABI in Five Minutes](learn/abi-series/abi-in-5-minutes.md)
+   assumes nothing, and the overview page's numbered steps take you from
+   there through checking a multi-binary product in CI — and keep the
    [example encyclopedia](reference/examples/index.md) as a catalog of real breaks.
 2. **Use the tool** — the [User Guide](start/getting-started.md) takes you from install
    and first check through CI integration to specialised workflows;
@@ -60,7 +61,7 @@ needs:
 **New to the ABI/API problem itself?**
 
 - [ABI/API Compatibility](learn/abi-api-handling.md) — the consolidated guide.
-- [Learning series, part 0](learn/abi-series/00-product-contract.md) — compatibility as a product contract, from first principles.
+- [ABI in Five Minutes](learn/abi-series/abi-in-5-minutes.md) — the series' first rung; [Part 0](learn/abi-series/00-product-contract.md) then makes compatibility a product contract, from first principles.
 - [ABI Cheat Sheet](learn/abi-cheat-sheet.md) — which changes are safe, risky, or breaking, at a glance.
 
 **Evaluating or comparing tools?**

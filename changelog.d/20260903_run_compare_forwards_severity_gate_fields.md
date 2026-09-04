@@ -1,0 +1,3 @@
+### Fixed
+
+- **`abicheck.service.run_compare()` had no way to select the severity-aware exit-code gate.** ADR-064/PR G2 added `severity_preset`/`exit_code_scheme` to `CompareRequest`/`CompareResult`, but this supported kwargs-shim entry point never grew matching parameters or forwarded them — passing the keywords raised `TypeError`, and omitting them silently stayed on the legacy verdict-based exit code even when a caller wanted the severity scheme. `run_compare()` now accepts `severity_preset`/`exit_code_scheme` as trailing keyword-only parameters (appended after every pre-existing one, so positional callers are unaffected) and forwards them onto the `CompareRequest` it builds.

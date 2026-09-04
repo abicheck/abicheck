@@ -183,6 +183,57 @@ def _unique_dwarf_match(
 
 
 def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
+    # Fact[T]-bridged reads (ADR-063 Phase 0): the legacy field and its
+    # `_fact` sibling are kept in lockstep by `RecordType.__post_init__`
+    # (`rec.bases == rec.bases_fact.value if rec.bases_fact.is_present else
+    # []`, identically for `virtual_bases`/`vtable`), so resolving through
+    # the `Fact[...]` sibling here is exactly value-preserving. Each
+    # `*_fact` field is declared `Fact[list[str]] | None` (only
+    # `__init__`-time callers may omit it); `__post_init__` always
+    # backfills a real `Fact`, so the leading `is not None` check never
+    # actually fails at runtime — it, and the trailing `.value is not
+    # None` (mirroring `bridge_legacy_and_fact`'s own resolution), exist
+    # to narrow the type for mypy.
+    header_bases_fact = header.bases_fact
+    header_bases = (
+        header_bases_fact.value
+        if header_bases_fact is not None
+        and header_bases_fact.is_present
+        and header_bases_fact.value is not None
+        else []
+    )
+    header_virtual_bases_fact = header.virtual_bases_fact
+    header_virtual_bases = (
+        header_virtual_bases_fact.value
+        if header_virtual_bases_fact is not None
+        and header_virtual_bases_fact.is_present
+        and header_virtual_bases_fact.value is not None
+        else []
+    )
+    dwarf_bases_fact = dwarf.bases_fact
+    dwarf_bases = (
+        dwarf_bases_fact.value
+        if dwarf_bases_fact is not None
+        and dwarf_bases_fact.is_present
+        and dwarf_bases_fact.value is not None
+        else []
+    )
+    dwarf_virtual_bases_fact = dwarf.virtual_bases_fact
+    dwarf_virtual_bases = (
+        dwarf_virtual_bases_fact.value
+        if dwarf_virtual_bases_fact is not None
+        and dwarf_virtual_bases_fact.is_present
+        and dwarf_virtual_bases_fact.value is not None
+        else []
+    )
+    dwarf_vtable_fact = dwarf.vtable_fact
+    dwarf_vtable = (
+        dwarf_vtable_fact.value
+        if dwarf_vtable_fact is not None
+        and dwarf_vtable_fact.is_present
+        and dwarf_vtable_fact.value is not None
+        else []
+    )
     if header.fields and dwarf.fields:
         return bool({f.name for f in header.fields} & {f.name for f in dwarf.fields})
     if not header.fields and dwarf.fields:
@@ -207,12 +258,14 @@ def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
     # only ever reads DW_AT_name (always bare, e.g. "Base", never
     # scope-qualified) — comparing the raw strings would reject a
     # namespaced base's own correct match (Codex review).
-    header_bases = {
-        _topmost_scope_suffix(b) for b in header.bases + header.virtual_bases
+    header_base_suffixes = {
+        _topmost_scope_suffix(b) for b in header_bases + header_virtual_bases
     }
-    dwarf_bases = {_topmost_scope_suffix(b) for b in dwarf.bases + dwarf.virtual_bases}
-    if header_bases or dwarf_bases:
-        return bool(header_bases & dwarf_bases)
+    dwarf_base_suffixes = {
+        _topmost_scope_suffix(b) for b in dwarf_bases + dwarf_virtual_bases
+    }
+    if header_base_suffixes or dwarf_base_suffixes:
+        return bool(header_base_suffixes & dwarf_base_suffixes)
     if header.name == dwarf.name:
         # Exact match still needs the header's own fields to be real
         # corroborating evidence, not just the match key itself (Codex
@@ -232,7 +285,7 @@ def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
         # with" isn't true once the DWARF side has a vtable the header
         # side structurally can't (the clang header parser never
         # populates ``RecordType.vtable`` itself).
-        return not dwarf.vtable and (
+        return not dwarf_vtable and (
             not header.fields or header.has_anonymous_aggregate_fields
         )
     # Suffix-only match with no field/base overlap left to corroborate.
@@ -282,7 +335,7 @@ def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
     # DWARF views — data this function doesn't have (only
     # ``RecordType``s, not the snapshot's ``functions`` list) — so it's
     # left unbackfilled (stays ``None``) rather than guessed.
-    return header.has_anonymous_aggregate_fields and not dwarf.vtable
+    return header.has_anonymous_aggregate_fields and not dwarf_vtable
 
 
 def _merged_fields(header: RecordType, dwarf: RecordType) -> list[TypeField]:
@@ -349,20 +402,47 @@ def _backfilled_record(header: RecordType, dwarf: RecordType) -> RecordType:
             else dwarf.vptr_offset_bits_fact
         ),
         base_offsets=header.base_offsets or dwarf.base_offsets,
+        # ADR-063 Phase 5: same "surviving value's own Fact status" rule as
+        # vptr_offset_bits_fact above, now that these three also carry a
+        # Fact[...] sibling -- without an explicit *_fact kwarg here,
+        # replace_with_fact_sync would derive Fact.present(final_value)
+        # unconditionally, which is wrong whenever the surviving value is
+        # header's own not-yet-determined None (header.data_size_bits_fact
+        # already correctly reads not_collected() in that case; stamping
+        # present(None) over it would fabricate a confirmed determination
+        # that was never made). dwarf never populates these three fields
+        # (dwarf_snapshot.py's own comment), so dwarf.*_fact is always
+        # not_collected() too -- passing it through on that branch is
+        # exactly as inert as the plain-value ternary already is.
         data_size_bits=(
             header.data_size_bits
             if header.data_size_bits is not None
             else dwarf.data_size_bits
+        ),
+        data_size_bits_fact=(
+            header.data_size_bits_fact
+            if header.data_size_bits is not None
+            else dwarf.data_size_bits_fact
         ),
         is_standard_layout=(
             header.is_standard_layout
             if header.is_standard_layout is not None
             else dwarf.is_standard_layout
         ),
+        is_standard_layout_fact=(
+            header.is_standard_layout_fact
+            if header.is_standard_layout is not None
+            else dwarf.is_standard_layout_fact
+        ),
         is_trivially_copyable=(
             header.is_trivially_copyable
             if header.is_trivially_copyable is not None
             else dwarf.is_trivially_copyable
+        ),
+        is_trivially_copyable_fact=(
+            header.is_trivially_copyable_fact
+            if header.is_trivially_copyable is not None
+            else dwarf.is_trivially_copyable_fact
         ),
     )
 

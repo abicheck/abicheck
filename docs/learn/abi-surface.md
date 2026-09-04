@@ -112,6 +112,31 @@ Two abicheck features map directly onto this page:
   ([case146](../reference/examples/case146_audit_rtti_for_internal.md)). See
   [Source-Scan Depth § single-build audit](../use/scan-levels.md#single-build-audit-no-against).
 
+Both as commands. The one-build audit needs only the build and its public
+headers, and reports the leaking boundary:
+
+```bash
+abicheck scan libfoo.so -H include/
+```
+
+The second shows the boundary applied to a *change*: an internal struct
+gains a field ([case118](../reference/examples/case118_internal_struct_field_added_scoped.md)),
+and the contract evaluator classifies the finding as out of the exported
+contract rather than scoring it:
+
+```bash
+abicheck compare old.json new.so -H include/ --contract exports --no-scope-public-headers
+```
+
+The second flag matters: default public-header scoping removes the
+unreachable change before the evaluator ever sees it, so with `--contract
+exports` alone the report shows nothing at all. Contract domains are owned
+by [Contract-Aware Compatibility](contract-aware-compatibility.md).
+
 The design patterns that keep the surface small — opaque handles, Pimpl,
 version scripts, `-fvisibility=hidden` + explicit exports — are the subject of
 [Part 7 — Designing for Stability](abi-series/07-designing-for-stability.md).
+
+---
+
+**Ladder:** ← [Part 1 — Foundations](abi-series/01-foundations.md) · Step 2 · Foundations · [Part 2 — Symbol Contract Breaks](abi-series/02-symbol-contracts.md) →

@@ -23,6 +23,29 @@ whose name sounds policy/report-shaped* — the catalog itself is exactly the
 kind of "what is this fact" (which `ChangeKind` defaults to which verdict,
 under which override) D1 already assigns here.
 
+**A second deliberate, ADR-063 D7-sanctioned exception: `fact_registry.py`.**
+D7 names `abicheck/model/fact_registry.py` explicitly as the fact/capability
+registry's home, and its `FactDefinition.producing_backends` field names
+which extraction backend(s) populate a fact (e.g. `("castxml", "clang")` for
+`RecordType.is_final`). Read narrowly, that looks like "how was it
+produced" — the one question this package's own Purpose section says it
+never answers. It survives the same test `change_catalog/` above does:
+`producing_backends` is a closed, fixed-vocabulary string tag
+(`KNOWN_PRODUCING_BACKENDS`), not the *code* that extracts a fact or
+imports an extractor — `fact_registry.py` has zero first-party imports
+beyond `model/` itself, same as `change_catalog/`. The actual extraction
+logic (what `dumper_castxml.py`/`dumper_clang.py`/etc. do) stays entirely
+in `extract/`; this registry only records, as data, which of those modules
+a fact's own producer flag already names elsewhere in this package
+(`AbiSnapshot.ast_producer`). A hybrid (`--ast-frontend hybrid`) snapshot
+is deliberately **not** a fourth member of that vocabulary — `ast_producer
+="hybrid"` is a snapshot-level *merge mode*, and the real per-fact producer
+on such a snapshot is still `"castxml"` or `"clang"` (whichever
+`dumper_hybrid.merge_snapshots()` kept), recorded per-declaration by
+`fact_provenance.py` — mirroring `backend_capabilities.py`'s own identical
+"the hybrid column is derived, never hand-typed" stance for the same
+question one layer up.
+
 ## Permitted imports
 
 Per ADR-061 D1, `model/` may import **nothing** first-party except the public
@@ -49,6 +72,14 @@ types, so `from abicheck.elf_metadata import ElfMetadata` still resolves.
 | A new snapshot-level field or layer attachment | `snapshot.py` |
 | A new ELF/PE/Mach-O/DWARF/SYCL/kABI fact | the matching `*_facts.py` |
 | A snapshot-aware surface predicate | `stdlib_surface.py` |
+| An L5 source-graph value field, node-id spelling, or schema vocabulary entry (`NODE_KINDS`/`EDGE_KINDS`) | `source_graph.py` |
+| An L5 `GraphNode`/`GraphEdge` field, or the ADR-046 fact-merge machinery | `graph_facts.py` |
+| An L5 confidence label or `*_NODE_KINDS`/`*_EDGE_KINDS` family vocabulary set | `graph_vocabulary.py` |
+| A decl/type node-id normalization rule | `graph_identity.py` |
+| A `EntityResolver`/canonical-identity resolution rule | `entity_resolver.py`, `entity_identity.py` |
+| An already-built L5 graph node/edge public/internal/consumer-compiled classification predicate | `source_graph_query.py` |
+| A canonical, backend-independent IR field or canonicalization rule (ADR-063 Phase 6) | `semantic_ir.py` |
+| A read-only query/lookup over an already-built `SemanticIR` (entity/occurrence/kind lookups; ADR-063 Phase 6B) | `semantic_ir_index.py` |
 
 `__init__.py` is the supported import surface and stays a re-export list
 with `__all__` — no logic, no new names that are not owned by a submodule.

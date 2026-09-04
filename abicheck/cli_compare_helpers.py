@@ -28,7 +28,6 @@ in ``check_ai_readiness``). Verdict routing stays through the Tier-2 service
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -84,7 +83,6 @@ from .cli_options import (
     resolve_contract_domain,
     resolve_contract_evaluation,
 )
-from .cli_params import _load_suppression_and_policy
 from .cli_resolve import (
     _reject_compile_context_for_set_inputs,
     _reject_evidence_flags_for_set_inputs,
@@ -95,6 +93,7 @@ from .cli_resolve import (
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 from .frontends.cli.options import reject_incoherent_secondary_output
+from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.runtime import (
     _EXIT_NOT_COMPARABLE,
     _announce_exit_scheme,
@@ -112,8 +111,8 @@ from .workflows.gate import announce_coverage_floor, fold_coverage_exit
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
     from .model import AbiSnapshot
-    from .policy_file import PolicyFile
     from .workflows.extraction import DumpManifest
+    from .workflows.policy_file import PolicyFile
 
 
 def _resolve_compare_config(
@@ -464,13 +463,15 @@ def _report_not_comparable(
     )
     refusal = (old.library, old.version, new.version, kind, message)
     if fmt == "json":
-        from .report.not_comparable import render_not_comparable_json
+        from .report.not_comparable import OperationalStatus, render_not_comparable_json
         from .schemas import REPORT_SCHEMA_VERSION
 
         _write_or_echo(
             output,
             render_not_comparable_json(
-                *refusal, report_schema_version=REPORT_SCHEMA_VERSION
+                *refusal,
+                report_schema_version=REPORT_SCHEMA_VERSION,
+                operational=OperationalStatus.NOT_COMPARABLE,
             ),
         )
     elif fmt == "sarif":
@@ -894,19 +895,26 @@ def _render_compare_report(
     fmt: str, follow_deps: bool, show_only: str | None, report_mode: str,
     show_impact: bool, severity_config: Any,
     demangle: bool, contract_evaluation: bool,
-    old_build_info: Path | None, new_build_info: Path | None,
-    old_sources: Path | None, new_sources: Path | None,
     require_complete_analysis: bool = False,
 ) -> str:
     """Render one compare report and fold every post-render section into it.
 
     The primary (``--format``) and secondary (``--write``) renders
-    run the identical four-step pipeline and differ only in their arguments, so
+    run the identical pipeline and differ only in their arguments, so
     they share this one function rather than keeping two copies that can drift.
 
     No ``stat``/``recommend`` parameters (CLI cleanup phase two, PR 1): see
     ``_render_output``/``service_render.render_output`` for where the
     one-line format and the unconditional recommendation now live.
+
+    ADR-061 Phase 2 item 5: this used to be a four-fold pipeline -- the
+    fourth step, ``_fold_evidence_depth_into_json``, re-parsed the JSON text
+    this function was about to return to splice in
+    ``old_evidence_depth``/``new_evidence_depth``. Both are now resolved
+    once by the caller and attached onto ``result`` before this function
+    ever runs (see ``checker_types.DiffResult.old_evidence_depth``'s own
+    docstring), so ``_render_output``'s own ``to_json`` call already emits
+    them and no fourth fold-in is needed here any more.
     """
     text = _render_output(
         fmt, result, old, new,
@@ -923,15 +931,13 @@ def _render_compare_report(
         severity_config=severity_config,
         show_only=show_only, report_mode=report_mode,
         contract_evaluation=contract_evaluation,
+        demangle=demangle,
     )
     text = _fold_suppression_audit_into_text(
-        text, fmt, getattr(result, "suppression_audit", None)
+        text, fmt, result.suppression_audit, demangle=demangle
     )
-    text = _fold_use_case_impact_into_text(text, fmt, result, show_only)
-    return _fold_evidence_depth_into_json(
-        text, fmt, old, new,
-        old_build_info=old_build_info, new_build_info=new_build_info,
-        old_sources=old_sources, new_sources=new_sources,
+    return _fold_use_case_impact_into_text(
+        text, fmt, result, show_only, demangle=demangle
     )
 
 
@@ -1012,7 +1018,7 @@ def _attach_suppression_audit(result: Any, suppression: Any) -> None:
     # a kind the policy promoted to BREAKING is reported as high-risk
     # even though it isn't in the built-in BREAKING_KINDS.
     effective_breaking_kinds, _, _, _ = result._effective_kind_sets()
-    result.suppression_audit = suppression.audit(  # type: ignore[attr-defined]
+    result.suppression_audit = suppression.audit(
         list(result.changes)
         + list(result.suppressed_changes)
         + list(getattr(result, "scoped_only_changes", ()) or ()),
@@ -1034,7 +1040,7 @@ def _reject_flags_unsupported_for_set_inputs(
     include_labels: dict[Path, str] | None,
     require_complete_analysis: bool = False,
     use_cases_manifest: Path | None = None,
-) -> None:
+) -> str | None:
     """Reject the single-pair-only flags on a directory/package compare.
 
     The per-library fan-out (``compare-release`` backend) consumes the
@@ -1047,6 +1053,11 @@ def _reject_flags_unsupported_for_set_inputs(
     after this call. ``--write`` (``secondary_fmt``/``secondary_output``) is
     not rejected either -- the release engine supports it directly, so it is
     simply forwarded to ``_dispatch_release_compare``.
+
+    Returns the ``--depth`` value the caller should forward to the fan-out
+    (D1: currently always ``"binary"`` or ``None`` --
+    :func:`~abicheck.cli_resolve._reject_depth_for_set_inputs` rejects
+    everything else outright).
     """
     _reject_set_input_flags(
         exit_code_scheme, reconcile_build_context, env_matrix_path,
@@ -1058,7 +1069,7 @@ def _reject_flags_unsupported_for_set_inputs(
         require_complete_analysis=require_complete_analysis,
     )
     _reject_compile_context_for_set_inputs(ctx)
-    _reject_evidence_flags_for_set_inputs(ctx)
+    return _reject_evidence_flags_for_set_inputs(ctx)
 
 
 def _report_compare_result(
@@ -1078,8 +1089,6 @@ def _report_compare_result(
     show_impact: bool,
     demangle: bool, demangle_explicit: bool | None, follow_deps: bool,
     secondary_fmt: str | None, secondary_output: Path | None,
-    old_build_info: Path | None, new_build_info: Path | None,
-    old_sources: Path | None, new_sources: Path | None,
     require_complete_analysis: bool = False,
     depth: str | None = None,
     use_cases_manifest: Path | None = None,
@@ -1124,28 +1133,30 @@ def _report_compare_result(
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
 
     # P0.4 (P1 review): recompute analysis_assurance now that the *real*
-    # evidence pack behind this comparison's findings is known.
-    # checker.compare() (inside compare_snapshots above) only ever saw each
-    # snapshot's own *embedded* BuildSourcePack -- an out-of-band
-    # --old/new-build-info / --old/new-sources pack directory is resolved
-    # separately via _resolve_side_pack and used to produce this run's real
-    # findings/coverage (prepare_embedded_build_source, before
-    # compare_snapshots was even called) without ever being attached back
-    # onto old/new. Without this, analysis_assurance would silently reflect
-    # whatever (possibly absent, possibly stale) payload the bare snapshots
-    # carry instead of the pack that actually backed this run -- defeating
-    # --require-complete-analysis's whole purpose. Re-resolving here is
-    # cheap (pure pack-directory metadata load, no diffing) and mirrors the
-    # identical, already-reviewed fix _fold_evidence_depth_into_json applies
-    # for the same class of gap on old_evidence_depth/new_evidence_depth.
-    from .cli_buildsource_helpers import _resolve_side_pack
+    # evidence pack behind this comparison's findings is known. An
+    # out-of-band --old/new-build-info / --old/new-sources pack is now
+    # attached onto old.build_source/new.build_source, already capped to
+    # --depth, by run_compare's resolve-and-cap step above -- so reading it
+    # straight off old/new here (not re-resolving the raw paths, which would
+    # reload the uncapped pack and defeat the ceiling here) is correct at
+    # any --depth (Codex review, PR #1020, second round).
+    from .cli_dump_helpers import evidence_depth_label
     from .workflows.gate import compute_analysis_assurance
 
+    old_pack = old.build_source
+    new_pack = new.build_source
     result.analysis_assurance = compute_analysis_assurance(
-        result, old, new,
-        old_pack=_resolve_side_pack(old_build_info, old_sources, old),
-        new_pack=_resolve_side_pack(new_build_info, new_sources, new),
+        result, old, new, old_pack=old_pack, new_pack=new_pack,
     )
+    # ADR-061 Phase 2 item 5 (post-render mutation): resolved here, before
+    # any report is rendered, and attached directly onto `result` -- mirrors
+    # `analysis_assurance` immediately above.
+    # `reporter.to_json`'s JSON builders read these two fields straight off
+    # `result` now, instead of `_fold_evidence_depth_into_json` re-parsing
+    # this function's own already-rendered JSON text afterwards to splice
+    # them in (see that field's own docstring in checker_types.py).
+    result.old_evidence_depth = evidence_depth_label(old, old_pack)
+    result.new_evidence_depth = evidence_depth_label(new, new_pack)
 
     if explain_patterns:
         echo_pattern_modulations(result)
@@ -1245,8 +1256,6 @@ def _report_compare_result(
             show_impact=show_impact, severity_config=report_severity,
             demangle=demangle,
             contract_evaluation=contract_evaluation,
-            old_build_info=old_build_info, new_build_info=new_build_info,
-            old_sources=old_sources, new_sources=new_sources,
             require_complete_analysis=require_complete_analysis,
         ),
     )
@@ -1273,8 +1282,6 @@ def _report_compare_result(
                 severity_config=report_severity,
                 demangle=_resolve_demangle(secondary_fmt, demangle_explicit),
                 contract_evaluation=contract_evaluation,
-                old_build_info=old_build_info, new_build_info=new_build_info,
-                old_sources=old_sources, new_sources=new_sources,
                 require_complete_analysis=require_complete_analysis,
             ),
         )
@@ -1520,8 +1527,9 @@ def run_compare(
     # release/directory one with no --pack; resolved just below (ahead of the
     # --dry-run emit) otherwise, so a dry run and the real run agree.
     release_pack_application = None
+    release_depth: str | None = None
     if {old_kind, new_kind} & {"directory", "package"}:
-        _reject_flags_unsupported_for_set_inputs(
+        release_depth = _reject_flags_unsupported_for_set_inputs(
             ctx,
             exit_code_scheme=exit_code_scheme,
             reconcile_build_context=reconcile_build_context,
@@ -1667,6 +1675,7 @@ def run_compare(
             secondary_fmt=secondary_fmt, secondary_output=secondary_output,
             compile_context=directory_compile_context,
             config_includes=directory_config_includes,
+            depth=release_depth,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
@@ -1831,6 +1840,18 @@ def run_compare(
         lang_explicit=lang_explicit,
     )
 
+    # ADR-063 Phase 8's "--depth floor vs ceiling" gap (Codex review, PR
+    # #1020): this native CLI path calls `compare_snapshots()` directly, not
+    # `classify_compare_pair`, so it needs the identical capped view applied
+    # here too -- before every subsequent reader of `old`/`new` below
+    # (`fold_l0_hard_removals`, the build-source diff, `compare_snapshots`
+    # itself). Imported from `service_compare_pipeline` (`workflows`), not
+    # `.policy.depth_projection` directly: ADR-061 forbids `frontends ->
+    # policy`, and this CLI module is `frontends`.
+    from .service_compare_pipeline import project_pair_to_depth
+
+    old, new = project_pair_to_depth(old, new, depth)
+
     suppression, pf = _load_suppression_and_policy(
         suppress, policy, policy_file_path,
         strict_suppressions=strict_suppressions,
@@ -1880,13 +1901,29 @@ def run_compare(
     if getattr(old, "from_headers", False) or getattr(new, "from_headers", False):
         extra_changes = fold_l0_hard_removals(old, new, lang, extra_changes)
 
+    # ADR-063 Phase 8 "--depth" ceiling (Codex review, PR #1020, second
+    # round): an out-of-band --old/new-sources/-build-info pack never lives
+    # on old/new until prepare_embedded_build_source diffs it, so
+    # project_pair_to_depth above can't cap it. Resolve + cap it ourselves,
+    # attach onto old/new, then pass None below so resolve_side_pack falls
+    # back to the now-capped embedded payload instead of the raw pack.
+    from .cli_buildsource_helpers import _resolve_side_pack
+    from .service_compare_pipeline import project_build_source_pack_to_depth
+
+    old.build_source = project_build_source_pack_to_depth(
+        _resolve_side_pack(old_build_info, old_sources, old), depth
+    )
+    new.build_source = project_build_source_pack_to_depth(
+        _resolve_side_pack(new_build_info, new_sources, new), depth
+    )
+
     # Build-info + source facts (ADR-028/033): the helper times inline diffing
     # for the D6/D9 metrics and returns coverage/metrics to attach post-compare.
     from .cli_buildsource import prepare_embedded_build_source
     extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = (
         prepare_embedded_build_source(
             old, new, collect_mode, extra_changes,
-            old_build_info, new_build_info, old_sources, new_sources,
+            None, None, None, None,
             policy_file=pf,
         )
     )
@@ -1901,6 +1938,14 @@ def run_compare(
     # Reporting reads the severity config only under the severity exit scheme;
     # resolved once here rather than re-spelled at each of the five consumers.
     report_severity = sev_config if resolved_cfg.exit_code_scheme == "severity" else None
+    # One Semantic Pipeline plan, 4B: use evaluation_config's resolved
+    # contract.mode -- but only under contract_evaluation itself, since a
+    # --pack-only run resolves a non-None config with a concrete mode too.
+    resolved_contract_mode = (
+        evaluation_config.contract.mode
+        if evaluation_config is not None and contract_evaluation
+        else contract_mode
+    )
     from .service import compare_snapshots, load_env_matrix
     try:
         env_matrix = load_env_matrix(env_matrix_path)
@@ -1920,7 +1965,7 @@ def run_compare(
             reconcile_build_context=reconcile_build_context,
             diagnostic_comparison=diagnostic_comparison,
             contract_evaluation=contract_evaluation,
-            contract_mode=contract_mode,
+            contract_mode=resolved_contract_mode,
         )
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
@@ -1945,52 +1990,7 @@ def run_compare(
         demangle=demangle, demangle_explicit=demangle_explicit,
         follow_deps=follow_deps,
         secondary_fmt=secondary_fmt, secondary_output=secondary_output,
-        old_build_info=old_build_info, new_build_info=new_build_info,
-        old_sources=old_sources, new_sources=new_sources,
         require_complete_analysis=require_complete_analysis,
         depth=depth,
         use_cases_manifest=use_cases_manifest,
     )
-
-
-def _fold_evidence_depth_into_json(
-    text: str, fmt: str, old: Any, new: Any,
-    old_build_info: Path | None = None, new_build_info: Path | None = None,
-    old_sources: Path | None = None, new_sources: Path | None = None,
-) -> str:
-    """Add ``old_evidence_depth``/``new_evidence_depth`` to a JSON report (CLI-audit P2).
-
-    Self-describing output: the evidence depth each side *actually* reached
-    (``binary``/``headers``/``build``/``source``), computed from what was
-    resolved rather than the requested ``--depth`` -- so a report is never
-    silently mismatched against what was actually collected. JSON only; other
-    formats already show depth-related context in their own ways (or, for
-    binary/structured formats, are left untouched per
-    :func:`_fold_scoped_compat_into_text`'s convention).
-
-    An out-of-band ``--old/new-build-info``/``--old/new-sources`` *pack
-    directory* (as opposed to a raw checkout, which gets embedded into the
-    snapshot before this point) is resolved via ``_resolve_side_pack`` and
-    never attached back to ``old``/``new`` themselves -- reading only
-    ``old.build_source``/``new.build_source`` would then report the
-    snapshot's own (absent or unrelated) embedded depth instead of the pack
-    that was actually used to produce this comparison's build/source
-    findings (Codex review). Re-resolving here is cheap (pure pack-directory
-    metadata load, no diffing) and mirrors the same resolution
-    ``prepare_embedded_build_source``/``diff_embedded_build_source`` already
-    performed to run the comparison itself.
-    """
-    if fmt != "json":
-        return text
-    from .cli_buildsource_helpers import _resolve_side_pack
-    from .cli_dump_helpers import evidence_depth_label
-
-    try:
-        payload = json.loads(text)
-    except ValueError:
-        return text
-    old_pack = _resolve_side_pack(old_build_info, old_sources, old)
-    new_pack = _resolve_side_pack(new_build_info, new_sources, new)
-    payload["old_evidence_depth"] = evidence_depth_label(old, old_pack)
-    payload["new_evidence_depth"] = evidence_depth_label(new, new_pack)
-    return json.dumps(payload, indent=2)

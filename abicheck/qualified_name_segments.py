@@ -14,9 +14,23 @@
 
 """Shared qualified-name segmentation and versioned inline-namespace helpers.
 
-Leaf module (no imports from the rest of ``abicheck``) so it can be shared
-between ``diff_namespaces.py`` (which owns the segment-splitting logic this
-module was extracted from) and any other detector that needs to recognize a
+Leaf module: its ``abicheck`` imports are its own sibling
+``qualified_name_segments_walk.py`` (itself a leaf) and
+``model.qualified_name_split`` -- the bracket-depth-aware ``"::"``-splitting
+primitive :func:`raw_segments` delegates to, AND (since PR #1025, Codex
+review) the *recognition* half of the versioned/ABI-tag inline-namespace
+helpers, :func:`version_suffix`/:func:`is_inline_abi_namespace_segment`
+themselves: both are re-exported here unchanged for every existing call
+site, but now defined in ``model/`` so ``extract``-adjacent code that may
+not import this, `compare`-layer, module (``extract -> model`` only, per
+ADR-061; see that module's own docstring for exactly which two independent
+needs motivated the move) can use them too. What stays here,
+:func:`version_strip_segments`/:func:`strip_inline_abi_namespaces`, is the
+genuinely ``compare``-layer *decision* built on top of that recognition --
+that two differently-spelled qualified names identify the same declaration
+for diffing purposes. So this module can be shared between
+``diff_namespaces.py`` (which owns the segment-splitting logic this module
+was extracted from) and any other detector that needs to recognize a
 versioned inline-namespace segment (``v1``, ``_V2``, ``__1``, ...) without
 re-implementing the same regex.
 
@@ -49,24 +63,36 @@ cannot be made sound with the data available today.
 from __future__ import annotations
 
 import contextlib as _contextlib
-import dataclasses as _dataclasses
 import re as _re
 import threading as _threading
 from collections.abc import (
-    Callable as _Callable,
     Iterable as _Iterable,
     Iterator as _Iterator,
     Mapping as _Mapping,
 )
 from typing import NamedTuple as _NamedTuple, TypeVar as _TypeVar
 
-_SnapshotT = _TypeVar("_SnapshotT")
+# The generic payload-exclusion-aware dataclass string walk this module's
+# own renumbering builds on -- split out into qualified_name_segments_walk.py
+# (a sibling leaf module, stdlib-only like this one) once this module
+# crossed the AI-readiness file-size gate's 800-line production cap. Its
+# names are re-exported here so every existing
+# `from .qualified_name_segments import _walk_rewrite_strings` call site
+# (this module's own use below, plus tests exercising the walk directly) is
+# unaffected.
+from .model.qualified_name_split import (
+    is_inline_abi_namespace_segment as is_inline_abi_namespace_segment,
+    split_top_level_scopes as _split_top_level_scopes,
+    version_suffix as version_suffix,
+)
+from .qualified_name_segments_walk import (
+    _PAYLOAD_FIELD_EXCLUSIONS as _PAYLOAD_FIELD_EXCLUSIONS,
+    _collect_strings as _collect_strings,
+    _legacy_sibling_is_payload_excluded as _legacy_sibling_is_payload_excluded,
+    _walk_rewrite_strings as _walk_rewrite_strings,
+)
 
-# Matches segment-name shapes commonly used as a versioned inline
-# namespace: ``_V1``, ``__v2``, ``v3``, ``__1``. Anchored to whole
-# segment match (caller passes a single segment string). Captures the
-# integer suffix for ordering checks.
-_VERSION_NS_RE = _re.compile(r"^_{0,2}[Vv]?(\d+)$")
+_SnapshotT = _TypeVar("_SnapshotT")
 
 
 def segments(qualified: str) -> list[str]:
@@ -116,19 +142,6 @@ def segments(qualified: str) -> list[str]:
     return [s for s in out if s]
 
 
-def version_suffix(segment: str) -> int | None:
-    """Return the integer suffix if *segment* looks like a versioned
-    inline-namespace tag (``_V1``, ``__1``, ``v2``, ...); else ``None``.
-    """
-    m = _VERSION_NS_RE.match(segment)
-    if not m:
-        return None
-    try:
-        return int(m.group(1))
-    except ValueError:
-        return None
-
-
 def version_strip_segments(segs: list[str]) -> tuple[tuple[str, ...], int | None]:
     """Strip any one versioned-*namespace* segment and return
     ``(stripped_segments, version_int)``.
@@ -152,28 +165,6 @@ def version_strip_segments(segs: list[str]) -> tuple[tuple[str, ...], int | None
         if v is not None:
             return tuple(segs[:i] + segs[i + 1 :]), v
     return tuple(segs), None
-
-
-#: Toolchain *ABI-tag* inline namespaces that are not version-number-shaped
-#: and therefore invisible to :func:`version_suffix`: libstdc++'s dual-ABI
-#: ``std::__cxx11`` and the Android NDK's ``std::__ndk1``. Both are inline
-#: namespaces — transparent for name lookup — so a declaration gaining or
-#: losing one is the *same* entity spelled two ways, exactly like the
-#: ``v1``/``__1`` family ``version_suffix`` already recognizes.
-_ABI_TAG_NS_RE = _re.compile(r"^__(?:cxx|ndk)\d+$")
-
-
-def is_inline_abi_namespace_segment(segment: str) -> bool:
-    """True when *segment* names an inline namespace used as an ABI tag.
-
-    Union of the version-number family (``v1``, ``__1``, ``_V2`` — see
-    :func:`version_suffix`) and the named toolchain tags (``__cxx11``,
-    ``__ndk1``). Deliberately not a general "looks like an implementation
-    detail" test: a segment such as ``detail``, ``impl`` or oneTBB's ``d1``
-    is an *ordinary* namespace whose rename is a real move of the
-    declarations inside it, so it must not be stripped.
-    """
-    return version_suffix(segment) is not None or bool(_ABI_TAG_NS_RE.match(segment))
 
 
 def strip_inline_abi_namespaces(qualified: str) -> tuple[str, ...]:
@@ -211,35 +202,12 @@ def raw_segments(qualified: str) -> list[str]:
 
     Splits on ``::`` at template-nesting depth zero only, so
     ``ns::Map<std::pair<int, int>>::iterator`` yields three segments and the
-    ``::`` inside the argument list is not a separator.
+    ``::`` inside the argument list is not a separator. Delegates to
+    :func:`~abicheck.model.qualified_name_split.split_top_level_scopes` --
+    see that module's own docstring for why the splitting primitive itself
+    lives in ``model/`` rather than here.
     """
-    if not qualified:
-        return []
-    if "::" not in qualified and "<" not in qualified:
-        return [qualified]
-    out: list[str] = []
-    buf: list[str] = []
-    depth = 0
-    i = 0
-    n = len(qualified)
-    while i < n:
-        ch = qualified[i]
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            if depth > 0:
-                depth -= 1
-        elif depth == 0 and ch == ":" and i + 1 < n and qualified[i + 1] == ":":
-            if buf:
-                out.append("".join(buf).strip())
-                buf = []
-            i += 2
-            continue
-        buf.append(ch)
-        i += 1
-    if buf:
-        out.append("".join(buf).strip())
-    return [s for s in out if s]
+    return _split_top_level_scopes(qualified)
 
 
 # ---------------------------------------------------------------------------
@@ -271,15 +239,13 @@ def raw_segments(qualified: str) -> list[str]:
 # ``architecture/debt.yaml``.
 # ---------------------------------------------------------------------------
 
-#: Matches the marker prefix :func:`strip_anonymous_type_location` already
-#: produces (``"(lambda:"``, ``"(unnamed struct:"``) -- NOT the raw
-#: ``at <path>:<line>:<col>`` form that function itself consumes. Only the
-#: fixed prefix is a regex; the variable-length basename that follows is
-#: scanned manually by :func:`_scan_anon_type_marker` below, since a single
-#: regex alternation (``\([^()]*\)``) can only ever balance one level of
-#: nesting and fails on a basename with two, e.g. ``foo(a(b)).hpp``
-#: (Codex review, fresh evidence).
-_ANON_TYPE_MARKER_PREFIX_RE = _re.compile(r"\((lambda|unnamed\s+\w+):")
+#: Matches the marker prefix :func:`strip_anonymous_type_location` already produces
+#: (``"(lambda:"``, ``"(unnamed struct:"``) -- NOT the raw ``at <path>:<line>:<col>``
+#: form that function itself consumes. Only the fixed prefix is a regex; the
+#: variable-length basename that follows is scanned manually by :func:`_scan_anon_type_marker`
+#: below, since a single regex alternation (``\([^()]*\)``) can only ever balance one
+#: level of nesting and fails on a basename with two, e.g. ``foo(a(b)).hpp`` (Codex review, fresh evidence).
+_ANON_TYPE_MARKER_PREFIX_RE = _re.compile(r"\((lambda|unnamed\s+\w+|anonymous\s+\w+):")
 
 #: Matches a marker's trailing ``:<line>:<col>`` right before the closing
 #: paren :func:`_scan_anon_type_marker` already found -- applied to the text
@@ -521,97 +487,6 @@ def apply_anonymous_type_ordinals(
     return "".join(pieces)
 
 
-#: Dataclass field names that carry free-text/expression payload, never a
-#: type/name spelling -- so a coincidental substring matching the closure
-#: marker syntax must not be collected as (fabricated) identity evidence or
-#: rewritten as if it were one (Codex review: a ``RecordType.deprecated``
-#: message like ``"avoid (lambda:x.h:10:2)"`` was silently corrupted to
-#: ``"avoid (lambda:x.h#1)"``). Shared across every declaration dataclass in
-#: ``model.py`` that has a field of this name (``Function``/``Variable``/
-#: ``TypeField``/``RecordType``/``EnumType``/``EnumMember`` all document
-#: ``deprecated`` as "see Function.deprecated for the message-string
-#: convention"; ``Param.default``/``TypeField.default`` are documented
-#: "verbatim, value not preserved"), matched by name alone rather than
-#: per-dataclass, since the walk in ``_collect_strings``/
-#: ``_walk_rewrite_strings`` is itself dataclass-agnostic. ``Variable.value``
-#: (its compile-time constant initializer, "if known", model.py's own
-#: docstring) is the identical payload shape -- added after the same
-#: reachable-corruption pattern was found on it too (Codex review, fresh
-#: evidence). ``source_location``/``source_header`` (ADR-015 provenance --
-#: a filesystem path, optionally with ``:line:col`` appended, never a C++
-#: type/name spelling) are the same shape again: a legal path containing
-#: marker-shaped text of its own (``/tmp/(lambda:a.h:1:2)``) was rewritten
-#: even for a snapshot with no real closure at all, corrupting persisted
-#: declaration provenance and, transitively, any later header-origin/
-#: dependency-scoping decision that reads it (Codex review, fresh evidence).
-_PAYLOAD_FIELD_EXCLUSIONS: frozenset[str] = frozenset(
-    {"deprecated", "default", "value", "source_location", "source_header"}
-)
-
-
-def _collect_strings(value: object, out: list[str]) -> None:
-    """Append every ``str`` reachable from *value* to *out*, recursing
-    through dataclasses, lists/tuples, and dicts (keys and values) --
-    except a field named in :data:`_PAYLOAD_FIELD_EXCLUSIONS`.
-    """
-    if isinstance(value, str):
-        out.append(value)
-    elif _dataclasses.is_dataclass(value) and not isinstance(value, type):
-        for f in _dataclasses.fields(value):
-            if f.name in _PAYLOAD_FIELD_EXCLUSIONS:
-                continue
-            _collect_strings(getattr(value, f.name), out)
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            _collect_strings(item, out)
-    elif isinstance(value, dict):
-        for k, v in value.items():
-            if isinstance(k, str):
-                out.append(k)
-            _collect_strings(v, out)
-
-
-def _walk_rewrite_strings(value: object, rewrite: _Callable[[str], str]) -> object:
-    """Rewrite every ``str`` reachable from *value* via ``rewrite(s)``,
-    mutating dataclasses/lists/dicts in place where possible -- except a
-    field named in :data:`_PAYLOAD_FIELD_EXCLUSIONS`. Returns the (possibly
-    new) value -- a bare ``str`` can't be mutated in place.
-    """
-    if isinstance(value, str):
-        return rewrite(value)
-    if _dataclasses.is_dataclass(value) and not isinstance(value, type):
-        for f in _dataclasses.fields(value):
-            if f.name in _PAYLOAD_FIELD_EXCLUSIONS:
-                continue
-            old = getattr(value, f.name)
-            new = _walk_rewrite_strings(old, rewrite)
-            if new is not old:
-                setattr(value, f.name, new)
-        return value
-    if isinstance(value, list):
-        for i, item in enumerate(value):
-            new_item = _walk_rewrite_strings(item, rewrite)
-            if new_item is not item:
-                value[i] = new_item
-        return value
-    if isinstance(value, tuple):
-        return tuple(_walk_rewrite_strings(item, rewrite) for item in value)
-    if isinstance(value, dict):
-        rewritten: dict[object, object] = {}
-        changed = False
-        for k, v in value.items():
-            new_k = rewrite(k) if isinstance(k, str) else k
-            new_v = _walk_rewrite_strings(v, rewrite)
-            rewritten[new_k] = new_v
-            if new_k != k or new_v is not v:
-                changed = True
-        if changed:
-            value.clear()
-            value.update(rewritten)
-        return value
-    return value
-
-
 #: Fields whose string content can embed a castxml/clang closure marker --
 #: scoped to the header-derived ABI surface rather than the whole snapshot,
 #: since ELF/PE/Mach-O/DWARF metadata never carry a demangled C++ type
@@ -650,7 +525,20 @@ _LAMBDA_IDENTITY_FIELDS: tuple[str, ...] = (
     "enums",
     "typedefs",
     "typedefs_qualified",
+    "typedef_entity_ids",  # ...and NOT constant_entity_ids: see both fields' own comment.
     "fact_provenance",
+    # ADR-063 Phase 6 (second slice): SemanticIR.occurrences is keyed by
+    # OccurrenceId, which wraps an EntityId whose leaf_name/extra can embed
+    # the identical closure/anonymous-marker spelling `types`/`enums` carry
+    # as a plain field value (both are built from the same
+    # strip_anonymous_type_location() output) -- this walk's own dict
+    # branch now recurses into a dataclass-typed key
+    # (qualified_name_segments_walk.py), which is what makes adding this
+    # field here actually renumber the key, not only CanonicalEntity's own
+    # canonical_spelling value. The first slice's own "not an open question
+    # today only because the map is always empty" note is closed here, now
+    # that a real dump populates it (Codex review, PR #1001).
+    "semantic_ir",
 )
 
 
@@ -687,6 +575,96 @@ def defer_closure_identity_renumbering() -> _Iterator[None]:
         _defer_renumber.active = previous
 
 
+def _lambda_identity_containers_and_strings(
+    snapshot: object,
+) -> tuple[list[object], list[str]] | None:
+    """Collect :data:`_LAMBDA_IDENTITY_FIELDS`' containers and strings, or
+    ``None`` once none mentions ``"(lambda"``/``"(unnamed "`` -- shared with
+    ``storage.snapshot_load_normalization``, an importer of this helper.
+
+    Deliberately does NOT look at ``semantic_ir_conflicts`` -- see
+    :func:`_conflict_only_marker_strings` for why.
+    """
+    containers = [getattr(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
+    strings: list[str] = []
+    for container in containers:
+        _collect_strings(container, strings)
+    markers = ("(lambda", "(unnamed ", "(anonymous ")
+    if not any(m in s for s in strings for m in markers):
+        return None
+    return containers, strings
+
+
+def _has_any_marker(strings: _Iterable[str]) -> bool:
+    markers = ("(lambda", "(unnamed ", "(anonymous ")
+    return any(m in s for s in strings for m in markers)
+
+
+def _conflict_only_marker_strings(snapshot: object) -> list[str]:
+    """Decode every ``semantic_ir_conflicts`` value's real string
+    component(s), for :func:`_extend_ordinals_with_conflict_only_markers`
+    to consult only -- NEVER folded into
+    :func:`_lambda_identity_containers_and_strings`'s own pool (Codex
+    review, PR #1001, sixth then seventh round). A hybrid conflict's
+    discarded spelling can be the ONLY place a closure/anonymous marker
+    appears at all, so it still needs an ordinal -- but
+    :func:`collect_anonymous_type_ordinals` numbers a ``(marker, header)``
+    group by SORTED source position, so mixing a conflict-only coordinate
+    straight into that pool would insert it wherever it sorts and shift
+    every later REAL declaration's ordinal: whether a backend disagreement
+    happens to exist between two otherwise-identical snapshots would then,
+    on its own, relabel real closures and manufacture spurious removals/
+    additions in a comparison. Assigned separately instead, as a pure
+    continuation that never touches an already-assigned real ordinal.
+    """
+    conflicts = getattr(snapshot, "semantic_ir_conflicts", None)
+    if not conflicts:
+        return []
+    from .model.semantic_ir import conflict_value_strings
+
+    strings: list[str] = []
+    for value in conflicts.values():
+        strings.extend(conflict_value_strings(value))
+    return strings
+
+
+def _extend_ordinals_with_conflict_only_markers(
+    ordinals: dict[tuple[str, str, int, int], int],
+    conflict_strings: _Iterable[str],
+) -> None:
+    """Assign an ordinal, in place in *ordinals*, to a marker coordinate
+    that appears ONLY inside a hybrid conflict's discarded value.
+
+    Each new ``(marker, header)`` coordinate is appended AFTER every
+    ordinal that group already has (``max(existing) + 1``, continuing in
+    ascending ``(line, col)`` order among the new coordinates only) --
+    never inserted into the same sorted sequence real declarations were
+    numbered from (see :func:`_conflict_only_marker_strings` for why). A
+    coordinate matching an existing entry (the conflict names the literal
+    same closure a retained declaration does) needs no new entry -- the
+    existing lookup already covers it.
+    """
+    new_coordinates: dict[tuple[str, str], set[tuple[int, int]]] = {}
+    for text in conflict_strings:
+        for match in _anon_type_ordinal_matches(text):
+            coordinate_key = (match.marker, match.header, match.line, match.col)
+            if coordinate_key in ordinals:
+                continue
+            group_key = (match.marker, match.header)
+            new_coordinates.setdefault(group_key, set()).add((match.line, match.col))
+
+    for (marker, header), coords in new_coordinates.items():
+        existing_ordinals = [
+            ordinal
+            for (m, h, _line, _col), ordinal in ordinals.items()
+            if m == marker and h == header
+        ]
+        next_ordinal = (max(existing_ordinals) if existing_ordinals else 0) + 1
+        for line, col in sorted(coords):
+            ordinals[(marker, header, line, col)] = next_ordinal
+            next_ordinal += 1
+
+
 def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     """Replace each castxml/clang closure marker's ``:<line>:<col>``
     discriminator with a stable ordinal among same-header, same-kind
@@ -704,42 +682,69 @@ def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     ``getattr(snapshot, field)`` rather than importing ``AbiSnapshot``, to
     keep this module import-free -- see its own docstring.
 
-    Known, accepted residual (Codex review, fresh evidence): a snapshot
-    written by a version of abicheck *older* than this function's own
-    introduction never carries an ordinal-form marker, and a reader
-    *older* than this function that later loads a snapshot written by a
-    *newer* abicheck (which already carries the ordinal form) has no code
-    path that renumbers it back -- ``serialization.SCHEMA_VERSION`` was not
-    bumped for this representation change, so that older reader has no
-    signal that the identity format it's comparing against differs from
-    what its own dumper would have produced. The reverse direction (an
-    older-format on-disk baseline compared by a current reader) is closed
-    by ``snapshot_from_dict``'s unconditional renumber-on-load. Closing
-    this direction too needs a real schema bump, which ripples into
-    ``docs/`` (the doc-count-sync AI-readiness check) and every test
-    fixture pinning the current schema version -- a real, separate change,
-    not folded into this fix.
+    The marker regex requires the stripped spelling, never a raw
+    ``(lambda at <path>:<line>:<col>)`` one --
+    ``storage.snapshot_load_normalization`` strips it first on load.
+
+    Known, accepted residual (Codex review, fresh evidence): a reader
+    *older* than this function that loads a snapshot written by a *newer*
+    abicheck (already in ordinal form) has no code path renumbering it
+    back -- ``serialization.SCHEMA_VERSION`` was not bumped for this
+    representation change, so that older reader has no signal the identity
+    format differs from what its own dumper would produce. The reverse
+    direction (an older-format baseline, current reader) is closed by the
+    strip-then-renumber load path above; closing this one too needs a real
+    schema bump, rippling into ``docs/`` and every fixture pinning the
+    schema version -- separate, not folded into this fix.
 
     A no-op, returning *snapshot* untouched, inside
     :func:`defer_closure_identity_renumbering`'s context.
     """
     if getattr(_defer_renumber, "active", False):
         return snapshot
-    containers = [getattr(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
-    strings: list[str] = []
-    for container in containers:
-        _collect_strings(container, strings)
-    if not any("(lambda" in s or "(unnamed " in s for s in strings):
+    collected = _lambda_identity_containers_and_strings(snapshot)
+    conflict_strings = _conflict_only_marker_strings(snapshot)
+    if collected is None and not _has_any_marker(conflict_strings):
         return snapshot
+    containers, strings = collected if collected is not None else ([], [])
     ordinals = collect_anonymous_type_ordinals(strings)
+    # Extended AFTER real ordinals are assigned, and never mixed into their
+    # own coordinate pool -- see _conflict_only_marker_strings()'s own
+    # docstring for why a conflict-only marker must never participate in
+    # the sorted numbering real, retained declarations get.
+    _extend_ordinals_with_conflict_only_markers(ordinals, conflict_strings)
     if not ordinals:
         return snapshot
 
     def _rewrite(text: str) -> str:
         return apply_anonymous_type_ordinals(text, ordinals)
 
+    # ADR-063 Phase 6 (second slice, Codex review, PR #1001): captured
+    # BEFORE the generic walk below replaces `semantic_ir`'s own keys --
+    # `semantic_ir_conflicts`' packed keys can't be fixed up by the same
+    # in-place text rewrite (see `model.semantic_ir.renumber_conflict_keys`'
+    # own docstring for exactly why: it would corrupt the packed length
+    # prefix), so this needs the old/new OccurrenceId pairing instead.
+    old_semantic_ir = getattr(snapshot, "semantic_ir", None)
+    old_occurrence_ids = (
+        list(old_semantic_ir.occurrences) if old_semantic_ir is not None else None
+    )
+
     for field_name, container in zip(_LAMBDA_IDENTITY_FIELDS, containers):
         new_container = _walk_rewrite_strings(container, _rewrite)
         if new_container is not container:
             setattr(snapshot, field_name, new_container)
+
+    conflicts = getattr(snapshot, "semantic_ir_conflicts", None)
+    new_semantic_ir = getattr(snapshot, "semantic_ir", None)
+    if old_occurrence_ids is not None and conflicts and new_semantic_ir is not None:
+        # Local import: this module is otherwise import-free (its own
+        # docstring) precisely so it stays cheaply importable from broad,
+        # early contexts -- confined to this rare (real conflicts + a real
+        # marker present at all) branch rather than paid by every caller.
+        from .model.semantic_ir import renumber_conflict_keys
+
+        renumber_conflict_keys(
+            conflicts, old_occurrence_ids, new_semantic_ir, rewrite_value=_rewrite
+        )
     return snapshot

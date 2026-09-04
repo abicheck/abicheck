@@ -32,13 +32,14 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from ..errors import SnapshotError
+from . import pack_io
 from .pack import BuildSourcePack
 
 
 def load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:
     """Load a classic :class:`BuildSourcePack`, or raise ``SnapshotError``."""
     try:
-        return BuildSourcePack.load(evidence_dir)
+        return pack_io.load(evidence_dir)
     except (FileNotFoundError, ValueError) as exc:
         raise SnapshotError(f"Invalid evidence pack at {evidence_dir}: {exc}") from exc
 

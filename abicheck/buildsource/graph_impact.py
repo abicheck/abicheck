@@ -41,10 +41,11 @@ from .call_graph import (
     RESOLUTION_OVERAPPROX,
 )
 from .graph_facts import CONF_HIGH
-from .source_graph import PUBLIC_VISIBILITIES
+from .source_graph_query import PUBLIC_VISIBILITIES
 
 if TYPE_CHECKING:
-    from .source_graph import GraphEdge, GraphNode, SourceGraphSummary
+    from ..model.graph_facts import GraphEdge, GraphNode
+    from ..model.source_graph import SourceGraphSummary
 
 
 def structured_proof_path(

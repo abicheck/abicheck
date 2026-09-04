@@ -45,16 +45,20 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from .diff_cxx_rules import itanium_scope_components
+# Canonical definition moved to ``extract.headers.clang.templates`` (ADR-061
+# Phase 5 item 1): that package's own ``build_specialization_index`` and its
+# sibling `_index_template_param_*` walks need this constant, and `extract`
+# may not import `diff_cxx_rules` (classified `compare`) -- so the constant
+# now lives on the side that CAN be imported from unconditionally, and this
+# module reads it back, keeping this as the ONE definition (never two
+# independently-drifting copies) the same way ``dumper_clang.py``'s own
+# ``_ClangAstParser._walk`` already did before this move. (The
+# ``itanium_scope_components`` import below no longer needs this same
+# workaround -- ADR-061 D1 moved it to ``model/mangled_name.py``, which any
+# layer may import.)
+from .extract.headers.clang.templates import _SCOPE_NODE_KINDS as _SCOPE_NODE_KINDS
+from .model.mangled_name import itanium_scope_components
 
-#: Decl contexts we descend into, tracking the enclosing scope name so a
-#: namespace/class-qualified constant key is built (``ns::C::kLimit``).
-#: Shared with ``dumper_clang._ClangAstParser._walk``'s own public-surface
-#: qualified-name building (imported back from there) — kept as ONE
-#: definition rather than two independently-drifting copies.
-_SCOPE_NODE_KINDS = frozenset(
-    {"NamespaceDecl", "CXXRecordDecl", "RecordDecl", "LinkageSpecDecl"}
-)
 #: Literal node kinds whose ``value`` is a stable, human-meaningful constant.
 _LITERAL_NODE_KINDS = frozenset(
     {
@@ -326,7 +330,7 @@ def _specialization_scope_key(node: dict[str, Any]) -> str:
     changed).
 
     Fixed via the SCOPE portion of a representative member's mangled name
-    (:func:`diff_cxx_rules.itanium_scope_components`), e.g.
+    (:func:`model.mangled_name.itanium_scope_components`), e.g.
     ``_ZN1AIiE5VALUEE`` -> ``["AIiE", "VALUE"]``: dropping the trailing leaf
     leaves ``["AIiE"]``, identical regardless of which member contributed
     it. Tries every child until one parses -- a special member/operator's

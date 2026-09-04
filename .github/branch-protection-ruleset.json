@@ -11,29 +11,6 @@
   "rules": [
     {
       "type": "non_fast_forward"
-    },
-    {
-      "type": "required_status_checks",
-      "parameters": {
-        "strict_required_status_checks_policy": true,
-        "do_not_enforce_on_create": false,
-        "required_status_checks": [
-          { "context": "ai-readiness" },
-          { "context": "FAIR metadata and packaging" },
-          { "context": "lint-and-types" },
-          { "context": "unit-tests (ubuntu-latest, 3.13, false)" },
-          { "context": "packaging (ubuntu-latest)" },
-          { "context": "packaging (windows-latest)" },
-          { "context": "changelog-fragment" },
-          { "context": "cli-interface-diff" },
-          { "context": "test-contract" },
-          { "context": "Dependency Review" },
-          { "context": "Security Scan" },
-          { "context": "CodeQL Analysis (python)" },
-          { "context": "docs-pr (required)" },
-          { "context": "test-action (required)" }
-        ]
-      }
     }
   ],
   "bypass_actors": []

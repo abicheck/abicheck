@@ -18,8 +18,13 @@
 
 Reads each snapshot's raw JSON directly (not through abicheck's AbiSnapshot
 model) so this script has no dependency on abicheck's internal schema beyond
-a handful of top-level, long-stable keys -- the same defensive-.get()
-philosophy abicheck/buildsource/CLAUDE.md documents for its own dataclasses.
+a handful of long-stable keys -- the same defensive-.get() philosophy
+abicheck/buildsource/CLAUDE.md documents for its own dataclasses. Since
+ADR-062/063 Phase 8 those keys are no longer at the document's top level by
+default (a real dump now writes storage.sectioned_document's envelope);
+`_read_snapshot_meta` unwraps it via that module's own public
+`is_sectioned_document`/`from_sectioned_document` before reading anything,
+which is the one place this script does depend on an abicheck import.
 
 A baseline-set is *not* self-describing from a version number alone (see
 docs/use/baseline-management.md#baseline-identity-is-more-than-a-version-number):
@@ -96,8 +101,21 @@ def _read_snapshot_meta(path: Path) -> dict[str, Any]:
     # dependency on abicheck.snapshot_io) to keep this module's own import
     # surface exactly what its docstring documents.
     from abicheck.snapshot_io import detect_snapshot_compression, read_snapshot_bytes
+    from abicheck.storage.sectioned_document import (
+        from_sectioned_document,
+        is_sectioned_document,
+    )
 
     raw = json.loads(read_snapshot_bytes(path).decode("utf-8"))
+    # ADR-062/063 Phase 8 (redesign, Codex review, fresh evidence): a real
+    # dump now writes storage.sectioned_document's envelope by default, so
+    # library/version/git_*/build_source/dump_provenance -- everything this
+    # function reads below except schema_version, which the envelope still
+    # keeps at top level -- are nested under "sections", not top-level keys
+    # of `raw` itself. Unwrap first so every .get() below (and the
+    # stable-content hash) still sees the flat shape they're written against.
+    if is_sectioned_document(raw):
+        raw = from_sectioned_document(raw)
     compression = detect_snapshot_compression(path).value
     # Hash the snapshot with volatile fields removed, not the raw file
     # bytes: dumper.py/collect-facts stamp several fields fresh on every run

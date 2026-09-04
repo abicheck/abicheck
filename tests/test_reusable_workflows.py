@@ -810,6 +810,7 @@ class TestPreCheckOperationalErrorReport:
             "MATRIX_PROFILE_ID": "linux-x86_64",
             "MATRIX_BASELINE_CHANNEL": "accepted-main",
             "MATRIX_REQUESTED_DEPTH": "headers",
+            "MATRIX_EXPLICIT_ID": "",
             "MATRIX_GATE_MODE": "deferred",
             "PROJECT": "abicheck/abicheck",
             "HEAD_SHA": "deadbeef",

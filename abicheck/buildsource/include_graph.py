@@ -31,17 +31,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .. import deadline
-from .source_graph import (
-    CONF_HIGH,
-    GraphEdge,
-    GraphNode,
-    _header_node_id,
-    _source_node_id,
-)
+from ..model.graph_facts import CONF_HIGH, GraphEdge, GraphNode
+from ..model.source_graph import _header_node_id, _source_node_id
 
 if TYPE_CHECKING:
+    from ..model.source_graph import SourceGraphSummary
     from .build_evidence import BuildEvidence
-    from .source_graph import SourceGraphSummary
 
 
 #: Flags (with their value argument) that must be stripped before re-driving a

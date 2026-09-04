@@ -56,7 +56,6 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     _merge_pick_base as _merge_pick_base,
     _merge_print_summary as _merge_print_summary,
     _optional_coverage as _optional_coverage,
-    _purge_external_outputs as _purge_external_outputs,
     _resolve_side_pack as _resolve_side_pack,
     _run_adapters as _run_adapters,
     _run_external_extractors as _run_external_extractors,
@@ -64,6 +63,7 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     diff_embedded_build_source as diff_embedded_build_source,
     parse_from_specs as parse_from_specs,
     prepare_embedded_build_source as prepare_embedded_build_source,
+    purge_external_outputs as purge_external_outputs,
 )
 from .errors import SnapshotError, ValidationError
 
@@ -127,7 +127,9 @@ def embed_build_source(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             defer_cleanup=defer_cleanup,
-            on_warning=None if quiet else (lambda message: click.echo(message, err=True)),
+            on_warning=None
+            if quiet
+            else (lambda message: click.echo(message, err=True)),
         )
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -286,9 +288,7 @@ def _missing_requested_evidence_layers(
     return missing
 
 
-def build_source_already_satisfies(
-    snap: AbiSnapshot, collect_mode: str
-) -> bool:
+def build_source_already_satisfies(snap: AbiSnapshot, collect_mode: str) -> bool:
     """True when *snap* already carries every layer *collect_mode* asks for.
 
     The idempotence predicate behind :func:`_write_snapshot_output`'s
@@ -376,6 +376,13 @@ def _write_snapshot_output(
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
+    ADR-062/ADR-063 Phase 8 (redesign): every snapshot this function writes
+    -- to `-o`/`--output` or stdout -- is the single-file, D8-sectioned
+    shape (`storage.sectioned_document`, wired in at `write_snapshot_payload`
+    below and at the stdout `json.dumps` call), not a separate opt-in
+    package. `snapshot_from_dict` transparently reads either the new
+    sectioned shape or an older flat `.abi.json` a prior build wrote.
+
     When *build_info* and/or *sources* are given, their normalized L3/L4/L5 facts
     are collected (inline from a source tree / build dir, or loaded from a pack
     directory) and embedded in the snapshot first (single-artifact UX) so a later
@@ -433,13 +440,19 @@ def _write_snapshot_output(
         build_source_already_satisfies(snap, collect_mode)
     ):
         from .cli_buildsource import embed_build_source
+
         embed_build_source(
-            snap, build_info, sources,
-            build_config=build_config, allow_build_query=allow_build_query,
+            snap,
+            build_info,
+            sources,
+            build_config=build_config,
+            allow_build_query=allow_build_query,
             collect_mode=collect_mode,
-            build_query=build_query, build_compile_db=build_compile_db,
+            build_query=build_query,
+            build_compile_db=build_compile_db,
             build_targets=build_targets,
-            extractor=extractor, clang_bin=clang_bin,
+            extractor=extractor,
+            clang_bin=clang_bin,
             public_headers=tuple(str(p) for p in public_headers),
             public_header_dirs=tuple(str(p) for p in public_header_dirs),
         )
@@ -492,6 +505,7 @@ def _write_snapshot_output(
     # --sources/--build-info embed, so both fact sources combine).
     if inputs_pack is not None:
         from .cli_buildsource_merge import embed_inputs_pack
+
         embed_inputs_pack(snap, inputs_pack, output)
     # CLI-audit P1: an *explicitly* requested --depth that was not actually
     # reached is a hard failure, not a warning — see
@@ -499,6 +513,7 @@ def _write_snapshot_output(
     # embed step above has had its chance to fill in build_source.
     check_requested_depth_satisfied(depth, snap)
     from .workflows.extraction import resolve_dependency_scope
+
     snap = resolve_dependency_scope(snap, include_dependencies, header_roots)
     # ADR-059: one payload dict, one JSON encode -- previously this built a
     # full JSON *string* via snapshot_to_json(), then fold_dump_provenance_
@@ -515,7 +530,13 @@ def _write_snapshot_output(
     else:
         import json
 
-        click.echo(json.dumps(payload, indent=2))
+        from .serialization import SCHEMA_VERSION
+        from .workflows.storage import to_sectioned_document
+
+        sectioned = to_sectioned_document(
+            payload, max_known_schema_version=SCHEMA_VERSION
+        )
+        click.echo(json.dumps(sectioned, indent=2))
 
 
 def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
@@ -523,10 +544,12 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
     CLI's error contract.
 
     The Tier-2 pipeline signals a bad request as
-    :class:`~abicheck.errors.ValidationError`; a Click front end owes the user
-    a ``UsageError`` (exit 64) instead. Translated here, at the boundary,
-    rather than inside the pipeline — the same Tier-1/Tier-2 separation
-    ``embed_side_build_source`` observes in the other direction.
+    :class:`~abicheck.errors.ValidationError` or, since ADR-063 Phase 4's
+    pre-flight `AnalysisPlan` check, :class:`~abicheck.errors.PlanningError`;
+    a Click front end owes the user a ``UsageError`` (exit 64) for either
+    instead. Translated here, at the boundary, rather than inside the
+    pipeline — the same Tier-1/Tier-2 separation ``embed_side_build_source``
+    observes in the other direction.
 
     Worth being explicit about what this can newly reject on the ``--dry-run``
     path, since that path's own contract is "never raises on anything but a
@@ -545,16 +568,18 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
     (`IMPORT_CYCLE_ALLOWLIST` in `scripts/check_ai_readiness.py`), which
     `cli_buildsource` already is.
     """
-    from .errors import ValidationError
+    from .errors import PlanningError, ValidationError
     from .service_dump_pipeline import resolve_dump_request
 
     try:
         return resolve_dump_request(request)
-    except ValidationError as exc:
+    except (ValidationError, PlanningError) as exc:
+        # PlanningError (ADR-063 Phase 4) is a bad-input combination, the
+        # same usage-error contract as ValidationError.
         raise click.UsageError(str(exc)) from exc
 
 
-# ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────
+# ── Back-compat re-export shims (lazy) ─────────────────────────────────────
 # `_load_source_graph` / `_resolve_symbol_from_report` historically lived here
 # (re-exported from `cli_buildsource_helpers`, like the block above). They moved
 # to `cli_graph` when the `graph` command group was extracted. A *static*
@@ -567,10 +592,29 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
 # from `cli_graph` directly.
 _GRAPH_REEXPORTS = frozenset({"_load_source_graph", "_resolve_symbol_from_report"})
 
+# `_purge_external_outputs` was `cli_buildsource_helpers._purge_external_outputs`
+# (a private helper, but one this module has always re-exported "for API
+# stability / tests" per AGENTS.md's "Moving helpers out of a module that
+# re-exports them?" guidance) before it moved to `buildsource/pack_shape.py`
+# as the public `purge_external_outputs` (ADR-061). Resolved the same lazy
+# way as the `cli_graph` names above -- not because of an import cycle here,
+# but so this compatibility path keeps tracking whatever
+# `cli_buildsource_helpers.purge_external_outputs` currently resolves to
+# (including a test's `monkeypatch.setattr` on that name) rather than
+# freezing a snapshot of it at this module's own import time the way a plain
+# assignment would (Codex review).
+_HELPERS_REEXPORTS = frozenset({"_purge_external_outputs"})
+
 
 def __getattr__(name: str) -> Any:
     if name in _GRAPH_REEXPORTS:
         import importlib
 
         return getattr(importlib.import_module("abicheck.cli_graph"), name)
+    if name in _HELPERS_REEXPORTS:
+        import importlib
+
+        return importlib.import_module(
+            "abicheck.cli_buildsource_helpers"
+        ).purge_external_outputs
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

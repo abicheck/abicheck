@@ -935,6 +935,7 @@ def _collect_build_source_evidence(
     input (mirroring what standalone `collect` used to produce), call that same
     inline collector directly and write its result to *out_dir*.
     """
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.inline import collect_inline_pack
 
     extractor = str(entry.get("source_abi_extractor", "castxml"))
@@ -976,7 +977,7 @@ def _collect_build_source_evidence(
         if pack is None:
             return None, None, f"collect {side} failed: no build/source evidence collected"
         pack.root = out_dir
-        pack.write()
+        pack_io.write(pack)
         results.append(out_dir)
     return results[0], results[1], None
 

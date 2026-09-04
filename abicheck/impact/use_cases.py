@@ -81,7 +81,7 @@ from ..buildsource.graph_facts import (
 from ..errors import UseCaseManifestError
 
 if TYPE_CHECKING:
-    from ..buildsource.source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
 # USE_CASE_NODE_KINDS/USE_CASE_EDGE_KINDS are re-exported (imported above)
 # from buildsource.graph_facts, the leaf that owns the whole graph vocabulary
@@ -369,7 +369,7 @@ def _public_entry_index(library_graph: SourceGraphSummary) -> dict[str, str]:
     (two distinct declarations sharing a label with no mapping edge joining
     them) is still treated as ambiguous.
     """
-    from ..buildsource.source_graph import PUBLIC_VISIBILITIES
+    from ..buildsource.source_graph_query import PUBLIC_VISIBILITIES
 
     def is_public(node: GraphNode) -> bool:
         if node.kind == "binary_symbol":
@@ -539,7 +539,7 @@ def build_use_case_graph(
     library graph to resolve against, so there is nothing to fail to
     resolve.
     """
-    from ..buildsource.source_graph import SourceGraphSummary
+    from ..model.source_graph import SourceGraphSummary
 
     entries = _public_entry_index(library_graph)
     node_by_id = {n.id: n for n in library_graph.nodes}
@@ -631,7 +631,7 @@ def join_use_case_graph(
     reason ``join_consumer_graph`` keeps them unchanged: a declared use case
     is not a source-extraction pass, and rewriting those flags would make
     the library's own coverage honesty describe a pass that never ran.
-    Deliberately not :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.finalize`\\ d
+    Deliberately not :meth:`~abicheck.model.source_graph.SourceGraphSummary.finalize`\\ d
     either, for the same transient-graph reason.
 
     Restores every already-existing node's own ``provenance``/``confidence``
@@ -670,7 +670,7 @@ def join_use_case_graph(
     ``compare``/report pipeline yet, per this file's own module docstring),
     so this fix is correct for every real code path that exists right now.
     But a *future* caller that merges this joined graph's nodes into another
-    graph via :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.add_node`
+    graph via :meth:`~abicheck.model.source_graph.SourceGraphSummary.add_node`
     again, or round-trips it through ``to_dict()``/``from_dict()``, would
     re-trigger the same tied-confidence provenance risk this function just
     fixed, since both recompute ``provenance``/``confidence`` fresh from the
@@ -691,17 +691,17 @@ def join_use_case_graph(
     ``docs/contribute/use-case-impact.md``), so a caller following that doc and
     calling ``joined.to_dict()`` on the result is a real, reachable path,
     not a hypothetical future pipeline. ``library_graph`` may already carry
-    a non-empty ``graph_id`` from its own :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.finalize`;
+    a non-empty ``graph_id`` from its own :meth:`~abicheck.model.source_graph.SourceGraphSummary.finalize`;
     left untouched, the deep copy would inherit that same id even though the
     node/edge content just changed, and ``to_dict()`` only recomputes an id
     when the stored value is empty — silently describing this join's
     different content under the library graph's own unrelated id, which
     could corrupt a content-addressed cache or an identity comparison keyed
     on it. Clearing (rather than eagerly recomputing via
-    :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.compute_graph_id`)
+    :meth:`~abicheck.model.source_graph.SourceGraphSummary.compute_graph_id`)
     matches this function's own choice to leave the rest of ``finalize()``'s
     output (``coverage``/etc.) untouched — the join result is still not
-    :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.finalize`\\ d,
+    :meth:`~abicheck.model.source_graph.SourceGraphSummary.finalize`\\ d,
     so an empty id is the honest "not finalized" signal a caller who does
     want one can resolve via ``compute_graph_id()``/``finalize()`` itself.
     """
@@ -766,7 +766,7 @@ def explain_use_case_impact(
     if not wanted or not definitions:
         return {}
 
-    from ..buildsource.source_graph import is_consumer_compiled_public_entry
+    from ..buildsource.source_graph_query import is_consumer_compiled_public_entry
     from ..internal_leak import (
         CALL_GRAPH_TRAVERSAL_POLICY,
         _consumer_compiled_reachability,

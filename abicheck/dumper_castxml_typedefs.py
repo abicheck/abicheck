@@ -13,16 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``_CastxmlParser.parse_typedefs``/``parse_typedefs_qualified`` bodies,
-plus a couple of small, unrelated pure per-element helpers
-(``_extract_contract_attributes``/``_deprecation_marker``) that also moved
-here purely to keep :mod:`abicheck.dumper_castxml` under the AI-readiness
-file-size hard cap (there being no responsibility-package owner for either
-yet is ADR-061's own still-open migration, not a design choice made here —
-see that ADR for the target shape; adding a *new* flat ``dumper_`` sibling
-module is what ``architecture/modules.yaml``'s ``frozen_root_families``
-exists to prevent, so this reuses the one already-allowlisted split-out
-module in this family rather than adding another).
+"""``_CastxmlParser.parse_typedefs``/``parse_typedefs_qualified`` bodies.
+
+``_deprecation_marker`` and ``_extract_contract_attributes`` both moved on
+to :mod:`abicheck.extract.headers.castxml.location` (ADR-061 D9, Codex
+review on PR #939 and PR #940 respectively) once an ``extract``-owned
+entity module needed each — this module, still flat and unmigrated itself,
+is exactly the "legacy sibling" ``abicheck/extract/AGENTS.md`` says a new
+``extract`` module must not reach into the private helpers of. Both are
+re-exported here under their old private names so every existing caller
+(including ``dumper_castxml.py``'s own re-export of them, and the direct
+``from abicheck.dumper_castxml_typedefs import ...`` test imports) is
+unaffected.
 
 Pure functions taking the parser's own bound helper methods (or an
 already-extracted XML attribute string/``Element``) as arguments, never
@@ -32,79 +34,40 @@ the parser class and cannot form an import cycle back into it.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Iterator
 from typing import Any
 from xml.etree.ElementTree import (
     Element,  # type annotation only; parsing uses defusedxml
 )
 
-_CONTRACT_ATTRIBUTE_BASES = frozenset(
-    {
-        "noreturn",
-        "nonnull",
-        "returns_nonnull",
-        "malloc",
-        "format",
-        "format_arg",
-        "alloc_size",
-        "alloc_align",
-        "warn_unused_result",
-        "sentinel",
-        # calling-convention selections — a flip is an ABI change on the
-        # affected targets, reported via the contract-attribute kinds.
-        "cdecl",
-        "stdcall",
-        "fastcall",
-        "thiscall",
-        "regparm",
-        "ms_abi",
-        "sysv_abi",
-        "vectorcall",
-    }
+# Moved to abicheck.extract.headers.castxml.location (ADR-061 D9's "extract
+# owns castxml/clang header-AST entity parsing", Codex review on PR #939):
+# this module is a still-flat, unmigrated `dumper_castxml.py` sibling, and
+# extract/headers/castxml/enums.py needed this exact primitive — reaching
+# back into a private helper here would have been the "don't reach into a
+# flat legacy module's private helpers" violation abicheck/extract/AGENTS.md
+# warns against. Re-exported under its old private name so every existing
+# caller here (and `dumper_castxml.py`'s own `as`-aliased re-export of it)
+# is unaffected.
+from .extract.headers.castxml.location import (
+    _CONTRACT_ATTRIBUTE_BASES as _CONTRACT_ATTRIBUTE_BASES,
+    contract_attributes,
+    deprecation_marker,
 )
 
 
 def _extract_contract_attributes(attributes: str) -> list[str]:
-    """Filter a castxml ``attributes`` string down to contract attributes.
-
-    Returns normalized, sorted tokens with any ``gnu:``/``gnu::`` namespace
-    prefix stripped and argument lists preserved (``nonnull(1)``). Tokens not
-    in the known contract set (``noexcept``, ``final``, …) are ignored.
-    """
-    tokens: set[str] = set()
-    for raw in attributes.split():
-        token = raw
-        for prefix in ("gnu::", "gnu:", "__"):
-            if token.startswith(prefix):
-                token = token[len(prefix) :]
-        token = token.strip("_")
-        base = token.split("(", 1)[0]
-        if base in _CONTRACT_ATTRIBUTE_BASES:
-            tokens.add(token)
-    return sorted(tokens)
+    """Back-compat private alias — see
+    :func:`abicheck.extract.headers.castxml.location.contract_attributes`,
+    this primitive's real home since ADR-061 D9."""
+    return contract_attributes(attributes)
 
 
 def _deprecation_marker(el: Element) -> str | None:
-    """Deprecation message for *el*, or ``None`` if not deprecated.
-
-    castxml's ``GetDeclAttributes`` (``Output.cxx``) always adds a bare
-    ``"deprecated"`` token to the compound ``attributes`` string when
-    ``DeprecatedAttr`` is present, but only emits the dedicated
-    ``deprecation="..."`` XML attribute when the attribute carries a
-    non-empty message. A BARE ``[[deprecated]]``/
-    ``__attribute__((deprecated))`` (no message) therefore has NO
-    ``deprecation`` attribute at all — reading only ``el.get("deprecation")``
-    missed every messageless deprecation (Codex review, PR #582, confirmed
-    against castxml's own source). Falls back to ``""`` (deprecated, no
-    message) when the bare token is present in ``attributes`` instead.
-    """
-    msg = el.get("deprecation")
-    if msg is not None:
-        return msg
-    if re.search(r"\bdeprecated\b", el.get("attributes", "")):
-        return ""
-    return None
+    """Back-compat private alias — see
+    :func:`abicheck.extract.headers.castxml.location.deprecation_marker`,
+    this primitive's real home since ADR-061 D9."""
+    return deprecation_marker(el)
 
 
 def iter_typedef_entries(

@@ -21,6 +21,7 @@ import json
 
 from click.testing import CliRunner
 
+from abicheck.buildsource import pack_io
 from abicheck.buildsource.adapters import CMakeFileApiAdapter, NinjaAdapter
 from abicheck.buildsource.adapters.base import derive_build_options
 from abicheck.buildsource.build_diff import diff_build_evidence
@@ -159,13 +160,13 @@ def test_pack_load_with_build_evidence(tmp_path):
         compile_units=[CompileUnit(id="cu://a", source="a.cpp", language="CXX", standard="c++20")],
         build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)],
     )
-    pack.write()
-    loaded = BuildSourcePack.load(tmp_path / "p")
+    pack_io.write(pack)
+    loaded = pack_io.load(tmp_path / "p")
     assert loaded.build_evidence is not None
     assert loaded.build_evidence.compile_units[0].standard == "c++20"
     # The build evidence contributes an artifact digest to the content hash.
     assert loaded.manifest.artifacts
-    assert loaded.content_hash().startswith("sha256:")
+    assert pack_io.content_hash(loaded).startswith("sha256:")
 
 
 def test_pack_rewrite_removes_stale_build_evidence(tmp_path):
@@ -175,23 +176,23 @@ def test_pack_rewrite_removes_stale_build_evidence(tmp_path):
     first.build_evidence = BuildEvidence(
         compile_units=[CompileUnit(id="cu://a", source="a.cpp", language="CXX", standard="c++20")],
     )
-    first.write()
+    pack_io.write(first)
     assert (root / "build" / "build_evidence.json").is_file()
 
     # Rerun into the same directory producing no build evidence.
     second = BuildSourcePack.empty(root)
     second.build_evidence = None
-    second.write()
+    pack_io.write(second)
     assert not (root / "build" / "build_evidence.json").exists()
-    assert BuildSourcePack.load(root).build_evidence is None
+    assert pack_io.load(root).build_evidence is None
 
 
 def test_pack_to_ref_coverage_summary(tmp_path):
     pack = BuildSourcePack.empty(tmp_path / "p")
     pack.manifest.coverage = [LayerCoverage(layer="L3_build", status=CoverageStatus.PRESENT,
                                             confidence=LayerConfidence.HIGH)]
-    pack.write()
-    ref = pack.to_ref()
+    pack_io.write(pack)
+    ref = pack_io.to_ref(pack)
     assert ref.coverage_summary["L3_build"]["status"] == "present"
 
 
@@ -437,7 +438,7 @@ def _write_pack_from_compile_db(path, cdb):
     pack = BuildSourcePack.empty(path)
     pack.build_evidence = merged if merged.compile_units or merged.build_options else None
     pack.manifest.extractors = extractors
-    pack.write()
+    pack_io.write(pack)
     return pack
 
 

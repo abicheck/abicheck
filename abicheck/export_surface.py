@@ -28,11 +28,18 @@ second domain:
   directory, the Mach-O export trie) -- observed evidence, never a
   header-origin classification;
 - **closure** is the transitive walk over the *raw* record/enum/typedef graph
-  from those roots' signatures, reusing :mod:`abicheck.surface`'s own
-  :func:`~abicheck.surface._walk_type_closure` verbatim so the two domains
+  from those roots' signatures, reusing
+  :func:`~abicheck.policy.public_surface_closure._walk_type_closure` verbatim
+  (ADR-063 Phase 3 D5's public-surface closure walk) so the two domains
   cannot drift apart in how they follow fields, bases, and typedef targets.
-  Only the *seeds* differ, which is precisely the difference ADR-049 D2 draws
-  between the two modes.
+  **Not** a traversal of the persisted ``AbiSnapshot.surface_graph`` --
+  three review rounds found reading that graph unsafe (see
+  ``docs/contribute/known-gaps.md``'s ADR-063 Phase 3 entry), so the shared
+  walk resolves references via
+  :func:`~abicheck.compare.surface_graph.referenced_identifiers_by_node`, a
+  pure function of the snapshot's own current declarations, and never reads
+  ``snap.surface_graph``/``GraphNode.attrs``. Only the *seeds* differ, the
+  difference ADR-049 D2 draws.
 
 No header-origin filtering happens anywhere here: a private-header type
 reached from a real export *is* inside the export closure, and a
@@ -60,6 +67,7 @@ import re
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
+from .compare.surface_graph import referenced_identifiers_by_node
 from .diff_cxx_rules import owner_class_of
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, EnumType, Function, RecordType
@@ -67,7 +75,7 @@ from .name_classification import (
     STDLIB_TYPE_NAMESPACE_PREFIXES,
     is_cxx_runtime_library,
 )
-from .surface import (
+from .policy.public_surface import (
     _IDENT_RE,
     _TYPE_NOISE,
     PublicSurface,
@@ -75,8 +83,8 @@ from .surface import (
     _is_real_type,
     _symbol_keys,
     _type_identifiers,
-    _walk_type_closure,
 )
+from .policy.public_surface_closure import _walk_type_closure
 from .type_reachability import (
     _namespace_suffix_spellings,
     _stripped_signature_spelling,
@@ -91,11 +99,11 @@ class ExportSurface:
     snapshot's full universe, used by a caller to tell "this entity exists and
     is provably not reachable from an export" apart from "this entity is not
     something this snapshot knows about at all" -- the same distinction
-    :class:`~abicheck.surface.PublicSurface` draws with its own ``all_*``
+    :class:`~abicheck.policy.public_surface.PublicSurface` draws with its own ``all_*``
     sets.
     """
 
-    #: Every symbol key (:func:`~abicheck.surface._symbol_keys`: demangled
+    #: Every symbol key (:func:`~abicheck.policy.public_surface._symbol_keys`: demangled
     #: name, mangled name, and the trailing ``::`` segment) of a declaration
     #: whose linker symbol appears in the observed export table.
     export_symbols: set[str] = field(default_factory=set)
@@ -309,7 +317,7 @@ def _linker_identity(name: str, mangled: str) -> str:
     The mangled name, or the plain name when the producer recorded no mangled
     one (a C symbol, or a backend that leaves the field empty; there is no
     other identity to match on). Deliberately **not**
-    :func:`~abicheck.surface._symbol_keys`, whose demangled-name and bare-tail
+    :func:`~abicheck.policy.public_surface._symbol_keys`, whose demangled-name and bare-tail
     aliases exist so a *finding* naming any encoding can be looked up: a
     binary exporting the C symbol ``foo`` while the headers also declare an
     unexported ``ns::foo`` would otherwise match on the bare tail ``"foo"``
@@ -421,7 +429,7 @@ def _seed_export_roots(
     the ``(table, spelling)`` pairs actually matched, and the roots' own
     linker identities.
 
-    Mirrors :func:`~abicheck.surface._seed_public_roots` field for field --
+    Mirrors :func:`~abicheck.policy.public_surface_closure._seed_public_roots` field for field --
     the return/parameter/variable types of every root, plus a method root's
     own enclosing class (a consumer holding an exported method can declare,
     allocate, and inherit that class, so its layout is inside the export
@@ -431,7 +439,7 @@ def _seed_export_roots(
     :data:`~abicheck.model.Visibility.PUBLIC`.
 
     A root's *lookup* keys are still the full
-    :func:`~abicheck.surface._symbol_keys` set, so a finding naming any
+    :func:`~abicheck.policy.public_surface._symbol_keys` set, so a finding naming any
     encoding of a genuine root resolves; only the rootness *decision* is
     narrowed to linker identity.
 
@@ -690,7 +698,7 @@ class _SpellingIndex(NamedTuple):
     #: namespace-suffix and stdlib-stripped form of it.
     nodes_by_spelling: dict[str, frozenset[str]]
     #: Lookup key -> the node identities
-    #: :func:`~abicheck.surface._walk_type_closure` actually reaches through
+    #: :func:`~abicheck.policy.public_surface_closure._walk_type_closure` actually reaches through
     #: it. Exactly the walk's own indexes: a record/enum by its name or bare
     #: ``::`` tail, a typedef by its exact key only.
     nodes_by_walk_key: dict[str, frozenset[str]]
@@ -901,7 +909,7 @@ def _edge_is_unresolved(
     Each ``_IDENT_RE`` token is judged on its own -- a template spelling
     like ``Wrapper<Payload>`` carries two independent edges, and either can
     be the missing one. This does not reuse
-    :func:`~abicheck.surface._type_identifiers`, which flattens a token and
+    :func:`~abicheck.policy.public_surface._type_identifiers`, which flattens a token and
     its bare tail into one set: a qualified token whose bare tail happens to
     be unknown would then look like a second, missing edge.
 
@@ -919,7 +927,7 @@ def _edge_is_unresolved(
     what it will not do is invent a scope the snapshot never recorded.
 
     **Naming a known node is necessary but not sufficient.** The token must
-    also be one :func:`~abicheck.surface._walk_type_closure` could actually
+    also be one :func:`~abicheck.policy.public_surface_closure._walk_type_closure` could actually
     look up, which is a strictly narrower set: the walk resolves a record or
     enum through its own name or bare ``::`` tail, but a *typedef* only
     through its exact key, with no spelling tolerance at all. Registered
@@ -1008,7 +1016,7 @@ def _followed_typedef_aliases(
     """Typedef keys named by *type_str* whose target is worth scanning too.
 
     A token is resolved to the alias key the closure *actually traversed*,
-    via :func:`~abicheck.surface._type_identifiers` -- the same function the
+    via :func:`~abicheck.policy.public_surface._type_identifiers` -- the same function the
     walk queues from -- rather than matched against ``snap.typedefs``
     literally (Codex review, confirmed empirically). The direct-clang
     backend stores a typedef under its bare ``node["name"]`` (the
@@ -1164,7 +1172,7 @@ def _unresolved_type_edges(
             continue
         for f in rec.fields:
             scan(f.type)
-        for base in (*rec.bases, *rec.virtual_bases):
+        for base in (*rec.resolved_bases(), *rec.resolved_virtual_bases()):
             scan(base)
     return frozenset(unresolved)
 
@@ -1183,7 +1191,8 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
 
     # A `PublicSurface` is used purely as the scratch structure
     # `_index_surface_types`/`_walk_type_closure` already know how to fill --
-    # reusing surface.py's own indexing and closure walk verbatim, rather
+    # reusing policy/public_surface.py's own indexing and
+    # policy/public_surface_closure.py's closure walk verbatim, rather
     # than a second implementation of the same graph traversal that could
     # drift. Only its type-universe/closure outputs are read back; its
     # public_symbols/origin bookkeeping is header-domain state this domain
@@ -1203,8 +1212,9 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     # minimal snapshot: `export_types` came back empty while
     # `exclusion_is_provable` was true). Adding each record's
     # `qualified_name` to this *local* index gives every such record an exact
-    # handle. Deliberately not done in `surface.py`'s shared indexing: that
-    # index is relied on by every other consumer of the closure walk, and
+    # handle. Deliberately not done in `policy/public_surface.py`'s shared
+    # indexing: that index is relied on by every other consumer of the
+    # closure walk, and
     # AGENTS.md already records its bare-tail lookup as needing its own
     # scoped design rather than a drive-by change. `ambiguous_type_names` is
     # computed above, from the un-augmented index, so these added keys cannot
@@ -1299,7 +1309,10 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         ),
     )
 
-    _walk_type_closure(snap, scratch, record_by_name, enum_by_name, roots.seed_types)
+    refs = referenced_identifiers_by_node(snap)
+    _walk_type_closure(
+        refs, snap, scratch, record_by_name, enum_by_name, roots.seed_types
+    )
     surface.export_types = set(scratch.public_types)
     # After the walk, so only edges the closure actually reached are scanned.
     surface.unresolved_type_edges = _unresolved_type_edges(

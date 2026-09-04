@@ -72,11 +72,17 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > block PR B closing.
 > **PR 0B/P0 is still the single outstanding item with no code-side gap
 > left** — see its status note below for the ready-to-apply Ruleset
-> artifact this pass added. PR C (typed dump/scan convergence) remains the
-> largest genuinely unfinished slice; its own section below has the fullest,
-> most current account (it has absorbed a long running series of
-> investigate/fix/revert rounds — read its own text, not this summary, for
-> what is actually closed today).
+> artifact this pass added. **PR C's real ELF run is now migrated** onto
+> `execute_dump_request` — see its own section's closing status note
+> ("Slice landed: the real ELF run is migrated") for the account; the
+> section's own long investigation history above that note remains as the
+> record of why this was not attempted sooner. **Update (2026-09-01, PR
+> #980): PR C's PE/Mach-O half (`handle_non_elf_dump`) is migrated too**
+> — see that section's own "Update (2026-09-01, PR #980)" paragraph for
+> the account; verified only via mock-based CLI/unit tests, no real
+> PE/Mach-O toolchain was available to verify against. PR F/3C's removal
+> is no longer blocked on this half specifically, per 3C's own "all three
+> resolvers" ordering rule (its own section).
 >
 > **Update (2026-08-16, later the same day).** PR G1 (canonical `ExitDecision`
 > + report block) landed as [#789](https://github.com/abicheck/abicheck/pull/789)
@@ -89,6 +95,25 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > release fan-out rejected `--pack` outright). See PR B's own section below for
 > what this slice closed and what is still open (`gate.*` pack fields on
 > release/scan, and the effective-config digest in every report).
+>
+> **Update (2026-09-01, external re-review, `main` at `94be22ad`, recorded
+> against `2598d0d`).** The re-review's finding is a re-prioritization, not a
+> new deletion candidate: the dominant risk is no longer surface size but
+> **one user question getting different semantics per input form** — and the
+> largest new instance is `compare --old-bundle-facts` (G38 Phase 17), a
+> second compare engine behind the same command name, with ~20 flags
+> fail-closed-rejected and a legacy verdict-to-exit mapping instead of
+> `ExitDecision`. Two new entries join the Ordering block (PR I: operand
+> classification + one `BundleCompareRequest`, then delete
+> `--old-bundle-facts`; PR J: bundle topology out of CLI flags), plus
+> `--max-json-object-nodes` recorded as a temporary escape hatch rather than
+> a stable concept. Everything else the pass raised — `--exit-code-scheme`,
+> the `contract=public` default's one remaining unresolved loss, L5
+> source-graph identity migration, dry-run/execution config-discovery
+> parity, the `importlib` architecture-gate workaround, PR 0B governance —
+> is already tracked here and is re-confirmed still open. Two of its items
+> were already fixed in `94be22ad..2598d0d` and are corrected rather than
+> re-opened. Full account: **"Review checkpoint (2026-09-01)"** below.
 
 ## Problem
 
@@ -118,6 +143,11 @@ simplification).
 | `--annotate`, `--annotate-additions` | **Removed** (PR 1b/E — done) | Options on `compare` alone, shared by both operand shapes (no CLI-level split was possible); the release-report persistence prerequisite landed and the flags are deleted — `compare --annotate` now exits `64` with `No such option`; see PR 1b |
 | `dump --build-query`, `dump --build-compile-db` | Remove from CLI | Move to `.abicheck.yml`; only `build.query` (an executable command) needs the explicit-`--config` trust gate — `build.compile_db` is a data path and carries the ordinary dry-run contract only |
 | `aggregate --on-missing-required`, `--on-unexpected-target` | Remove from CLI | Move the policy into the manifest / run-plan schema alongside the expected target set |
+| `compare --old-bundle-facts` (new; G38 Phase 17) | Remove, after operand classification | Detect a stored `BundleFacts` operand from an explicit `artifact_type` marker; one `BundleCompareRequest` over live/live, stored/live, live/stored, stored/stored — see the 2026-09-01 checkpoint |
+| `compare --max-json-object-nodes` (new) | **Keep, as a temporary escape hatch** | Re-express as a resource limit (`--resource-limit memory=…` / `.abicheck.yml` `resources:`); the node budget is an internal decode detail, not a user concept |
+| `compare --bundle-facts-library-manifest` (new; merged #969) | **Keep provisionally** | Real capability (mixed-toolchain bundles); the end state is `bundles: … libraries: … target:` topology referencing existing targets, not a second compile-context manifest format |
+| release `--manifest` | Rename | Collides with `aggregate --manifest` and four other "manifest" concepts — `--abi-manifest` / `--instantiation-manifest` |
+| `--bundle-system-providers`, `--bundle-cohort` | Move to config | Topology belongs in `BundleSpec` / `.abicheck.yml` (joins G42's environment-aware provider resolution) |
 
 Everything above is a **breaking** change to the native CLI. Consistent with
 the #770 cleanup and ADR-037's stance, none of it gets a deprecation alias:
@@ -178,6 +208,21 @@ SHA), which is precisely what item 4 exists to make detectable.
 > a fourth hand-copied one. This closes every part of PR 0B/P0 that can be
 > closed from inside a PR; the ruleset still has to actually be applied and
 > the negative test actually run by an admin before this item is done.
+>
+> **Superseded (2026-09).** The Ruleset described above *was* applied by an
+> admin and did block merges on CI completion, as designed. The maintainer
+> then decided that trade-off isn't wanted going forward — see
+> `.github/AGENTS.md`'s "Required-status-check configuration" section,
+> whose heading now reads "deliberately not enforced" — and reversed both
+> halves of this item: the Ruleset's `required_status_checks` rule was
+> removed (only `non_fast_forward` remains in
+> `.github/branch-protection-ruleset.json`), and `verify-merge-checks.yml`
+> plus its dedicated tests were deleted outright, since an audit that fires
+> on every merge under the new, accepted policy is noise, not a finding.
+> PR 0B/P0 as originally scoped is therefore closed by reversal rather than
+> by completion; this section's history above stays as the record of the
+> design this repo built and later chose not to keep enforcing, and
+> `.github/AGENTS.md` is the up-to-date source for the current policy.
 
 **The required-check list must match `.github/AGENTS.md`'s own required-vs-
 informational classification, not the set of workflow names visible in a run
@@ -577,10 +622,19 @@ gate` now also raises `diff.exit.code` and re-stamps `diff.exit.reasons` to
 a new `ExitReason.PROMOTED_CROSSCHECK` (a scan-only reason;
 `resolve_compare_exit_decision` itself never emits it) whenever a promotion
 actually fires — never lowering, never firing when the existing code already
-dominates. Budget overflow and `NOT_COMPARABLE` remain unmodeled by this
-block, matching `exit_decision.py`'s own explicit scope (no `DiffResult`
-exists for `NOT_COMPARABLE`; budget overflow aborts before a report is
-built) — see that module's own docstring for the reasoning.
+dominates. Budget overflow and `NOT_COMPARABLE` remain unmodeled by *this
+specific block* — `_promote_published_gate` only patches an already-built
+`diff_summary["exit"]`, and the earliest, candidate-collection-stage
+`_BudgetOverflow` still raises before one exists to patch (no `DiffResult`
+exists for `NOT_COMPARABLE` either) — see `exit_decision.py`'s own
+docstring for the reasoning. This is narrower than "budget overflow gets no
+report at all": ADR-064's own status (below) documents the separate,
+minimal abort envelope both the typed API and the native CLI now build for
+every `_BudgetOverflow`/`_EvidenceContractError` abort, late ones included
+— that envelope is not `_promote_published_gate`'s `diff.exit` block, it is
+built by `scan_abort_result_fields`/`cli_scan._emit_scan_abort_report`
+instead, and a *late* budget overflow's prior contributions reach it via
+`attach_prior_on_budget_overflow`, not this crosscheck-promotion path.
 
 **The persistence prerequisite's single-library half is now also landed**
 (schema 2.43): every `compare --format json` report carries a top-level
@@ -2109,6 +2163,62 @@ pipelines a fourth time.
   `scan --against` candidate needs one interpreter, not two, before the flags
   that configure it are removed.
 
+  > **LANDED (2026-09-02): `dump --build-query` and `dump --build-compile-db`
+  > are removed.** Both are now a hard usage error (`No such option`, exit
+  > 64) with no hidden alias; `--build-info`, `--build-target` and
+  > `--compile-db-filter` are untouched, being genuine per-run inputs rather
+  > than project build settings. The replacement is the config form this
+  > section already specified (`build.query` / `build.compile_db` in a file
+  > passed with `--config`), which worked before the removal and is unchanged
+  > by it.
+  >
+  > **The removal simplified the trust model rather than merely relocating
+  > it.** The real gate was `cfg_trusted_for_query = build_config is not None
+  > or build_query is not None` -- a bare `--build-query` on the command line
+  > was a second, independent authorizer for executing an arbitrary command.
+  > With the flag gone the gate has exactly one term, so prerequisites 1 and
+  > 2 ("only an explicitly-passed `--config` may authorize executing
+  > `build.query`"; "an auto-discovered `.abicheck.yml` never executes a
+  > query") are now structural rather than conventional: there is no
+  > command-line-only route to execution at all.
+  > `cli_dump_dry_run_build_query.py` lost its own CLI-override parameters
+  > for the same reason, so the mirrored decision cannot drift from the real
+  > one by a term the real one no longer has.
+  >
+  > Scope note: the *engine/typed-API* `build_query`/`build_compile_db`
+  > parameters (`service_dump_pipeline.run_dump_request`,
+  > `buildsource.embed_build_source`, `l2_seed`) are deliberately kept. They
+  > remain meaningful for a Python API caller -- who is the operator, exactly
+  > as an explicit `--config` is -- and removing them is a public-API change
+  > with its own compatibility question, not part of this CLI removal. What
+  > was removed is the whole CLI-layer thread: the two Click options, the
+  > `dump_cmd` parameters, and their forwarding through
+  > `frontends/cli/dump_execute.py`.
+  >
+  > Tests: `tests/test_dump_build_query_flags_removed.py` (new -- both
+  > spellings exit 64, and no surviving build-evidence flag re-opens the
+  > authorization, asserted over the whole surviving flag surface rather than
+  > one representative, with a `touch pwned` query proving non-execution).
+  > `tests/test_dry_run_build_query_contract.py` migrated: the two tests whose
+  > *subject* was the removed CLI override are deleted (the capability is
+  > gone, so they cannot be rewritten), and every other use of the flag was
+  > scaffolding that either drops out or moves to an explicit `--config` via a
+  > new `_explicit_config` helper. Verified end to end against a real
+  > g++-compiled library: an auto-discovered config reports "will NOT run ...
+  > pass --config to authorize it", an explicit `--config` reports the exact
+  > argv, cwd and resulting compile-DB path, and neither executes anything.
+  >
+  > **One ordering caveat, stated rather than glossed:** this entry's own
+  > "all three resolvers converge" rule is satisfied for item 1 (closed by PR
+  > C, ELF and PE/Mach-O alike) but only *partly* for item 2 -- a **named**
+  > L4 backend now resolves identically everywhere (PR #990), while `auto`
+  > still resolves to clang on `scan` and castxml on `dump`/`compare`. That
+  > residue is a frontend-selection divergence, not a `build.query`/
+  > `build.compile_db` interpretation one: the two flags removed here are
+  > interpreted by a single path either way, so the removal does not widen
+  > it. It is recorded here so a future reader does not infer from "3C
+  > landed" that item 2 closed.
+
   > **Status (2026-08-21): still blocked — but on a materially shorter list
   > than this note carried earlier the same day.** Blocker 5's three
   > sub-issues and blocker 6 are now closed (see the second 2026-08-21 note
@@ -2119,8 +2229,37 @@ pipelines a fourth time.
   > baseline-reuse rule lives in one shared primitive with an opt-in hook on
   > the shared resolver.
   >
+  > **Update: item 1's `dump`-side half is now closed for ELF.** See PR C's
+  > own section above ("Slice landed: the real ELF run is migrated") — the
+  > real ELF `dump` run now executes through `execute_dump_request`, the
+  > identical shared pipeline `scan`'s candidate resolution already routes
+  > through (that half of item 1 closed earlier, in the 3A sub-section
+  > above). **3C is therefore down to exactly one blocker on item 1**:
+  > `handle_non_elf_dump` (PE/Mach-O) still executes independently — no
+  > PE/Mach-O toolchain was available where the ELF migration was verified,
+  > and this section's own "measure, don't reason" discipline means that
+  > half is not attempted without one. Item 2 (the `scan`-vs-`dump`/
+  > `compare` L4 extractor default divergence) is unchanged, deliberately —
+  > closing item 1 did not require closing item 2, and item 2 stays its own
+  > separate, deferred decision. 3C's removal itself remains blocked until
+  > PE/Mach-O closes item 1 in full, per this entry's own "all three
+  > resolvers" rule.
+  >
+  > **Update (2026-09-01, PR #980): item 1 is now fully closed, PE/Mach-O
+  > included.** `handle_non_elf_dump` no longer executes independently —
+  > it routes through `execute_dump_request` the identical way ELF's real
+  > run and `scan`'s candidate resolution already do (see PR C's own
+  > section above for the account; verified only via mock-based CLI/unit
+  > tests, no PE/Mach-O toolchain was available to verify against a real
+  > binary). **3C's removal is therefore no longer blocked by item 1 at
+  > all — only item 2 (the L4 extractor default divergence, still not
+  > attempted, deliberately) remains open** before this entry's "all three
+  > resolvers" condition is fully satisfied.
+  >
   > **What still blocks the removal**, restated precisely because "3A is not
-  > done" is now too coarse to act on:
+  > done" is now too coarse to act on (numbered list below predates both
+  > updates immediately above; item 1's `dump`-side half, ELF and PE/Mach-O
+  > alike, is superseded by them, not by anything in this list):
   >
   > 1. **Neither real run routes through the shared pipeline yet.** The ELF/
   >    PE/Mach-O `dump` executes through `perform_elf_dump`/
@@ -2136,7 +2275,55 @@ pipelines a fourth time.
   >    `_write_snapshot_output`'s provenance/`--inputs`/depth-gate sequence
   >    around a resolve-time embed.
   > 2. **The L4 extractor default still diverges, in more than one pairing.**
-  >    `scan`'s candidate resolution hardcodes `source_extractor="auto"`
+  >    **Update (2026-09-02): the *named-backend* half is closed; the
+  >    `auto` half below remains.** `scan`'s candidate resolution no longer
+  >    ignores a `--ast-frontend`/`compile.frontend` that names a concrete
+  >    backend: `scan_engine`'s call site now passes
+  >    `service_compare_evidence.explicit_source_extractor(
+  >    compile_context) or "auto"`, and that helper *delegates to*
+  >    `effective_frontend` rather than re-deriving a second resolution, so
+  >    an explicit request cannot resolve to one backend on `scan` and a
+  >    different one on `dump`/`compare` — they agree by construction, not by
+  >    two copies of a rule staying in sync. It answers `None` (leaving
+  >    `scan`'s own `"auto"` in place) for a missing context, an unstated
+  >    `auto`, and `hybrid` — the last because `hybrid` is an L2-only
+  >    dual-backend header-AST mode with no L4 extractor at all, so there is
+  >    nothing to honor; forwarding it would reach `_make_source_extractor`'s
+  >    `skipped` branch, which is `dump`'s behaviour but *not* `scan`'s
+  >    today, and `scan` does not call `reject_hybrid_source_frontend`, so
+  >    that would have been a new divergence rather than a closed one.
+  >    Verified against real castxml + clang + g++: the two long-standing
+  >    xfails in `tests/test_dump_scan_l3_comparability.py`
+  >    (`..._is_comparable_on_unchanged_source[castxml]` and
+  >    `..._matches_reported_cli_invocation[castxml]`) now pass outright,
+  >    `_SCAN_KNOWN_DIVERGENT_FRONTENDS` and its whole xfail-signature
+  >    apparatus are gone, and the exhaustive bucket set that apparatus
+  >    inspected was kept — repurposed into positive `_assert_scan_*_is_clean`
+  >    assertions, which are strictly stronger than the `Verdict: NO_CHANGE`
+  >    check they sit next to. Contract tests for the new primitive:
+  >    `tests/test_explicit_source_extractor_propagation.py` (exhaustive over
+  >    the accepted-spelling x `ABICHECK_AST_FRONTEND` domain against a
+  >    hand-written oracle table, grounded in `_make_source_extractor`, plus a
+  >    fast-lane pin on the `scan_engine` call site itself); registered under
+  >    the `config.propagation_completeness` bug class, whose own known gap
+  >    already named "frontend/compiler as a general per-entry-point concern"
+  >    as untreated.
+  >
+  >    **What is deliberately still open**, and is what the rest of this item
+  >    describes: `auto` itself -- **including an `auto` the user typed out**,
+  >    not just an omitted flag (Codex review, PR #990, reproduced directly:
+  >    `--ast-frontend auto` given to both `dump` and `scan --against` over
+  >    unchanged source still yields `COMPATIBLE_WITH_RISK` /
+  >    `source_fact_coverage_incomplete`, because `dump` resolves `auto` to
+  >    castxml and `scan` to clang). Honoring a *typed* `auto` while an
+  >    omitted one kept clang was considered and rejected as strictly worse:
+  >    the same word would select different backends depending on whether it
+  >    was typed, and `CompileContext.frontend` carries the identical string
+  >    either way (the CLI's typed-vs-default signal exists to rank an
+  >    explicit value above a config one, not to change what the value
+  >    resolves to). The only coherent fix is to make the word mean one thing
+  >    across commands, which is the default change below. `scan`'s candidate
+  >    resolution hardcodes `source_extractor="auto"`
   >    (`embed_build_source`, ignoring whatever `--ast-frontend` scan itself
   >    received), which resolves to clang; `compare`'s implicit-dump operand
   >    and the typed `execute_dump_request` pipeline reach
@@ -2360,6 +2547,61 @@ pipelines a fourth time.
   > byte-identical-output verification, blocked only on castxml before this
   > update, no longer blocked on it either) remains the sole open item in
   > this prerequisite.
+  >
+  > **Re-audited (2026-08-28, later session), no code change, no drift
+  > found.** Re-checked this section's live claims directly against current
+  > `main` rather than trusting the prior notes' status cells: `dump_cmd`'s
+  > real ELF/PE/Mach-O execution still goes through `perform_elf_dump`/
+  > `handle_non_elf_dump`, not `execute_dump_request` (the migration itself
+  > is still unstarted); `scan_engine.py` still hardcodes
+  > `source_extractor="auto"`; `--build-query`/`--build-compile-db`/
+  > `--exit-code-scheme` are all still live CLI options. Nothing in this
+  > section had gone stale.
+  >
+  > **Correction (Codex review, same PR): the castxml-tooling paragraph this
+  > note originally carried here sent an implementer the wrong way and is
+  > replaced rather than kept for history.** It reported `apt`'s castxml
+  > (0.6.3, below the 0.6.11 floor) and a hand-assembled conda-forge 0.7.0
+  > build with an unresolved `libclang-cpp.so.20.1` dependency — both real
+  > observations, but neither needed: this repository already ships a
+  > checksum-pinned installer, `action/install-castxml.sh` (the same one
+  > `.github/actions/setup-castxml` and the CI `integration` lane use), with
+  > a `castxml-ubuntu-24.04-x86_64` asset. Running it in this session's own
+  > Ubuntu 24.04/x86_64 container installed CastXML `0.6.20260105-g9864b1e`
+  > (bundled Clang 21.1.8) in under a minute, no dependency assembly
+  > required, and `castxml_policy.evaluate_castxml_version()` confirms
+  > `supported=True` against its real `--version` output. **Any future note
+  > in this section needing a policy-compliant castxml should run
+  > `action/install-castxml.sh` first, rather than reassembling one from
+  > `apt`/`pip`/conda-forge by hand** — `apt`'s own package genuinely fails
+  > the version floor, and `pip`'s only wheel is far below it too, but
+  > conda-forge itself is not unusable: the 2026-08-27 note below this one
+  > records a working conda-forge 0.7.0 install (`supported=True`), and the
+  > CI `integration` lane's own Windows leg installs castxml from
+  > conda-forge. What actually failed in *this* session was one manual
+  > dependency-assembly attempt (a missing `libclang-cpp.so.20.1` payload
+  > from the obvious conda-forge counterpart package) — not conda-forge as a
+  > source. Either route can work; the pinned installer is just faster and
+  > doesn't require re-solving that dependency split by hand.
+  >
+  > With that installer's castxml on `PATH`, `tests/
+  > test_dump_write_after_resolve_time_embed.py`'s three cases — previously
+  > only exercised under `--ast-frontend clang` per that module's own notes
+  > above, since no working castxml was available in the sessions that wrote
+  > it — now run and pass under the `integration` marker with a real,
+  > policy-compliant castxml present (not re-verified against the *default*
+  > castxml backend specifically, since that suite still pins
+  > `--ast-frontend clang` explicitly rather than exercising an unflagged
+  > `dump`/`execute_dump_request` call; that distinction is unchanged by
+  > this note). `tests/test_dump_scan_l3_comparability.py` was re-run too, as
+  > a reconfirmation rather than a new finding: 4 passed, 2 xfailed — the
+  > same `_SCAN_KNOWN_DIVERGENT_FRONTENDS` signature the fact owner already
+  > documents, not a new or different divergence. Neither run moves the
+  > still-open items: the whole migrated pipeline's byte-identical-output
+  > verification under the default castxml backend, and item 2's L4
+  > extractor default divergence fix, are both untouched — this note only
+  > removes a wrong tooling recipe and confirms the right one works here,
+  > it does not attempt the migration itself.
   >
   > **Item 2 (the L4 extractor default divergence) is now locally
   > reconfirmed under real castxml — but this is a reproduction of an
@@ -2995,6 +3237,174 @@ pipelines a fourth time.
   > This fix removes that decision's main objection (castxml's L4 surface
   > was unsafe to trust), but does not itself change any default.
 
+  > **Slice landed: the real ELF run is migrated.** With item 3's fix
+  > landed (above) and the reordering prerequisite's Flow-2 half closed
+  > (above, "Update (2026-08-28): the Flow-2 half is closed"), the two
+  > remaining named blockers to "the migration itself" — a policy-compliant
+  > castxml, and byte-identical-output verification — are both cleared:
+  > `dump_cmd`'s real ELF branch (`frontends/cli/commands/dump.py`) now
+  > calls `execute_dump_request` directly, retiring `perform_elf_dump` from
+  > this call site (the function itself is unchanged and still defined, in
+  > case another caller depends on it — only `dump_cmd` no longer imports
+  > it). Built on exactly the pieces this section already closed, not a
+  > fresh redesign: the same `DumpRequest` `--dry-run` already resolves
+  > (`_dump_request`), re-pointed at the post-linker-script-following
+  > `so_path` (`resolve_dump_request`'s own `detect_binary_format` call runs
+  > before any such following, so feeding it the pre-follow path risked a
+  > wrong `fmt` for a symlink-to-linker-script input — a fresh
+  > `ResolvedDumpRequest` is built for execution alone, leaving `--dry-run`'s
+  > own, already-tested resolution against the pre-follow path unchanged);
+  > `requested_depth` nulled out on that execution-only copy, so
+  > `execute_dump_request`'s own `enforce_requested_depth` — a differently
+  > worded `ValidationError` than `check_requested_depth_satisfied`'s
+  > `DumpDepthNotSatisfiedError` for the identical condition — never fires,
+  > keeping `_write_snapshot_output`'s own call (unchanged) the sole
+  > enforcement point and its pinned message intact
+  > (`tests/test_depth_vocabulary.py`); and the legacy `-p`/`--compile-db`
+  > auto-match threaded through via `legacy_compile_db_tokens`/
+  > `legacy_compile_db_matched`, the explicit pass-through ADR-063 Phase 1
+  > already built into `execute_dump_request` for exactly this purpose
+  > (its own docstring's precedence rule), rather than a new `InputSpec`
+  > field — the pass-through already reproduces `perform_elf_dump`'s own
+  > `_fold_explicit_gcc_options` unfold-when-the-fold-applies logic, so a
+  > second, dataclass-shaped copy of the same fact would be a second place
+  > for it to drift, not a cleaner one. `_write_snapshot_output`'s own
+  > write-time embed fallback (`build_source_already_satisfies`), depth
+  > gate, Flow-2 `--inputs` fold, and dependency-scope resolution are all
+  > unchanged, called exactly as before with the now-execution-produced
+  > snapshot — the embed itself is the only step this migration actually
+  > moves to resolution time, not the whole write sequence PR 3A's earlier
+  > "reordering" framing worried about; see the root `AGENTS.md`'s own PR C
+  > entry (search "The real ELF `dump` run is migrated") for the precise
+  > account of why that split is safe, including the one structural nuance
+  > that is measured rather than proven in general (the shared pipeline's
+  > own pre-existing double-dependency-scoping, confirmed idempotent for
+  > every shape this migration's own parity suite exercises).
+  >
+  > One real, user-visible default change falls out of the migration:
+  > `dump`'s L4 source-extractor default flips from an accidental **clang**
+  > (`perform_elf_dump` forwarded the bare, unresolved `header_backend`
+  > straight to the write-time embed, which treats anything but the literal
+  > string `"castxml"` as clang) to **castxml** (the shared pipeline's
+  > `effective_frontend`, matching `compare`'s implicit-dump operand, the
+  > typed `DumpRequest` API, and `dump`'s own L2 header-AST default) — safe
+  > now specifically because item 3's castxml L4 phantom-implicit-member fix
+  > landed first; `--ast-frontend clang` recovers the previous default.
+  > **`scan`'s own item 2 divergence (`scan_engine._build_new_snapshot`'s
+  > `source_extractor="auto"` override) is unchanged by this** — it stays
+  > its own separate, deliberately deferred decision, exactly as the
+  > paragraph immediately above already states.
+  >
+  > Verified with real `g++`/clang/castxml (this session's environment has a
+  > policy-compliant castxml on `PATH`, unlike the sessions that wrote most
+  > of this section's history): the full fast unit suite; the
+  > `integration`-marked suite for this area end to end —
+  > `test_dump_cli_typed_api_parity.py` (16 cases; `_CONTRACT_KNOWN_
+  > DIVERGENT_FIELDS` stays empty, i.e. the migrated CLI path and the typed
+  > pipeline now agree on the extraction contract with zero remaining
+  > divergence, for every parametrized real-build shape this module
+  > exercises — the byte-identical-output bar this section's own history
+  > named as the last open item), `test_dump_scan_l3_comparability.py` (2
+  > xfails, the same pre-existing `_SCAN_KNOWN_DIVERGENT_FRONTENDS`
+  > signature item 2 already documents, unchanged), `test_dump_write_after_
+  > resolve_time_embed.py`, `test_dump_embed_idempotence.py` (updated to
+  > count both the write-time embed call site and the new resolve-time one,
+  > since a single-site count can no longer distinguish "moved" from
+  > "doubled"), `test_compile_db_filter_scope.py`, `test_dry_run_contract.py`,
+  > `test_dry_run_build_query_contract.py`, `test_l2_seed_flow2_packs.py`,
+  > `test_scan_adr039_build_context.py`, `test_castxml_l4_phantom_members.py`,
+  > `test_dump_depth_provenance.py`, `test_depth_vocabulary.py` — and
+  > `test_dump_request_from_cli.py`'s own `TestExecutionConsumesTheResolvedPlan`
+  > (updated to spy on `execute_dump_request` instead of the now-retired
+  > `perform_elf_dump` call site). `mypy`/`ruff` clean on every touched
+  > module.
+  >
+  > **What this does not close.** `handle_non_elf_dump` (PE/Mach-O) is
+  > untouched — no PE/Mach-O toolchain was available in this environment to
+  > verify a migration against, and this section's own established
+  > discipline is to measure, not reason, before moving a real-run call
+  > site. PR 3C's removal itself stays blocked on that half per its own
+  > "all three resolvers" ordering rule below, unchanged by this slice. Item
+  > 2 (the `scan`-vs-`dump`/`compare` L4 extractor default divergence) is
+  > unchanged, deliberately.
+
+  > **Update: two real regressions in the migration above, found by review
+  > and fixed before this PR merged.** Both were plain dropped kwargs —
+  > `execute_dump_request`/`_resolve_side_snapshot_impl` already had the
+  > parameters `scan`'s own candidate resolution needs for the identical
+  > purpose, but the migrated ELF call site never passed either:
+  > (1) `seed_collect_mode` was never forwarded, so the L2 include/compile
+  > seed silently ran with the Tier-2 API's own "never execute a build
+  > system as a side effect" pin (`collect_mode="off"`) instead of the CLI's
+  > actually-resolved collect mode — unlike `perform_elf_dump`, which always
+  > forwarded its own resolved `collect_mode`, a `--sources` tree with no
+  > compile database lost its zero-config inferred build query entirely.
+  > (2) `source_frontend_from_folded_context` was never passed, so L4 source
+  > replay kept selecting its compiler from the pre-fold context instead of
+  > the L3 build-context fold's own match — unlike `perform_elf_dump`, which
+  > always reassigned `gcc_path`/`gcc_prefix` from the folded context once
+  > it applied, a project whose real compiler (clang-cl, a prefixed
+  > cross-compiler, one named only in a compile database) is discovered
+  > only through that fold could replay source with the wrong driver.
+  > Fixed by threading both through `execute_dump_request`'s own new
+  > `seed_collect_mode`/`source_frontend_from_folded_context` parameters
+  > (mirroring the existing pass-through pattern for `legacy_compile_db_*`)
+  > down to `_resolve_side_snapshot_impl`, and having `dump_execute.
+  > execute_dump_cli_run` pass `seed_collect_mode=resolved.collect_mode`/
+  > `source_frontend_from_folded_context=True` unconditionally — exactly
+  > the values `scan`'s own candidate resolution already passes, for the
+  > identical reasons. `tests/test_dump_request_from_cli.py`'s existing
+  > `TestExecutionConsumesTheResolvedPlan` spy now also asserts both kwargs
+  > reach `execute_dump_request` (verified to fail against the pre-fix code
+  > with a `KeyError`, confirming the test catches the exact regression).
+
+  > **A third regression, same review round.** `execute_dump_cli_run`'s call
+  > forwarded `dump_cmd`'s own `allow_build_query` local -- the deprecated,
+  > always-`False` `--allow-build-query` no-op flag (`cli_options.py`: "Kept
+  > as a no-op for backward compatibility") -- straight into
+  > `_gated_build_query_inputs`, a Tier-2 gate written for a programmatic API
+  > caller who must opt in. That silently nulled an explicit `--config`/
+  > `--build-query` for the execution step alone, contradicting both flags'
+  > own documented CLI contract (`--build-query`: "runs automatically as
+  > trusted operator input"; `--config`: "build.query runs only from an
+  > explicit --config") and regressing `perform_elf_dump`, which forwarded
+  > both unchanged with no such gate. `dump`'s CLI is itself the trust
+  > boundary an explicit `--config`/`--build-query` already crossed by being
+  > typed there at all -- unlike `scan`'s config-file-sourced `build.query`,
+  > which needs its own `resolve_effective_allow_query` "level-implies-query"
+  > decision (ADR-037 D4) precisely because it is not operator-typed. Fixed
+  > by passing `allow_build_query=True` unconditionally at this one call
+  > site instead of the CLI local. The same spy test now also asserts
+  > `seen["allow_build_query"] is True` (verified to fail against the
+  > pre-fix code the same way).
+
+  > **Update (2026-09-01, PR #980): PE/Mach-O is now migrated too, closing
+  > this section's own "What this does not close" gap.** The design this
+  > section already worked out for ELF above carried over mechanically —
+  > `execute_dump_request`/`_resolve_side_snapshot_impl` were already
+  > format-generic (confirmed by reading the real code: `is_elf=True if
+  > fmt == "elf" else None`, the ADR-039 build-context collector and
+  > `embed_side_build_source` both called unconditionally regardless of
+  > format), the same pipeline `compare`'s implicit-dump operand and
+  > `scan`'s candidate resolution already used for PE/Mach-O input — so no
+  > second structural investigation was needed the way the ELF slice above
+  > required. `handle_non_elf_dump` is retired from `dump_cmd`'s real
+  > dispatch the same way `perform_elf_dump` was (still defined, for its
+  > own direct unit tests). **Verified only via mock-based CLI/unit tests,
+  > not real `g++`/clang/castxml** — no PE/Mach-O toolchain was available
+  > in this environment either, so unlike the ELF slice's own
+  > `test_dump_cli_typed_api_parity.py` corpus, there is no byte-for-bit
+  > confirmation against a real compiled DLL/dylib. PR F/3C's removal
+  > itself is therefore no longer blocked on this half specifically, per
+  > 3C's own "all three resolvers" ordering rule below — see that rule's
+  > own text for what (if anything) it still needs. Root `AGENTS.md`'s own
+  > PR C entry, `docs/contribute/known-gaps.md`'s "PR C" entry, and
+  > `docs/contribute/plans/one-semantic-pipeline.md`'s Phase 1 "Landed"
+  > notes (ADR-063 itself no longer carries a per-phase status bullet, its
+  > duplicated status block having been removed by PR 0, 2026-09-02) are
+  > all updated to match (Codex review on PR #980 caught this section's own
+  > conclusion left stale after that PR's initial push).
+
 `dump --build-query` and `dump --build-compile-db` describe how the *project*
 is built, not what this snapshot is. They are already documented as CLI
 equivalents of the `.abicheck.yml` `build.query` / `build.compile_db` fields,
@@ -3245,6 +3655,274 @@ value set, or add a sibling key under the same `assurance` namespace, never a
 second top-level spelling of the same fact.
 
 ## PR 4 — one gate algorithm (`--exit-code-scheme` removal)
+
+> **Status (2026-08-31): the ADR landed; stage 1a is complete and stage 1b
+> partially so.**
+> [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md) is the
+> settled design this section's own analysis called for — precedence order,
+> the mode-dependent removed-required-library rank, the "numbers stay
+> per-command" constraint, the `GateOptions` reassignment, and a two-stage
+> landing plan whose first stage is itself split into 1a (pure resolvers)
+> and 1b (wiring). Stage 1a landed complete:
+> `abicheck/policy/exit_decision_precedence.py` gained
+> `resolve_scan_exit_decision` (evidence-contract-error / budget-overflow /
+> not-comparable, with the exact "budget discards an already-decided
+> not-comparable result" ordering) and `resolve_release_exit_decision`
+> (the release fan-out's mode-dependent removed-required-library rank,
+> including the real severity-mode asymmetry where removed-library wins
+> outright even over a coverage contribution, and an independent
+> operational-error axis that can tie with a real compatibility-gate
+> finding from a different library rather than replacing its reason) —
+> both pure functions, verified against `scan_engine.py`/
+> `cli_compare_release_helpers.py` and unit-tested (`tests/
+> test_exit_decision.py`'s `TestResolveScanExitDecision`/
+> `TestResolveReleaseExitDecision`).
+>
+> Stage 1b landed partially: `ExitDecision.to_dict` now serializes all five
+> ADR-064 fields (report schema 2.47/1.22); `scan`'s `NOT_COMPARABLE`
+> outcome persists a real `diff.exit` block, since that outcome already
+> builds and emits a report today; and the release fan-out's JSON summary
+> gains an unconditional `exit` block
+> (`resolve_release_exit_decision_for_report`, a new, report-only resolver
+> in `exit_decision_precedence.py`) reproducing `_exit_compare_release`'s
+> own precedence, including the legacy-scheme "worst verdict among
+> non-`ERROR`/non-`not_comparable` libraries" aggregation this section used
+> to flag as missing — landed as a separate resolver rather than a rewrite
+> of `_exit_compare_release` itself (that function's exact signature/output
+> is pinned by `tests/test_exit_code_integrity.py`, which CI gates depend
+> on), proven to always agree with it numerically
+> (`TestReleaseExitDecisionForReportAgreesWithRealExit`) rather than merely
+> assumed to.
+>
+> **Update (2026-08-31):** the programmatic `ScanResult` API's own
+> `_BudgetOverflow`/`_EvidenceContractError` catches (`service_scan.
+> run_scan`/`_run_scan_one_member`) now persist a real `ExitDecision` into
+> `ScanResult.report["exit"]` too
+> (`scan_abort_result_fields`, `abicheck/workflows/scan_abort_result.py` —
+> a `workflows` module, not `policy`, since a review round (Codex, PR #967)
+> caught that shaping `ScanResult`'s own fields is report-shape work
+> `abicheck/policy/AGENTS.md` reserves for a different layer than the gate
+> decision itself) — `ScanResult` was already a real, always-returned object
+> at these two abort points, so this needed no new design decision, only
+> the same wiring `NOT_COMPARABLE` already got
+> (`tests/test_scan_abort_result.py`). `SCAN_SCHEMA_VERSION` bumped to
+> `1.23` for the newly nonempty `report.exit` shape. **Update (2026-08-31,
+> continued):** `_BudgetOverflow` now carries a `prior_decision` across
+> `scan_engine.py`'s own *later* raise site (the post-compare deadline
+> check, and the audit-only branch's own late check) via
+> `attach_prior_on_budget_overflow`, so a late overflow after a real gate/
+> coverage/assurance/audit decision already exists preserves those
+> contributions instead of reporting a bare budget-only one. The native
+> `scan` *CLI*'s own equivalent has also landed: `cli_scan._emit_scan_
+> abort_report` gives `--format json` (and a `--write json=...` secondary
+> output) a real, `ScanOutcome`-envelope-compatible payload on either abort
+> — top-level `verdict`/`exit_code`, the exit decision nested under
+> `diff.exit` so `workflows/aggregate/gate.py`'s `GateInfo.from_scan_report`
+> reads it without raising `_MalformedGate` — instead of empty stdout.
+> Still open: the release fan-out's `GateOptions` typed-object rewrite, a
+> full cross-front-end parity pass (typed API, Action), and stage 2 (the
+> atomic removal — deleting `--exit-code-scheme` and updating CLI/API/
+> Action/`aggregate` parity together).
+>
+> **Update (2026-09-01): a first Action-side parity slice.** The
+> cross-front-end parity pass found a real gap on the very axis this
+> section just finished wiring: `action/run.sh`'s `scan` verdict mapping
+> could not tell an `_EvidenceContractError` abort apart from a genuine CLI
+> usage error, since `cli_scan.py` raises it as a `click.ClickException` —
+> identical `Error: ...` stderr to a bad flag or a crash — so the Action
+> folded a well-formed, evidence-incomplete scan into the generic `ERROR`
+> bucket, discarding the distinguishable `verdict:
+> "EVIDENCE_CONTRACT_ERROR"` JSON envelope this section's own native-CLI
+> work had just started emitting. Fixed with a new `_evidence_contract_
+> gated()` helper (JSON-verdict-first, mirroring `_coverage_gated`/
+> `_assurance_gated`) consulted ahead of `_is_cli_error`, a matching
+> `EVIDENCE_CONTRACT_ERROR` output verdict (job summary, `action.yml`
+> docs, and the same unconditional step-failure block `NOT_COMPARABLE`/
+> `BUDGET_OVERFLOW` already have — but deliberately **not** their
+> `_maybe_post_pr_comment` skip: a Codex review round caught that the
+> analogy to `BUDGET_OVERFLOW`'s skip doesn't hold here, since reaching
+> this verdict already proves a readable JSON report exists, and
+> `pr_comment_scan_abort.scan_abort_incomplete_reason` already renders it
+> correctly — see ADR-064's own update for the full account), and
+> `tests/test_action_run_sh_scan_evidence_contract_error.py` (including an
+> executing malicious-fixture test the `bugfix-test-contract` CI gate
+> required for this trust-boundary diff). See
+> [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md)'s own
+> matching update for the full account, including the one gap this leaves:
+> `--format text` with no JSON secondary output still reads as `ERROR`,
+> since `cli_scan.py` writes no report at all on that path.
+>
+> **Update (2026-09-02): the release fan-out's `GateOptions` rewrite
+> landed** (`abicheck/policy/release_gate_options.py`'s `GateOptions`/
+> `resolve_release_gate_options` -- `policy/`'s own home for gate/severity
+> decisions, reached from the release fan-out's `cli_compare_release_helpers.py`
+> through `abicheck/workflows/gate.py`'s facade), closing the item PR B's own "finalized"
+> note reassigned here. `_resolve_release_severity_config`,
+> `_compute_release_severity_exit_code`, and `_fold_release_global_severity`
+> no longer independently re-derive the same `SeverityConfig` from the same
+> six raw preset/category/scheme strings at three separate call sites —
+> `resolve_release_gate_options` resolves it exactly once (pack folding via
+> the existing `apply_release_gate_pack`, plus the two scheme-dependent
+> corrections `compare_release_cmd` used to apply inline at its own call
+> site), and the two downstream functions now take the resulting
+> `GateOptions` object. Landed additively: no CLI surface and no externally
+> observable exit code changed (the existing severity/exit-code test suite's
+> call sites were updated to build a `GateOptions` instead of passing the
+> six raw strings directly, and every expected result stayed the same
+> against the new call shape), so — contrary to this ADR's
+> own original assumption that the shape change had to be atomic-stage work
+> alongside `--exit-code-scheme`'s removal — it did not need to wait for
+> stage 2. See ADR-064's own matching correction for the full account.
+> Still open: the typed-API half of the parity pass, the `--format
+> text` gap, and a real `--artifact-set` member-level evidence-contract
+> signal for the Action to consume.
+>
+> **Update (2026-09-03): the single-binary half of the `--format text` gap
+> closed.** `cli_scan.py`'s `_EvidenceContractError` catch site (the one
+> half of "the `--format text` gap" `action/run.sh` actually needed —
+> `_BudgetOverflow` was never ambiguous, since its exit code 5 is unique
+> and the Action's exit-code `case` already maps it straight to
+> `BUDGET_OVERFLOW` with no JSON needed) now always prints a stable stderr
+> marker line ahead of its existing `Error: <message>` text, independent of
+> `fmt`/`secondary_fmt` — deliberately *not* inventing a full text render of
+> the abort (that remains the separate, genuinely open design question
+> `_emit_scan_abort_report`'s own docstring names), just a single greppable
+> line. `action/run.sh`'s `_evidence_contract_gated()` falls back to
+> matching that marker in `STDERR_CONTENT` whenever `_json_report_src`
+> answers nothing — the same shape `_assurance_gated`'s own stderr fallback
+> already established for a sibling gap — so a `format: text` scan step
+> (the Action's documented default) that hits this abort now publishes
+> `EVIDENCE_CONTRACT_ERROR` instead of falling into the generic `ERROR`
+> bucket a bad flag or crash gets. Not the message text itself (`ce.message`
+> differs across this exception's two independent raise sites — a pinned
+> depth with no source evidence, and `--abi3` targeting a binary that isn't
+> a recognisable CPython extension module — so matching either message's
+> own wording would need two independently-drifting patterns); a dedicated
+> marker line the shared `except` clause prints once. Tests:
+> `tests/test_cli_scan_abort_report.py::test_evidence_contract_error_text_format_has_no_json_report`
+> (the marker is now present even though the JSON report still isn't) and
+> `tests/test_action_run_sh_scan_evidence_contract_error.py`'s new
+> `test_evidence_contract_gated_stderr_fallback_*` tests, including one that
+> runs the real native CLI end-to-end and feeds its real stderr into the
+> real bash pipeline — proving the Python-side marker and the bash-side
+> grep pattern actually agree, not two independently-drifting copies of the
+> same literal string. **Still open, deliberately not attempted in this
+> slice:** the `--artifact-set` member-level signal (a member's
+> `_EvidenceContractError` is caught inside `_run_scan_one_member` and never
+> reaches this catch site or its stderr marker at all — `run_scan_set`'s
+> aggregate `ScanSetResult.to_dict()` already surfaces the top-level
+> `EVIDENCE_CONTRACT_ERROR` verdict for `--format json`, but a `format:
+> text` artifact-set step has no analogous stderr signal, and the Action
+> doesn't even attempt a JSON secondary for `--artifact-set` today — a
+> separate, not-yet-scoped piece of work), and the typed-API half of the
+> parity pass.
+
+> **Update (2026-09-03): the typed-API half of the parity pass closed.**
+> `CompareRequest`/`ScanRequest` gained `severity_preset`/`exit_code_scheme`
+> fields — exactly the two flags single-pair `compare`/`scan --against`
+> themselves expose (neither has a per-category `--severity-<category>` CLI
+> flag; only the release fan-out does, via `.abicheck.yml` for the other
+> two, so neither typed request carries a per-category field either).
+> Resolved through `abicheck.policy.release_gate_options.GateOptions` via
+> `resolve_release_gate_options(None, ...)` — the identical function/object
+> the release fan-out resolves its own gate configuration from, called with
+> no pack (`pack_application=None`; a typed request's own `gate.*` pack
+> field is still a separate, open item, same as it always was for
+> `pack_policy_overrides`/`pack_internal_namespaces`) — not a second,
+> parallel resolution. `ScanRequest`'s two fields join
+> `_COMPARISON_ONLY_FIELD_PREDICATES` (baseline-only, mirroring
+> `cli_scan._COMPARISON_ONLY_FLAGS`) and `service_scan._scan_request_config`'s
+> ADR-049 receipt now reads their real values instead of always claiming
+> "not stated". `run_scan`'s own `run_scan_core` call now actually passes
+> `sev_config`/`exit_code_scheme` (previously never wired at all, regardless
+> of `--against` — a real, previously-undetected gap: a typed
+> `ScanRequest(..., baseline=..., severity_preset=..., exit_code_scheme=
+> "severity")` silently classified through the legacy scheme). `CompareResult`
+> gained `exit_decision` (the canonical `ExitDecision`,
+> `abicheck.policy.exit_decision.resolve_compare_exit_decision`, the same
+> resolver the native `compare` CLI's own report `exit` block uses), built
+> in `service_compare_pipeline.classify_compare_pair`.
+> `abicheck/workflows/scan_gate_options.py` is a new leaf module holding
+> `ScanRequest`'s own resolution (`service_scan.py` sits at its own
+> `architecture/debt.yaml` `no_growth` baseline, so the new logic could not
+> live there); `api_types.py`'s baseline moved 1008 -> 1013 for the three
+> genuinely new typed fields (see that debt entry's own rationale). Tests:
+> `tests/test_typed_api_gate_options.py` — per request type, both that the
+> fields are not a no-op (a demoted/raised exit code) and that the typed
+> result agrees with the real CLI's exit code for equivalent input
+> (`CliRunner`, not the same helper the implementation uses). **Still open,
+> deliberately not attempted in this slice:** a typed request's own
+> `gate.*` pack field (`--pack` stays a CLI-only selector, ADR-049 D8,
+> unchanged by this slice), and the `--artifact-set` member-level
+> evidence-contract signal above — both left for a future session; per-
+> category `severity_<category>` fields were investigated and deliberately
+> **not** added to either typed request, since neither `compare` nor `scan
+> --against` itself exposes them as CLI flags (only `.abicheck.yml` does,
+> which a typed caller has no equivalent of) — adding them would have been
+> new surface beyond CLI parity, not parity itself. **A narrower gap found
+> while landing this and deliberately left open, not silently missed:**
+> `compatibility_evaluation_frontend.compare_request_inputs` — the ADR-049
+> D7 resolver behind `CompareRequest(..., contract_evaluation=True)`'s own
+> persisted receipt — still does not read `CompareRequest.severity_preset`/
+> `exit_code_scheme` into `ExplicitCompatibilityInputs` (its own docstring
+> still literally says "a `CompareRequest` carries no severity,
+> exit-code-scheme, or pack inputs", which this slice makes half-false).
+> Cosmetic only, not a functional bug the way the equivalent `scan` gap
+> was (`_scan_request_config`'s history, above): a typed `CompareRequest`
+> has no gate-pack field at all, so there is no pack whose D7 precedence
+> could be silently overridden the way `scan`'s real repro was — the real
+> exit-code decision (`CompareResult.exit_decision`) is unaffected, since it
+> reads the two fields directly, not through this resolver. What's stale is
+> only the `gate.exit_code_scheme`/`gate.severity.*` block inside the
+> `--contract` JSON report's `contract_context.evaluation_context.
+> resolved_config`, for the narrow combination of a typed caller setting
+> both `contract_evaluation=True` and `severity_preset`/`exit_code_scheme`.
+> Not fixed in this slice because `compatibility_evaluation_frontend.py`
+> sits at its own `architecture/debt.yaml` `no_growth` baseline (1996
+> lines, four lines under the file-size hard cap) — the fix needs a design
+> decision this plan's own governing principle asks not to make reactively
+> under a nearly-exhausted line budget (move responsibility to a new leaf
+> module vs. squeeze a few lines out of the existing one), not a
+> five-minute patch. Left for a future session alongside the two items
+> above.
+
+> **Update (2026-09-03, fourth round): the single-binary `--format text`
+> gap closed for good, via a dedicated exit code, not a hardened marker.**
+> Three further Codex review rounds on the landing PR (#1032) each found
+> the prior fix's stderr/marker-file signal forgeable in a new way: round
+> 2 — an unanchored `grep -q` match spoofed by a diagnostic merely
+> containing the marker text (fixed with whole-line `grep -Fxq`); round 3
+> — even that whole-line match spoofed by a crafted path with an embedded
+> newline, echoed into a wholly unrelated error message (fixed by moving
+> the signal to a private marker-file path, `$ABICHECK_EVIDENCE_CONTRACT_
+> MARKER_FILE`, that `action/run.sh` creates and names itself); round 4 —
+> that path itself leaked as an inherited environment variable to every
+> subprocess `abicheck` spawns during evidence collection (build-tool
+> queries over the *analyzed* checkout), letting a PR-controlled build
+> script read it and forge the marker directly — and even after popping
+> the variable from `os.environ` at import time, it stayed recoverable via
+> `/proc/<pid>/environ`, which reflects a process's *initial* environment
+> regardless of later mutation. No channel derived from text or the
+> environment closes this class of forgery. The final fix replaces the
+> whole mechanism with a dedicated process exit code
+> (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR = 7`, matched by
+> `workflows/scan_abort_result.py`'s `_SCAN_ABORT_VERDICTS` and
+> `policy/exit_decision_precedence.py`'s `resolve_scan_exit_decision`
+> default) — this process's own choice, reported to its trusted parent
+> shell by the OS kernel via `wait()`, which no subprocess this run spawns
+> can alter. `_evidence_contract_gated()`, `write_evidence_contract_
+> marker()`, and the marker-file/env-var machinery are deleted outright;
+> `action/run.sh`'s `case $ABICHECK_EXIT in ... 7) ...` dispatches
+> unconditionally, with no predicate, no JSON report, and no stderr/
+> environment signal needed. This closes the single-binary half of the
+> `--format text` gap completely, not just hardens it further.
+> `tests/test_action_run_sh_scan_evidence_contract_error.py` was rewritten
+> for the new mechanism (its own module docstring has the condensed
+> four-round account); `docs/reference/exit-codes.md` and this repo's
+> `AGENTS.md` gained the new `7` row. **Still open, unchanged by this
+> round:** the `--artifact-set` member-level signal — whether the
+> exit-code approach generalizes to it is its own, separate design
+> question, not attempted here — and the typed-API `gate.*` pack field.
 
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
@@ -3649,7 +4327,11 @@ reason — Codex review, fresh evidence against `scan_engine.py`)**:
 
 ```text
 usage/config error            (outside the report entirely — 64 everywhere)
-scan evidence-contract error  (scan only, exit 1 — see below)
+scan evidence-contract error  (scan only, exit 7 as of 2026-09-03 — a
+                                dedicated code, no longer the generic
+                                exit 1 the paragraph below still describes
+                                as the contemporary state when written;
+                                see PR G2's own "fourth round" update above)
 scan budget exceeded          (scan only, exit 5 — see below; dominates
                                 not-comparable when both would apply)
 not comparable                (dominates the gate/coverage/assurance axes
@@ -3666,10 +4348,24 @@ found by review, fresh evidence against `scan_engine.py`:**
 - `run_scan_core` raises `_EvidenceContractError` during evidence collection
   — before a candidate/baseline comparison is even attempted — whenever a
   pinned (non-`auto`) `--depth`/`--source-method` has no source evidence to
-  satisfy it (ADR-037 D5). `cli_scan.py` maps it to a `click.ClickException`
-  (exit `1`); `service_scan.py` maps it to `ScanResult(verdict=
-  "EVIDENCE_CONTRACT_ERROR", exit_code=1)`. Distinct from usage error `64`
-  (a bad flag combination) and from the gate's own `1` (a severity-scheme
+  satisfy it (ADR-037 D5). **As of the 2026-09-03 fourth round (PR G2's own
+  "still open" item, since closed for the single-binary case):**
+  `cli_scan.py` maps it to its own dedicated exit code
+  (`_EXIT_EVIDENCE_CONTRACT_ERROR = 7`, a real `sys.exit(7)` rather than a
+  generic `click.ClickException`); `service_scan.py`'s single-run typed API
+  maps it to `ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=7)`
+  (`workflows/scan_abort_result.py`) — the same reasoning that split it off
+  `1`: exit `1` is shared by too many other unrelated axes (a crash, a
+  severity-scheme error-level gate, `--artifact-set`'s own coverage floor)
+  for a stderr/marker-based signal to disambiguate reliably, and a
+  process's own exit code is the one channel nothing this run spawns can
+  forge (see ADR-064's own account of the four iterations this went
+  through). **`--artifact-set` did not move**: a member's own abort is
+  caught inside `_run_scan_one_member` and never reaches `cli_scan.py`'s
+  single-binary catch site at all, so `_aggregate_scan_set_verdict` still
+  floors the *set's* own exit code at `1` for this axis — a separate,
+  not-yet-closed half of the same gap. Distinct from usage error `64` (a bad
+  flag combination) and from the gate's own `1` (a severity-scheme
   error-level finding) — it's "the evidence contract this run pinned itself
   to could not be met," always scan-only, and an earlier draft of this table
   omitted it entirely.
@@ -3745,6 +4441,61 @@ mechanical PRs so a bisect over a red CI job lands on this PR unambiguously.
 
 ## PR 5 — `scan --artifact-set` refinement (not removal)
 
+**Status: the repeatable-option syntax slice is implemented (2026-08-28).**
+`--artifact-set` is now `multiple=True` (`cli_options.py`); a single
+directory value is unchanged, and multiple explicit paths are given as one
+`--artifact-set` per member (`--artifact-set a.so --artifact-set b.so`), not
+a comma-separated string. The comma-separated form is gone with no alias,
+same "hard cleanup" stance as every other removal in this plan — passing
+the old `a.so,b.so` spelling as a single value is now read as one literal
+(nonexistent) path and errors `--artifact-set member not found`, not
+silently parsed. `_resolve_artifact_set_paths` (`cli_scan.py`),
+`reject_incoherent_scan_operands`/`reject_incoherent_scan_secondary_output`
+(`cli_scan_helpers.py`), and `_run_artifact_set`/`scan_cmd`'s own type all
+moved from `str | None` to `tuple[str, ...]` together — "supplied" is now
+exactly `bool(artifact_set)`, which closes the CodeRabbit-caught
+truthiness/`is not None` mismatch class the comma-string form needed a
+special-cased comment to avoid (a tuple has no falsy-but-present state the
+way an empty string did). The composite Action's own `new-library-set`
+input (`action.yml`) deliberately keeps its comma-separated contract
+unchanged — that is a separate, already-decoupled front end, and front-end
+parity here means *staying working*, not re-breaking to match the CLI's new
+syntax — so `action/run.sh` now splits a comma-separated `new-library-set`
+value into one `--artifact-set` occurrence per member (a bare directory,
+having no comma, passes through as the single unsplit value it always was).
+Docs regenerated (`gen_cli_reference.py`); tests updated across
+`test_scan_artifact_set.py`, `test_bazel_root_targets_scan.py`, and
+`test_action_run_sh_artifact_set.py` (the latter gained two new cases
+pinning the Action-side comma-split and blank-member-skipping behavior
+directly against the real `action/run.sh` text, not a paraphrase of it).
+
+**A second slice (2026-08-29) shipped the dry-run/cost-estimation item.**
+`scan --artifact-set --dry-run` is a real preview now, not a hard rejection
+(`reject_incoherent_scan_operands`'s own `--dry-run` check was removed;
+`render_artifact_set_dry_run`, `abicheck/frontends/cli/
+artifact_set_dry_run.py`, builds the report). The cost projection is
+genuinely per-member-scaled: one single-binary `ScanRequest` is built per
+discovered member from the real request's shared fields, each run through
+`service.estimate_scan()` independently, and the per-layer TU/time results
+summed across members — rather than reusing the shared estimator's
+single-request shape, which only scales its `L0_binary` row by
+`len(binaries)` (see `docs/contribute/plans/g35-multi-artifact-scan.md`'s
+own estimator bullet for that general, still-open gap for other
+`estimate_scan()` callers). Lives in a new `frontends/cli/` leaf module
+rather than `cli_scan.py` (`no_growth`-debt-tracked, at its line-count
+baseline) or `cli_scan_helpers.py` (which cannot import `.service` without
+closing an import cycle back through `service -> service_scan ->
+scan_engine -> cli_scan_helpers`). Tests in
+`tests/test_scan_artifact_set_coverage.py`.
+
+**Still open, per the sequencing note below:** `--artifact-set-manifest`
+(no real domain contract proposed for it yet) and the remaining set-mode
+*semantics* items (expected provider DSO, a symbol moved between sibling
+libraries, duplicated providers, L4 symbol reconciliation) — the first
+slice touched only the value syntax and the second only the dry-run/cost
+item; the review itself called the syntax change "the only part of this
+section worth doing on its own."
+
 The draft proposed dispatching on the operand type:
 
 ```text
@@ -3762,16 +4513,16 @@ What is actually worth changing is the *value syntax*. The comma-separated form
 (`_resolve_artifact_set_paths` in `cli_scan.py`) is the weak part:
 
 ```bash
-# today
+# before this slice (removed, no alias — now errors, see the status note above)
 abicheck scan --artifact-set a.so,b.so,c.so
 
-# proposed: repeatable option
+# landed: repeatable option
 abicheck scan --artifact-set a.so --artifact-set b.so --artifact-set c.so
 
 # unchanged
 abicheck scan --artifact-set directory/
 
-# optional, for bundles needing stable IDs / expected-provider ownership
+# still just a proposal, not implemented — see "Still open" in the status note above
 abicheck scan --artifact-set-manifest set.json
 ```
 
@@ -3786,14 +4537,313 @@ the surrounding text already shows as a usage example.
 
 **Sequencing note:** the syntax cleanup is lower value than finishing set-mode
 *semantics* — expected provider DSO, a symbol moved between sibling libraries,
-duplicated providers, L4 symbol reconciliation, cost estimation, and a
-machine-readable dry-run. Do the semantics first if the two compete. The
+duplicated providers, and L4 symbol reconciliation (cost estimation and the
+dry-run/cost preview shipped in the second slice above -- text-only, like
+every other `abicheck` dry-run, ADR-054). Do the remaining semantics first
+if they compete with anything else. The
 review reaffirms this and sharpens it: the *only* part of this section that is
 worth doing on its own is replacing the comma-separated value with a repeatable
 option. `--artifact-set-manifest` is worth adding only when it carries a real
 domain contract — member identity, expected-provider ownership, external
 providers, cohort — never merely as nicer syntax. `--artifact-set` itself is an
 explicit safety boundary, not surplus surface; it stays.
+
+## Review checkpoint (2026-09-01) — the risk moved from "too many flags" to "too many semantics"
+
+**External re-review, `main` at `94be22ad` (merge of
+[#970](https://github.com/abicheck/abicheck/pull/970)); re-verified while
+recording it against `main` at `2598d0d`** (merge of
+[#983](https://github.com/abicheck/abicheck/pull/983)), which is where the
+two staleness corrections at the end of this section come from — a review
+note recorded without re-checking its own claims against the branch it lands
+on is exactly the drift the 2026-08-27 pass above was written to stop.
+
+The review's headline finding is a re-prioritization of *this* plan, not
+another candidate for deletion:
+
+> The main risk is no longer "the CLI is too large". It is that **one user
+> question is starting to get different semantics depending on the physical
+> form of its input** — live release, stored bundle facts, snapshot, binary,
+> `scan --against`. The best next architectural step is not deleting a few
+> more flags, but unifying *operand classification → resolved request →
+> evaluation → exit → report*. After that, the remaining deletions become
+> nearly obvious and safe.
+
+That is the same governing principle the "Ordering" section already states
+("stop the mechanical CLI cleanup until the typed resolution, configuration,
+gate and report paths are unified"), so this checkpoint does not reverse the
+sequence — it adds the parallel-semantics instance that appeared *after* that
+sequence was written, and which is now the largest one.
+
+### The new instance: `compare --old-bundle-facts` is a second `compare`
+
+G38 Phase 17 landed a real and needed capability — a persisted `BundleFacts`
+baseline is now reachable from the CLI instead of only from the Python API /
+a private driver, which is what an oneDAL-scale release scan needs:
+
+```bash
+abicheck compare old.bundle-facts.json new-release/ --old-bundle-facts
+```
+
+The **capability** is right. The **shape** is the problem. There are now two
+compare engines behind one command name, and the second one is deliberately
+narrower — `abicheck/frontends/cli/commands/compare_bundle_facts.py`'s own
+docstring says so, and
+`compare_bundle_facts_rejections.reject_unsupported_options` is the
+executable list: `--contract`, `--severity-preset`, `--pack`,
+`--require-complete-analysis`, `--diagnostic-comparison`, `--used-by`,
+`--required-symbol`, `--use-cases`, `--sources`, `--build-info`,
+`--dump-manifest`, `--probe-matrix`, `--post-manifest`, `--follow-deps`,
+`--debug-info`, `--pdb-path`, `--dry-run`, `--fail-on-removed-library`,
+`--bundle-facts-out`, every `--format` outside `json`/`markdown`, and every
+`--write FORMAT=PATH` outside that same pair. It also exits through
+`cli_compare_release_helpers._exit_compare_release`'s legacy verdict mapping
+rather than the canonical `ExitDecision` PR G1 built.
+
+**Fail-closed rejection was the right call for that PR** — silently ignoring
+`--contract` would have produced a different finding set than the user asked
+for with no indication (that is what the rejection comments record). The
+problem is what happens if the mode stays a mode: in another two phases the
+repository has
+
+```text
+normal compare semantics
+release compare semantics
+bundle-facts compare semantics
+scan --against semantics
+```
+
+and every new evaluation field has to be threaded four times, with four
+chances to diverge.
+
+**Target.** `--old-bundle-facts` is not a user question, it is an answer to
+"how should I read this file", which is the input classifier's job — the same
+classifier that already distinguishes binary / snapshot / directory / rpm /
+deb / wheel without asking. So:
+
+```bash
+abicheck compare old.bundle-facts.json new-release/
+```
+
+with the operand kind detected, and the mode flag deleted (no deprecation
+alias, per this plan's standing stance).
+
+**Prerequisite, and it is a real one: the artifact needs a strong
+discriminator first.** A stored `BundleFacts` document today is identified by
+`schema_version` plus the presence of `per_library_snapshots`
+(`abicheck/bundle_facts.py`); `schema_version` is far too generic to
+classify on, and this repository already has several JSON artifacts carrying
+one. Detection must key on an explicit self-describing marker:
+
+```json
+{"artifact_type": "abicheck.bundle-facts", "schema_version": 2}
+```
+
+which is a `BundleFacts` schema bump with the ordinary machine-contract
+obligations from "Merge criteria" below (packaged *and* documented schema
+copies, an explicit backward-reading decision for existing v1 documents —
+these are persisted baselines in users' CI, so v1 must stay readable and
+classifiable by shape as the fallback path). The archive container
+(`BUNDLE_ARCHIVE_SCHEMA_VERSION`) is a separate axis and gets the same
+treatment.
+
+**Then, and only then, the deletion.** Order matters here in the same way it
+does for `--exit-code-scheme`: removing the selector before the classifier
+and the unified request exist would replace a visible narrow mode with an
+invisible one.
+
+**The unified request the deletion actually rests on.** The foundation is
+mostly built — `LiveBundleInput`, `StoredBundleFactsInput`,
+`ResolvedBundleSide` already exist. What is missing is one request object
+covering all four combinations rather than one special-cased pair:
+
+```python
+BundleCompareRequest:
+    old: LiveBundleInput | StoredBundleFactsInput
+    new: LiveBundleInput | StoredBundleFactsInput
+    topology: BundleSpec
+    evaluation: CompatibilityEvaluationConfig
+    gate: GateOptions
+```
+
+so `live/live`, `stored/live`, `live/stored` and `stored/stored` are operand
+*types*, not semantic branches, and the evaluation/gate/report parity items
+(`--contract`, `--pack`, `--severity-preset`, `ExitDecision`, `--dry-run`,
+the full renderer set) are answered once for the whole family. Note the
+`gate: GateOptions` field is the same object PR B deliberately reassigned to
+PR G2's prerequisite work — this is a second consumer for it, not a second
+design.
+
+### `--max-json-object-nodes` is an implementation detail on the user surface
+
+The flag exists for a real reason (a large SYCL facts document exceeding the
+decode node budget) and the guard itself should stay — it is a
+decompression/decode resource bound, not a nuisance. What is wrong is the
+user contract: *"how many Python JSON container nodes may the parser
+allocate"* asks the user to reason about this build's memory-DoS defense.
+Re-express it as a resource limit and derive the node budget internally:
+
+```bash
+--resource-limit memory=2GiB
+```
+
+or, better for the CI case, `.abicheck.yml`:
+
+```yaml
+resources:
+  max_decoded_memory: 2GiB
+```
+
+Treat the current spelling as a **temporary advanced escape hatch, not a
+stable CLI concept** — and note that G40's content-addressed bundle archive
+removes much of its reason to exist by not decoding one monolithic document
+at all.
+
+### Bundle topology keeps arriving as CLI flags
+
+The release/bundle option group has grown `--bundle-system-providers`,
+`--bundle-cohort`, `--manifest`, `--include-private-dso`,
+`--bundle-facts-out`, `--old-bundle-facts`, `--max-json-object-nodes`. Not
+all are wrong, and the split the review proposes matches this plan's existing
+"belongs somewhere else" test:
+
+| Flag | Where it belongs |
+|---|---|
+| `--bundle-facts-out`, `--no-bundle-analysis` | Stay — operation output / debug switches for one invocation |
+| `--bundle-system-providers`, `--bundle-cohort` | Topology → `BundleSpec` / `.abicheck.yml`, joining G42's environment-aware provider resolution rather than a per-invocation basename list |
+| `--manifest` | Rename. It is a real collision, not a style preference: `--manifest` already means one thing on `aggregate` (`cli_aggregate.py`) and another on release `compare` (`frontends/cli/options/release.py`), while the product separately has a dump manifest, an aggregate manifest, a run plan, bundle facts, and the project config. `--abi-manifest` / `--instantiation-manifest` |
+| `--old-bundle-facts` | Delete after operand classification (above) |
+
+**Per-library bundle configuration is the open half.** #972 applies a
+target's declared `public_headers` only for `kind != bundle`, because there
+is no per-bundle-member header staging yet — so a mixed-toolchain bundle
+(`libonedal_core` plain C++, `libonedal_dpc` `-fsycl`/`icpx`,
+`libonedal_parameters` with its own context) cannot yet give each DSO its own
+headers/includes/compiler/frontend/flags from one check. `#969` landed since
+the review (see corrections below) as `--bundle-facts-library-manifest`,
+which unblocks the case. **Do not treat that flag as the end state**: the
+end state is project topology referencing already-defined targets, which
+carry the real header/compile context, rather than a second manifest format
+re-describing compile configuration —
+
+```yaml
+bundles:
+  onedal:
+    libraries:
+      libonedal_core.so: {target: core}
+      libonedal_dpc.so: {target: dpc}
+```
+
+`BundleSpec` should point at targets; it should not grow a compile-context
+vocabulary of its own.
+
+### Re-verified, unchanged, still open
+
+The review independently reached items this plan already tracks; recording
+the agreement so a future pass does not re-derive them as new:
+
+- **`--exit-code-scheme` (PR G2).** Still user-selectable
+  (`auto|legacy|severity`) although the canonical `ExitDecision` already
+  composes compatibility + contract coverage + analysis assurance + scan
+  crosscheck promotion and explains the result. Target unchanged: gate policy
+  absent → compatibility mapping, gate policy present → severity mapping,
+  coverage/assurance an independent floor, the user never selects the
+  algorithm; then delete the flag from the CLI, the project config, the pack
+  schema and the Action mapping, and let the report state
+  `"gate": {"algorithm": "severity", "source": "policy-pack"}`.
+- **`contract=public` cannot be the default yet** — its unresolved-loss
+  count is not zero. The live numbers are owned by
+  `scripts/measure_contract_shadow.py`'s `UNRESOLVED_LOSS_BASELINE` (the
+  `public` entry is the one that gates the default flip) and move as
+  evaluator coverage improves — read them there rather than from a copy here,
+  which is the same staleness this checkpoint's own last bullet argues
+  against. The review's ordering advice is worth keeping: do **not** fix the public evaluator with another string
+  heuristic. Finish ADR-063 Phase 2's typed `EntityId` across function /
+  variable / record / enum, make it the primary finding identity, and run the
+  public closure over the `EntityId` graph rather than bare-name strings —
+  the remaining loss is an identity ambiguity, so it should fall out.
+- **Snapshot migration is not yet symmetric.** #970 normalizes anonymous /
+  lambda identity *on load* of an old snapshot, which is the right shape, but
+  the same normalization does not reach L5 source-graph identities. The
+  failure mode is not a wrong ABI verdict; it is a wrong proof path, a lost
+  impact edge, inconsistent root-cause grouping, or a consumer/source-graph
+  join mismatch. The fix belongs in the same central `EntityId`/occurrence
+  migration — every persisted identity carrier (flat entities, source-graph
+  nodes, surface-graph nodes, consumer-graph nodes, proof-path references,
+  impact ids), not one regex per graph format.
+- **Configuration discovery still happens too late (PR C's tail).** A
+  `.abicheck.yml`-only `build: targets:` can be discovered only during real
+  execution, so `dump --dry-run` / `compare --dry-run` / `scan --dry-run` can
+  answer "valid" for a request the real run then rejects. The convergence
+  target: configuration discovery, build-target resolution, toolchain
+  selection and evidence requirements belong to ADR-063 Phase 4's
+  `AnalysisPlan`, *before* extraction — not inside an extraction adapter.
+- **The ADR-061 move is directionally right and carries one visible debt.**
+  #972 put the new command in `frontends/cli/commands/` instead of a new flat
+  `cli_compare_bundle_facts.py`, which is exactly ADR-061's direction — but
+  `compare_bundle_facts.py:181` has to reach its own dependency through
+  `importlib.import_module("abicheck.bundle_side_input")` to stay outside the
+  import-cycle gate. Physical placement is correct, dependency direction is
+  not yet: `bundle_side_input` → `workflows/release/`, service dependencies
+  downward, `frontends → workflows`, and then the frontend gets an ordinary
+  static import. A dynamic import to dodge an architecture detector is an
+  acceptable transitional hack and an unacceptable end state.
+- **CI governance (PR 0B/P0) is closed, by explicit decision, not by
+  completion.** At the time of this checkpoint it read as the oldest open
+  item — the review found the same shape from outside: Actions check-runs
+  green on the exact merge SHA, `Verify Merge Checks` success, but the
+  commit *status* red from `codecov/patch` and
+  `required_status_checks.enforcement_level: off`. Both decisions this
+  bullet used to say were owed have since been made, and made the same way:
+  the Ruleset **was** applied and did block merges on CI completion, exactly
+  as designed — and the maintainer then decided that trade-off isn't wanted
+  going forward. `required_status_checks` was removed from the Ruleset
+  (only `non_fast_forward` remains), `verify-merge-checks.yml` and its
+  dedicated tests were deleted outright, and — same call, same reasoning —
+  `codecov/patch` is not being promoted into the required set either: this
+  repo accepts an occasional red or incomplete merge over paying CI-completion
+  latency on every merge, full stop, and there is no plan to revisit that.
+  See `.github/AGENTS.md`'s "Required-status-check configuration —
+  deliberately not enforced" section for the durable statement of this
+  policy and PR 0's own "Superseded (2026-09)" note above for the mechanical
+  account of what was built, applied, and then reversed. No further
+  governance tightening is planned; this item does not reopen on its own.
+- **Generated plan status.** `plans/index.md`'s hand-maintained status prose
+  goes stale between merge and the next docs pass (the review caught exactly
+  that, below). The durable fix is not more careful hand-editing: take ADR
+  status from the ADR, phase status from each plan's own frontmatter
+  (`status:` plus a `phases:` map), and generate the index — the same
+  source-of-truth-plus-gate shape `doc-count-sync` and `adr-status-sync`
+  already use. Stale status is worse than absent status for an agent reading
+  the repository cold.
+
+### Corrections — two review items were already fixed in `94be22ad..2598d0d`
+
+Recorded so they are not re-opened as work:
+
+1. **`plans/index.md`'s G38 row is no longer stale.** The review read it as
+   still saying Phase 17 has "no CLI surface, open"; that was true at
+   `94be22ad` and was corrected by `c163409`/`34021e5`. The row now states
+   Phases 1–17 shipped, naming the `compare --old-bundle-facts` surface and
+   the per-library override manifest. The *generated-status* recommendation
+   above stands on its own merits — the mechanism that produced this
+   instance is unchanged.
+2. **PR [#969](https://github.com/abicheck/abicheck/pull/969) is merged.**
+   The review assessed it as an open PR proposing
+   `--bundle-facts-library-manifest`; it landed as `c163409` (G38 Phase 17),
+   and the option exists on `compare` today, gated by
+   `reject_bundle_facts_manifest_without_old_bundle_facts` so it cannot be
+   passed to the ordinary dispatch path. The review's substantive point is
+   unaffected and is recorded under "Bundle topology" above: the capability
+   is needed, the flag should not become the stable API.
+
+### Where this lands in the sequence
+
+Two new entries join the "Ordering" block below (PR I, PR J). The review
+would have run repository governance (PR A / PR 0B) ahead of everything as
+P0; that item is now closed by explicit decision (see the corrected bullet
+above and PR 0's own "Superseded (2026-09)" note) rather than pending, so it
+no longer sits ahead of the sequence below waiting to happen.
 
 ## Merge criteria for every removal PR here
 
@@ -3840,8 +4890,20 @@ slice that made it safe.
 **Current, authoritative sequence:**
 
 ```text
-PR A  repository governance          = PR 0B — required checks / Ruleset,
-                                       exact-merge-SHA verification
+PR A  repository governance           = PR 0B — required checks / Ruleset,
+      (CLOSED, by decision)             exact-merge-SHA verification. Both
+                                       pieces were built and the Ruleset was
+                                       applied; the maintainer then decided
+                                       against merge-blocking CI going
+                                       forward and reversed it (Ruleset's
+                                       required_status_checks rule removed,
+                                       verify-merge-checks.yml deleted,
+                                       codecov/patch stays informational
+                                       too). See .github/AGENTS.md's
+                                       "Required-status-check configuration
+                                       — deliberately not enforced" section.
+                                       No further governance tightening is
+                                       planned
 PR B  effective configuration parity  — packs resolved once into one
       (DONE)                           CompatibilityEvaluationConfig, pack
                                        parity across every CLI command
@@ -3855,11 +4917,17 @@ PR B  effective configuration parity  — packs resolved once into one
                                        deliberately reassigned to PR G2,
                                        see PR B's own section for why
 PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
-                                       ResolvedDumpRequest → DumpResult, one
+      (ELF done, PE/Mach-O open)       ResolvedDumpRequest → DumpResult, one
                                        resolver for dump CLI/Python/Action
                                        *and* scan_engine's candidate
                                        resolution, JSON dry-run rendered
-                                       from that object
+                                       from that object. The real ELF `dump`
+                                       run now executes through
+                                       execute_dump_request (scan's
+                                       candidate resolution already did);
+                                       handle_non_elf_dump (PE/Mach-O) is
+                                       unmigrated -- no PE/Mach-O toolchain
+                                       was available to verify against
 PR D  build-context completeness      = PR 3B — matched compile-unit
       (DONE)                           selection, forced includes, provenance
                                        tests
@@ -3873,24 +4941,105 @@ PR E  Action machine-report           = PR 1b — uncapped persisted release
       └─ DELETE --annotate, --annotate-additions — DONE, verified against
          current abicheck/cli.py and action.yml
 PR F  trusted build config            = PR 3C — build.query executes only
-                                       from an explicit --config (a data
+      (DONE)                            from an explicit --config (a data
                                        path like build.compile_db carries no
                                        such restriction), trust receipt in
-                                       --dry-run, fail closed
-      └─ then DELETE dump --build-query, dump --build-compile-db
+                                       --dry-run, fail closed. Both flags are
+                                       gone; an explicit --config is now the
+                                       only authorizer, so the trust gate has
+                                       one term instead of two
+      └─ DELETE dump --build-query, dump --build-compile-db — DONE, both are
+         now `No such option` / exit 64
 PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
-                                       schema / report / Action parity
+      (ADR-064 accepted; stage 1a done,   schema / report / Action parity.
+       stage 1b: GateOptions landed       GateOptions (the release fan-out's
+       2026-09-02, rest partially wired)  own typed severity/exit-code-scheme
+                                       object) landed 2026-09-02
+                                       (abicheck/policy/release_gate_options.py,
+                                       reached from the frontends-classified
+                                       cli_compare_release_helpers.py through
+                                       workflows/gate.py's facade); the
+                                       single-binary half of the scan
+                                       --format text gap closed 2026-09-03,
+                                       for good, via a dedicated process
+                                       exit code on _EvidenceContractError
+                                       (7 -- three further review rounds
+                                       each found a stderr/marker-file
+                                       signal forgeable in a new way; see
+                                       PR 4's own section for the full
+                                       four-round account); the typed-API
+                                       half of the
+                                       parity pass closed 2026-09-03
+                                       (CompareRequest/ScanRequest severity_
+                                       preset/exit_code_scheme fields, both
+                                       resolved through the identical
+                                       GateOptions object; see PR 4's own
+                                       section for the full account); still
+                                       open: a real --artifact-set
+                                       member-level evidence-contract signal
+                                       for the Action (the --format text
+                                       gap's remaining half -- a member's
+                                       abort never reaches the single-binary
+                                       catch site's own exit code at all)
       └─ then DELETE --exit-code-scheme
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
-                                       duplicated symbols, cost and dry-run;
-                                       syntax refinement last
+      (syntax slice DONE)               duplicated symbols, cost and dry-run;
+                                       syntax refinement (DONE) was the one
+                                       piece independent of the semantics work
+PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
+      (prerequisite DONE; classifier/    explicit artifact_type discriminator
+       request/deletion not started)     on BundleFacts, operand classification
+                                       instead of a mode flag, and one
+                                       BundleCompareRequest over live/live +
+                                       stored/live + live/stored +
+                                       stored/stored, with the full
+                                       evaluation/gate/report/dry-run surface
+                                       answered once. Shares PR G2's own
+                                       GateOptions prerequisite.
+                                       Prerequisite landed (2026-09-02):
+                                       BUNDLE_FACTS_ARTIFACT_TYPE
+                                       ("abicheck.bundle-facts"; see
+                                       BUNDLE_FACTS_SCHEMA_VERSION in
+                                       abicheck/bundle_facts.py for the
+                                       current version) plus the archive
+                                       container's own
+                                       BUNDLE_ARCHIVE_ARTIFACT_TYPE, and
+                                       bundle_facts_serialization.looks_like_bundle_facts_document()
+                                       as the classifier a future operand
+                                       dispatcher will call. PR G2's own
+                                       GateOptions now exists too (landed
+                                       2026-09-02, see PR G2's own row) --
+                                       but scoped narrowly to the release
+                                       fan-out's own severity/exit-code-scheme
+                                       resolution, per ADR-064's actual
+                                       "GateOptions" section, not yet the
+                                       shared cross-front-end object this
+                                       row's own BundleCompareRequest sketch
+                                       implies. The BundleCompareRequest
+                                       unification and the deletion below
+                                       are not started; whether they reuse
+                                       this GateOptions class as-is or need
+                                       a broader one is this row's own design
+                                       question to resolve, not decided here
+      └─ then DELETE compare --old-bundle-facts
+PR J  bundle topology out of the CLI  — NEW (2026-09-01 checkpoint):
+      (NEW, not started)                --bundle-system-providers/--bundle-
+                                       cohort and per-library header/compile
+                                       context move into BundleSpec /
+                                       .abicheck.yml referencing existing
+                                       targets; release --manifest renamed;
+                                       --max-json-object-nodes re-expressed as
+                                       a resource limit. Depends on G42 for
+                                       provider resolution
 ```
 
 Independent of the chain, unblocked at any time: PR 1 (**done**), PR 2
-(**done**, minus its `.abicheck.yml` gate-policy sourcing follow-up), PR E /
-1b (**done** — annotations moved to the Action; see PR 1b's own section,
-whose "blocked on a persistence prerequisite" subtitle was stale until this
-pass corrected it).
+(**done**, including its `.abicheck.yml` gate-policy sourcing follow-up —
+see PR 2's own section: `aggregate: gate:` shipped, and `project plan`'s
+`--gate-missing-required`/`--gate-unexpected-target` flags were removed),
+PR E / 1b (**done** — annotations moved to the Action; see PR 1b's own
+section, whose "blocked on a persistence prerequisite" subtitle was stale
+until this pass corrected it).
 
 **Superseded original ordering:**
 

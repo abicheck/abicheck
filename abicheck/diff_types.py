@@ -17,13 +17,18 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
 from collections.abc import Collection, Mapping
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .compare.base_class_diff import diff_bases as _diff_bases
+from .compare.typedefs import (
+    diff_typedefs,
+    is_version_stamped_typedef as is_version_stamped_typedef,
+    typedef_index_pair,
+)
 from .detector_registry import registry
-from .diff_cxx_rules import itanium_qualified_name, vtable_slot_is_override_reuse
+from .diff_cxx_rules import itanium_qualified_name
 from .diff_helpers import (
     build_type_map as _build_type_map,
     fact_known_qualified,
@@ -63,6 +68,17 @@ from .diff_types_surface import (
     _directly_referenced as _directly_referenced,
     _is_abi_surface_type as _is_abi_surface_type,
 )
+from .diff_types_vtable import (
+    # Re-exported (`as`-aliased) so `from .diff_types import
+    # _vtable_transition_is_evidenced` and similar call sites keep resolving
+    # — mirrors the diff_types_abicc_parity re-export block above.
+    _diff_type_vtable as _diff_type_vtable,
+    _layout_evidence_is_unverifiable as _layout_evidence_is_unverifiable,
+    _owned_virtual_signatures as _owned_virtual_signatures,
+    _owned_virtual_signatures_for_record as _owned_virtual_signatures_for_record,
+    _vtable_transition_is_evidenced as _vtable_transition_is_evidenced,
+    _vtable_transition_rests_on_unresolved_evidence as _vtable_transition_rests_on_unresolved_evidence,
+)
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
     VARIABLE_SYMBOL_TYPES,
@@ -83,8 +99,18 @@ from .model import (
     cv_qualifiers_only_differ,
     func_signature_cv_only_differ,
     is_non_abi_surface_type as _is_non_abi_surface_type,
+    resolved_fact_value,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
+from .model.identity import EntityId
+
+#: Back-compat alias: the ADR-063 Phase 6 typedef cutover moved this
+#: predicate into ``diff_typedefs.py`` with the rest of its family, but
+#: ``checker.py`` and ``tests/test_typedef_version_sentinel.py`` both import
+#: it from here by its private name. A module-level binding rather than an
+#: ``as``-aliased import, since ruff only recognizes the identical-name form
+#: as an intentional re-export.
+_is_version_stamped_typedef = is_version_stamped_typedef
 
 
 def _field_type_genuinely_changed(
@@ -282,6 +308,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     ChangeKind.TYPE_REMOVED,
                     symbol=name,
                     description=f"Type removed: {name}",
+                    entity_id=t_old.entity_id,
                 )
             )
             continue
@@ -319,6 +346,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     ChangeKind.TYPE_ADDED,
                     symbol=t_new.name,
                     name=t_new.name,
+                    entity_id=t_new.entity_id,
                 )
             )
 
@@ -398,6 +426,7 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
                 name=key,
                 old_value="1 overload",
                 new_value=f"{len(news)} overloads",
+                entity_id=original.entity_id,
             )
         )
     return changes
@@ -427,6 +456,7 @@ def _diff_type_pair(
                 name=name,
                 old_value="complete",
                 new_value="opaque",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
         return changes  # no further checks meaningful for opaque type
@@ -487,6 +517,7 @@ def _append_type_abstract_changes(
                 name=name,
                 old_value="instantiable",
                 new_value="abstract",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
     else:
@@ -497,6 +528,7 @@ def _append_type_abstract_changes(
                 name=name,
                 old_value="abstract",
                 new_value="instantiable",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
 
@@ -527,6 +559,7 @@ def _append_type_finality_changes(
                 name=name,
                 old_value="non-final",
                 new_value="final",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
     else:
@@ -537,6 +570,7 @@ def _append_type_finality_changes(
                 name=name,
                 old_value="final",
                 new_value="non-final",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
 
@@ -565,6 +599,7 @@ def _append_type_size_and_alignment_changes(
                 old=str(t_old.size_bits),
                 new=str(t_new.size_bits),
                 qualified_name=qualified,
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
 
@@ -581,6 +616,7 @@ def _append_type_size_and_alignment_changes(
                 old=str(t_old.alignment_bits),
                 qualified_name=qualified,
                 new=str(t_new.alignment_bits),
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
 
@@ -593,6 +629,8 @@ def _try_match_reserved_field(
     added_by_type: dict[str, list[TypeField]],
     reserved_matched_added: set[str],
     renamed_type_changed_added: set[str],
+    *,
+    entity_id: EntityId | None = None,
 ) -> Change | None:
     """Check if a removed field is a reserved field put into use.
 
@@ -639,6 +677,7 @@ def _try_match_reserved_field(
             name=name,
             old=fname,
             new=candidate.name,
+            entity_id=entity_id,
         )
     return None
 
@@ -686,6 +725,7 @@ def _diff_removed_field(
     renamed_type_changed_added: set[str],
     *,
     qualified_name: str | None = None,
+    entity_id: EntityId | None = None,
 ) -> Change | None:
     """Classify a field missing from the new type as reserved-use, rename(+retype), or removal.
 
@@ -706,6 +746,7 @@ def _diff_removed_field(
         added_by_type,
         reserved_matched_added,
         renamed_type_changed_added,
+        entity_id=entity_id,
     )
     if matched is not None:
         return matched
@@ -756,6 +797,7 @@ def _diff_removed_field(
                 name=name,
                 old=fname,
                 new=f_new.name,
+                entity_id=entity_id,
             )
         f_new = candidates[0] if candidates else None
         if f_new is not None and not cv_qualifiers_only_differ(f_old.type, f_new.type):
@@ -769,6 +811,7 @@ def _diff_removed_field(
                 new=f_new.type,
                 qualified_name=qualified_name,
                 field_name=fname,
+                entity_id=entity_id,
             )
     return make_change(
         ChangeKind.TYPE_FIELD_REMOVED,
@@ -777,6 +820,7 @@ def _diff_removed_field(
         detail=fname,
         qualified_name=qualified_name,
         field_name=fname,
+        entity_id=entity_id,
     )
 
 
@@ -788,6 +832,8 @@ def _added_field_changes(
     reserved_matched_added: set[str],
     renamed_type_changed_added: set[str],
     new_trailing_fam: str | None,
+    *,
+    entity_id: EntityId | None = None,
 ) -> list[Change]:
     """Emit added-field changes for new fields not consumed by reserved/rename matching."""
     changes: list[Change] = []
@@ -806,6 +852,7 @@ def _added_field_changes(
                     symbol=name,
                     name=name,
                     detail=fname,
+                    entity_id=entity_id,
                 )
             )
     return changes
@@ -821,6 +868,10 @@ def _diff_type_fields(
     # Same qualified-identity stamp as _append_type_size_and_alignment_changes
     # above, threaded down to the field-level emitters (Codex review).
     qualified = t_new.qualified_name or t_old.qualified_name
+    # The containing record's own identity, not any one field's -- TypeField
+    # carries no entity_id of its own (mirrors diff_types_field_facts.py's
+    # identical threading for its own field-level detectors).
+    entity_id = t_old.entity_id or t_new.entity_id
 
     added_by_offset, added_by_type = _index_added_fields(old_fields, new_fields)
     # Track which added fields were matched as reserved-field activations
@@ -848,6 +899,7 @@ def _diff_type_fields(
                 reserved_matched_added,
                 renamed_type_changed_added,
                 qualified_name=qualified,
+                entity_id=entity_id,
             )
             if removed_change is not None:
                 changes.append(removed_change)
@@ -863,6 +915,7 @@ def _diff_type_fields(
                 f_new,
                 cv_facts_reliable=cv_facts_reliable,
                 qualified_name=qualified,
+                entity_id=entity_id,
             )
         )
 
@@ -875,6 +928,7 @@ def _diff_type_fields(
             reserved_matched_added,
             renamed_type_changed_added,
             new_trailing_fam,
+            entity_id=entity_id,
         )
     )
 
@@ -893,6 +947,7 @@ def _diff_type_field_pair(
     *,
     cv_facts_reliable: bool = True,
     qualified_name: str | None = None,
+    entity_id: EntityId | None = None,
 ) -> list[Change]:
     changes: list[Change] = []
     # Use canonical form for type comparison to avoid false positives from
@@ -913,6 +968,7 @@ def _diff_type_field_pair(
                 new_value=f_new.type,
                 qualified_name=qualified_name,
                 field_name=fname,
+                entity_id=entity_id,
             )
         )
     if (
@@ -930,6 +986,7 @@ def _diff_type_field_pair(
                 new=str(f_new.offset_bits),
                 qualified_name=qualified_name,
                 field_name=fname,
+                entity_id=entity_id,
             )
         )
     if (
@@ -944,6 +1001,7 @@ def _diff_type_field_pair(
                 detail=fname,
                 old_value=f"bits={f_old.bitfield_bits}",
                 new_value=f"bits={f_new.bitfield_bits}",
+                entity_id=entity_id,
             )
         )
     return changes
@@ -992,6 +1050,7 @@ def _diff_flexible_array_member(
                 description=f"Flexible array member removed: {name}::{old_fam.name}",
                 old_value=old_fam.type,
                 new_value="(removed)",
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
     elif old_fam is None and new_fam is not None:
@@ -1003,6 +1062,7 @@ def _diff_flexible_array_member(
                 description=f"Flexible array member added: {name}::{new_fam.name}",
                 old_value="(none)",
                 new_value=new_fam.type,
+                entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
     elif old_fam is not None and new_fam is not None:
@@ -1023,6 +1083,7 @@ def _diff_flexible_array_member(
                         ),
                         old_value=old_fam.type,
                         new_value=new_fam.type,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
 
@@ -1032,7 +1093,9 @@ def _diff_flexible_array_member(
 def _new_field_change_kind(t_new: RecordType) -> ChangeKind:
     # Field addition is BREAKING for polymorphic types or types with vtables;
     # COMPATIBLE only for standard-layout types without virtual functions.
-    is_polymorphic = bool(t_new.vtable or t_new.virtual_bases)
+    new_vtable = resolved_fact_value(t_new.vtable_fact, [])
+    new_virtual_bases = resolved_fact_value(t_new.virtual_bases_fact, [])
+    is_polymorphic = bool(new_vtable or new_virtual_bases)
     return (
         ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
         if not is_polymorphic and t_new.kind == "struct"
@@ -1041,501 +1104,11 @@ def _new_field_change_kind(t_new: RecordType) -> ChangeKind:
 
 
 def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
-    changes: list[Change] = []
-
-    # BASE_CLASS_POSITION_CHANGED: same set of non-virtual bases, different order
-    # This shifts this-pointer adjustments for all bases → old binaries call wrong method.
-    old_bases_set = set(t_old.bases)
-    new_bases_set = set(t_new.bases)
-    if old_bases_set == new_bases_set and t_old.bases != t_new.bases:
-        changes.append(
-            make_change(
-                ChangeKind.BASE_CLASS_POSITION_CHANGED,
-                symbol=name,
-                name=name,
-                old_value=str(t_old.bases),
-                new_value=str(t_new.bases),
-            )
-        )
-    elif old_bases_set != new_bases_set:
-        # General base class set change (add/remove base) → TYPE_BASE_CHANGED
-        changes.append(
-            make_change(
-                ChangeKind.TYPE_BASE_CHANGED,
-                symbol=name,
-                description=f"Base classes changed: {name}",
-                old_value=str(t_old.bases),
-                new_value=str(t_new.bases),
-            )
-        )
-
-    # BASE_CLASS_VIRTUAL_CHANGED: a base moved between virtual and non-virtual
-    old_virt_set = set(t_old.virtual_bases)
-    new_virt_set = set(t_new.virtual_bases)
-    # Bases that moved from non-virtual to virtual or vice versa
-    became_virtual = (new_virt_set - old_virt_set) & old_bases_set
-    lost_virtual = (old_virt_set - new_virt_set) & new_bases_set
-    if became_virtual or lost_virtual:
-        desc_parts = []
-        if became_virtual:
-            desc_parts.append(f"became virtual: {sorted(became_virtual)}")
-        if lost_virtual:
-            desc_parts.append(f"lost virtual: {sorted(lost_virtual)}")
-        changes.append(
-            make_change(
-                ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
-                symbol=name,
-                name=name,
-                detail="; ".join(desc_parts),
-                old_value=str(sorted(t_old.virtual_bases)),
-                new_value=str(sorted(t_new.virtual_bases)),
-            )
-        )
-    elif old_virt_set != new_virt_set:
-        # Pure add/remove of a virtual base (not a migration from non-virtual):
-        # e.g. class D : virtual A  →  class D : virtual A, virtual B
-        # → TYPE_BASE_CHANGED (hierarchy changed, not just virtuality toggled)
-        if not changes:  # don't duplicate if TYPE_BASE_CHANGED already emitted above
-            changes.append(
-                make_change(
-                    ChangeKind.TYPE_BASE_CHANGED,
-                    symbol=name,
-                    description=f"Virtual base classes changed: {name}",
-                    old_value=str(t_old.virtual_bases),
-                    new_value=str(t_new.virtual_bases),
-                )
-            )
-
-    return changes
-
-
-def _vtable_transition_is_evidenced(
-    name: str,
-    t_old: RecordType,
-    t_new: RecordType,
-    old_funcs: Mapping[str, Function],
-    new_funcs: Mapping[str, Function],
-) -> bool:
-    """Whether an *empty↔non-empty* vtable difference rests on real evidence.
-
-    ``RecordType.vtable`` cannot express "not captured": it is a plain list,
-    and on the DWARF path it is simply the class's own virtual-method DIEs in
-    child order (``dwarf_snapshot._process_virtual_method_child``). So an
-    empty list means either "this class has no virtuals of its own" *or*
-    "this side's debug info did not carry them" -- and the two are
-    indistinguishable from the list alone.
-
-    That ambiguity produced a real false positive: identical headers on both
-    sides, no DWARF vtable, and not one ``_ZTV`` symbol anywhere still
-    emitted ``TYPE_VTABLE_CHANGED`` as BREAKING, because one side's virtual
-    methods happened to live in a translation unit only the other side's
-    debug info covered (differing ``-g`` level, a differently-inlined TU, or
-    ODR first-definition-wins in ``dwarf_snapshot``). The neighbouring
-    ``diff_vtable_layout`` already names this exact hazard for its own
-    detector and answers it with a tri-state ``None``; ``diff_elf_layout``
-    answers it by only ever comparing a ``_ZTV`` present on *both* sides.
-    This is the same principle applied to the type-level detector: degrade to
-    silence rather than fabricate a break.
-
-    An independent *layout* signal is what makes the transition real. A class
-    that genuinely gains its first virtual function also gains a vptr, so it
-    grows; one that gains or loses a virtual base says so directly. When
-    neither moved and both sizes are known, no real polymorphism change can
-    have occurred and the differing list is capture noise.
-
-    Size alone is **not** sufficient, which is why the class's own virtual
-    functions are consulted first (they are a different projection of the
-    same debug info, not a fully independent one -- see the body). A sufficiently over-aligned class absorbs
-    its new vptr into existing padding: verified against g++, both
-    ``struct alignas(8) A {}`` and ``struct alignas(8) A { virtual void f(); }``
-    are 8 bytes, as are the ``alignas(16)`` pair at 16 -- so a size-only guard
-    suppressed a genuine first-vptr addition (Codex review). It compounded:
-    ``diff_cxx_rules.virtual_method_addition`` withholds
-    ``VIRTUAL_METHOD_ADDED`` whenever the vtable lists differ, so the run was
-    left with a compatible ``FUNC_ADDED`` and a ``COMPATIBLE`` verdict on a
-    real layout break. ``snapshot.functions`` is a separate evidence stream
-    from the class DIE's virtual-method children, so it answers that case
-    without weakening the capture-gap guard.
-
-    Deliberately conservative in the other direction: an *unknown* size on
-    either side corroborates nothing but also refutes nothing, so the finding
-    is kept. The suppression needs positive evidence that layout held still;
-    it is not a fallback for missing information.
-
-    Two known false negatives, accepted rather than papered over -- both are
-    a class whose vtable grows while its object size does not, which is
-    indistinguishable from capture noise on the evidence this detector
-    receives:
-
-    * A class already polymorphic through a base, declaring no virtuals of
-      its own, that gains one.
-    * An over-aligned class gaining its first *pure* virtual. A pure virtual
-      has no out-of-line definition, so ``dwarf_snapshot`` drops its
-      declaration-only DIE from ``snapshot.functions`` while still counting
-      it as a vtable child -- both owned-signature sets read empty -- and
-      ``alignas`` absorbs the new vptr into existing padding so the size
-      does not move either (reproduced against g++ with
-      ``struct alignas(8) A { virtual void f() = 0; }``).
-
-    Neither loses the *break*: ``diff_layout._check_vptr_introduced`` fires
-    independently on the same None -> 0 vptr transition and the verdict stays
-    BREAKING. Only this detector's own ``TYPE_VTABLE_CHANGED`` is withheld.
-    Leaning on a sibling detector is not a comfortable place to be, and a
-    previous revision tried to close the second case here directly by reading
-    ``vptr_offset_bits`` -- see the body for why that witness is circular and
-    made this guard inert. Closing it for real needs evidence the model does
-    not carry (a per-finding provider record, or a polymorphism walk over
-    both base chains) -- see AGENTS.md's evidence-provider entry -- not a
-    cleverer reading of the fields already here.
-    """
-    if t_old.vtable and t_new.vtable:
-        # Both sides captured something, so the difference is a real
-        # reorder/replace rather than one side's evidence going missing.
-        return True
-    if _owned_virtual_signatures(name, old_funcs) != _owned_virtual_signatures(
-        name, new_funcs
-    ):
-        # The class's own virtual *functions* -- a different projection of
-        # the debug info from `RecordType.vtable`, and the signal that keeps
-        # an over-aligned class honest when the size check below cannot.
-        #
-        # Not fully independent, and the docstring used to overclaim that:
-        # on the DWARF path both ultimately derive from `DW_TAG_subprogram`
-        # evidence, so a TU whose coverage vanishes can take the vtable list
-        # *and* the function with it (Codex review). When that happens the
-        # sets differ, this returns True, and the finding is kept -- i.e. the
-        # guard declines to suppress rather than suppressing wrongly. That is
-        # the failure direction to have: it leaves the pre-existing false
-        # positive standing instead of hiding a real break. Closing it needs
-        # artifact or provenance evidence (`_ZTV` presence, per-finding
-        # providers) the type-level detector does not yet receive.
-        return True
-    # NOT consulted here: ``vptr_offset_bits``. It reads like the one
-    # independent layout witness available, and a previous revision of this
-    # function used it as exactly that -- wrongly. At the time, both
-    # producers assigned it as ``0 if vtable else None`` (``dwarf_snapshot.
-    # py``, ``dumper_castxml.py``), so on those two backends
-    # ``(old.vptr_offset_bits is None) != (new.vptr_offset_bits is None)``
-    # was *identical* to the empty-vs-non-empty vtable transition being
-    # guarded: true by construction for every input reaching this point,
-    # which silently made the whole guard a no-op and let the original
-    # capture-gap false positive straight back through (Codex review).
-    # ``dumper_castxml.py`` still assigns it exactly that way. ``dwarf_
-    # snapshot.py`` no longer does (G31 Phase C): it now reads a real
-    # ``_vptr.<Class>``/base-chain offset from DWARF in the common case,
-    # falling back to the same ``0 if vtable`` heuristic only for the
-    # residual unresolved set -- so for DWARF the field is no longer purely
-    # circular. This function still doesn't consult it, on purpose:
-    # declining to use an available signal is always safe (the failure mode
-    # this guard exists to avoid only ever ran the other way -- trusting a
-    # circular signal AS IF independent), and using it as a genuine witness
-    # for the now-partially-real DWARF case while still excluding it for
-    # castxml's own still-fully-circular case is its own careful design +
-    # FP-verification effort, not a drive-by extension here — see
-    # ``tests/test_vtable_evidence_guard.py``'s own note on why
-    # ``abicheck.dwarf_snapshot`` was dropped from its premise-pin test.
-    # Only the optional ``ABICHECK_CLANG_LAYOUT_TOOL`` path computes it from
-    # a real layout query on the castxml/clang side, and nothing in the
-    # model distinguishes that value from the derived one -- so it still
-    # cannot be trusted as evidence here at all on that side.
-    if t_old.size_bits is None or t_new.size_bits is None:
-        return True
-    if t_old.size_bits != t_new.size_bits:
-        return True
-    return list(t_old.virtual_bases) != list(t_new.virtual_bases)
-
-
-def _vtable_transition_rests_on_unresolved_evidence(
-    t_old: RecordType,
-    t_new: RecordType,
-    old_funcs: Mapping[str, Function],
-    new_funcs: Mapping[str, Function],
-) -> bool:
-    """True exactly when a kept ``TYPE_VTABLE_CHANGED`` finding for this
-    already-matched ``RecordType`` pair rests on the *same* "one side has no
-    known size" evidence gap ``LAYOUT_UNVERIFIABLE`` (``diff_layout.py``)
-    reports for the same type -- as opposed to a real, independently-evidenced
-    signal.
-
-    Only ever consulted after ``_vtable_transition_is_evidenced`` already
-    returned True, so this mirrors that function's own branches to isolate
-    which one supplied the evidence:
-
-    * Both sides' vtables populated -> a real reorder/replace. Not this case.
-    * The class's own virtual *functions* (a separate projection of the
-      debug info) differ -> a real signal, however imperfect. Not this case.
-    * A real ``size_bits`` delta, or a virtual or non-virtual base change ->
-      a real layout signal. Not this case.
-    * An *unknown* ``size_bits`` on either side -> the finding was kept only
-      because an unresolved-evidence gap corroborates nothing and refutes
-      nothing. This is the one case sharing ``LAYOUT_UNVERIFIABLE``'s own
-      evidence gap, and the only one a caller should treat as demotable.
-
-    Used by ``_diff_type_vtable`` to scope its correlation marker
-    (``Change.vtable_covers_unverifiable_layout_gap``) precisely; the
-    finding's own severity is never changed (an earlier design that demoted
-    it via ``effective_verdict`` was reverted as unsafe -- see AGENTS.md's
-    "Findings emitted from absent evidence" entry). Co-occurrence with an
-    unrelated ``LAYOUT_UNVERIFIABLE`` finding on a *different* same-named
-    type (a real risk when correlating by bare ``Change.symbol`` alone,
-    since two distinct records can share a leaf name in different
-    namespaces -- Codex review) is not a reason to mark a
-    genuinely-evidenced vtable change, and neither is any of the three
-    real-signal branches above (Codex review: an earlier revision of this
-    marker fired on any co-occurring ``LAYOUT_UNVERIFIABLE`` regardless,
-    wrongly tagging a real reorder/replace with both sides populated).
-    """
-    if t_old.vtable and t_new.vtable:
-        return False
-    # A single normalized identity for *both* sides, not each RecordType's
-    # own (possibly unset) qualified_name independently -- t_old and t_new
-    # already arrived here as one matched pair (TypeMap's own ambiguity-safe
-    # bare-name fallback, upstream of this function), so a legacy snapshot
-    # leaving qualified_name unset on one side must not desynchronize the
-    # identity this function matches owners against on the other (Codex
-    # review, fresh evidence).
-    qualified = t_new.qualified_name or t_old.qualified_name or t_new.name or t_old.name
-    if _owned_virtual_signatures_for_record(
-        qualified, old_funcs
-    ) != _owned_virtual_signatures_for_record(qualified, new_funcs):
-        return False
-    # A virtual-base change is real, independent evidence regardless of
-    # whether size_bits is known on either side (Codex review): it is not
-    # gated behind a known size in _vtable_transition_is_evidenced's own
-    # size-known branch, and must not be treated as unresolved here either
-    # -- otherwise a genuine hierarchy change (also separately reported via
-    # TYPE_BASE_CHANGED/BASE_CLASS_VIRTUAL_CHANGED) could have its
-    # TYPE_VTABLE_CHANGED half demoted to RISK merely because size_bits
-    # happens to be unknown.
-    if list(t_old.virtual_bases) != list(t_new.virtual_bases):
-        return False
-    # An ordinary (non-virtual) base addition, removal, or reorder is the
-    # identical class of independent evidence -- diff_types._diff_type_bases
-    # separately reports it as TYPE_BASE_CHANGED/BASE_CLASS_POSITION_CHANGED
-    # regardless of size_bits, so this correlation must not tag the
-    # co-occurring vtable finding as resting purely on an evidence gap just
-    # because size_bits also happens to be unknown (Codex review, fresh
-    # evidence -- the identical false-correlation risk the virtual_bases
-    # check above already guards against, just for the non-virtual case).
-    if list(t_old.bases) != list(t_new.bases):
-        return False
-    return t_old.size_bits is None or t_new.size_bits is None
-
-
-def _layout_evidence_is_unverifiable(
-    t_old: RecordType, t_new: RecordType, *, vtable_facts_reliable: bool
-) -> bool:
-    """True when ``diff_layout._check_layout_unverifiable``'s own
-    asymmetric-evidence condition holds for this *exact*, already
-    type-matched ``RecordType`` pair.
-
-    Delegates to ``diff_layout._layout_evidence_asymmetric`` -- the exact
-    predicate ``_check_layout_unverifiable`` itself evaluates -- rather than
-    a hand-duplicated copy, so the two can never silently drift apart
-    (Codex review). Consulted with the identical ``t_old``/``t_new``
-    objects ``diff_layout.py``'s own detector sees for this type -- so
-    there is no separate symbol-name correlation step (bare
-    ``Change.symbol`` equality across two independently-emitted findings)
-    that a same-named-but-different type could defeat.
-    """
-    from .diff_layout import _layout_evidence_asymmetric
-
-    return _layout_evidence_asymmetric(
-        t_old, t_new, vtable_facts_reliable=vtable_facts_reliable
-    )
-
-
-def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[str]:
-    """The mangled names of *name*'s own virtual member functions.
-
-    An evidence stream independent of ``RecordType.vtable``: these come from
-    ``snapshot.functions`` (their own DIEs / AST nodes), not from the class
-    DIE's virtual-method children, so one going missing does not take the
-    other with it.
-    """
-    from .diff_cxx_rules import owner_class_of
-    from .type_reachability_spelling import _namespace_suffix_spellings
-
-    # An *exact* comparison was wrong, in the direction that silences
-    # findings (Codex review). CastXML records a namespaced class under its
-    # bare leaf (`A`) while `owner_class_of` reconstructs the qualified
-    # `ns::A` from the mangled method, so the two never met, both signature
-    # sets came back empty, and the guard fell through to the size check --
-    # suppressing e.g. a class losing its last private virtual with no size
-    # change, which no other detector reports.
-    #
-    # Matched through `_namespace_suffix_spellings` (depth-aware, so a
-    # template argument's own `::` isn't mistaken for a namespace boundary).
-    # Deliberately *eager*: a spurious match makes the two sides' sets
-    # differ, which keeps the finding -- the only safe direction here.
-    wanted = {name, *_namespace_suffix_spellings(name)}
-
-    def _owns(fn: Function) -> bool:
-        owner = owner_class_of(fn)
-        if not owner:
-            return False
-        return bool(wanted & {owner, *_namespace_suffix_spellings(owner)})
-
-    return {
-        mangled
-        for mangled, fn in funcs.items()
-        if getattr(fn, "is_virtual", False) and _owns(fn)
-    }
-
-
-def _owned_virtual_signatures_for_record(
-    qualified: str, funcs: Mapping[str, Function]
-) -> set[str]:
-    """The mangled names of *funcs*' virtual member functions owned by
-    *qualified* -- an exact identity, matched by the bare-leaf suffix
-    matching ``_owned_virtual_signatures`` above uses.
-
-    That function's eager namespace-suffix matching is safe for its own
-    caller (``_vtable_transition_is_evidenced``): over-inclusion just makes
-    the two sides' sets differ, which reads as "real evidence, keep the
-    finding" -- the safe direction for a suppression. It is unsafe here: our
-    caller, ``_vtable_transition_rests_on_unresolved_evidence``, treats
-    "sets differ" as real evidence and *declines to correlate* -- so an
-    unrelated same-leaf-name record in a different namespace (e.g. an
-    unrelated ``ns2::Foo::g`` while scoping ``ns1::Foo``'s own evidence gap)
-    silently makes a genuine ``ns1::Foo`` pair's sets look different and the
-    pair never receives ``correlated_change_kind`` (Codex review, fresh
-    evidence).
-
-    ``owner_class_of`` always returns a *fully* scope-qualified owner when it
-    returns anything at all -- its display-name branch only fires on an
-    already-qualified name, and its mangled-name fallback reconstructs the
-    complete nested-name chain, never a partial one. So an exact string
-    comparison against *qualified* (also fully qualified -- see the caller)
-    is precise here, unlike the bare-name comparison an earlier revision
-    tried and reverted (see ``_owned_virtual_signatures``'s own docstring).
-
-    Takes the identity as a plain string, computed *once* by the caller from
-    both ``RecordType``s of an already-matched pair, rather than deriving it
-    separately per side from each ``RecordType``'s own ``qualified_name``:
-    a legacy stored snapshot can carry ``qualified_name=None`` for a record
-    the *other* side (or ``TypeMap``'s own ambiguity-safe bare-name
-    fallback) already knows is the same namespaced type as a fresher
-    snapshot's fully-qualified one -- comparing each side against its own,
-    independently-derived identity would then compare "Foo" (old) against
-    "ns::Foo" (new), permanently mismatching every owner and manufacturing a
-    spurious "independently evidenced" verdict for a comparison that has
-    nothing to do with either side's actual virtual surface (Codex review,
-    fresh evidence).
-
-    Declining a match is always safe for this caller: it only feeds a
-    cosmetic cross-reference annotation, never a finding's presence or
-    severity. A template specialization whose owner reconstruction falls
-    back to the raw Itanium argument encoding (``BoxIiE``) rather than the
-    spelled ``qualified_name`` (``Box<int>``) simply produces no match here
-    -- the same outcome eager suffix matching already had for that case
-    (neither spelling shares a namespace-suffix with the other), so this is
-    not a new gap.
-    """
-    from .diff_cxx_rules import owner_class_of
-
-    return {
-        mangled
-        for mangled, fn in funcs.items()
-        if getattr(fn, "is_virtual", False) and owner_class_of(fn) == qualified
-    }
-
-
-def _diff_type_vtable(
-    name: str,
-    t_old: RecordType,
-    t_new: RecordType,
-    old_funcs: dict[str, Function],
-    new_funcs: dict[str, Function],
-    old_types: Mapping[str, RecordType],
-    new_types: Mapping[str, RecordType],
-    *,
-    vtable_facts_reliable: bool = True,
-) -> list[Change]:
-    if t_old.vtable == t_new.vtable:
-        return []
-    if not vtable_facts_reliable:
-        # Either side is a persisted, pre-v21 direct-clang snapshot whose
-        # vtable was unconditionally vtable=[] for EVERY record -- real but
-        # WRONG data for an already-polymorphic class, not merely absent
-        # (AbiSnapshot.clang_vtable_facts_reliable's own docstring). Every
-        # differing-vtable pair reaching this point on such a comparison is
-        # capture-tool noise, not a genuine change, so decline exactly like
-        # the unevidenced-transition guard below -- see
-        # _vtable_transition_is_evidenced for the same discipline applied to
-        # a different (genuinely ambiguous, rather than known-wrong) cause.
-        return []
-    if not _vtable_transition_is_evidenced(name, t_old, t_new, old_funcs, new_funcs):
-        return []
-    # Same slot count/order, every differing slot a same-signature override
-    # reusing its base's slot (case185) -> no real layout change, just a
-    # slot's mangled owner renaming base to derived; func_added already
-    # covers the new symbol. Mirrors virtual_method_addition()'s exemption
-    # (own-owner-descends-from-old-owner guard included, so an unrelated
-    # same-signature virtual can't false-suppress a genuine replacement).
-    if len(t_old.vtable) == len(t_new.vtable) and all(
-        vtable_slot_is_override_reuse(
-            old_entry, new_entry, old_funcs, new_funcs, old_types, new_types
-        )
-        for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)
-    ):
-        return []
-    description = (
-        f"vtable reordered: {name}"
-        if Counter(t_old.vtable) == Counter(t_new.vtable)
-        else f"vtable changed: {name}"
-    )
-    change = make_change(
-        ChangeKind.TYPE_VTABLE_CHANGED,
-        symbol=name,
-        description=description,
-        old_value=", ".join(t_old.vtable),
-        new_value=", ".join(t_new.vtable),
-    )
-    # Tag (never demote) when this finding rests on the identical evidence
-    # gap LAYOUT_UNVERIFIABLE reports for the same (exact, already
-    # type-matched) RecordType pair.
-    #
-    # An earlier revision of this fix set ``effective_verdict =
-    # COMPATIBLE_WITH_RISK`` here instead -- wrong, and wrong for a reason
-    # this file's own AGENTS.md "Findings emitted from absent evidence"
-    # entry already states for the sibling suppression this mirrors: "an
-    # unknown size on either side corroborates nothing but also refutes
-    # nothing, so the finding is kept... not a fallback for missing
-    # information." The genuinely ambiguous case this branch identifies --
-    # old vtable populated, new vtable empty/differing, new-side evidence
-    # missing -- is indistinguishable from a real removal of the class's
-    # last virtual method whose only definition happens to live in a TU the
-    # new side's debug info doesn't cover (Codex review, fresh evidence: a
-    # pure-virtual method absent from both function maps reaches exactly
-    # this branch). Demoting BREAKING to RISK there risks hiding a real ABI
-    # break behind a capture gap, the opposite of this codebase's documented
-    # default (false-negative-avoidance over false-positive-avoidance).
-    #
-    # So the finding stays BREAKING here, full stop. Instead this only
-    # records ``qualified_name`` + a dedicated internal correlation marker
-    # (``vtable_covers_unverifiable_layout_gap`` -- deliberately NOT
-    # ``modulation_reason``/``modulation_rule``, which are a public,
-    # report-facing audit trail for an actual verdict override that did not
-    # happen here; Codex review) so a post-processing step
-    # (``post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged``)
-    # can recognize that THIS type's LAYOUT_UNVERIFIABLE finding shares the
-    # exact same evidence gap and cross-reference it via
-    # ``Change.correlated_change_kind`` -- rather than reporting the same
-    # gap twice at two different (and, before this fix, contradictory-
-    # looking) severities with no link between them. Both findings stay
-    # fully reported; nothing is ever removed from ``changes`` for this
-    # reason (an earlier fold-based design was reverted -- see AGENTS.md's
-    # "Findings emitted from absent evidence" entry for why a compare()-time
-    # removal here can never be correct for every downstream consumer).
-    if _vtable_transition_rests_on_unresolved_evidence(
-        t_old, t_new, old_funcs, new_funcs
-    ) and _layout_evidence_is_unverifiable(
-        t_old, t_new, vtable_facts_reliable=vtable_facts_reliable
-    ):
-        change.qualified_name = t_new.qualified_name or t_new.name
-        change.vtable_covers_unverifiable_layout_gap = True
-    return [change]
+    """Delegation-only facade — see :func:`abicheck.compare.base_class_diff.
+    diff_bases` (Codex review, PR #1033: identifying a raw ``bases``/
+    ``virtual_bases`` change is `compare/`-owned per this repo's own
+    task-routing table, not a `diff_types.py` growth)."""
+    return _diff_bases(name, t_old, t_new)
 
 
 @registry.detector("enums")
@@ -1573,6 +1146,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         ChangeKind.TYPE_REMOVED,
                         symbol=name,
                         description=f"Enum removed: {name}",
+                        entity_id=e_old.entity_id,
                     )
                 )
             continue
@@ -1617,6 +1191,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         detail=mname,
                         old_value=str(mval),
+                        entity_id=e_old.entity_id or e_new.entity_id,
                     )
                 )
             elif new_members[mname] != mval:
@@ -1633,6 +1208,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=mname,
                         old_value=str(mval),
                         new_value=str(new_members[mname]),
+                        entity_id=e_old.entity_id or e_new.entity_id,
                     )
                 )
 
@@ -1662,6 +1238,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         detail=mname,
                         new_value=str(mval),
+                        entity_id=e_old.entity_id or e_new.entity_id,
                     )
                 )
 
@@ -1697,6 +1274,7 @@ def _append_enum_scoped_changes(
                 name=name,
                 old_value="unscoped",
                 new_value="scoped",
+                entity_id=e_old.entity_id or e_new.entity_id,
             )
         )
     else:
@@ -1707,6 +1285,7 @@ def _append_enum_scoped_changes(
                 name=name,
                 old_value="scoped",
                 new_value="unscoped",
+                entity_id=e_old.entity_id or e_new.entity_id,
             )
         )
 
@@ -1751,6 +1330,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=f_old.name,
                     old_value=str(f_old.is_static),
                     new_value=str(f_new.is_static),
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
 
@@ -1765,6 +1345,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     kind,
                     symbol=mangled,
                     name=f_old.name,
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
 
@@ -1793,6 +1374,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=f_old.name,
                     old_value=str(f_old.is_static),
                     new_value=str(f_new.is_static),
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
         if f_old.is_const != f_new.is_const or f_old.is_volatile != f_new.is_volatile:
@@ -1803,6 +1385,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=f_old.name,
                     old_value=f"const={f_old.is_const} volatile={f_old.is_volatile}",
                     new_value=f"const={f_new.is_const} volatile={f_new.is_volatile}",
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
 
@@ -1819,6 +1402,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     new=repr(new_rq),
                     old_value=old_rq or "(none)",
                     new_value=new_rq or "(none)",
+                    entity_id=f_old.entity_id or f_new.entity_id,
                 )
             )
 
@@ -1868,6 +1452,7 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         detail=fname,
                         old_value=f_old.type,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
             elif _field_type_genuinely_changed(
@@ -1881,6 +1466,7 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         detail=fname,
                         old_value=f_old.type,
                         new_value=new_fields[fname].type,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
 
@@ -1893,107 +1479,42 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         name=name,
                         detail=fname,
                         new_value=f_new.type,
+                        entity_id=t_old.entity_id or t_new.entity_id,
                     )
                 )
 
     return changes
-
-
-_VERSION_STAMPED_TYPEDEF_RE = re.compile(r"^(.*?)_version_\d+_\d+_\d+$", re.IGNORECASE)
-"""Pattern for version-stamped compile-time sentinel typedefs.
-
-Some libraries (e.g. libpng) define typedefs whose names encode the library
-version, e.g. ``typedef char* png_libpng_version_1_6_46``.  The name changes
-every release by design — this is NOT a binary ABI break because the typedef
-is never exported as an ELF symbol; it exists solely to produce a
-compile-time error if headers from different versions are mixed.
-
-When such a typedef disappears (``typedef_removed``), abicheck would
-otherwise report BREAKING.  This guard downgrades the change to
-TYPEDEF_VERSION_SENTINEL (COMPATIBLE) instead.
-"""
-
-
-def _is_version_stamped_typedef(name: str) -> bool:
-    """Return True if *name* looks like a version-stamped sentinel typedef."""
-    return bool(_VERSION_STAMPED_TYPEDEF_RE.match(name))
-
-
-def _has_version_family_successor(name: str, new_typedefs: dict[str, str]) -> bool:
-    """Return True if *new_typedefs* contains another version-stamped typedef
-    with the same family prefix (e.g. ``png_libpng_version_``).
-
-    This distinguishes a sentinel rotation (old version removed, new version
-    added) from a genuine typedef removal where the name happens to match the
-    version-stamp pattern.
-    """
-    m = _VERSION_STAMPED_TYPEDEF_RE.match(name)
-    if not m:
-        return False
-    prefix = m.group(1).lower()
-    # Require a non-empty family prefix to avoid matching unrelated sentinels
-    # when the name itself starts with _version_ (e.g. ``_version_1_0_0``).
-    if not prefix:
-        return False
-    prefix = prefix + "_version_"
-    return any(k.lower().startswith(prefix) for k in new_typedefs)
 
 
 @registry.detector("typedefs")
 def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    changes: list[Change] = []
-    excl = _exclude_stdlib_namespaces(old, new)
-    # RD2-5: don't manufacture phantom TYPEDEF_REMOVED when the new side is stripped.
-    suppress_removed = _removals_are_unconfirmed(old, new)
+    """The typedef family, migrated onto the ``SemanticIR`` read index
+    (ADR-063 Phase 6's first checker cutover).
+
+    What stays here is only the *comparison-level* half: the two
+    snapshot-wide decisions a typedef cannot answer for itself
+    (stdlib-namespace exclusion, and RD2-5's "the new side is stripped, so
+    removals are unconfirmed"), plus which alias map the pair trusts
+    (``_typedef_diff_maps``). Detection itself moved to
+    ``compare.typedefs.diff_typedefs``, which reads only through
+    :class:`~abicheck.model.semantic_ir_index.SemanticIrIndex` and is
+    forbidden by ``scripts/semantic_ir_cutover.py`` from touching a legacy
+    typedef collection at all.
+
+    ``typedef_index_pair`` hands back the ``SemanticIR``-backed index when
+    its own rendered display names exactly reproduce those alias maps on
+    both sides, and the legacy adapter otherwise -- so this is a real read
+    of the IR wherever the IR is faithful, and bit-for-bit the previous
+    behavior everywhere else.
+    """
     old_typedefs, new_typedefs = _typedef_diff_maps(old, new)
-    for alias, old_type in old_typedefs.items():
-        # Full alias: correct for both legacy-DWARF's and the qualified map's keys.
-        if _is_non_abi_surface_type(alias, exclude_stdlib_namespaces=excl):
-            continue
-        # symbol/name stay bare like _diff_types (else _enrich_affected_symbols
-        # breaks); qualified_suffix disambiguates description so dedup can't collapse collisions.
-        bare_alias = alias.rsplit("::", 1)[-1]
-        qualified_suffix = f" ({alias})" if alias != bare_alias else ""
-        new_type = new_typedefs.get(alias)
-        if new_type is None and suppress_removed:
-            continue
-        if new_type is None:
-            # Version-stamped typedefs (e.g. png_libpng_version_1_6_46) are
-            # compile-time sentinels that change every release by design and
-            # are never exported as ELF symbols -- not a binary ABI break.
-            # Require a same-family successor to avoid hiding a genuine
-            # TYPEDEF_REMOVED for a name that merely matches the pattern.
-            if _is_version_stamped_typedef(alias) and _has_version_family_successor(
-                alias, new_typedefs
-            ):
-                changes.append(
-                    make_change(
-                        ChangeKind.TYPEDEF_VERSION_SENTINEL,
-                        symbol=bare_alias,
-                        name=bare_alias,
-                        old_value=old_type,
-                    )
-                )
-                continue
-            # Typedef removed — breaking for consumers that used the alias
-            changes.append(
-                make_change(
-                    ChangeKind.TYPEDEF_REMOVED,
-                    symbol=bare_alias,
-                    name=bare_alias,
-                    old_value=old_type,
-                    description=f"Typedef removed: {bare_alias}{qualified_suffix}",
-                )
-            )
-        elif new_type != old_type:
-            changes.append(
-                make_change(
-                    ChangeKind.TYPEDEF_BASE_CHANGED,
-                    symbol=bare_alias,
-                    name=bare_alias,
-                    old_value=old_type,
-                    new_value=new_type,
-                    description=f"Typedef base type changed: {bare_alias}{qualified_suffix}",
-                )
-            )
-    return changes
+    old_index, new_index = typedef_index_pair(
+        old, new, old_typedefs=old_typedefs, new_typedefs=new_typedefs
+    )
+    return diff_typedefs(
+        old_index,
+        new_index,
+        exclude_stdlib_namespaces=_exclude_stdlib_namespaces(old, new),
+        suppress_removed=_removals_are_unconfirmed(old, new),
+        is_non_abi_surface_type=_is_non_abi_surface_type,
+    )

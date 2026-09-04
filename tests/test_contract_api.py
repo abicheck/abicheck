@@ -285,16 +285,20 @@ class TestSnapshotJsonSchema:
     """Verify snapshot serialization round-trips correctly with required keys."""
 
     def test_snapshot_has_required_top_level_keys(self) -> None:
+        from abicheck.storage.sectioned_document import from_sectioned_document
+
         snap = _snap("1.0",
                      funcs=[_fn("foo", "_Z3foov")],
                      enums=[EnumType(name="E", members=[EnumMember("A", 0)])])
-        d = json.loads(snapshot_to_json(snap))
+        d = from_sectioned_document(json.loads(snapshot_to_json(snap)))
         for key in ("library", "version", "functions", "variables", "types", "enums"):
             assert key in d, f"Missing required snapshot key: {key}"
 
     def test_function_has_required_keys(self) -> None:
+        from abicheck.storage.sectioned_document import from_sectioned_document
+
         snap = _snap("1.0", funcs=[_fn("foo", "_Z3foov")])
-        d = json.loads(snapshot_to_json(snap))
+        d = from_sectioned_document(json.loads(snapshot_to_json(snap)))
         func = d["functions"][0]
         for key in ("name", "mangled", "return_type"):
             assert key in func, f"Missing required function key: {key}"

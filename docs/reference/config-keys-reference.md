@@ -2,7 +2,7 @@
 
 # Config Keys Reference
 
-Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource.inline.BuildConfig` itself validates, with its exact required YAML type — generated directly from `BuildConfig`'s strict-schema registries (an unknown key or a wrong-typed value is a hard error, ADR-043). "Other recognized top-level keys" below are also accepted but parsed by a sibling module instead, so no type is claimed for them here. See [Config File Reference](../reference/config-file.md) for effective defaults, CLI-override precedence, and a worked example; this page is the exhaustive key/type list for `BuildConfig`'s own schema only.
+Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource.build_config.BuildConfig` itself validates, with its exact required YAML type — generated directly from `BuildConfig`'s strict-schema registries (an unknown key or a wrong-typed value is a hard error, ADR-043). "Other recognized top-level keys" below are also accepted but parsed by a sibling module instead, so no type is claimed for them here. See [Config File Reference](../reference/config-file.md) for effective defaults, CLI-override precedence, and a worked example; this page is the exhaustive key/type list for `BuildConfig`'s own schema only.
 
 ## Blocks
 

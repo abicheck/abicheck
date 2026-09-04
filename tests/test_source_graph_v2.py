@@ -24,7 +24,8 @@
 from __future__ import annotations
 
 from abicheck.buildsource.graph_facts import edge_occurrence_id, edge_relation_key
-from abicheck.buildsource.source_graph import (
+from abicheck.buildsource.source_graph_build_source_abi import fold_source_edges
+from abicheck.model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
     CONF_UNKNOWN,
@@ -32,9 +33,8 @@ from abicheck.buildsource.source_graph import (
     GraphEdge,
     GraphFact,
     GraphNode,
-    SourceGraphSummary,
-    fold_source_edges,
 )
+from abicheck.model.source_graph import SourceGraphSummary
 
 
 def _node(provenance: str, confidence: str, **attrs: object) -> GraphNode:

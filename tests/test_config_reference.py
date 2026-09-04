@@ -45,7 +45,7 @@ def test_generated_reference_is_in_sync_with_build_config():
 
 
 def test_every_known_top_key_appears_in_generated_reference():
-    from abicheck.buildsource.inline import BuildConfig
+    from abicheck.buildsource.build_config import BuildConfig
 
     gen = _load_gen()
     content = gen.OUT_PATH.read_text(encoding="utf-8")
@@ -57,7 +57,7 @@ def test_every_known_top_key_appears_in_generated_reference():
 
 
 def test_every_block_subkey_has_a_resolved_type_or_is_flagged_unspecified():
-    from abicheck.buildsource.inline import (
+    from abicheck.buildsource.build_config import (
         _BOOL_SUBKEYS,
         _LIST_SUBKEYS,
         _STR_SUBKEYS,

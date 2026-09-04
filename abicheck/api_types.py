@@ -60,15 +60,33 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .change_registry_types import Verdict
-from .checker_policy import ChangeKind
+from .checker_policy import VALID_BASE_POLICIES, ChangeKind
+from .checker_types import DiffResult
 from .errors import ValidationError
+from .model import AbiSnapshot
+from .policy.exit_decision import ExitDecision
+from .policy.severity import SeverityConfig
+from .suppression import SuppressionList
 
 if TYPE_CHECKING:
-    from .checker_types import DiffResult
+    # ``CompileContext``/``DumpManifest`` are used only by ``InputSpec``,
+    # never referenced by ``CompareResult`` -- unlike the five imports above,
+    # nothing here needs them resolvable at runtime by ``typing.get_type_
+    # hints()`` (CodeRabbit review, fresh evidence, PR #1032: that call
+    # raised ``NameError`` for ``CompareResult`` because its own fields --
+    # ``diff: DiffResult``, ``old_snapshot``/``new_snapshot: AbiSnapshot``,
+    # ``suppression: SuppressionList | None``, ``exit_decision:
+    # ExitDecision | None``, ``severity_config: SeverityConfig | None`` --
+    # directly reference six of what were seven ``TYPE_CHECKING``-only
+    # names; importing only ``DiffResult``, as first suggested, would have
+    # just moved the same failure to the next unresolved name. No import
+    # cycle: none of ``checker_types``/``model``/``suppression``/
+    # ``policy.exit_decision``/``policy.severity`` imports this module,
+    # directly or transitively -- the same check
+    # ``TestCompareRequestRuntimeResolvableAnnotations`` already documents
+    # for ``CompareRequest``'s own two runtime imports below).
     from .compile_context import CompileContext
     from .dump_manifest import DumpManifest
-    from .model import AbiSnapshot
-    from .suppression import SuppressionList
 
 #: Languages the C/C++ frontends accept (mirrors the CLI ``--lang`` choices).
 SUPPORTED_LANGS = frozenset({"c", "c++"})
@@ -703,6 +721,8 @@ class CompareRequest:
     pack_internal_namespaces: tuple[str, ...] | None = field(
         default=None, kw_only=True
     )
+    severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
+    exit_code_scheme: str | None = field(default=None, kw_only=True)
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).
@@ -750,6 +770,17 @@ class CompareRequest:
         errors += _debug_format_errors(self.debug_format)
         if not self.policy:
             errors.append("policy profile name must not be empty")
+        elif self.policy_file_path is None and self.policy not in VALID_BASE_POLICIES:
+            # Only checked with no policy_file_path (Codex review, Round 11):
+            # a file overrides the base name -- stated_policy_base's own
+            # logic, applied here too -- so an unknown name paired with a
+            # valid file is a legitimate request the file already resolves
+            # for; only a name with nothing to override it is a real error,
+            # and needs to fail here before any extraction runs.
+            errors.append(
+                f"unknown policy {self.policy!r}: choose from "
+                f"{sorted(VALID_BASE_POLICIES)}"
+            )
         # D9 pre-flight: a --policy-file path that doesn't exist is a hard error
         # here (Tier 2), so CLI and MCP surface the same message before any work.
         if (
@@ -782,6 +813,40 @@ class CompareRequest:
                 )
         errors += _depth_errors(self.depth)
         errors += frontend_context_errors(self.frontend_context)
+        # Fail fast on a misspelled exit_code_scheme (Codex review, Round 6):
+        # `resolve_release_gate_options` already rejects an unknown scheme,
+        # but `classify_compare_pair` only calls it *after*
+        # `resolve_compare_request` has already run extraction — a project-
+        # controlled build/source step that can be slow or side-effecting.
+        # Checking the same set here means a bad value is a Tier-2
+        # ValidationError before any of that runs, for every front end that
+        # calls `validate()`/`validation_errors()` (native `compare` CLI
+        # included, via `cli_compare_receipt.py`).
+        if self.exit_code_scheme is not None:
+            from .policy.release_gate_options import _VALID_EXIT_CODE_SCHEMES
+
+            if self.exit_code_scheme not in _VALID_EXIT_CODE_SCHEMES:
+                errors.append(
+                    f"invalid exit_code_scheme {self.exit_code_scheme!r}; "
+                    f"must be one of {_VALID_EXIT_CODE_SCHEMES} or None"
+                )
+        # Same fail-fast reasoning, same round (Codex review, fresh
+        # evidence): the `exit_code_scheme` check above left this sibling
+        # field unchecked, so a misspelled `severity_preset` (e.g.
+        # `"strcit"`) still reached `resolve_release_gate_options` only
+        # after `resolve_compare_request` had already extracted both
+        # sides -- `SEVERITY_PRESETS` is `resolve_severity_config`'s own
+        # lookup table, checked here without calling it (this method must
+        # stay side-effect-free; resolving would also require a real
+        # `SeverityConfig` this validation has no use for).
+        if self.severity_preset is not None:
+            from .policy.severity import SEVERITY_PRESETS
+
+            if self.severity_preset not in SEVERITY_PRESETS:
+                errors.append(
+                    f"invalid severity_preset {self.severity_preset!r}; "
+                    f"must be one of {sorted(SEVERITY_PRESETS)} or None"
+                )
         for label, side in (("old", self.old), ("new", self.new)):
             errors += _path_required_errors(label, side, source_only_allowed=False)
             errors += _side_errors(label, side)
@@ -976,6 +1041,16 @@ class CompareResult:
     old_snapshot: AbiSnapshot
     new_snapshot: AbiSnapshot
     suppression: SuppressionList | None = None
+    # ADR-064/PR G2, see classify_compare_pair.
+    exit_decision: ExitDecision | None = None
+    # ADR-064/PR G2 rendering parity (Codex review): the same resolved
+    # `GateOptions.severity` `exit_decision` above was scored under, so a
+    # caller can pass `severity_config=result.severity_config` into
+    # `reporter.render_output`/`to_json` and get a rendered `severity` block
+    # and exit code that agree with `exit_decision`, instead of silently
+    # recomputing a `None`-severity legacy exit that contradicts it. `None`
+    # under the legacy scheme, where there is nothing to disagree with.
+    severity_config: SeverityConfig | None = None
 
     def as_tuple(self) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
         """Return ``(diff, old_snapshot, new_snapshot)`` — the pre-0.6 shape.

@@ -1,4 +1,8 @@
+<div align="center">
+
 # abicheck
+
+**Know before you ship whether a C/C++ library upgrade will break the programs already built against it.**
 
 [![CI](https://github.com/abicheck/abicheck/actions/workflows/ci.yml/badge.svg)](https://github.com/abicheck/abicheck/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/abicheck/abicheck/branch/main/graph/badge.svg)](https://codecov.io/gh/abicheck/abicheck)
@@ -7,193 +11,266 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/abicheck.svg)](https://pypi.org/project/abicheck/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-**abicheck** combines binary, debug, header, build, and (optionally) source evidence to detect the widest practical set of mechanical C/C++ ABI/API compatibility breaks — while reporting exactly which finding classes weren't checkable with the evidence you gave it, rather than silently passing. It compares two versions of a shared library — along with their public headers — and reports whether existing binaries will continue to work or break at runtime.
+[Documentation](https://abicheck.github.io/abicheck/) ·
+[Getting started](https://abicheck.github.io/abicheck/start/getting-started/) ·
+[Which command do I need?](#which-command-do-i-need) ·
+[Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/) ·
+[Migrate from ABICC / libabigail](#migrating-from-another-tool)
 
-It catches removed or renamed symbols, changed function signatures, struct layout drift, vtable reordering, enum value reassignment, and many more — **397 ABI/API change types** in total — that cause crashes, silent data corruption, or linker failures after a library upgrade.
-
-> **Platforms:** Linux (ELF), Windows (PE/COFF), macOS (Mach-O). Binary and header AST analysis on all platforms; debug-info cross-check uses DWARF/BTF/CTF on Linux and PDB on Windows — Mach-O has no debug-info cross-check today, only header AST when you supply `-H`. MinGW-built DLLs are validated end-to-end in CI; native MSVC+PDB verdicts are experimental (the CI lane is non-blocking until proven stable) — see [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/).
-
-**Full documentation:** **[abicheck.github.io/abicheck](https://abicheck.github.io/abicheck/)**
-
----
-
-## Key features
-
-- **Reads multiple sources of information.** abicheck doesn't rely on a single view of a library. It overlays up to **five independent, additive sources** — the compiled binary, its debug symbols, its public headers, its build-system data, and (optionally) its sources — and lets the strongest evidence win. Each source finds breaks the weaker ones are blind to, and *removes* false positives the weaker ones would raise. See [How it works](#how-it-works--multiple-sources-of-information) below.
-- **Detects most of what causes ABI/API breaks.** **397 change types** across functions, variables, structs/classes, enums, unions, typedefs, templates, and platform/linker metadata — removed or renamed symbols, changed signatures and parameter lists, struct/class layout drift, field-offset shifts, vtable reordering, enum value reassignment, qualifier/`noexcept`/access changes, calling-convention and packing changes, symbol-version and SONAME drift, dependency leaks, and more. Each is classified as `BREAKING`, `API_BREAK`, `COMPATIBLE_WITH_RISK`, or `COMPATIBLE`. See the [Change Kind Reference](https://abicheck.github.io/abicheck/reference/change-kinds/).
-- **Cross-platform.** Linux (ELF), Windows (PE/COFF), and macOS (Mach-O) binaries, with debug-info cross-checks from DWARF, BTF, and CTF (all Linux/ELF) and PDB (Windows) — Mach-O has no debug-info cross-check today. See [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/) for what's validated in CI per platform (native MSVC+PDB verdicts are experimental).
-- **Built for CI.** Deterministic [exit codes](https://abicheck.github.io/abicheck/reference/exit-codes/), SARIF/JSON/Markdown/HTML/JUnit output, snapshot-based [baselines](https://abicheck.github.io/abicheck/user-guide/baseline-management/), [policy profiles](https://abicheck.github.io/abicheck/user-guide/policies/) and [suppressions](https://abicheck.github.io/abicheck/user-guide/suppressions/), and a first-class [GitHub Action](https://abicheck.github.io/abicheck/user-guide/github-action/).
-- **Public-surface scoping.** Filters findings to the library's *public* ABI surface so internal-only changes don't fail your build — fewer false positives than symbol-only tools.
-- **More than one library at a time.** Compare co-versioned multi-library releases as a single bundle ([`compare` on directory/package inputs](https://abicheck.github.io/abicheck/user-guide/multi-binary/)), check whether a specific application still works ([`compare --used-by`](https://abicheck.github.io/abicheck/user-guide/appcompat/)), or validate a binary's full dependency stack across sysroots ([`deps compare`](https://abicheck.github.io/abicheck/user-guide/cli-usage/)).
-- **Drop-in for existing tools.** A [`compat`](https://abicheck.github.io/abicheck/user-guide/from-abicc/) mode mirrors `abi-compliance-checker` flags, and migration guides cover [ABICC](https://abicheck.github.io/abicheck/user-guide/from-abicc/) and [libabigail](https://abicheck.github.io/abicheck/user-guide/from-libabigail/).
-- **Agent- and script-friendly.** Structured JSON/SARIF output and a [Python API](#python-api) for AI-driven workflows — no separate protocol server, agents use the CLI or the typed API directly. Pure Python (3.10+), no heavyweight native toolchain required for binary-only mode. A portable [Agent Skill](https://abicheck.github.io/abicheck/use/agent-skills/) (internal candidate, not yet externally published) is generated from [`skills-src/check-abi-compatibility/`](skills-src/check-abi-compatibility/) (`python scripts/install_dev_skill.py` to materialize it locally, e.g. into `.agents/skills/`) so a coding agent can answer "will this break existing consumers?" without the user knowing abicheck exists.
-- **Contract-aware decisions** (opt-in). Gate only on changes that belong to your *declared* compatibility contract — public headers, the binary's actual export table, or everything — while excluded and unresolved findings stay in an auditable report instead of silently vanishing. See [Contract-Aware Compatibility](https://abicheck.github.io/abicheck/learn/contract-aware-compatibility/).
-- **Cross-compiler reconciliation.** When one target is checked under several compiler/build profiles (GCC, Clang, MSVC), `aggregate` folds the reports back together and tells you whether a break is universal or profile-specific. See [Aggregate Reports](https://abicheck.github.io/abicheck/use/aggregate-reports/).
-- **Consumer impact explanations.** `compare --used-by` doesn't just say an application is affected — with source evidence on the library side, it can show the public-to-internal call chain that makes the app depend on the changed declaration. See [Application Compatibility](https://abicheck.github.io/abicheck/user-guide/appcompat/#why-does-this-consumer-depend-on-the-changed-declaration).
-- **One automation model.** The CLI and the Python API resolve through the same typed request objects and compatibility semantics (native `dump` is migrating — see the [CLI/Python parity table](https://abicheck.github.io/abicheck/user-guide/python-api/#cli-python-parity)).
+</div>
 
 ---
 
-## How it works — multiple sources of information
+## The problem
 
-abicheck treats compatibility analysis as a question of **evidence**: the more independent sources you give it about a library, the more it can prove — and the fewer false positives it raises. There are **five layers**, ordered from the least input to the most. Each one *adds* facts the previous cannot see; none is complete on its own.
+You ship a shared library. Other people's programs were compiled against version 1, and you are about to release version 2. If an exported function vanished, a struct field moved, a vtable slot shifted, or an enum was renumbered, those programs **crash, corrupt data silently, or refuse to load**. No compiler warns you, and a test suite that rebuilds from source never sees it.
 
-| Layer | Source you provide | Read by | What it newly reveals |
-|:-----:|--------------------|---------|------------------------|
-| **L0** | **Just the binary** — a stripped `.so` / `.dll` / `.dylib` | ELF/PE/COFF/Mach-O parsers (`pyelftools`, `pefile`, `macholib`) | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, `DT_NEEDED`/`LC_LOAD_DYLIB` dependencies |
-| **L1** | **+ Debug symbols** — a `-g` build or sidecar debug file | DWARF, PDB, BTF, CTF | Type **layout**: struct/class sizes, field offsets, enum *values*, vtable slots, calling convention, packing/alignment |
-| **L2** | **+ Public headers** — `-H include/` | castxml AST | Source-level **API**: signatures, overloads, access (`public`/`private`), `final`/`explicit`/`noexcept`, templates, default args, public/internal scoping |
-| **L3** | **+ Build system data & options** — `-p build/` | compile DB / CMake / Ninja / Bazel / Make | The flags the library was *actually* built with: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`, toolchain/sysroot, export maps |
-| **L4** | **+ Sources** — a build/source pack | per-TU source ABI replay | Facts that never reach the binary: macro/`constexpr` values, default-argument *values*, inline/template bodies, uninstantiated templates |
+abicheck compares the two versions, with whatever headers, debug info, build data, and sources you have, and tells you what breaks, why, and which version bump you owe.
 
-The layers are **independent and additive, not a fallback chain** — abicheck overlays every source you give it and computes one worst-wins verdict, under the *authority rule*: artifact-backed evidence (L0/L1/L2) is authoritative for the shipped-ABI verdict, while build/source evidence (L3/L4) *explains, localizes, scopes, or adds confidence* to a finding (and can raise its own source-/API-level findings) but never silently deletes an artifact-proven break.
+```bash
+abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=include/v2/
+```
 
-> **A sixth code you may see in the docs:** `L5` is the source *reachability graph* abicheck **derives** from L3/L4 evidence — you provide five sources (L0–L4); L5 is computed, never an input. It appears in the [`scan` documentation](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/).
+## Why abicheck
 
-With less input, abicheck degrades gracefully *down the staircase* rather than failing — a stripped binary with no headers collapses toward symbol-only checking — and `abicheck dump --dry-run` reports exactly which layers it found. The best input you can give it is **old library + new library + matching public headers + debug info + build data**. See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source can and cannot see, and [Architecture](https://abicheck.github.io/abicheck/concepts/architecture/) for how the layers are reconciled.
+- **Five layers of evidence, not one.** Binary, debug info, headers, build flags, sources. Each layer finds breaks the others miss and removes false positives the weaker ones raise.
+- **It says what it could not check.** Missing evidence is reported, never silently passed.
+- **397 ABI/API change types**, and it keeps binary breaks (`BREAKING`) apart from source-only breaks (`API_BREAK`). It is the only tool in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK` as its own verdict; ABICC splits binary and source into separate reports without an equivalent verdict.
+- **Zero false positives** on the benchmark catalog, at 95.9% accuracy with headers and 99.5% with full evidence, where `abidiff` scores 28.5% and ABICC 44.6%.
+- **Made for CI.** Deterministic exit codes, SARIF/JSON/Markdown/HTML/JUnit, baselines, policies, suppressions, a [GitHub Action](#github-action), a typed [Python API](#python-api), and a drop-in `compat` mode for `abi-compliance-checker`. Pure Python, Linux/Windows/macOS.
 
----
+## What a report looks like
+
+The run below compares two builds where version 2 only grows the ABI surface: two new functions, a new exported variable, and a new enum member. The HTML report, rendered from real output:
+
+<p align="center"><img src="docs/assets/readme/report-html.png" alt="abicheck HTML report: verdict COMPATIBLE, analysis confidence table, change summary, four added symbols" width="900"></p>
+
+The same content ships as Markdown (the default, and what the [GitHub Action](#github-action) posts as a PR comment), JSON, SARIF, and JUnit. Before the report, a CLI run prints which checks were on and which were off for the evidence you supplied:
+
+```text
+$ abicheck compare v1/libfoo.so.1 v2/libfoo.so.2 --header old=v1/foo.h --header new=v2/foo.h
+
+Evidence coverage:
+  L0 binary metadata         present, high confidence: elf
+  L1 debug info              present, high confidence: DWARF
+  L2 public header AST       present, high confidence: header-scoped
+  L3 build context           not_collected
+  L4 source ABI replay       not_collected
+  L5 source graph summary    present, reduced confidence
+Checks enabled for this scan (and why others are not):
+  [on]  Symbol presence & linkage (added/removed/SONAME) — from the binary's dynamic symbol table
+  [on]  Type layout, members, vtables, signatures — from DWARF/PDB debug info
+  [on]  API decls absent from the symbol table; public-surface scoping — from the public header AST
+  [off] Build-flag & toolchain drift (visibility, std, ABI flags) — no build data
+  [off] Macros, default args, inline/template/constexpr bodies — no source replay evidence
+  [on]  Impact / call / reachability graph — from the source graph summary
+```
+
+<details>
+<summary>Markdown output for the same run (abridged)</summary>
+
+```markdown
+# ABI Report: libfoo.so.1
+
+| | |
+|---|---|
+| **Old version** | `old` |
+| **New version** | `new` |
+| **Verdict** | ✅ `COMPATIBLE` |
+| Breaking changes | 0 |
+| Source-level breaks | 0 |
+| Deployment risk changes | 0 |
+| Compatible changes | 4 |
+
+## Analysis Confidence
+
+| Field | Value |
+|---|---|
+| Confidence | HIGH |
+| Evidence tier | `header_aware` |
+| Evidence tiers | `elf`, `dwarf`, `dwarf_advanced`, `header` |
+| Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
+| Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
+| Coverage gap | Detector 'dwarf_layout_coherence' disabled: neither snapshot has a DWARF-vs-header-AST layout coherence mismatch |
+| Coverage gap | Detector 'pe' disabled: missing PE metadata |
+| Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
+| Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
+| Coverage gap | Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered) |
+| Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
+
+> **Policy**: `strict_abi`
+
+## Release Recommendation
+
+| Field | Value |
+|---|---|
+| Version bump | 🟢 **MINOR** |
+| SONAME action | `no_bump_needed` |
+| Recommendation state | `actionable` |
+
+Backward-compatible additions to the public API — release a new MINOR version.
+
+## ✅ Additions
+
+- **enum_member_added**: Enum member added: color::ALPHA (`3`)
+  > New enumerator may shift subsequent values in non-fixed enums; switch defaults may miss the new case.
+- **func_added**: New public function: point_translate (`point_translate`) — `v2/foo.h:7`
+  > New function available; existing binaries are unaffected.
+- **func_added**: New public function: color_name (`color_name`) — `v2/foo.h:8`
+  > New function available; existing binaries are unaffected.
+- **var_added**: New public variable: point_api_version — `v2/foo.h:9`
+  > New variable available; existing binaries are unaffected.
+```
+
+</details>
+
+Exit code `0`, with a `MINOR` version-bump recommendation and no SONAME change. Had a struct field moved or a function vanished, the verdict would be `BREAKING`, the recommendation `MAJOR` with an SONAME bump, and the exit code `4`. Every finding names the change kind and the consumer-visible consequence; where the evidence allows, it also carries the header location and the exported symbols it reaches.
+
+## How it works: five layers of evidence
+
+abicheck treats compatibility as a question of **evidence**. The more independent sources you give it, the more it can prove and the fewer false positives it raises. You provide up to five; each adds facts the previous one cannot see.
+
+```mermaid
+flowchart LR
+    subgraph give["What you give it"]
+        direction TB
+        L0["L0 · Binary<br/>.so · .dll · .dylib"]
+        L1["L1 · Debug info<br/>DWARF · PDB · BTF · CTF"]
+        L2["L2 · Public headers<br/>castxml / clang AST"]
+        L3["L3 · Build data<br/>compile DB · CMake · Bazel"]
+        L4["L4 · Sources<br/>per-TU source replay"]
+    end
+    L0 & L1 & L2 & L3 & L4 --> X["Overlay all evidence<br/>worst-wins verdict"]
+    X --> V["BREAKING · API_BREAK<br/>COMPATIBLE_WITH_RISK · COMPATIBLE"]
+    V --> O["Markdown · JSON · SARIF · HTML · JUnit<br/>exit code 0 · 2 · 4"]
+    style X fill:#fff3cd,stroke:#d4a017
+    style V fill:#f8d7da,stroke:#c0392b
+    style O fill:#d4edda,stroke:#2e8b57
+```
+
+| Layer | You provide | Read by | What it newly reveals |
+|:-----:|-------------|---------|-----------------------|
+| **L0** | Just the binary, even stripped | ELF / PE / Mach-O parsers | Exported symbols, SONAME, symbol versions, visibility, dependencies |
+| **L1** | + Debug symbols (`-g` build or sidecar) | DWARF, PDB, BTF, CTF | Struct sizes and field offsets, enum values, vtable slots, calling conventions, packing |
+| **L2** | + Public headers (`-H include/`) | castxml or clang AST | Signatures, overloads, access levels, `noexcept`/`final`/`explicit`, templates, what is public vs internal |
+| **L3** | + Build data (`--build-info build/`) | compile DB, CMake, Ninja, Bazel, Make | The flags the library was actually built with: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, export maps |
+| **L4** | + Sources | Per-translation-unit source replay | Facts that never reach the binary: macro and `constexpr` values, default-argument values, inline and template bodies |
+
+The layers are **additive, not a fallback chain**. abicheck overlays everything you give it and computes one worst-wins verdict under an *authority rule*: artifact evidence (L0 to L2) decides the shipped-ABI verdict, while build and source evidence (L3, L4) explains, localizes, scopes, or adds findings of its own, but never deletes an artifact-proven break. A derived source-reachability graph, `L5`, is computed from whatever evidence is present (reduced confidence from headers alone, full confidence with build and source data) and feeds the impact and reachability checks; it is never an input.
+
+With less input abicheck degrades gracefully instead of failing. `abicheck dump --dry-run` reports which layers it found. The best input is **old library + new library + matching headers + debug info + build data**. Read more in [Evidence & Detectability](https://abicheck.github.io/abicheck/learn/evidence-and-detectability/) and [Architecture](https://abicheck.github.io/abicheck/learn/architecture/).
+
+### What each layer buys
+
+Measured on the [`examples/`](examples/README.md) catalog, which holds 197 cases today: 185 of them are compare-style cases with a minimum-evidence label, and the table shows the cumulative share of those whose *every* expected change kind is discovered once a layer is present.
+
+| Evidence available | Cases fully covered |
+|--------------------|:-------------------:|
+| Just the binary (L0) | 64 / 185 (35%) |
+| + Debug symbols (L1) | 133 / 185 (72%) |
+| + Public headers (L2) | 157 / 185 (85%) |
+| + Build data (L3) | 167 / 185 (90%) |
+| + Sources (L4) | 172 / 185 (93%) |
+| + Derived source graph (L5) | 185 / 185 (100%) |
+
+This is a discoverability floor, not an accuracy score; the [tool comparison page](https://abicheck.github.io/abicheck/reference/tool-comparison/#which-source-discovers-what) explains the methodology and the handful of cases whose *verdict* is reachable earlier than their last correlated kind.
+
+## How it compares to other tools
+
+`abidiff` (libabigail) reads the binary and its DWARF. `abi-compliance-checker` (ABICC) reads headers and a compiled dump. abicheck runs each pass its input supports: a symbol-table pass on every comparison, a header-AST pass when you supply headers, a DWARF/PDB cross-check when the binaries carry debug info (Linux and Windows; Mach-O has none yet), and build and source evidence layered on top when given, feeding **397 change types** of detection. A bare stripped binary gets only the first pass, and the report says so. That is where the gap comes from.
+
+| | abicheck | libabigail `abidiff` | ABICC |
+|---|:---:|:---:|:---:|
+| Symbol-table pass (SONAME, visibility, versions) | ✅ | ✅ | ❌ |
+| Header AST pass (`noexcept`, `static`, `const`, access, pure-virtual) | ✅ | ❌ | ✅ |
+| Debug-info layouts, vtable slots, cross-checked against the AST | ✅ | ✅ (no AST to cross-check) | abi-dumper mode only |
+| Build-flag and toolchain drift detection (L3) | ✅ | ❌ | ❌ |
+| Distinct `API_BREAK` verdict (source break, binary still works) | ✅ | ❌ | ❌ |
+| Reports which checks it could *not* run | ✅ | ❌ | ❌ |
+
+Full-catalog benchmark from 2026-07-18, when the catalog held 193 cases, every tool pointed at the whole catalog blind. A crash, hang, or "no mode for this case" counts as a miss, same as a wrong verdict.
+
+| Tool | Accuracy | False positives | False negatives |
+|------|:---:|:---:|:---:|
+| **abicheck** (headers, L2) | **95.9%** | **0** | 8 |
+| **abicheck** (+ build and sources, L3 to L5) | **99.5%** | **0** | 1 |
+| libabigail `abidiff` (with or without headers) | 28.5% | 5 | 133 |
+| ABICC (abi-dumper mode) | 44.6% | 8 | 99 |
+| ABICC (xml/legacy mode) | 40.4% | 7 | 108 |
+
+Run against abicheck 0.5.0, libabigail 2.4.0, and ABICC 2.3. The table is pinned to commit `ffa860c` and the 193-case catalog of that date; the exact reproduction procedure, ground-truth digest, per-case matrix, and the pinned cross-tool subset used for release-to-release tracking are in [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-18-all-193-cases). `python scripts/benchmark_comparison.py --suite all` reruns the *current* catalog against the current checkout rather than reproducing that historical run.
+
+`abidiff` is still the right choice for a sub-second sanity check, especially on a stripped binary where only the symbol table is available. For anything you gate a release on, the numbers above are the argument.
 
 ## Installation
 
-**Full installation (recommended)** — conda-forge bundles `abicheck` with `castxml` as a run dependency, so header AST analysis (L2) is available without a separate `castxml` install. The feedstock does **not** pull in a C/C++ compiler as a run dependency, and its `castxml >=0.6.3` floor is looser than abicheck's own `>=0.6.11` version gate — pin `castxml>=0.6.11` explicitly, as shown below, so a fresh environment doesn't land a `castxml` build old enough for abicheck's own gate to then reject it:
+**Full installation (recommended)**: conda-forge bundles abicheck with a castxml that passes abicheck's own version gate, so header analysis (L2) works out of the box.
 
 ```bash
-conda create -n abicheck -c conda-forge python=3.12 abicheck "castxml>=0.6.11"
+conda create -n abicheck -c conda-forge python=3.12 abicheck "castxml>=0.6.11,<0.8.0"
 conda activate abicheck
 ```
 
-**Lightweight/core installation** — the PyPI package is pure Python with no native scanner dependency:
+Pin castxml as shown: the feedstock's own floor is looser than abicheck's gate, which also requires castxml's bundled Clang to be recent. The exact supported bounds live in the [environment reference](https://abicheck.github.io/abicheck/reference/environment/).
+
+**Lightweight/core installation**: the PyPI package is pure Python with no native dependencies.
 
 ```bash
 pip install abicheck
 ```
 
-`pip install abicheck` does **not** install `castxml` or a compiler. Without them, abicheck still works in binary-only (L0) and, where the Python DWARF/PDB parsers apply, debug-info (L1) mode — it can also load and compare pre-built snapshots, and run every report format. For header AST analysis (L2) on a pip install, point `abicheck` at a separately managed, modern `castxml`/direct-Clang toolchain — **don't** `pip install castxml`: that installs the unmaintained legacy PyPI distribution (last released 0.4.5 in September 2022, with no bundled-Clang metadata at all), which abicheck's version gate rejects by default for an authoritative L2 scan.
+This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need a castxml inside the supported range on your `PATH`, or a clang plus `--ast-frontend clang` (or `ABICHECK_AST_FRONTEND=clang`), since the default frontend resolves to castxml and fails closed without it. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
 
-See [Getting Started](https://abicheck.github.io/abicheck/getting-started/) for per-platform setup and cross-compilation.
+Per-platform setup, cross-compilation, and Windows/macOS toolchains: [Install](https://abicheck.github.io/abicheck/start/install/) and [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/).
 
-> **Naming note:** the PyPI/conda-forge package (`abicheck`) is distinct from the older SourceForge `abicheck` that is still packaged by some Linux distributions, and from similarly named ABI tools such as `abi-compliance-checker` wrappers or Fedora's `libabigail-tools`. Run `abicheck --version` to confirm — it should print `abicheck X.Y.Z (abicheck/abicheck)`. If there is a conflict, invoke via `python -m abicheck`.
-
----
+> **Same name, different tool.** The PyPI/conda-forge `abicheck` is unrelated to the older SourceForge `abicheck` some Linux distributions still package. `abicheck --version` should print `abicheck X.Y.Z (abicheck/abicheck)`; if it does not, run `python -m abicheck`.
 
 ## Quick start
 
-Compare two library versions:
+Compare two versions of a library:
 
 ```bash
 abicheck compare libfoo.so.1 libfoo.so.2 \
   --header old=include/v1/foo.h --header new=include/v2/foo.h
 ```
 
-Save a baseline snapshot at release time, then compare every new build against it:
+Save a baseline at release time, then check every build against it:
 
 ```bash
 abicheck dump libfoo.so -H include/foo.h --version 1.0 -o baseline.json
 abicheck compare baseline.json ./build/libfoo.so --header new=include/foo.h
 ```
 
-Supported output formats: `markdown` (default), `json`, `sarif`, `html`, and `junit`.
+Pick an output format with `--format markdown|json|sarif|html|junit`:
 
 ```bash
 abicheck compare old.so new.so -H foo.h --format sarif -o report.sarif
 ```
 
-See [Getting Started](https://abicheck.github.io/abicheck/getting-started/) for the full tutorial and [CLI Usage](https://abicheck.github.io/abicheck/user-guide/cli-usage/) for the complete command reference.
-
----
+Inputs can be shared libraries, JSON snapshots, release directories, or packages (`.rpm`, `.deb`, `.tar`, conda, wheel), mixed freely. Full walkthrough: [Getting Started](https://abicheck.github.io/abicheck/start/getting-started/). Decision guide by artifact and CI policy: [Choose Your Workflow](https://abicheck.github.io/abicheck/start/choose-your-workflow/).
 
 ## Which command do I need?
 
-abicheck's whole CLI is 7 root commands: `dump`, `compare`, `scan`, `deps`, `compat`, `aggregate`, `project`. The last two are workflow-composition/advanced-integration commands, not binary analysis — most single-library projects only ever need the first five.
+The whole CLI is seven root commands. Most single-library projects only ever need `compare` and `dump`.
 
 | I want to… | Use |
 |------------|-----|
-| Check whether a library upgrade breaks existing consumers | [`abicheck compare`](https://abicheck.github.io/abicheck/user-guide/cli-usage/) |
-| Compare **a multi-library release** (a co-versioned bundle, e.g. oneDAL) as a single bundle | [`abicheck compare`](https://abicheck.github.io/abicheck/user-guide/multi-binary/) |
-| Check whether **my application** breaks with a new library version | [`abicheck compare --used-by APP`](https://abicheck.github.io/abicheck/user-guide/appcompat/) |
-| Check whether a **plugin** still satisfies its host's required entrypoints | [`abicheck compare --required-symbol SYM`](https://abicheck.github.io/abicheck/user-guide/plugin-systems/) |
-| Run a deterministic source-intelligence scan (classify → audit → optional compare) | [`abicheck scan ARTIFACT`](https://abicheck.github.io/abicheck/user-guide/scan-levels/) |
-| Validate a binary's full dependency stack across two sysroots | [`abicheck deps compare`](https://abicheck.github.io/abicheck/user-guide/cli-usage/) |
-| Drop-in replacement for `abi-compliance-checker` | [`abicheck compat`](https://abicheck.github.io/abicheck/user-guide/from-abicc/) |
-| Save a reusable ABI snapshot | [`abicheck dump`](https://abicheck.github.io/abicheck/getting-started/) |
-| Fold per-target ABI reports from a CI build matrix into one gate verdict | [`abicheck aggregate`](https://abicheck.github.io/abicheck/use/aggregate-reports/) |
-| Check a multi-target/multi-build-profile **project** together (advanced, `check-project.yml`) | [`abicheck project`](https://abicheck.github.io/abicheck/reference/cli-reference/) |
+| Check whether a library upgrade breaks existing consumers | [`abicheck compare`](https://abicheck.github.io/abicheck/use/cli-usage/) |
+| Compare a co-versioned **multi-library release** as one bundle (bundle-level analysis is [ELF/Linux-only](https://abicheck.github.io/abicheck/use/multi-binary/#platform-support)) | [`abicheck compare old-release/ new-release/`](https://abicheck.github.io/abicheck/use/multi-binary/) |
+| Check whether **my application** survives a library upgrade | [`abicheck compare --used-by ./myapp`](https://abicheck.github.io/abicheck/use/appcompat/) |
+| Check whether a **plugin** still satisfies its host's entrypoints | [`abicheck compare --required-symbol SYM`](https://abicheck.github.io/abicheck/use/plugin-systems/) |
+| Scan a PR with source and build context, against a baseline | [`abicheck scan ARTIFACT --against baseline.json`](https://abicheck.github.io/abicheck/use/scan-levels/) |
+| Validate a binary's whole dependency stack across two sysroots | [`abicheck deps compare`](https://abicheck.github.io/abicheck/use/cli-usage/) |
+| Save a reusable ABI snapshot | [`abicheck dump`](https://abicheck.github.io/abicheck/use/create-baseline/) |
+| Replace `abi-compliance-checker` without changing flags | [`abicheck compat`](https://abicheck.github.io/abicheck/use/from-abicc/) |
+| Fold per-target reports from a CI build matrix into one gate | [`abicheck aggregate`](https://abicheck.github.io/abicheck/use/aggregate-reports/) |
+| Declare and validate a multi-target, multi-profile **project** (advanced) | [`abicheck project`](https://abicheck.github.io/abicheck/reference/project-targets-schema/) |
 
-`compare` is strictly binary/API comparison. Planning and validating a
-declared multi-target/multi-profile topology is `project`'s job; folding
-already-produced per-check reports back into one gate is `aggregate`'s —
-neither of those two analyzes a binary directly.
+`compare --used-by` does more than flag an affected application: with source evidence on the library side it shows the public-to-internal call chain that makes the app depend on the changed declaration. When one target is built under several compilers, `aggregate` tells you whether a break is universal or profile-specific.
 
-### Migrating a multi-library project onto the declarative topology
+## Continuous integration
 
-For a co-versioned release like oneDAL — several libraries, some built under
-divergent compiler flags (e.g. `-fsycl` for a subset) — there are two ways to
-wire `abicheck` into CI. The one every project can use today is
-`abicheck compare` on directory/package inputs (see the table above) driven
-directly from your own workflow, with a release-asset baseline and a
-committed digest anchor — cross-library findings (removed dependencies,
-provider changes) from this path are **ELF/Linux-only**; a Windows/macOS
-release gets per-library results only, with bundle analysis silently
-skipped (see [Platform Support](https://abicheck.github.io/abicheck/user-guide/multi-binary/#platform-support)).
-The other is G30/ADR-047's declarative topology: a
-`.abicheck.yml` `targets:`/`bundles:`/`profiles:`/`baseline:` block, validated
-with `abicheck project validate`, fanned out with `abicheck project plan`,
-and run by the reusable `check-project.yml`/`publish-baseline.yml`
-workflows — zero project-owned Python. See the
-[Project Targets Reference](https://abicheck.github.io/abicheck/reference/project-targets-schema/).
-
-The declarative path isn't a drop-in replacement for every project yet.
-Before adopting it, confirm none of these apply to you:
-
-- **`bundles:` checks only run at `depth: binary`** — `headers`/`build`/
-  `source` are rejected at `project validate`. If your bundle-level check
-  needs header-scope evidence, it can't run through a `bundles:` entry today.
-- **Per-target `public_headers:` is validated but not yet projected into a
-  run-plan cell** — it's schema-checked, but nothing downstream reads it to
-  build a `-H` argument for you.
-- **Stored-facts bundle comparison (`BundleFacts`) has no run-plan/composite
-  Action/`check-project.yml` wiring** — it's reachable from the Python API
-  only, not from the declarative CI surface.
-- **`publish-baseline.yml` expects one `build-output.json` per contract
-  profile** (G30 P1.1). A build system that doesn't emit a per-profile
-  manifest in that shape needs to add one first.
-- **`profiles:` describes a build *lane* (compiler/flags), not a library** —
-  one profile's `targets[]` can list several libraries built under it (see
-  the [`build-output.json` reference](https://abicheck.github.io/abicheck/reference/build-output-schema/)),
-  but a project needs one profile *per distinct build configuration*: e.g.
-  oneDAL needs one profile for its SYCL-built subset and another for the
-  rest, not one profile per library.
-
-None of these block `compare`-based CI today — they're gaps in the
-*declarative* topology specifically, verified directly against
-`abicheck/buildsource/project_targets.py`/`run_plan.py` rather than tracked
-as open punch-list items anywhere: the design history for the bundle-depth
-restriction and the `build-output.json` contract lives in the
-[G30 GitHub Actions integration plan](docs/contribute/plans/g30-github-actions-integration-model.md),
-and for stored-facts bundle comparison in the
-[G38 bundle-facts plan](docs/contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md)
-— neither doc currently lists these as scheduled work, so check the code
-itself, not just the docs, before relying on a gap having closed.
-
----
-
-## Exit codes
-
-Use these to gate CI pipelines.
-
-| Exit code | Verdict | Meaning |
-|-----------|---------|---------|
-| `0` | `NO_CHANGE` / `COMPATIBLE` / `COMPATIBLE_WITH_RISK` | Safe — no binary ABI break |
-| `2` | `API_BREAK` | Source-level break (recompile needed, binary may still work) |
-| `4` | `BREAKING` | Binary ABI break (old binaries will crash or misbehave) |
-| `8` | `REMOVED_LIBRARY` | Library removed in new version (multi-library compare with `--fail-on-removed-library`) |
-
-Any active severity setting (a `--severity-*` flag or a severity value in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level *finding* in the addition/quality categories (`0` still passes, `4` is still worst). Under `--contract` (opt-in), an orthogonal contract-coverage axis can also raise a clean `0` to `1` when the selected contract domain's evidence is incomplete — a *different* reason for exit `1` than a severity error, both foldable with `max`; see [Contract-Aware Compatibility](https://abicheck.github.io/abicheck/learn/contract-aware-compatibility/). `scan`, `deps compare`, and `compat` add per-command codes (e.g. `scan` also has a `5` for `--budget` overflow). The canonical matrix is the [exit code reference](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine into the exit code is covered in [CI Gating](https://abicheck.github.io/abicheck/user-guide/ci-gating/).
-
----
-
-## GitHub Action
+### GitHub Action
 
 ```yaml
 - uses: abicheck/abicheck@v0.5.0
@@ -205,30 +282,29 @@ Any active severity setting (a `--severity-*` flag or a severity value in `.abic
     upload-sarif: true
 ```
 
-The action installs Python, castxml, and abicheck automatically. Outputs: `verdict`, `exit-code`, `report-path`. See the [GitHub Action docs](https://abicheck.github.io/abicheck/user-guide/github-action/) for matrix builds, cross-compilation, and gating flags (`fail-on-breaking`, `fail-on-api-break`).
+The action installs Python, castxml, and abicheck, runs the comparison, sets the exit code, and can post a PR comment or upload SARIF to the Security tab. Outputs: `verdict`, `exit-code`, `report-path`. The default compare path needs only checkout access; grant `pull-requests: write` for PR comments and `security-events: write` for SARIF upload. Matrix builds, cross-compilation, and gating flags: [GitHub Action](https://abicheck.github.io/abicheck/use/github-action/).
 
-The default compare path only needs normal checkout access. Extra repository permissions are needed only for optional GitHub integrations: `pull-requests: write` for PR comments and `security-events: write` for SARIF upload.
+### Exit codes
 
----
+| Exit | Verdict | Meaning |
+|:----:|---------|---------|
+| `0` | `NO_CHANGE` / `COMPATIBLE` / `COMPATIBLE_WITH_RISK` | No binary ABI break. `COMPATIBLE_WITH_RISK` still wants a deployment review (a new dependency, a raised runtime floor) |
+| `2` | `API_BREAK` | Source-level break. Consumers must recompile; existing binaries still run |
+| `4` | `BREAKING` | Binary ABI break. Existing binaries will crash or misbehave. A multi-library release also exits `4` when one library fails to dump or compare |
+| `8` | any | A library vanished from a multi-library release and `--fail-on-removed-library` is set; under the default scheme, only when no `2`/`4` already applies |
+| `64` | usage error | Bad flags or inputs |
 
-## Policies and suppressions
+`--severity-preset` (or a `severity:` block in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level finding in the addition/quality categories. Opt-in `--contract` adds an orthogonal axis that raises a clean `0` to `1` when the declared contract's evidence is incomplete. `scan`, `deps compare`, and `compat` add per-command codes. Full matrix: [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine: [CI Gating](https://abicheck.github.io/abicheck/use/ci-gating/).
 
-Policies classify detected changes (`BREAKING`, `COMPATIBLE`, …); suppressions silence known or intentional changes so they don't fail CI.
+### Policies and suppressions
+
+Policies decide how a change kind is classified; suppressions silence known or intentional changes, with justification and expiry.
 
 ```bash
-abicheck compare old.so new.so -H foo.h \
-  --policy sdk_vendor \
-  --suppress suppressions.yaml
+abicheck compare old.so new.so -H foo.h --policy sdk_vendor --suppress suppressions.yaml
 ```
 
-Built-in profiles: `strict_abi` (default), `sdk_vendor`, `plugin_abi`. Custom YAML policies are supported, and the ABICC compat CLI accepts `-symbols-list`/`-types-list` whitelist flags.
-
-Full references:
-- [Policy Profiles](https://abicheck.github.io/abicheck/user-guide/policies/)
-- [Suppressions](https://abicheck.github.io/abicheck/user-guide/suppressions/) (YAML schema, expiry, justification)
-- [Migrating from ABICC](https://abicheck.github.io/abicheck/user-guide/from-abicc/)
-
----
+Built-in profiles: `strict_abi` (default), `sdk_vendor`, `plugin_abi`; custom YAML policies are supported. See [Policy Profiles](https://abicheck.github.io/abicheck/use/policies/) and [Suppressions](https://abicheck.github.io/abicheck/use/suppressions/).
 
 ## Python API
 
@@ -245,98 +321,45 @@ result = run_compare(
 
 print(result.diff.verdict)       # e.g. Verdict.BREAKING
 print(len(result.diff.changes))  # number of detected changes
-print(result.old_snapshot.library, result.new_snapshot.library)
 ```
 
-`run_compare` returns a `CompareResult` — `diff`, `old_snapshot`,
-`new_snapshot`, and the resolved `suppression` list. It returned a bare
-3-tuple before 0.6; a positional caller migrates in one line with
-`result, old, new = run_compare(...).as_tuple()`.
+`run_compare` returns a `CompareResult` with `diff`, `old_snapshot`, `new_snapshot`, and the resolved suppressions. The CLI and the API resolve through the same typed request objects and compatibility semantics, so equivalent resolved inputs give a script or an AI agent the same answer a human gets at the terminal; note that the CLI additionally folds in a discovered `.abicheck.yml`, `--profile`, and `--pack` before running, which a bare `run_compare` call does not. There is no separate protocol server; agents use the CLI's JSON/SARIF output or this API directly. A portable [Agent Skill](https://abicheck.github.io/abicheck/use/agent-skills/) (an internal candidate, not yet externally published) is generated from [`skills-src/`](skills-src/check-abi-compatibility/) with `python scripts/install_dev_skill.py`, so a coding agent can answer "will this break existing consumers?" on its own.
 
-See the [Python API guide](https://abicheck.github.io/abicheck/user-guide/python-api/)
-for snapshots, custom policies, and rendering. AI-agent workflows use this
-same API or the CLI's structured JSON/SARIF output — there is no separate
-protocol server.
+Snapshots, custom policies, rendering, and the CLI/API parity table: [Python API guide](https://abicheck.github.io/abicheck/use/python-api/).
 
----
+## Migrating from another tool
 
-## Examples
+- **From `abi-compliance-checker`:** `abicheck compat` accepts ABICC's flags, including `-symbols-list` / `-types-list` whitelists, so an existing pipeline keeps working while you move to `compare`. [Migrating from ABICC](https://abicheck.github.io/abicheck/use/from-abicc/).
+- **From libabigail:** `abidiff old.so new.so` becomes `abicheck compare old.so new.so`; the guide maps every header, suppression, and debug-info flag and translates `abidiff`'s exit bitmask to abicheck's scalar codes. [Migrating from libabigail](https://abicheck.github.io/abicheck/use/from-libabigail/).
 
-The [`examples/`](examples/README.md) directory contains **197 real-world ABI/API scenarios** (192 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts:
+## Platform support
 
-- Most are single-library `v1`/`v2` examples with a consumer app, including cases 187–189 and 191 (a public struct/class/function gaining a dependency on an internal type, proven both as a real artifact-level break and via the L2 header-only semantic graph, built automatically at `--depth headers` and above).
-- The G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks.
-- A handful of L3/L4/L5 build/source-only cases (152–158, 160–162, 190, 192–193) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see.
-- Case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039).
-- Bundle/release-level cases use release-style layouts.
+| Platform | Binary + header AST | Debug-info cross-check | CI status |
+|----------|:---:|:---:|-----------|
+| Linux (ELF) | ✅ | ✅ DWARF, BTF, CTF | Fully validated; canonical lane |
+| Windows (PE/COFF) | ✅ | ✅ PDB (layout depth best-effort) | MinGW DLLs validated end-to-end; native MSVC+PDB verdicts experimental (non-blocking lane) |
+| macOS (Mach-O) | ✅ | — | Apple-clang dylibs validated end-to-end; no debug-info cross-check yet |
 
-The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
+Details, including which toolchains each lane exercises: [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/). What abicheck does *not* catch: [Limitations](https://abicheck.github.io/abicheck/learn/limitations/).
 
-The authoritative completeness gate is the full example matrix: compiler lanes, runtime smoke, bundle validation, and dedicated proof owners are aggregated into exactly one row per ground-truth case. A green single-library lane or a `libv1.so`/`libv2.so` pair scan is not full-catalog proof. See the [full example validation runbook](docs/contribute/examples-validation-runbook.md) for runner selection, the reproducible workflow, artifact semantics, and agent rules.
+## Examples and validation
 
----
+The [`examples/`](examples/README.md) directory contains **197 real-world ABI/API scenarios and evidence-model fixtures** with ground-truth verdicts: 192 single-library cases (most are compiled `v1`/`v2` pairs with a consumer app modelled on real breaks; the rest are single-snapshot audits and hand-built L3 to L5 evidence-model fixtures for breaks no artifact layer can see) plus 5 multi-library bundle releases. They double as the regression corpus and as a case encyclopedia of how real breaks look ([browse it](https://abicheck.github.io/abicheck/reference/examples/)).
 
-## Validation snapshot
-
-The main validation target is the full **197-case catalog**. To scan it for the current checkout:
-
-```bash
-python scripts/benchmark_comparison.py --suite all
-```
-
-The command writes `benchmark_reports/benchmark_report.json` with the selected suite, abicheck version, git commit, tool versions, the `ground_truth.json` SHA-256, and per-tool accuracy. Cases that require bundle/release harnesses or unavailable compiler features are marked as unscored instead of being folded into single-library verdict accuracy.
-
-For apples-to-apples comparison with libabigail and ABICC, release workflows also run the historical pinned cross-tool subset (`case01`-`case73` + `case26b`) and attach that report to GitHub Releases:
-
-```bash
-python scripts/benchmark_comparison.py --suite pinned74
-```
-
-### Detection by evidence source
-
-The [five input sources of information](#how-it-works--multiple-sources-of-information) reveal breaks that weaker sources cannot detect. L5 is a derived source graph, not a sixth input source. The table below is derived from the `examples/ground_truth.json` minimum-evidence labels of the 186 compare-style catalog cases (185 excluding the one documented detector gap, `case111`). The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
-
-```bash
-python scripts/benchmark_comparison.py --evidence-tiers
-```
-
-| Source you provide | Cumulative cases reaching full expected-kind coverage |
-|--------------------|:------------------------------------------------------:|
-| Just the binary (`L0`) | 64 / 185 (35%) |
-| + Debug symbols (`L1`) | 133 / 185 (72%) |
-| + Public headers (`L2`) | 157 / 185 (85%) |
-| + Build data (`L3`) | 167 / 185 (90%) |
-| + Sources (`L4`) | 172 / 185 (93%) |
-| + Source graph (`L5`) | 185 / 185 (100%) |
-
-More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). This staircase is a **discoverability floor** — the minimum source that reaches every cataloged expected kind for a case, not a blind accuracy score. That's usually also the minimum source for the correct *verdict*, but not always: 4 of the 13 `L5` cases are verdict-detectable much earlier (L1 or L0) and land at `L5` only because one correlated, non-verdict-driving kind in their catalog entry needs the source graph — see the `L5` caveat in [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/#which-source-discovers-what) for the specific cases. For the stricter number that also penalizes false positives across the whole catalog, see the [full-catalog benchmark](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-18-all-195-cases) (L3-L5 scores 99.5% there, with 0 false positives). See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://abicheck.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
-
-Per-case matrix, methodology, full-catalog notes, and the pinned cross-tool comparison table: [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/).
-
----
+CI validates the full **197-case catalog** on every push to `main` and every pull request that touches the engine, the tests, or the examples, combining GCC and Clang lanes, runtime smoke, artifact variants, and bundle checks into one proof matrix (the [validation runbook](docs/contribute/examples-validation-runbook.md) describes how to reproduce it). `python scripts/benchmark_comparison.py --suite all` scores the catalog's verdict accuracy locally, which is a narrower check than that matrix. Each GitHub Release additionally runs and attaches the pinned 74-case cross-tool subset (`case01` to `case73` plus `case26b`; `python scripts/benchmark_comparison.py --suite pinned74`) for apples-to-apples comparison with libabigail and ABICC.
 
 ## Documentation
 
-- **Start here:** [Getting Started](https://abicheck.github.io/abicheck/getting-started/)
-- **User guide:** [CLI Usage](https://abicheck.github.io/abicheck/user-guide/cli-usage/) · [Application compatibility](https://abicheck.github.io/abicheck/user-guide/appcompat/) · [Output formats](https://abicheck.github.io/abicheck/user-guide/output-formats/) · [GitHub Action](https://abicheck.github.io/abicheck/user-guide/github-action/)
-- **Concepts:** [Verdicts](https://abicheck.github.io/abicheck/concepts/verdicts/) · [Architecture](https://abicheck.github.io/abicheck/concepts/architecture/) · [ABI/API Compatibility](https://abicheck.github.io/abicheck/concepts/abi-api-handling/) · [Limitations](https://abicheck.github.io/abicheck/concepts/limitations/)
-- **Reference:** [Change Kinds](https://abicheck.github.io/abicheck/reference/change-kinds/) · [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/) · [Platforms](https://abicheck.github.io/abicheck/reference/platforms/) · [Tool Comparison](https://abicheck.github.io/abicheck/reference/tool-comparison/)
-- **Troubleshooting:** [Troubleshooting guide](https://abicheck.github.io/abicheck/troubleshooting/)
+- **Start:** [Getting Started](https://abicheck.github.io/abicheck/start/getting-started/) · [Install](https://abicheck.github.io/abicheck/start/install/) · [Choose Your Workflow](https://abicheck.github.io/abicheck/start/choose-your-workflow/)
+- **Use:** [CLI Usage](https://abicheck.github.io/abicheck/use/cli-usage/) · [Output Formats](https://abicheck.github.io/abicheck/use/output-formats/) · [Baselines](https://abicheck.github.io/abicheck/use/baseline-management/) · [Application Compatibility](https://abicheck.github.io/abicheck/use/appcompat/) · [GitHub Action](https://abicheck.github.io/abicheck/use/github-action/) · [Troubleshooting](https://abicheck.github.io/abicheck/use/troubleshooting/)
+- **Learn:** [ABI in Five Minutes](https://abicheck.github.io/abicheck/learn/abi-series/abi-in-5-minutes/) · [ABI/API Compatibility](https://abicheck.github.io/abicheck/learn/abi-api-handling/) · [Verdicts](https://abicheck.github.io/abicheck/learn/verdicts/) · [Architecture](https://abicheck.github.io/abicheck/learn/architecture/) · [Limitations](https://abicheck.github.io/abicheck/learn/limitations/)
+- **Reference:** [Change Kinds](https://abicheck.github.io/abicheck/reference/change-kinds/) · [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/) · [CLI Reference](https://abicheck.github.io/abicheck/reference/cli-reference/) · [Platforms](https://abicheck.github.io/abicheck/reference/platforms/) · [Tool Comparison](https://abicheck.github.io/abicheck/reference/tool-comparison/)
 
-### Citation and machine-readable metadata
-
-- GitHub renders [CITATION.cff](CITATION.cff) through **Cite this repository**.
-- [CodeMeta](codemeta.json) and [Zenodo deposit metadata](.zenodo.json) expose
-  software identity, licensing, authorship, and dependency metadata.
-- The published [versioned JSON Schemas](https://abicheck.github.io/abicheck/reference/machine-readable-metadata/)
-  describe the machine-readable output contracts. Each schema's canonical `$id`
-  is a resolvable HTTPS URL.
-
----
+Machine-readable metadata: [CITATION.cff](CITATION.cff) (GitHub's **Cite this repository**), [CodeMeta](codemeta.json), [Zenodo](.zenodo.json), and the published [JSON Schemas](https://abicheck.github.io/abicheck/reference/machine-readable-metadata/) for every output contract.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, code style, and PR workflow. Project status and roadmap: [development/goals.md](docs/contribute/goals.md). Coding agents (Claude Code, Copilot, Cursor, or otherwise): the canonical repository contract is [AGENTS.md](AGENTS.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, code style, and the PR workflow, and [goals.md](docs/contribute/goals.md) for status and roadmap. Coding agents (Claude Code, Copilot, Cursor, or otherwise): the canonical repository contract is [AGENTS.md](AGENTS.md).
 
 ## License
 

@@ -15,14 +15,12 @@
 
 """Scan service — typed request/result contract and per-project cost estimate.
 
-ADR-035 D10 / G19.7 (Phase 3b). One typed contract — :class:`ScanRequest` →
-:class:`ScanResult` / ``[CostEstimate]`` — that the CLI (`cli_scan.py`), the MCP
-server, and CI wrappers all drive, so there is one engine and many renderings.
-
-This is a leaf module (it must not import from :mod:`abicheck.service`); the
-header-expansion helper it shares with the input-resolution path
-(:func:`expand_header_inputs`) lives here and is re-exported by ``service`` for
-backward compatibility.
+ADR-035 D10 / G19.7 (Phase 3b). One typed contract — :class:`ScanRequest` ->
+:class:`ScanResult` / ``[CostEstimate]`` -- that the CLI and CI wrappers all
+drive, so there is one engine and many renderings. A leaf module (must not
+import :mod:`abicheck.service`); its header-expansion helper
+(:func:`expand_header_inputs`) is re-exported by ``service`` for backward
+compatibility.
 """
 
 from __future__ import annotations
@@ -30,7 +28,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -39,9 +37,30 @@ from .buildsource.build_query import (
     drain_build_dir_cleanups,
 )
 from .compile_context import CompileContext as CompileContext  # re-exported, ADR-055 D1
-from .errors import ValidationError
+
+# pair_wide_cxx20_std_override lives in the leaf `cxx20_pair_dialect` module
+# (moved for line-budget room, see that module's own docstring), re-exported
+# here so every existing `from .service_scan import pair_wide_cxx20_std_override`
+# call site is unaffected.
+from .cxx20_pair_dialect import (
+    pair_wide_cxx20_std_override as pair_wide_cxx20_std_override,
+)
+from .errors import PlanningError, ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
+from .policy.outcome import run_outcome_dict_for_scan
 from .schemas import SCAN_SCHEMA_VERSION
+from .workflows.scan_abort_result import ScanAbortAxis, scan_abort_result_fields
+
+# The process-group kill machinery behind run_scan_subprocess/
+# run_scan_set_subprocess lives in the leaf `workflows.scan_subprocess` module
+# (moved for this module's own line-budget room, ADR-063 Phase 4's residual --
+# see that module's own docstring), re-exported here so every existing
+# `from .service_scan import _kill_process_tree`/`_descendant_pgids` call site
+# is unaffected.
+from .workflows.scan_subprocess import (
+    _descendant_pgids as _descendant_pgids,
+    _kill_process_tree as _kill_process_tree,
+)
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
@@ -130,14 +149,11 @@ def expand_public_header_inputs(headers: Iterable[Path]) -> list[str]:
 
 
 # ── Scan service: typed request/result + per-project cost estimate ───────────
-#
-# ADR-035 D10 / G19.7 (Phase 3b). One typed contract — :class:`ScanRequest` →
-# :class:`ScanResult` / ``[CostEstimate]`` — that the CLI (`cli_scan.py`), the MCP
-# server, and CI wrappers all drive, so there is one engine and many renderings.
-# ``estimate_scan`` is a first-class **dry-run** (ADR-035 D10): it probes the
-# project (TU count, header fan-out, cache state) and returns the projected cost
-# of each L-layer for *this* project so a maintainer can pick a depth on measured
-# cost instead of guesswork — it scans nothing and runs no compiler.
+# See the module docstring above for the contract. ``estimate_scan`` is a
+# first-class **dry-run** (ADR-035 D10): it probes the project (TU count,
+# header fan-out, cache state) and returns the projected cost of each L-layer
+# so a maintainer can pick a depth on measured cost, not guesswork — it scans
+# nothing and runs no compiler.
 
 
 def _scan_imports() -> tuple[Any, ...]:
@@ -175,54 +191,9 @@ class Budget:
     partial_ok: bool = True  # a partial scan (missing tool/layer) is success
 
 
-# CompileContext itself now lives in the leaf `compile_context` module
-# (ADR-055 D1, imported at the top of this file and re-exported here) so a
-# module outside this file's import-cycle-allowlisted cluster (api_types.py,
-# in particular) can depend on the type without joining the cluster itself.
-
-
-def pair_wide_cxx20_std_override(
-    lang: str,
-    old_headers: Iterable[Path],
-    new_headers: Iterable[Path],
-    gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...],
-) -> tuple[str, ...] | None:
-    """Pair-wide C++20 dialect decision, shared by every compare front-end
-    (P0 fix — CLI ``compare`` via ``cli_helpers_compare._pair_wide_dialect_override``,
-    the Python-API/MCP ``run_compare_request`` path).
-
-    ``dumper.py``'s C++20 ``requires``/``concept`` heuristic only ever sees ONE
-    side's headers at a time (each side is dumped independently), so an
-    old/new pair could silently disagree on the language standard whenever
-    neither side pins an explicit one — e.g. only the *new* side picks up a
-    ``concept`` and gets auto-upgraded to C++20 while *old* stays on the
-    toolchain default. That lets a real dialect-floor change masquerade as an
-    ordinary ABI diff (or, the inverse historical bug: a header containing
-    ``#error Foo requires Base`` tripped the heuristic on whichever side had
-    that text).
-
-    Decides the heuristic once, over the union of both sides' headers, so a
-    caller can pin the identical result onto both sides' compile context. An
-    explicit ``-std=``/``--std=``/``/std:`` from the user always wins
-    (``has_explicit_std`` short-circuits first); returns ``None`` in that case
-    and whenever no override is needed — never overriding an explicit choice.
-    Lives here (not in a CLI-layer module) so every front-end — CLI, Python
-    API, MCP — can share one implementation without a CLI-layer dependency
-    reaching into the Tier-2 service layer.
-    """
-    from ._compiler_options import has_explicit_std
-    from .dumper_ast_config_cpp20 import _detect_cpp20_headers
-
-    old_h = list(old_headers)
-    new_h = list(new_headers)
-    if lang.lower() != "c++" or not (old_h or new_h):
-        return None
-    if has_explicit_std(gcc_options, gcc_option_tokens):
-        return None
-    if not _detect_cpp20_headers(old_h + new_h):
-        return None
-    return ("-std=gnu++20",)
+# CompileContext lives in the leaf `compile_context` module (ADR-055 D1,
+# imported above, re-exported here) so api_types.py can depend on the type
+# without joining this file's import-cycle-allowlisted cluster.
 
 
 @dataclass(frozen=True)
@@ -246,8 +217,8 @@ class ScanRequest:
     lang: str = "c++"
     # L2 header compile context (dump↔scan flag parity, ADR-037 D3).
     compile: CompileContext = field(default_factory=CompileContext)
-    # --against config-surface parity with `compare` (ADR-049 Phase 5 §6.4): a `baseline` comparison can be scoped/suppressed/policy-classified the
-    # same way a direct `compare` run is, instead of always using the fixed policy="strict_abi"/suppression=None/scope_to_public_surface=True the engine previously hardcoded.
+    # --against config-surface parity with `compare` (ADR-049 Phase 5 §6.4): a `baseline` comparison can be
+    # scoped/suppressed/policy-classified like a direct `compare` run, instead of the engine's old fixed defaults.
     suppression: SuppressionList | None = None
     policy: str = "strict_abi"
     policy_file: PolicyFile | None = None
@@ -256,16 +227,13 @@ class ScanRequest:
     pattern_verdicts: bool = False
     env_matrix: EnvironmentMatrix | None = None
     collapse_versioned_symbols: bool = False
-    # ADR-049 Phase 5 §6.4 also names contract relevance/reason/evidence side among the fields the two commands must
-    # agree on -- which a `scan --against` result could not carry at all while only `compare` could ask for the
-    # shadow evaluator. Same advisory contract as `compare`: stamping a decision never changes verdict or exit code.
+    # ADR-049 Phase 5 §6.4 also names contract relevance/reason/evidence side among the fields the two commands
+    # must agree on. Same advisory contract as `compare`: stamping a decision never changes verdict or exit code.
     contract_evaluation: bool = False
     contract_mode: str | None = None
     # ADR-056: options the single-binary CLI path (cli_scan.py) already forwards straight to run_scan_core,
-    # bypassing ScanRequest entirely. Both run_scan and run_scan_set (--artifact-set) honor these when set directly
-    # on a ScanRequest (P2 regression, Codex review: run_scan used to silently ignore them, so a direct Python API
-    # caller passing abi3_floor/enabled_checks/severities/ build_config/allow_build_query/risk_rules_path got a
-    # differently-gated result than requested).
+    # bypassing ScanRequest entirely. Both run_scan and run_scan_set (--artifact-set) honor these when set
+    # directly on a ScanRequest (P2 regression, Codex review: run_scan used to silently ignore them).
     abi3_floor: tuple[int, int] | None = None
     enabled_checks: frozenset[str] | None = None  # None = ALL_CHECKS default
     severities: dict[str, str] = field(default_factory=dict)
@@ -274,10 +242,9 @@ class ScanRequest:
     risk_rules_path: Path | None = None
     # ADR-056 D2: caller-declared external DSO allow-list for the --artifact-set audit-mode bundle detector (closed-world escape hatch); unused by run_scan.
     bundle_system_providers: tuple[str, ...] = ()
-    # ADR-056: real changed-path provenance (e.g. "--since origin/main" or "--changed-path"), as computed by
-    # cli_scan._resolve_changed_seed. run_scan_set forwards this into each member's report instead of a hardcoded
-    # placeholder; unused by run_scan (which threads its own changed_src through _run_scan_one_member's caller
-    # directly).
+    # ADR-056: real changed-path provenance (e.g. "--since origin/main"), as computed by
+    # cli_scan._resolve_changed_seed. run_scan_set forwards this into each member's report instead
+    # of a hardcoded placeholder; unused by run_scan (which threads its own directly).
     changed_src: str = "run_scan_set"
     # `--against` summary's findings/suppressed cap; see `scan --max-findings`.
     max_findings: int | None = None
@@ -285,6 +252,8 @@ class ScanRequest:
     # (checker_types.py's public-dataclass convention) so a positional insert
     # can't rebind a later field (Codex review).
     build_targets: tuple[str, ...] = field(default=(), kw_only=True)
+    severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
+    exit_code_scheme: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -338,37 +307,42 @@ class LayerResult:
         }
 
 
-#: Per-TU / per-file cost anchors (seconds) for the dry-run estimate. These are
-#: deliberately coarse starting defaults (§11 of the ADR-035 proposal: a full
-#: ``-fsyntax-only`` pass dominates; pattern/compile-DB scans are <1-5%). The real
-#: per-project number comes from the actual run; the estimate only ranks layers so
-#: a maintainer can pick a depth.
+# Codex review: TU counts here are workspace-wide (a pre-captured Bazel aquery/cquery jsonproto is never filtered
+# by `targets` -- BazelAdapter only scopes a *live* query), so a `--build-target` run's real count is typically
+# lower. Baked into each row's `note` so a Python-API caller sees it too.
+_UNSCOPED_TU_NOTE_SUFFIX = (
+    " [UNSCOPED: --build-target given, but this TU count is workspace-wide -- "
+    "the real run's Bazel collection scopes to the requested root target(s) "
+    "and typically touches fewer TUs]"
+)
+# L4/L5 derive their counts from L3's -- inherit its "[UNKNOWN" state too.
+_TU_UNKNOWN_NOTE_SUFFIX = (
+    " [UNKNOWN: derived from an unknown L3 TU count, see L3_build note]"
+)
+
+#: Per-TU / per-file cost anchors (seconds) for the dry-run estimate. These are deliberately coarse starting
+#: defaults (§11 of the ADR-035 proposal: a full ``-fsyntax-only`` pass dominates; pattern/compile-DB scans are
+#: <1-5%). The real per-project number comes from the actual run; the estimate only ranks layers so a maintainer
+#: can pick a depth.
 _COST_PER_HEADER_PARSE = 0.08  # L2 base: castxml/clang startup + preprocess per header
-#: L2 marginal cost per KB of header text. A flat per-header anchor priced a
-#: one-line shim and a 200 KB templated umbrella (ICU's ``unicode/*.h``,
-#: hdf5's C++ API) identically, so a large public surface was under-ranked and
-#: ``scan --estimate`` understated header-audit cost. Weighting by on-disk size
-#: ranks heavy headers above trivial ones (field-eval P1: ICU/HDF5 header scans
-#: took 80-180 s while the estimate read flat).
+#: L2 marginal cost per KB of header text. A flat per-header anchor priced a one-line shim and a 200 KB templated
+#: umbrella (ICU/hdf5) identically, under-ranking a large public surface. Weighting by on-disk size ranks heavy
+#: headers above trivial ones (field-eval P1: ICU/HDF5 scans took 80-180 s while the estimate read flat).
 _COST_PER_HEADER_KB = 0.004
 _COST_PER_TU_BUILD = 0.002  # L3 compile-DB entry parse
-# Cold L4 is a full clang JSON-AST replay + Python JSON parse + macro pass per TU.
-# Real-world pvxs/oneDAL validation showed ~7.5s/TU cold; the old 0.45s/TU anchor
-# under-promised source/full scans by an order of magnitude and made 100+ TU runs
-# look like one-minute jobs. Warm cache is reported by live coverage; dry-run stays
-# conservative unless a future cache probe can prove hits up front.
+# Cold L4 is a full clang JSON-AST replay + Python JSON parse + macro pass per TU. Real-world pvxs/oneDAL
+# validation showed ~7.5s/TU cold; the old 0.45s/TU anchor under-promised source/full scans by an order of
+# magnitude, making 100+ TU runs look like one-minute jobs. Warm cache is reported by live coverage; dry-run
+# stays conservative absent a future cache probe.
 _COST_PER_TU_REPLAY = 7.5  # L4 per-TU semantic AST replay, cold-cache default
 _COST_PER_TU_GRAPH = 0.02  # L5 per-TU graph fold/edge
 
 
-#: A flat size-based estimate prices a one-line ``#include`` umbrella and a
-#: heavily-templated header identically per KB — real-world field evidence (the
-#: SVS ``datatype.h``/``float16.h``/``meta.h`` trio) showed a dry-run estimate
-#: of 0.51s for headers whose actual parse ran over 15,000s before an external
-#: SIGKILL: none of that cost is visible in on-disk bytes, it comes from
-#: template/include fan-out the compiler has to instantiate. These are a cheap,
-#: local (no compiler invocation) peek for that signal so the dry-run estimate
-#: can flag it instead of reporting a falsely precise number.
+#: A flat size-based estimate prices a one-line ``#include`` umbrella and a heavily-templated header identically
+#: per KB — real-world field evidence (the SVS ``datatype.h``/``float16.h``/``meta.h`` trio) showed a dry-run
+#: estimate of 0.51s for headers whose actual parse ran over 15,000s before an external SIGKILL: that cost comes
+#: from template/include fan-out, not on-disk bytes. These are a cheap, local (no compiler invocation) peek for
+#: that signal so the estimate can flag it instead of a falsely precise number.
 _COMPLEXITY_PEEK_BYTES = 512 * 1024
 _COMPLEXITY_INCLUDE_THRESHOLD = 8  # local #include lines
 _COMPLEXITY_TEMPLATE_THRESHOLD = 5  # template/concept/requires/SFINAE hits
@@ -381,12 +355,11 @@ _TEMPLATE_RE = re.compile(
 
 def _header_complexity_signal(path: Path) -> bool:
     """Best-effort local peek: many ``#include``s or heavy template/concept/
-    constexpr usage in *path* signal a header whose real parse time a flat
-    size-based estimate systematically under-prices (recursive template
-    instantiation is not linear in header bytes — the SVS pathological case had
-    small headers and a near-unbounded real parse time). Never raises; an
-    unreadable header is treated as unknown risk (not flagged), matching the
-    size estimate's own fall back to the base cost alone.
+    constexpr usage in *path* signals a header a flat size-based estimate
+    under-prices (template instantiation isn't linear in bytes -- the SVS
+    case had small headers and near-unbounded real parse time). Never
+    raises; unreadable is treated as unknown risk, matching the size
+    estimate's own fallback.
     """
     try:
         with open(path, "rb") as fh:
@@ -400,18 +373,14 @@ def _header_complexity_signal(path: Path) -> bool:
 
 
 def _estimate_header_seconds(headers: list[Path]) -> tuple[float, bool]:
-    """Size-aware L2 cost, plus a complexity-risk flag.
-
-    Returns ``(seconds, high_risk)``: *seconds* is a fixed per-header parse/
-    preprocess base plus a marginal per-KB term over each header's on-disk
-    size — inflated by :data:`_COMPLEXITY_MULTIPLIER` for any header that trips
-    :func:`_header_complexity_signal`, so a small-but-pathological header no
-    longer prices as a fraction of a second. *high_risk* is True when any
-    header tripped the signal — callers surface this as an explicit caveat
-    instead of a falsely precise point estimate (P0 SVS field report).
-
-    Falls back to the base alone when a path can't be stat'd (a symlink/glob
-    that no longer resolves) so the estimate never raises mid-dry-run.
+    """Size-aware L2 cost, plus a complexity-risk flag. Returns ``(seconds,
+    high_risk)``: *seconds* is a fixed per-header base plus a per-KB term,
+    inflated by :data:`_COMPLEXITY_MULTIPLIER` for any header tripping
+    :func:`_header_complexity_signal` (so a small-but-pathological header
+    doesn't price as a fraction of a second); *high_risk* flags that case so
+    callers surface an explicit caveat instead of a falsely precise number
+    (P0 SVS field report). Falls back to the base alone when a path can't
+    be stat'd, so the estimate never raises mid-dry-run.
     """
     total = 0.0
     high_risk = False
@@ -506,14 +475,13 @@ def _compile_db_in(root: Path) -> Path | None:
 
 
 def _discover_compile_db(sources: Path | None, explicit: Path | None) -> Path | None:
-    """The compile DB to estimate against: explicit wins, else discover in *sources*.
-
-    An explicit ``--compile-db``/``--build-info`` that points at a *directory*
-    (a supported scan input, e.g. ``build/`` holding a ``compile_commands.json``)
-    is resolved to the contained DB — otherwise the directory itself flows into
-    :func:`_count_compile_db_tus`, which fails the read and reports 0 TUs, making
-    L3/L4/L5 near-free even though the real scan replays the directory's DB
-    (Codex review).
+    """The compile DB to estimate against: explicit wins, else discover in
+    *sources*. An explicit ``--compile-db``/``--build-info`` pointing at a
+    *directory* (e.g. ``build/`` holding a ``compile_commands.json``) is
+    resolved to the contained DB -- else it flows into
+    :func:`_count_compile_db_tus`, which fails the read and reports 0 TUs,
+    making L3/L4/L5 near-free even though the real scan replays it (Codex
+    review).
     """
     if explicit is not None and explicit.exists():
         if explicit.is_dir():
@@ -540,12 +508,12 @@ def _count_pack_tus(path: Path) -> int | None:
     if not path.is_dir():
         return None
     try:
+        from .buildsource import pack_io
         from .buildsource.inline import is_pack_dir
-        from .buildsource.pack import BuildSourcePack
 
         if not is_pack_dir(path):
             return None
-        pack = BuildSourcePack.load(path)
+        pack = pack_io.load(path)
     except Exception:  # noqa: BLE001 - estimate is advisory; never raise on a bad pack
         return None
     be = pack.build_evidence
@@ -553,14 +521,12 @@ def _count_pack_tus(path: Path) -> int | None:
 
 
 def _count_bazel_build_info_tus(path: Path) -> int | None:
-    """Compile-unit count of a Bazel ``aquery``/``cquery`` ``--build-info``, else ``None``.
-
-    The real scan routes a Bazel jsonproto ``--build-info`` through
-    ``inline._maybe_collect_bazel_build_info`` → ``BazelAdapter`` (pre-captured,
-    ``allow_query=False``) and replays its compile actions; the estimate mirrors
-    that so a Bazel project does not report 0 L3/L4/L5 TUs and undersize the budget
-    (Codex review). Non-executing (parses the captured JSON only); best-effort —
-    any failure → ``None`` so the caller falls back to compile-DB / source counting.
+    """Compile-unit count of a Bazel ``aquery``/``cquery`` ``--build-info``,
+    else ``None``. The real scan routes it through ``BazelAdapter``
+    (pre-captured, ``allow_query=False``) and replays its compile actions;
+    the estimate mirrors that so a Bazel project doesn't undersize the
+    budget (Codex review). Non-executing, best-effort -- any failure ->
+    ``None`` so the caller falls back to compile-DB/source counting.
     """
     if not path.is_file():
         return None
@@ -632,20 +598,6 @@ def _resolve_estimate_level(
     return resolved, eff_depth, collect_mode
 
 
-# Codex review, fresh evidence: TU counts here are workspace-wide (a
-# pre-captured Bazel aquery/cquery jsonproto is never filtered by `targets`
-# -- adapters/bazel.py's BazelAdapter only scopes a *live* query, see its
-# own `collect()`), so a `--build-target` run's real TU count is typically
-# lower. Previously only cli_scan.py's dry-run bullet flagged this; baked
-# into each row's own `note` here so a Python-API caller reading
-# `ScanResult.estimate`/`estimate_scan()` directly sees it too.
-_UNSCOPED_TU_NOTE_SUFFIX = (
-    " [UNSCOPED: --build-target given, but this TU count is workspace-wide -- "
-    "the real run's Bazel collection scopes to the requested root target(s) "
-    "and typically touches fewer TUs]"
-)
-
-
 def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
     """Project-wide TU count and its provenance note for the estimate."""
     # Count TUs from the *same* effective build-info the real scan uses (`req.compile_db or req.build_info`) so an
@@ -666,11 +618,25 @@ def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
     elif pack_tus is not None:
         total, note = pack_tus, "build-source pack (build_evidence)"
     elif compile_db is not None:
-        total, note = _count_compile_db_tus(compile_db), f"compile DB: {compile_db.name}"
+        total, note = (
+            _count_compile_db_tus(compile_db),
+            f"compile DB: {compile_db.name}",
+        )
     elif req.sources is not None:
-        total, note = _count_source_tus(req.sources), "counted source files (no compile DB)"
+        total, note = (
+            _count_source_tus(req.sources),
+            "counted source files (no compile DB)",
+        )
     else:
-        total, note = 0, "no source tree / compile DB"
+        total, note = (
+            0,
+            (
+                f"build.query: {req.build_config.name} [UNKNOWN: query-only build.query, real run's trusted query determines the actual count]"
+                if req.build_config is not None
+                and _build_config_declares_query(req.build_config)
+                else "no source tree / compile DB"
+            ),
+        )
     if req.build_targets:
         note += _UNSCOPED_TU_NOTE_SUFFIX
     return total, note
@@ -681,11 +647,10 @@ def _estimate_replay_tus(req: ScanRequest, collect_mode: str, total_tus: int) ->
     # The L4 replay scope: a changed-only collection touches at most the changed *source* TUs (POI-focused, D7); a
     # full/target scope touches every TU. The budget's max_tus is a documented cap (never shrinks scope silently —
     # it FAILS — but the estimate honestly reflects the cap as the upper bound). A changed *header* fans out:
-    # without an include graph (the common compile-DB-only path)
-    # ``source_replay.select_compile_units(scope='changed')`` fails open to **all** TUs so header ABI changes are
-    # never silently missed, so the estimate must charge ``total_tus`` for a header change rather than the single
-    # header path — else it understates L4 cost and a user picks too small a budget (Codex review). An
-    # empty/seedless diff is likewise broad.
+    # without an include graph (the common compile-DB-only path), ``source_replay.select_compile_units(scope=
+    # 'changed')`` fails open to **all** TUs so header ABI changes are never silently missed, so the estimate must
+    # charge ``total_tus`` for a header change rather than the single header path — else it understates L4 cost and
+    # a user picks too small a budget (Codex review). An empty/seedless diff is likewise broad.
     changed = [p for p in req.changed_paths if p]
     source_changed = [p for p in changed if _is_source_tu_path(p)]
     header_changed = any(_is_header_path(p) for p in changed)
@@ -757,11 +722,10 @@ def _source_layer_estimates(
     # "source-target" (ADR-043 D2/D3) is the unseeded sibling of "source-changed" — same L3/L4/L5 layers, just a
     # broader (target-scoped, not changed-only) replay; it must price identically to source-changed everywhere
     # below, else an unseeded explicit-source scan/estimate silently reports zero source layers (the same zero-TU
-    # defect the collect-mode fix addresses).
-    #
-    # L4/L5 inherit the same unscoped total_tus the L3 row's tu_note already
-    # flags -- a short back-reference, not the full sentence again (Codex review).
+    # defect the collect-mode fix addresses). L4/L5 inherit the same unscoped/unknown total_tus the L3 row's
+    # tu_note already flags -- a short back-reference, not the full sentence again.
     unscoped_ref = " [UNSCOPED, see L3_build note]" if build_targets else ""
+    unknown_ref = _TU_UNKNOWN_NOTE_SUFFIX if "[UNKNOWN" in tu_note else ""
     estimates: list[CostEstimate] = []
     if collect_mode in (
         "build",
@@ -788,7 +752,8 @@ def _source_layer_estimates(
                 replay_tus,
                 _COST_PER_TU_REPLAY * replay_tus,
                 0.0,
-                f"{collect_mode} replay scope ({replay_tus} of {total_tus} TU(s)){unscoped_ref}",
+                f"{collect_mode} replay scope ({replay_tus} of {total_tus} TU(s))"
+                f"{unscoped_ref}{unknown_ref}",
             )
         )
     # L5 structural fold runs for every graph-building mode (cheap).
@@ -800,7 +765,7 @@ def _source_layer_estimates(
                 total_tus,
                 _COST_PER_TU_GRAPH * total_tus,
                 0.0,
-                f"source graph fold/edges{unscoped_ref}",
+                f"source graph fold/edges{unscoped_ref}{unknown_ref}",
             )
         )
     # When both L4 and L5 are collected the inline path also runs a Clang
@@ -815,7 +780,8 @@ def _source_layer_estimates(
                 replay_tus,
                 _COST_PER_TU_REPLAY * replay_tus,
                 0.0,
-                f"call-graph clang pass ({replay_tus} of {total_tus} TU(s)){unscoped_ref}",
+                f"call-graph clang pass ({replay_tus} of {total_tus} TU(s))"
+                f"{unscoped_ref}{unknown_ref}",
             )
         )
     return estimates
@@ -826,15 +792,12 @@ def estimate_scan(
     *,
     resolved_level: tuple[SourceMethod, EvidenceDepth] | None = None,
 ) -> list[CostEstimate]:
-    """Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10).
-
-    Probes the project (TU count from the compile DB or source tree, public-header
-    fan-out, the resolved level's collect mode) and returns one
-    :class:`CostEstimate` per L-layer the chosen level would touch — **without
-    running any compiler or parsing any binary**. The numbers are coarse anchors
-    (see ``_COST_PER_*``); the estimate's job is to *rank* layers so a maintainer
-    can pick a depth/budget, not to be a precise wall-clock prediction.
-    """
+    """Dry-run: projected per-layer cost of *req* for this project (ADR-035
+    D10). Probes the project (TU count, header fan-out, collect mode) and
+    returns one :class:`CostEstimate` per L-layer the level would touch --
+    **without running any compiler or parsing any binary**. Coarse anchors
+    (see ``_COST_PER_*``): ranks layers for a depth/budget pick, not a
+    precise wall-clock prediction."""
     resolved, eff_depth, collect_mode = _resolve_estimate_level(req, resolved_level)
     total_tus, tu_note = _estimate_total_tus(req)
     replay_tus = _estimate_replay_tus(req, collect_mode, total_tus)
@@ -850,13 +813,10 @@ def estimate_scan(
 @dataclass(frozen=True)
 class ScanResult:
     """Typed result of an executed scan (ADR-035 D10) — the one object the CLI
-    and library callers consume.
-
-    ``diff`` is the full report payload (``None``-free); ``findings`` are the raw
-    cross-source :class:`Change` objects; ``layers`` is the per-layer coverage;
+    and library callers consume. ``findings`` are the raw cross-source
+    :class:`Change` objects; ``layers`` is the per-layer coverage;
     ``confidence`` is the §6.8 provider-agreement matrix; ``estimate`` is the
-    projected per-layer cost for comparison against the actual run.
-    """
+    projected per-layer cost for comparison against the actual run."""
 
     verdict: str
     exit_code: int
@@ -876,15 +836,21 @@ class ScanResult:
             "confidence": {k: list(v) for k, v in self.confidence.items()},
             "estimate": [e.to_dict() for e in self.estimate],
             "report": dict(self.report),
+            "run_outcome": run_outcome_dict_for_scan(
+                self.verdict, self.exit_code, report=self.report
+            ),
         }
+
+    @staticmethod
+    def _from_abort(axis: ScanAbortAxis, p: dict[str, object] | None) -> ScanResult:
+        return ScanResult(**scan_abort_result_fields(axis, prior_decision=p))
 
 
 @dataclass(frozen=True)
 class ScanArtifactResult:
     """One member's :class:`ScanResult`, with the identity that result alone
     doesn't carry (ADR-056 — neither `ScanResult` nor its nested report
-    carries a binary path or library name anywhere).
-    """
+    carries a binary path or library name anywhere)."""
 
     artifact: Path
     result: ScanResult
@@ -893,11 +859,10 @@ class ScanArtifactResult:
         return {"artifact": str(self.artifact), **self.result.to_dict()}
 
 
-# ADR-056 D3: ScanSetResult's own explicit verdict/exit-code precedence —
-# deliberately NOT a reuse of compare-release's `_RELEASE_VERDICT_ORDER`
-# (`cli_compare_release_helpers.py`), which has no entries for the two
-# scan-specific failure verdicts (`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`)
-# a ScanResult can carry. See _aggregate_scan_set_verdict's docstring.
+# ADR-056 D3: ScanSetResult's own verdict/exit-code precedence — not a reuse
+# of compare-release's `_RELEASE_VERDICT_ORDER`, which has no entries for the
+# two scan-specific failure verdicts a ScanResult can carry
+# (`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`).
 _SCAN_SET_COMPAT_ORDER: dict[str, int] = {
     # NO_CHANGE ranks strictly below COMPATIBLE (not tied at 0): the bundle audit's own verdict is always appended
     # to `candidates` below and often reads NO_CHANGE when it simply found nothing to flag -- with a tied rank, the
@@ -925,18 +890,19 @@ def _aggregate_scan_set_verdict(
     """Combine per-member + bundle verdicts into one set-level verdict/exit.
 
     1. Any member ``BUDGET_OVERFLOW`` -> the whole set is ``BUDGET_OVERFLOW``,
-       exit 5. Dominates every other outcome (ADR-050 D2's ``not_comparable``
-       precedent: a member whose analysis didn't finish is worse than one
-       that finished and found a break, because its true result is unknown).
+       exit 5 (dominates: an unfinished analysis is worse than a finished one
+       that found a break, ADR-050 D2's ``not_comparable`` precedent).
     2. Else, the worst compatibility verdict across `per_artifact` + the
        bundle layer's own verdict (`_SCAN_SET_COMPAT_ORDER`), with the
        matching exit code.
     3. Any member ``EVIDENCE_CONTRACT_ERROR`` floors the exit code at 1
-       without lowering a worse one from step 2, and — mirroring the exit
-       code — becomes the reported verdict *only* when step 2's worst
-       compatibility verdict was NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK
-       (i.e. the error is the dominant problem); a stronger API_BREAK/
-       BREAKING from step 2 keeps that verdict string.
+       without lowering a worse one from step 2, and becomes the reported
+       verdict only when step 2's worst was NO_CHANGE/COMPATIBLE/
+       COMPATIBLE_WITH_RISK; a stronger API_BREAK/BREAKING keeps that string.
+    4. Any member ``NOT_COMPARABLE`` becomes the reported verdict/exit 6
+       under that same condition, outranking step 3 (Codex review:
+       previously exited 0 here, dropping the run_outcome.operational
+       signal ``to_dict()`` already emits for this case).
     """
     if any(a.result.verdict == "BUDGET_OVERFLOW" for a in per_artifact):
         return "BUDGET_OVERFLOW", 5
@@ -952,14 +918,16 @@ def _aggregate_scan_set_verdict(
             worst_rank = rank
             worst_verdict = v
     exit_code = _SCAN_SET_COMPAT_EXIT.get(worst_verdict, 0)
+    no_stronger_break = worst_rank <= _SCAN_SET_COMPAT_ORDER["COMPATIBLE_WITH_RISK"]
 
-    has_evidence_error = any(
-        a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in per_artifact
-    )
-    if has_evidence_error:
+    if any(a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in per_artifact):
         exit_code = max(exit_code, 1)
-        if worst_rank <= _SCAN_SET_COMPAT_ORDER["COMPATIBLE_WITH_RISK"]:
+        if no_stronger_break:
             worst_verdict = "EVIDENCE_CONTRACT_ERROR"
+    if no_stronger_break and any(
+        a.result.verdict == "NOT_COMPARABLE" for a in per_artifact
+    ):
+        worst_verdict, exit_code = "NOT_COMPARABLE", 6
 
     return worst_verdict, exit_code
 
@@ -984,10 +952,9 @@ class ScanSetResult:
             "verdict": self.verdict,
             "exit_code": self.exit_code,
             "per_artifact": [a.to_dict() for a in self.per_artifact],
-            # Full finding records (kind/symbol/consumer/provider/description), not just a count -- mirrors
-            # cli_compare_release_helpers.py's summary["bundle_findings"] JSON shape for the two-sided release path, so a
-            # machine consumer of either can identify and act on the condition that produced bundle_verdict, not just its
-            # count (Codex review).
+            # Full finding records, not just a count -- mirrors cli_compare_release_helpers.py's
+            # summary["bundle_findings"] shape, so a consumer of either can act on what produced
+            # bundle_verdict, not just its count (Codex review).
             "bundle_findings": [
                 {
                     "kind": f.kind.value,
@@ -1004,6 +971,22 @@ class ScanSetResult:
             "bundle_finding_count": len(self.bundle_findings),
             "bundle_verdict": self.bundle_verdict,
             "bundle_incomplete": self.bundle_incomplete,
+            "run_outcome": run_outcome_dict_for_scan(
+                self.verdict,
+                self.exit_code,
+                member_evidence_contract_error=any(
+                    a.result.verdict == "EVIDENCE_CONTRACT_ERROR"
+                    for a in self.per_artifact
+                ),
+                member_not_comparable=any(
+                    a.result.verdict == "NOT_COMPARABLE" for a in self.per_artifact
+                ),
+                bundle_incomplete=self.bundle_incomplete,
+                member_verdicts=[
+                    *(a.result.verdict for a in self.per_artifact),
+                    self.bundle_verdict,
+                ],
+            ),
         }
 
 
@@ -1038,15 +1021,12 @@ def _layers_from_coverage(coverage: list[dict[str, Any]]) -> list[LayerResult]:
 
 
 def _load_risk_rules_for_service(risk_rules_path: Path) -> Any:
-    """Load `--risk-rules` YAML for a service-layer caller (`run_scan`/
-    `_run_scan_one_member`), as a plain `ValueError`.
-
-    `risk_rules_path` is a plain `ScanRequest` field a direct Python API caller
-    can set without importing click, so this boundary must not leak a
-    click-flavored failure (CodeRabbit review). ADR-061 Phase 4 moved the loader
-    into the engine, where a malformed profile is a `SnapshotError` -- also not
-    a `ValueError`, so only the caught class changed; `ClickException` is still
-    caught because the CLI-side adapter raises it.
+    """Load `--risk-rules` YAML for a service-layer caller, as a plain
+    `ValueError`: `risk_rules_path` is a plain `ScanRequest` field a direct
+    Python API caller can set without importing click, so this boundary
+    must not leak a click-flavored failure (CodeRabbit review). A malformed
+    profile is a `SnapshotError` from the engine, also not a `ValueError`;
+    `ClickException` is still caught because the CLI-side adapter raises it.
     """
     import click
 
@@ -1056,17 +1036,120 @@ def _load_risk_rules_for_service(risk_rules_path: Path) -> Any:
     try:
         return _load(risk_rules_path)
     except (click.ClickException, SnapshotError) as exc:
-        msg = exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
+        msg = (
+            exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
+        )
         raise ValueError(str(msg)) from exc
+
+
+def _resolve_member_scan_level(
+    req: ScanRequest,
+) -> tuple[Any, Any, list[str], bool, Any, Any, Any, str]:
+    """Resolve ``(sm, dp, changed, seeded, risk, resolved, eff_depth,
+    collect_mode)`` for one member -- shared by :func:`_run_scan_one_member`
+    and :func:`estimate_artifact_set`, per ``workflows/AGENTS.md``'s
+    "dry-run and execution must consume the same resolved plan" rule.
+    """
+    (
+        RiskRules,
+        score_changed_paths,
+        _EvidenceDepth,
+        ScanMode,
+        SourceMethod,
+        level_to_collect_mode,
+        resolve_level,
+        parse_user_depth,
+        SourceScope,
+    ) = _scan_imports()
+    sm = SourceMethod(req.source_method) if req.source_method else None
+    dp = parse_user_depth(req.depth)
+    changed = [p for p in req.changed_paths if p]
+    seeded = req.seeded or bool(changed)
+    risk_rules = (
+        _load_risk_rules_for_service(req.risk_rules_path)
+        if req.risk_rules_path is not None
+        else RiskRules.default()
+    )
+    risk = score_changed_paths(changed, risk_rules)
+    auto_method = (
+        risk.recommended_method if (sm is SourceMethod.AUTO and seeded) else None
+    )
+    resolved, eff_depth = resolve_level(
+        mode=ScanMode(req.mode), source_method=sm, depth=dp, auto_method=auto_method
+    )
+    scope = SourceScope.CHANGED if seeded else SourceScope.TARGET
+    collect_mode = level_to_collect_mode(resolved, eff_depth, source_scope=scope)
+    return sm, dp, changed, seeded, risk, resolved, eff_depth, collect_mode
+
+
+_COST_PER_MEMBER_BUNDLE_AUDIT = 0.1  # per-member bundle-audit anchor, ~= L0_binary's
+
+
+def _build_config_declares_query(path: Path) -> bool:
+    """Does *path* declare ``build.query`` -- the only way a bare
+    ``--build-config`` supplies L3 evidence on its own (Codex review: an
+    inert config gives the real run nothing to collect either). ``False`` on
+    any read/parse failure -- a dry-run can't know whether an unparseable
+    query would have succeeded."""
+    from .buildsource.build_config_io import load_build_config_with_digest
+
+    try:
+        config, _digest = load_build_config_with_digest(path)
+    except ValueError:
+        return False
+    return bool(config.query)
+
+
+def estimate_artifact_set(
+    req: ScanRequest, member_paths: list[Path]
+) -> tuple[dict[str, tuple[int, float]], list[str], str | None, frozenset[str]]:
+    """Per-layer cost total for ``scan --artifact-set --dry-run``: one
+    single-binary estimate per member at the level :func:`_resolve_member_scan_level`
+    resolves once (shared with :func:`_run_scan_one_member`), plus a
+    ``bundle_audit`` entry. Third return value: a blocker message, or
+    ``None`` -- set only when ``collect_mode != "off"`` (mirrors
+    ``scan_engine._check_scan_evidence_contract``'s short-circuit) and no
+    source/build evidence was given, matching ``EVIDENCE_CONTRACT_ERROR``
+    (exit 1). Kept out of *notes* so the caller routes it through
+    :meth:`DryRunResult.block` instead. Fourth value *unknown_layers* names
+    per-layer unknown-marked members (totals alone can't tell zero from unknown).
+    """
+    sm, dp, _c, _s, _r, resolved, eff_depth, collect_mode = _resolve_member_scan_level(
+        req
+    )
+    totals: dict[str, tuple[int, float]] = {}
+    notes: list[str] = []
+    seen: set[str] = set()
+    unknown_layers: set[str] = set()
+    blocker: str | None = None
+    pinned = dp is not None or (sm is not None and sm != "auto")
+    cfg_query = req.build_config and _build_config_declares_query(req.build_config)
+    no_evidence = not (req.sources or req.build_info or cfg_query)
+    if pinned and collect_mode != "off" and no_evidence:
+        blocker = (
+            f"pinned depth '{eff_depth.value}' has no --sources/--build-info, "
+            "and --build-config declares no build.query -- the real run "
+            "would fail with EVIDENCE_CONTRACT_ERROR (exit 1 for this "
+            "--artifact-set member; a single-artifact scan uses exit 7), "
+            "not run as priced below."
+        )
+    for member_path in member_paths:
+        member_req = replace(req, binaries=[member_path], mode="audit")
+        for e in estimate_scan(member_req, resolved_level=(resolved, eff_depth)):
+            tus, seconds = totals.get(e.layer, (0, 0.0))
+            totals[e.layer] = (tus + e.tus, seconds + e.est_seconds)
+            unknown_layers.update({e.layer} if "[UNKNOWN" in e.note else ())
+            if e.note and e.note not in seen:
+                seen.add(e.note)
+                notes.append(e.note)
+    n = len(member_paths)
+    totals["bundle_audit"] = (n, _COST_PER_MEMBER_BUNDLE_AUDIT * n)
+    return totals, notes, blocker, frozenset(unknown_layers)
 
 
 #: Every ``ScanRequest`` field meaningful only for a baseline comparison,
 #: keyed to a predicate that's ``True`` when *req* carries a caller-set,
-#: non-default value. A plain dict (not logic buried in
-#: ``_reject_comparison_only_fields``) so a structural test can cross-check
-#: its keys against ``_run_baseline_compare``'s own signature -- generalizing
-#: the "forwarded but never guarded" gap a P2 review caught twice here (see
-#: `test_every_baseline_only_field_is_guarded`).
+#: non-default value (see `test_every_baseline_only_field_is_guarded`).
 _COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
     "suppression": lambda r: r.suppression is not None,
     "policy": lambda r: r.policy != "strict_abi",
@@ -1079,20 +1162,22 @@ _COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
     "contract_evaluation": lambda r: r.contract_evaluation,
     "contract_mode": lambda r: r.contract_mode is not None,
     "max_findings": lambda r: r.max_findings is not None,
+    "severity_preset": lambda r: r.severity_preset is not None,  # ADR-064/PR G2
+    "exit_code_scheme": lambda r: r.exit_code_scheme is not None,
 }
 
 
 def _reject_comparison_only_fields(req: ScanRequest) -> None:
-    """Raise :class:`ValidationError` for a set ``_COMPARISON_ONLY_FIELD_PREDICATES`` field with no baseline for it to apply to.
-
-    Shared by :func:`run_scan` (baseline ``None``/audit mode) and
-    :func:`run_scan_set` (always audit-only, ADR-056 D2) so both entry points
-    enforce the identical contract (P2 regression, Codex review:
-    ``run_scan_set()`` used to only validate ``req.baseline`` itself, letting
-    e.g. ``policy_file``/``env_matrix`` through silently discarded).
+    """Raise :class:`ValidationError` for a set ``_COMPARISON_ONLY_FIELD_PREDICATES``
+    field with no baseline for it to apply to. Shared by :func:`run_scan`
+    (baseline ``None``/audit mode) and :func:`run_scan_set` (always
+    audit-only, ADR-056 D2) so both enforce the identical contract (P2
+    regression: ``run_scan_set()`` used to only validate ``req.baseline``).
     """
     _non_default = [
-        name for name, is_set in _COMPARISON_ONLY_FIELD_PREDICATES.items() if is_set(req)
+        name
+        for name, is_set in _COMPARISON_ONLY_FIELD_PREDICATES.items()
+        if is_set(req)
     ]
     if _non_default:
         raise ValidationError(
@@ -1190,16 +1275,8 @@ def _scan_request_config(req: ScanRequest) -> Any:
                 # letting the key resolve as "not stated" by omission (which
                 # is what the declared-params guard exists to prevent).
                 "pack_paths": (),
-                # A `ScanRequest` has no severity-preset/exit-code-scheme
-                # field either (CLI cleanup phase two, "PR B" -- these two
-                # keys joined `SCAN_CONFIG_PARAMS` so a selected gate pack
-                # cannot override an *explicit* `--severity-preset`/
-                # `--exit-code-scheme` on the CLI path); the API path has no
-                # such CLI flag to be explicit about, so both resolve as
-                # "not stated" here, same as every other field this request
-                # shape does not carry.
-                "severity_preset": None,
-                "exit_code_scheme": None,
+                "severity_preset": req.severity_preset,  # ADR-064/PR G2
+                "exit_code_scheme": req.exit_code_scheme,
             },
             typed={"policy", "scope_public_headers"},
             policy_file=req.policy_file,
@@ -1212,14 +1289,12 @@ def _scan_request_config(req: ScanRequest) -> Any:
 
 def run_scan(req: ScanRequest) -> ScanResult:
     """Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10).
-
-    The single engine entry point behind the ``scan`` CLI and the MCP scan tool:
-    it resolves the deterministic level from *req* (the same way
-    :func:`estimate_scan` does), drives the shared orchestration core
-    (``scan_engine.run_scan_core`` — classify → always-on tier → pinned level →
-    optional baseline compare), and folds the projected ``estimate_scan`` cost in
-    so a caller can compare projected vs. actual. ``--budget`` overflow surfaces as
-    ``exit_code`` 5 (the failure-guard contract; never shrinks scope).
+    The single engine entry point behind the ``scan`` CLI and the MCP scan
+    tool: resolves the deterministic level from *req* (as :func:`estimate_scan`
+    does), drives the shared orchestration core (``scan_engine.run_scan_core``),
+    and folds the projected ``estimate_scan`` cost in for projected-vs-actual
+    comparison. ``--budget`` overflow surfaces as ``exit_code`` 5 (never
+    shrinks scope).
     """
     (
         RiskRules,
@@ -1239,6 +1314,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
         run_scan_core,
     )
     from .workflows.scan_config import public_provenance_set as _public_provenance_set
+    from .workflows.scan_gate_options import resolve_scan_gate_options  # ADR-064/PR G2
 
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")
@@ -1246,9 +1322,10 @@ def run_scan(req: ScanRequest) -> ScanResult:
 
     if req.max_findings is not None and req.max_findings < 1:
         # Up front, not after a wasted full scan (Codex review).
-        raise ValidationError(f"ScanRequest.max_findings must be positive, got {req.max_findings}")
-    # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean anything for a baseline comparison (`run_scan_core` only calls
-    # `_run_baseline_compare` when `baseline is not None` AND `scan_mode is not ScanMode.AUDIT`) -- without one they'd be silently accepted and discarded, which could hide a `policy_file` requiring evidence the caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
+        raise ValidationError(
+            f"ScanRequest.max_findings must be positive, got {req.max_findings}"
+        )
+    # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean anything for a baseline comparison (`run_scan_core` only calls `_run_baseline_compare` when `baseline is not None` AND `scan_mode is not ScanMode.AUDIT`) -- without one they'd be silently accepted and discarded, which could hide a `policy_file` requiring evidence the caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
     if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
         _reject_comparison_only_fields(req)
     else:
@@ -1320,6 +1397,20 @@ def run_scan(req: ScanRequest) -> ScanResult:
     # as cwd); run it in the finally below on every exit path. See cli_scan.run_scan.
     build_dir_cleanups: list[Callable[[], None]] = []
     try:
+        gate = resolve_scan_gate_options(req)
+    except ValueError as exc:
+        # `resolve_release_gate_options` raises bare `ValueError`
+        # (invalid `exit_code_scheme`) or `PolicyError` (invalid
+        # `severity_preset`, a `ValueError` subclass) for a malformed
+        # request -- neither is `ValidationError`, so a Tier-2 caller
+        # guarding this call with `except ValidationError` (the type
+        # every other malformed-`ScanRequest` field raises) would miss
+        # it and see the raw exception instead. Same translation
+        # `_resolve_scan_contract_config` above already applies to its
+        # own `resolve_scan_config` call (CodeRabbit review, fresh
+        # evidence, PR #1032).
+        raise ValidationError(str(exc)) from exc
+    try:
         core = run_scan_core(
             start=_time.monotonic(),
             binary=binary,
@@ -1368,19 +1459,19 @@ def run_scan(req: ScanRequest) -> ScanResult:
             abi3_floor=req.abi3_floor,
             max_findings=req.max_findings,
             build_targets=req.build_targets,
+            sev_config=gate.severity,
+            exit_code_scheme="severity" if gate.severity is not None else "legacy",
         )
-    except _BudgetOverflow:
+    except _BudgetOverflow as exc:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
-        return ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5)
+        return ScanResult._from_abort("budget_overflow", exc.prior_decision)
     except _EvidenceContractError:
         # A pinned depth that can't collect its evidence (auto-strict, ADR-037 D5):
-        # the programmatic API honors the same contract as the CLI (pinned_explicit
-        # above), so map the signal to a failed result rather than degrade silently.
-        return ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1)
+        # the programmatic API honors the same contract as the CLI (pinned_explicit).
+        return ScanResult._from_abort("evidence_contract_error", None)
     finally:
         # Remove the inferred cmake build dir(s) once all build-dir-dependent phases
-        # have run (or the scan aborted). Best-effort (each thunk is suppressed) so a
-        # removal/unlock error never aborts the rest nor masks the real outcome.
+        # have run/aborted. Best-effort: a removal/unlock error never masks the outcome.
         drain_build_dir_cleanups(build_dir_cleanups)
 
     outcome = core.outcome
@@ -1436,122 +1527,6 @@ def _scan_subprocess_worker(req: ScanRequest, q: Any) -> None:
         q.put(("err", f"{type(exc).__name__}: {exc}"))
 
 
-def _descendant_pgids(root_pid: int) -> set[int]:
-    """Every process-group id in *root_pid*'s live process tree (POSIX, best-effort).
-
-    A clang/castxml child spawned via ``deadline.run_bounded`` detaches into its
-    *own* new session/group (needed so its own inner-timeout ``killpg`` can't
-    self-kill the caller) — a plain ``killpg(root_pgid)`` from an ancestor no
-    longer reaches it even though the PPID chain still leads back to *root_pid*,
-    until *root_pid* itself dies and severs that link. Walking a live
-    ``ps -eo pid,ppid`` snapshot while *root_pid* is still alive finds every such
-    descendant's own pgid too, so it can be killed alongside the worker's own
-    group instead of surviving as an orphan (Codex review, PR #591). Returns an
-    empty set on any failure (missing ``ps``, non-POSIX, ...) — never raises.
-    """
-    import os
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            ["ps", "-eo", "pid=,ppid="],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return set()
-    children: dict[int, list[int]] = {}
-    for line in result.stdout.splitlines():
-        parts = line.split()
-        if len(parts) != 2:
-            continue
-        try:
-            pid, ppid = int(parts[0]), int(parts[1])
-        except ValueError:
-            continue
-        children.setdefault(ppid, []).append(pid)
-    pgids: set[int] = set()
-    stack, seen = [root_pid], set()
-    while stack:
-        pid = stack.pop()
-        if pid in seen:
-            continue
-        seen.add(pid)
-        try:
-            pgids.add(os.getpgid(pid))
-        except (ProcessLookupError, PermissionError, AttributeError, OSError):
-            pass
-        stack.extend(children.get(pid, []))
-    return pgids
-
-
-def _kill_process_tree(proc: Any) -> None:
-    """Terminate *proc* and every group in its process tree (best-effort, never raises).
-
-    Killing only ``proc``'s own group used to miss a clang/castxml child that
-    had detached into its own session via ``deadline.run_bounded``'s
-    ``start_new_session=True`` — that isolation is needed so *its* inner-timeout
-    ``killpg`` can't self-kill the worker, but it also made the child invisible
-    to this outer, worker-level ``killpg``. :func:`_descendant_pgids` finds it
-    (and any other detached descendant) by PPID while ``proc`` is still alive, so
-    it gets killed here too instead of surviving as an orphan (Codex review,
-    PR #591).
-    """
-    import os
-    import signal
-
-    if not proc.is_alive():
-        return
-    try:
-        own_pgid = os.getpgrp()
-    except (AttributeError, OSError):
-        try:
-            proc.terminate()
-        except (OSError, AttributeError):
-            pass
-        proc.join(5)
-        return
-    pgids: set[int] = set()
-    try:
-        pgids.add(os.getpgid(proc.pid))
-    except (ProcessLookupError, PermissionError, AttributeError, OSError):
-        pass
-    pgids |= _descendant_pgids(proc.pid)
-    # Only kill *proc*'s own group when it actually detached into its own (``os. setsid`` ran). If it timed out
-    # before that, its pgid still equals the parent's group — killpg would then terminate the MCP server itself, so
-    # that group is excluded and only its (already-detached) descendants, if any, are targeted (Codex review).
-    pgids.discard(own_pgid)
-    # Unconditional: proc itself never detached (own_pgid was excluded above precisely because it's still in the
-    # parent's group), so it is never reached by the killpg sweep below over *descendant* groups. Skipping this when
-    # pgids is non-empty left the direct worker process running forever whenever it had spawned a detached
-    # clang/castxml child but had not itself detached (CodeRabbit review, PR #591).
-    try:
-        proc.terminate()
-    except (OSError, AttributeError):
-        pass
-    if not pgids:
-        proc.join(5)
-        return
-    for pgid in pgids:
-        try:
-            os.killpg(pgid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
-    proc.join(3)
-    # Unconditional SIGKILL sweep, not gated on proc's own exit: a detached
-    # clang/castxml session or a SIGTERM-ignoring grandchild can outlive the
-    # grace period even once the direct worker has already exited (mirrors
-    # deadline._kill_process_tree's same escalation fix).
-    for pgid in pgids:
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
-    proc.join(5)
-
-
 def run_scan_subprocess(req: ScanRequest, timeout: float) -> dict[str, Any]:
     """Run :func:`run_scan` in a killable child process; return ``ScanResult.to_dict()``.
 
@@ -1592,54 +1567,27 @@ def _run_scan_one_member(
     changed_src: str,
     sibling_exported_symbols: frozenset[str] = frozenset(),
 ) -> ScanResult:
-    """One member's scan, for :func:`run_scan_set` (ADR-056).
-
-    Mirrors :func:`run_scan`'s body (kept as a separate function rather than
-    a refactor of `run_scan` itself, so `run_scan`'s existing behavior/tests
-    stay byte-for-byte unchanged) with three differences:
-
-    - Accepts an externally-supplied ``start``/``budget_s`` instead of
-      calling ``_time.monotonic()`` itself. `run_scan_set` passes the *same*
-      ``start`` and the *original, unreduced* total ``budget_s`` to every
-      member — `run_scan_core`'s own ``_remaining_budget_s(start, budget_s)``
-      already computes ``budget_s - (now - start)`` internally, so this
-      alone produces the correct shrinking remaining budget across members.
-      Passing an already-reduced ``budget_s`` here instead would double-subtract elapsed time.
-    - Forwards `req.abi3_floor`/`enabled_checks`/`severities`/`build_config`/`allow_build_query`/
-      `risk_rules_path`/`build_targets` -- must not silently drop what single-binary `scan` honors.
-    - Accepts ``sibling_exported_symbols`` (G35): a sibling's export also
-      satisfies this member's own `public_not_exported` check.
+    """One member's scan, for :func:`run_scan_set` (ADR-056). Mirrors
+    :func:`run_scan`'s body (a separate function so `run_scan` stays
+    byte-for-byte unchanged), with three differences: accepts an
+    externally-supplied ``start``/``budget_s`` (the *same*, unreduced total
+    passed to every member -- `run_scan_core`'s `_remaining_budget_s`
+    computes the shrinking remainder itself, so a pre-reduced value here
+    would double-subtract); forwards `abi3_floor`/`enabled_checks`/
+    `severities`/`build_config`/`allow_build_query`/`risk_rules_path`/
+    `build_targets`; accepts ``sibling_exported_symbols`` (G35: a sibling's
+    export also satisfies `public_not_exported`).
     """
-    (
-        RiskRules,
-        score_changed_paths,
-        EvidenceDepth,
-        ScanMode,
-        SourceMethod,
-        level_to_collect_mode,
-        resolve_level,
-        parse_user_depth,
-        SourceScope,
-    ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
-    from .scan_engine import (
-        _BudgetOverflow,
-        _EvidenceContractError,
-        run_scan_core,
-    )
+    from .buildsource.scan_levels import EvidenceDepth, ScanMode, SourceMethod
+    from .scan_engine import _BudgetOverflow, _EvidenceContractError, run_scan_core
     from .workflows.scan_config import public_provenance_set as _public_provenance_set
 
-    sm = SourceMethod(req.source_method) if req.source_method else None
-    dp = parse_user_depth(req.depth)
-
-    changed = [p for p in req.changed_paths if p]
-    seeded = req.seeded or bool(changed)
-    risk_rules = (
-        _load_risk_rules_for_service(req.risk_rules_path)
-        if req.risk_rules_path is not None
-        else RiskRules.default()
+    # Shared with the --artifact-set --dry-run preview (workflows.scan_estimate) -- workflows/AGENTS.md's
+    # "dry-run and execution must consume the same resolved plan" rule.
+    sm, dp, changed, seeded, risk, resolved, eff_depth, collect_mode = (
+        _resolve_member_scan_level(req)
     )
-    risk = score_changed_paths(changed, risk_rules)
 
     scan_mode = ScanMode(req.mode)
     sm_pin = sm is not None and sm is not SourceMethod.AUTO
@@ -1650,15 +1598,6 @@ def _run_scan_one_member(
     # review).
     level_explicit = sm_pin or (sm is None and dp is not None)
     is_auto = sm is SourceMethod.AUTO
-    auto_method = risk.recommended_method if (is_auto and seeded) else None
-    resolved, eff_depth = resolve_level(
-        mode=scan_mode, source_method=sm, depth=dp, auto_method=auto_method
-    )
-    collect_mode = level_to_collect_mode(
-        resolved,
-        eff_depth,
-        source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
-    )
     eff_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
     prov_headers, prov_dirs = _public_provenance_set(
         eff_headers, list(req.public_header_dirs)
@@ -1706,10 +1645,10 @@ def _run_scan_one_member(
             sibling_exported_symbols=sibling_exported_symbols,
             build_targets=req.build_targets,
         )
-    except _BudgetOverflow:
-        return ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5)
+    except _BudgetOverflow as exc:
+        return ScanResult._from_abort("budget_overflow", exc.prior_decision)
     except _EvidenceContractError:
-        return ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1)
+        return ScanResult._from_abort("evidence_contract_error", None)
     finally:
         drain_build_dir_cleanups(build_dir_cleanups)
 
@@ -1729,16 +1668,12 @@ def _run_scan_one_member(
 
 def run_scan_set(req: ScanRequest) -> ScanSetResult:
     """Execute an audit-mode, no-old-side scan over a *set* of artifacts
-    (ADR-056, ``scan --artifact-set``).
-
-    The plural sibling of :func:`run_scan`, sharing `ScanRequest` but never
-    touching `run_scan`'s own code path — `req.binaries` must have 2+
-    entries (use `run_scan` for exactly one). `req.baseline` must be
-    ``None``: this is a service-layer, not just a CLI-layer, guard — a
-    directly-constructed `ScanRequest(binaries=[...], baseline=old)` handed
-    straight to this public, re-exported entry point would otherwise
-    silently compare every member against the same single baseline
-    (ADR-056 D2 scopes `--artifact-set` to audit-only).
+    (ADR-056, ``scan --artifact-set``). The plural sibling of :func:`run_scan`,
+    sharing `ScanRequest` but never touching `run_scan`'s own code path --
+    `req.binaries` must have 2+ entries. `req.baseline` must be ``None``: a
+    service-layer guard so a directly-constructed `ScanRequest(binaries=
+    [...], baseline=old)` can't silently compare every member against the
+    same baseline (ADR-056 D2 scopes `--artifact-set` to audit-only).
     """
     import time as _time
     from dataclasses import replace
@@ -1792,6 +1727,26 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     # flags only mean anything with --against" guard -- req.mode is already forced to "audit" above, so this always
     # applies here (unlike run_scan, where it's conditional on baseline/mode).
     _reject_comparison_only_fields(req)
+
+    from .workflows.plan import scan_bazel_scoping_failure  # ADR-063 Phase 4
+
+    _, _, _, _, _, _, ed, cm = _resolve_member_scan_level(req)
+    _bi = req.compile_db or req.build_info
+    # sources=/build_config= closes the config-sourced (no explicit --build-target)
+    # root-target-scope dry-run/execution parity gap here too, now that this file
+    # has the line-budget room -- see docs/contribute/adr/063-one-semantic-pipeline.md's
+    # Phase 4 status entry ("Second slice" / residual) and the matching entry in
+    # docs/contribute/known-gaps.md.
+    if _bf := scan_bazel_scoping_failure(
+        req.headers,
+        ed,
+        cm,
+        _bi,
+        req.build_targets,
+        sources=req.sources,
+        build_config=req.build_config,
+    ):
+        raise PlanningError((_bf,))
 
     # Start the shared budget clock *before* set discovery/validation, not after (Codex review):
     # discover_artifact_set() stats every candidate path and parses each one's ELF program/dynamic table to classify
@@ -1857,8 +1812,9 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         per_artifact.append(ScanArtifactResult(artifact=binary, result=result))
         if result.verdict == "BUDGET_OVERFLOW":
             # The failure-guard contract: never keep scanning past overflow.
-            return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5,
-                                  per_artifact=per_artifact)
+            return ScanSetResult(
+                verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
+            )
 
     remaining = None if budget_s is None else budget_s - (_time.monotonic() - start)
     if remaining is not None and remaining <= 0:
@@ -1937,13 +1893,11 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
 
 def _scan_set_subprocess_worker(req: ScanRequest, q: Any) -> None:
     """Child-process entry for :func:`run_scan_set_subprocess` (ADR-056).
-
     Mirrors :func:`_scan_subprocess_worker`'s process-group detachment and
-    SIGTERM cleanup verbatim — same race, same fix: without these, a
-    clang/castxml child one of `run_scan_set`'s member scans spawns can
-    detach into its own process group in the gap between the parent's
-    descendant-pgid snapshot and its terminate() call, and outlive the
-    worker as an orphan (Codex review).
+    SIGTERM cleanup verbatim -- same race, same fix: without these, a
+    clang/castxml child a member scan spawns can detach into its own group
+    in the gap between the parent's descendant-pgid snapshot and its
+    terminate() call, and outlive the worker as an orphan (Codex review).
     """
     import os
 

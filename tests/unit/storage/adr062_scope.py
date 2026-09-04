@@ -40,10 +40,18 @@ import pathlib
 
 #: Modules that are not ADR-062 Phase 0 primitives. G40's content-addressed
 #: bundle archive and its guards, per `abicheck/storage/AGENTS.md`, plus
-#: ADR-063 Phase 0's Fact[T] snapshot encode/decode/legacy-backfill helpers
-#: (fact_codec, enum_codec) — a third, independent body of work in this
+#: ADR-063's own snapshot encode/decode/legacy-backfill helpers (Phase 0's
+#: Fact[T] pair `fact_codec`/`enum_codec`, Phase 5's `fact_backfill` and the
+#: `fact_schema_versions` leaf they share, Phase 2's `entity_id_codec`,
+#: which keeps the parse-time `EntityId` carrier out of the wire format, and
+#: Phase 3's `surface_graph_codec` and Phase 6's `semantic_ir_codec`, the
+#: identical shape for `AbiSnapshot.surface_graph`/`semantic_ir`) — a third,
+#: independent body of work in this
 #: package, unrelated to either ADR-062's Phase 0 primitives or G40's
-#: container.
+#: container. `snapshot_load_normalization` is a fourth, equally unrelated
+#: body of work: `serialization.snapshot_from_dict`'s on-load legacy-format
+#: migrations (ADR-061 D1's storage-owns-migrations rule), not a Phase 0
+#: identity/availability/versioning primitive.
 NON_ADR062_MODULES = frozenset(
     {
         "bundle_archive",
@@ -53,7 +61,14 @@ NON_ADR062_MODULES = frozenset(
         "json_budget",
         "zstd_frame_guard",
         "fact_codec",
+        "fact_backfill",
+        "fact_schema_versions",
         "enum_codec",
+        "entity_id_codec",
+        "surface_graph_codec",
+        "semantic_ir_codec",
+        "types_section_codec",
+        "snapshot_load_normalization",
     }
 )
 

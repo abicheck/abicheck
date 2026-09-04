@@ -22,6 +22,7 @@ from typing import cast
 
 from .elf_facts import SymbolBinding
 from .fact import Fact, _Omitted, bridge_legacy_and_fact
+from .identity import EntityId
 from .vocabulary import AccessLevel, ElfVisibility, ParamKind, ScopeOrigin, Visibility
 
 # ADR-063 Phase 0: private omission sentinel for Param.is_va_list's Fact[T]
@@ -32,6 +33,22 @@ from .vocabulary import AccessLevel, ElfVisibility, ParamKind, ScopeOrigin, Visi
 # bool | None (which would be a breaking change to this public dataclass's
 # type for every reader, not only the ones migrating to Fact[T]).
 _OMITTED_IS_VA_LIST: bool = cast(bool, _Omitted())
+# ADR-063 Phase 5 (tenth batch): Param.is_restrict's own omission sentinel --
+# same shape as _OMITTED_IS_VA_LIST above (a bare False cannot double as an
+# omission marker), guarded by AbiSnapshot.clang_restrict_facts_reliable.
+_OMITTED_IS_RESTRICT: bool = cast(bool, _Omitted())
+# ADR-063 Phase 5 (ninth batch): `Function.deprecated`/`Variable.deprecated`
+# share the identical case-(a) shape -- `None` means "not deprecated" as
+# much as "not captured" (see Function.deprecated's own comment below), so
+# availability is carried by AbiSnapshot.clang_deprecation_facts_reliable,
+# never by the value.
+_OMITTED_FUNC_DEPRECATED: str | None = cast("str | None", _Omitted())
+_OMITTED_VAR_DEPRECATED: str | None = cast("str | None", _Omitted())
+# ADR-063 Phase 5 (tenth batch): Variable.access's own omission sentinel.
+# AccessLevel.PUBLIC is both this field's resting value and a real answer,
+# so -- exactly like a bare False -- it cannot mark "nobody looked";
+# AbiSnapshot.castxml_var_access_facts_reliable carries that instead.
+_OMITTED_VAR_ACCESS: AccessLevel = cast("AccessLevel", _Omitted())
 
 
 @dataclass
@@ -41,7 +58,9 @@ class Param:
     kind: ParamKind = ParamKind.VALUE
     default: str | None = None  # has default value (value not preserved)
     pointer_depth: int = 0  # nesting: T=0, T*=1, T**=2
-    is_restrict: bool = False  # restrict-qualified pointer parameter
+    # ADR-063 Phase 5 (tenth batch): private omission sentinel, not a plain
+    # False -- see is_restrict_fact below and __post_init__.
+    is_restrict: bool = _OMITTED_IS_RESTRICT  # restrict-qualified pointer
     # ADR-063 Phase 0: defaults to a private omission sentinel, not False —
     # see is_va_list_fact below and __post_init__.
     is_va_list: bool = (
@@ -51,10 +70,15 @@ class Param:
     # comment in model/entities.py for the full rationale. A detector reads
     # this, never the plain is_va_list field above.
     is_va_list_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    # Fact[bool] sibling of is_restrict -- case (a), see the field's comment.
+    is_restrict_fact: Fact[bool] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.is_va_list, self.is_va_list_fact = bridge_legacy_and_fact(
             self.is_va_list, self.is_va_list_fact, _OMITTED_IS_VA_LIST, False
+        )
+        self.is_restrict, self.is_restrict_fact = bridge_legacy_and_fact(
+            self.is_restrict, self.is_restrict_fact, _OMITTED_IS_RESTRICT, False
         )
 
 
@@ -129,7 +153,9 @@ class Function:
     # skipping a None on either side of a single pair — that would silently
     # miss every real "gained/lost deprecated" transition, since one side of
     # a real transition is always None (not-deprecated) by construction.
-    deprecated: str | None = None
+    # ADR-063 Phase 5 (ninth batch): private omission sentinel, see
+    # deprecated_fact below and _OMITTED_FUNC_DEPRECATED above.
+    deprecated: str | None = _OMITTED_FUNC_DEPRECATED
     # Explicit C++11 `override` specifier on a virtual method declaration.
     # Tri-state like is_explicit/is_hidden_friend: True/False = captured;
     # None = dumper/loader does not know (older snapshots, DWARF/symbols-only
@@ -203,6 +229,80 @@ class Function:
     # `api_relevant` computation, and AGENTS.md's "PR C" known-gaps entry
     # for the full empirical account.
     is_compiler_generated: bool | None = None
+    # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
+    # ``model/entities.py``'s ``RecordType.entity_id`` for the full
+    # rationale, including why this is keyword-only, excluded from
+    # equality, and not yet readable by any consumer.
+    entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+    # ADR-063 Phase 5 (fifth batch): Fact[...] siblings for this dataclass's
+    # own ten case-(b) fields, mirroring Variable's identical fields exactly
+    # -- each field's own None already unambiguously means "not captured",
+    # so the generic bridge applies directly with no explicit
+    # Fact.present(...) construction needed.
+    contract_attributes_fact: Fact[list[str] | None] | None = field(
+        default=None, kw_only=True
+    )
+    is_explicit_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+    is_hidden_friend_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+    source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    is_variadic_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+    exception_spec_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    is_override_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+    hidden_friend_owner_fact: Fact[str | None] | None = field(
+        default=None, kw_only=True
+    )
+    elf_binding_fact: Fact[SymbolBinding | None] | None = field(
+        default=None, kw_only=True
+    )
+    # ADR-063 Phase 5 (ninth batch) -- case (a), see the field's own comment.
+    deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    is_compiler_generated_fact: Fact[bool | None] | None = field(
+        default=None, kw_only=True
+    )
+
+    def __post_init__(self) -> None:
+        self.contract_attributes, self.contract_attributes_fact = (
+            bridge_legacy_and_fact(
+                self.contract_attributes, self.contract_attributes_fact, None, None
+            )
+        )
+        self.is_explicit, self.is_explicit_fact = bridge_legacy_and_fact(
+            self.is_explicit, self.is_explicit_fact, None, None
+        )
+        self.is_hidden_friend, self.is_hidden_friend_fact = bridge_legacy_and_fact(
+            self.is_hidden_friend, self.is_hidden_friend_fact, None, None
+        )
+        self.source_header, self.source_header_fact = bridge_legacy_and_fact(
+            self.source_header, self.source_header_fact, None, None
+        )
+        self.is_variadic, self.is_variadic_fact = bridge_legacy_and_fact(
+            self.is_variadic, self.is_variadic_fact, None, None
+        )
+        self.exception_spec, self.exception_spec_fact = bridge_legacy_and_fact(
+            self.exception_spec, self.exception_spec_fact, None, None
+        )
+        self.is_override, self.is_override_fact = bridge_legacy_and_fact(
+            self.is_override, self.is_override_fact, None, None
+        )
+        self.hidden_friend_owner, self.hidden_friend_owner_fact = (
+            bridge_legacy_and_fact(
+                self.hidden_friend_owner, self.hidden_friend_owner_fact, None, None
+            )
+        )
+        self.elf_binding, self.elf_binding_fact = bridge_legacy_and_fact(
+            self.elf_binding, self.elf_binding_fact, None, None
+        )
+        self.deprecated, self.deprecated_fact = bridge_legacy_and_fact(
+            self.deprecated, self.deprecated_fact, _OMITTED_FUNC_DEPRECATED, None
+        )
+        self.is_compiler_generated, self.is_compiler_generated_fact = (
+            bridge_legacy_and_fact(
+                self.is_compiler_generated,
+                self.is_compiler_generated_fact,
+                None,
+                None,
+            )
+        )
 
 
 @dataclass
@@ -214,7 +314,9 @@ class Variable:
     source_location: str | None = None
     is_const: bool = False  # const-qualified type (write → SIGSEGV)
     value: str | None = None  # initial value (compile-time constant, if known)
-    access: AccessLevel = AccessLevel.PUBLIC  # public/protected/private
+    # ADR-063 Phase 5 (tenth batch): private omission sentinel, not a plain
+    # AccessLevel.PUBLIC -- see access_fact below and __post_init__.
+    access: AccessLevel = _OMITTED_VAR_ACCESS  # public/protected/private
     elf_visibility: ElfVisibility | None = None  # ELF st_other (populated from .dynsym)
     # Provenance (ADR-015, schema v6) — see Function.source_header.
     source_header: str | None = None
@@ -224,8 +326,70 @@ class Variable:
     # alignment when a dumper can resolve it. None = not captured (older
     # snapshots / dumpers without support).
     alignment_bits: int | None = None
-    # See Function.deprecated for the message-string convention.
-    deprecated: str | None = None
+    # See Function.deprecated for the message-string convention, and
+    # _OMITTED_VAR_DEPRECATED for ADR-063 Phase 5's sentinel rationale.
+    deprecated: str | None = _OMITTED_VAR_DEPRECATED
     # See Function.elf_binding for the ELF-linkage rationale; same population
     # path (dumper_elf_symbols._populate_elf_visibility).
     elf_binding: SymbolBinding | None = None
+    # Storage-linkage signal, mirroring Function.is_static exactly (same
+    # castxml `static="1"` XML attribute / clang `storageClass ==
+    # "static"` AST-node field, populated by each header-AST backend's own
+    # `parse_variables()`). Closes a real gap `tu_merge._variable_key`'s own
+    # docstring long documented as a "known, accepted limitation": a plain-C
+    # (or `extern "C"`) file-scope `static` variable has no Itanium mangling
+    # marker at all (its mangled spelling equals its bare name, identical to
+    # an ordinary external variable's), so before this field existed there
+    # was no signal to tell a same-named `static` and `extern` C variable
+    # apart across translation units -- confirmed empirically (PR #1024
+    # review, CodeRabbit) to actually collide: `tu_merge.merge_fragments`
+    # silently folded both into one `Variable`, discarding one entirely, and
+    # `extract.manifest_semantic_ir` collapsed them onto one `EntityId`
+    # (only accidentally kept apart when their source locations happened to
+    # differ, since that axis is independent of linkage). Appended after
+    # every pre-existing field (never inserted mid-list) so this additive
+    # field cannot shift the positional slot of any field that came before
+    # it. Unlike `Function.is_static`/`hidden_friend_owner` (older plain
+    # positional appends), this one is keyword-only (Codex review,
+    # `model/AGENTS.md`'s "Append new fields at the end, keyword-only where
+    # a default is needed") -- every real call site already passes it by
+    # keyword, so this closes off a new positional dependency without
+    # touching any of them.
+    is_static: bool = field(default=False, kw_only=True)
+    # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
+    # ``model/entities.py``'s ``RecordType.entity_id`` for the full
+    # rationale, including why this is keyword-only, excluded from
+    # equality, and not yet readable by any consumer.
+    entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+    # ADR-063 Phase 5 (fourth batch): Fact[...] siblings for this dataclass's
+    # own case-(b) fields, mirroring RecordType.source_header_fact/
+    # EnumType.source_header_fact exactly — each field's own None already
+    # unambiguously means "not captured", so the generic bridge applies
+    # directly with no explicit Fact.present(...) construction needed
+    # (unlike qualified_name_fact on the other two dataclasses).
+    source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    alignment_bits_fact: Fact[int | None] | None = field(default=None, kw_only=True)
+    # ADR-063 Phase 5 (ninth batch) -- case (a), see the field's own comment.
+    deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    # ADR-063 Phase 5 (tenth batch) -- case (a), see the field's own comment.
+    access_fact: Fact[AccessLevel] | None = field(default=None, kw_only=True)
+    elf_binding_fact: Fact[SymbolBinding | None] | None = field(
+        default=None, kw_only=True
+    )
+
+    def __post_init__(self) -> None:
+        self.source_header, self.source_header_fact = bridge_legacy_and_fact(
+            self.source_header, self.source_header_fact, None, None
+        )
+        self.alignment_bits, self.alignment_bits_fact = bridge_legacy_and_fact(
+            self.alignment_bits, self.alignment_bits_fact, None, None
+        )
+        self.elf_binding, self.elf_binding_fact = bridge_legacy_and_fact(
+            self.elf_binding, self.elf_binding_fact, None, None
+        )
+        self.deprecated, self.deprecated_fact = bridge_legacy_and_fact(
+            self.deprecated, self.deprecated_fact, _OMITTED_VAR_DEPRECATED, None
+        )
+        self.access, self.access_fact = bridge_legacy_and_fact(
+            self.access, self.access_fact, _OMITTED_VAR_ACCESS, AccessLevel.PUBLIC
+        )

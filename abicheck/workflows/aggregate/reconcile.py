@@ -56,6 +56,7 @@ from abicheck.finding_identity import FindingIdentity, resolve_change_identity
 
 if TYPE_CHECKING:
     from abicheck.checker_types import Change
+    from abicheck.model.identity import EntityId
 
 #: :attr:`FindingMatrixEntry.scope` values — how one logical finding is
 #: distributed across the profiles that checked its target.
@@ -74,7 +75,7 @@ class _ReportChangeView:
     ``Change`` carries ~30 further fields (verdict modulation, reachability,
     impact assessment) that identity resolution never touches, and
     constructing one here would invite a future reader to assume those
-    fields mean something on the round-tripped side. Only the eight
+    fields mean something on the round-tripped side. Only the nine
     attributes below are consulted, all by plain attribute access
     (``resolve_change_identity`` reads ``kind`` through ``getattr(..., "value",
     kind)``, so a bare kind *slug* string works unchanged and an unknown
@@ -95,6 +96,14 @@ class _ReportChangeView:
     source_location: str | None
     affected_symbols: list[str] | None
     qualified_name: str | None
+    #: Never serialized by ``_change_to_dict`` (same as ``qualified_name``
+    #: above), so a report-derived view always reads this as absent rather
+    #: than lossy — ``resolve_change_identity`` only folds a set
+    #: ``change.entity_id`` in as an additional alias, never into
+    #: ``primary_id``/tier, so a permanently-``None`` value here degrades
+    #: identity precision but never raises or fabricates one (ADR-063
+    #: Phase 2's first real reader of ``Change.entity_id``).
+    entity_id: EntityId | None = None
 
 
 def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
@@ -165,6 +174,7 @@ def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
         # docstring for why an absent value here is consistent rather than
         # lossy for the cross-report comparison it exists to serve.
         qualified_name=None,
+        entity_id=None,
     )
     return resolve_change_identity(cast("Change", view))
 

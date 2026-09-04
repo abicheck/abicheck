@@ -1783,7 +1783,7 @@ class TestFieldDefaultHybridProducerMismatchDeclines:
     absence") were each reverted after being shown unsound: that stamp is
     identical whether clang genuinely examined the field and agreed, or
     never matched the field/type at all (a clang-side parse gap) --
-    ``dumper_hybrid._backfill_fact``'s own docstring already discloses this
+    ``fact_provenance.backfill_fact``'s own docstring already discloses this
     ("the entity itself IS castxml-sourced", not "both backends agree").
     See ``diff_types_field_facts._diff_field_default_initializer``'s own
     docstring for the full reasoning and why a real fix needs a data-model
@@ -1794,9 +1794,9 @@ class TestFieldDefaultHybridProducerMismatchDeclines:
 
     def test_hybrid_backfill_producer_mismatch_declines_even_for_a_real_removal(self):
         """OLD side: castxml found no default, clang backfilled a real value
-        (`dumper_hybrid._backfill_fact` stamps this field's provenance
+        (`fact_provenance.backfill_fact` stamps this field's provenance
         "clang"). NEW side: castxml alone found no default and clang
-        independently agreed (`_backfill_fact(None, None)` stamps "castxml"
+        independently agreed (`backfill_fact(None, None)` stamps "castxml"
         -- genuinely dual-confirmed here, but that's NOT distinguishable
         from the "clang never matched this field" case from the resulting
         snapshot alone). Two positively known, DIFFERENT per-field
@@ -1855,7 +1855,7 @@ class TestFieldDefaultHybridProducerMismatchDeclines:
         """The exact ambiguity that sank the earlier relaxations: when
         clang's own dump has NO matching type at all for a field (a
         clang-side parse gap, not a genuine "no initializer" answer),
-        `_backfill_fact` still stamps "castxml" -- byte-identical to the
+        `backfill_fact` still stamps "castxml" -- byte-identical to the
         genuinely dual-confirmed case above. Confirmed empirically that
         the resulting snapshot cannot distinguish the two from provenance
         alone."""

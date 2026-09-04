@@ -1,10 +1,43 @@
 # ADR-063: One Semantic Pipeline — Unifying Application, Fact, Identity, and Outcome Models
 
 **Date:** 2026-08-27
-**Status:** Proposed — roadmap ADR, not implemented. Several of its decisions
-are already partially satisfied by work this ADR consolidates rather than
-replaces (see "Relationship to existing ADRs" below); none of its new
-primitives exist yet.
+**Status:** Proposed — roadmap ADR, partially implemented.
+
+*Per-phase implementation status used to live here as a consolidated,
+hand-maintained bullet list. It was removed 2026-09-02 (per an external
+review's "PR 0" recommendation, accepted): a second, independently-updated
+summary of the same mutable state is exactly the "one concept, two
+representations" pattern this ADR's own Governing Invariant forbids, and
+it had already drifted from the primary source twice in one day (PR #1019
+caught and fixed two stale paragraphs, then a third factual error, before
+this removal). This section below is now the stable target-architecture
+text only — Context, Governing Invariant, Decision Drivers, and D1-D10 —
+which does not change as phases land. For current, per-phase and
+per-concept status, use:*
+
+- *the [implementation plan](../plans/one-semantic-pipeline.md)'s own
+  per-phase "Landed"/"Still not landed" notes — the primary, most detailed
+  source, updated in the same PR that lands a slice;*
+- *`docs/_meta/one-semantic-pipeline-status.yaml` — a machine-readable,
+  per-concept summary (primitive/producers/consumers/authority/
+  removal_gate), structurally validated but hand-maintained content
+  (no generator derives it from the plan or the codebase — update it in
+  the same PR that changes a concept's status, exactly like the plan
+  and this pointer), for a quick "who's authoritative today" check
+  without reading the whole plan;*
+- *`docs/contribute/adr/index.md`'s own ADR-063 row — a paraphrase for
+  readers browsing the ADR index (this file's own established convention
+  for an actively-evolving ADR is a detailed row, not a one-liner — see
+  ADR-061's/058's own rows — so this one stays that detailed too), kept in
+  sync with the plan and ledger above rather than independently
+  re-deriving a status claim.*
+
+See the [implementation plan](../plans/one-semantic-pipeline.md) for the
+full phase-by-phase state, including every slice's own "Landed"/"What this
+slice deliberately does not attempt" notes and review-found corrections.
+Several of the still-unimplemented phases' decisions are already partially
+satisfied by work this ADR consolidates rather than replaces (see
+"Relationship to existing ADRs" below).
 **Decision maker:** abicheck maintainers
 **Relates to / builds on:** [ADR-024](024-public-abi-surface-resolution.md),
 [ADR-031](031-source-implementation-graph-augmentation.md),
@@ -48,16 +81,17 @@ by different PRs, at different times:
 | Fact support | a model field, a parser, a serializer, a detector, a provenance entry, a capability-matrix row |
 | Persistence | per-library snapshot, baseline set, `BundleFacts`, `BuildSourcePack` |
 | Compiler context | CLI flags, a compile database, a captured evidence pack, L4 replay argv, the resolved `CompileContext` |
+| Evidence scope | requested `--depth`, `enforce_requested_depth`'s resolved-rank check, a resolved snapshot's actually-embedded facts, `analysis_assurance.requested_depth` |
 
 AGENTS.md's own "Known gaps" section is the best evidence for this claim,
 not an assertion made here: dozens of numbered findings there are the same
 shape — a fact is folded into one of these representations but not a
 sibling, or two independently-maintained implementations of the same
-decision quietly diverge. One of those findings is cited below by name;
+decision quietly diverge. Two of those findings are cited below by name;
 the other two examples are independently verifiable in the repository's
 own merged-commit history (`git log --grep`) rather than in AGENTS.md —
 stated that way deliberately, so a reader checking a citation against the
-wrong source doesn't read it as unsupported. All three are real, not
+wrong source doesn't read it as unsupported. All four are real, not
 illustrative:
 
 - **ELF binding** (commit `e5fabd403` / PR #734, `feat(model): expose ELF
@@ -87,6 +121,19 @@ illustrative:
   because the regression was caught before merge, not because the
   dependency was made impossible. The exit code was being used *inside
   the system* as semantic data, not only as an external contract.
+- **`--depth` as a floor for live extraction vs. a ceiling for a pre-built
+  snapshot** (the `docs/contribute/known-gaps.md` entry by that name,
+  surfaced by a Codex review round on PR #1016): `enforce_requested_depth`
+  fails a run when *resolved* evidence falls short of an explicit
+  `--depth`, but nothing projects a requested depth back down onto an
+  already-serialized JSON snapshot carrying richer embedded evidence —
+  `resolve_input`'s `fmt == "json"` branch returns `load_snapshot(path)`
+  verbatim regardless of what was asked for. Real on both operand shapes a
+  request can name (a single pre-built snapshot pair, or a directory/
+  package of them), not introduced by the PR that happened to surface it:
+  extending `--depth binary`'s acceptance to a second operand shape merely
+  made an existing, single-pair-only instance of the disagreement
+  reachable from a second code path.
 
 None of these are bugs in the PR that shipped the fix. They are evidence
 that **the integration surface for one new fact, one new config value, or
@@ -247,27 +294,45 @@ snapshot — not a gap this decision claims to close.
 
 **A second, narrower exception, found the same way (checked against real
 code, not assumed covered by "bundle/release fan-out" above): two branches
-inside `cli_compare_release.py` bypass the pipeline and are not migrated by
-this plan either.** `_collect_matrix_result()` (the `--probe-matrix-*`
-release-global build-configuration feature) calls `service.
-compare_snapshots()` directly over a pair of empty snapshots with
+inside `cli_compare_release.py` bypassed the pipeline.** `_collect_matrix_result()`
+(the `--probe-matrix-*` release-global build-configuration feature) calls
+`service.compare_snapshots()` directly over a pair of empty snapshots with
 `extra_changes` — the sanctioned Tier-2 chokepoint, not the disallowed
 Tier-1 `checker.compare()` core, so this does not itself trip the
 `cli-contract` gate — but it still never constructs a request or a plan,
-which is what this decision's own convergence is about. `_resolve_stranded_library()` (the
-`--bundle-facts-out` path's fallback for a library missing from the normal
-per-pair comparison) calls `cli_resolve._resolve_input()` directly — the
-same Tier-2 resolution `resolve_compare_request` itself calls, but reached
-independently, with its own bespoke fallback on top. The release fan-out's
-*main* per-pair path (`_run_compare_pair`) does route through `service.
-run_compare`, so "bundle/release fan-out" above is not uniformly
-unconverged — only these two narrower branches are. Migrating either is a
-real, separate design question (an `AnalysisPlan` pre-flight check for a
-probe-matrix build-config diff, or for a deliberately-degrading
-stranded-library fallback, is not the same shape of check this decision
-specifies for an ordinary comparison) and is named here, explicitly, as
-staying outside this decision's convergence rather than left to be
-discovered as a silent gap in an implementation phase's own accounting.
+which is what this decision's own convergence is about. This one remains
+unmigrated, and deliberately so: an `AnalysisPlan` pre-flight check has
+nothing to check here — there is no requested-vs-resolved evidence input to
+validate feasibility for, only two already-empty synthetic snapshots and an
+already-computed `extra_changes` list — so forcing this branch through
+`AnalysisPlanner.resolve()` would mean inventing a vacuous plan for a
+request shape the checker was never designed to answer, not closing a real
+gap.
+
+`_resolve_stranded_library()` (the `--bundle-facts-out` path's fallback for
+a library missing from the normal per-pair comparison) **is migrated**
+(ADR-063 Phase 8 follow-up): it used to call `cli_resolve._resolve_input()`
+directly — the same Tier-2 resolution `resolve_compare_request` itself
+calls, but reached independently, with its own hand-rolled `depth=binary`
+header-clearing special-case and no `AnalysisPlan` pre-flight check at all.
+Unlike the matrix branch above, this one genuinely is "the same shape of
+check" once looked at correctly: a stranded library is exactly one
+dump-shaped input (a path, headers, includes, version, language, an
+optional depth), so it now builds a real `DumpRequest` and runs it through
+`resolve_dump_request`/`execute_dump_request` — the identical pipeline
+`dump`/`scan` already converge on — gaining a real `AnalysisPlanner.
+resolve()` pre-flight check and dropping the hand-copied depth-clearing
+rule (the shared evidence-resolution machinery a matched pair's own
+`CompareRequest` side already uses does the identical clearing
+consistently). Its "deliberately-degrading stranded-library fallback"
+nature — the reason this was originally judged not-the-same-shape-of-check
+as an ordinary comparison — is preserved exactly, not designed away: a
+`PlanningError`/`ValidationError`/`SnapshotError` from either the resolve
+or execute step still degrades to an ELF-only entry with a warning rather
+than aborting the release. The release fan-out's *main* per-pair path
+(`_run_compare_pair`) already routed through `service.run_compare`, so
+"bundle/release fan-out" above is now unconverged in exactly one narrower
+branch (`_collect_matrix_result()`), not two.
 
 ### D2 — `Fact[T]`: one representation of "do we know this, and how"
 
@@ -448,6 +513,19 @@ already ran.
 
 ### D5 — Public surface as a query over one evidence graph
 
+**Superseded in part by the "Amendment" note near the end of this
+section (2026-09-02, accepted) — read that note first.** The paragraph
+immediately below states this decision's *original* text, kept verbatim
+for the historical record (the package split, the shared-primitive
+reasoning, and the twelve-L5-call-site node-id-collision gap it
+describes all remain accurate and still apply). Its one specific
+sentence that does **not** hold as shipped is "`compute_public_surface()`
+becomes a traversal... through this graph": the Amendment note explains
+why, after three review rounds, that literal mandate was replaced with a
+deterministic `SemanticReferenceIndex` that never reads the graph for
+this decision's motivating case. Treat that sentence as historical intent,
+not current instruction.
+
 Generalize the public-surface computation (`surface.py`,
 `dumper_scoping.py`, `type_reachability.py`, ADR-024/044) into a query over
 one authoritative graph with typed nodes (`Header`, `TranslationUnit`,
@@ -459,13 +537,18 @@ reconstruction of the same relationships from the flat snapshot — closing
 the class of bugs AGENTS.md documents under the namespace-collision and
 partial-qualification findings in `type_reachability.py`.
 
-**This graph is not a new primitive.** `buildsource.graph_facts.
-GraphNode`/`GraphEdge`/`merge_graph_facts` (ADR-031 D2, ADR-046 D1/D2)
-already is exactly the producer-agnostic node/edge/evidence-merge
-primitive this decision needs — today used only to build the optional L5
-source/build-evidence graph. D5 relocates that primitive to `model/graph.py`
-(ADR-061's own task-routing table already names `model/` as owning "an ABI
-entity/value shared across stages") and builds the public-surface graph as
+**This graph is not a new primitive.** `GraphNode`/`GraphEdge`/
+`merge_graph_facts` (ADR-031 D2, ADR-046 D1/D2) — relocated by an unrelated
+ADR-061 Phase 5 migration to `model.graph_facts`/`graph_identity`/
+`graph_vocabulary`, with `buildsource/graph_facts.py` now a back-compat
+re-export shim — already is exactly the
+producer-agnostic node/edge/evidence-merge primitive this decision needs,
+today used to build the optional L5 source/build-evidence graph and,
+independently, `impact/consumer_graph.py`'s/`impact/use_cases.py`'s own
+consumer-impact graph (CodeRabbit review, PR #958). D5
+reuses that already-relocated primitive directly (ADR-061's own
+task-routing table already names `model/` as owning "an ABI entity/value
+shared across stages") and builds the public-surface graph as
 a second set of node/edge *kinds* over the same primitive, available
 unconditionally rather than gated on L3-L5 evidence — not a second
 dataclass hierarchy. A first draft of this decision proposed exactly such
@@ -477,13 +560,13 @@ Building the graph and deciding relevance from it are two different
 responsibilities under ADR-061's own task-routing table ("match... a raw
 change" vs. "decide relevance"): the public-surface graph *builder* —
 the code that walks a snapshot and populates node/edge instances of the
-shared `model/graph.py` primitive D5 already relocates above — lands in
-`compare/` (a reconciliation of raw facts, not a policy decision; **not
-the shared `GraphNode`/`GraphEdge`/`merge_graph_facts` primitive itself,
-which stays in `model/graph.py` per the relocation two paragraphs above —
-a first draft of this sentence said "the graph substrate lands in
-`compare/`," contradicting that same relocation within this decision's
-own text**), and the relevance
+shared `model.graph_facts`/`graph_identity`/`graph_vocabulary` primitive
+D5 reuses above — lands in `compare/` (a reconciliation of raw facts, not
+a policy decision; **not the shared `GraphNode`/`GraphEdge`/
+`merge_graph_facts` primitive itself, which stays under `model.graph_facts`
+per the relocation two paragraphs above — a first draft of this sentence
+said "the graph substrate lands in `compare/`," contradicting that same
+relocation within this decision's own text**), and the relevance
 query itself — what `compute_public_surface()` actually decides — lands in
 `policy/`, which may import from `compare/` under ADR-061's fixed
 dependency direction. D5 does not move a relevance decision into
@@ -534,6 +617,40 @@ after this decision's first implementation phase ships, an accepted,
 named limitation rather than a silently-assumed-closed one. See the
 implementation plan's Phase 3 for the full accounting and what a real fix
 would require.
+
+**Amendment (2026-09-02, accepted): the shipped design does not read this
+graph for the public-surface closure walk, and this decision's own text is
+amended to match rather than left describing a design that was tried and
+rejected.** Three independent review rounds on the traversal migration
+(see the implementation plan's own Phase 3 section; full account in
+`docs/contribute/known-gaps.md`) each found reading `AbiSnapshot.
+surface_graph` for `compute_public_surface()` unsafe — stale/unenriched
+node attrs on the ordinary dump path, a measured 30-100%+ performance
+regression once enrichment was added to fix that, and a confidence-merge
+precedence hazard that let a stale or adversarial persisted fact win over
+a freshly-derived one even with enrichment in place. The shipped fix
+removes the graph from this one computation entirely:
+`compare/surface_graph.py::referenced_identifiers_by_node()` is a pure
+function of the snapshot's own current declarations, computed *before*
+any `GraphNode` is built, and is what `policy/public_surface_closure.py`/
+`export_surface.py` call directly. This decision's "one authoritative
+graph, queried by traversal" premise is therefore split into two concepts
+going forward, formally amending D5's own text: a
+**`SemanticReferenceIndex`** (deterministic, sourced from
+`SemanticIR`/snapshot declarations alone, authoritative for the
+public-surface closure walk — what `referenced_identifiers_by_node()`
+already computes today, not yet re-sourced from `SemanticIR`
+specifically) is the query this decision's motivating case actually
+needs, and the shared evidence graph (`GraphNode`/`GraphEdge`/
+`merge_graph_facts`, multi-producer, provenance/confidence-bearing)
+remains for explanation and L5 analysis — never for a decision with
+exactly one legitimate source, which is what a mergeable, multi-producer
+structure structurally cannot safely be. Re-sourcing
+`referenced_identifiers_by_node()` from `SemanticIR` instead of raw
+declarations is tracked under Phase 6B (SemanticIR checker cutover) in
+the implementation plan, not as a residual of this decision. The
+twelve-L5-call-site node-id-collision gap above is unaffected by this
+amendment — it was never about this closure walk.
 
 ### D6 — `RunOutcome` as independent axes; no `exit_code` inside the domain
 

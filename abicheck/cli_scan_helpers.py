@@ -50,35 +50,43 @@ if TYPE_CHECKING:
 def reject_incoherent_scan_operands(
     *,
     artifact: Path | None,
-    artifact_set: str | None,
+    artifact_set: tuple[str, ...],
     against: Path | None,
-    dry_run: bool,
     bundle_system_providers: str,
 ) -> None:
     """Reject operand/flag combinations ``scan`` cannot serve.
 
-    An empty ``--artifact-set`` is rejected explicitly rather than left to
-    collapse to ``Path("") == Path(".")`` and audit the whole CWD (CodeRabbit
-    review). ``--artifact-set`` is audit-only -- there is no old side for a set
-    -- so ``--against`` is rejected with it, and ``--dry-run`` is not wired for
-    it yet. ``--bundle-system-providers`` is the mirror case: it only means
+    ``--artifact-set`` is a repeatable option (CLI cleanup phase two, PR 5):
+    ``artifact_set`` is the tuple Click collects, empty when the flag was
+    never given at all -- so "supplied" is exactly ``bool(artifact_set)``,
+    with no truthiness/``is not None`` mismatch left to reintroduce the
+    CodeRabbit-caught bug the comma-separated single-string form once had
+    (an empty ``--artifact-set ""`` still yields a non-empty one-element
+    tuple, so it is correctly treated as *supplied* here and rejected by the
+    empty-member check below, never silently read as "not set"). Any empty
+    or blank member is rejected explicitly rather than left to collapse to
+    ``Path("") == Path(".")`` and audit the whole CWD (CodeRabbit review,
+    preserved from the comma-separated form's own fix). ``--artifact-set``
+    is audit-only -- there is no old side for a set -- so ``--against`` is
+    rejected with it. ``--dry-run`` *is* supported (CLI cleanup phase two,
+    PR 5's set-mode-semantics slice) -- see
+    :func:`abicheck.frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`
+    -- so it is no longer rejected here.
+    ``--bundle-system-providers`` is the mirror case: it only means
     something *for* a set.
     """
-    if artifact_set is not None and not artifact_set.strip():
+    if any(not member.strip() for member in artifact_set):
         raise click.UsageError("--artifact-set must not be empty.")
-    if (artifact is not None) == (artifact_set is not None):
+    supplied = bool(artifact_set)
+    if (artifact is not None) == supplied:
         raise click.UsageError(
             "scan requires exactly one of ARTIFACT or --artifact-set."
         )
-    if artifact_set is not None:
+    if supplied:
         if against is not None:
             raise click.UsageError(
                 "--against is not supported with --artifact-set "
                 "(audit-only -- no old side for a set)."
-            )
-        if dry_run:
-            raise click.UsageError(
-                "--dry-run is not yet supported with --artifact-set."
             )
     elif bundle_system_providers:
         raise click.UsageError("--bundle-system-providers requires --artifact-set.")
@@ -90,7 +98,7 @@ def reject_incoherent_scan_secondary_output(
     output: Path | None,
     secondary_fmt: str | None,
     secondary_output: Path | None,
-    artifact_set: str | None,
+    artifact_set: tuple[str, ...],
 ) -> None:
     """Reject a ``--secondary-*`` combination that cannot mean anything.
 
@@ -114,7 +122,7 @@ def reject_incoherent_scan_secondary_output(
         reject_incoherent_secondary_output as _reject_shared,
     )
 
-    if artifact_set is not None and (
+    if artifact_set and (
         secondary_fmt is not None or secondary_output is not None
     ):
         raise click.UsageError(

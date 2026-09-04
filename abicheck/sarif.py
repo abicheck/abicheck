@@ -48,6 +48,7 @@ from abicheck.contract_gating import (
 from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
+from abicheck.policy.gate_decision import gate_decision_for_result
 from abicheck.report.render_json import render_mapping_as_json
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import (
@@ -64,7 +65,7 @@ from abicheck.reporter_markdown import (
 from abicheck.severity import missing_contract_exit_code
 
 if TYPE_CHECKING:
-    from abicheck.severity import SeverityConfig
+    from abicheck.severity import GateDecision, SeverityConfig
 
 # ---------------------------------------------------------------------------
 # Severity mapping
@@ -487,7 +488,7 @@ def _result_for(
 
 
 def _severity_gate_properties(
-    result: DiffResult,
+    gate: GateDecision,
     severity_config: SeverityConfig,
 ) -> dict[str, Any]:
     """Build a compact, auditable ``severityGate`` block for SARIF ``properties``.
@@ -495,21 +496,14 @@ def _severity_gate_properties(
     Mirrors the categories/exit-code contract of JSON's ``severity`` block
     (:func:`abicheck.reporter._build_severity_json`) so a SARIF consumer can
     tell *why* the invocation's exit code is what it is without
-    cross-referencing the JSON report separately. Both routed through
-    :func:`abicheck.severity.compute_gate_decision` — the single canonical
-    gate computation — so ``exitCode``/``blocking``/``blockingCategories``
-    can never independently drift apart from each other or from JSON's
-    equivalent block.
+    cross-referencing the JSON report separately. *gate* is the caller's
+    already-computed
+    :func:`abicheck.policy.gate_decision.gate_decision_for_result` value --
+    the same one JSON's block projects -- so ``exitCode``/``blocking``/
+    ``blockingCategories`` can never independently drift apart from each
+    other or from JSON's equivalent block, and this function itself makes
+    no policy decision (ADR-061 D9).
     """
-    from abicheck.severity import compute_gate_decision
-
-    gate = compute_gate_decision(
-        result.changes,
-        severity_config,
-        policy=result.policy,
-        kind_sets=result._effective_kind_sets(),
-        policy_file=result.policy_file,
-    )
     return {
         "exitCode": gate.exit_code,
         "blocking": gate.blocking,
@@ -945,9 +939,10 @@ def to_sarif(
                     )
                 )
 
+    gate_decision = gate_decision_for_result(result, severity_config)
     severity_gate = (
-        _severity_gate_properties(result, severity_config)
-        if severity_config is not None
+        _severity_gate_properties(gate_decision, severity_config)
+        if gate_decision is not None and severity_config is not None
         else None
     )
     scoped_gate = _scoped_gate_properties(result)

@@ -6,9 +6,16 @@ lifecycle: active
 
 # One Semantic Pipeline — unifying application, fact, identity, and outcome models
 
-**ADR:** [ADR-063](../adr/063-one-semantic-pipeline.md) · Proposed; nothing in
-this plan implemented yet. **Effort:** XL, multi-quarter, phased — do not
-attempt as one PR. **Depends on / sequences with:** ADR-055, ADR-061,
+**ADR:** [ADR-063](../adr/063-one-semantic-pipeline.md) · Proposed — roadmap
+ADR, partially implemented. Phase 0's `Fact[T]`/`FactStatus` infrastructure
+and AI-readiness gates have landed, and a narrow Phase 1 slice has too; see
+each phase's own "Landed"/"Still not landed" paragraph below in this plan
+for the authoritative per-slice detail, plus
+`docs/_meta/one-semantic-pipeline-status.yaml` for the concept-level
+authority summary. ADR-063 itself no longer restates this detail — its own
+duplicated status block was removed (PR 0, 2026-09-02) precisely because it
+kept drifting out of sync with this plan.
+**Effort:** XL, multi-quarter, phased — do not attempt as one PR. **Depends on / sequences with:** ADR-055, ADR-061,
 ADR-062, ADR-042, ADR-046/048, ADR-049, ADR-050 (each partially implemented
 already; see "Sequencing against in-flight ADRs" below).
 
@@ -62,6 +69,421 @@ assume:
 | ADR-062 (storage v2) | Phase 0 primitives (`abicheck/storage/`: `FactStatus`/`FactAvailability`, occurrence-preserving identity, canonical encoding, version axes) implemented and **inert** — nothing wired to a producer/reader | Phase 0/5 of this plan is the *generalization* of these primitives into the domain layer; Phase 8 of this plan is the *wiring* ADR-062 Phase 1 still needs, done jointly rather than twice |
 | ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `workflows/aggregate/gate.py`/`fold.py` still decode exit codes inline | Phase 7 of this plan closes the `gate.py`/`fold.py` gap — not a redesign of ADR-042 itself. `junit_report.py`'s own inline `_is_failure` computation is **not** one of the gaps Phase 7 closes: that phase's own corrected design leaves it exactly as it is, since it is a legitimate per-render function of each call's own `SeverityConfig`/`relevant_ids`, not a property a finding carries — there is no `RunOutcome` field for it to read instead, so it stays inline by design, not as an unclosed gap |
 | AGENTS.md "PR C" (dump/scan typed convergence) | `resolve_dump_request`/`execute_dump_request` split landed; `scan`'s candidate resolution already converges on the shared `workflows.artifact.execute._resolve_side_snapshot_impl` primitive that `execute_dump_request` itself calls internally (`resolve_dump_request` only validates evidence and builds a `ResolvedDumpRequest` — it never calls the primitive; `service_input_resolution` is only a delegating facade re-exporting this module's owner), but `dump`'s own real ELF/PE/Mach-O execution still runs the legacy path, blocked on two named items (castxml availability for parity testing, `--compile-db-filter` typed surface — now closed) | Phase 1 of this plan is exactly "finish PR C" for the `dump` half, not a new design |
+
+## Phase 2B-8B: consumer-cutover extension (accepted 2026-09-02)
+
+An external review of the codebase as of merge commit `aa78c37` (PR #1015)
+assessed this plan against ADR-063's own governing invariant rather than
+against each phase's individually-scoped acceptance criteria. Its findings
+and its six proposed sub-phases were reviewed and **accepted** on
+2026-09-02 (this PR) — they are now part of this plan's roadmap, not a
+standing proposal. A per-concept, machine-readable summary of "who is
+authoritative today, and what has to land before the legacy representation
+can be removed" now lives in
+`docs/_meta/one-semantic-pipeline-status.yaml`; update it in the same PR
+that changes a concept's status rather than letting this prose and that
+ledger drift apart the way ADR-063's own Phase 2/6 status paragraphs
+briefly did (see PR #1019).
+
+The review's conclusion: **the primitives this plan calls for — `Fact[T]`,
+`EntityId`/`ScopePath`, `SemanticIR`, `AnalysisPlan`, `RunOutcome`, sectioned
+storage, `ReportDocument` — are, in large part, built, but they have
+mostly been added *alongside* the legacy representations they were meant to
+replace, not yet made the sole authority those legacy representations funnel
+through.** That is a materially different claim from "phases remain," and
+the review's own headline numbers make the shape of the gap concrete:
+infrastructure/building-blocks roughly 75-80% built; actual consumer cutover
+onto the one semantic model roughly 35-45% done; legacy-representation
+removal under 15% done. Concretely, the review found:
+
+- `SemanticIR` is real, persisted, and (since Phase 6's third/fourth
+  slices) covers records/enums/typedefs/functions/variables/constants on
+  both header-AST backends — but no detector, verdict, or exit path reads
+  it; the checker still reads the legacy `AbiSnapshot.functions`/`types`/…
+  collections exclusively, with `semantic_ir` computed and stored beside
+  them. Two independently-mutable representations of the same entities
+  existing side by side is exactly the shape ADR-063's governing invariant
+  exists to forbid, even though each individual phase that produced this
+  state met its own stated acceptance criteria.
+- Phase 0/5 converted `Fact[T]` representation and populated the registry
+  (see `abicheck/model/fact_registry.py`'s `FACT_REGISTRY` for the current
+  count — this document doesn't freeze it; `KNOWN_UNCONVERTED_ELIGIBLE_FACTS`
+  is empty), but every migrated reader still resolves through
+  `resolved_fact_value(fact, legacy_default)` or an equivalent local
+  helper doing the identical present-or-default collapse — a review
+  finding on this PR named three: `diff_param_qualifiers._fact_bool`,
+  `diff_cxx_rules._fact_str_list`, `compare.surface_graph.fact_list`.
+  Each reads `.is_present`/`.value` directly rather than calling the
+  shared primitive, but all collapse `NotCollected`/`Unsupported`/`Failed`
+  back onto the same `False`/`None`/`[]` default the legacy field always
+  held, so 5B's inventory of what to migrate is every such
+  default-collapsing unwrap, not only literal `resolved_fact_value` call
+  sites. This was Phase 0's own explicit, correct acceptance bar
+  ("representation, not detector logic"), but it means no fact anywhere
+  has reached `FactLifecycle.CONSUMED` — a detector branching on
+  `FactStatus` at all remains unscheduled work, named as out of scope by
+  every phase that touches facts rather than owned by any of them.
+- `AnalysisPlan` (Phase 4) is deliberately a narrow, side-effect-free
+  preflight object by design (so `--dry-run` stays free of ambiguous
+  resolution) — but that means no single resolved runtime object exists
+  for real execution either; policy, pack, contract, and public-surface
+  state are each still (re)resolved independently downstream of it.
+- Phase 3's closure-walk-not-graph-traversal outcome (see ADR-063's own
+  D5 "Amendment" note and `docs/contribute/known-gaps.md`'s three-review-
+  round account) is a correct, reviewed decision given the demonstrated
+  hazards of reading a mergeable evidence graph for a value with exactly
+  one legitimate source — but it leaves D5's own text unfulfilled, and
+  `AbiSnapshot.surface_graph` genuinely has no production reader today.
+- `action/run.sh` still decodes raw process exit codes and its own shell
+  `case` logic into a verdict rather than reading `run_outcome` from the
+  report (Phase 7's own named, deliberate scope boundary — real, not an
+  oversight, but still a second live representation of the same outcome).
+- Sectioned storage (Phase 8) is real and is now the default write shape,
+  but most sections still carry the pre-existing JSON encoding for their
+  fields rather than a typed domain DTO — `semantic_ir` is the only
+  section actually promoted to one so far.
+- `buildsource/entity_identity.py`'s `CanonicalIdentity` (L5) remains a
+  second, deliberately out-of-scope identity system alongside `EntityId`
+  (Phase 2's own named scope boundary) — permanently duplicate under a
+  literal reading of "one concept, one representation," pending a bridge
+  or reclassification neither this plan nor ADR-063 currently schedules.
+
+**None of this contradicts any individual phase's own "Landed"/"Still not
+landed" accounting elsewhere in this plan** — every *landed slice* met its
+own stated acceptance criteria at the time it landed. (ADR-063 itself no
+longer carries this per-phase accounting at all: PR 0 removed its
+duplicated status block, leaving this plan's own per-phase sections as the
+primary source, plus the machine-readable ledger at
+`docs/_meta/one-semantic-pipeline-status.yaml` for the concept-level
+authority split — see the "Adopted sub-phases" table above for how the two
+relate.) That is narrower than "every phase is complete": Phase 3's
+own D5 text remains unfulfilled for the reason recorded in its "Amendment"
+note, Phase 6's acceptance-criteria fixture (a closure-parameterized
+template) is still unmet, and several later phases are explicitly still in
+progress — each says so plainly in its own status paragraph elsewhere in
+this document, and this review does not dispute any of those self-reports.
+The review's point is that the plan's phase
+list, read end to end, did not until this update contain a phase whose job
+is "make the new representation the *only* one a consumer can reach" for
+`SemanticIR`, `Fact` semantics, or a single resolved runtime context — only
+Phase 9 (selectors) and Phase 10 (title only, unimplemented) were framed
+around deletion/authority at all, and Phase 10 itself still documents that
+detector migration and legacy-projection retirement are separate future
+work it does not itself schedule. The six sub-phases below close that gap.
+
+**Adopted sub-phases** — each slots after the parent phase it extends in
+the numbering, and each starts at status `not_started`. This table is the
+status owner for the six sub-phases themselves; the ledger
+(`docs/_meta/one-semantic-pipeline-status.yaml`) tracks status one level
+up, per *concept* (`facts`/`identity`/`semantic_ir`/…), and each
+concept's own `removal_gate` names which sub-phase closes it — the two are
+complementary, not the same data twice. Update the `Status` column below
+when a first PR lands against a sub-phase:
+
+| Sub-phase | Status | Closes | One-line goal |
+|---|---|---|---|
+| **2B — Identity consumer migration** | not started | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted) |
+| **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. `resolve_dump_request` remains fully unwired, and nothing yet calls `with_assurance()` from a real post-execution caller — the sub-phase's own gap (most downstream code still independently re-reads/re-derives what this object would give it in one place) stays open |
+| **5B — Fact semantic consumption** | in progress | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test. First PR landed (see the note below the table): the shared `compare_facts`/`FactComparison` primitive plus two of the five fields' primary finding-emitting call sites (`bases`/`virtual_bases` in `diff_types._diff_type_bases`, `is_va_list` in `diff_param_qualifiers.param_va_list_changes`). Second PR landed (see the note below the table): every remaining reader of `bases`/`virtual_bases`/`is_va_list` audited and closed — one genuine pairwise fabrication risk (`diff_cxx_rules._transitive_bases`, feeding `virtual_method_addition`) gated the same way, the rest (single-snapshot reachability/classification aids) documented as already safe. `vtable`/`vptr_offset_bits` remain on the old collapse, deliberately (their own dedicated, higher-scrutiny slice — see below), so this sub-phase's own gate ("every detector... for at least one full fact family") is not yet closed |
+| **6B — SemanticIR checker cutover** | in progress | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
+| **7B — Boundary consumer migration** | in progress | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary) and the release fan-out's independent pair-semantics reimplementation | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; release/artifact-set fan-out calls one shared pair-operation executor instead of independently resolving depth, policy provenance, and report composition per pair |
+| **8B — Multi-artifact canonical storage** | in progress | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
+
+**5B's first PR landed (2026-09-03).** `abicheck.compare.fact_comparison.
+compare_facts` is the shared primitive (moved there from `model/fact.py`
+where it first landed — Codex review: deciding "does this differ" is a
+`compare/`-owned question per `model/AGENTS.md`'s own scoped contract, not
+`model/`'s). It
+classifies an `(old_fact, new_fact)` pair into `FactComparability.COMPARABLE`
+/`INCOMPLETE`/`UNSUPPORTED`/`NOT_APPLICABLE` per the review's proposed
+`FactStatus` → detector-meaning table, and returns the resolved
+`old_value`/`new_value` only when `COMPARABLE`. Two of the five named
+fields' primary finding-emitting call sites were migrated onto it:
+`diff_types._diff_type_bases` (`bases_fact`/`virtual_bases_fact` — the two
+comparisons are gated independently, so a comparable `virtual_bases` pair
+with an incomplete `bases` pair still reports a plain hierarchy change,
+just without the finer became/lost-virtual classification) and
+`diff_param_qualifiers.param_va_list_changes` (per-parameter
+`is_va_list_fact` — the old `_fact_bool` present-or-`False` collapse this
+function used is removed; `param_restrict_changes` is unaffected, since
+`is_restrict` has no per-parameter evidence gap on either producer). Each
+migration is behavior-preserving for a pair with fully complete evidence on
+both sides (`PRESENT`, confirmed-empty/confirmed-`False` included — see
+`tests/test_diff_types_bases_fact_status.py`'s and
+`tests/test_clang_param_va_list.py::TestParamVaListFactStatusGating`'s own
+"both sides confirmed" controls) and changes behavior for a pair with
+incomplete evidence on either side, where a finding used to be fabricated
+from the gap and is now withheld instead. `bases`/`virtual_bases`
+additionally decline on a `PARTIAL` fact (Codex review, PR #1033: a base
+absent from a partially-covered list may simply live in the uncovered
+part, so treating the covered portion as the complete set is the identical
+fabrication risk as an incomplete fact); `is_va_list` — a single-parameter
+bool, not a list with an unobserved remainder — still compares normally
+under `PARTIAL`. Both checked against the FP-rate and per-tier-accuracy
+gates (`scripts/check_fp_rate.py`/`scripts/check_tier_accuracy.py`), both
+clean.
+
+**Deliberately not attempted in this PR** — `vtable`/`vptr_offset_bits`
+(`diff_types_vtable.py`/`diff_layout.py`/`diff_vtable_layout.py`): those
+three modules already implement extensive, individually-reasoned
+evidence-gap guards (`_vtable_transition_is_evidenced` and siblings) built
+*before* `Fact[T]` existed, inferring "evidence missing" indirectly from
+`size_bits`/virtual-signature heuristics rather than reading `FactStatus`
+directly, with a documented history of multiple prior false-positive/
+false-negative incidents per guard (see each function's own docstring).
+Replacing that heuristic layer with a direct `FactStatus` read is very
+likely a real improvement — `FactStatus` is strictly better evidence than
+inferring a capture gap from `size_bits`/signature-set heuristics — but it
+needs its own dedicated slice with equal scrutiny (each existing guard's
+own Codex-review history re-verified against the new behavior), not a
+drive-by change bundled into this PR's already-broader scope. Also
+unconverted: every other reader of the two fields this PR *did* migrate
+(`diff_cxx_rules.py`'s `_fact_str_list`, `diff_stdlib_impl.py`,
+`diff_time64.py`, `idioms.py`, `surface_graph.py`,
+`buildsource/header_graph.py`, `diff_cpp_patterns.py`) — these are mostly
+classification/matching aids rather than finding-emitting detectors in
+their own right, so they carry a smaller fabricated-finding risk than the
+two migrated call sites, but 5B's own removal gate ("every detector...
+for at least one full fact family") is not closed until they are covered
+too. Recorded here rather than silently left implicit, per this repo's own
+"say so explicitly and record the gap" convention (`AGENTS.md`
+"Decision-making principles").
+
+**5B's second PR landed (2026-09-03) — the "lower-risk batch" from the note
+above.** Every remaining reader of `bases`/`virtual_bases`/`is_va_list`
+named above was audited individually (`is_va_list` has no other reader at
+all: `diff_param_qualifiers.param_va_list_changes`/`compare.va_list_diff`
+is its only call site). The audit split into two kinds:
+
+- **One genuine old/new pairwise fabrication risk**: `diff_cxx_rules.
+  _transitive_bases`, called from `virtual_method_addition` to tell a
+  genuinely new virtual slot apart from a compatible override of an
+  inherited one. An incomplete `bases_fact`/`virtual_bases_fact` anywhere
+  along the transitive walk used to read as "no bases here", which could
+  make a real override look like a new slot and fire a spurious
+  `VIRTUAL_METHOD_ADDED`. `_transitive_bases` now returns whether every
+  visited record's evidence was confirmed `PRESENT` (a `PARTIAL` fact is
+  treated as incomplete too, the same discipline `diff_bases` already
+  applies to this identical field pair — an unlisted base could simply
+  live in the uncovered remainder); `virtual_method_addition` declines to
+  emit when either side's walk was incomplete, rather than fabricating.
+  Behavior is unchanged whenever both sides' evidence is complete — every
+  real producer (`dwarf_snapshot.py` included) already states `bases`/
+  `virtual_bases` explicitly, even empty, for every `RecordType` it emits;
+  only test fixtures that never set the field at all (reading as
+  `NOT_COLLECTED`, not confirmed-empty) needed updating to match that real
+  producer shape. `_owner_descends_from` (`diff_cxx_rules.py`, feeding
+  `vtable_slot_is_override_reuse`) also calls `_transitive_bases` but is
+  itself part of the vtable evidence-gap cluster below — it takes the new
+  return value's set component only, unchanged behavior, left for that
+  slice. Verified against the FP-rate gate (`scripts/check_fp_rate.py`)
+  and the per-tier-accuracy gate (`scripts/check_tier_accuracy.py`), both
+  clean, plus the full unit suite.
+- **Five single-snapshot reachability/classification aids with no old/new
+  pair to gate at all**: `diff_stdlib_impl._public_by_value_type_closure`
+  (feeds an OR of both sides — an evidence gap only narrows one side's
+  closure, the other side's independent closure or a later re-run still
+  catches it), `diff_time64._fold_record_tokens` (feeds a union of both
+  sides' token sets — identical shape), `idioms._collect_base_targets`
+  (single-snapshot ADR-027 anti-pattern scan — a gap only shrinks
+  `base_targets`, missing a `POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR` rather than
+  fabricating one), `buildsource/header_graph._flat_structural_type_edges`
+  (one snapshot's own graph, and this package's own governing rule already
+  caps every finding it can feed at `API_BREAK_KINDS`/`RISK_KINDS` without
+  an artifact diff also proving the break), and `compare.surface_graph.
+  fact_list` (already explicitly justified before this PR — an evidence
+  gap only omits a graph edge this phase's own D5 amendment already
+  documents as non-authoritative for any decision today). None of the
+  five needed a behavior change — each already fails toward under-
+  detection, never fabrication — so each now carries an explicit ADR-063
+  Phase 5B docstring note recording *why*, closing the audit gap without
+  a speculative rewrite of code that was already safe. `diff_cpp_patterns.
+  _is_empty_record`'s `vtable_fact` read is the one item from the original
+  list that turned out to belong to the vtable cluster, not this batch —
+  see below.
+
+**Still open**: `vtable`/`vptr_offset_bits` themselves (`diff_types_vtable.
+py`/`diff_layout.py`/`diff_vtable_layout.py`'s own guard cluster), plus
+every downstream reader of those two fields specifically —
+`diff_cxx_rules.virtual_method_addition`'s own `old_vtable != new_vtable`
+comparison, `idioms.py`'s three vtable reads (`_recognise_factory`,
+`_has_virtual_destructor`, `_detect_non_virtual_dtor`), and
+`diff_cpp_patterns._is_empty_record`. This PR's own audit reconfirms the
+prior PR's reasoning for leaving them alone: `_vtable_transition_is_
+evidenced` and its siblings are exactly the kind of individually-reasoned,
+multi-round-reviewed evidence-gap heuristic that needs its own dedicated
+slice with equal scrutiny, not a change folded into an otherwise
+lower-risk batch.
+
+**Known gap surfaced by review (Codex security review, this PR, not
+closed): a "decline rather than fabricate" evidence gate can be an
+under-detection lever, not just a fabrication guard, for a detector that is
+the *sole* signal for its ABI-break class.** `virtual_method_addition`'s own
+docstring already states it is the only signal for its specific blind spot
+(a DWARF/symbol-only snapshot whose vtable array cannot show the growth);
+declining when `bases`/`virtual_bases` evidence is incomplete therefore
+doesn't just miss one classification among several redundant ones — for a
+hand-crafted or legacy-schema snapshot with the right shape (`vtable_fact`
+already trivially spoofable pre-existing this PR, plus a `bases`/
+`virtual_bases_fact` at `NOT_COLLECTED`/`FAILED`/`PARTIAL`), it can turn a
+genuinely BREAKING `VIRTUAL_METHOD_ADDED` into a silent, `--require-
+complete-analysis`-invisible `FUNC_ADDED`/`COMPATIBLE`. This is not unique
+to this PR's diff: the identical shape already exists at the first 5B PR's
+own migrated call sites (`diff_bases`, `diff_va_list_params`) — any
+detector using `compare_facts`'s `INCOMPLETE` branch to decline has the
+same property whenever it is (or becomes) a sole signal for its class. A
+real fix threads a detector's own decline into `analysis_assurance.py`'s
+rollup (a genuine new signal that module doesn't compute today — it is
+explicitly "a rollup, not a new probe" over data the pipeline already
+computes) so `--require-complete-analysis` can see it, or gates the
+specific sole-signal detectors more conservatively than the general
+`compare_facts` pattern. Neither is attempted here: it is a cross-cutting
+design question for the whole "decline rather than fabricate" philosophy
+this sub-phase established, not a two-line patch scoped to one call site,
+and reversing just this PR's own decline would only reopen the fabrication
+bug it fixes without closing the class (an attacker would target
+`diff_bases`/`diff_va_list_params` instead). Recorded here per this
+repo's own "say so explicitly and record the gap" convention rather than
+left implicit or rushed.
+
+**7B's first PR landed (2026-09-03).** Scoped narrowly, after inspection
+showed most of `action/run.sh`'s raw-exit-code dispatch is not actually
+closable the way it first appears: the Click-usage-error-vs-real-verdict
+disambiguation (`_is_cli_error`'s stderr grep) has no `run_outcome` to read
+in the first place (a genuine CLI usage error produces no report at all),
+and `scan`'s dedicated evidence-contract/budget-overflow/not-comparable exit
+codes (7/5/6) are *deliberately* exit-code-only by ADR-037 D5's own design —
+three prior stderr/marker-file signals for that exact axis were each shown
+forgeable, which is why it has its own reserved exit code instead of a
+report-based signal at all. Neither is a gap this sub-phase can close by
+reading `run_outcome` harder. What *is* closable, and landed this PR:
+`_report_compat_verdict`/`_severity_gate_exit` — the two shared functions
+`compare` and `scan` alike consult to resolve the compatibility-axis verdict
+and the severity-policy gate tier — now read the report's own
+`run_outcome.compatibility`/`run_outcome.gate` (ADR-063 Phase 7 / D6) first,
+falling back to the pre-existing `verdict`/`severity.exit_code` field (and,
+for a non-JSON report, the rendered text) only when no `run_outcome` block
+is present. Behavior-preserving wherever both sources exist (`run_outcome
+.compatibility` is literally `result.verdict`, same as the legacy `verdict`
+field; `run_outcome.gate` is the identical fold `severity.exit_code`
+already encoded, just typed), so no existing `tests/test_action_run_sh_*.py`
+fixture needed updating — `tests/test_action_run_sh_run_outcome.py` adds the
+new coverage, giving each report a `run_outcome` value that deliberately
+disagrees with its paired legacy field to prove the script actually reads
+`run_outcome` rather than falling through to the unchanged path by
+coincidence. The release fan-out's own "independent pair-semantics
+reimplementation" half of this sub-phase's stated scope is untouched by
+this PR — real, separately-scoped follow-up work (`cli_compare_release.py`/
+`cli_compare_release_helpers.py`/`cli_compare_release_matrix.py` together
+are ~2800 lines with their own extensive review history; a shared
+pair-operation executor there needs its own dedicated slice, not a
+drive-by extension of this one).
+
+**8B's first PR landed (2026-09-03).** `storage.types_section_codec
+.TypesSection` is the `"types"` D8 legacy section's own typed DTO, wired
+through `storage.dto.types_to_dto`/`types_from_dto` in place of the generic
+`legacy_section_to_dto` pass-through envelope every other legacy section
+still uses. `"types"` was chosen as the first section to promote precisely
+*because* it is the simplest possible case: `storage.legacy_sections
+._SECTION_FIELDS["types"]` is exactly one field, and that field is required
+whenever the section is present at all (`_REQUIRED_SECTION_FIELDS["types"]`
+names it) — so there is no schema-version-dependent field-presence sparsity
+for a typed wrapper to get wrong, unlike the `provenance`/`debug`/`binary`
+sections a first investigation also considered, each of which carries a
+genuinely sparse, schema-version-dependent set of *optional* fields that a
+naive typed-dataclass-with-defaults conversion risks silently reconstructing
+incorrectly against `storage.import_v1.export_legacy_snapshot`'s
+byte-for-byte round-trip contract (verified against every real
+`tests/fixtures/schema/v*.json` fixture, `test_a_real_schema_fixture_round_
+trips`) — a real design problem those sections still need before they can
+follow, recorded here rather than attempted without it. The on-disk section
+payload shape is unchanged (`{"types": [...]}`, identical to what
+`legacy_section_to_dto` already stored); what changed is that the DTO layer
+no longer treats a `"types"` section as an arbitrary opaque blob
+indistinguishable from any other legacy section. The remaining seven legacy
+sections (`binary`/`declarations`/`layout`/`debug`/`build`/`graph`/
+`provenance`), multi-artifact `ProjectSnapshot` packages, and folding
+baseline-set/`BundleFacts` into sections all remain open, per this
+sub-phase's own stated scope.
+
+**Recommended sequencing:** 2B and 6B are
+the highest-value pair, in that order — 2B closes the last identity-provider
+gap 6B's own migration would otherwise trip on, and 6B is what actually
+starts retiring the legacy `AbiSnapshot.functions`/`types`/… read path
+rather than adding a further passenger beside it. The review's explicit
+recommendation is **not** to keep widening `SemanticIR`'s/`FactRegistry`'s
+producer coverage (more backends, more fields) until at least one full
+vertical slice — request → `SemanticIR` → a `FactStatus`-aware detector →
+`RunOutcome` → report, with the legacy read path for that one detector
+family actually removed — exists as a proof of the pattern the remaining
+phases would repeat. Widening producers without first proving a consumer
+cutover increases the number of representations to keep in sync faster than
+it retires any of them, which is precisely the failure mode ADR-063 exists
+to stop.
+
+**A mechanical definition of done for the whole ADR**, accepted as the
+target — evaluated once 6B (or an equivalent) has landed at least one real
+cohort, not before: the pipeline is complete only when (1) every front end builds one
+request type; (2) every real execution resolves one execution context;
+(3) every extractor's output reaches one canonical `SemanticIR` (Phase 6's
+own type — no new type is proposed here; `AbiSnapshot.semantic_ir` remains
+the persisted container); (4) the checker
+reads no backend-specific or legacy `AbiSnapshot` collection
+(`.functions`/`.types`/…) directly, only `SemanticIR` through the read
+index Phase 6B defines;
+(5) every detector consuming an availability-bearing fact explicitly
+branches on its `FactStatus`; (6) stable-entity matching goes through
+`EntityId`, with string identity as a named legacy fallback only;
+(7) public surface has one authoritative query, whatever that query's own
+final design turns out to be after Phase 3's amendment (see below);
+(8) release/artifact-set fan-out calls the same pair operation single
+`compare` does; (9) `RunOutcome -> ExitDecision` is the only path a
+consumer follows to a numeric exit code, never the reverse (exit code back
+to inferred semantics, except inside a documented legacy-report compat
+adapter); (10) the Action and every renderer read decisions instead of
+re-deriving them; (11) current writers emit canonical, typed section DTOs,
+with legacy shapes confined to import adapters; (12) an architecture/AST
+check finds no legacy reader of a migrated representation outside its
+compatibility layer; (13) live, legacy-flat, sectioned, and `ProjectSnapshot`
+inputs describing the same comparison agree on semantic digest, finding
+identity, verdict, assurance, gate, and `RunOutcome`; (14) the checks behind
+(12)/(13) run as **required**, not merely informative, CI gates — worth
+flagging because PR #1011 disabled required-status-check enforcement and
+post-merge verification on this repository, so today's AI-readiness/
+architecture gates are informative only and do not themselves block a
+regression from merging.
+
+**Phase 3 (D5) amendment — accepted:** rather than a further attempt to make
+`compute_public_surface()` read the mergeable evidence graph (three review
+rounds already found that unsafe for the reasons ADR-063's own D5
+"Amendment" note and `docs/contribute/known-gaps.md` record), formally split
+the concept D5 conflated into two: a **`SemanticReferenceIndex`**
+(deterministic, built from `SemanticIR`/snapshot declarations alone,
+authoritative for the public-surface closure walk — what
+`referenced_identifiers_by_node()` already computes today, just not yet
+sourced from `SemanticIR`) and the existing **evidence graph**
+(multi-producer, provenance/confidence-bearing, for explanation and L5
+analysis, never for a decision with exactly one legitimate source). This
+would formally close D5's own literal "traversal over one authoritative
+graph" text with a decision that matches what already shipped, rather than
+leaving that text describing a design three review rounds rejected.
+Recorded here as accepted; ADR-063's own D5 text (this same PR) carries
+the matching amendment note.
+
+**On this plan document's own size and structure:** this document has grown
+past fifteen thousand lines, carrying multi-round PR review history inline
+with each phase's design. The review's suggestion — move each phase's own
+review-round history to `docs/contribute/plans/history/one-semantic-pipeline/
+phase-N.md` and keep this document to "where are we, what blocks the next
+step, what's the next bounded PR" per phase, plus a small machine-readable
+authority ledger (`concepts: {primitive, producers, consumers, authority,
+removal_gate}` per concept, generated into a status table rather than
+hand-copied) — is a reasonable direction for a future documentation-only PR,
+but is not attempted in this update: it is a structural change to how this
+plan is maintained, not a status correction, and risks losing citations
+(commit hashes, PR numbers, specific Codex-round findings) that later
+phases' own text still points back to. Recorded here as a named, deferred
+proposal rather than silently acted on.
 
 ## Phases
 
@@ -5713,6 +6135,167 @@ posture. `python scripts/check_docs_contract.py` and `python scripts/
 check_ai_readiness.py` both re-run clean at their existing baselines
 (0 errors, 2/148 warnings respectively) after the addition.
 
+**Detector migration (fourth slice) — landed, closing this phase.** Every
+site the `KNOWN_UNMIGRATED_READERS` baseline recorded — 104 keys across 20
+modules at the point this slice started — has migrated off the bare legacy
+attribute onto its `Fact[...]` sibling; the baseline is now the literal
+empty set (`frozenset()`), and the scan (`unmigrated_fact_reader_sites`/
+`check_fact_field_readers`) stays exactly as live as before — a genuinely
+new direct read anywhere under `abicheck/` still fails the gate on sight,
+with nothing left to exempt it. This is the exact gap the Status section of
+`docs/contribute/adr/063-one-semantic-pipeline.md` previously recorded
+("No detector has migrated to read the converted fields' `Fact[...]`
+siblings yet") — closed, not deferred.
+
+**The migration is representation-only, per this phase's own Design
+section and Acceptance criteria stated above — it does not change any
+detector's emitted findings.** The mechanism is a single, provable
+invariant `bridge_legacy_and_fact` (this phase's own compatibility bridge,
+landed in the first slice) already establishes for every constructed
+`RecordType`/`Param` instance: the retained legacy field always equals
+`<field>_fact.value` when `<field>_fact.is_present`, and the field's own
+normal resting value (`[]` for `bases`/`virtual_bases`/`vtable`, `None` for
+`vptr_offset_bits`, `False` for `is_va_list`) otherwise — by construction,
+not by convention, since `__post_init__` is the only place either
+representation is ever written after construction. `abicheck/model/fact.py`
+gained one new function, `resolved_fact_value(fact: Fact[T] | None,
+default: T) -> T`, expressing exactly this: `fact.value_or(default)` when
+`fact` is not `None`, else `default` (the `Fact[T] | None` union on the
+parameter — not `Fact[T]` alone — matches the field's own declared type;
+see below for why that union matters). Every migrated call site replaces
+`rec.bases` with `resolved_fact_value(rec.bases_fact, [])` — a pure
+re-spelling of the identical value the legacy field already held, verified
+by the full test suite staying green (mypy 0 errors, ruff clean, the
+complete non-integration/non-slow/non-golden suite unchanged) and by the
+FP-rate/tier-accuracy gates staying at their existing baselines with no
+new corpus case needed. **This is deliberately not the same thing as
+`Fact.value_or(...)`'s own documented "not detector-safe" warning
+(Design section, above) being quietly ignored** — that warning is about a
+detector *inventing* a collapsed default that discards information the raw
+legacy field never had ("`old.vtable_fact.value_or([]) != new.vtable_fact.
+value_or([])` reintroduces... the exact ambiguity"); `resolved_fact_value`
+used at one of these 104 sites reproduces a value that already existed,
+observable at the exact same fidelity, one hop away, on the still-live
+`.status` of the very `Fact[...]` object each call reads from. A future
+caller wanting genuine per-status handling still matches on `.status`
+directly — this phase does not remove that capability, only stops forcing
+every reader to go through the ambiguous legacy name to get an ordinary
+value.
+
+**Why `resolved_fact_value` takes `Fact[T] | None`, not `Fact[T]` — a real
+mypy gap the first attempt at this slice missed.** `RecordType.bases_fact`
+(and its four siblings) are declared `Fact[list[str]] | None`, not
+`Fact[list[str]]` — required by this phase's own direct-construction
+compatibility bridge (Design section: the field's real default is `None`,
+distinct from `Fact.not_collected()`, so `__post_init__` can tell "caller
+passed nothing" apart from "caller explicitly asserted no evidence"). A
+first pass at each migrated call site wrote the natural-looking
+`rec.bases_fact.value if rec.bases_fact.is_present else []` directly —
+`mypy` correctly rejected essentially every one of them
+(`Item "None" of "Fact[list[str]] | None" has no attribute "is_present"`):
+the field is provably never `None` on a fully-constructed instance
+(`__post_init__` always resolves it), but mypy has no cross-instance view
+of that invariant and must assume the declared type. `resolved_fact_value`
+closes this once, centrally, rather than repeating an `assert fact is not
+None` (or an equivalent `... or []` narrowing hack) at every one of the 104
+sites — a real, if narrower, instance of this phase's own governing
+principle (one concept, one representation) applied to the *narrowing*
+step itself, not only to availability.
+
+**Two modules crossed the AI-readiness `file-size` hard cap purely from
+this slice's added local-variable lines, and both were split the same way
+this codebase already splits an oversized module — a fifth slice, not a
+new design.** `diff_types.py` (2018 lines) and `dwarf_snapshot.py` (2041
+lines) each exceeded the unconditional 2000-line limit once every migrated
+site's `resolved_fact_value(...)` assignment line was added; `diff_types.py`
+already had three such sibling splits before this phase
+(`diff_types_abicc_parity.py`/`diff_types_field_facts.py`/
+`diff_types_surface.py`), so this is the same pattern, not a new one.
+`diff_types_vtable.py` takes the self-contained `TYPE_VTABLE_CHANGED`
+evidence-gating cluster (`_vtable_transition_is_evidenced`/
+`_vtable_transition_rests_on_unresolved_evidence`/
+`_layout_evidence_is_unverifiable`/`_owned_virtual_signatures`/
+`_owned_virtual_signatures_for_record`/`_diff_type_vtable`) — every one of
+these six functions was already only ever called from within this same
+cluster or from the one external call `diff_types.py` makes into
+`_diff_type_vtable`, so the split needed only one import back
+(`from .diff_types_vtable import _diff_type_vtable as _diff_type_vtable`),
+mirroring the `as`-aliased re-export convention the three pre-existing
+siblings already use. `dwarf_snapshot_datasources.py` takes
+`show_data_sources` and its three private formatting helpers
+(`_evidence_layer_line`/`_coverage_row_summary`/`_evidence_payload_summary`)
+— a human-readable L0-L5 diagnostic renderer with zero dependency on
+`_DwarfSnapshotBuilder` or anything else in `dwarf_snapshot.py` — with
+`show_data_sources` re-exported (`as`-aliased) from `dwarf_snapshot.py` so
+`cli_datasources.py`/`cli_dump_helpers.py`/`workflows/extraction.py` and
+their tests, all of which import it as `from abicheck.dwarf_snapshot import
+show_data_sources`, are unaffected. Neither split changes any behavior,
+only which module owns the code; both land at 1579 and 1915 lines
+respectively, with headroom under the cap.
+
+**A second, narrower growth surface -- ADR-061's own `architecture/debt.yaml`
+no-growth ledger, not the AI-readiness `file-size` cap above -- needed a
+different fix, not a module split.** Six already-`no_growth`-tracked files
+(`contract_evidence_collect.py`/`dumper_scoping.py`/`export_surface.py`/
+`internal_leak.py`/`surface.py`/`type_reachability.py`) each grew 2-9 lines
+past their frozen adoption baseline purely from the two-line
+`bases = resolved_fact_value(...)` / `virtual_bases = resolved_fact_value
+(...)` local-variable pattern this migration otherwise uses everywhere --
+`architecture/debt.yaml`'s own README states the ledger "should only
+shrink," so raising six baselines to absorb this migration's own overhead
+would be exactly the kind of undocumented exception this ADR's Governing
+Invariant section rejects. Splitting a module was not the fix here either
+(none of the six is anywhere near the 2000-line hard cap the split above
+addresses; `architecture/debt.yaml`'s own per-file ceiling is a stricter,
+independent budget the same file can be tracked under well before that).
+The actual fix: `RecordType` gained two short, import-free convenience
+methods, `resolved_bases()`/`resolved_virtual_bases()` (`model/entities.py`,
+right after `__post_init__`, each a one-line call to the identical
+`resolved_fact_value` primitive) -- a call site with an already-typed
+`RecordType` in hand writes `rec.resolved_bases()` instead of
+`resolved_fact_value(rec.bases_fact, [])`, which needs no new `from .model
+import resolved_fact_value` line at all (the six files above already import
+`RecordType` for their own type annotations) and is short enough to often
+collapse the two-line local-variable pattern back to the original
+single-line call site the pre-migration code used. This is not a second
+representation of the same concept -- both spellings resolve through the
+one `resolved_fact_value` primitive in `model/fact.py`, and the method
+exists purely to avoid an import cost at space-constrained call sites, the
+same reasoning `Fact.value_or()`/`bridge_legacy_and_fact()` already coexist
+under in that same module. The free-function form remains correct and used
+elsewhere (`diff_cpp_patterns.py`'s `_is_empty_record(t: object)` cannot
+call a `RecordType` method at all, since `t` is deliberately typed `object`
+there). All six files land exactly at their recorded adoption baseline
+(1183/1289/1312/1651/1507/1504 lines respectively) with this migration's
+reads included -- confirmed via `python scripts/check_architecture.py
+--base <this-branch's-actual-base-commit>`, which is what isolates a PR's
+own growth from unrelated already-on-`main` debt the same way CI's own
+`ARCHITECTURE_BASE` does (a bare local run with no resolvable
+`origin/main` tracking ref, as in a stale/shallow sandbox checkout, can
+misattribute pre-existing debt to an unrelated PR -- passing `--base`
+explicitly is the fix, not a ledger change).
+
+With the empty baseline, the empty-baseline test
+(`tests/test_fact_field_readers.py::test_baseline_entries_are_real_sites`)
+is vacuously satisfied (there is nothing left to check is "real"), and
+`tests/test_fact_field_readers.py`'s own synthetic-violation tests continue
+to pin the scan's real behavior against a throwaway `abicheck/`-shaped tree,
+independent of the baseline's size. Phase 0 is therefore complete per its
+own stated scope in this document's Goal/Design/Acceptance-criteria
+sections above: `Fact[T]` exists, every one of the five converted fields'
+producers construct it directly, every currently-known reader consults it
+instead of the ambiguous legacy attribute, and both AI-readiness gates
+(`fact-detector-misuse`/`fact-field-readers`) are live with nothing left in
+either baseline for a *known* violation to hide behind. What remains
+explicitly outside this phase's scope, unchanged: a detector *branching* on
+`FactStatus` to actually change which findings it emits (Phase 5's job);
+converting any field beyond the five this phase named (also Phase 5,
+registry-driven); and removing the four retained legacy attributes
+themselves, which Phase 10's own checklist already schedules for once the
+widened reader check reports zero remaining readers outside the
+compatibility bridge's own `__post_init__` and serialization — true as of
+this slice, but Phase 10 is where that removal actually happens, not here.
+
 ---
 
 ### Phase 1 — finish the `dump`/`scan` typed-API convergence (closes AGENTS.md "PR C")
@@ -5837,6 +6420,216 @@ plan's own ordering rule) unblocks as a follow-on, not part of this phase,
 and — per the same scoping — only once castxml parity closes too, not on
 the strength of clang-only convergence alone, since `--build-query`/
 `--build-compile-db` are reachable under either backend.
+
+**Landed (first slice), not the whole phase — read this before assuming
+the Design section above is fully implemented.** The environmental
+precondition the Design section's option (a)/(b) split turned on no
+longer holds the way it was written: castxml is genuinely available and
+working in the environment this slice was implemented in (a
+solver-resolved conda-forge install — clang 20.1.8 + libclang-cpp20.1 +
+castxml 0.7.0, wrapped at `/usr/local/bin/castxml` to carry its
+`LD_LIBRARY_PATH` — not the hand-assembled 0.7.0 build the Design
+section's own investigation found segfaulting inside
+`clang::ParseAST`; that specific segfault was an artifact of a bad manual
+install, not of castxml 0.7.0 itself). `test_dump_cli_typed_api_parity.py
+-m integration` is 16/16 green — but that file is itself clang-only, not
+evidence of castxml coverage: every one of its subprocess invocations
+hard-codes `--ast-frontend clang` and it is not parametrized by backend
+(`-k castxml` against this file alone selects zero tests). What castxml's
+newfound availability separately confirmed, run against the *wider*
+integration suite instead (`pytest tests/ -m "integration and not slow" -k
+castxml`), is that `abicheck dump --ast-frontend castxml` genuinely works
+end to end in this environment today (38/38 green, only the two
+pre-existing, unrelated `xfail`s) — real, useful confirmation, but not the
+same claim this section's acceptance criteria makes about the parity
+corpus specifically. That field-level parity was, however, already closed
+before this slice started (`_CONTRACT_KNOWN_DIVERGENT_FIELDS`/
+`_SCAN_KNOWN_DIVERGENT_SHAPES` were both already empty — this slice found
+no shape to flip from `xfail` to passing) — so what this slice actually
+landed is narrower: only `render_dump_dry_run()`'s own migration named
+above -- the function itself is not deleted (this section's Acceptance
+criteria's "is deleted" language describes the whole phase's eventual
+end state, not this slice), only its independent primitive-threading
+implementation is. `render_dump_dry_run` now takes the real `ResolvedDumpRequest`
+`resolve_dump_request_for_cli` already builds and reads
+`so_path`/`headers`/`sources`/`build_info`/`depth`/`collect_mode`/
+`header_backend`/`dump_manifest` off it, rather than being handed fifteen
+independently-threaded primitives `dump_cmd` re-derived by hand — closing
+this phase's own "Files" list item for that function. `resolve_dump_request`
+itself never invokes castxml/clang (see its own docstring), so this
+rendering path is backend-agnostic by construction, not merely by test
+coverage; verified via the clang-scoped parity corpus above, the full fast
+unit suite, and `mypy`/`ruff` clean.
+
+**The real routing step — `perform_elf_dump`/`handle_non_elf_dump` calling
+`execute_dump_request` instead of `dumper.dump()` directly — was
+investigated in this slice and NOT landed, for a reason that turned out to
+be independent of castxml availability.** Read `docs/contribute/
+known-gaps.md`'s "PR C" entry (its own newest addendum, appended by this
+slice) for the full account. In short: two of the concerns the Design
+section implicitly bundled under "post-processing passes driven by
+CLI-only inputs" turned out, on a fresh read of the real code, not to be
+blockers at all (the ADR-039 collector's `attach_build_context_for_
+parsed_headers` already runs a second time inside `_resolve_side_
+snapshot_impl`, and re-running it a third time from `perform_elf_dump`'s
+own existing hook is a safe, idempotent no-op, not a double-count; the
+`scope_header_dirs` parameter `perform_elf_dump`'s own `dump()` call
+passes is provably redundant with what `resolve_dump_request`'s own
+`public_header_dirs` already carries). A third, genuinely structural
+blocker was found instead: `dump_cmd`'s legacy `-p`/`--compile-db`
+auto-match (`cli_helpers_compare._resolve_build_context_flags` —
+`build_context_for_header`/`build_context_union_fallback`, a completely
+different code path from the P0.3 L3→L2 fold) runs strictly after
+`resolve_dump_request_for_cli` already built the resolved object, and its
+derived flags are the *sole* source of compile-database-derived context
+for any header the L3→L2 fold itself does not independently match — a
+still-live, still-documented fallback (`dump --build-query`/
+`--build-compile-db`/`-p`/`--compile-db` are explicitly not yet removed).
+`resolve_dump_request`/`_resolve_side_snapshot_impl` has no call to that
+legacy matcher anywhere, so routing the primary parse through
+`execute_dump_request()` as it stands today would silently drop that
+fallback's flags for exactly the headers the fold doesn't match — a real
+regression, not a refactor, for a project still relying on the legacy
+match. Closing this needs the legacy match's computation moved earlier
+(before `resolve_dump_request_for_cli` runs) and threaded into the
+`DumpRequest`/`CompileContext` the resolved object carries, which is a
+genuine, separate design question (which field absorbs a *derived*, not
+user-typed, value, and how that squares with `DumpRequest`'s documented
+"records the run, not a second opinion about it" contract) — not a
+same-session drive-by fix, and independent of which AST backend is used.
+Not attempted here; recorded in `known-gaps.md` at the precision needed
+for a future slice to start from the actual mechanism rather than
+re-diagnosing it. This phase's Acceptance criteria section above is
+therefore still not met for the routing half — only for the dry-run
+half named in its own last two sentences, which was already correctly
+scoped to "both backends" (dry-run resolution never invokes either
+compiler, so nothing about it is backend-specific), unlike the routing
+half's own now-corrected clang/castxml framing.
+
+**Update (2026-08-29): the design question named above is now answered and
+landed, but the routing itself is still open.** `execute_dump_request`
+gained an additive `legacy_compile_db_tokens: tuple[str, ...] = ()`
+parameter, threaded through `_resolve_side_snapshot_impl` into
+`_seeded_includes_and_compile_context` — the same "optional pass-through
+for `dump`'s still-live CLI legacy flags" shape `build_config`/
+`build_query`/`build_compile_db` already use on these same three
+functions, rather than a new `DumpRequest`/`CompileContext` field. That
+answers the design question the paragraph above left open: the legacy
+match's *derived* value stays out of `DumpRequest`/`CompileContext`
+entirely (preserving "records the run, not a second opinion about it"),
+and rides as a separate, explicitly-legacy parameter instead — a caller
+(today: nothing yet; `dump_cmd` itself still executes through
+`perform_elf_dump`, not `execute_dump_request`) that already computed the
+legacy match's flags can now thread them through and have them reach the
+real parse, with the P0.3 fold's own result still winning outright
+whenever it applies (verified by a dedicated precedence test — see
+`known-gaps.md`'s dated addendum to the "PR C" entry for the full
+mechanism and the real-`g++`-build regression test,
+`tests/test_legacy_compile_db_typed_threading.py`). **`perform_elf_dump`
+still does not call `execute_dump_request()`** — that remains exactly the
+routing restructuring described above (its own try/except/
+`ResolvedArtifactPlan` cleanup handling needs to delegate rather than
+call `dumper.dump()` directly, keeping the second try block's hooks
+applied to the returned `DumpResult`), left as its own slice for the same
+reason stated there: this exact code area's review history (18+ numbered
+findings on the adjacent fold alone) argues for landing one
+independently-verifiable piece at a time rather than combining the
+threading and the routing in one change. This phase's Acceptance criteria
+section is therefore still not met for the routing half.
+
+**Update (2026-08-29, same day): the routing was attempted as its own slice
+and NOT landed — and the "purely the control-flow restructuring itself, not
+a new correctness question" framing above is retracted as wrong.** A
+dedicated session read both execution paths and the whole typed pipeline end
+to end and built the parameter-by-parameter parity map, then found two
+*structural* blockers neither this section nor the known-gaps entry had
+anticipated. Both are recorded in full, with the exact mechanisms and the
+list of previously-suspected blockers that were ruled out with evidence, in
+`docs/contribute/known-gaps.md`'s "ADR-063 Phase 1" entry (its "Fourth
+correction (2026-08-29)" addendum). In short:
+
+- **A (ELF only)** — the L2 seed's inferred-build-dir cleanup has two
+  mutually exclusive correct drain points. `perform_elf_dump` must drain
+  *after* its header-graph and clang-layout second passes (they re-parse
+  headers under the seeded dirs); `_resolve_side_snapshot_impl` must drain
+  *before* `embed_side_build_source` (whose own inferred query otherwise
+  self-contends on the same `flock` for up to 600s). They do not conflict
+  today only because `perform_elf_dump` runs no embed inside its plan;
+  routing makes the conflict live. This is exactly `DumpResult`'s own
+  documented "Lifetime caveat", and its fix is the pair-aware/lifetime
+  redesign PR 3A already scopes as separate work.
+- **B (both paths)** — `execute_dump_request` embeds L3-L5, applies
+  dependency scoping and enforces the depth floor *inside* resolution, while
+  the `dump` CLI does all three at write time in
+  `cli_buildsource._write_snapshot_output`, after provenance stamping.
+  Routing reorders all three, which changes what the post-processing hooks
+  see, enforces the depth floor before the embed that actually fills L3-L5
+  for a `dump`, and swaps a Click error for a `ValidationError`.
+
+`handle_non_elf_dump` is free of A (no second pass; it already drains where
+the shared primitive does) but is blocked by B alone, so converting the
+smaller PE/Mach-O path first does not isolate a safely-landable slice
+either. This phase's Acceptance criteria section remains unmet for the
+routing half; closing it now has two named prerequisites (the seed-cleanup
+ownership redesign, and a decision on where `dump`'s embed/enforce/scope
+stanza belongs) rather than being a mechanical restructuring.
+
+**Update (landed, ELF): `dump`'s real ELF run now routes through
+`execute_dump_request`.** Both blockers A and B above were closed —
+`frontends/cli/commands/dump.py`'s ELF branch now builds a second,
+execution-scoped `ResolvedDumpRequest` (re-pointed at the normalized
+`so_path`, `requested_depth` nulled so the shared pipeline's own depth gate
+never fires ahead of `_write_snapshot_output`'s existing one) and calls
+`frontends.cli.dump_execute.execute_dump_cli_run`, which runs
+`service_dump_pipeline.execute_dump_request` — `perform_elf_dump` is
+retired for this call site (kept defined for its own direct unit tests).
+Landed as commit `0b69fc3` ("refactor(cli): migrate dump's real ELF run
+onto execute_dump_request (PR C)") plus three Codex-review follow-up
+commits (collect-mode/folded-compiler forwarding, keeping the new module
+out of the CLI-registration import cycle, and treating an explicit
+`dump --config`/`--build-query` as trusted operator input). See
+`docs/contribute/known-gaps.md`'s "PR C" entry for the exact mechanism
+each blocker's fix uses.
+
+**Update (2026-09-01, landed): the PE/Mach-O half is closed the identical
+way, completing this phase's routing half for both binary formats.** The
+same structural finding that blocked a from-scratch PE/Mach-O migration
+above no longer applies once the ELF slice had already resolved blockers A
+and B for the shared pipeline itself — `execute_dump_request`/
+`_resolve_side_snapshot_impl` were already format-generic
+(`fmt`-parameterized: `is_elf=True if fmt == "elf" else None`,
+`pdb_path=side.pdb` unconditional, `attach_build_context_for_parsed_headers`/
+`embed_side_build_source` both format-unconditional), so no second design
+investigation was needed — only the *caller* was still routing PE/Mach-O
+around it. `frontends/cli/commands/dump.py`'s PE/Mach-O branch now builds
+the identical execution-scoped `ResolvedDumpRequest` and calls the same
+`execute_dump_cli_run`; `handle_non_elf_dump` is retired for this call
+site (kept defined, unchanged, for its own direct unit tests — the same
+discipline `perform_elf_dump` already follows). The shared real-run tail
+(execute, stamp provenance, write the snapshot) both formats now need was
+factored into a new `frontends/cli/dump_execute.
+execute_and_write_dump_cli_run` so `commands/dump.py` — already at the
+architecture gate's 800-line production cap — did not grow net lines when
+the PE/Mach-O branch stopped being a single delegating call to
+`handle_non_elf_dump`. Verified via the existing mock-based CLI/unit test
+suite (four CLI-dispatch tests that previously monkeypatched
+`handle_non_elf_dump` were rewritten to patch
+`abicheck.service_dump_native._dump_pe`/`_dump_macho` instead, the same
+depth below the format dispatch the pre-existing ELF-side precedent,
+`test_compile_context_parity.py::test_dump_reads_compile_block_from_config`,
+already patches `abicheck.dumper.dump` at) — **not** a real PE/Mach-O
+toolchain end-to-end run: no PE/Mach-O toolchain was available in this
+environment to do a byte-for-bit parity check the way the ELF migration's
+own `tests/test_dump_cli_typed_api_parity.py` corpus does for ELF. This
+phase's Acceptance criteria section's routing half is therefore now met
+for both binary formats that execute through this pipeline at all. The
+one remaining, permanent exception is unchanged from this phase's own
+Design section: `cli_buildsource.dump_source_only()` (the binary-less
+`dump --sources`/`--build-info` path) is explicitly out of scope for this
+phase and was not touched — it has no `execute_dump_request()` call to
+route through at all (`ResolvedDumpRequest`'s own docstring: a
+binary-less request has no `InputSpec.path` for `execute_dump_request` to
+resolve), and remains its own separate pipeline.
 
 ---
 
@@ -6280,9 +7073,4065 @@ exists in the repository after this phase, in `model/identity.py` —
 shows no regression (a net-new suppressed finding from the identity
 change is a Phase 2 bug, not acceptable drift).
 
+**Landed (first slice, 2026-08-29), not the whole phase — read this before
+assuming the Design section above is fully implemented.**
+`abicheck/model/identity.py` is real: the five `ScopeSegment` types
+(`Namespace`, `Record`, `InlineNamespace`, `Anonymous`, `LocalToFunction`)
+with exactly the identity-vs-payload field split the Design section states
+(`Record.access` excluded from equality/hash via `field(compare=False)`,
+every other segment's fields all participate), the corrected `EntityId`
+shape (`scope`, `kind`, `leaf_name`, `extra`), and `entity_id_for_type`/
+`_enum`/`_typedef`/`_constant`/`_variable`/`_function` constructors
+implementing the function/variable discriminator rules (mangled name first
+when the caller has already established it is genuine, normalized
+param-type/cv-qualifier fallback otherwise — both branches tagged
+(`"mangled"`/`"sig"`) so they occupy disjoint regions of `extra`'s value
+space and can never collide with each other by coincidence).
+`EntityKind`/`ObservationKind` are relocated from `storage/entity_ids.py`
+into this module and re-exported from there under their original names, so
+`storage.entity_ids.EntityKind is model.identity.EntityKind` — that one
+acceptance criterion is closed now, ahead of the rest of the phase.
+Primitive-level property tests in `tests/test_model_identity.py` (not
+`tests/test_entity_identity.py` as this phase's own "Tests" section named —
+that file was already taken, by the unrelated ADR-048/G31
+`buildsource.entity_identity` L5 primitive; corrected here rather than
+silently reusing the wrong name) pin: `Record.access` never affects
+equality/hash; `Anonymous`/`InlineNamespace`/`LocalToFunction` are identity
+on every field; a record nested in a record never collides with the same
+bare names nested in a namespace (the exact collision a `qualified_name`-
+only identity cannot distinguish, since both render to `"A::B"`); sibling
+declarations of the same kind in one scope never collide (enums, typedefs,
+constants, and the two function-overload shapes named in the Tests
+section — `f(int)` vs. `f(double)`, `void f()` vs. `void f() const`);
+`extern "C"`-shaped input (a genuine mangled name present) ignores param
+types, matching `finding_identity.resolve_function_identity`'s own
+documented rule; and the relocation itself, including a hashability check
+per segment and a real AST-based (not substring) leaf-module-import check
+per ADR-063 D10. Full fast unit suite green; storage's own existing test
+suite (1421 tests) re-run clean against the relocated enums; `mypy
+abicheck/` and `ruff` both clean.
+
+**What this slice deliberately does not attempt, and why** — both of Phase
+2's own named open design questions are still open, on purpose:
+
+1. *No `ScopePath` is derived from a real parser yet.* Every
+   `entity_id_for_*` constructor takes an already-built `ScopePath` as
+   input; none of them reach into `dumper_clang.py`'s/`dumper_castxml.py`'s
+   `entry.scope` (still a bare `list[str]`, exactly as insufficient as the
+   Design section found it). Widening that parser state is real,
+   separately-reviewable work of its own — this slice does not touch either
+   dumper module.
+2. *The carrier-field question (option (a) vs. (b)) is still unresolved,*
+   because nothing yet needs it resolved: with no real `ScopePath` producer
+   wired up, there is nothing for a post-parse consumer
+   (`diff_filtering.py`'s `_find_opaque_types` and siblings,
+   `type_reachability.py`) to migrate onto yet, so this slice does not touch
+   either of them, and their existing string-based ambiguity-tracking
+   machinery is untouched and still the one working implementation. Per this
+   phase's own acceptance criteria, deleting them now — before either option
+   is chosen and actually wired — would be strictly worse, not a shortcut.
+3. *`finding_identity.py` does not delegate to this module yet.* The
+   "direction of reuse" note above is correct about where the algorithm
+   should end up, but `finding_identity.is_real_mangled_name`/
+   `normalize_mangled_name` (the ~450-line, independently multi-round-
+   reviewed Itanium-mangling-validation machinery that decides whether a
+   caller-supplied `mangled_name` is genuine) has not moved. This slice's
+   `entity_id_for_function`/`entity_id_for_variable` instead take that
+   determination as an already-resolved `mangled_name: str | None` argument
+   from the caller, documented in the module's own docstring as a
+   deliberate scope boundary rather than an oversight. Migrating that
+   validation logic, and turning `resolve_function_identity`/
+   `resolve_variable_identity` into thin wrappers, is real follow-on work
+   this slice intentionally leaves for its own dedicated, independently
+   reviewable pass — not attempted here to keep this slice small enough to
+   review on its own, matching how every other phase's own first slice in
+   this plan has been landed one piece at a time.
+4. *No storage v2 wire-schema bridge (`to_dto`/`from_dto`) exists yet.*
+   `storage.entity_ids.EntityId`/`OccurrenceId` are completely unchanged
+   beyond the two enum imports — `model.identity.EntityId` and
+   `storage.entity_ids.EntityId` are two independent types today, which the
+   Design section's own note names as the accepted, temporary state until a
+   later slice does the `ScopePath`-preserving v2 encoding it specifies.
+
+Next slice, in order: (a) widen `entry.scope` in both dumper modules to a
+typed segment list (this is the fork point for the carrier-field question —
+see the Design section's own framing of why it can't be answered
+independently of that work), then (b) migrate `diff_filtering.py`/
+`type_reachability.py` once a real producer exists, then (c) the
+`finding_identity.py` algorithm migration and the storage v2 wire bridge,
+each as their own reviewable slice.
+
+**Correction (2026-08-29, same day, Codex review on PR #941): two real
+discriminator gaps in `entity_id_for_function` fixed, both traced to the
+same root cause -- the constructor accepted a strict subset of the
+dimensions `finding_identity.resolve_function_identity` already treats as
+load-bearing, so a caller reproducing that resolver's own contract through
+this constructor could not.** (1) An `extern "C"` producer follows
+*mangled_name*'s own documented contract and passes `None` for it (its raw
+export spelling is not a genuine mangling) -- with no separate linkage
+signal, that fell through to the signature-based fallback branch, so a
+changed parameter list on a genuinely-non-overloadable C-linkage function
+produced two ids instead of one modification, defeating the name-based
+extern-C fallback the rest of the codebase relies on. Fixed by adding an
+explicit `is_extern_c: bool = False` parameter that takes a third,
+signature-free `("extern_c",)` branch, mirroring `resolve_function_
+identity`'s own `func.is_extern_c` gate. (2) The signature fallback carried
+only `param_types`/`cv_qualifiers`, missing the two dimensions
+`resolve_function_identity` already folds in (`ref_qualifier`,
+`is_variadic`) -- `C::f() &` vs. `C::f() &&`, and `void f(int)` vs.
+`void f(int, ...)`, both collided. Fixed by adding `ref_qualifier: str = ""`
+and `is_variadic: bool | None = None` parameters, folded into the tagged
+`("sig", ...)` tuple; `is_variadic` stays a tri-state (not defaulting to
+`False`) for the same reason `resolve_function_identity` keeps it one --
+"doesn't know" must not silently collapse onto "confirmed non-variadic".
+Both fixes are additive keyword-only parameters with backward-compatible
+defaults; no existing call site changes behavior (there are none outside
+this module's own tests yet). Six new tests in `tests/test_model_identity.py`
+pin each new dimension, the three-way tag disjointness, the tri-state
+`is_variadic`, and that a genuine `mangled_name` still wins outright and
+ignores every other dimension.
+
+**Correction (2026-08-29, same day, CodeRabbit review on PR #941): the
+Design section above states `LocalToFunction(owner)` as a single-field
+segment, but that is an under-specification the same review caught for
+real -- fixed by adding `block_ordinal`, a required second field.**
+`owner` alone disambiguates two same-named locals declared in *different*
+functions, but not two same-named locals in *sibling compound blocks of
+the same function* (`void f() { { struct A {}; } { struct A {}; } }` --
+two distinct declarations, identical `owner`, identical leaf name, so both
+would collapse onto one `EntityId` under the Design section's original
+single-field shape). `block_ordinal` closes this exactly the way
+`Anonymous.ordinal` already closes the structurally identical
+sibling-anonymous-scope case: a deterministic per-function sequence
+number assigned at parse time, stable within one parse only -- the
+identical accepted, documented limitation `Anonymous` already states (an
+inserted or removed earlier local block shifts every later sibling's
+ordinal and therefore its whole `EntityId`, even though nothing about
+those later declarations changed). No default value, matching
+`Anonymous.ordinal`, since nothing constructs a `LocalToFunction` outside
+this module's own tests yet -- a caller must supply a real value rather
+than silently under-specifying identity via an unwired default. The code
+docstring's original "Both fields are identity" language was already
+correct in intent (mirroring `Anonymous`'s own phrasing) but described a
+struct that, before this correction, had only one field -- a real
+inconsistency between the stated contract and the actual shape, not just
+prose.
+
+**Correction (2026-08-29, same day, second Codex review round on PR #941,
+commit de0f23e): three more real gaps found and fixed, on top of the two
+already closed above.** (1) `block_ordinal`'s own fix (just above) was
+itself incomplete: `LocalToFunction.owner` stayed a bare `str`, which
+still collides two *overloads* that each declare a same-named local in
+their corresponding block (`f(int) { struct A {}; }` vs. `f(double) {
+struct A {}; }` -- identical `owner="f"` string, identical leaf name).
+Fixed by changing `owner`'s type to `EntityId` -- the owning function's
+*own*, already-overload-disambiguated identity -- rather than widening it
+to yet another bespoke discriminator field; `EntityId` is frozen/hashable,
+so the resulting recursive structure (an `EntityId` whose `scope` may
+contain a `LocalToFunction` whose own `owner` is another `EntityId`) is
+free, not a special case. (2) The `is_extern_c` branch added earlier
+folded the caller-supplied `scope` into the returned `EntityId` unchanged,
+which reintroduces exactly the evidence-tier fragmentation problem
+`resolve_symbol_identity` deliberately avoids for this case: a header/
+DWARF-derived observation of a namespaced `extern "C"` function may supply
+a real `ScopePath`, while an export-table-only snapshot of the identical
+binary symbol knows only the bare exported name (extern "C" linkage means
+the symbol *is* that bare name at the ABI level -- no namespace is even
+recoverable from an export table alone). Fixed by forcing `scope=()` for
+the `is_extern_c` branch specifically, regardless of what `scope` argument
+the caller passed; the `mangled`/`sig` branches are unaffected -- a real
+mangled name already fully and deterministically encodes scope (no
+evidence-tier divergence possible), and a DWARF-only, mangling-free
+function has no comparable across-tier availability problem to guard
+against. (3) The `sig` fallback's `param_types` were joined into `extra`
+as raw, uncanonicalized strings, so CastXML's `"char const*"` and Clang's
+`"char const *"` -- an otherwise-identical parameter type -- would
+fragment identity across the two header-AST backends. Fixed by running
+each `param_types` entry through `name_classification.
+canonicalize_type_name` before joining, mirroring
+`resolve_function_identity`'s own canonicalization of `func.params` for
+the identical reason; `name_classification` is itself a dependency-free
+leaf module already imported by other `model/` modules
+(`model/graph_identity.py`, `model/stdlib_surface.py`), so this does not
+violate this module's own leaf-module contract (ADR-063 D10) -- it is not
+`checker_types`/`diff_*`/`checker`/`compare`/`finding_identity`. Nine new
+tests in `tests/test_model_identity.py` pin all three fixes, including the
+overload-disambiguated-owner case, the export-only-vs-namespaced
+scope-independence case (and that it does not erase `leaf_name`'s own
+discriminating power), that the `sig` branch keeps scope as given, and
+the cross-backend canonicalization. (This section originally also claimed
+the `mangled` branch keeps scope as given, alongside `sig` -- see the next
+correction below for why that claim was itself wrong and has been fixed
+here rather than left standing.)
+
+**Correction (2026-08-29, same day, third Codex review round on PR #941,
+commit e5cbdf2): the previous correction's own claim that the `mangled`
+branch "keeps scope as given... redundant but harmless" was wrong, and
+the identical evidence-tier-fragmentation bug the `is_extern_c` branch
+was fixed for above turned out to reach two more places.** (1)
+`entity_id_for_function`'s *mangled* branch folded the caller-supplied
+`scope` into the returned `EntityId` unchanged. That is not harmless: a
+header/DWARF-derived observation of a mangled function may supply a real
+`ScopePath`, while an export-table-only snapshot of the identical binary
+symbol knows only the bare mangled name -- exactly the same
+evidence-tier-availability mismatch the `is_extern_c` fix already closed,
+just for the mangled case instead of the extern-"C" case.
+`resolve_symbol_identity`'s own real primary id for a genuine mangling is
+`f"mangled:{real_mangled}"` alone, with no scope folded in at all --
+confirming the mangled branch should have matched the `is_extern_c`
+branch's `scope=()` treatment from the start. Fixed by forcing `scope=()`
+for the mangled branch too; only the `sig` fallback -- which has no
+authoritative, scope-independent name to fall back on -- keeps scope as
+given. (2) `entity_id_for_variable` had no `is_extern_c` parameter at all,
+so a namespaced `extern "C"` variable (caller passes `mangled_name=None`
+per that parameter's own contract) had no way to reach a scope-independent
+identity the way the equivalent function case now does, and its own
+*mangled* branch had the identical scope-folding bug as (1). Fixed by
+adding the same `is_extern_c` parameter `entity_id_for_function` has, and
+forcing `scope=()` for both its mangled and its `is_extern_c` branches.
+Six new tests across both constructors pin all of this: mangled-branch
+scope-independence for both functions and variables, the `sig` branch
+still keeping scope as given, the new variable `is_extern_c` path and its
+own tag-disjointness from the pre-existing mangling-free degenerate case,
+and mangled-name-wins-over-`is_extern_c` precedence for variables
+(mirroring the function constructor's own precedence, already tested).
+
+**Correction (2026-08-29, same day, fourth Codex review round on PR #941,
+commit f22ecf7): a fourth, *confirmed* (not merely hypothetical) gap in
+the mangled branch, found by reading the real producer code.** The
+previous correction made the mangled branch's `EntityId.scope` always
+`()`, but left `leaf_name` folded in unchanged. Codex's finding named a
+concrete, real code path proving this still fragments identity:
+`dumper_elf_fallback.py`'s ELF-only (export-table-only) path constructs
+`Function(name=sym, mangled=sym, ...)` and `Variable(name=sym,
+mangled=sym, ...)` -- the raw exported symbol reused for *both* fields,
+confirmed by reading that module directly rather than assumed. A header/
+DWARF observation of the identical symbol supplies the real demangled
+short name for `name` (e.g. `"f"`), while the export-only observation's
+`name` is the raw mangled spelling itself (e.g. `"_Z1fv"`). Since
+`leaf_name` was still part of the mangled branch's `EntityId`, these two
+observations of the *same* symbol -- agreeing on the mangled evidence --
+would not merge. Fixed by ignoring the caller-supplied `leaf_name`
+entirely in the mangled branch (both constructors), using `""` instead:
+the mangled spelling in `extra` already disambiguates every declaration
+losslessly, so nothing is lost. Four new tests (two per constructor) pin
+that a demangled-short-name observation and a raw-symbol-reused-as-name
+observation of the identical mangled symbol now produce one `EntityId`.
+
+**Correction (2026-08-29, same day, fifth Codex review round on PR #941,
+commit 4ad03da): two real gaps in the `sig` fallback's own signature
+normalization, one requiring a genuinely new, carefully-scoped
+primitive rather than reuse of an existing one.** (1) `param_types` were
+canonicalized only for cross-producer *spelling* (via
+`canonicalize_type_name`), not for the C++-standard-mandated fact that a
+top-level BY-VALUE cv-qualifier is dropped from a function's own type for
+linkage/mangling purposes -- `void f(int)` and `void f(const int)` name
+the identical function, but `"int"` and `"const int"` canonicalize to
+different strings and collided as two overloads. **The naive fix --
+reusing this codebase's existing `_strip_cv_qualifiers`/
+`func_signature_cv_only_differ` (the primitive an initial attempt reached
+for, since Codex's own finding named it) -- was investigated and found to
+be wrong, not merely reused:** that helper is deliberately permissive at
+the true top level, stripping a *pointee* cv-qualifier too (`"const char
+*"` -> `"char *"`), because its actual job is "is this an already-
+positionally-matched declaration's param change worth reporting as ABI-
+breaking" (`diff_symbols._params_differ`'s question) -- a *different*
+question from this primitive's, "are these the same overload for identity
+purposes." A pointee cv-qualifier on a pointer/reference parameter is a
+genuine, standard-mandated overload discriminator (`void f(char*)` and
+`void f(const char*)` are two simultaneously-declarable, independently-
+mangled overloads), so reusing the permissive helper verbatim would have
+silently merged two distinct functions into one identity -- reintroducing
+exactly the sibling-overload-collision class this whole primitive exists
+to prevent, while fixing the narrower problem Codex actually named. Fixed
+correctly instead: a new, narrower public primitive,
+`name_classification.canonicalize_function_signature_type`, strips a cv
+token only when the canonicalized type carries no top-level pointer/
+reference sigil at all (checked via the same `_has_top_level_ptr_or_ref`
+helper `cv_qualifiers_only_differ` already uses) -- the one case where
+every cv token found is unambiguously by-value, never pointee, cv. (2)
+`cv_qualifiers: tuple[str, ...]` was itself the wrong representation:
+unlike `resolve_function_identity`'s own `func.is_const`/
+`func.is_volatile` booleans, a caller-supplied token tuple invites order-
+dependence for one member-cv qualification spelled two ways (`("const",
+"volatile")` vs. `("volatile", "const")` -- caught named literally as
+`f() const volatile` vs. `f() volatile const`). Fixed by replacing the
+parameter with `is_const: bool = False, is_volatile: bool = False`,
+matching `resolve_function_identity`'s own representation exactly and
+eliminating the ordering question by construction rather than by
+normalizing a tuple after the fact. Six new tests pin both fixes: by-value
+top-level cv non-distinction, pointee cv's continued distinguishing power,
+independent const/volatile discrimination, and that the two booleans'
+call-site order cannot affect the resulting id.
+
+**Correction (2026-08-29, same day): the fifth correction's own new
+primitive landed in the wrong module and had to be relocated before
+push.** `name_classification.canonicalize_function_signature_type` was
+first added directly to `abicheck/name_classification.py` -- but that
+file is a frozen, no-growth legacy module under ADR-061's debt ledger
+(`architecture/debt.yaml`, baseline 1258 lines), and CI's
+`debt-no-growth` architecture check (`scripts/check_architecture.py`)
+correctly failed the push for exceeding it. Relocated the whole primitive
+into `abicheck/model/identity.py` itself as a module-private
+`_canonicalize_function_signature_param_type`, along with a
+self-contained, deliberately-duplicated (not imported) reimplementation
+of the top-level-pointer/reference-sigil detection algorithm
+`name_classification._has_top_level_ptr_or_ref` already applies for a
+different purpose -- duplication here is the correct outcome of the
+no-growth constraint, not an oversight: the alternative (importing a
+private helper from the frozen module) would be worse, and the algorithm
+is small, stable, and independently tested in its new location. This is
+exactly the kind of tension a genuinely completed ADR-061 migration of
+`name_classification.py` would resolve (see that file's own debt-ledger
+entry, "target: see ADR-061 ownership map") -- not attempted here, since
+migrating the whole file is far outside this slice's scope. `git diff
+--stat`/`wc -l` confirm `name_classification.py` is back to exactly 1258
+lines (its original baseline) and `scripts/check_architecture.py`
+reports 0 errors.
+
+**Correction (2026-08-29, same day, sixth Codex review round on PR #941,
+commit 1b3575d): two more real gaps found, both requiring a genuine
+extension rather than reuse.** (1) The by-value-cv fix above left one
+case unhandled: a function PARAMETER's array type always decays to a
+pointer (``int []`` -> ``int *``), so a cv-qualifier on the array's
+element type is pointee-level, exactly like an explicit pointer -- ``void
+f(int[])`` and ``void f(const int[])`` are two distinct, independently-
+mangled overloads, not one. Neither spelling contains a ``*``/``&``
+sigil, so `_has_top_level_ptr_or_ref` (module-private, in
+`model/identity.py`) wrongly treated both as by-value and stripped the
+``const``. Fixed by also treating a top-level ``[`` as pointer-shaped for
+this determination -- the fix landed in this correction's own new
+`model/identity.py` primitive precisely because it was already the
+no-growth-safe location the fifth correction relocated to; there was no
+second relocation needed. (2) `ScopePath` names only the *containing*
+scope, never the leaf declaration (this module's own stated design), so
+two anonymous sibling records/enums both passing `leaf_name=""` collided
+onto one identical `EntityId` regardless of which is meant --
+`Anonymous.ordinal` (a `ScopePath` segment) disambiguates a *descendant's*
+containing scope, not the anonymous declaration's own identity, so it
+does not help here. Fixed by adding an opt-in `anonymous_ordinal: int |
+None = None` keyword to `entity_id_for_type`/`entity_id_for_enum` (the
+two kinds C++ actually allows to be anonymous), folded into `extra` as
+`("anonymous", str(ordinal))` only when `leaf_name` is empty -- mirroring
+`Anonymous.ordinal`'s own deterministic-per-parent-sequence-number
+semantics and identical within-one-parse-only accepted limitation.
+Omitting it (no wired producer yet, same scope boundary this module's own
+docstring already states for `LocalToFunction`/`Anonymous` before their
+producers existed) keeps the pre-existing degenerate-collision behavior,
+not a silent, unrequested change. Six new tests pin both fixes.
+
+**Correction (2026-08-29, same day, seventh Codex review round on PR #941,
+commit b767576): two more real gaps in the by-value/array-decay logic,
+plus a new hard architectural gate the fix itself then had to satisfy.**
+(1) The pointer branch skipped *all* cv processing as soon as it saw any
+top-level `*`/`&`/`[`, so a cv-qualifier trailing the parameter's own
+outermost pointer sigil (`int * const` -- the pointer VALUE itself is
+const, not what it points to) survived unstripped, even though the
+standard drops it exactly like any other top-level parameter qualifier:
+`void f(int *)` and `void f(int * const)` name the same function. Fixed
+by splitting the string at the LAST top-level `*`/`&`: everything up to
+and including it is kept verbatim (an intermediate pointer level's own
+qualifier, e.g. `int * const *`'s middle `const`, is genuinely
+distinguishing and must survive), only the suffix is stripped. (2) The
+earlier `[`-is-pointer-shaped fix stopped `int []`/`const int []` from
+colliding, but never performed the actual array-to-pointer decay, so
+`int []`/`int [3]`/`int [4]`/`int *` -- all one identical adjusted
+parameter type -- still canonicalized to four different strings. Fixed
+with `_decay_top_level_array`, deliberately narrow: multi-dimensional
+arrays (`T[][N]`) and parenthesized declarators (`int (*)[3]`, "pointer to
+array", where the trailing `[3]` is the POINTEE's bound, not the
+parameter's own shape) are left entirely unchanged rather than mis-decayed
+-- an accepted, documented limitation, not a silent gap. **Implementing
+these two together, correctly, in `model/identity.py` pushed that file to
+834 lines, over the AI-readiness gate's 800-line production maximum with
+no debt-ledger entry possible for a brand-new file (`debt-exemption`
+explicitly forbids that) -- a second, different hard architectural
+constraint from the fifth correction's `debt-no-growth` one, caught before
+push this time by running `scripts/check_ai_readiness.py` locally first.**
+Resolved by splitting the whole cv/array-decay block into a new sibling
+leaf module, `abicheck/model/signature_normalization.py` (`identity.py`
+now 586 lines, the new module 299) -- not a design change, purely a file
+split, with `identity.py` importing the one public
+`canonicalize_function_signature_param_type` from it. The new module also
+got its own dedicated primitive-level test file,
+`tests/test_signature_normalization.py` (per AGENTS.md's own convention
+for a new reusable primitive), which caught a genuine bug of its own
+before it shipped: the array-decay path bypassed
+`canonicalize_type_name`'s east-const normalization (its regex never
+matches a bracket-containing string), so `"const int [3]"` and `"const int
+*"` -- the identical adjusted type -- canonicalized to two different
+strings until the decay result was re-canonicalized a second time. Fixed
+in the same commit; `test_element_cv_becomes_pointee_cv` pins it.
+
+**Correction (2026-08-29, same day, eighth Codex review round on PR #941,
+commit 572de14): a parenthesized declarator's own outer pointer skipped
+by-value cv stripping entirely.** The sigil-scan treated every `(` as a
+real nesting level, so a cv-qualifier written inside a declarator's own
+grouping parens -- `void (* const)(int)` (a callback parameter: "const
+pointer to a function taking int"), or `int (* const)[3]` (a const
+pointer to an array of 3 ints) -- was never found at depth 0 and so never
+stripped, even though it qualifies the parameter's own outermost pointer
+exactly like an unparenthesized `int * const` does. Fixed by making an
+opening `(` "transparent" (not a real nesting level) whenever the next
+non-space character is `*`/`&` -- the one shape a real function-parameter-
+list paren can never have, since a parameter list's first token is always
+a type, never a bare sigil. This also reaches the previously-unchanged
+pointer-to-array case (`int (*)[3]`) the same way: its own outermost
+pointer's cv-qualifier, once one exists, is by-value too, while the
+trailing array bound inside the parens (the pointee's own shape) stays
+untouched exactly as before. Also removed `_has_top_level_ptr_or_ref`,
+a leftover private helper from an earlier revision of this module that had
+become genuinely dead code -- the array/pointer-shape detection it
+described was already reimplemented inline at each of its two call sites
+during earlier correction rounds, and nothing in this module or its tests
+called it. Four new tests in `tests/test_signature_normalization.py`
+(`TestParenthesizedDeclaratorOwnCvIsDropped`) pin both the fix and that the
+callback/pointee's own inner types stay untouched.
+
+A second finding from the same round -- that a raw, platform-decorated PE
+export name (`_foo@4` for an `extern "C"` `foo`) reaching this module's
+`is_extern_c` branch as `leaf_name` would fragment identity against an
+undecorated header/DWARF observation of the same symbol -- was investigated
+and NOT fixed here. `entity_id_for_function`'s docstring already states
+this branch is deliberately built to mirror `resolve_symbol_identity`'s own
+representation, and that resolver has the identical property: it also
+keys a non-`_Z`/`?` `mangled` value on its literal raw spelling, undecorated
+(`finding_identity.py`'s own `normalized_basis = mangled if (mangled and
+not real_mangled) else qn` never strips a stdcall/cdecl decoration either).
+This module's stated contract is to *match* that resolver's own chosen
+representation for evidence-tier scope/leaf-name handling, not to invent a
+new normalization capability the mirrored function doesn't have -- and no
+PE-decoration-stripping helper exists anywhere else in the codebase to
+reuse. Introducing one is a real, valid gap worth closing, but it is a
+separate design question (most naturally `pe_metadata.py`'s own extraction
+layer, where the platform's decoration convention is already known, not
+this identity primitive) and out of scope for this "purely additive,
+mirrors the existing resolver" first slice.
+
+**Correction (2026-08-29, same day, ninth Codex review round on PR #941,
+commit 0b7a80a): two more real gaps in the same paren-transparency logic,
+both fixed with a general recursive treatment rather than another one-off
+patch.** (1) A *pointer-to-member-function* declarator (`void (C::*
+const)(int)`) has its own outermost sigil preceded by the member's
+qualified-name prefix (`C::`) rather than a bare sigil -- the eighth
+round's transparency check ("next non-space character after `(` is
+`*`/`&`") never recognized this shape, so its own trailing cv-qualifier
+stayed unstripped. Fixed by generalizing the transparency test to a regex
+(`_DECLARATOR_GROUP_RE`) matching one or more `identifier::` segments
+before the sigil, not only a bare one. (2) A declarator's own trailing
+parameter list (the `(int)` in `void (*)(int)`) is itself exactly as much
+"a function's parameters" as this function's own top-level parameter --
+C++ drops a nested callback parameter's top-level by-value cv from the
+callback's own function type too, so `void (*)(int)` and
+`void (*)(const int)` name the identical adjusted callback type, not two.
+The eighth round's fix left every trailing parameter-list paren entirely
+opaque, so this nested by-value cv was never stripped. Fixed with a real,
+general recursive treatment rather than a narrow special case: every
+top-level `(...)` group found after the declarator's own sigil is now
+comma-split (`_split_top_level_commas`, depth-aware) and each of its own
+parameters is recursively run back through
+`canonicalize_function_signature_param_type` itself
+(`_normalize_nested_param_lists`/`_normalize_param_list_contents`) --
+unlike the array-decay limitations, this is not "unbounded C declarator
+grammar": it is one already-correct function applied to a strictly
+shorter substring at each level, which is what terminates it, and it
+reaches a callback-of-a-callback automatically since each recursive call
+performs the identical treatment on its own nested parameter lists. An
+empty parameter list, a bare `void`, and a variadic `...` marker are left
+untouched (none is itself a parameter type). Ten new tests in
+`tests/test_signature_normalization.py`
+(`TestPointerToMemberOwnCvIsDropped`,
+`TestNestedCallbackParametersAreNormalizedRecursively`, plus two new
+idempotence cases) pin both fixes, including that a nested parameter's
+genuine *pointee* cv still distinguishes, a doubly-nested callback
+normalizes at its innermost level too, and the variadic/void/empty
+special cases pass through unchanged.
+
+**Correction (2026-08-29, same day, tenth Codex review round on PR #941,
+commit fd715cc): two more real gaps in the same declarator handling, plus
+a self-caught correctness regression from fixing the second one.** (1) The
+paren-transparency regex recognized a bare sigil or a member-pointer's
+qualified-name prefix, but not an MSVC/PE calling-convention keyword
+(`__cdecl`, `__stdcall`, `__fastcall`, `__thiscall`, `__vectorcall`)
+preceding the sigil, so `void (__cdecl * const)(int)` -- confirmed a real,
+reachable shape (this codebase's own PE/PDB-decorated-export handling in
+`diff_platform.py` already deals with `__cdecl`-decorated exports) --
+never found its sigil at depth 0 either. Fixed by widening
+`_DECLARATOR_GROUP_RE` to accept an optional calling-convention keyword
+before the existing qualified-name-prefix loop; the keyword itself is
+matched, not erased, so it stays genuine, distinguishing content in the
+prefix (`void (__cdecl *)(int)` and `void (__stdcall *)(int)` correctly
+stay two different types). (2) A pointer-to-member-function's own
+TRAILING cv/ref-qualifiers -- the ones that follow its parameter list,
+e.g. `const` in `void (C::*)(int) const` -- were wrongly blanket-stripped
+by the same by-value logic that (correctly) strips the pointer's own
+qualifier *before* the parameter list. These are not the same thing: a
+trailing qualifier qualifies the POINTED-TO member function itself, a
+genuine, standard-mandated discriminator (`void (C::*)(int) const` is a
+different, non-interchangeable type from `void (C::*)(int)`), so
+collapsing them together was a real over-merge, the same class of mistake
+this whole primitive exists to prevent, not merely an incompleteness.
+Fixed by splitting the suffix at the declarator's own trailing parameter
+list (`_split_at_trailing_param_list`): everything before it stays the
+pointer's own by-value region (stripped, as before); everything after it
+now goes through a new `_canonicalize_member_qualifiers`, which -- mirroring
+`entity_id_for_function`'s own `is_const`/`is_volatile` two-boolean
+treatment for the identical ordering problem one level up -- only
+reorders `const`/`volatile` into a fixed order and normalizes a ref-
+qualifier (`&`/`&&`), rather than dropping any of it.
+
+**Self-caught regression, found by this round's own new ref-qualifier
+tests before push, not by a reviewer:** implementing fix (2) initially
+broke on `void (C::*)(int) &&`, canonicalizing it as `void (C:: * )(int)
+&&` for `&` but corrupting the `&&` case into `void (C:: * )(int) & &` --
+worse, `canon(...) != canon(...)` on the SAME input, an outright identity
+non-determinism bug. Root cause: `canonicalize_type_name` spells `&&` as
+`"& &"` (its own established sigil-spacing convention, the same source as
+`"int * const *"` -> `"int *const *"` elsewhere in this module), and the
+main sigil-scanning loop records the LAST `*`/`&` found anywhere at depth
+0 as `last_top_level_sigil` -- so the second `&` of the trailing `"& &"`
+ref-qualifier, itself sitting at depth 0 well after the declarator's own
+parameter list had already closed, wrongly overrode the member-pointer's
+own already-found `*`, corrupting the entire prefix/suffix split. Fixed
+at the root: the main loop now tracks whether it has already seen a
+top-level *opaque* paren (the declarator's own trailing parameter list)
+and stops updating `last_top_level_sigil` once it has -- nothing
+`*`/`&`-shaped appearing after a declarator's parameter list closes can
+ever be a NEW top-level sigil, only a ref-qualifier on what came before.
+`_canonicalize_member_qualifiers`'s own ref-qualifier detection was
+likewise fixed to compare against a whitespace-collapsed form so `"& &"`
+is still recognized as `&&`, not two separate `&` tokens. Eleven new tests
+in `tests/test_signature_normalization.py`
+(`TestCallingConventionDeclaratorGroupIsRecognized`,
+`TestPointerToMemberTrailingQualifiersPreserved`, plus two new idempotence
+cases) pin all of this, including the exact `&&`-vs-`& &` regression.
+
+A third finding from the same round -- that a bare, unadjusted function
+*type* used as a parameter (`void(int)`, as opposed to the already-
+adjusted `void (*)(int)`) is returned unchanged rather than decayed to a
+pointer the way an array parameter is -- was investigated and NOT fixed.
+Checked against this codebase's own real header-AST producer output
+(`tests/test_dumper_clang.py`'s and `test_dumper_clang_vtable.py`'s fixed
+`qualType` strings) and confirmed: a real castxml/clang dump always
+already prints the ADJUSTED pointer form for a function-typed parameter
+(`"void (*)(int)"`), never the bare, unadjusted function type -- unlike
+the array case, where the plan's own earlier correction explicitly notes
+this primitive "makes no assumption about whether a given producer's own
+parsed representation already reflects the decay" because an unadjusted
+array spelling genuinely does reach this function from real callers.
+There is no equivalent confirmed real code path supplying an unadjusted
+bare function type here, so implementing a heuristic "is this really an
+unadjusted function type, not some other paren-containing spelling" guess
+would be solving a hypothetical shape, with the attendant risk of a false
+positive on a legitimate class-type spelling that happens to end in a
+parenthesized group. Recorded here as an accepted, documented limitation
+rather than silently dropped.
+
+**Correction (2026-08-29, same day, eleventh Codex review round on PR #941,
+commit ea44356): one more real gap in the declarator-transparency test,
+plus a second, more serious self-caught over-merge in the tenth round's
+own trailing-qualifier fix.** (1) `_DECLARATOR_GROUP_RE`'s qualified-name
+loop matched only plain `identifier::` segments, so a template-qualified
+nested-name-specifier -- `void (C<int>::* const)(int)`, a real, common
+C++ shape -- was never recognized as a declarator group, and its own
+by-value cv stayed unstripped. Fixed by replacing the single regex with a
+manual scanner, `_is_declarator_group`: a template-argument list can nest
+arbitrarily deep (`Box<Pair<int, int>>::`), which `re`'s non-recursive
+matching cannot balance, so this needed real character-by-character
+`<`/`>` depth tracking, not a regex extension. (2) The tenth round's
+`_canonicalize_member_qualifiers` fixed the over-merge on trailing
+`const`/`&`/`&&`, but did so by RECONSTRUCTING the whole trailing region
+from only those three tokens -- silently dropping anything else found
+there. The practically important case: a `noexcept`-specifier, which
+C++17 made part of the function type, so `void (*)(int) noexcept` and
+`void (*)(int)` are two different, non-interchangeable types -- and this
+primitive was merging them into one identity, the exact same over-merge
+class the tenth round's own fix existed to close, just relocated rather
+than eliminated. Fixed generally: instead of naming every possible
+trailing specifier and reconstructing from a fixed list, the function now
+only ever removes and reorders the `const`/`volatile` WORDS themselves
+(via `_CV_WORD_RE`, the same primitive `_strip_cv_tokens_outside_nesting`
+already uses) and passes everything else through verbatim, in its
+original relative order -- `dcl.fct`'s own grammar already fixes
+cv-qualifier-seq first among a function's trailing specifiers, so a real
+producer's placement of ref-qualifier/`noexcept`/anything else never
+needs inferring, only cv needs reordering relative to itself. This also
+means the function no longer special-cases the ref-qualifier's `"&&"` ->
+`"& &"` spelling quirk (`canonicalize_type_name` already normalizes that
+upstream, before this function ever sees the string, so passing the
+leftover text through verbatim is already consistent). Eight new tests in
+`tests/test_signature_normalization.py`
+(`TestTemplateQualifiedMemberPointerOwnCvIsDropped`, four new cases in
+`TestPointerToMemberTrailingQualifiersPreserved` for `noexcept`, plus two
+new idempotence cases) pin both fixes, including a nested template
+argument and `noexcept` combined with order-independent cv.
+
+**Correction (2026-08-29, same day, twelfth Codex review round on PR #941,
+commit 509e3f3): the eleventh round's `noexcept` fix preserved the
+specifier verbatim, which was necessary but not sufficient -- preserving
+its exact SPELLING is not the same as canonicalizing it.** Since C++17, a
+function type's exception specification collapses to exactly two kinds
+for TYPE purposes: "non-throwing" (bare `noexcept` or `noexcept(true)`)
+and "potentially-throwing" (no specifier at all, or `noexcept(false)`).
+Those pairs are the SAME type and must canonicalize identically, but the
+eleventh round's fix passed the raw text through unchanged, so
+`void (*)(int) noexcept` and `void (*)(int) noexcept(true)` -- one
+identical adjusted type -- canonicalized to two different strings (an
+under-merge this time, the milder sibling of the over-merges every
+earlier round fixed, but the same underlying principle: "verbatim
+preservation" is not "canonicalization"). Fixed with a new
+`_canonicalize_noexcept`: only the two literal, constant-expression
+spellings (`true`/`false`) are recognized and normalized -- bare
+`noexcept`/`noexcept(true)` collapse to the single canonical spelling
+`"noexcept"`, `noexcept(false)` is dropped entirely (equivalent, for type
+purposes, to an already-absent specifier) -- while any other,
+non-literal `noexcept(expr)` is left completely untouched, since
+evaluating an arbitrary constant expression is out of scope, the same
+"don't solve the fully general grammar" limit this module already draws
+for multi-dimensional arrays and non-literal declarator shapes elsewhere.
+Nine new tests in `tests/test_signature_normalization.py`
+(`TestNoexceptSpellingsCanonicalized`, plus two new idempotence cases)
+pin this, including that a non-literal expression stays genuinely
+distinguishing rather than being silently (and wrongly) folded into
+either canonical form.
+
+**Correction (2026-08-29, same day, thirteenth Codex review round on PR
+#941, commit 45fd050): one more real under-merge, plus one more real
+over-merge -- this time an actively corrupting one -- in the trailing-
+qualifier and nested-parameter-list handling.** (1)
+`_normalize_param_list_contents` returned an empty parameter list and a
+bare `void` unchanged rather than unifying them, so `void (*)()` and
+`void (*)(void)` -- the identical "no parameters" adjusted type --
+canonicalized to two different strings. Fixed by collapsing both to the
+same canonical empty form. (2) `_canonicalize_member_qualifiers`'s
+`const`/`volatile` extraction used a plain, depth-blind `re.search`/
+`re.sub` over the WHOLE trailing region, which wrongly reached inside a
+non-literal `noexcept(expr)`'s own argument too -- a `const`/`volatile`
+token that is part of THAT expression's own text (e.g.
+`noexcept(Foo<const int>)`) is not this declarator's own cv-qualifier at
+all. This was worse than the earlier over-merges: it didn't just misjudge
+which type two spellings belonged to, it actively MUTATED the nested
+expression's own text (moving the found "const" out to the front,
+leaving the argument reading `Foo< int>`), and could merge two genuinely
+different overloads that happen to share a nested "const" by coincidence.
+Fixed with a depth-aware scan, `_extract_top_level_cv`, mirroring
+`_strip_cv_tokens_outside_nesting`'s own outside-nesting discipline: only
+a cv word sitting at nesting depth 0 -- outside any `(...)`/`<...>`/
+`[...]` -- is ever this declarator's own trailing qualifier. Thirteen new
+tests in `tests/test_signature_normalization.py`
+(`TestCvInsideNoexceptExpressionIsNotExtracted`, a corrected
+`test_empty_and_void_param_lists_unify`, plus two new idempotence cases)
+pin both fixes, including that the nested `const` neither merges with nor
+is corrupted by a real leading `const`.
+
+**Correction (2026-08-29, same day, fourteenth CodeRabbit review round on
+PR #941, commit 45fd050): one more real, serious over-merge in the
+tenth round's `seen_top_level_opaque_paren` flag itself, plus two
+minor cleanups.** (1) That flag was armed on ANY top-level opaque paren,
+regardless of whether the declarator's own sigil had already been found.
+This is wrong for a real, observed producer spelling this codebase
+already handles elsewhere (`tests/test_diff_templates.py`'s own
+`"(anonymous namespace)::T"`): `(anonymous namespace)::Foo const *`
+starts with an opaque paren (`_is_declarator_group` correctly rejects it
+-- it's not a declarator group) that precedes the parameter's own actual
+pointer sigil entirely, not a trailing parameter list. Arming the flag
+there locked out that LATER real sigil, so the whole type fell through to
+the by-value-strip branch and wrongly merged `Foo const *` with `Foo *`
+-- pointer-to-const vs. pointer-to-non-const, two genuinely
+non-interchangeable types. Fixed by only arming the flag once
+`last_top_level_sigil != -1` -- an opaque paren before the declarator's
+own sigil is never its trailing parameter list, so it must never lock
+sigil detection out. (2) A tautological test assertion
+(`canon(x) == canon(x)`, which cannot fail for a pure function and pinned
+nothing) was replaced with a real idempotence check. (3) The twelfth
+round's own changelog wording claimed a non-literal `noexcept(expr)`
+"stays genuinely distinguishing", which overclaims: C++ evaluates a
+constant expression's actual boolean VALUE, not its literal spelling, so
+e.g. `noexcept(sizeof(int))` is genuinely type-equivalent to
+`noexcept(true)` while this primitive (which only recognizes the two
+literal `true`/`false` spellings, per its own docstring's already-correct
+hedge) treats them as different -- a real, documented over-splitting
+limitation, corrected in the changelog fragment's wording rather than the
+code (evaluating an arbitrary constant expression remains out of scope).
+Two new tests in `tests/test_signature_normalization.py` pin the
+anonymous-namespace fix, including idempotence.
+
+**Correction (2026-08-29, same day, fifteenth Codex review round on PR
+#941): a bare data-member-pointer's pointee cv-qualifier was misplaced
+across the `ClassName::` infix, plus the fix's own line-count growth
+forced a second module split.** `canonicalize_type_name`'s own east-const
+regex -- unmodifiable, since `name_classification.py` is a frozen,
+no-growth legacy file -- does not know how to normalize a leading
+cv-qualifier across a bare (non-parenthesized) data-member-pointer's own
+`ClassName::` infix, and MISPLACES it depending on which side it started
+on: `"int const C::*"` stays `"int const C:: *"` (matching this
+primitive's own canonical output), but `"const int C::*"` becomes
+`"int C:: const *"` -- the cv-word shoved in between the qualifier and
+the sigil, indistinguishable in that position from the pointer's own
+by-value qualifier. Both spell the identical pointer-to-const-int-member
+type and must canonicalize identically; a first, narrower fix attempt
+(scanning only immediately before the sigil) caught the first
+manifestation but not the second, discovered via direct testing. Fixed
+with a more robust "reliable marker" strategy in the new
+`_find_member_pointer_qualifier`: a member pointer's own qualifier is
+always followed by a single space before whatever comes next
+(`"C:: *"`), unlike ordinary namespace qualification within a type's own
+spelling, which never has a space after `::` (`"ns::Foo"`) -- so the LAST
+`"::` "` marks the qualifier's end reliably, and the caller re-collects
+any cv word found on either side of the qualifier (base-side and
+tail-side) before re-canonicalizing the combined base. A related,
+broader limitation was found and deliberately left out of scope:
+`canonicalize_type_name` never reorders `volatile` at all (only
+`const`), a pre-existing gap affecting every pointee-volatile position in
+this module, not specific to member pointers -- fixing it is a
+substantially larger undertaking than this round's actual Codex finding
+(which named `const` specifically), so it is documented directly in
+`_find_member_pointer_qualifier`'s own docstring and the corresponding
+doctest as an accepted, out-of-scope residual gap rather than silently
+patched over.
+
+Implementing this pushed `signature_normalization.py` to 908 lines, over
+the AI-readiness gate's 800-line production maximum (which has no
+debt-ledger workaround for a file this new) -- the identical situation
+the seventh round's own `identity.py` -> `signature_normalization.py`
+split addressed one level up. Resolved the same way: a second sibling
+leaf module, `abicheck/model/declarator_qualifiers.py`, now holds every
+piece of this module's own machinery that has no *recursive* dependency
+back into `canonicalize_function_signature_param_type` itself --
+`_is_declarator_group` (+ its `_CALLING_CONVENTIONS`/`_IDENTIFIER_RE`
+supporting constants), `_extract_top_level_cv`, the new
+`_find_member_pointer_qualifier` (+ `_MEMBER_POINTER_TAIL_RE`),
+`_split_at_trailing_param_list`, `_canonicalize_member_qualifiers`, and
+`_canonicalize_noexcept` (+ `_NOEXCEPT_RE`). What stays behind in
+`signature_normalization.py` is exactly the machinery that DOES recurse
+back into `canonicalize_function_signature_param_type`
+(`_normalize_param_list_contents`/`_normalize_nested_param_lists`, for a
+callback/member-function-pointer's own nested parameter list) plus the
+top-level by-value cv/array-decay logic and the main function itself --
+so the import is strictly one-way (`signature_normalization ->
+declarator_qualifiers`, never the reverse), avoiding a cycle between the
+two sibling leaf modules. `_CV_WORD_RE` (a trivial one-line regex
+constant) is duplicated in both modules rather than shared, since sharing
+it would need an import in the direction that would create that cycle.
+Both files stay comfortably under the cap after the split (~600 and ~370
+lines respectively). The new module gets its own dedicated
+primitive-level test file, `tests/test_declarator_qualifiers.py`
+(mirroring `test_signature_normalization.py`'s own rationale and
+including its own leaf-module-contract test), alongside new tests in
+`tests/test_signature_normalization.py` pinning the member-pointer fix
+itself (both cv-spelling orderings unifying, an ordinary namespace-
+qualified pointer staying unaffected, the parenthesized member-function-
+pointer case staying unaffected, and idempotence).
+
+**Correction (2026-08-29, same day, sixteenth Codex review round on PR
+#941, commit 932814b): `restrict`/`__restrict`/`__restrict__` was left
+completely unstripped, fragmenting identity across a compatible
+parameter-qualifier change.** `int *` and `int *restrict` canonicalized
+to two different strings, even though restrict has NO effect on the
+Itanium C++ ABI's mangling at all -- this repository already tracks the
+fact separately (`Param.is_restrict`; `dumper_castxml.py`'s own
+extraction comments state the identical thing), so treating a restrict
+addition/removal as an `EntityId` change turned that dedicated compatible
+change into a spurious removal/addition pair instead. The finding as
+reported scoped a fix to only the parameter's own outermost pointer,
+mirroring how a genuine BY-VALUE cv-qualifier is scoped (per this
+primitive's own established, deliberately narrow-scoped-to-review-
+evidence discipline) -- but unlike cv, restrict's absence from mangling
+does not depend on WHERE in the declarator it sits (the C/C++ grammar
+only ever allows it directly after the `*` it qualifies, at any nesting
+depth), so a fix scoped to "outermost only" would leave e.g.
+`int * restrict *` and `int * *` still wrongly distinguishing. Fixed more
+generally than the reported scope: a new `_RESTRICT_WORD_RE` strips every
+`restrict`/`__restrict`/`__restrict__` token from the canonical type
+string unconditionally, before any of the position-sensitive cv/pointer
+logic runs -- so a nested callback parameter's own restrict-qualified
+pointer is covered too, through this function's existing recursion into
+itself for a trailing parameter list's own parameters, with no special-
+casing needed for that case. New tests:
+`TestRestrictQualifierIsAlwaysStripped` in
+`tests/test_signature_normalization.py` (all three spellings, a
+non-outermost-pointer restrict, a callback parameter's own restrict, a
+sanity check that a genuine pointee cv-qualifier still distinguishes, and
+idempotence).
+
+**Correction (2026-08-29, same day, seventeenth Codex review round on PR
+#941, commit 2264423): Clang's own trailing calling-convention attribute
+spelling was not recognized, fragmenting identity across header-AST
+backends.** Clang's `ParmVarDecl.type.qualType` renders a calling-
+convention-decorated function-pointer declarator as e.g.
+`void (*)(int) __attribute__((cdecl))` -- the attribute trails the
+parameter list -- rather than MSVC/castxml's leading-keyword spelling,
+`void (__cdecl *)(int)`, which `_is_declarator_group`/
+`_CALLING_CONVENTIONS` already recognized. The two spellings of one
+identical type canonicalized differently, so a template or DWARF-only
+function observed through both backends would fragment. Fixed with a new
+`_CALLING_CONVENTION_ATTR_RE`, matching the same five attribute-node
+kinds `dumper_clang_attributes.py`'s own `_CLANG_ATTR_TOKENS` mapping
+already recognizes for a FunctionDecl's own top-level contract
+attributes (this is the textual, parameter-type-spelling equivalent, for
+the mangling-free signature-fallback identity this module computes): when
+found in the trailing region after a declarator's own parameter list, the
+attribute text is removed and, if the leading `prefix` doesn't already
+carry a calling-convention keyword, the equivalent `__cdecl`-style
+keyword is injected at the same position `_is_declarator_group` looks for
+it -- so both spellings converge on one `prefix` before the ordinary
+member-qualifier canonicalization runs on whatever remains of the
+trailing text. Verified this is a real, internally-corroborated Clang
+spelling (not merely the finding's own claim) via
+`dumper_clang_attributes.py`'s existing, independent handling of the
+identical attribute-node kinds for the top-level FunctionDecl case. New
+tests: `TestClangTrailingCallingConventionAttributeUnifies` in
+`tests/test_signature_normalization.py` (cdecl and stdcall unifying with
+their leading-keyword equivalents, the member-function-pointer case,
+no-attribute staying unaffected, two different conventions still
+distinguishing, coexistence with a trailing `noexcept`, idempotence, and
+a defensive redundant-both-spellings-at-once case).
+
+**Correction (2026-08-29, same day, eighteenth Codex review round on PR
+#941, commit 06255fc): the sixteenth round's own "restrict never affects
+mangling, strip it everywhere" fix was itself wrong -- a real
+generalization mistake, not a narrow miss.** Fresh evidence, confirmed by
+direct compilation rather than mere assertion (`g++ -c`, inspecting the
+real mangled symbols): `void f(int **)` and `void f(int * restrict *)`
+mangle to two DIFFERENT, simultaneously-declarable Itanium symbols
+(`_Z1fPPi` vs. `_Z1fPrPi`), so restrict on a NON-outermost pointer level
+genuinely IS a standard-mandated, mangling-relevant overload
+discriminator -- the sixteenth round's own unconditional strip wrongly
+collapsed that pair into one identity. Only restrict on the parameter's
+own OUTERMOST, by-value pointer position drops from the mangled name
+(`void f(int *)`/`void f(int * restrict)` mangle identically, and GCC
+even refuses to compile them together as an overload set -- the same
+"can't be a real overload pair" signal a genuine by-value cv-qualifier
+gives). This is exactly the position-sensitivity the SIXTEENTH round's
+own docstring dismissed ("restrict's absence from mangling does not
+depend on where in the declarator it sits") -- which was the actual bug:
+restrict behaves like cv, not like a pure no-op token. Fixed by
+REVERTING the standalone `_RESTRICT_WORD_RE`-based unconditional strip
+entirely and instead folding restrict's three spellings into
+`_CV_WORD_RE` itself, so it goes through the exact same outermost-vs-pointee
+position discipline `const`/`volatile` already have throughout this
+module (`_strip_cv_tokens_outside_nesting`'s existing depth-aware scan,
+applied at exactly the same two safe positions as always -- no new
+logic needed, since the position discipline was already correct for cv
+and restrict needed nothing different from it). Updated tests: `TestRestrictQualifierIsAlwaysStripped` renamed to
+`TestRestrictQualifierSharesCvPositionDiscipline`
+in `tests/test_signature_normalization.py`, with the previously-wrong
+`test_restrict_on_non_outermost_pointer_also_stripped` (asserting
+equality) replaced by
+`test_restrict_on_non_outermost_pointer_still_distinguishes` (asserting
+INequality) plus a new idempotence case for the inner-restrict spelling.
+This is the second consecutive round to revise the SAME primitive's
+restrict handling (sixteenth introduced it, this one corrects its own
+overreach) -- direct compiler verification, not just re-reading the
+finding text, is now the standard for any future ABI-mangling-behavior
+claim in this file before implementing a fix, the same discipline that
+already caught this round's own error.
+
+**Correction (2026-08-29, same day, nineteenth Codex review round on PR
+#941, commit 3aeccc2): an explicit leading `::` (forced global-namespace
+lookup) fragmented identity across producers.** `::dep::Thing *` and
+`dep::Thing *` -- the identical type, since `dep` is unambiguous --
+canonicalized differently, because nothing stripped the leading
+qualifier. Confirmed as a real, already-documented producer spelling
+rather than a hypothetical: direct-clang's own `qualType` preserves an
+explicit global-scope qualifier verbatim, the identical fact
+`tests/test_dumper_scoping_dependency_retention.py`'s own twenty-sixth-
+round docstring already states from the *type-matching* side of this
+codebase (`test_globally_qualified_signature_spelling_still_matches`).
+Fixed with a new `_GLOBAL_SCOPE_RE`, applied unconditionally (not
+position-sensitive the way restrict/cv are, since global-vs-unqualified
+lookup never changes which entity a name denotes) up front, before any
+of the position-sensitive machinery runs. The match is anchored to
+SPECIFIC preceding characters (string start, or immediately after
+whitespace/`(`/`<`/`,`/`*`/`&` -- everywhere a fresh type-name token can
+begin) rather than a blanket "not preceded by an identifier character"
+negative lookbehind: a first draft used exactly that blanket test and
+would have wrongly stripped the genuine, load-bearing `::` in
+`(anonymous namespace)::Foo` too (that separator follows a `)`, not an
+identifier character, so the naive test can't tell it apart from a
+genuine leading global-scope marker) -- caught before implementing by
+walking through the anonymous-namespace case as a check, not discovered
+after the fact. New tests:
+`TestLeadingGlobalScopeQualifierIsStripped` in
+`tests/test_signature_normalization.py` (the bare case, the qualifier
+surviving after stripping, inside a template argument, inside a callback
+parameter, an ordinary namespace qualifier staying unaffected, the
+anonymous-namespace regression pin, the member-pointer qualified-name-
+prefix case, idempotence).
+
+**Correction (2026-08-29, same day, twentieth Codex review round on PR
+#941, commit 2a14e2e): the seventeenth round's own "does prefix already
+carry a calling-convention keyword" check used a bare substring test,
+which a coincidentally-named return type defeats.** `any(cc in prefix
+for cc in _CALLING_CONVENTIONS)` matches whenever any of the five
+keyword strings appears ANYWHERE in `prefix` -- but `prefix` also
+contains the return type, which can legitimately CONTAIN one of these
+keywords as a substring of an unrelated identifier, e.g.
+`my__cdecl_result`. For `my__cdecl_result (*)(int)
+__attribute__((stdcall))`, the substring test wrongly concluded a
+convention keyword was already present (matching `__cdecl` inside
+`my__cdecl_result`), which both skipped injecting the REAL `__stdcall`
+keyword AND still stripped the trailing attribute text -- silently
+merging two distinct callback types (one genuinely `__stdcall`, one with
+no calling convention at all) into one identity. Fixed with a new
+`_CALLING_CONVENTION_KEYWORD_RE`, matched as a genuine whole token
+positioned immediately after the declarator's own opening paren
+(allowing leading whitespace, mirroring exactly where
+`_is_declarator_group`/`_CALLING_CONVENTIONS` themselves look for a
+convention keyword) rather than a substring test anywhere in `prefix`.
+New tests: a doctest plus
+`test_return_type_containing_convention_keyword_as_substring` in
+`TestClangTrailingCallingConventionAttributeUnifies` (asserting both the
+correct injected keyword AND non-collision with the convention-free
+form).
+
+**Correction (2026-08-29, same day, twenty-first Codex review round on
+PR #941, commit 05091da): two findings -- one real fix (noexcept
+integer literals), one real REGRESSION in the nineteenth round's own
+global-scope-stripping fix, reverted after direct-compilation
+falsification.**
+
+*Fix 1 (real, implemented):* `noexcept`'s argument is contextually
+converted to `bool`, so `noexcept(1)`/`noexcept(0)` are the identical
+types as `noexcept(true)`/`noexcept(false)` -- confirmed both by direct
+compilation (`g++`: redefinition errors for each pair) and by Clang's
+own `qualType`, which genuinely emits these integer-literal spellings
+verbatim (`clang -Xclang -ast-dump=json`: `void (int) noexcept(1)`).
+`_canonicalize_noexcept` now recognizes `"1"`/`"0"` alongside
+`"true"`/`"false"`, deliberately narrow to exactly these two literals
+(a non-0/1 integer constant in this position triggers a
+narrowing-conversion diagnostic in real compilers and is not a spelling
+this module has confirmed evidence for).
+
+*Fix 2 (self-correction, REVERTED):* the nineteenth round's own
+`_GLOBAL_SCOPE_RE`-based unconditional stripping of a leading `::` was
+itself wrong, falsified by direct compilation before reverting rather
+than accepted on the strength of a plausible-sounding C++ semantic
+argument. Given
+```
+namespace dep { struct Thing; }
+namespace local { namespace dep { struct Thing; } void f(dep::Thing*); }
+```
+Clang's own `qualType` for `f`'s parameter prints the BARE, unqualified
+`dep::Thing *` (no leading `::`) even though it resolves to
+`local::dep::Thing` -- a type DISTINCT from the true global
+`::dep::Thing` a sibling declaration in the SAME namespace prints WITH
+the leading `::` (verified via `clang -Xclang -ast-dump=json` on both
+declarations side by side). This module has no scope-tree information;
+it operates purely on already-printed type-name text, so it cannot tell
+"a genuinely global entity, spelled either way" apart from "an
+unqualified name that happens to resolve to a DIFFERENT, locally-
+shadowing entity of the same spelling" -- Clang's own choice to include
+or omit the leading `::` IS exactly that distinguishing signal, so
+erasing it can silently merge two non-interchangeable types. Separately:
+the nineteenth round's own motivating evidence
+(`tests/test_dumper_scoping_dependency_retention.py::
+test_globally_qualified_signature_spelling_still_matches`) turns out to
+be for a DIFFERENT subsystem entirely -- matching a signature's type
+reference against an already-KNOWN declared type's own `qualified_name`
+within ONE snapshot's dependency-scoping pass, not comparing two
+independently-observed SIGNATURES for cross-producer/cross-revision
+identity (this function's own job) -- and does not establish that
+castxml and Clang ever disagree on this leading `::` for one identical
+real declaration. `_GLOBAL_SCOPE_RE` is removed entirely (not merely
+disabled); `TestLeadingGlobalScopeQualifierIsStripped` in
+`tests/test_signature_normalization.py` is renamed to
+`TestLeadingGlobalScopeQualifierIsPreserved` with every assertion
+flipped from equality to inequality. This is the SECOND self-correction
+on this primitive (the first was the restrict handling, sixteenth ->
+eighteenth rounds) -- the common thread both times is that a plausible-
+sounding cross-producer-normalization generalization was accepted
+without direct-compilation verification first; every future claim about
+what two spellings "mean the same thing" on this primitive gets checked
+against real compiler/AST-dumper output before implementing, not merely
+re-derived from C++ semantics on paper.
+
+**Landed (second slice, 2026-08-29): the first slice's own "Next slice"
+item (a) -- both dumper modules now track scope as typed segments.** The
+parser-internal scope state in `dumper_clang.py` and `dumper_castxml.py` is
+no longer only a bare `tuple[str, ...]`/`context`-chain-of-names: each
+containing scope is now ALSO recorded as a `model.identity.ScopeSegment`,
+built at the exact point that scope is determined, which is the only point
+the AST node kind and its kind-specific payload are still in hand (the
+Design section's own reasoning for why a later reconstruction from the
+flattened string cannot work). Three new leaf modules under `extract/`
+(`extract -> model`, ADR-061): `extract/headers/scope_segments.py` -- the
+ONE construction primitive both backends share, so two producers cannot
+independently spell the same construct two ways, plus `flat_names()`, the
+parity helper that renders a typed path back to exactly the flat spelling
+each backend already built; `extract/headers/clang/scope.py` -- clang JSON
+node inspection (`scope_segment_for`/`anonymous_scope_kind`/
+`anonymous_scope_key`); and `extract/headers/castxml/scope.py` --
+`scope_path(ctx, el)`, the structural counterpart of
+`location.qualified_name`'s own `context`-chain walk. On the clang side
+`_walk` threads a `scope_path` alongside the untouched `scope`, and
+`_Decl` grew an optional `scope_path` field (defaulted, so every direct
+`_Decl` construction elsewhere is unaffected); on the castxml side
+`_CastxmlParser._scope_path` sits beside the untouched `_qualified_name`.
+Backward compatibility is structural, not merely tested: the flat
+representation is not derived from the typed one and is not modified at
+all, and `flat_names(typed) == flat` is asserted over every categorized
+declaration in both backends' tests (`tests/test_typed_scope_paths.py`),
+with `qualified_name` reconstructed end-to-end from the typed path plus
+the element's own name as the castxml oracle rather than a re-implemented
+parent walk.
+
+*Verified against the real producers, per this section's own
+direct-verification standard -- not inferred from plausible AST semantics.*
+Running `clang -Xclang -ast-dump=json` and `castxml --castxml-output=1`
+over the same headers established: an inline namespace is a
+`NamespaceDecl` with `isInline: true` (clang) and **does not exist as an
+element at all** in castxml output (a declaration inside `inline namespace
+v1` is attributed directly to the enclosing named namespace, confirmed on
+both a hand-written header and libstdc++'s own `std::__cxx11`), so
+`InlineNamespace` is structurally unproducible from castxml -- a backend
+capability gap the flat spelling already had, now documented rather than
+papered over; an anonymous namespace/record carries no `name` at all in
+either producer; a class-scope castxml record carries an explicit `access`
+attribute while a namespace-scope one carries none (mapped to the one
+shared `"public"` spelling `_walk` already threads, and non-identity
+payload regardless); and only `<Namespace>`/`<Struct>`/`<Class>`/`<Union>`
+are ever referenced as another element's castxml `context` (checked across
+a full `<string>`/`<vector>`-including dump), so no other tag needs a
+guessed segment kind.
+
+**One real over-split was found this way and fixed before it shipped**,
+which is exactly what the direct-verification standard is for. Two
+`namespace { ... }` blocks in one translation unit REOPEN the same unnamed
+namespace -- C++ merges them -- but clang's JSON AST emits one
+`NamespaceDecl` node per *block*, so a naive positional counter handed
+declarations in the first and second blocks different `Anonymous.ordinal`s
+and split one real scope into two identities. That is the mirror image of
+the sibling collision `ordinal` exists to prevent, and it was also a
+cross-backend divergence: castxml emits a single merged `<Namespace>`
+element for both blocks (verified directly). Fixed by keying the per-parent
+ordinal on the *entity* rather than the block, via clang's own
+`originalNamespace`/`previousDecl` link (`anonymous_scope_key`), with the
+"no id at all" case (a hand-built test AST) deliberately reported as
+"cannot be merged" rather than "same as the last one that also had no id".
+Ordinals are counted per parent scope and across all anonymous kinds at
+once, so two siblings never share one ordinal even before `kind` is
+consulted; a named `LinkageSpecDecl` and a `ClassTemplateSpecializationDecl`
+each deliberately produce NO segment from the shared node inspector (the
+former is unreachable in real clang output and would need a guessed segment
+kind; the latter's trimmed `A<double>`-style spelling is owned by `_walk`'s
+own specialization branch, which must not be given a second opinion).
+
+**One architectural constraint found mid-implementation, recorded rather
+than worked around.** `InlineNamespace.version_tag` is left empty by both
+producers. This repository has exactly one definition of "what an
+inline-namespace version tag is" -- `qualified_name_segments.version_suffix`,
+the signal ADR-025's own versioned-inline-namespace-alias handling already
+keys on -- and that module belongs to the `compare` layer, which `extract`
+may not import under ADR-061's dependency direction (`scripts/
+check_architecture.py` failed on exactly that edge, which is how this was
+caught, before push). Re-deriving the rule inside `extract` would create a
+second, independently-drifting notion of a version tag -- the precise
+duplication this plan's own Governing Invariant forbids -- and relocating
+the existing one into `model` is a real `compare`-layer migration of its
+own, not a drive-by inside this slice. Left empty and documented in the
+constructor's own docstring and pinned by a test, so a later slice
+populating it has to do so consciously. Nothing is lost meanwhile:
+`InlineNamespace` is identity on `name` too, so `v1` and `v2` are already
+distinct segments and the tag is a convenience payload, not a
+discriminator, at this point in the phase.
+
+**What this slice deliberately still does not do.** (1) *The carrier-field
+question (option (a) vs. (b)) remains open, and this slice did not force
+it.* The typed path is parser-internal state only -- a `_walk` recursion
+parameter and a `_Decl` field, both alive only during and immediately after
+the walk -- attached to no persisted `AbiSnapshot`/`RecordType`/`Function`,
+with no schema bump and no serialization change. (2) *No
+`model.identity.EntityId` is constructed from real parser output anywhere.*
+Neither dumper calls any `entity_id_for_*` constructor; this slice produces
+the typed scope data and stops there. (3) `diff_filtering.py`,
+`type_reachability.py` and `finding_identity.py` are untouched, and their
+existing string-based ambiguity machinery is still the one working
+implementation, exactly as the first slice left it. (4) No storage v2 wire
+bridge. Two smaller, producer-specific limitations are recorded in the new
+modules' own docstrings rather than left implicit: `InlineNamespace` is
+unproducible from castxml (above), and `LocalToFunction` is unproducible
+from EITHER backend today -- clang's `_walk` stops at a function node by
+design (a body is not an ABI declaration surface) and castxml emits no
+function-local declarations at all (verified: a `struct` declared inside a
+function body is absent from its output entirely) -- which also means this
+slice never had to construct a `LocalToFunction.owner`, i.e. an `EntityId`,
+which would itself have forced the carrier question.
+
+Next slice, in order (superseding the first slice's own list above, whose
+item (a) is what this slice landed): (b) migrate `diff_filtering.py`/
+`type_reachability.py` -- which still requires answering the carrier-field
+question first, since both are post-parse consumers and the typed data this
+slice produces does not outlive the parse; then (c) the
+`finding_identity.py` algorithm migration and the storage v2 wire bridge,
+each as their own reviewable slice.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+per-parent anonymous-ordinal counter this same slice introduced was itself
+a call-frame-local variable, and a NAMED namespace reopened across two
+separate blocks defeats exactly that.** `namespace N { struct { ... } a; }
+... namespace N { struct { ... } b; }` walks the second block as a
+SEPARATE `_walk` call from the first -- confirmed directly (`clang -Xclang
+-ast-dump=json`): a reopening block carries `originalNamespace`/
+`previousDecl` pointing at the first block's node, identical linkage to
+the anonymous-namespace-reopening case this slice's own "Landed" paragraph
+above already handles, just one level up (the *container* being reopened,
+not an anonymous *child* of it). A call-local `anonymous_ordinals` dict
+resets between the two calls, so block two's first anonymous child gets
+ordinal 0 again -- the SAME ordinal already given to block one's first
+anonymous child -- silently merging two genuinely distinct anonymous
+scopes under one `ScopePath`, the exact collision this whole primitive
+exists to prevent. Fixed by moving the ordinal state off the call stack
+entirely: `_ClangAstParser` now holds
+`self._anonymous_ordinal_state: dict[str, dict[str, Any]]`, keyed by
+`_clang_scope.anonymous_scope_key` computed on the CONTAINER node itself
+(the one whose children are about to be numbered) rather than only ever
+being called on an anonymous child -- that function's own merge logic
+(originalNamespace/previousDecl, falling back to the node's own id) is
+generic to any node kind, and was already exactly what this fix needed,
+not a new mechanism. A node with no id at all (the root call, or a
+hand-built test AST) falls back to its own Python object identity
+(`f"objid:{id(node)}"`), so two such calls never accidentally share
+state. New regression coverage: `test_live_clang_typed_scope_paths`
+reopens a NAMED namespace with a distinct anonymous struct in each block
+and asserts the two get DIFFERENT ordinals under the same `Namespace(...)`
+segment (confirmed to fail with the pre-fix call-local dict: both reported
+`Anonymous("struct", 0)`, verified by reverting the fix locally before
+committing it).
+
+**A second Codex finding on the same PR, investigated and left open
+rather than fixed here.** `Y` in `template<class T> struct X<T, int> {
+struct Y {}; };` is, per real clang output, nested directly under a
+`ClassTemplatePartialSpecializationDecl` -- a node kind neither in
+`_RECORD_NODE_KINDS`/`_SCOPE_NODE_KINDS` nor covered by `_walk`'s own
+`ClassTemplateSpecializationDecl` (FULL-specialization-only) spelling
+-reconstruction branch, so `Y.scope_path` (and, checked directly:
+`Y`'s pre-existing flat `scope`/`qualified_name` too) omits the
+partial specialization's own containing scope entirely. **This is
+confirmed, by direct compilation, to be a PRE-EXISTING gap in the flat
+representation this slice's own parity contract requires reproducing
+byte-for-byte** -- not a regression this slice's typed `scope_path`
+introduces on top of a previously-correct flat spelling. Building a real
+partial-specialization scope segment needs a spelling reconstruction
+comparable to `_specialization_spelling`'s existing full-specialization
+handling (matching template arguments against the partial pattern's own
+parameter list, e.g. `X<T, int>` rather than a fully-concrete `X<double,
+int>`), which is real, independently-reviewable work of its own, not a
+small fix bundled into this slice -- left for a follow-on slice rather
+than attempted under review pressure here.
+
+**Correction (2026-08-29, same day, a SECOND Codex review round on
+PR #943): the previous correction's own fix was itself incomplete -- keying
+ordinal state by the walked node's identity is wrong whenever a
+TRANSPARENT AST wrapper sits between a scope and its anonymous
+children.** `extern "C" { ... }` (a `LinkageSpecDecl`) contributes NO
+`ScopePath` segment of its own (confirmed above: `scope_segment_for`
+returns `None` for it, so `child_scope_path` for its children is exactly
+`scope_path`, unchanged) -- but it IS a separate AST node and a separate
+`_walk` call. `namespace N { extern "C" { struct { struct X {}; } a; }
+struct { struct Y {}; } b; }`: confirmed directly (`clang -Xclang
+-ast-dump=json`) that the `LinkageSpecDecl` sits directly between `N` and
+`X`'s anonymous struct, while `Y`'s anonymous struct is a direct child of
+`N`. Both are, from `ScopePath`'s own perspective, direct children of the
+IDENTICAL logical scope `(Namespace("N"),)` -- but the previous fix's
+node-identity key gave them separate `_anonymous_ordinal_state` entries
+anyway (one keyed by the `LinkageSpecDecl`'s own id, one by `N`'s), so both
+got ordinal 0. The reopened-namespace fix and this one share a root cause:
+ordinal state was keyed by *which AST node produced it*, when the actual
+invariant is about *which logical scope the children are entering* --
+`child_scope_path` IS that answer, computed once per `_walk` call already
+for an unrelated reason (threading the typed path to children), and using
+it as the ordinal-state key closes BOTH cases with one rule instead of two
+special-cased identity fallbacks: a reopened namespace's two blocks
+compute the identical segment tuple (construction depends only on
+name/`isInline`, never on which node/block produced it), and a transparent
+wrapper's `child_scope_path` is *by definition* identical to its own
+`scope_path`. `ScopeSegment`s are frozen/hashable, so the tuple is a valid
+dict key directly -- no string-identity/objid fallback needed at all, which
+also means the previous fix's `"objid:{id(node)}"` fallback branch (for a
+node with no id) is gone, not merely untested: `child_scope_path` is
+always a real, comparable value regardless of whether the node producing
+it happens to carry an id. New regression coverage: `test_live_clang_
+typed_scope_paths` adds an `extern "C"` block beside a plain anonymous
+struct in the same namespace and asserts distinct ordinals (confirmed to
+fail against the node-identity-keyed fix, both reporting ordinal 0,
+verified by reverting to that version locally before committing the real
+fix). This is the same "verify before generalizing, and verify again when
+generalizing a second time" discipline the earlier restrict/calling-
+convention/global-scope corrections on this same plan established --
+two review rounds in a row found the previous round's fix real but
+incomplete, which is exactly what direct-compilation verification is for.
+
+**Decision (2026-08-29, PR #943): the carrier-field question is CLOSED as
+option (a) -- `EntityId` is computed once, at parse time, and carried on
+the model object.** The Design section above deliberately left this open
+("this plan does not pick one under continued review pressure a third
+time") and stated the consequences of each branch; this entry records the
+choice its implementation PR made, and why, so no later slice has to
+re-litigate it. Three reasons, each checked against this plan's own text
+rather than asserted:
+
+1. *Option (b) leaves two live representations of one concept standing
+   indefinitely.* Its own premise is that `diff_filtering.py`/
+   `type_reachability.py` keep their bespoke string-based ambiguity
+   trackers until Phase 6's `SemanticIR` assembly -- a phase with no
+   scheduled start, several phases out. This plan's Governing Invariant is
+   "one concept, one representation, everywhere it is used, never two,"
+   with an explicit "delete after consolidating -- same PR or the very next
+   one, never eventually" rule. An unscheduled deferral is precisely the
+   "eventually" that rule names.
+2. *Option (b) blocks Phase 3 as sequenced.* The "not contained to Phase 2"
+   paragraph above already establishes this: Phase 3's public-surface graph
+   keys `declaration`/`type` nodes by `EntityId`, and its graph builder is a
+   post-parse consumer by construction. Under option (b) Phase 3 must move
+   to land with or after Phase 6, cascading the deferral into Phases 3/4/5.
+   Option (a) keeps the stated phase ordering intact.
+3. *Option (a) is the only branch where "computed once" is literally true.*
+   The typed `ScopePath` exists only during the AST walk (the second slice's
+   own finding). Recomputing identity later is not merely inconvenient, it
+   is structurally impossible from an already-parsed model object -- so a
+   carrier is not a cache of something re-derivable, it is the only place
+   the answer can live at all.
+
+Consequently, the conditionals this plan deliberately wrote in both
+branches now resolve to their option-(a) halves: the "Tests" section's
+carrier-vs-no-carrier pair resolves to the *first* shape (the field is
+populated for every declaration kind immediately after parsing, and a
+static check confirms the resolver is never called on an already-parsed
+`RecordType`/`Function` outside the parser); the "Acceptance criteria"
+section's deletion of `diff_filtering.py`/`type_reachability.py`'s
+string-based helpers is in scope for this phase rather than moving to
+Phase 6; and Phase 6's own conditional paragraph ("If Phase 2's
+implementation PR resolves ... as option (b)") is now unreachable and
+carries no work for that phase. **One clause of the option-(a) test shape
+is NOT satisfied by this slice and is not claimed to be** -- "round-trips
+through `serialization.py` unchanged"; see the finding immediately below.
+
+**Finding (2026-08-29, same day, found while implementing the decision
+above): option (a) is necessary but NOT sufficient for the consumer
+migration, and this plan's Phase 2 sequencing assumed it was.** The
+Acceptance-criteria text above reads as though choosing option (a) makes
+`diff_filtering.py`'s migration land in the same slice. Reading the three
+actual call sites, it does not -- three independent blockers, none of them
+about the carrier field itself:
+
+1. *A carrier that is not persisted is not available to a post-parse
+   consumer either.* `compare old.json new.json` is a first-class,
+   documented invocation; those two snapshots come back through
+   `snapshot_from_dict`, which cannot reconstruct an `EntityId` without the
+   `ScopePath`-preserving storage v2 wire DTO this phase's own Design
+   section specifies (and which the second slice's "Next slice" list
+   already scopes as slice (c)). A consumer keyed on `entity_id` would
+   therefore answer one way for two live binaries and another for two
+   dumped snapshots OF those same binaries -- a worse defect than the
+   bare-name collision it set out to close, and one that no amount of
+   care inside `diff_filtering.py` can prevent. Encoding it with a
+   stopgap flattening is not an option: this section's own
+   "Flattening `ScopePath`/`extra` into the existing bare
+   `qualified_name`/`discriminator` strings is not a lossless bridge"
+   paragraph already rejected exactly that, by name.
+2. *`_root_type_name` does not operate on a model object at all.* It takes
+   a `Change` (`checker_types`) and slices its `symbol` STRING; the set
+   `_find_opaque_types` returns is matched against that string in
+   `_downgrade_opaque_type_changes`. Keying the set on `EntityId` therefore
+   requires `Change` itself to carry one -- which is the `finding_identity.
+   py` algorithm migration this phase already scopes as slice (c), not part
+   of slice (b).
+3. *`_find_by_value_types` is not a name-keyed index; it is a substring
+   scan.* It asks whether an opaque type's spelling occurs inside a
+   parameter's or return value's own type text (`tname in rt`). An
+   `EntityId` cannot be substring-matched inside a type spelling: turning
+   that into an identity join requires resolving a type REFERENCE to a
+   declaration, which is `type_reachability.py`'s job -- the module this
+   phase's own text (and this slice's task) explicitly defers on the
+   strength of its eleven-plus-finding regression history.
+
+So the correct sequencing, recorded here rather than discovered again
+mid-slice: option (a)'s carrier lands first (this slice), persistence via
+the storage v2 wire bridge second, and the post-parse consumer migrations
+-- with the string-based helper deletion the Acceptance criteria require --
+only after BOTH, since neither is optional for a correct migration. The
+Acceptance criteria's "deleted, not kept alongside" therefore still holds
+for this phase; it does not hold for this phase's *third* slice, which has
+no working replacement to switch those consumers onto yet. Deleting them
+now would leave the same "neither the old mechanism nor a usable
+replacement" hole the criteria themselves already reject for option (b).
+
+**Landed (third slice, 2026-08-29): the carrier field, populated by both
+header-AST backends. No consumer migration -- see the finding above for
+why that is a separate slice, not an omission.**
+`RecordType`/`EnumType` (`model/entities.py`) and `Function`/`Variable`
+(`model/declarations.py`) each gained one field, `entity_id: EntityId |
+None = field(default=None, kw_only=True, compare=False)`. Each property is
+deliberate: `None` is the honest answer for the direct constructor call an
+external consumer of these public dataclasses makes (never a fabricated
+identity reconstructed from `qualified_name`, which this section already
+established is structurally insufficient); `kw_only=True`, appended last,
+means no existing positional argument's slot moves (the same reasoning
+`Function.hidden_friend_owner` already records); and `compare=False` keeps
+`__eq__` bit-for-bit what it was, since identity is derived from the
+declaration and folding it into equality would make two otherwise-identical
+model objects differ purely on whether a producer wired it -- the same
+identity-vs-payload split `identity.Record.access` applies one level down.
+**`typedefs`/`constants` get no carrier, and this is a real limitation
+rather than an oversight**: both are `dict[str, str]` on `AbiSnapshot`, not
+dataclasses, so `entity_id_for_typedef`/`entity_id_for_constant` have
+nowhere to write to. Giving them one means giving each a model dataclass
+first, which is its own change to a persisted snapshot shape.
+
+*Populated at every construction site of the four carriers, in both
+backends*: `extract/headers/clang/records.py` (both the opaque and the
+complete branch), `clang/enums.py`, `clang/functions.py`,
+`dumper_clang.py`'s `parse_variables`, and the four castxml counterparts
+(`castxml/records.py`, `castxml/enums.py`, `castxml/functions.py`,
+`dumper_castxml.py`'s `parse_variables`) -- each reading the typed
+`scope_path` the second slice threaded, never re-deriving one. Two
+supporting changes were needed and are worth not rediscovering: both
+function builders now hoist `is_extern_c`/`is_const`/`is_volatile`/
+`ref_qualifier`/`is_variadic` into locals shared by the model object and
+the identity constructor, so the two cannot form independently-computed
+opinions about the same fact; and the clang function builder keeps the
+declaration's own unqualified `leaf_name` separately from `name`, which
+that builder requalifies for a template specialization's member (a
+display/owner-matching spelling, not a leaf identity).
+
+*The mangled-vs-`extern "C"` routing is producer-local, by design.*
+`entity_id_for_function`/`_variable` require the caller to have already
+established that `mangled_name` is a GENUINE mangling; that determination
+lives in `finding_identity.is_real_mangled_name`, which `model`/`extract`
+may not import (a `compare`-layer module; ADR-061/ADR-063 D10). Both
+backends already answer the same question locally for the model's own
+`is_extern_c` field, so the identity call reuses exactly that answer:
+`mangled_name=None if is_extern_c else mangled`, `is_extern_c=is_extern_c`
+-- the same order `resolve_function_identity` itself applies (linkage
+first, mangling second). Verified end-to-end against BOTH real producers on
+one probe header rather than inferred: `clang -Xclang -ast-dump=json` and
+`castxml --castxml-output=1` agree exactly on every kind -- `ns::Outer`,
+`ns::Outer::Inner` (whose scope is `(Namespace("ns"), Record("Outer"))`,
+the Record-vs-Namespace distinction a flat spelling cannot carry),
+`ns::Color`, the `f(int)`/`f(double)` overload pair (two distinct
+`("mangled", ...)` ids), `c_fn`/`c_var` (both `("extern_c",)`), and
+`ns::gVar` (`("mangled", "_ZN2ns4gVarE")`).
+
+**One real cross-backend divergence found by that verification, confirmed
+PRE-EXISTING and left as-is rather than papered over in this primitive.**
+For `extern "C" int c_var;` with no export evidence supplied, castxml emits
+a bogus pseudo-Itanium `mangled="_Z5c_var"` (confirmed by reading the raw
+XML) while clang emits the bare `c_var`, so the two backends' `EntityId`s
+disagree -- but they disagree because the two backends' own
+`Variable.mangled` fields already disagree, before this slice and
+independently of it. castxml offers no local signal for a C-linkage
+variable at all (its `extern="1"` attribute marks the `extern` storage
+class: the C++ `ns::gVar` carries it and the `extern "C"` `c_var` does
+not, verified directly), which is why the pre-existing real-ELF-export
+override is the mitigation -- and with real export evidence supplied, the
+normal dump path, both backends produce the identical
+`((), VARIABLE, "c_var", ("extern_c",))`, confirmed by re-running the same
+parse with the symbol present. Inventing a castxml-only C-linkage
+heuristic inside an identity constructor would be exactly the "solve a
+shape the producer never gave us" overreach the eighth round's PE-
+decoration finding already declined, one layer lower.
+
+**Not persisted, deliberately, and this is the one clause of the Design
+section's option-(a) test shape this slice does not satisfy.**
+`serialization.snapshot_to_dict` drops the field
+(`storage/entity_id_codec.py`, a new `storage`-owned leaf module mirroring
+`fact_codec.py`/`enum_codec.py`'s role), `SCHEMA_VERSION` does not move,
+and a reloaded snapshot carries `entity_id=None` for every declaration.
+The alternative was a stopgap flattening this section already rejected by
+name as a silently-collapsing round trip; the real encoding is the storage
+v2 wire DTO, still slice (c). Three tests pin the drop as a deliberate
+property rather than an accident -- including that the snapshot stays
+`json.dumps`-able at all, which is the concrete regression at stake:
+`EntityId.kind` is a plain `Enum` (not a `(str, Enum)`) and `scope` is a
+tuple of dataclasses, so an `asdict()`-ed carrier reaching `json.dumps`
+raises `TypeError` outright. **Until persistence lands, no diff/report
+consumer may read this field**: it is present on an in-memory dump and
+absent from a reloaded one, so a consumer keyed on it would answer
+differently for the same two libraries depending only on whether a
+snapshot was written to disk in between.
+
+*Tests.* `tests/test_entity_id_carrier.py` (new): the dataclass contract
+(default `None`, `kw_only`, excluded from equality -- parameterized over
+all four carriers rather than asserted for one); the non-persistence
+properties above; the live-backend population tests for every declaration
+kind on clang and castxml, sharing one assertion helper so the two
+producers must AGREE rather than each merely be self-consistent; the
+record-vs-namespace collision closed by construction (`struct B { struct C
+{}; };` and `namespace B { struct C {}; }` parsed as two separate headers
+-- the real shape of the bug, one spelling on each side of a comparison --
+producing the identical `qualified_name` `"B::C"` and two different
+`EntityId`s, on both backends); and the static check the Design section's
+option-(a) branch asks for, as a real AST scan for `entity_id_for_*` CALL
+nodes across all of `abicheck/` (attribute-style calls included, docstring
+mentions excluded), asserting every call site is a header-AST producer.
+That check carries its own guard -- an assertion that the scan actually
+finds the four real producer modules -- since an emptiness assertion alone
+passes just as happily against a broken scanner.
+
+**Correction (2026-08-29, same day, found by the third slice's own full
+local suite before review): adding the carrier broke every dump of a
+lambda-bearing library outright, and the cause was not the carrier.**
+`qualified_name_segments.renumber_anonymous_closure_identities` -- the pass
+that replaces a closure marker's raw `:line:col` with a snapshot-stable
+ordinal, i.e. the machinery `identity.environment_taint` rests on -- walks
+every dataclass reachable from `functions`/`variables`/`types`/`enums` and
+assigns rewritten strings back with `setattr`. `EntityId` is frozen, so the
+first lambda marker anywhere in a snapshot raised `FrozenInstanceError` and
+aborted the dump; ten end-to-end tests in
+`tests/test_identity_taint_end_to_end.py` failed at once, none of which the
+targeted per-module runs this slice had done so far would have reached.
+Fixed at the root rather than by excluding the new field from the walk: a
+frozen dataclass is now rebuilt via `dataclasses.replace`. Excluding it was
+considered and rejected -- a closure marker surviving unrewritten *inside*
+an identity carrier is a path/line-tainted identity sitting next to the
+normalized ones, which is precisely the taint class that pass exists to
+remove, so the crash would have been traded for a silent version of the
+same bug. The regression coverage is stated about the walk primitive
+itself over six independently-chosen frozen shapes (nested in a tuple, a
+list, a dict value, two levels deep, under a mutable parent, under a
+frozen parent) plus an `init=False` field and an unchanged-value
+object-identity case, alongside the concrete `entity_id` case through the
+public entry point, so the next frozen model field is covered by
+construction rather than by someone remembering; all nine were confirmed
+to fail against the pre-fix walk by reverting it locally. Worth stating
+plainly as the transferable lesson: a purely additive model field is not
+automatically inert, because a *generic object-graph walk* elsewhere in
+the codebase makes every new field its input.
+
+**Correction (2026-08-29, same day, Codex and CodeRabbit independently on
+PR #943): the third slice wired the clang producer's own `is_extern_c`
+into the identity constructor, and that field is broader than the
+constructor's `is_extern_c` parameter means.** `parse_functions`'
+`mangled` local falls back to the bare `name` whenever clang emits no
+`mangledName`, and the long-standing `mangled == name` heuristic reads
+that fallback as C linkage. Confirmed by direct compilation that clang
+omits `mangledName` entirely for three real shapes -- an uninstantiated
+function template, an uninstantiated class-template method, and a
+class-template pattern's static member -- and then reproduced the
+consequence through the real parser: `A::f`/`B::f` collapsed onto one
+`EntityId`, as did `C::S::v`/`D::S::v` through the variable path, because
+the `extern_c` branch deliberately forces `scope=()` and drops the
+signature. Fixed by gating the heuristic on the AST key's own *presence*
+rather than the fallback-widened value's truthiness, in both the function
+and the variable path; verified the narrowing cannot break real C linkage
+(`clang -x c` on a plain C header and `clang -x c++` on an `extern "C"`
+block both emit an explicit `mangledName` equal to the name, functions and
+variables alike), and pinned that as a negative control. castxml needs no
+counterpart -- verified directly that it emits nothing at all for an
+uninstantiated template, so its own absent-`mangled` attribute genuinely
+does mean C linkage.
+
+The transferable point, which generalizes past this one field: **every
+evidence-tier branch this constructor added that ERASES a discriminator
+(`scope=()` for `mangled`/`extern_c`, `leaf_name=""` for `mangled`) turns
+any over-broad predicate feeding it into an identity collapse, silently.**
+Those erasures are correct -- they exist to stop one entity fragmenting
+across evidence tiers, per the third/fourth Codex rounds above -- but they
+invert the usual failure mode: a wrong answer here merges two entities
+rather than splitting one, and merges are the direction no downstream
+consumer can recover from. A producer wiring a new caller into these
+constructors owes the same check this correction had to make after the
+fact: is the linkage/mangling signal I am passing *authoritative*, or is
+it a display fallback that happens to be true? The second slice's own
+`is_extern_c` field had been an inert inaccuracy for as long as it
+existed; only the carrier made it load-bearing.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the carrier
+also stopped being inert for a second, unrelated reason -- `dumper_
+hybrid.py` rewrites a declaration's `mangled` field in two places AFTER a
+producer already resolved its `entity_id` from the ORIGINAL spelling, and
+neither rewrite touched the carrier.** Reconciling a castxml ctor/dtor
+synthetic placeholder key to clang's real mangled name (`_merge_functions`)
+left the reconciled declaration's own `mangled` field correct while its
+`entity_id` still carried the synthetic, no-such-symbol-exists placeholder
+inside its own `"mangled"` tag; normalizing a Mach-O linker symbol's
+leading underscore (`merge_snapshots`) had the identical shape, just for a
+real-not-synthetic spelling. Before this slice, the same rewrite site
+already existed but touched an inert field -- nothing kept it in sync with
+anything, because nothing downstream read it as an identity. Fixed two
+ways, matching which side of the rewrite has a matching declaration to
+adopt: the ctor/dtor case adopts `match`'s entire, already-correctly-
+resolved `entity_id` wholesale (the clang-side declaration for the SAME
+real symbol); the Mach-O case has no "other side" to borrow from, so it
+rebuilds only the `"mangled"` tag's spelling via a new, general
+`model.identity.with_mangled_name(entity_id, new_mangled_name)` helper,
+which is a no-op on an `extern_c`/`sig`-tagged identity (or `None`) since
+neither was derived from the mangled spelling in the first place. Regression
+tests for both live in `tests/test_entity_id_carrier.py` (not `tests/
+test_dumper_hybrid.py`, despite testing that module's own merge logic --
+they're pinning THIS module's identity-carrier contract, the same reasoning
+the file's own module docstring already states for keeping every carrier
+test in one place), and both were confirmed to fail against the pre-fix
+`dumper_hybrid.py` before landing this correction.
+
+Next slice, in order (superseding the second slice's list, whose item (a)
+that slice landed and whose item (b) this slice's own finding above
+re-sequences): (c1) the storage v2 wire bridge -- `storage/entity_ids.py`'s
+`ScopePath`-preserving `to_dto()`/`from_dto()` plus the v1 migration
+adapter -- and, on top of it, real persistence of the `entity_id` carrier
+with a schema bump and the round-trip test the Design section names; then
+(c2) the `finding_identity.py` algorithm migration, which is also what
+gives `Change` an `EntityId` to be keyed on; then (b) the post-parse
+consumer migrations, now unblocked: `diff_filtering.py`'s
+`_find_opaque_types`/`_find_by_value_types`/`_root_type_name` and
+`type_reachability.py`'s eleven-plus-case ambiguity machinery, with their
+string-based helpers deleted in the same PR per the Acceptance criteria.
+
+**Landed (fourth slice, 2026-08-30): (c1)'s bridge half, not its
+persistence half.** `storage/entity_ids.py` gains
+`domain_entity_id_to_dto`/`domain_entity_id_from_dto`, a wire-schema-
+versioned (`DOMAIN_ENTITY_ID_SCHEMA_VERSION = 2`) pair operating on
+`model.identity.EntityId` directly -- kept deliberately separate from this
+module's own pre-existing `EntityId`/`OccurrenceId` packed-key wire DTO
+(unchanged, still the shape a caller that only needs a flat, orderable,
+key-producing identity reaches for; `storage/identity.py`'s re-export is
+therefore unaffected, exactly as the Design section's own note predicted).
+`domain_entity_id_to_dto` encodes `ScopePath` as an explicit list of typed
+segment records (`{"kind": "namespace"|"record"|"inline_namespace"|
+"anonymous"|"local_to_function", ...}`, one entry per segment, each
+carrying that segment's own fields -- `Record.access`, `InlineNamespace.
+version_tag`, `Anonymous.{kind,ordinal}`, and `LocalToFunction`'s own
+`owner`/`block_ordinal`, with `owner` itself recursively encoded as a full
+nested `EntityId` document, not a bare string, since `LocalToFunction.owner`
+is a whole `EntityId` by the primitive's own design (see that segment's own
+docstring in `model/identity.py`) -- rather than one rendered
+`qualified_name` string, which is exactly the lossy encoding the Design
+section's own finding named (a record nested in a record vs. the same
+bare names nested in a namespace both render `"A::B"`, and a
+`from_dict`-style reconstruction from that string alone cannot recover
+which one it was). `domain_entity_id_from_dto` dispatches on
+`schema_version`: an absent version or an explicit `1` routes through
+`_domain_entity_id_from_v1_dto`, a best-effort migration adapter matching
+the Design section's own stated shape (each `::`-separated
+`qualified_name` component becomes an untyped `Namespace` segment, the
+last becomes `leaf_name`, and a non-empty `discriminator` becomes a
+single-entry `extra` tuple) -- documented, in the test suite and not only
+in prose, as a lossy reconstruction never asserted equal to a fresh v2
+encoding of the same logical declaration. Tests in
+`tests/unit/storage/test_entity_id_domain_bridge.py`: a Hypothesis
+round-trip property (`from_dto(to_dto(x)) == x`) generating arbitrary
+`EntityId`s across every `ScopePath` segment kind, plus dedicated cases for
+the exact `Record`-vs-`Namespace` and `InlineNamespace`-vs-`Namespace`
+counterexamples the Design section's own finding raised (confirmed
+distinct both before and after the round trip, and confirmed to encode to
+*different* wire documents -- not merely to reconstruct correctly, which
+alone would not rule out two different domain objects sharing one
+document by coincidence), a case pinning that `Record.access` stays
+non-identity across the bridge the same way it is in-memory (the wire
+document itself still records the real access level; only equality
+ignores it), recursive `LocalToFunction.owner` round-trips (including an
+owner that is itself local to another function), the mangled-variable
+branch's degenerate `scope=()`/`leaf_name=""` shape, and malformed-input
+refusals (an unknown `schema_version`, an unrecognized segment `"kind"`
+tag, a non-mapping document, an unrecognized `ScopeSegment` type passed
+directly to `to_dto`). Full fast unit suite green; `mypy abicheck/` and
+`ruff` both clean; `tests/unit/storage/test_landed_surface.py`'s table
+check (this plan's storage-v2 sibling document,
+`docs/contribute/plans/storage-format-v2.md`) updated with the three new
+names.
+
+**Correction (2026-08-30, same day, Codex review on PR #949): three
+malformed-document leniency gaps in the reader half, all sharing one root
+cause -- a boundary door that coerced or defaulted instead of refusing, the
+same class of defect this module's own pre-existing `EntityId`/
+`OccurrenceId` guards exist to close, just not yet extended to the new v2
+bridge.** (1) `schema_version` was dispatched by `==` against `1`; since
+`bool` subclasses `int` and compares across `int`/`float` in Python,
+`True == 1` and `2.0 == 2`, so a document carrying either silently
+dispatched to a parser for a version it never declared (a `true`
+`schema_version` alongside real v2 `scope`/`extra` fields ran the *lossy
+v1 adapter*, discarding data the v1 shape cannot even express). Fixed by
+`_entity_id_schema_version`, which rejects any non-`int`-excluding-`bool`
+value outright rather than comparing it. (2) `ordinal`/`block_ordinal`
+were read via the existing `_instance_of(value, int, ...)` guard, which
+accepts `bool` for the identical subclassing reason -- so a document with
+`ordinal: true` and one with `ordinal: 1` reconstructed to equal,
+same-hash `Anonymous`/`LocalToFunction` segments, two structurally
+different wire values collapsing onto one identity. Fixed by
+`_ordinal_field`, a strict integer guard excluding `bool` for both fields.
+(3) `access`, `version_tag`, and `extra` were read via `.get(key, default)`
+even though the writer (`_domain_segment_to_dict`/`domain_entity_id_to_dto`)
+always emits every one of them regardless of value -- so a v2 document
+truncated or hand-edited to omit one of these silently read as "the
+producer had nothing to say" rather than "this document is malformed,"
+exactly the shape `storage.guards.row_sequence`'s own docstring already
+names as this package's central invariant. Fixed by reading all three via
+`_required_field`, matching how every other field in this bridge (`scope`,
+`kind`, `leaf_name`) was already read. New tests for all three in
+`tests/unit/storage/test_entity_id_domain_bridge.py`
+(`TestMalformedDocuments`), each starting from a real `domain_entity_id_to_dto`
+output and mutating exactly the field under test rather than a hand-typed
+fixture, confirmed to fail against the pre-fix reader.
+
+**Correction (2026-08-30, same day): the paragraph originally here
+overclaimed that no `entity_id` carrier field existed yet and that the
+carrier-field question was still unresolved -- both wrong.** The carrier
+field (`RecordType`/`EnumType`/`Function`/`Variable.entity_id`) was added
+by the THIRD slice, the day before this one, resolving the open question as
+option (a); this fourth slice's own opening line ("populated by both header-
+AST backends... schema-inert at the time: dropped before reaching the
+wire") already said so correctly two sections up. The error was writing
+this closing paragraph from the SECOND slice's own stale "what it doesn't
+do yet" framing instead of the current state. What this slice actually
+still does not attempt: "real persistence of the `entity_id` carrier with a
+schema bump," the second half of (c1) as originally scoped, stays open --
+that is what actually wires this bridge into `AbiSnapshot` serialization (a
+`SCHEMA_VERSION` bump and a real snapshot-level round-trip test). (c2) (the
+`finding_identity.py` algorithm migration) and (b) (the post-parse consumer
+migrations) remain open exactly as stated above. See the fifth slice below
+for the persistence half.
+
+**Landed (fifth slice, 2026-08-30): (c1)'s persistence half.** The
+`entity_id` carrier now round-trips through `serialization.py`
+(`SCHEMA_VERSION` 27 -> 28). `storage/entity_id_codec.py` gained
+`encode_entity_ids(d, snap)`/`decode_entity_id(raw)`, replacing the interim
+`drop_entity_ids` this section originally landed: `encode_entity_ids`
+cannot operate on the already-`dataclasses.asdict()`-ed snapshot dict alone
+the way this package's other codecs (`fact_codec.encode_fact_fields`) do,
+because `asdict()` recurses into a `ScopeSegment`'s own fields but loses
+which dataclass (`Namespace`/`Record`/...) produced them -- exactly the
+type tag `domain_entity_id_to_dto` needs. So it is given *both* the
+`asdict()`-ed dict and the original, still-typed `AbiSnapshot`, pairs each
+declaration list by position (`asdict()` preserves list order), and
+re-derives each declaration's wire-encoded `entity_id` from the ORIGINAL
+typed object rather than from what `asdict()` already flattened. A
+declaration with `entity_id is None` gets no key at all (sparse, matching
+`OccurrenceId.to_dict`'s existing convention), rather than an explicit
+`null` -- so a pre-persistence snapshot and a persisted one whose
+declarations never resolved an identity serialize identically.
+`snapshot_from_dict` wires `entity_id=decode_entity_id(f.get("entity_id"))`
+into all four reconstruction sites (`Function`, `Variable`, `RecordType` via
+`decode_record_facts`'s neighbor, and `_enum_type_from_dict`).
+`decode_entity_id` needs no schema-version-gated distinction the way
+`fact_codec.decode_fact` does (`Fact[T]`'s "predates the carrier" vs.
+"malformed" split): a missing/`None` `entity_id` is genuinely optional even
+on a snapshot written by the current build (not every declaration resolves
+one), so absence always means the same thing regardless of which side of
+v28 the snapshot was written on.
+
+**One AI-readiness hard-cap consequence, worth recording so it isn't
+rediscovered.** `serialization.py` was already at this repo's 2000-line
+hard cap before this slice (`load_bundle_facts`/`save_bundle_facts` are
+kept as long, single, `ruff format`-noncompliant lines specifically to stay
+under it -- a pre-existing, deliberate trade-off this slice found and
+preserved rather than "fixed": running `ruff format` on the whole file
+would reflow those two functions across ~20 more lines and push the file
+over the hard cap). New `entity_id` encode/decode call sites and the
+`SCHEMA_VERSION` history-comment entry were kept as terse as the existing
+convention allows, and `ruff format`/`ruff check` were run scoped to confirm
+no NEW formatting drift was introduced beyond that pre-existing, known
+exception -- not to "fix" it, which would have been a scope-creeping,
+cap-violating change bundled into an unrelated slice.
+
+*Tests.* `tests/test_entity_id_carrier.py`'s `TestCarrierIsNotPersisted`
+(third slice) is replaced by `TestCarrierIsPersisted`: a real
+`json.dumps`/`json.loads` round trip (not just the dict form) reconstructs
+an identical `EntityId` for all four carriers; the `Record`-vs-`Namespace`
+counterexample from the Design section's own finding survives the round
+trip at the WHOLE-SNAPSHOT level (not only in the storage-layer bridge's
+own unit tests from the fourth slice); a declaration with no resolved
+identity reloads as `None`, not a reconstructed guess; and a snapshot whose
+`schema_version` is pinned to 27 with `entity_id` keys stripped (simulating
+a genuine pre-v28 document, not merely an old in-memory object) reloads
+every carrier as `None` rather than raising. `tests/test_baseline_pinning.py`
+and `tests/test_serialization_roundtrip.py`'s own `SCHEMA_VERSION ==
+27` pins updated to 28. Full fast unit suite green; `mypy abicheck/` and
+`ruff check` clean; golden-marked tests green (a v27-stamped fixture
+snapshot reloads with `entity_id=None` for every declaration, exactly the
+backward-compatible degradation this slice's own design states -- no golden
+fixture needed regeneration).
+
+**Correction (2026-08-30, same day, Codex review on PR #949): the claim
+below that `snapshot_cache.py` needs no bump was wrong -- `_SNAPSHOT_CACHE_
+VERSION` bumped to `"22"`.** The original reasoning ("it caches parsed
+`AbiSnapshot` objects... no consumer reads this field yet") missed that
+`store_key`/`lookup_key` round-trip through `write_snapshot`/`load_snapshot`
+-- a real on-disk JSON write, not an in-memory object cache surviving one
+process's lifetime -- so a cache entry written before this slice really
+does have `entity_id=None` for every declaration, the same way an on-disk
+v27 snapshot does. The consequence the "no consumer reads it yet" argument
+missed: `snapshot_to_dict` stamps `converted["schema_version"] =
+SCHEMA_VERSION` unconditionally on every write, including a warm cache
+entry re-saved to a caller-visible file -- so a stale pre-this-slice cache
+entry would re-serialize claiming schema_version 28 while never having had
+the chance to resolve identities a genuine v28 extraction would. Exactly
+the same staleness shape the file's own pre-existing `v21` bump (`Function.
+is_compiler_generated`, schema v27) already documents and exists to
+prevent -- this slice missed applying its own established precedent to
+itself. Fixed by bumping `_SNAPSHOT_CACHE_VERSION` with a matching
+`v22` comment entry.
+
+**What this slice deliberately does not attempt.** (c2) (the `finding_identity.py` algorithm
+migration, which is also what gives `Change` an `EntityId` to key on) and
+(b) (the post-parse consumer migrations -- `diff_filtering.py`'s
+`_find_opaque_types`/`_find_by_value_types`/`_root_type_name` and
+`type_reachability.py`'s ambiguity machinery) remain the two open items
+before Phase 2 can be considered complete.
+
+**Correction (2026-08-30, same day, Codex review on PR #949): three
+findings, fixed in the same PR.** (1) `decode_entity_id` used `if not raw:
+return None` -- truthiness, not `raw is None` -- so a genuinely malformed
+wire value that happens to be falsy (`{}`, `[]`, `""`, `False`, `0`) was
+silently read as an honest "never resolved an identity" rather than
+reaching `domain_entity_id_from_dto`'s own validation to be refused. Fixed
+by testing `raw is None` specifically; regression test parametrized over
+all five bogus values in `tests/test_entity_id_carrier.py`. (2) and (3) were
+both `scripts/check_architecture.py` violations from *incidental*
+`ruff format` reflow of pre-existing, already-`ruff format`-noncompliant
+code the initial push happened to touch: `serialization.py`'s
+`debt-no-growth` gate (a stricter, separately-tracked adoption-debt ceiling
+of 1985 lines -- below the 2000-line AI-readiness hard cap this file was
+already sitting at) and a `tests/test_serialization_roundtrip.py`
+`new-test-size` violation (1200-line test-file cap) from unrelated
+multi-line reflows of long assertion lines that carried no functional
+change. Both fixed by reverting the incidental reflow (restoring the exact
+pre-existing single-line forms outside this PR's own touched lines) rather
+than "fixing" the formatting, which would have been unrelated scope creep
+bundled into this slice -- and, for `serialization.py` specifically, by a
+genuine simplification Codex's own finding prompted looking for:
+`decode_entity_id`'s four separate `entity_id=decode_entity_id(...)`
+keyword arguments (one inline at each of `Function`'s, `Variable`'s,
+`RecordType`'s, and `EnumType`'s own reconstruction site) collapsed into
+one new `decode_entity_ids(d, functions=funcs, variables=variables,
+types=types, enums=enums)` call, set post-construction (none of the four
+carrier-bearing dataclasses are frozen) -- a real reduction in
+`serialization.py`'s own footprint, not merely a line-count-driven
+rearrangement, since the four sites' near-identical one-line additions are
+exactly the kind of small, repeated wiring a single codec-owned helper
+should absorb. `encode_entity_ids` also gained a return value (returns `d`)
+so its own call site could fold back into the original single-statement
+`_sets_to_lists(encode_entity_ids(d, snap))` shape the pre-existing
+`_sets_to_lists(drop_entity_ids(d))` line already used, instead of a
+separate statement.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+over-broad-extern-C fix above closed one collision but left a sibling one
+open -- two uninstantiated function/method templates that share scope, leaf
+name, and an identical (possibly empty) ordinary parameter list, differing
+ONLY in template-parameter *kind*.** `template<class T> void f();` and
+`template<int N> void f();` are two distinct, legally-overloaded
+declarations (real C++ disambiguates them via explicit template arguments,
+e.g. `f<5>()`), but neither is `is_extern_c` (both are genuinely mangled by
+any real instantiation) nor do they differ in `param_types`/qualifiers --
+so `entity_id_for_function`'s `"sig"` fallback tuple, built only from the
+ordinary parameter list, still collapsed them (confirmed by direct
+compilation: `distinct: 1` of 2 declarations before this fix). Fixed by
+extracting each `FunctionTemplateDecl`'s own per-position
+parameter-KIND signature (`function_template_param_kinds` in
+`extract/headers/clang/functions.py` -- `"type"`/`"template"`/
+`"nontype:<type-spelling>"` per position, stopping at the first
+non-parameter child) at parse time (threaded through `_Decl`/`_walk`/
+`_categorize` in `dumper_clang.py`, set only on the direct `FunctionDecl`
+child of a `FunctionTemplateDecl`, never inherited further down) and
+folding it into `entity_id_for_function`'s new `template_param_kinds`
+parameter -- tagged (`"tmpl", *template_param_kinds`) and appended only
+when non-empty, so an ordinary non-template function's `extra` tuple is
+unchanged byte-for-byte. castxml needs no counterpart: it does not emit
+uninstantiated function/method template declarations as parseable
+snapshot entries at all (a different, pre-existing asymmetry between the
+two backends, not one this fix introduces or has to reconcile). Regression
+test in `tests/test_entity_id_carrier.py`
+(`test_live_clang_template_param_kind_discriminates_overloaded_templates`),
+confirmed to fail (collapsing to one `EntityId`) against the pre-fix
+`entity_id_for_function`.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+template-parameter-kind fix above still missed a second, sibling
+collision -- two legal overloads differing only in parameter
+*packness*.** `template<class T> void f();` and `template<class... T>
+void f();` share scope, leaf name, and an identical ordinary parameter
+list, and the first version of `function_template_param_kinds` recorded
+only parameter *kind* (`"type"`/`"template"`/`"nontype:..."`), so both
+still reduced to the identical `("type",)` -- reproduced end to end:
+`distinct: 1` of 2 declarations. Confirmed by direct compilation that
+clang tags a pack parameter with `isParameterPack: true` on all three
+parameter-node kinds (`TemplateTypeParmDecl`, `NonTypeTemplateParmDecl`,
+`TemplateTemplateParmDecl` alike), omitting the key entirely otherwise.
+Fixed by appending a trailing `"..."` to each discriminator entry when
+that flag is set, giving e.g. `"type"` vs. `"type..."`,
+`"nontype:int"` vs. `"nontype...:int"`. Regression test in
+`tests/test_entity_id_carrier.py`
+(`test_live_clang_template_param_packness_discriminates_overloaded_templates`),
+confirmed to fail against the pre-fix (kind-only) version.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the opposite
+hazard -- a non-semantic template-parameter RENAME changing identity.**
+`template<class T, T N> void f();` and `template<class U, U N> void
+f();` are the identical declaration under a pure rename, but clang's own
+`qualType` for the non-type parameter `N` spells its dependent type
+literally as the type parameter's own name (confirmed by direct
+compilation: `"T"` vs. `"U"` respectively), and the discriminator built
+directly from that spelling changed too -- reproduced end to end: the two
+revisions produced unequal `EntityId`s. Fixed by canonicalizing a
+non-type parameter's own declared type against the PRECEDING type
+parameters' names before joining into the `"nontype:"` entry, replacing
+each type-parameter name with its 0-based position
+(`_canonicalize_dependent_type_param_spelling`, a whole-word
+regex substitution so a name that is a substring of another, e.g. `T`
+inside `TT`, is never partially replaced) -- `("type", "nontype:T")` and
+`("type", "nontype:U")` both become `("type", "nontype:type-param-0")`.
+Verified this does not collapse a genuinely different non-type parameter
+type (`template<class T, int N>` still keeps `nontype:int`, distinct from
+either rename revision). Regression test in
+`tests/test_entity_id_carrier.py`
+(`test_live_clang_template_param_rename_does_not_change_identity`).
+
+A second finding from the same review round -- two overloads
+distinguished only by a `requires`-clause (e.g. `template<class T>
+requires C1<T> void f();` vs. the same constrained by `C2<T>`) still
+collide, since clang's own `ConceptSpecializationExpr` node (confirmed by
+direct compilation to appear as a `FunctionTemplateDecl` child right
+after its `TemplateTypeParmDecl`) carries no concept name or a
+resolvable reference to one anywhere in its own JSON subtree -- verified
+directly, not assumed: every key on the node and its
+`ImplicitConceptSpecializationDecl` child was inspected, and neither
+carries anything but synthetic AST ids and dependent-type placeholders
+(`type-parameter-0-0`). Recovering the concept's actual name would need
+either a different clang AST-dump mode/flag or the raw header source
+text sliced at the node's own `range` offsets -- and `_ClangAstParser`
+deliberately consumes only an already-parsed JSON tree (this module's own
+docstring), with no source text available to it. Recorded here as a
+**known gap** rather than attempted as a fragile source-offset hack: a
+`requires`-clause-only overload pair is the one template-overload shape
+this discriminator still cannot distinguish.
+
+**Correction (2026-08-29, same day, CodeRabbit review on PR #943): a third
+sibling collision -- a template-TEMPLATE parameter's own NESTED arity.**
+`template<template<class> class TT> void f();` and
+`template<template<class, class> class TT> void f();` are two more legal
+overloads sharing scope, leaf name, and an identical ordinary parameter
+list; the `TemplateTemplateParmDecl` branch recorded only the bare
+`"template"`/`"template..."` tag, with nothing encoding ITS OWN nested
+parameter list -- reproduced end to end: `distinct: 1` of 2 declarations.
+Confirmed by direct compilation that clang shapes a
+`TemplateTemplateParmDecl`'s own `inner` exactly like a top-level
+parameter list (its own `TemplateTypeParmDecl`/`NonTypeTemplateParmDecl`/
+nested `TemplateTemplateParmDecl` children), so the fix is a genuine
+recursion rather than a special case: `function_template_param_kinds` now
+delegates to a shared `_template_param_kinds_from_node` helper that runs
+identically over the top-level `FunctionTemplateDecl` and any nested
+`TemplateTemplateParmDecl`, each level getting its own independent
+`type_param_names` scope (a template-template parameter's own type
+parameters live at a different depth than the enclosing list's). A
+template-template parameter's entry now reads e.g.
+`"template(type,type)"` for two nested type parameters. Regression test
+in `tests/test_entity_id_carrier.py`
+(`test_live_clang_template_template_param_nested_arity_discriminates`).
+
+While landing that fix, also found and fixed an unrelated, pre-existing
+test bug in the SAME file: `_clang_parser`'s subprocess invocation named
+no `--target`, so it silently compiled for whichever platform the test
+happened to run on -- on a macOS CI runner, clang's own default target
+(Darwin/Mach-O) bakes an extra leading underscore directly into
+`mangledName` (`__ZN2ns4gVarE` rather than the Linux-target
+`_ZN2ns4gVarE`), which every assertion in this file was written against.
+Confirmed reproducible via cross-compilation (`--target=x86_64-apple-
+darwin` on this Linux sandbox reproduces the exact double-underscore
+spelling a real macOS CI run hit). Fixed by pinning
+`--target=x86_64-unknown-linux-gnu` on the one `clang` invocation this
+file's helpers share -- this module tests entity-identity logic, not
+host-linker-convention accidents, so every live-clang probe here now
+compiles for one fixed target regardless of which OS runs the test.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+dependent-rename canonicalization from two corrections ago missed a
+sibling case -- a non-type parameter dependent on a preceding
+template-TEMPLATE parameter, not just a type parameter.**
+`template<template<class> class TT, TT<int>* N> void f();` renamed to
+`UU` are the identical declaration, but a bare reference to a
+template-template parameter is not itself legal C++ (confirmed by direct
+compilation: it fails to parse) -- a real non-type parameter dependent on
+one always names a concrete instantiation like `TT<int>`, and clang's own
+`qualType` for `N` spells that instantiation using the template-template
+parameter's own name literally (`"TT<int> *"`/`"UU<int> *"`). The
+canonicalization loop tracked only `TemplateTypeParmDecl` names, so a
+template-template parameter's own name was never added to the
+substitution map -- reproduced end to end: the two renamed revisions
+produced unequal `EntityId`s. Fixed by appending a `TemplateTemplateParmDecl`'s
+own name to the same substitution list its type-parameter siblings use,
+so either kind at a given declaration position resolves to the identical
+`"type-param-N"` token. Regression test in `tests/test_entity_id_carrier.py`
+(`test_live_clang_template_template_param_rename_does_not_change_identity`).
+
+**Correction (2026-08-29, same day, CodeRabbit review on PR #943): an
+unrelated, pre-existing primitive bug in `qualified_name_segments.
+_walk_rewrite_strings` (the general closure-marker rewrite walk, not
+this phase's own discriminator work) -- a changed `init=False` field on
+a frozen dataclass was computed but then silently discarded.** Only
+`init=True` fields can be handed to `dataclasses.replace`, so a changed
+`init=False` field's rewritten value was dropped on the floor -- most
+visibly when it was the ONLY field on that dataclass to change (`replace`
+is then never even called, since the `replacements` dict stays empty),
+leaving that field holding stale, un-normalized `:line:col` content
+indefinitely. Fixed by applying a changed `init=False` field via
+`object.__setattr__` -- the same escape hatch a frozen dataclass's own
+`__post_init__` uses to set a derived field, and an established
+convention elsewhere in this codebase (`compatibility_evaluation_
+config.py`) for the identical need -- applied AFTER `replace` rebuilds
+the `init=True` fields, so a rewrite touching both kinds of field in one
+dataclass lands on the object this function actually returns. Regression
+test in `tests/test_lambda_identity_ordinal.py`
+(`test_a_changed_non_init_field_is_itself_rewritten`), confirmed to fail
+against the pre-fix walk (verified via `git stash` on just the source
+file).
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+dependent-rename hazard also reached the ORDINARY parameter list, not
+just non-type template parameters.** `template<class T> void f(T);` and
+`template<class U> void f(U);` are the identical declaration, but an
+ordinary parameter's raw spelling names the template parameter literally
+too (confirmed by direct compilation), and `entity_id_for_function`'s
+`param_types` were never canonicalized against the enclosing template's
+own type parameter names -- reproduced end to end: the two renamed
+revisions produced unequal `EntityId`s. Fixed by generalizing the
+canonicalization helper (renamed `canonicalize_type_param_references`,
+relocated from `extract/headers/clang/functions.py` to `model/identity.py`
+since both a model-layer function and an extract-layer one now need it,
+and ADR-061's import direction is extract -> model, never the reverse)
+and adding a new `type_param_names` parameter to `entity_id_for_function`,
+applied to each `param_types` entry before the existing cross-backend
+signature canonicalization. The producer side threads the enclosing
+function template's own TOP-LEVEL type/template-template parameter names
+through a new `function_template_type_param_names` (sharing
+`_template_param_kinds_from_node`'s exact walk with
+`function_template_param_kinds`, now returning `(kinds,
+type_param_names)`) and a new `_Decl.template_type_param_names` field,
+threaded through `_walk`/`_categorize` in `dumper_clang.py` identically to
+the existing `template_param_kinds` field. Regression test in
+`tests/test_entity_id_carrier.py`
+(`test_live_clang_template_param_rename_in_ordinary_param_does_not_change_identity`).
+
+A second finding from the same review round, in the castxml backend
+rather than this discriminator: castxml's own C-linkage recovery for a
+bogus pseudo-Itanium mangled name (the "case141" class of issue) checked
+only `exported_dynamic`, so a C API observed exclusively through a static
+archive's own export set (`exported_static`) left the bogus guess
+standing -- confirmed by direct compilation (a plain, unmarked `int
+foo(int);` gets `mangled="_Z3fooi"` from castxml's ambiguous-language-mode
+default) and by inspecting `dumper_castxml.py`'s own sibling
+variable-level override, which already checks the
+`exported_dynamic | exported_static` union. Fixed by extending
+`extract/headers/castxml/functions.py`'s function-level override to the
+identical union. Regression test in `tests/test_entity_id_carrier.py`
+(`test_live_castxml_honors_static_export_evidence_for_c_linkage`),
+confirmed to fail against the pre-fix override via `git stash` on just
+the source file.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): two more
+sibling collisions in the SAME rename-canonicalization mechanism.**
+
+First: a non-type parameter's own NAME had never been added to the
+substitution list, so a later non-type parameter referencing an earlier
+one (``decltype(N)`` for a preceding ``int N``) was left uncanonicalized
+-- confirmed by direct compilation and reproduced end to end: renaming
+`N` to `M` changed the `EntityId`. Fixed by appending a non-type
+parameter's own name to the shared substitution list too, once its own
+spelling is canonicalized (so its name is visible to LATER parameters,
+never to itself).
+
+Second, and more fundamental: the sequential (one name, one `re.sub`
+call, applied to the progressively-mutated string) substitution scheme
+itself had a self-inflicted collision -- if an earlier name substitution
+produces `"type-param-0"`, and a LATER parameter happens to be named
+literally `type` (a legal, unremarkable C++ identifier that just happens
+to match this function's own generated marker's prefix), that later
+substitution's `\btype\b` pattern matches the `"type"` INSIDE the
+already-generated token, corrupting it into `"type-param-1-param-0"` --
+so renaming an entirely unrelated, unused parameter changed the
+`EntityId` too. Reproduced end to end
+(`template<class T, class type, T x>` vs. the unused second parameter
+renamed to `U`). Fixed by replacing the sequential per-name scheme with
+ONE combined-alternation regex pass: Python's `re.sub` resumes scanning
+immediately after each match in the ORIGINAL string, never inside what
+it just substituted, so this class of collision cannot occur regardless
+of what any parameter happens to be named. The helper (renamed
+`canonicalize_type_param_references`, already relocated to
+`model/identity.py` in the correction above) now builds one
+`name -> index` dict and one compiled alternation pattern per call,
+rather than looping `re.sub` once per name.
+
+Regression tests for both in `tests/test_entity_id_carrier.py`
+(`test_live_clang_nontype_param_dependent_rename_does_not_change_identity`,
+`test_live_clang_rename_of_param_named_type_does_not_corrupt_a_prior_marker`),
+both confirmed to fail against the pre-fix (sequential, non-type-name-
+excluding) canonicalization via `git stash` on just the source files.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): a
+pre-existing bug in `dumper_clang.py`'s own linkage-state propagation
+(not new code from this phase, but only newly OBSERVABLE through the
+entity_id carrier this phase adds) -- a nested `extern "C++"` block
+inside `extern "C"` was misidentified as C linkage.** Confirmed by direct
+compilation that `extern "C" { extern "C++" { void cppfun(); } }` places
+a `language="C++"` `LinkageSpecDecl` directly inside a `language="C"`
+one, and clang genuinely mangles `cppfun` normally (`_Z6cppfunv`) -- real
+C++ linkage nested inside a C block, a legal and real shape. `_walk`'s
+`child_extern_c` computation was `extern_c or (kind == "LinkageSpecDecl"
+and node.get("language") == "C")` -- a sticky OR that never resets back
+to `False` for the inner block, so `cppfun` got `is_extern_c=True` and
+collapsed onto the bare `("extern_c",)` `EntityId`, colliding with every
+other C-linkage declaration. Verified this line is unchanged from
+`origin/main` (a genuinely pre-existing defect, not something this PR's
+own diff introduced), but fixed it here anyway since it directly affects
+identity correctness -- the exact class of thing this phase is about --
+and the fix is small and self-contained. Fixed by having a
+`LinkageSpecDecl` RESET the linkage state to its own declared `language`
+rather than only ever OR-ing a `True` in -- linkage specs don't stack,
+the innermost one wins, so a non-`LinkageSpecDecl` node simply inherits
+whatever is already in effect. Verified plain `extern "C"` and plain
+top-level C++ (no enclosing linkage spec at all) both still resolve
+correctly. Regression test in `tests/test_entity_id_carrier.py`
+(`test_live_clang_nested_cpp_linkage_inside_extern_c_is_not_extern_c`),
+confirmed to fail against the pre-fix sticky-OR propagation via `git
+stash` on just the source file.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): a hidden
+friend function/function-template's `EntityId` was resolved in the
+befriending class's scope, not the enclosing namespace it is actually
+injected into.** Per [namespace.memdef], a hidden friend (one with no
+prior declaration reachable by ordinary lookup) is a member of the
+*nearest enclosing namespace*, not of the class it is lexically written
+inside. Confirmed by direct compilation: clang rejects `struct A {
+template<class T> friend void f(T) {} }; struct B { template<class T>
+friend void f(T) {} };` as a **redefinition** of `f` -- proof the two
+hidden friend templates are the identical entity in the global namespace,
+not two distinct class-scoped ones. The clang backend's own scope-building
+walk is lexical, though: it pushes a `Record` segment for the enclosing
+class regardless of whether a nested declaration is a genuine member or a
+hidden friend, so each declaration's `scope_path` (and therefore its `sig`
+fallback `EntityId`, since neither gets a real mangled name as an
+uninstantiated template) wrongly still named its own befriending class
+(`Record("A")` vs. `Record("B")`) -- an identity collision in the opposite
+direction from every other fix in this phase: two genuinely identical
+declarations wrongly compared *unequal*, rather than two distinct ones
+wrongly compared equal. castxml does not have this bug: its `context`
+attribute for a hidden friend already points at the enclosing namespace
+element directly (confirmed with real castxml output), with the
+befriending class recorded only via a separate `befriending` attribute --
+exactly the split this fix brings the clang backend to. Fixed by adding
+`strip_record_scopes()` to `extract/headers/scope_segments.py` (drops
+every `Record` segment and every record-kind `Anonymous` segment -- ALL of
+them, not just the innermost, since a friend hidden inside nested classes
+is injected past every enclosing class -- keeping `Namespace`/
+`InlineNamespace`/an anonymous-*namespace* `Anonymous`/`LocalToFunction`
+unchanged) and applying it only to the `scope` argument
+`entity_id_for_function` receives for a hidden friend in
+`extract/headers/clang/functions.py`; `hidden_friend_owner` and every
+other use of `entry.scope_path` (display qualified name included) are
+untouched. Regression tests: `tests/test_scope_segments.py`'s
+`TestStripRecordScopes` (the primitive, in isolation) and
+`tests/test_entity_id_carrier.py`'s
+`test_live_clang_hidden_friend_template_resolves_in_namespace_scope` (the
+live-clang end-to-end case, confirmed to fail pre-fix via `git stash` on
+just the source files).
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+unmangled function-TEMPLATE identity fallback ignored a dependent return
+type, so two templates differing only in it collapsed onto one
+`EntityId`.** A function template's return type can itself depend on its
+own template parameter (`template<class T> typename T::x f(T);`) --
+confirmed by direct compilation that clang accepts both that declaration
+and its `typename T::y` sibling with no redefinition error, two real
+`FunctionTemplateDecl`s. `entity_id_for_function`'s `sig` fallback already
+folded ordinary parameters, const/volatile/ref-qualifier/variadic, and
+template-parameter kinds into `extra`, but never the return type, so the
+two templates shared every dimension and collided. Fixed by adding a
+`return_type` parameter, folded into `extra` as `("ret", <canonicalized
+spelling>)` -- placed BEFORE the existing `"tmpl"` block so it doesn't
+shift the fixed `extra[-1]`/`extra[-2]` tail position every existing
+`template_param_kinds` consumer already reads -- and ONLY when
+`template_param_kinds` is non-empty: an ORDINARY function can never
+legally overload solely by return type, so this is a no-op there,
+identical to why `finding_identity.normalized_signature` never folds
+return type in at all. Canonicalized identically to a dependent ordinary
+parameter type (`canonicalize_function_signature_param_type` then
+`canonicalize_type_param_references`), so a pure template-parameter
+rename reflected only in the return type still resolves to the same id.
+Regression test in `tests/test_entity_id_carrier.py`
+(`test_live_clang_dependent_return_type_discriminates_overloaded_templates`),
+confirmed to fail pre-fix via `git stash` on just the source files.
+
+**Correction (2026-08-29, same day, CodeRabbit review on PR #943): the
+frozen-dataclass rebuild `qualified_name_segments._walk_rewrite_strings`
+added for an `init=False` field's own rewrite mutated the caller's
+ORIGINAL object when no `init=True` field also changed.** `value =
+_dataclasses.replace(value, **replacements)` ran only `if replacements`,
+so when only `frozen_field_updates` was non-empty (the exact motivating
+case this rebuild exists for -- a changed `init=True` field with no
+sibling `init=False` change is the common path, but the reverse is what
+this mechanism was added to handle), `value` still named the caller's own
+original frozen instance, and the following `object.__setattr__` loop
+mutated it in place instead of a fresh copy -- a frozen dataclass silently
+becoming not-actually-immutable to its own caller. Fixed by rebuilding
+whenever EITHER dict is non-empty (`if replacements or
+frozen_field_updates`); `dataclasses.replace(value)` with no overrides
+still constructs a genuinely new instance. Regression test in
+`tests/test_lambda_identity_ordinal.py`'s
+`test_a_changed_non_init_field_is_itself_rewritten`, extended to assert
+`result is not original` and that `original`'s own field is unchanged
+after the rewrite, confirmed to fail pre-fix via `git stash` on just the
+source file.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+return-type canonicalization the previous correction added dropped a
+top-level by-value cv-qualifier that is a real overload discriminator for
+a function TEMPLATE.** `entity_id_for_function`'s new `return_type`
+handling reused `canonicalize_function_signature_param_type`, which
+deliberately drops a top-level by-value cv-qualifier because that
+qualifier is dropped from an ORDINARY function's own type (confirmed:
+`int f(int); const int f(int);` is a redefinition error). But confirmed
+by direct compilation that `template<class T> T f(T);` and `template
+<class T> const T f(T);` are two more real, legally-coexisting
+`FunctionTemplateDecl`s (`T (T)` vs. `const T (T)`) -- the opposite rule
+for a template's return type, so the reused function collapsed both onto
+`type-param-0`. Fixed by canonicalizing the return type through
+`canonicalize_type_name` instead (cross-producer spelling normalization
+only, keeps every cv-qualifier) before the same
+`canonicalize_type_param_references` rename-blind substitution.
+Regression test in `tests/test_entity_id_carrier.py`
+(`test_live_clang_return_type_top_level_cv_discriminates_overloaded_templates`),
+confirmed to fail pre-fix via `git stash` on just the source file; the
+prior dependent-return-type test
+(`test_live_clang_dependent_return_type_discriminates_overloaded_templates`)
+and its rename-invariance case both still pass unchanged.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): an ordinary
+member function nested inside a class template still changed identity on
+a pure rename of the ENCLOSING class template's own parameter.** Every
+prior correction in this phase threaded a directly-templated FUNCTION's
+own type-parameter names into `entity_id_for_function`, but `_walk`
+computed `child_template_type_param_names` as `own-names-if-
+FunctionTemplateDecl-else-()` -- resetting to empty for every other node
+kind, including a `ClassTemplateDecl`. So `template<class T> struct A {
+void f(T); };` renamed to `template<class U> struct A { void f(U); };`
+-- the identical declaration -- fingerprinted as a remove+add: `f` is an
+ordinary (non-template) `CXXMethodDecl`, never itself a
+`FunctionTemplateDecl`, so it never received the enclosing class
+template's own parameter names to canonicalize its dependent ordinary
+parameter type against. Confirmed by direct compilation.
+`ClassTemplatePartialSpecializationDecl` carries the identical shape
+(its own parameter list, then its own member pattern) and needs the same
+treatment -- also confirmed by direct compilation. Fixed by making
+`child_template_type_param_names` an ACCUMULATING value (like
+`in_template`), not a per-node reset: a `ClassTemplateDecl`/
+`ClassTemplatePartialSpecializationDecl` node's own names (via a new
+`extract.headers.clang.functions.class_template_type_param_names`,
+sharing `function_template_type_param_names`'s exact node-shape walk) are
+now APPENDED to whatever was already accumulated, and every other node
+kind simply inherits the incoming value unchanged instead of discarding
+it. A member function template nested inside a class template sees BOTH
+levels' names (verified: `template<class T> struct B { template<class U>
+void g(T, U); };` renamed at both levels still resolves to one id).
+Regression test in the new `tests/test_entity_id_template_discriminators.py`
+(split out of `tests/test_entity_id_carrier.py`, which had grown past the
+architecture gate's 1200-line test-file cap, purely to keep both files
+under it -- no test content or behavior changed by the split itself)
+(`test_live_clang_enclosing_class_template_param_rename_does_not_change_identity`),
+confirmed to fail pre-fix via `git stash` on just the source files.
+
+**Known gap raised (2026-08-29, same day, Codex review on PR #943, NOT
+fixed): an out-of-line member (function or static data member) template
+definition gets a different `EntityId` scope than its in-class
+declaration, colliding one entity into two.** Confirmed by direct
+compilation that clang emits two `FunctionTemplateDecl` nodes for
+`struct A { template<class T> void f(T); }; template<class T> void
+A::f(T) {}` -- one lexically nested inside `A`, one at the enclosing
+namespace's own lexical level carrying a `parentDeclContextId` pointing
+back at `A`'s node id, clang's own signal for the out-of-line
+definition's real semantic owner. `_walk` computes `scope`/`scope_path`
+purely from lexical nesting, with no `parentDeclContextId` handling
+anywhere in this codebase, so the two nodes get `scope=()` and
+`scope=(Record("A"),)` respectively for what is one entity;
+`parse_variables` has the analogous gap for an out-of-line class-template
+static data member. Unlike every other correction in this phase (each a
+small, local addition to one already-threaded parameter), this needs a
+NEW general-purpose facility: a typed, `ScopePath`-valued sibling of the
+existing `dumper_clang_expr._index_decl_id_qualified_names` (which
+already indexes every decl id to a flat qualified-name STRING for a
+different consumer -- a flat string cannot be losslessly converted back
+into a typed `ScopePath`, exactly the ambiguity `ScopePath` exists to
+prevent), threaded through both `parse_functions` and `parse_variables`,
+with further edge cases (an out-of-line member of a nested class, of a
+class-template specialization, and whether castxml has the identical
+gap) needing their own verification before landing. Recorded as a known
+gap in `docs/contribute/known-gaps.md` rather than attempted as a
+narrow, risky patch under this PR's own scope; the corresponding review
+thread was left open by design, the same as the `requires`-clause gap
+above.
+
+**Correction (2026-08-29, same day, real Windows CI failure on PR #943):
+the castxml C-linkage export-evidence override never fired on the
+Windows CI leg, since it was gated on Itanium's own `"_Z"` mangling
+prefix.** Both `extract.headers.castxml.functions.parse_function_element`
+and `dumper_castxml.parse_variables`'s override (recovering `extern "C"`
+identity when castxml's own guess is ambiguous, matching a confirmed
+bare-name export) checked `mangled.startswith("_Z")` before considering
+the export evidence. A real Windows CI run failed two tests
+(`test_live_castxml_populates_every_kind`, `test_live_castxml_honors_
+static_export_evidence_for_c_linkage`) because the Windows-targeting
+castxml install decorates a guessed C-linkage function/variable with its
+own MSVC `"?...@@..."` prefix instead -- `extern "C" int c_var;` got
+`mangled="?c_var@@3HA"`, and a plain (no-`extern`) `int foo(int x);` got
+`"?foo@@YAHH@Z"` -- so the `"_Z"` check silently never matched on that
+platform, leaving the bogus MSVC-decorated symbol standing even though
+`exported_dynamic`/`exported_static` already confirmed the bare name.
+Nothing else in the override's condition is ABI-specific: `mangled not
+in (exported_dynamic|exported_static)` already means "not itself a real
+observed export" regardless of what guessed prefix produced it. Fixed by
+dropping the `"_Z"`-prefix gate from both overrides entirely, making
+them recognize the identical evidence on every mangling scheme
+castxml's underlying compiler can guess. Regression test in
+`tests/test_entity_id_carrier.py`
+(`test_live_castxml_export_override_recognizes_non_itanium_mangling_prefixes`)
+-- since this sandbox has no MSVC-targeting castxml to reproduce the
+real failure directly, it runs a real (Linux) castxml dump and then
+rewrites its own `mangled` attributes to the exact MSVC-decorated
+strings the Windows CI log showed, confirmed to fail pre-fix via `git
+stash` on just the source files. Both originally-failing tests
+(unmodified) were re-verified to still pass on Linux.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+rename-blind substitution treated an EXPLICITLY globally-qualified name
+as a reference to a template parameter merely because it collided in
+spelling.** `canonicalize_type_param_references`'s whole-word
+substitution had no way to distinguish a genuine dependent reference
+from a name that only happens to share a spelling with the template
+parameter but is actually disambiguated to the global namespace by a
+leading `::`. Confirmed by direct compilation: `namespace T { struct X
+{}; } template<class T> void f(::T::X);` keeps `::T::X` verbatim in
+clang's own `qualType` (it does not resolve to the parameter), yet the
+substitution rewrote it to `::type-param-0::X` regardless -- so renaming
+the (here, unused) parameter to `U` left the second revision's `::T::X`
+untouched (since `"U"` doesn't match), producing unequal `EntityId`s for
+the identical declaration. Fixed by adding a `(?<!::)` negative
+lookbehind to the substitution pattern -- a bare `::` prefix (global
+scope, no preceding name) is the only legal spelling a name can appear
+after in this position, so no alternation is needed. Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_globally_qualified_name_is_not_canonicalized_as_a_param_ref`),
+confirmed to fail pre-fix via `git stash` on just the source file; every
+existing rename-invariance test in that module (ordinary dependent
+references, none globally-qualified) still passes unchanged.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the same
+whole-word substitution also mistook a MEMBER-ACCESS expression's member
+name for a template-parameter reference merely because it collided in
+spelling.** `struct S { int N; }; template<int N> void
+f(decltype(S{}.N));` (and the pointer form `((S*)0)->N`) keeps the
+member name `N` verbatim in clang's own `qualType` regardless of what
+the (here, unused) non-type template parameter is actually named --
+confirmed by direct compilation for both `.` and `->` forms -- yet the
+substitution rewrote it to `type-param-0` anyway, so renaming the
+parameter to `M` left the second revision's `S{}.N`/`((S*)0)->N`
+untouched, producing unequal `EntityId`s for the identical declaration.
+Same collision shape as the globally-qualified-name correction directly
+above, just for `.`/`->` instead of `::`. Fixed by extending the
+substitution pattern with `(?<!\.)(?<!->)` negative lookbehinds
+alongside the existing `(?<!::)` one. Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_member_access_name_is_not_canonicalized_as_a_param_ref`,
+parametrized over both the `.` and `->` forms), confirmed to fail
+pre-fix via `git stash` on just the source file for both parametrized
+cases; every existing test in that module still passes unchanged.
+`abicheck/model/identity.py` sits exactly at the AI-readiness
+production-file soft cap (800 lines) after this fix -- the two related
+lookbehind comments were condensed to fit rather than granted a debt-
+ledger entry, since both fixes are genuinely small and the file was
+already at 797 lines before this correction.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): a function
+template's TRAILING return type was discarded entirely, collapsing two
+legal, coexisting overloads onto one identity.** `_return_type`
+(`extract.headers.clang.functions`) scanned a function `qualType` for
+the first top-level `(` (the start of the parameter list) and returned
+everything before it -- correct for an ordinary leading return type, but
+clang spells a trailing-return-type function's leading part as the bare
+placeholder `"auto"`, confirmed by direct compilation: `template<class
+T> auto f(T) -> typename T::x;` and the sibling overload returning
+`typename T::y` both carry the literal `qualType` `"auto (T) -> typename
+T::x"`/`"auto (T) -> typename T::y"`. So both the model's own
+`Function.return_type` field and (for an uninstantiated template with no
+mangled name) the `EntityId`'s "sig" fallback read `"auto"` for both
+overloads, discarding the one thing that actually distinguishes them.
+Fixed by resuming the same bracket-depth scan past the parameter list's
+matching `)` and, when a top-level `->` follows (never inside
+`<...>`/`[...]`, so a nested `std::function<T(int)->int>`-shaped alias
+cannot be mistaken for one), returning the spelling after it instead of
+the leading placeholder. Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_trailing_return_type_discriminates_overloaded_templates`),
+confirmed to fail pre-fix via `git stash` on just the source file;
+non-template, non-trailing, and function-pointer-return-type cases were
+independently checked to keep their existing spellings (`int g(int)`
+still reads `"int"`, `auto f(int) -> int*` still reports
+`return_pointer_depth=1`).
+
+**Correction (2026-08-29, same day, Codex review on PR #943): a nested
+template-template parameter's own non-type parameter could reference an
+ENCLOSING parameter's name, but the recursive descent started that
+nested scope's substitution empty.** `template<class T, template<T>
+class TT> void f();` is valid C++ -- confirmed by direct compilation:
+clang parses it without error, and the nested, unnamed
+`NonTypeTemplateParmDecl` inside `TT`'s own parameter list carries
+`qualType` `"T"`, the literal enclosing type parameter's name. But
+`_template_param_kinds_from_node`'s recursive call for a
+`TemplateTemplateParmDecl` (`extract.headers.clang.functions`) passed no
+enclosing names into the nested walk, so
+`canonicalize_type_param_references` had nothing to substitute `"T"`
+against inside that nested scope -- renaming the enclosing parameter to
+`U` produced `"template(nontype:T)"` vs. `"template(nontype:U)"` for the
+otherwise-identical declaration, the same collision shape the earlier
+enclosing-class-template-parameter correction fixed for an ordinary
+member, just one level further inward. Fixed by threading an
+`enclosing_type_param_names` parameter through the recursive descent,
+seeded once ahead of the nested list's own accumulated names so a nested
+parameter never shadows an enclosing one's substitution position.
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_nested_template_template_param_sees_enclosing_names`),
+confirmed to fail pre-fix via `git stash` on just the source file; every
+existing template-template-parameter discriminator test in that module
+(kind/packness/nested-arity collisions, the `TT`/`UU` rename case) still
+passes unchanged.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): two
+templates differing only in the DECLARATOR SHAPE of a dependent return
+type still collapsed onto one identity, after the trailing-return-type
+fix above.** `template<class T> typename T::x f(T);` and `template<class
+T> typename T::x (*f(T))(T);` both compile with no redefinition error
+(confirmed by direct compilation) -- the second returns a pointer to a
+function, and clang spells this as a SPIRAL declarator, `typename T::x
+(*(T))(T)`: the first top-level parenthesized group (`(*(T))`) is not
+itself the function's parameter list -- it wraps a pointer declarator
+around the real one, `(T)`, nested one level deeper; the trailing `(T)`
+belongs to the RETURNED function type, not to the outer function. The
+fixed `_return_type` (from the trailing-return-type correction above)
+still treated the first top-level group as the parameter list
+unconditionally, so both overloads' return type -- and, for an
+uninstantiated template, `EntityId` -- collapsed onto the identical
+`"typename T::x"`. Fixed by detecting when a function's `qualType` has
+MORE than one top-level parenthesized group (the ordinary,
+single-group case is left byte-for-byte unchanged): in that case the
+real parameter list is located by recursing into the first group's own
+interior until a nesting level is reached with no further top-level
+group following it (the recursion bottoms out there, generalizing to
+arbitrarily deep pointer/reference-to-function nesting, not just one
+level), and its contents are excised (parens kept, as an empty marker)
+so the remaining text -- including the `*`/`&` and any further wrapping
+groups -- becomes the return-type discriminator. Verified the pointer
+and reference forms stay distinct from each other and from the ordinary
+case: `typename T::x (*f(T))(T)` -> `"typename T::x (*())(T)"`,
+`typename T::x (&f(T))(T)` -> `"typename T::x (&())(T)"`, `typename T::x
+f(T)` -> `"typename T::x"` (unchanged). Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_function_pointer_return_declarator_discriminates_overloaded_templates`),
+confirmed to fail pre-fix via `git stash` on just the source file; every
+existing return-type/trailing-return-type discriminator test in that
+module still passes unchanged, and no other clang-backend test in the
+unit suite regressed.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+spiral-declarator fix directly above was itself too general -- assuming
+EVERY function `qualType` with more than one top-level parenthesized
+group was a function-pointer/reference-returning spiral broke two other
+real, confirmed cases.** (1) A dependent return type containing its OWN
+parenthesized sub-expression, `decltype((T::x))`: `template<class T>
+decltype((T::x)) f(T);` and the `T::y` sibling both compile with no
+redefinition error, but the fix's first-group recursion treated
+`((T::x))` as a spiral wrapper and excised its interior, discarding the
+operand entirely and collapsing both overloads onto one `EntityId`. (2)
+An ordinary function's exception specification, `noexcept(expr)`: `int
+f() noexcept(cond());`'s `qualType` is genuinely
+`"int () noexcept(cond())"` -- a real two-top-level-group spelling -- and
+the fix appended the whole `noexcept(cond())` group onto `return_type`
+as if it were return-type text, which would fabricate a spurious
+return-type-changed finding whenever only the exception-specification
+condition changes. Both confirmed by direct compilation. Root cause: the
+FIRST top-level group is not reliably identifiable as "the parameter
+list" or "not the parameter list" from local shape alone (a leading `*`/
+`&` sigil test was considered and rejected -- it would have fixed the
+`noexcept` case but not the `decltype` one, since neither of that case's
+groups starts with a sigil). Replaced with a simpler, more general rule:
+the function's own real top-level parameter list is the LAST top-level
+parenthesized group that is not itself an exception-specification group
+(checked via a `noexcept`/`throw` keyword immediately preceding it) --
+everything before that group, verbatim, is the return type; the earlier
+recursive `_excise_own_param_list` helper is no longer needed at all and
+was deleted. Verified this single rule now resolves all four cases
+together: ordinary (`int (int)` -> `"int"`), trailing-return-type
+(`auto (T) -> typename T::x` -> `"typename T::x"`), spiral pointer/
+reference (`typename T::x (*(T))(T)` -> `"typename T::x (*(T))"`, the
+`(&...` form distinctly `"typename T::x (&(T))"`), dependent-parens
+(`decltype((T::x)) (T)` -> `"decltype((T::x))"`), and `noexcept`
+(`int () noexcept(cond())` -> `"int"`). Regression tests added in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_dependent_return_type_own_parens_discriminates_overloaded_templates`,
+`test_live_clang_noexcept_expression_group_is_not_mistaken_for_return_type`),
+both confirmed to fail against the prior commit's code via `git stash`
+and pass post-fix; every existing return-type discriminator test in that
+module (including the spiral-declarator one directly above, whose exact
+expected string this correction also updates -- `"typename T::x (*(T))"`
+rather than the previous fix's excised `"typename T::x (*())(T)"`, since
+the new rule no longer excises the nested parameter list at all) still
+passes.
+
+**Correction (2026-08-29, same day, real Windows CI failures on
+PR #943): two more real Windows-only failures in the `EntityId` carrier
+test suite itself, this time in the test infrastructure rather than the
+production code.** (1) `TestResolverIsOnlyCalledByAProducer`/
+`TestMangledRewritesKeepTheCarrierInSync` (both new AST-scanning tests
+this phase's own second slice added) read every `abicheck/**/*.py` file
+via `Path.read_text()` with no explicit encoding -- `str.decode`/
+`open()`'s platform default on Windows is the host codepage, not UTF-8,
+so this raised `UnicodeDecodeError` on the first source file containing
+a byte sequence the codepage can't decode; a real Windows CI run failed
+both scanner test classes this way. Fixed by passing
+`encoding="utf-8"` explicitly at both call sites. (2)
+`test_live_castxml_populates_every_kind` failed for the identical
+root-cause class the earlier castxml-mangling-prefix correction fixed in
+production code, but here in the test's OWN castxml invocation:
+`_castxml_parser` (unlike its `_clang_parser` sibling, which already
+pins `--target=x86_64-unknown-linux-gnu` for exactly this reason) passed
+no target at all, so on Windows CI the underlying castxml install
+targeted the host by default and mangled the probe header's `gVar` as
+MSVC's `"?gVar@ns@@3HA"` instead of the Itanium `"_ZN2ns4gVarE"` the
+test's assertion is hardcoded against -- confirmed by a real Windows CI
+failure log. Fixed by pinning the identical `--target=...` flag on the
+castxml invocation too (castxml forwards an unrecognized flag straight
+to its internal clang compiler, so it is the same flag reached a
+different way). Both fixes verified by re-running the affected tests
+locally (Linux, where the bug was invisible either way -- UTF-8 is
+already the default codepage there, and this sandbox's castxml already
+targets Itanium by default) and by confirming this repository's own
+mypy/ruff/architecture gates and the full `clang`/`castxml`-marked test
+subset stay green.
+
+**Correction (2026-08-29, same day, Codex and CodeRabbit independently
+on PR #943): two more real return-type collisions the "scan from the
+end" fix above still missed.** (1) Codex: a TRAILING return type that
+itself contains parentheses, `auto f(T) -> decltype((T::x))` and the
+`T::y` sibling, both compile with no redefinition error, but locating
+"the" parameter-list group BEFORE ever checking for a top-level `->`
+(the previous fix's own order of operations) picked the `decltype`'s own
+`((T::x))` group -- the LAST top-level group, and not preceded by
+`noexcept`/`throw` -- as if it were the parameter list, reducing both
+overloads to the identical `"auto (T) -> decltype"` and discarding the
+dependent operand entirely. (2) CodeRabbit: a function-pointer/reference
+return type's OWN parameter list is real, distinguishing content, but
+"scan from the end, pick the last non-exception-spec group" picked the
+RETURNED function's parameter list (`(int)`/`(double)` in `typename S::x
+(*f(T))(int)` vs. `...(double)`) as if it were `f`'s own, discarding it
+entirely and reducing both overloads to the identical `"typename S::x
+(*(T))"` -- the exact distinguishing content the ORIGINAL (pre-"scan
+from the end") recursive-excision design preserved, before that design
+was replaced to fix the `noexcept`/`decltype` cases. Both confirmed by
+direct compilation. Root cause, in both cases: "scan from the end" is
+not a single correct rule for every shape -- a trailing return type must
+never be group-parsed at all (its own parentheses are never a parameter
+list), and a spiral function-pointer/reference return type's REAL
+parameter list is always nested ONE LEVEL INSIDE the first group, not
+the last group at the top level. Fixed by re-introducing a three-step
+resolution, each step checked in order and never falling through once
+one matches: (1) a top-level `->` (checked FIRST, before any group
+scan) takes everything after it verbatim, so a trailing return type's
+own parentheses are never mistaken for a parameter list; (2) a spiral
+declarator (detected by the first top-level group's own interior
+starting with a `*`/`&` sigil) uses the ORIGINAL recursive
+`_excise_own_param_list` design, which correctly preserves the returned
+function type's own parameter list while excising only the nested,
+duplicate copy of `f`'s own; (3) otherwise, scan from the end for the
+last non-exception-spec group, exactly as the previous fix already
+established for the ordinary/dependent-parens/`noexcept` cases. Verified
+all eight cases together (ordinary, trailing-return, spiral pointer,
+spiral reference, dependent-parens, `noexcept`, spiral-with-differing-
+returned-parameters, and trailing-return-containing-parens). Regression
+tests added in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_trailing_return_type_containing_parens_discriminates_overloaded_templates`,
+`test_live_clang_spiral_declarator_preserves_returned_function_parameter_list`),
+both confirmed to fail against the prior commit's code via `git stash`
+and pass post-fix; the spiral-declarator test from the earlier round had
+its own expected string updated back to the excised form
+(`"typename T::x (*())(T)"`) since excision is back. This correction
+also split `_return_type` (now `return_type`) and its three private
+helpers out of `extract/headers/clang/functions.py` into a new sibling
+leaf module, `extract/headers/clang/return_type.py` -- the accumulated
+docstrings pushed `functions.py` past the AI-readiness gate's 800-line
+production soft cap, and this primitive was already self-contained with
+exactly one external call site, matching this package's own established
+"prefer extending a split-out module over growing the parent toward the
+cap" convention.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): a QUOTED
+LITERAL sharing a template parameter's spelling was rewritten by the
+same rename-blind substitution as if it were a reference to that
+parameter.** `template<char C> struct Literal {}; template<int N> void
+f(Literal<'N'>);` keeps the char literal `'N'` verbatim in clang's own
+`qualType` -- confirmed by direct compilation -- it does not resolve to
+the (here, unused) non-type parameter, yet
+`canonicalize_type_param_references`'s whole-word substitution rewrote
+it to `Literal<'type-param-0'>` anyway, so renaming the parameter to `M`
+left the second revision's `Literal<'N'>` untouched, producing unequal
+`EntityId`s for the identical declaration -- the identical collision
+shape the globally-qualified-name and member-access corrections earlier
+in this file fixed, just for a quoted literal instead of `::`/`.`/`->`.
+Fixed by adding `quoted_literal_spans` (a new leaf module,
+`model/identity_literals.py` -- `identity.py` was already at the
+800-line cap after the return-type corrections above, so this stayed a
+sibling module rather than inline) and skipping any substitution match
+whose start falls inside a single- or double-quoted literal span
+(backslash-escapes honored). Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_quoted_literal_is_not_canonicalized_as_a_param_ref`),
+confirmed to fail pre-fix via `git stash` on just the source file; every
+existing rename-invariance test in that module still passes unchanged.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): a MEMBER
+FUNCTION TEMPLATE's own non-type parameter could reference an ENCLOSING
+CLASS template's parameter, one level further out than the earlier
+nested-template-template correction, and `function_template_param_kinds`
+had no seeding for that scope at all.** `template<class T> struct A {
+template<T N> void f(); };` is valid C++ -- confirmed by direct
+compilation -- and clang's `qualType` for the member template's own
+non-type parameter `N` spells its type literally as the enclosing class
+template's own parameter name, `"T"`. But `function_template_param_kinds`
+took no `enclosing_type_param_names` parameter at all (unlike
+`class_template_type_param_names`, which already exists to fix the
+identical hazard for an ORDINARY, non-template member), so renaming the
+enclosing parameter to `U` produced `"nontype:T"` vs. `"nontype:U"` for
+the otherwise-identical declaration. Fixed by adding an
+`enclosing_type_param_names` parameter (mirroring the nested-template-
+template-parameter fix already threaded through
+`_template_param_kinds_from_node`'s own recursion) and passing
+`dumper_clang.py`'s already-accumulated `template_type_param_names`
+(the enclosing scope, available at the exact point a `FunctionTemplateDecl`
+node is visited, before its own names are folded in) into the call.
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_enclosing_class_template_param_rename_does_not_change_member_template_identity`),
+confirmed to fail pre-fix via `git stash` on just the source files;
+every existing template-parameter discriminator test in that module
+still passes unchanged.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): a
+POINTER-TO-MEMBER-FUNCTION return type is another spiral declarator, but
+its wrapper prefix is a qualified `C::*`, not a bare `*`/`&`, and the
+spiral-detection sigil check from two corrections ago only recognized
+the latter.** `template<class T> int (C::*f(T))(int);` and the sibling
+returning a pointer to a member function taking `double` instead both
+compile with no redefinition error -- confirmed by direct compilation
+that clang spells this as `int (C::*(T))(int)`, whose first group's
+interior, `C::*(T)`, does not start with a bare `*`/`&`. The
+leading-sigil check (`first_interior[:1] in ("*", "&")`) missed this
+shape entirely, falling through to the scan-from-the-end branch and
+discarding the returned member function's own parameter list -- the
+identical hazard the ordinary pointer/reference spiral fix already
+closed, just for a class-qualified sigil. Fixed by replacing the
+single-character check with `_is_spiral_wrapper_prefix`: it locates the
+first group's own nested top-level group (if any) and checks whether
+the text BEFORE it is exactly `*`/`&`/`&&`, or ends with `::*` (any
+qualified, possibly-templated class name followed by the pointer-to-
+member sigil) -- both confirmed correct against the full existing case
+set (ordinary, spiral pointer/reference, dependent-parens, `noexcept`,
+trailing-return, member-pointer). Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_member_pointer_spiral_return_declarator_preserves_returned_function_parameter_list`),
+confirmed to fail pre-fix via `git stash` on just the source file; every
+existing return-type discriminator test in that module still passes
+unchanged.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): a
+function-pointer-returning function's own OUTER exception specification
+leaked into `return_type` through the SPIRAL branch's trailing group.**
+`template<class T> int (*f(T))(int) noexcept(noexcept(T()));`'s
+`qualType` is `"int (*(T))(int) noexcept(noexcept(T()))"` -- confirmed
+by direct compilation -- and the spiral branch appends
+`qualtype[first_end:]` (everything after the wrapper group) verbatim,
+which here includes the trailing `noexcept(noexcept(T()))` text on top
+of the returned function's own real `(int)` parameter list. Left
+unstripped this pollutes `return_type` with exception-specification
+text, which would fabricate a spurious return-type-changed finding
+whenever only the exception-specification condition changes, not the
+actual return type -- the identical hazard the ordinary, non-spiral
+`noexcept` correction closed, here for the spiral branch's own trailing
+group instead of its parameter-list-selection logic. Fixed by adding
+`_strip_trailing_exception_spec`, applied to the spiral branch's tail
+before appending it: it finds the last top-level group in the tail and,
+if that group is immediately preceded by `noexcept`/`throw` AND sits at
+the very end of the string, truncates the tail to remove it (falling
+back to a plain regex strip for a bare, parenthesis-free `noexcept`).
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_spiral_return_strips_outer_exception_spec`), confirmed
+to fail pre-fix via `git stash` on just the source file; every existing
+return-type discriminator test in that module still passes unchanged.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+previous correction's own premise was backwards, and it left a distinct,
+still-real leak unfixed.** Direct compilation (`static_assert(!noexcept(
+f(0)))` plus `static_assert(noexcept((*(decltype(f(0)))(0))))` for
+`template<class T> int (*f(T))(int) noexcept(noexcept(T()));`) proves the
+trailing `noexcept(noexcept(T()))` in that qualType belongs to the
+RETURNED function pointer type, not to `f` itself -- the previous
+correction's `_strip_trailing_exception_spec` removed it anyway, silently
+collapsing two overloads differing only in that condition onto the same
+reported return type (the identical class of hazard the arrow-first and
+scan-from-end corrections above exist to prevent, just reintroduced here
+by this fix). Separately, fresh review on this same head found the
+*genuinely* outer case Codex originally raised had never actually been
+fixed: for `template<class T> int (*g(T) noexcept(noexcept(T())))(int);`
+(qualType `"int (*(T) noexcept(noexcept(T())))(int)"`, confirmed by
+direct compilation that `g(0)` itself IS noexcept there), the exception
+specification sits INSIDE the wrapper's own first top-level group --
+`_excise_own_param_list`'s `len(spans) == 1` base case -- not in the
+tail `_strip_trailing_exception_spec` was applied to; a complex condition
+is itself parenthesized, so it produces a SECOND top-level span in that
+same interior exactly like a genuine further-nested spiral level does
+(compare `int (*(*h(T))(T))(T)`'s first_interior, `*(*(T))(T)`, whose
+second span `(T)` is real, kept return-type content) -- a span-count-only
+rule cannot tell the two apart, so `g`'s complex own condition took the
+"further wrapper, recurse" branch and both the spec AND `g`'s own
+parameter list leaked through verbatim. Fixed by removing
+`_strip_trailing_exception_spec` entirely (the spiral branch's `tail` is
+now kept exactly as `qualtype[first_end:]`, unmodified -- confirmed real
+return-type content, never something to strip) and instead
+discriminating inside `_excise_own_param_list` on what immediately
+follows the wrapper's own nested parameter list: a new
+`_LEADING_EXCEPTION_SPEC_RE` match (a leading `noexcept`/`throw` keyword,
+regardless of how many parenthesized groups its own condition
+introduces) discards that remainder outright as the CURRENT level's own
+spec, while anything else that starts with `(` is real further-nested
+return-type content, recursed into as before. Two regression tests in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_spiral_trailing_exception_spec_belongs_to_returned_function`,
+replacing the now-incorrect `test_live_clang_spiral_return_strips_outer_
+exception_spec`, and `test_live_clang_spiral_return_own_exception_spec_
+excised`), each confirmed to fail pre-fix via `git stash` on just the
+source file; every existing return-type discriminator test in that
+module (including the double-spiral and member-pointer-spiral cases
+above) still passes unchanged. `mypy abicheck/` clean (515 files),
+`ruff check`/`ruff format --check` clean on both touched files,
+`check_architecture.py` 0 errors, `check_ai_readiness.py` 0 new errors.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): a function
+returning a Clang Blocks-extension block pointer collapsed the same way
+the pointer/reference and pointer-to-member spiral cases above once did,
+for a sigil `_is_spiral_wrapper_prefix` never covered.** Confirmed by
+direct compilation (`clang -fblocks -x c++ -Xclang -ast-dump=json`):
+`int (^f(int))(int);` is spelled `"int (^(int))(int)"`, structurally
+identical to the pointer-declarator spiral case but with `^` instead of
+`*` -- `_is_spiral_wrapper_prefix` only recognized `*`/`&`/`&&` and a
+qualified `<class>::*` prefix, so this fell through to the scan-from-end
+branch and discarded the returned block's own parameter list, exactly
+the hazard the member-pointer-spiral fix above already closed for a
+different sigil: `int (^f(int))(int);` and `int (^g(int))(double);` both
+reduced to the identical `"int (^(int))"` before this fix. Fixed by
+adding `^` to `_is_spiral_wrapper_prefix`'s recognized prefix set.
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_block_pointer_spiral_return_declarator_preserves_returned_function_parameter_list`,
+using a local `_clang_blocks_parser` helper since this is the only case
+in this module needing `-fblocks` enabled), confirmed to fail pre-fix via
+`git stash` on just the source file and pass post-fix; every existing
+return-type discriminator test in that module still passes unchanged.
+`mypy abicheck/` clean, `ruff check`/`ruff format --check` clean,
+`check_architecture.py` 0 errors.
+
+**Correction (2026-08-29, same day, CodeRabbit review on PR #943): a
+dependent return type containing a quoted literal with an unbalanced
+paren character corrupted the top-level paren scan itself.** Confirmed
+by direct compilation: `template<class T> decltype("(") f(T);`'s
+`qualType` is `'decltype("(") (T)'` -- the literal's own `(` character
+was counted as real declarator structure by `_top_level_paren_spans`'s
+naive bracket-depth counter (which has no concept of quoted text), so
+its running depth count from the opening `(` at `decltype(` never
+returned to zero before the string ended, swallowing the real trailing
+`(T)` parameter-list group along with everything else and reducing
+`return_type` to the bare `"decltype"` -- a `")"`-literal sibling
+(`decltype(")") f(T);`) happened to produce a different, but equally
+wrong, truncation, so the two were *also* distinguishable by accident,
+which is why this needed a repository review to surface rather than
+being caught by any existing test asserting an exact expected value. A
+second claim in the same review round -- that
+`canonicalize_type_param_references`'s `quoted_literal_spans` helper
+mishandles a raw string literal's `R"(...)"` delimiters -- was
+investigated and found NOT reproducible against real clang output:
+direct compilation of `template<class T, decltype(R"(T)") N> void f();`
+shows clang's own printed `qualType` for `N` is `"decltype(\"T\")"` --
+the raw-string prefix/delimiter never survives into the printed type at
+all, since clang's type printer always re-renders a string literal's
+*value* using ordinary quoted-string syntax, not its original source
+spelling. Every call site of `quoted_literal_spans`/
+`canonicalize_type_param_references` operates only on clang-derived
+`qualType` text, so a raw-string delimiter is not a real input this code
+path can ever see; no fix applied for that half, and no regression test
+added for an input that cannot occur. Fixed the confirmed half by adding
+`quoted_literal_spans` (`abicheck/model/identity_literals.py`, `extract
+-> model`, ADR-061's allowed direction) as a skip-list to both
+`_top_level_paren_spans` and `_find_top_level_arrow`: a literal span is
+now hopped over entirely when tracking bracket/paren depth, rather than
+having its contents inspected character-by-character. Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_string_literal_in_return_type_does_not_confuse_paren_scan`),
+confirmed to fail pre-fix via `git stash` on just the source file and
+pass post-fix; every existing return-type discriminator test in that
+module still passes unchanged. `mypy abicheck/` clean (515 files),
+`ruff check`/`ruff format --check` clean, `check_architecture.py` 0
+errors (confirming the new `extract -> model` import introduces no
+cycle).
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+spiral-declarator sigil check alone was too permissive, matching a
+`decltype` operand's own unrelated expression syntax.** Confirmed by
+direct compilation: `template<class T> decltype(*(typename T::x *)0)
+f(T);`'s `qualType` is `"decltype(*(typename T::x *)0) (T)"` -- a
+dereferenced C-style cast, not a declarator, whose first top-level
+group's interior (`*(typename T::x *)0`) nonetheless starts with the
+bare sigil `*` that `_is_spiral_wrapper_prefix` treats as a
+function-pointer-return marker. The check fired, and
+`_excise_own_param_list` discarded the entire dependent operand,
+collapsing this and a legal `T::y` sibling onto the identical
+`"decltype (*()0) (T)"`. Fixed by requiring `_is_spiral_wrapper_prefix`
+to also validate what follows the sigil's first nested group: nothing,
+the original function's own exception specification, or a
+further-nested spiral level's own parameter list (verbatim `(...)`) are
+all genuine declarator continuations; anything else (here, the bare
+token `0`) is expression text, not a declarator, and the check now
+returns `False` for it, falling through correctly to the scan-from-end
+branch, which keeps the entire dependent operand verbatim as
+distinguishing return-type content. Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_decltype_dereferenced_cast_is_not_mistaken_for_spiral_declarator`),
+confirmed to fail pre-fix via `git stash` on just the source file and
+pass post-fix; every existing return-type discriminator test in that
+module (spiral pointer/reference/member-pointer/block-pointer cases
+included) still passes unchanged. `mypy abicheck/` clean, `ruff check`/
+`ruff format --check` clean, `check_architecture.py` 0 errors.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): a trailing
+GNU `__attribute__((...))` clause was mistaken for the function's real
+parameter list, and separately leaked verbatim into a spiral
+declarator's return type.** Confirmed by direct compilation:
+`int f(int) __attribute__((sysv_abi));`'s `qualType` is `"int (int)
+__attribute__((sysv_abi))"` -- the attribute clause's own argument
+group (`((sysv_abi))`) is a second top-level span, and the fallback
+branch's scan-from-end picked it as "the last group not preceded by
+`noexcept`/`throw`", swallowing the real parameter list `(int)` into
+what was reported as the return type (`"int (int) __attribute__"`
+instead of `"int"`). Separately, `template<class T> int (*f(T))(int)
+__attribute__((sysv_abi));`'s spiral-branch tail (kept verbatim
+otherwise, since an exception specification there is real,
+distinguishing return-type content per the earlier correction above)
+carried the attribute text straight through too (`"int (*())(int)
+__attribute__((sysv_abi))"` instead of `"int (*())(int)"`). Unlike an
+exception specification -- part of the function's TYPE since C++17 --
+a GNU attribute is never part of the type: it doesn't affect overload
+resolution or type identity, so both hazards needed fixing, and neither
+the same way as an exception spec. Fixed by (1) extending
+`_EXCEPTION_SPEC_KEYWORD_RE` (the fallback branch's own group-exclusion
+check) to also exclude a group immediately preceded by
+`__attribute__`, and (2) adding `_strip_trailing_gnu_attribute`, applied
+to the spiral branch's tail, which repeatedly strips one or more
+trailing `__attribute__((...))` clauses outright (never keeping them,
+unlike the exception-spec tail case). Regression test in
+`tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_trailing_gnu_attribute_does_not_leak_into_return_type`),
+covering both the ordinary scan-from-end case and the spiral case,
+confirmed to fail pre-fix via `git stash` on just the source file and
+pass post-fix; every existing return-type discriminator test in that
+module still passes unchanged. `mypy abicheck/` clean, `ruff check`/
+`ruff format --check` clean, `check_architecture.py` 0 errors.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+previous correction's own "strip every trailing attribute" rule was
+itself wrong -- it can silently erase a real, ABI-breaking
+calling-convention difference on the RETURNED function of a spiral
+declarator.** Confirmed by direct compilation on an `i386` target
+(where the distinction is observable; both collapse to the platform
+default on x86-64, which is why the previous correction's own
+`sysv_abi` probe never caught this): `int (__attribute__((stdcall))
+*h())();` and `int (*hc())();` produce DIFFERENT qualTypes --
+`"int (*())() __attribute__((stdcall))"` vs. `"int (*())()"` -- for a
+genuine ABI difference (stdcall vs. cdecl disagree on stack-cleanup
+responsibility), which the previous correction's
+`_strip_trailing_gnu_attribute`, applied unconditionally to the spiral
+branch's tail, silently erased. Worse, direct compilation also confirms
+this attribute CANNOT be reliably attributed to "the outer function" by
+position alone: writing the identical attribute at the very END of the
+whole declaration instead of on the returned pointer explicitly
+(`int (*h())() __attribute__((stdcall));`) produces the BYTE-IDENTICAL
+qualType, so clang's own printer offers no textual way to tell which
+function a trailing spiral attribute binds to. Given that ambiguity,
+fixed by reverting the spiral branch's tail to being kept fully
+verbatim again (no attribute stripping at all) -- the same treatment
+exception specifications already get there, and for the same reason:
+erring toward reporting a difference that turns out to be the outer
+function's own is a strictly safer failure mode for an ABI checker than
+silently erasing a real one. The FALLBACK (scan-from-end) branch's own
+fix -- excluding an attribute-preceded group from being mistaken for
+the real parameter list -- remains correct and unchanged; an ordinary
+(non-spiral) function's own trailing attribute was never ambiguous (it
+sits in the group's own suffix, never the prefix that becomes
+`return_type`) and continues to be excluded naturally, with no special
+stripping needed. `_strip_trailing_gnu_attribute` and its
+`_TRAILING_ATTRIBUTE_KEYWORD_RE` are removed entirely as dead code.
+Regression tests in `tests/test_entity_id_template_discriminators.py`:
+the previous single test is split into
+`test_live_clang_ordinary_functions_own_trailing_attribute_does_not_leak_into_return_type`
+(unchanged behavior, kept as its own regression) and
+`test_live_clang_spiral_returns_own_calling_convention_attribute_is_preserved`
+(new, using a local `_clang_i386_parser` helper since the distinction
+needs a 32-bit x86 target), the latter confirmed to fail against the
+previous (over-eager stripping) commit via `git stash` on just the
+source file and pass post-fix; every existing return-type discriminator
+test in that module still passes unchanged. `mypy abicheck/` clean,
+`ruff check`/`ruff format --check` clean, `check_architecture.py` 0
+errors.
+
+**Correction (2026-08-29, same day, CodeRabbit review on PR #943): a
+relational/shift operator inside a paren-wrapped non-type template
+argument permanently corrupted the bracket-depth counter both scanners
+share.** Confirmed by direct compilation: `template<class T>
+std::enable_if_t<(sizeof(T) < 4), int> f(T);`'s qualType is
+`"std::enable_if_t<(sizeof(T) < 4), int> (T)"` -- the OLD
+`_top_level_paren_spans` tracked bracket depth only at the outer
+scanning level (switching to a paren-only inner loop once a "(" was
+seen with bracket already 0, never touching bracket state again until
+that inner loop's own parens closed): the relational `<` here was
+reached with bracket already at 1 (from `enable_if_t<`'s own opening),
+so it never entered that inner loop at all and instead incremented the
+SAME bracket counter to 2, which the qualType's one remaining `>` could
+only ever bring back down to 1 -- permanently stuck above zero, so the
+real trailing `(T)` was never recognized as a top-level group at all,
+and `return_type` retained the whole string verbatim (including a
+sibling declaration's trailing `noexcept`), corrupting both functions'
+identity. The identical corruption affected `_find_top_level_arrow` when
+the relational operator appeared in a PARAMETER instead: `auto
+f(std::enable_if_t<(sizeof(T) < 4), int>) -> T;`'s arrow was never
+found, falling back to the bare placeholder `"auto"`. Fixed by
+unifying bracket-depth and paren-depth tracking into ONE pass in both
+scanners: a bare `<`/`>` is only ever counted as a bracket while paren
+depth is ALSO zero (i.e. not currently inside any already-open
+parenthesized group) -- this matters because a non-type template
+argument containing a relational/shift operator must, per the grammar,
+be wrapped in its own parens to disambiguate it from the closing `>`,
+so once such a paren group has opened, any `<`/`>` inside it can only be
+that operator, never a genuine template bracket, regardless of what
+unrelated `<...>` surrounds the whole expression -- while a paren group
+already open for an UNRELATED reason (e.g. the relational operator's own
+wrapping parens) still correctly tracks its OWN "(" and ")" balance via
+paren depth, independent of bracket state, so it closes correctly and
+returns bracket-tracking control to the outer scan afterward. Regression
+test in the new `tests/test_entity_id_return_type_discriminators.py`
+(split out of `tests/test_entity_id_template_discriminators.py`, which
+had grown past the architecture gate's 1200-line test-file cap -- no
+test content changed by the split itself) --
+`test_live_clang_relational_operator_in_template_argument_does_not_corrupt_bracket_depth`,
+covering both the paren-scan and arrow-scan cases, confirmed to fail
+against the pre-fix code via `git stash` on just the source file and
+pass post-fix; every existing return-type discriminator test still
+passes unchanged. `mypy abicheck/` clean, `ruff check`/`ruff format
+--check` clean, `check_architecture.py` 0 errors.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): the
+remainder-based spiral-wrapper check has an irreducible blind spot for
+an EMPTY remainder, closed with a more general rule instead of another
+remainder heuristic.** Confirmed by direct compilation:
+`decltype(&(S::x)) f();`'s qualType is `"decltype(&(S::x)) ()"` -- an
+address-of a parenthesized member-access expression, whose leading `&`
+sigil and EMPTY remainder after its own nested group (`(S::x)`) is
+BYTE-FOR-BYTE indistinguishable, by the remainder check alone, from a
+genuine reference-returning spiral declarator with no parameters (`int
+(&f())();`, qualType `"int (&())()"`) -- both are `<sigil>(<content>)`
+with nothing following. No refinement of "what follows the group" can
+ever close this specific shape, since there is nothing following in
+either case; the two are only distinguishable by what's INSIDE the
+group (a type vs. an arbitrary expression), which plain text scanning
+cannot determine in general. Fixed with a different, SOUND signal
+instead of attempting to refine the remainder check further: a group
+whose immediately preceding text (no space, exactly as clang always
+prints it) is the bare token `decltype` is ALWAYS that operator's own
+parenthesized operand, never a declarator wrapper, regardless of what
+the operand's own text starts with -- this closes the address-of case
+here, the earlier dereferenced-cast case, and (by the same reasoning)
+any future construct sharing the identical shape, in one general rule
+rather than adding a third sigil- or remainder-specific patch.
+`_is_spiral_wrapper_prefix` now takes the group's own preceding text as
+a second parameter to check this before its existing sigil/remainder
+checks (which remain, as a second line of defense, for any construct
+other than `decltype` this hasn't been confirmed to need). Regression
+test in `tests/test_entity_id_return_type_discriminators.py`
+(`test_live_clang_decltype_address_of_expression_is_not_mistaken_for_spiral_declarator`),
+confirmed to fail against the pre-fix code via `git stash` on just the
+source file and pass post-fix; every existing return-type discriminator
+test still passes unchanged. `mypy abicheck/` clean, `ruff check`/`ruff
+format --check` clean, `check_architecture.py` 0 errors.
+
+**Correction (2026-08-29, same day, Codex review on PR #943): a
+QUALIFIED MEMBER-TEMPLATE name is one qualifier keyword past what the
+existing `::`/`.`/`->` exclusions reach.** Confirmed by direct
+compilation: `struct Base { template<class T> static int N(); };
+template<int N, class S> void f(decltype(S::template N<int>()));` keeps
+`S::template N<int>()` verbatim in clang's own qualType regardless of
+the non-type parameter `N`'s own name -- but `canonicalize_type_param_
+references`'s existing `(?<!::)` lookbehind (which already protects the
+plain `S::N` shape) doesn't reach this `N`, since it's separated from
+`::` by the literal `template` keyword and a space, not adjacent to it.
+Substituting it anyway fingerprinted a pure rename of the unrelated
+outer non-type parameter (`N` -> `M`) as a remove+add, since the
+member-template call's own raw text is identical either way. Fixed by
+adding a fourth fixed-width negative lookbehind, `(?<!::template )`, to
+the same combined pattern the `::`/`.`/`->` exclusions already share.
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_qualified_member_template_name_is_not_canonicalized_as_a_param_ref`),
+confirmed to fail against the pre-fix code via `git stash` on just the
+source file and pass post-fix; every existing rename-invariance test
+still passes unchanged. `identity.py`'s own docstrings condensed further
+to stay at the AI-readiness gate's 800-line production cap after this
+addition (no wording removed beyond redundant restatement). `mypy
+abicheck/` clean, `ruff check`/`ruff format --check` clean,
+`check_architecture.py` 0 errors.
+
+**Correction (2026-08-30, same day, Codex review on PR #943): a
+USER-DEFINED LITERAL SUFFIX (`'x'_tag`) is a fifth hazard the existing
+literal exclusion doesn't reach, since it sits OUTSIDE the quoted
+literal span rather than inside it.** Confirmed by direct compilation:
+`struct X { char v; }; constexpr X operator""_tag(char c) { return
+{c}; }; template<int _tag> void f(decltype('x'_tag));` keeps `'x'_tag`
+verbatim in clang's own qualType regardless of the non-type parameter
+`_tag`'s own name -- the existing quoted-literal exclusion in
+`canonicalize_type_param_references` checks whether a candidate
+match's start falls INSIDE a literal span (`'x'`), but a UDL suffix
+(`_tag`) is the token immediately AFTER the literal's closing quote,
+outside every recorded span, so it wasn't excluded and got substituted
+like an ordinary identifier. Fixed by also excluding any match whose
+start coincides exactly with a literal span's own end index (a UDL
+suffix always attaches with no space directly after the closing quote,
+per the language grammar, so this is a precise, not heuristic, test).
+Regression test in `tests/test_entity_id_template_discriminators.py`
+(`test_live_clang_user_defined_literal_suffix_is_not_canonicalized_as_a_param_ref`),
+confirmed to fail against the pre-fix code via `git stash` on just the
+source file and pass post-fix; every existing rename-invariance test
+still passes unchanged. `identity.py`'s own docstrings condensed
+further still to stay at the 800-line production cap after this
+addition. `mypy abicheck/` clean, `ruff check`/`ruff format --check`
+clean, `check_architecture.py` 0 errors.
+
+**Landed (sixth slice, 2026-08-30): a first, bounded piece of (c2), not
+all of it.** (c2) has two stated deliverables (see the fourth slice's own
+"Next slice" note above): the `finding_identity.py` algorithm migration
+itself, and giving `Change` an `EntityId` to key on. This slice lands only
+the first half of the first deliverable. `finding_identity.
+resolve_function_identity`'s per-parameter canonicalization -- previously
+a second, independently-maintained `canonicalize_type_name(p.type)` call,
+duplicating rather than reusing the cross-producer-spelling/cv-qualifier
+logic `entity_id_for_function`'s own `"sig"` fallback branch already
+established -- now calls `model.signature_normalization.
+canonicalize_function_signature_param_type` directly, the same primitive.
+Not a pure refactor: that primitive additionally drops a top-level
+BY-VALUE cv-qualifier (`void f(int)`/`void f(const int)` name the same
+function per the C++ standard's own linkage rules), which
+`canonicalize_type_name` deliberately does not -- so a DWARF-only,
+non-mangled function whose parameter merely gained or lost a top-level
+`const` no longer fragments into two NORMALIZED-tier identities. A
+*pointee* cv-qualifier (`char *` vs. `const char *`) remains genuinely
+distinguishing either way; both directions are pinned by new tests in
+`tests/test_finding_identity.py`
+(`test_by_value_cv_qualifier_no_longer_distinguishes_overloads`,
+`test_pointee_cv_qualifier_still_distinguishes_overloads`). The
+mangled-name-is-genuine determination (`is_real_mangled_name`/
+`normalize_mangled_name`) stays owned by `finding_identity.py`, unchanged
+-- `model/identity.py`'s own docstring already records why moving it would
+reverse the required `compare -> model` import direction (`entity_id_for_
+function`'s contract only ever needs an already-vetted mangled name as
+input, never `finding_identity`'s own validation logic). Full fast unit
+suite green; `mypy abicheck/` and `ruff check`/`ruff format --check`
+clean.
+
+**What this slice deliberately does not attempt.** `resolve_variable_
+identity` takes no `param_types` argument at all, so it has nothing
+equivalent to delegate (variables have no signature-shaped discriminator
+to canonicalize). Giving `Change` an `EntityId` to key on -- (c2)'s other,
+larger deliverable, which touches `checker_types.Change`,
+`resolve_change_identity`, and the `diff_symbols.py`/`diff_filtering.py`
+call sites that construct a `Change` -- is not attempted here; neither is
+(b), the post-parse consumer migrations (`diff_filtering.py`'s
+`_find_opaque_types`/`_find_by_value_types`/`_root_type_name` and
+`type_reachability.py`'s ambiguity machinery). Both remain open, and
+**no consumer may read the `entity_id` carrier field itself yet** --
+this slice recomputes the signature discriminator from `Function`'s own
+raw fields on every call, the same "one algorithm, not a cached value"
+discipline the carrier's own design note states, rather than reading the
+carrier `Function.entity_id` may already hold. Next slice, in order:
+give `Change` an `EntityId` (closing (c2)), then the post-parse consumer
+migrations (b), per the fourth slice's own sequencing note above, which
+this slice does not otherwise revise.
+
+**Landed (seventh slice, 2026-08-30): `Change` gains its own `entity_id`
+carrier, populated at every `diff_symbols.py` function-diff call site --
+not yet the exhaustive-population or consumer halves of (c2)/(b).**
+`checker_types.Change` gains `entity_id: EntityId | None = field(default=
+None, kw_only=True)`, appended last per the file's own established
+per-field-`kw_only` convention (`Change` is public API; see that
+convention's own comment, condensed in the same commit to make room under
+`checker_types.py`'s zero-slack `debt.yaml` `no_growth` pin). Semantics:
+the OLD side's `Function.entity_id` when it exists, else the NEW side's --
+mirroring `Change.symbol_binding`'s own already-documented old-side
+convention, rather than inventing a new rule. Wired at every
+function-level call site in `diff_symbols.py` where the producing
+`Function` object(s) are already in scope: `_check_removed_function` (both
+branches), `_check_return_type_change`, `_check_params_change`,
+`_check_ref_qualifier_change`, `_check_linkage_change`, the
+`_check_contract_attributes_change`'s three sites, `_check_exception_spec_
+change`, `_check_vtable_index_change`, `_check_inline_transitions`'s two
+sites, the `FUNC_ADDED` site in `_diff_functions` (new side, since there is
+no old side), and `_detect_newly_deleted_functions` (old side's, via
+`f_old_any.entity_id or f_new.entity_id`, since `f_old_any` -- present only
+when the symbol persisted before gaining `= delete` -- can be `None`).
+`diff_helpers.bool_transition` (backing the noexcept/virtual/explicit/
+variadic checks) gains a matching `entity_id: EntityId | None = None`
+parameter, passed through to both `Change(...)` constructions unchanged --
+it has no declaration of its own to derive one from, so resolving it stays
+the caller's job.
+
+**What this slice deliberately does not attempt**, named explicitly rather
+than left to be discovered: (1) the *other* family of `Change(...)`/
+`make_change(...)` construction sites -- variable-diff, type/enum/platform/
+versioning detectors -- even though several of those already construct
+`Change` from a `RecordType`/`EnumType`/`Variable` that also carries its
+own `.entity_id` (a ~400-site total population, per the scoping
+investigation this slice's own PR ran before implementing); (2)
+`finding_identity.resolve_change_identity`/`_change_discriminator` reading
+`Change.entity_id` at all -- both functions still key entirely on
+`change.symbol`/`change.qualified_name`/flat value fields, unchanged by
+this slice, so **no consumer may read this carrier field yet**, the
+identical staging the model-layer `entity_id` carriers (`Function.
+entity_id` et al.) already went through. Verified via a new, real
+`compare()`-level regression suite (`tests/test_change_entity_id_carrier.py`)
+rather than only unit-testing the private `_check_*` helpers directly:
+FUNC_RETURN_CHANGED/FUNC_REMOVED/FUNC_ADDED/FUNC_NOEXCEPT_ADDED each pin the
+carrier's value end to end, plus a no-producer-`entity_id` case confirming
+`Change.entity_id` stays honestly `None` rather than fabricating one. Full
+fast unit suite green; `mypy abicheck/` and `ruff check`/`ruff format
+--check` clean; `check_architecture.py` 0 new errors (`checker_types.py`
+and `diff_symbols.py` both land at or under their existing `debt.yaml`
+baselines; `diff_helpers.py` -- not itself debt-tracked, but sitting
+exactly at the architecture gate's general 800-line production ceiling --
+required the identical "trim existing verbose comments to make room"
+treatment `checker_types.py` needed, condensing `TypeMap`'s and
+`type_map_key`'s own pre-existing docstrings rather than growing past it).
+Next slice, in order: `resolve_change_identity`/`_change_discriminator`
+consuming `Change.entity_id` (the true completion of (c2)), then (b), the
+post-parse consumer migrations -- exhaustive `Change.entity_id` population
+beyond the function-diff path is a separate, larger follow-on this
+sequencing does not schedule.
+
+**Landed (eighth slice, 2026-08-31): exhaustive function-diff population,
+plus `resolve_change_identity` consuming `Change.entity_id` -- the true
+completion of (c2).** Two parts, landed together since the first is what
+made the second worth doing. First, the same old-else-new `entity_id`
+fallback reached every remaining function-backed `Change` construction
+site the seventh slice's own scoping investigation had found but not yet
+wired: `diff_hidden_friends.py` (`HIDDEN_FRIEND_ADDED`/`REMOVED`, both the
+matched-pair `bool_transition` call and the two single-sided `make_change()`
+sites), `diff_param_qualifiers.py` (`PARAM_RESTRICT_CHANGED`,
+`PARAM_BECAME_VA_LIST`/`LOST_VA_LIST`), `diff_symbols.py`'s own
+`_diff_ctor_overload_ambiguity` (`CTOR_OVERLOAD_AMBIGUITY_RISK`, a
+single-sided new-side-only site), and the auxiliary
+`param_defaults`/`param_renames`/`pointer_levels`/`method_access`/
+`func_deprecated`/`func_override_specifier` detectors -- ten sites in
+total, found and fixed across four review rounds (each fix drew a fresh
+"still missing a sibling site" finding until a full audit of every
+`make_change()`/`Change()` call in `diff_symbols.py` and its split-out
+sibling modules, not just the named sites, actually closed the class).
+Second, `EntityId` gained its own `.key` property (`model/identity.py`) --
+a flat, collision-safe string (`_packed`, a local duplicate of
+`storage.entity_ids._packed`'s own audited length-prefixing scheme, since
+`model` may not import `storage`), excluding every `compare=False` payload
+field (`Record.access`) so two `==` segments produce the same key.
+`finding_identity.resolve_change_identity` folds `change.entity_id.key` in
+as a new `entity:<key>\x1f<discriminator>` alias, qualified with the
+discriminator like every other alias there so two distinct findings on the
+same entity never collide -- **additive only**: never promoted to
+`primary_id`/tier, so every existing suppression rule and canonical finding
+ID is bit-for-bit unchanged (`tests/test_canonical_finding_id*.py` pin
+that). Deliberately conservative rather than replacing the CANONICAL tier's
+mangled-name basis outright: `EntityId.key`'s cross-release stability is
+not yet established the way a persisted wire identity would need to be
+(`Anonymous`/`LocalToFunction`'s own ordinals are parse-order-only, not
+cross-revision, by their own documented design), so promoting it to
+`primary_id` now would risk silently reshaping every stored suppression
+rule's matching behavior -- exactly the class of risk this slice's own
+scoping investigation flagged as needing a separate, explicit design
+decision rather than a rushed migration. Tests: `tests/
+test_model_identity.py::TestEntityIdKey` (collision-safety across sibling
+scope-segment variants, the `extra`-tuple boundary-forgery case in the same
+spirit as `storage.entity_ids`'s own audited collision test, `Record.
+access` exclusion, `LocalToFunction` recursion) and `tests/
+test_change_entity_id_carrier.py::TestResolveChangeIdentityConsumesEntityId`
+(the alias's presence/absence and non-collision, through `compare()` +
+`resolve_change_identity` end to end) plus one regression test per newly-
+wired site in `tests/test_change_entity_id_carrier.py`, each confirmed to
+fail against the pre-fix code. Full fast unit suite green; `mypy
+abicheck/` and `ruff check`/`ruff format --check` clean;
+`check_architecture.py` 0 errors (`finding_identity.py`, `diff_symbols.py`,
+and `model/identity.py` all land at or under their `debt.yaml`/general
+800-line baselines, each requiring the same "condense existing verbose
+docstrings to make room" treatment prior slices needed). Remaining Phase 2
+items unchanged by this slice: exhaustive `entity_id` population beyond
+the function-diff path, the post-parse consumer migrations, and promoting
+the new `entity:` alias into a real alias-match reconciliation tier once
+`EntityId.key`'s stability question above is resolved.
+
+**Landed (ninth slice, 2026-09-01): `entity_id` reaches the non-`diff_types.py`
+tail of exhaustive population, plus one hardening attempt explicitly not
+taken.** First part: every remaining `make_change()`/`bool_transition()`
+call site in `diff_layout.py`, `diff_vtable_layout.py`, and
+`diff_symbols_variables.py` now carries `entity_id` -- all ten sites
+across those three files (`diff_layout.py`'s six layout-descriptor findings,
+`diff_vtable_layout.py`'s two vtable-group findings,
+`diff_symbols_variables.py`'s `VAR_ACCESS_CHANGED`/`WIDENED` and
+`VAR_ALIGNMENT_CHANGED`), each keyed off the two matched `RecordType`/
+`Variable` objects already in scope at the call site
+(`old_rec.entity_id or new_rec.entity_id`, following the seventh/eighth
+slice's old-preferred/new-fallback convention). `diff_symbols.py`'s own
+remaining gap closed too: `_check_variable`'s `VAR_TYPE_CHANGED` and its
+`bool_transition` const-flip pair, `_var_removed`/`_var_added`
+(`VAR_REMOVED`/`VAR_ADDED`, one-sided), `_check_field_access_changes`
+(`FIELD_ACCESS_CHANGED`, attributed to the containing `RecordType` since a
+`TypeField` carries no `EntityId` of its own), `_check_anon_field_at_offset`
+(`ANON_FIELD_CHANGED`, both branches -- the containing-record identity is
+now threaded through as an explicit parameter from
+`_check_anon_fields_for_type`, since the field-level helper itself never
+had a `RecordType` in scope), and `_diff_var_deprecated`
+(`VAR_DEPRECATED_ADDED`/`REMOVED`). Nine sites in `diff_symbols.py`, all
+regression-tested by the existing `compare=False` invariant (no equality
+based test can regress) and confirmed by a direct code-level count
+(`make_change`/`bool_transition` call-site keyword arguments vs. the file's
+total `make_change`/`bool_transition` call count, distinguishing an actual
+call-site `entity_id=` keyword from the one signature parameter declaration
+and the one local `entity_id = ...` variable assignment this slice also
+added). Three sites deliberately stay unwired, all in `diff_symbols.py`'s
+`_diff_constants` (`CONSTANT_REMOVED`/`CHANGED`/`ADDED`): `AbiSnapshot.
+constants` is a plain `dict[str, str]`, with no parsed declaration object
+behind either side to carry an `EntityId` -- fabricating one was explicitly
+out of scope. Second part: the `type_reachability.py`/
+`type_reachability_spelling.py` hardening this slice was scoped to look at
+(`_record_identity(name, qualified_name)`'s three call sites --
+`_partition_snapshot_types`, and the two `snapshot.enums`-keyed
+`enum_identities` sites in `directly_referenced_stdlib_types`/its sibling)
+was investigated and **not taken**: every one of those three call sites'
+output strings feed directly into `_non_stdlib_signature_spellings`, which
+is consumed by `_StdlibReferenceScan`'s own substring/spelling-matching
+machinery -- the exact "core signature-spelling substring-matching
+machinery" this slice's own scope explicitly excluded. There is no
+`_record_identity` call site in either module that is an independent
+RecordType/EnumType-keyed anchor separable from that string-spelling
+domain; swapping any of the three to prefer `.entity_id.key` would mix
+opaque `EntityId` keys into a domain whose whole contract is "a spellable
+string that can appear inside a rendered `Function.return_type`/
+`Param.type`/`TypeField.type`", breaking the matching algorithm for any
+type that happens to carry a populated `entity_id`. Verification: full fast
+unit suite green, `mypy abicheck/` clean at the documented 0-error
+baseline, `ruff check`/`ruff format --check` clean on every file this
+slice touched (two pre-existing, unrelated formatting violations were
+independently confirmed present on the base commit before this slice's own
+changes, via `git stash`). Remaining Phase 2 items unchanged by this
+slice: `entity_id` population for DWARF/PDB/ELF-only tiers (still always
+`None` there, an out-of-scope gap noted since the background section
+above), the post-parse consumer migrations, and promoting the `entity:`
+alias into a real alias-match reconciliation tier.
+
+**Landed (tenth slice, 2026-09-01): `entity_id` reaches `diff_types.py`/
+`diff_types_field_facts.py`, closing exhaustive population for the
+type-diff detector family.** Every `make_change()` call site in
+`diff_types.py` (43 sites) and `diff_types_field_facts.py` (16 sites) now
+carries `entity_id`, following the same old-preferred/new-fallback
+convention (`t_old.entity_id or t_new.entity_id` for a matched
+`RecordType`/`EnumType`/`Function` pair; the single available side's own
+`entity_id` for a one-sided add/removal). Field-level findings (a struct/
+union field or enum member gaining, losing, or changing a property)
+attribute to the *containing* `RecordType`/`EnumType`'s `entity_id`, since
+`TypeField` carries no `EntityId` of its own (`EntityKind.FIELD` is
+declared but unimplemented -- the same conclusion the ninth slice reached
+for `diff_symbols.py`'s field-level detectors). Four helper functions that
+previously had no record object in scope at all at their own call sites
+(`_try_match_reserved_field`, `_diff_removed_field`, and
+`_diff_type_field_pair` in `diff_types.py`; `_check_field_qualifier_pair`
+in `diff_types_field_facts.py`) gained an explicit `entity_id`
+keyword-only parameter threaded down from their caller (`_diff_type_fields`/
+`_diff_field_qualifiers`, both of which do have the matched `RecordType`
+pair in scope), mirroring the existing `qualified_name` threading pattern
+already established at those same call sites. 56 of 59 `make_change()`
+sites wired (40/43 in `diff_types.py`, 16/16 in
+`diff_types_field_facts.py`); three sites deliberately stay unwired --
+`diff_types.py::_diff_typedefs`'s `TYPEDEF_VERSION_SENTINEL`/
+`TYPEDEF_REMOVED`/`TYPEDEF_BASE_CHANGED` -- since `_typedef_diff_maps`
+produces plain `str -> str` alias maps with no parsed declaration object
+behind either side to carry an `EntityId` (matching the ninth slice's
+identical conclusion for `diff_symbols.py::_diff_constants`;
+`entity_id_for_typedef` in `model/identity.py` still has zero confirmed
+production callers). One `OVERLOAD_ADDED` site in
+`_diff_overload_additions` is a genuine new shape not seen in earlier
+slices: its "new" side is a *group* of overload `Function`s rather than a
+single matched object, so it is stamped with only the still-present
+old-side declaration's own `entity_id`. Verification: full fast unit suite
+green (one pre-existing, unrelated failure --
+`test_platform_matrix.py::test_type_param_diff_implies_symbol_diff`, a
+`dataclasses`/`sys.modules` introspection error confirmed present on the
+base commit via `git stash` -- and one pre-existing mypy error in
+`frontends/cli/commands/dump.py` from concurrent, unrelated work in
+progress on this branch; neither touched by this slice); `mypy abicheck/`
+clean except that one pre-existing, unrelated error; `ruff check`/`ruff
+format --check` clean on both files this slice touched. Remaining Phase 2
+items unchanged by this slice: `entity_id` population for DWARF/PDB/
+ELF-only tiers, the post-parse consumer migrations, and promoting the
+`entity:` alias into a real alias-match reconciliation tier.
+
+**Landed (eleventh slice, 2026-09-01): `diff_types.py` split into
+`diff_types_bases_vtable.py` — a mechanical AI-readiness follow-up, not
+new ADR-063 semantic work.** The tenth slice's `entity_id=` wiring pushed
+`diff_types.py` from 1999 to 2066 lines, past the AI-readiness gate's
+2000-line hard cap (`file-size`, no allowlist mechanism), and shifted the
+line numbers thirteen `fact-field-readers` `KNOWN_UNMIGRATED_READERS`
+baseline entries in `diff_layout.py`/`diff_types.py`/
+`diff_vtable_layout.py` were keyed against. Fixed by extracting the
+largest genuinely self-contained function group in `diff_types.py` --
+base-class diffing (`_diff_type_bases`) and the vtable-diffing group
+feeding `_diff_type_vtable` (`_vtable_transition_is_evidenced`,
+`_vtable_transition_rests_on_unresolved_evidence`,
+`_layout_evidence_is_unverifiable`, `_owned_virtual_signatures`,
+`_owned_virtual_signatures_for_record`) -- 501 lines, into a new sibling
+leaf module, `abicheck/diff_types_bases_vtable.py`, following the exact
+precedent `diff_types_field_facts.py`/`diff_types_abicc_parity.py`/
+`diff_types_surface.py` already established for this same file: `diff_types.py`
+imports the moved names back with the same `as`-aliased re-export
+convention (so `from .diff_types import _vtable_transition_is_evidenced`,
+which `tests/test_vtable_evidence_guard.py` uses directly, keeps
+resolving), and the new module imports nothing from `diff_types.py`
+itself, so no import cycle is introduced. `diff_types.py` now sits at
+1566 lines (well under the cap, restoring margin), and the new module is
+553 lines. Registered in `architecture/modules.yaml`'s `compare` layer
+`legacy_paths` and `frozen_root_families.diff_` allowlist alongside its
+three siblings -- required since ADR-061's architecture gate
+(`scripts/check_architecture.py`) independently forbids an unregistered
+new flat `diff_*.py` root module; the new module is exempt from
+`compare/`'s own `may_import: [model]` restriction the same way its
+already-registered siblings are, since that restriction only applies to
+files physically inside `abicheck/compare/`, not to a `legacy_paths`-listed
+flat file (verified against the checker's own `_source_layer_for`/
+`migrated_source` logic before registering, rather than assumed).
+
+The thirteen `fact-field-readers` baseline entries were updated in
+`scripts/fact_field_readers.py`'s `KNOWN_UNMIGRATED_READERS` (a 37-key
+swap covering every entry whose file, containing-expression text, or both
+moved: the ten in `diff_types.py` for `_diff_type_bases`/
+`_vtable_transition_is_evidenced`/
+`_vtable_transition_rests_on_unresolved_evidence`/`_diff_type_vtable` now
+key off `diff_types_bases_vtable.py` with the `entity_id=`-bearing
+call-site text, plus the twenty-two sibling reads in that same moved
+block the task's own error list didn't enumerate individually, plus the
+three genuinely-stale entries in `diff_layout.py`/`diff_vtable_layout.py`
+whose exact text shifted from the tenth slice's `entity_id=` insertion
+without moving file) -- derived mechanically via
+`fact_field_readers.unmigrated_fact_reader_sites()` run against the
+post-split tree rather than hand-edited, so the new keys are exactly what
+the scanner itself would produce. No reader's own logic changed; this is
+purely baseline-key bookkeeping for code that already existed pre-split.
+
+Verification: `python scripts/check_ai_readiness.py` back to the
+documented 3 pre-existing `adr-status-sync` errors only (zero new
+`file-size`/`fact-field-readers` errors); `ruff check`/`ruff format
+--check`/`mypy abicheck/` clean; `python scripts/check_architecture.py`
+clean except one pre-existing, unrelated `debt-no-growth` finding on
+`diff_symbols.py` from the tenth slice's own concurrent, uncommitted
+`entity_id=` wiring (not touched by this slice); targeted tests
+(`test_diff_types_deep.py`, `test_vtable_evidence_guard.py`,
+`test_vtable_severity.py`, `test_checker.py`,
+`test_ai_readiness.py`, `test_fact_field_readers.py`, plus a
+type/layout/enum/vtable-keyed slice of the full suite, ~4370 tests) green
+-- the same one pre-existing, unrelated `test_platform_matrix.py`
+test-isolation failure the tenth slice's own entry already names
+reproduces only under that large combined run and passes standalone,
+confirming it predates this slice too.
+
+**Update (2026-09-01, merge with main): `diff_types_bases_vtable.py` no
+longer exists — folded into main's independently-landed
+`diff_types_vtable.py`.** Merging this branch's PR against `main` surfaced
+that `a2cc048` ("feat(model): complete ADR-063 Phase 0 detector migration")
+had, concurrently and independently, split the identical base-class/vtable
+function group out of `diff_types.py` into its own new sibling module --
+`diff_types_vtable.py` (same functions, same rationale, already Fact-migrated
+per Phase 0) -- landing on `main` before this slice's own extraction merged.
+Rather than keep two near-duplicate modules, the merge conflict was resolved
+by keeping `main`'s `diff_types_vtable.py` (it already carries the Phase 0
+`resolved_fact_value()` migration this slice's own copy did not) and layering
+only this slice's `entity_id=` addition onto its `_diff_type_vtable`; `_diff_
+type_bases` itself stayed where `main` already had it, inline in
+`diff_types.py` (also Fact-migrated), with `entity_id=` added to its three
+`make_change()` calls. `diff_types_bases_vtable.py` was deleted along with
+its `architecture/modules.yaml` registrations; the `fact-field-readers`
+baseline resolved to `main`'s side (now empty -- Phase 0 migrated every
+known reader, so there is nothing left for this slice's raw-field version of
+these functions to add back). No behavior change beyond what each side
+already carried; `tests/test_vtable_evidence_guard.py`'s existing `from
+abicheck.diff_types_vtable import _vtable_transition_is_evidenced` import
+was the confirming signal for which filename to keep.
+
+---
+
+**Landed (twelfth slice, 2026-09-01): typedefs and constants — the last
+`Change`-producing detector families with no `entity_id` at all — now carry
+one.** `entity_id_for_typedef`/`entity_id_for_constant` had existed in
+`model/identity.py` since the first slice with zero production callers,
+because `AbiSnapshot.typedefs`/`typedefs_qualified`/`constants` are plain
+`dict[str, str]` with no parsed declaration object to hang a carrier field
+on, the way `RecordType`/`EnumType`/`Function`/`Variable` have. The scope
+was not missing, only discarded: both header-AST backends already walk it
+(clang's `_Decl.scope_path`, castxml's `_scope_path(el)`) at the exact point
+those three dicts are built. So this slice reads it one step earlier rather
+than extending any AST walk.
+
+Two additive `AbiSnapshot` sidecars carry it — `typedef_entity_ids` (keyed
+like `typedefs_qualified`) and `constant_entity_ids` (keyed like
+`constants`), both `kw_only`, both defaulting to `{}`. Producers:
+`dumper_clang.parse_typedef_entity_ids`/`parse_constant_entity_ids` and
+`dumper_castxml`'s same-named pair. On both backends the constant sidecar
+shares one filtering pass with `parse_constants` itself (clang gained a
+`_iter_public_constants()` helper; castxml's existing one now yields the
+element too), so the two maps cannot disagree about which constants qualify
+— the property the join depends on. The castxml typedef sidecar calls the
+resolver from `dumper_castxml.py` itself, iterating
+`dumper_castxml_typedefs.iter_typedef_entries` rather than adding a resolver
+call to that helper module, since `tests/test_entity_id_carrier.py`'s
+`_ALLOWED_RESOLVER_CALLERS` confines `entity_id_for_*` to the two backend
+front doors.
+
+Plumbing, all of it in the same direction as the dict each sidecar
+annotates: `TuFragment`/`MergedTuFragments`/`ElfHeaderAstResult` carry them
+so a manifest (and the legacy single-header ELF path, which also routes
+through `TuFragment`) does not lose what a direct PE/Mach-O parse keeps;
+`tu_merge.merge_fragments` unions them plainly rather than through
+`_merge_scalar_group` (that helper diagnoses two TUs disagreeing about a
+key's *value*, and an `EntityId` is derived entirely from the key's own
+scope and leaf name, so there is no disagreement to report);
+`dumper_hybrid` unions them castxml-wins, matching `typedefs_qualified`;
+`storage/entity_id_codec.py` gained an `encode_sidecar_entity_ids`/
+`decode_sidecar_entity_ids` pair (a dict-of-documents encode, not the
+positional-list pairing the declaration carrier uses) and lost its
+now-false "typedefs/constants get no carrier" comment;
+`serialization.py` bumped `SCHEMA_VERSION` 30 → 31, with an absent sidecar
+loading as `{}` — no migration adapter, the identical reasoning v25's
+`typedefs_qualified` used; `snapshot_cache.py` bumped its own cache version
+22 → 23, since the same TU inputs now produce a different snapshot.
+
+One non-obvious asymmetry, worth not rediscovering: `typedef_entity_ids`
+joins `qualified_name_segments._LAMBDA_IDENTITY_FIELDS` and
+`constant_entity_ids` deliberately does not. A sidecar's keys must be
+renumbered exactly when its partner's are — `typedefs_qualified` is
+rewritten by that walk, so its sidecar must be; `constants` is excluded
+from it (its values are payload literals a closure marker could legitimately
+appear in), so renumbering *only* its sidecar is what would desynchronize
+the pair. The reasoning lives on the two `AbiSnapshot` fields themselves,
+since `qualified_name_segments.py` had one line of headroom against the
+architecture gate's 800-line production maximum.
+
+Consumers: `diff_types._diff_typedefs` (all three of `TYPEDEF_REMOVED`/
+`TYPEDEF_BASE_CHANGED`/`TYPEDEF_VERSION_SENTINEL`) and
+`diff_symbols._diff_constants` (`CONSTANT_REMOVED`/`CONSTANT_CHANGED`/
+`CONSTANT_ADDED`), old-side-preferred with a new-side fallback, the same
+convention every slice above uses, and `.get`-based so an absent sidecar
+degrades to today's identity-less `Change` rather than fabricating one from
+a flat key.
+
+Tests: `tests/test_entity_id_carrier.py` gained `TestSidecarFieldShape`
+(dataclass contract plus the partner-key-space property),
+`TestSidecarIsPersisted` (round trip, a `Record("ns")`-vs-`Namespace("ns")`
+counterexample the wire form must keep apart, and a pre-v31 snapshot loading
+with both sidecars empty and its partner dicts untouched), a typedef
+assertion inside the shared `_assert_probe_identities` both live backends
+run, and two new live-backend constant tests
+(`test_live_{clang,castxml}_populates_the_constant_sidecar`, split out
+because `parse_constants` is provenance-gated and needs a parser configured
+with a real public-header set). `tests/test_change_entity_id_carrier.py`
+gained `TestTypedefAndConstantSidecarsReachTheChange`, covering all five
+reachable finding kinds plus the absent-sidecar degradation.
+
+Verification (all run, not assumed): `ruff check abicheck/ tests/` clean;
+`mypy abicheck/` clean (0 errors, 562 files); `python
+scripts/check_ai_readiness.py` 0 errors (`doc-count-sync` caught the schema
+bump against `docs/reference/snapshot-format.md`, which was updated in the
+same pass); `python scripts/check_architecture.py` back to the single
+pre-existing `cli_buildsource_helpers.py` `debt-no-growth` finding;
+`pytest tests/test_entity_id_carrier.py` 47 passed and its
+`-m integration` lane 12 passed against real `castxml` 0.7.0 and `clang`,
+including both new constant-sidecar tests; `tests/test_change_entity_id_
+carrier.py` 32 passed; the full fast unit lane green apart from one
+pre-existing, unrelated failure
+(`test_action_run_sh_baseline_set_fallback.py::TestBaselineSetFallback::
+test_extraction_and_resolution_work_when_python3_is_absent`, confirmed to
+fail identically on the base commit under `git stash`). `ruff format
+--check` fails broadly on this tree (580 files at the base commit), a
+pre-existing condition; every file this slice touched is either
+format-clean or was already unformatted before it.
+
+Six `architecture/debt.yaml` no-growth baselines were raised, each by the
+exact plumbing this slice adds and each with its own rationale line, in the
+same style and for the same reason commit `09de29f` raised
+`cli_scan.py`/`scan_engine.py`: `dumper.py` 1985 → 1991 (two sidecar
+keywords at each of three `AbiSnapshot` construction sites),
+`dumper_hybrid.py` 979 → 989, `serialization.py` 1737 → 1747 (call-site
+plumbing only — the codec itself lives in `storage/`), `tu_merge.py`
+1552 → 1566, and on the test side `tests/test_dumper_manifest.py`
+1765 → 1771 (its stub parser gained the two new methods) and
+`tests/test_tu_merge.py` 1888 → 1890. No smaller diff was found that still
+populates both fields on every producing path without hiding the field names
+behind a spread helper. `qualified_name_segments.py` was the one file held
+under its cap rather than raised — it had a single line of headroom against
+the 800-line production maximum, which is why the reasoning for its one-line
+addition lives on the `AbiSnapshot` fields instead of beside the tuple entry.
+
+Three test stubs and one generated-fixture set needed updating, all
+mechanically: `tests/test_dumper_manifest.py`/`tests/test_dumper_phase1.py`'s
+fake header-AST parsers gained the two new methods (they already implemented
+`parse_typedefs_qualified`/`parse_constants` for the same reason),
+`tests/test_tu_merge.py`'s empty-merge expected value gained the two
+keywords, and `python scripts/gen_g20_fixtures.py` re-emitted the eleven
+`examples/case*/…abi.json` snapshots whose `schema_version` and field set
+this bump changes (both new keys serialize as `{}` there — none of those
+cases has header-resolved typedef/constant identity).
+
+**Still genuinely deferred after this slice — exactly two items, unchanged
+by it.** (1) Every DWARF/PE/Mach-O/ELF-symbol-table-only detector
+(`diff_platform.py`'s DWARF-tier functions, `diff_elf_layout.py`,
+`diff_platform_elf_dynamic.py`, `diff_platform_elf_symbols.py`,
+`diff_versioning.py`, `diff_sycl.py`) still has no `EntityId`-carrying
+object behind it, because only the header-AST (L2) backends resolve one;
+closing that needs `EntityId` extended to the DWARF backend (a `ScopePath`
+built from a DIE's parent chain), a separate extraction-side project, not a
+diff-site wiring pass. This slice deliberately did not touch
+`dwarf_snapshot.py`/`dwarf_metadata.py`/`dwarf_unified.py`: a DWARF-only
+snapshot leaves both new sidecars empty, exactly as it already leaves
+`typedefs_qualified`. (2) Promoting the `entity:` alias in
+`finding_identity.resolve_change_identity` into a real alias-match
+reconciliation tier stays blocked on `EntityId.key`'s cross-release
+stability, which is not established — `Anonymous`/`LocalToFunction`
+ordinals are stable only within one process's lifetime, and two prior
+attempts at ordinal stability were each designed and reverted (see
+`model/identity.py`'s own docstring). Neither was attempted here.
+`buildsource/*.py`'s L5 source-graph sites remain out of ADR-063's scope by
+design, as before.
+
+**Landed (fourteenth slice, 2026-09-02): item (1)'s extraction-side half,
+for DWARF and the ELF-symbol-only fallback — the object each of them
+carries, not the detector wiring on top of it.** `dwarf_snapshot.py`'s DIE
+walk threads a typed `ScopePath` alongside the pre-existing flat `scope`
+string, built at the exact points a `DW_TAG_namespace`/`DW_TAG_structure_
+type`/`DW_TAG_class_type`/`DW_TAG_union_type` DIE is entered — the same
+"widen the walker's own scope representation, don't reconstruct it from a
+flattened spelling" fix this phase's own Design section required for the
+two header-AST backends. `RecordType`/`EnumType`/`Function`/`Variable`
+gain a populated `entity_id`, and a new `typedef_entity_ids` sidecar on the
+builder (wired into `AbiSnapshot.typedef_entity_ids`, keyed identically to
+`typedefs`) mirrors the two header-AST backends' own — `AbiSnapshot.
+constant_entity_ids` stays empty for a DWARF-only snapshot, since a
+constexpr initializer is a header-AST-only fact DWARF does not carry.
+`dumper_elf_fallback.py`'s header-less, export-table-only `Function`/
+`Variable` construction gets the same treatment with an empty `ScopePath`
+(a raw exported symbol carries no scope information at all) — the case
+`model/identity.py`'s own docstring already named as needing this
+`mangled_name`/`leaf_name` interaction (`entity_id_for_variable`'s
+`mangled=sym` reused for both fields, so the mangled branch drops
+`leaf_name` rather than let a header/DWARF observation of the identical
+symbol fail to merge with it). The DWARF-specific construction (the
+mangled-name-vs-extern-C gate, the two scope-segment builders) lives in a
+new leaf module, `abicheck/extract/dwarf_scope.py`, under `extract/` per
+ADR-061 D9's task routing even though its one caller, `dwarf_snapshot.py`,
+is itself still a legacy root module; `tests/test_entity_id_carrier.py`'s
+`_ALLOWED_RESOLVER_CALLERS` was extended to name it (and
+`dumper_elf_fallback.py`) as legitimate `entity_id_for_*` front doors,
+alongside the two header-AST backends. `abicheck/extract/dwarf_records.py`
+(four small, dependency-free DWARF record/access helpers, previously
+inline in `dwarf_snapshot.py`) was split out in the same slice purely to
+keep that file under its `architecture/debt.yaml` no-growth baseline —
+unrelated to identity, a byproduct of "move responsibility instead of
+raising the baseline."
+
+Anonymous DWARF scopes get no `Anonymous` segment in this slice: an
+anonymous namespace (`namespace { ... }`, no `DW_AT_name`) contributes no
+scope segment at all, matching this walker's own pre-existing flat-scope
+behavior (its members were already treated as declared directly in the
+parent scope); an anonymous struct/union/enum DIE is skipped by
+`dwarf_snapshot.py`'s own pre-existing logic unless reached through a
+typedef (`typedef struct { ... } Point;`), which borrows the typedef's own
+name — so no bare-unnamed record/enum ever reaches this slice's
+`entity_id_for_type`/`entity_id_for_enum` call sites at all. This is
+narrower than the two header-AST backends (which do construct `Anonymous`
+segments, ordinal-tracked per parent), a documented gap rather than a
+silent one: DWARF exposes no per-block merge signal for a reopened
+anonymous namespace the way clang's `originalNamespace`/`previousDecl`
+does, so extending this slice to attempt one was not pursued. A method's
+own cv-qualification, ref-qualifier, and variadic-ness are similarly not
+read from DWARF here (unlike the two header-AST backends' own AST-node
+reads) — inert in practice, since they only feed `entity_id_for_function`'s
+"sig" fallback branch, reached only by a non-`extern "C"` function with no
+real `DW_AT_linkage_name` at all; every ordinarily-mangled C++ overload
+takes the mangled branch instead and never touches them.
+
+**Update (2026-09-02, landed): PE/Mach-O extraction-side `entity_id`.**
+`dumper.py`'s own header-less `_dump_macho`/`_dump_pe` export-table-only
+branches now populate `entity_id` too, via a new shared leaf module,
+`abicheck/extract/export_symbol_identity.py`, that also absorbs
+`dumper_elf_fallback.py`'s own construction (one shared builder for all
+three export-table-only producers instead of three drifting copies). The
+with-headers path for both formats already ran through the same
+header-AST parser ELF uses and so already carried `entity_id` before this
+slice — undocumented until now, not new. `export_symbol_identity.py`'s PE
+helper recognizes both the MSVC `?` and Itanium `_Z` mangling prefixes (a
+MinGW/GCC-built PE DLL's C++ exports are Itanium-mangled, a real, distinct
+supported PE lane from MSVC's own), so a MinGW DLL's headerless and
+header-backed dumps agree on the mangled branch instead of the headerless
+path silently falling back to extern-"C" for every MinGW C++ export. This
+closes item (1)'s remaining extraction-side gap in full: every
+DWARF/PE/Mach-O/ELF-symbol-table-only producer now populates `entity_id`.
+
+**Still open after this slice, updated by a follow-up pass**: the diff-site
+wiring pass was carried out module by module, with a deliberately narrow
+scope — populate `Change.entity_id` only where a producer already resolves
+a real matched `Function`/`Variable`/`RecordType` object, never invent a
+lookup where the detector only ever sees a raw string or a DWARF-only
+layout struct. That landed three real sites: `diff_platform.py`'s
+ELF-fallback deleted-function finding, and
+`diff_platform_elf_symbols.py`'s exported-object size/alignment findings
+(both via `AbiSnapshot.var_by_mangled`). Every other call site across
+`diff_platform.py`, `diff_elf_layout.py`, `diff_platform_elf_dynamic.py`,
+`diff_platform_elf_symbols.py`, `diff_versioning.py`, and `diff_sycl.py`
+was individually reviewed and left unwired for one of three structural
+reasons, not because the wiring pass stopped short of them: (a) the
+detector only has raw ELF/PE/Mach-O container facts in scope
+(`ElfMetadata`/`ElfSymbol`/PE export strings), which carry no `entity_id`
+field at all — the large majority of sites, including every one of
+`diff_platform_elf_dynamic.py`'s 40 and `diff_versioning.py`'s 7 and
+`diff_sycl.py`'s 9 (the latter two operating on `SyclMetadata`/
+`SyclPluginInfo`, equally plain); (b) the detector matches against
+DWARF-only `StructLayout`/`FieldInfo`/`EnumInfo` (`model/dwarf_facts.py`),
+which don't carry `entity_id` — only the header-layer `RecordType`/
+`EnumType` do, a genuinely separate, deeper extraction-side gap from
+"detector forgot to read `entity_id`"; this is `diff_platform.py`'s
+DWARF-tier layout functions and all of `diff_elf_layout.py` (pure L0/
+binary-only, matching `_ZTV<mangled>`/`_ZTI<mangled>` vtable/RTTI symbol
+strings with no `RecordType` ever in scope — its functions take only
+`old: AbiSnapshot, new: AbiSnapshot`); or (c) the finding is
+batch-shaped — aggregating multiple matched entities into one `Change`
+(e.g. `diff_platform_elf_dynamic.py`'s `VISIBILITY_LEAK`, which samples up
+to five leaked `Function` names into one summary finding) — where this
+codebase's own established convention (see `finding_identity.py`'s
+`resolve_change_identity` docstring) is that no producer sets `entity_id`
+on a batch-shaped `Change`, since a single id cannot represent several
+matched entities. `diff_filtering.py`/`type_reachability.py`'s bespoke
+string-suffix ambiguity trackers remain unmigrated, unattempted this slice
+given that module's own extensive, multiply-reviewed fragility (see its own
+module docstring) — a real rewrite risk this slice judged not worth taking
+on without the same adversarial review rigor that code's prior fixes
+received. Item (2), the `entity:` alias promotion, was investigated for a
+third time this slice. The suppression-facing hash side still has no
+accepted design and stays exactly as blocked as before: the same
+`Anonymous`/`LocalToFunction` within-one-parse-only ordinal limitation
+this phase's Design section already names blocks it identically for
+DWARF as for the two header-AST backends (DWARF's own DIE walk assigns no
+ordinals at all in this slice, so it inherits the identical gap rather
+than closing it), and changing what `report_canonical_finding_id` hashes
+for any already-shipped finding shape would silently invalidate a user's
+existing stored `finding_id:` suppression rules — a backward-compatibility
+call this phase's own discipline treats as needing explicit maintainer
+sign-off, the same bar `IMPORT_CYCLE_ALLOWLIST` extensions are held to,
+and deliberately not made unilaterally here.
+
+What did land, as a genuinely new (not a third attempt at either
+previously-reverted) design: `model/identity_stability.py`'s
+`entity_id_is_cross_snapshot_stable(entity_id)` — a gating predicate, not
+a stabilizer. It makes no claim about the `Anonymous`/`LocalToFunction`
+ordinal instability at all; it only lets a caller ask "does this
+`EntityId` avoid the unstable construct in the first place" and refuse to
+treat a match as authoritative when it doesn't (`False` whenever any
+`scope` segment is `Anonymous`/`LocalToFunction`, or `extra` is the
+anonymous-self marker). Split into its own leaf module purely to stay
+under `identity.py`'s 800-line production cap — see that module's own
+docstring for the full design writeup, and
+`tests/test_identity_stability.py` for the Hypothesis-driven
+primitive-level property tests (AGENTS.md's own doctrine for a new
+reusable predicate) stating its contract: true for every all-stable
+scope regardless of shape/position, false for any single unstable
+segment regardless of where it sits in the chain, false for the
+anonymous-self `extra` marker independent of `scope`, and a pure
+function of its input. This predicate is real, tested, safe-to-use
+infrastructure — but it is deliberately **not** wired into
+`diff_filtering.py`'s `_deduplicate_cross_detector` (or anywhere else)
+this slice: that file carries the identical "extensive, multiply-
+reviewed fragility" this section's item (1) paragraph already declined
+to touch for the same reason, and a promotion consumer belongs behind
+the same adversarial review rigor that code's prior fixes received, not
+bundled into the slice that first makes the primitive available. A
+`True` result from this predicate is a necessary, not sufficient,
+precondition for any future promotion — see the module's own docstring
+for what a real consumer still has to establish beyond it.
+
+**Landed (fourteenth slice, 2026-09-03): the `StableEntityId`/
+`SnapshotLocalIdentity` split, and the first two post-parse consumer
+migrations (item (b)) — not all of item (b), and not the collision
+narrowing.** This is the slice the twelfth slice's own "Still genuinely
+deferred" note and the thirteenth's `identity_stability.py` paragraph both
+pointed at, taken in the shape the plan asks for rather than as another
+attempt at a globally-stable ordinal (the two reverted designs stay
+reverted; nothing here re-proposes a third).
+
+*The primitive.* `abicheck/model/identity_tiers.py` (new leaf, depends only
+on `model.identity`/`model.identity_stability`) defines two frozen types and
+three constructors. `StableEntityId` wraps an `EntityId` that
+`entity_id_is_cross_snapshot_stable` admits, and is only ever constructible
+through `stable_entity_id()`, which answers `None` rather than wrapping one
+that fails — so the type itself carries the guarantee and a holder needs no
+second check. `SnapshotLocalIdentity` is keyed on a caller-chosen *spelling*
+with the (possibly unstable) `EntityId` carried alongside as a
+`field(compare=False)` payload: excluding it from equality is load-bearing,
+since an entity whose ordinal shifted between two parses must still match
+itself by spelling, which is the entire fallback this tier provides. The two
+are distinct dataclasses and therefore **never compare equal**, so a set of
+one tier can never be satisfied by a lookup in the other — a consumer wanting
+both must state a precedence order explicitly, which is the decision this
+module deliberately refuses to make on anyone's behalf.
+`tests/test_identity_tiers.py` states that contract as Hypothesis properties
+over the whole input space (the wrapper agrees with the predicate exactly for
+every input; no unstable ordinal at any depth can enter the stable tier; the
+anonymous-self `extra` marker is refused independent of scope; keys stay
+injective and never collide across tiers; the payload never affects equality
+or hash).
+
+*Consumer 1 — `diff_filtering.py`'s opaque-type suppression.* The bare
+`set[str]` of `RecordType.name` this phase's Design section names by name is
+gone, replaced by `compare/opaque_types.OpaqueTypeIndex` (relocated to its
+ADR-061 owner rather than grown in place — `diff_filtering.py` sits on a
+zero-slack `debt.yaml` no-growth pin, and the index is a matching concern,
+not a filtering one). Every opaque declaration contributes to the index's
+*local* tier keyed on the same `RecordType.name` spelling as before; one with
+a stable `EntityId` additionally contributes to the *stable* tier.
+`intersect()` is per-tier, and `contains()` consults stable first, then
+spelling. That closes a real false **negative**: `Change.symbol` is rendered
+bare on some paths and qualified on others while `RecordType.name` is bare on
+the header backends and namespace-baked on DWARF, so a string compare could
+miss a declaration both sides agree on — where two matching stable
+`EntityId`s prove it.
+
+*What this consumer deliberately does NOT do, stated rather than implied: it
+does not narrow.* The bare-name collision (two unrelated types sharing a leaf
+spelling in different scopes, one opaque, both suppressed) is still reachable
+through the spelling tier. Making the stable tier authoritative — matching
+*only* on it whenever the change carries one — would close that collision but
+silently drop a real suppression whenever the two sides' producers disagree
+about whether an identity was resolved at all (a mixed header-AST/DWARF
+comparison), which is a live false-positive risk against the FP-rate gate.
+Closing it needs stable-tier completeness on both sides first, which is its
+own separately-reviewable step. The gap is pinned as an executable test
+(`tests/test_opaque_identity_tiers.py::TestKnownGapStaysDocumented`) rather
+than left as prose, so a later slice that closes it has to change an
+assertion, not merely delete a paragraph.
+
+*Consumer 2 — `type_reachability.py`'s closure walk.* The six pieces of
+record-tracking state inside `_StdlibReferenceScan` (`_reached_records`,
+`_worklist`, `_record_pending`, `_record_direct`, `_record_typedef_origins`,
+`_record_walked`) plus `reach_record`/`mark_record_walked`/
+`record_provenance`/`next_reached_record`/`_walk_reached_records`'s own
+`non_stdlib_records` keys are now typed `SnapshotLocalIdentity` rather than
+bare `str`. Behavior is bit-for-bit unchanged (equality on the wrapped
+spelling is string equality); what changes is that the walk's node-key domain
+is now *named* as valid-within-one-snapshot, and separated at the type level
+from the spelling domain it sits next to. The conversion happens at one
+boundary in `_run_stdlib_reference_scan` rather than by widening
+`_partition_snapshot_types`'s shared contract, since two of that helper's
+three return values feed `_spelling_index`'s substring machinery where an
+opaque identity would be meaningless.
+
+*What was investigated and deliberately not migrated.* The rest of
+`type_reachability.py`/`type_reachability_spelling.py` — `_record_identity`'s
+three call sites, `_spelling_index`, `_typedef_spelling_targets`,
+`_namespace_suffix_spellings`, `_stripped_signature_spelling` — stays on raw
+strings, which is the identical conclusion the **ninth slice** reached and
+recorded, re-verified here rather than taken on trust. Those strings are not
+opaque identities: they must appear *inside* a rendered
+`Function.return_type`/`Param.type`/`TypeField.type`, and mixing `EntityId`
+keys into that domain breaks the matching algorithm for any type that happens
+to carry a populated `entity_id`. Wrapping them in an identity type and
+unwrapping at every use would add ceremony without closing a bug class. This
+phase's Acceptance criteria ("their string-based helpers are deleted") is
+therefore satisfied for the *identity* helpers and explicitly not for the
+*spelling* helpers, which were never identity helpers in the first place.
+
+*Also still open, unchanged by this slice.* Promoting the `entity:` alias in
+`finding_identity.resolve_change_identity` into a real alias-match
+reconciliation tier: `StableEntityId` makes the stability gate
+un-forgettable, but it does not by itself establish that changing what
+`report_canonical_finding_id` hashes is safe for a user's already-stored
+`finding_id:` suppression rules — the same backward-compatibility call the
+thirteenth slice declined to make unilaterally, and this slice does not make
+either.
+
+*Verification.* Full fast unit lane green; `ruff check`/`mypy abicheck/`
+clean; `python scripts/check_architecture.py` 0 errors (both new pieces given
+a real `compare/` owner rather than raising a `debt.yaml` baseline — the
+"move responsibility out" answer AGENTS.md prescribes);
+`python scripts/check_ai_readiness.py` 0 errors;
+`python scripts/check_fp_rate.py` 0 FP / 0 FN, both deltas 0;
+`python scripts/check_tier_accuracy.py` OK (top-tier correct, under-call
+monotonic).
+
+---
+
+**Landed (2026-09-03): Phase 6B's first real checker cutover — the typedef
+family, the legacy adapter, and the closing architecture gate.** "PR 2"'s
+first slice landed `SemanticIRIndex` deliberately with no live caller; this
+slice gives it one, which is what turns the whole `SemanticIR` line of work
+from "producers exist and are round-trip-tested" into "something a user's
+verdict depends on actually reads it".
+
+*Why typedefs.* Phase 6's own non-goal is not to keep widening producer
+coverage until one full vertical slice is proven, so the first cohort had to
+be one the IR already covers *completely* rather than one whose migration
+would really be extraction work. Typedefs are the only family where the IR
+carries exactly what the detector needs and nothing it does not: identity
+(`EntityId`, resolved by both header-AST backends since the twelfth slice)
+plus one payload fact (`CanonicalEntity.canonical_spelling` — for a typedef,
+its resolved underlying type, precisely the value the detector compares).
+Records carry layout facts the IR does not model; functions need a canonical
+signature spelling whose cross-backend agreement is its own open question;
+constants' payload is a value literal, not a type spelling.
+
+*The adapter, and why it was the actual blocker.* A detector reading only
+through the index would see **nothing at all** on a snapshot carrying no
+`SemanticIR` (DWARF-only, PE-only, or any pre-v38 reload) — silently losing a
+whole detector family. `abicheck/model/semantic_ir_legacy_adapter.py` removes
+that by projecting the legacy typedef collections into a *real* `SemanticIR`,
+so the same `SemanticIRIndex` reads both and a migrated detector cannot tell
+which it was handed. Producing a real IR rather than a parallel "index-like"
+type is the point: a second read shape would be a second thing to keep in
+agreement with the first.
+
+*Fidelity gating rather than optimism.* `render_display_name()` is the one
+projection between the IR's `EntityId` keys and the legacy collections' flat
+qualified keys, and it answers `None` — never a best-effort string — for an
+identity whose scope contains an `Anonymous`/`LocalToFunction` segment, since
+any string for those would be an invention and two distinct such declarations
+would render alike. `typedef_index_pair()` then hands back the IR-backed
+index only when its own rendered display-name key set *exactly* equals the
+alias maps the comparison already resolved, **on both sides**; anything else
+— an unrenderable anonymous scope, a producer that resolved identity for only
+some typedefs, a DWARF-only side, a pre-v38 reload — falls back to the
+adapter for both. Both-or-neither is not tidiness: pairing an IR-backed old
+side with an adapted new side compares two differently-derived key spaces,
+fabricating a removal or addition out of a projection difference. Set
+equality is checked, never a count.
+
+*Synthetic identity is marked, not hidden.* A legacy declaration whose
+producer resolved no `EntityId` still needs one to key an occurrence by, so
+the adapter derives one from the display spelling and tags it
+`SYNTHETIC_IDENTITY_EXTRA`; `producer_entity_id()` answers `None` for it. The
+detector stamps `Change.entity_id` only from that predicate, because
+`resolve_change_identity` folds that field into an `entity:` alias real
+stored suppression rules match against — passing the index's own bookkeeping
+off as backend evidence would change which suppressions fire.
+
+*The detector.* `diff_types._diff_typedefs` keeps only the comparison-level
+half (stdlib-namespace exclusion, RD2-5's unconfirmed-removals flag, and
+which alias map the pair trusts) and delegates to
+`abicheck/compare/typedefs.py`, which reads only through the index. One
+behavior detail worth not rediscovering: `extract/semantic_normalizer.py`
+records an unfollowable typedef chain as `Fact.failed(...)` where the legacy
+path carried the literal `"?"`, so the migrated detector maps a non-present
+spelling back onto that same placeholder — otherwise an
+unresolved-vs-unresolved pair would stop reading as "unchanged".
+`_is_version_stamped_typedef` moved with the family (its regex copied
+verbatim, not re-derived) and is re-exported from `diff_types` under its
+original private name so `checker.py` and
+`tests/test_typedef_version_sentinel.py` are unaffected.
+
+*The closing gate.* `scripts/semantic_ir_cutover.py` (`semantic-ir-cutover`,
+wired into `check_ai_readiness.py`) is a real AST scan forbidding a migrated
+cohort's modules from reading the legacy collections they were migrated off —
+direct attribute access, `getattr(obj, "name")`, and a resolved `getattr`
+alias alike, while never flagging a same-named local or an inbound
+`typedefs=` keyword. Deliberately **not** an allowlist-and-shrink baseline
+like `KNOWN_UNMIGRATED_READERS`: a cohort is only added at the moment it is
+migrated, so a grandfathered reader cannot exist, and there is no per-site
+exemption. `tests/test_typedef_cutover.py` exercises the gate against real
+source for every forbidden spelling *and* for the two shapes it must not
+flag, rather than asserting its allowlist is empty — a gate that cannot be
+shown to fail proves nothing.
+
+*What remains open, explicitly.* **Every other detector family** still reads
+the legacy collections directly, by design — each further cohort needs its
+own `MIGRATED_COHORTS` entry and its own equivalence evidence.
+`SemanticIRIndex.references()` is still unimplemented (it names a graph
+traversal belonging with the public-surface reference index, ADR-063 D5 /
+Phase 3), so this cohort does not use it, and the index's own accessor set is
+otherwise unchanged by this slice. `CanonicalEntity.template_arguments`
+remains unpopulated for function templates, and clang still produces no
+occurrence for a template specialization — both unchanged here.
+
+*Verification.* `tests/test_typedef_cutover.py` states the cutover's central
+property as a Hypothesis equivalence over generated typedef map pairs (add/
+remove/change/unchanged across bare, singly and doubly qualified aliases and
+five underlying spellings including the unresolved placeholder): the same
+comparison run through a real `SemanticIR` and through the adapter must
+produce identical findings, with the adapter path — the pre-migration
+behavior — as the oracle. Plus `tests/test_semantic_ir_legacy_adapter.py`'s
+property tests for `render_display_name`'s round-trip and refusal contract
+and the selector's both-or-neither rule. Full fast unit lane green;
+`ruff check`/`mypy abicheck/` clean; `check_architecture.py` 0 errors;
+`check_ai_readiness.py` 0 errors; FP-rate gate 0 FP / 0 FN; tier-accuracy
+gate OK.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
+
+**Landed (thirteen slices, 2026-08-31): the plumbing, not the traversal
+migration.** Every piece of new infrastructure this section's design calls
+for exists and is wired end to end: `model/occurrence.py`
+(`OccurrenceId`/`canonical_key`); `SurfaceGraphLike` (`model/graph_facts.py`,
+a structural `Protocol` with `nodes`/`edges` as read-only properties, not
+plain attributes — required to satisfy mypy's covariance check against
+`SourceGraphSummary`'s mutable `list` fields); `AbiSnapshot.surface_graph`
+(unconditional, schema v29) and its `storage/surface_graph_codec.py`
+encode/decode pair; `compare/surface_graph.py` (the new `compare/`-layer
+builder, `build_public_surface_facts`); `policy/public_surface.py`
+(`PublicSurfaceQuery`, `.resolve()`/`.resolve_public_domain()`/
+`.resolve_export_domain()`); `surface_graph.py`'s (root module)
+`public_entity_ids` threading through `build_surface_graph()`/
+`compute_surface_metrics()`; the `old_public_entity_ids`/
+`new_public_entity_ids` pair through `pattern_verdicts.py`/
+`diff_surface_metrics.py`/`checker.compare()`; `service.compare_snapshots()`
+resolving and forwarding the pair (which `service_compare_pipeline.
+classify_compare_pair` inherits for free — see below); and
+`service_header_graph_attach._attach_header_graph()` sharing one
+`SourceGraphSummary` instance between `AbiSnapshot.surface_graph` and
+`AbiSnapshot.build_source.source_graph` -- deliberately without also
+populating `compare/surface_graph.py`'s own facts onto it there, since a
+first version that did regressed the header-graph attach-cost perf gate by
+47-96% at realistic sizes (this builder runs unconditionally on
+essentially every real dump, and nothing in this phase's own wiring reads
+those facts back yet); `build_public_surface_facts()` stays available for
+a caller that does need them to populate the same shared instance
+explicitly.
+
+**Traversal migration landed (2026-09-01), for the public domain — the
+"deliberately not landed" scope directly below is now stale for that half
+and corrected here rather than silently rewritten (this section's own
+established convention).** `surface.py`'s closure-walk implementation
+(`_index_surface_types`/`_seed_public_roots`/`_walk_type_closure`/
+`_walk_exact_type_closure`/`_record_exact_identities`/
+`_record_nested_in_known_record`/`_record_is_confirmed_public_seed`, plus
+the `PublicSurface` result type itself) moved to a leaf module pair,
+`policy/public_surface.py` (the dataclass + `_index_surface_types`'
+indexing/bookkeeping) and `policy/public_surface_closure.py` (the actual
+walk, plus the real `resolve_public_surface()` entry point) — split purely
+to stay under the 800-line new-file production cap, not a design split.
+`surface.py`'s own copy of every one of those functions is **deleted**, not
+kept alongside; `compute_public_surface()` is now a thin wrapper delegating
+to `policy/public_surface_closure.py` (re-exporting `PublicSurface` for
+existing callers). `export_surface.py`'s own root-seeding (the
+`contract=exports` domain's export-table matching) is unchanged, but its
+final type-closure step calls the *same*, now-migrated `_walk_type_closure`
+it always reused "verbatim" from the header-domain implementation, so that
+domain's closure became graph-native for free, without its own separate
+migration. `PublicSurfaceQuery` itself moved to a third module,
+`policy/public_surface_query.py` — required because it is the one place
+that depends on both the closure module and `export_surface.py` at once,
+and `export_surface.py` now depends on the closure module too, so
+`PublicSurfaceQuery.resolve_export_domain` living inside that same module
+would have closed a real, `check_architecture.py`-detected import cycle
+(a *static*-analysis gate: a deferred, function-body-local import does not
+escape it, only a genuine restructuring does).
+
+The actual "traverse the graph" substitution is narrower than "operate on
+the graph's node/edge set directly" would suggest, for a reason found only
+once a first version of this migration shipped and a regression test
+caught it: `compare/surface_graph.py`'s own node ids can legitimately
+collapse two *distinct* declarations onto one id (two overloads sharing a
+demangled name with no mangled name and no resolved `entity_id` to tell
+them apart is the concrete, tested case) — and naively trusting a
+graph-node-keyed cache of "what does this id reference" for such a
+collision let a *public* overload appear to reference a *hidden* sibling's
+own private parameter type, which a `contract_replay.py` test designed to
+prove the opposite (that the private type stays `PROVEN_OUT_OF_CONTRACT`)
+correctly failed against. Unioning the colliding contributors — the
+over-keep direction that is safe for an *ambiguous type name* — is not safe
+for a *declaration identity* collision, because it attributes one
+declaration's reach to an unrelated one rather than merely widening a
+single declaration's own reach. Fixed by having `compare/surface_graph.py`
+flag such a node (`identifiers_collision`) and having the query fall back
+to recomputing that one declaration's own identifiers directly whenever the
+flag is set (`_referenced_identifiers_for_function`/`_for_variable`/
+`_for_record` in `policy/public_surface_closure.py`) — the pre-migration
+behavior, preserved exactly for the one case the graph's shared-node model
+cannot represent precisely. The declaration/type *indexing* itself
+(`_index_surface_types`, `ambiguous_type_names`, `origin_by_key`) was
+**not** re-pointed at the graph's node set for the identical structural
+reason — see `policy/public_surface.py`'s own module docstring.
+
+A second correctness hazard was found by post-merge review (Codex, PR #979)
+rather than caught before landing — and a more consequential one than it
+first looked, since it hits the *default* dump path rather than an aged
+on-disk format. `service_header_graph_attach._attach_header_graph` installs
+an L5 `surface_graph` on essentially every real dump (G31 Phase A), but
+deliberately never calls `build_public_surface_facts` itself — an earlier
+measurement found paying that per-declaration walk on *every* dump
+regressed the header-graph-attach-cost perf gate 47-96% at realistic sizes,
+so that attach site's own comment always said populating it "is deferred to
+whichever later phase actually queries the graph." `resolve_surface_graph_
+nodes()`'s `graph is None` check alone never triggered a rebuild for such an
+already-attached graph, so it was trusted as-is and every lookup against its
+un-stamped nodes silently read as "references nothing," collapsing the
+transitive closure on the ordinary, default `--scope-public-headers` path —
+not a stale-schema corner case, the common one. (A first fix attempt reached
+for the file's own established schema-version-gated reliability-flag
+pattern, e.g. `header_cv_facts_reliable` — that closes only the narrower
+"persisted pre-migration snapshot" shape of this same defect and does
+nothing for a fresh, never-serialized snapshot straight out of
+`_attach_header_graph`, since such an object's flag would default `True`
+with no schema version to gate on; reverted before landing once the
+broader defect was understood.) Fixed at the actual deferral point instead:
+`resolve_surface_graph_nodes()` now always calls `build_public_surface_facts`
+on the resolved graph, not only when it was `None`. That call is idempotent
+and evidence-preserving (`SourceGraphSummary.add_node`/`add_edge` merge a
+second registration's facts rather than replacing them), so it enriches an
+already-attached graph's existing nodes in place — never discarding
+`_attach_header_graph`'s own L5 edges/facts — and this *is* the "later
+phase" that attach site's docstring always deferred the cost to, so no new
+per-dump cost is introduced; the cost only lands when a caller actually
+resolves a public/export-domain surface, exactly as before this traversal
+existed at all. `TestUnpopulatedAttachedGraphIsBackfilled` and
+`TestStrippedGraphAttrsAreReconstructedNotTrusted` in
+`tests/test_policy_public_surface.py` cover, respectively, the real
+`_attach_header_graph` shape (a graph attached but never run through
+`build_public_surface_facts`) and a stripped-attrs shape, each confirming a
+type only transitively reachable through such a graph survives.
+
+**Superseded (2026-09-01) by a third round that removed the graph from
+this computation entirely, rather than trying to make trusting it safe —
+the paragraph above is preserved for its own history, but its
+`resolve_surface_graph_nodes()`-enrichment design is no longer what ships.**
+A second Codex security review found that even the enrichment fix above
+was not sufficient: `GraphNode.attrs` are derived through
+`model.graph_facts`' cross-producer evidence-merge machinery, which
+resolves a same-key disagreement between two registrations by
+confidence/producer/content precedence — correct for genuinely independent
+producer facts, wrong for `referenced_identifiers`/`identifiers_collision`
+specifically, since they have exactly one legitimate source (the
+snapshot's own current declarations) and no legitimate second producer to
+reconcile evidence with. A schema-v29 or otherwise untrusted/adversarial
+snapshot could carry a stale or crafted `referenced_identifiers` fact at a
+confidence this module's own freshly-registered fact (always
+`CONF_UNKNOWN`, the lowest rank) cannot outrank, so the enrichment fix's
+own fresh, correct recomputation could still silently lose to a poisoned
+persisted value — the identical collapsed-closure failure mode as the
+paragraph above, reached through its own fix instead of around it. This
+also explains the real, separately-measured performance regression against
+`scripts/benchmark_scaling.py`'s "Baseline regression (PR vs base)" gate
+that `resolve_surface_graph_nodes()`'s unconditional enrichment introduced:
+building real `GraphNode`/`GraphFact` objects for every declaration, twice
+per compare (once per side, since `checker.compare()` defaults
+`scope_to_public_surface=True`), carries meaningfully more overhead than
+the deleted regex-based re-parse it replaced. An identity-keyed cache was
+tried to close that regression specifically and reverted: it broke
+`tests/test_export_surface.py::TestUnresolvedTypeEdges::
+test_a_scope_lost_alias_key_is_followed_to_its_target`, which mutates a
+snapshot's `typedefs`/`types` in place between two calls and correctly
+expects the second to see the new content — an identity-keyed cache
+silently served the stale first result instead.
+
+The actual fix needed no merge-precedence override and no cache:
+`compare/surface_graph.py`'s `referenced_identifiers_by_node()` (renamed
+public, alongside its `ReferencedIdentifiers` return type) was already a
+pure function of the snapshot's own declarations, computed *before* any
+`GraphNode` is built. `policy/public_surface_closure.py` and
+`export_surface.py`'s closure-walk entry points now call it directly and
+thread the result through (`_referenced_identifiers`/
+`_node_identifiers_or_collision`/`_seed_public_roots`/`_walk_type_closure`/
+`_walk_exact_type_closure` all take a `ReferencedIdentifiers` now, not a
+`dict[str, GraphNode]`), never touching `snap.surface_graph` or
+`GraphNode.attrs` at all. `resolve_surface_graph_nodes()` had no remaining
+caller once both sites switched and was deleted rather than kept as unused
+surface — along with its own regression tests, replaced by
+`TestClosureIgnoresSurfaceGraphEntirely` (three cases: no graph at all, an
+empty attached graph, and a deliberately adversarial high-confidence
+poisoned fact) and `TestResolvePublicSurfaceIsNotIdentityCached` in
+`tests/test_policy_public_surface.py`. Removing the graph from the
+computation also removed essentially all of the `GraphNode`/`GraphFact`
+construction cost from the hot path as a direct consequence — an ad hoc
+local re-run of `scripts/benchmark_scaling.py` after this change showed
+the previously-regressed scenarios back in line with the pre-migration
+baseline, confirmed by CI itself: the `Performance` workflow's own
+"Baseline regression (PR vs base)" job (PR #979, commit `5544540`)
+completed with `conclusion: success`, the gate's own noise-controlled
+PR-vs-base measurement.
+
+Deliberately still not migrated: `export_surface.py`'s own root-seeding
+(the export-table-matching logic itself, as opposed to the type-closure
+step it shares with the header domain) and
+`type_reachability.directly_referenced_stdlib_types()` (unchanged reason:
+reclassifying `type_reachability.py` into `policy` would introduce a
+genuine new `policy -> extract` violation), and `compare/surface_graph.py`'s
+node-id-namespace unification with `buildsource/header_graph.py`'s L5 ids
+remains open, exactly as the paragraph below already described. FP-rate
+gate and per-tier accuracy gate both show zero regression against this
+migration.
+
+**Deliberately not landed** (original text below, now correct only for
+the residuals named above — the "not deleted, delegates to both unchanged"
+framing no longer describes the public domain; see the corrected paragraph
+just above). `surface.py`'s closure-walk traversal and
+`export_surface.py`'s independent one are **not deleted** —
+`PublicSurfaceQuery` delegates to both unchanged rather than reimplementing
+either as a literal graph traversal. This was a scoped, documented risk
+decision: both algorithms are exactly the kind of intricate, multi-round-
+corrected logic this plan's own "Primitive-level property tests" AGENTS.md
+section warns cost six review rounds to get right once already (the
+`_paired_stable_indices` incident) — reimplementing either from scratch as
+a graph BFS, inside the same phase that also had to build every piece of
+graph infrastructure underneath it, was judged a materially higher-risk
+combination than landing the infrastructure now and migrating the
+algorithm itself as a separate, later, narrowly-scoped phase. Consequently:
+there is no lazy, graph-reading legacy-snapshot backfill path (`compute_
+public_surface()`'s signature was never changed to accept a structured
+`resolution` parameter, since nothing inside it reads the graph yet);
+`type_reachability.directly_referenced_stdlib_types()` was not migrated
+into `policy/public_surface.py` (doing so would require reclassifying
+`type_reachability.py` into the `policy` layer, which would introduce a
+genuine new `policy -> extract` architecture violation — that module
+imports two already-`extract`-classified siblings); and `compare/
+surface_graph.py`'s own node ids (`canonical_key(occurrence_id)`/
+`approx::`/`typedef::` fallbacks) do not unify with `buildsource/
+header_graph.py`'s pre-existing L5 node ids (`decl://<identity>`/
+`type://<identity>`) — the two id namespaces coexist in one shared graph
+instance (real, tested) without deduping onto a common node for a
+declaration both builders see. `surface.py`'s own traversal deletion and
+the node-id unification are both real, separate follow-up phases, not
+silently-abandoned scope — see `compare/surface_graph.py`'s and
+`policy/public_surface.py`'s own module docstrings for the exact reasoning
+each carries.
+
+**Two corrections to this section's own design text below**, found while
+implementing it rather than assumed from the prose: the "real, working
+identity checked against `architecture/modules.yaml`, not assumed" bullet
+originally analyzed `surface.py`/`export_surface.py`/`pattern_verdicts.py`
+as "still flat, top-level modules" for the `policy -> compare` layering
+question — checked against the real `architecture/modules.yaml` during
+implementation, all three (and several siblings) are already classified
+into the `policy` layer via `legacy_paths`, an unrelated prior
+classification pass this section's text predates, which simplified the
+actual implementation (no circular-import risk to route around) rather
+than complicating it. And the "`service.compare_snapshots()` ... the
+second, documented Tier-2 production verb that also calls `checker.
+compare()` directly" framing below assumed `service_compare_pipeline.
+classify_compare_pair` was a *third* independent call site needing its own
+resolution wiring; reading the real code, `classify_compare_pair` already
+calls `service.compare_snapshots()` (never `checker.compare()` directly),
+so wiring `compare_snapshots()` alone was sufficient to cover both
+production Tier-2 paths.
 
 **Goal.** `compute_public_surface()` answers "is this declaration public"
 by traversing one authoritative evidence graph, not by independently
@@ -6326,6 +11175,79 @@ sibling:
   location (mirroring the re-export shim `source_graph.py` already uses
   for its own split-out pieces), so every existing L5 caller is
   unaffected.
+
+  **Already landed independently, under a different name, before this
+  phase's own implementation began** — confirmed by reading
+  `abicheck/buildsource/CLAUDE.md`'s current module table and
+  `abicheck/model/graph_facts.py` directly, not assumed from this plan's
+  own stale text. ADR-061 Phase 5 item 2's own follow-up split
+  `buildsource/graph_facts.py` into three sibling `model/` modules rather
+  than the single `model/graph.py` this bullet names:
+  `model.graph_facts` (`GraphNode`/`GraphEdge`/`GraphFact`/`FactConflict`/
+  `merge_graph_facts`/`ensure_facts_and_resolve`/`register_fact`/
+  `edge_relation_key`/`edge_occurrence_id`), `model.graph_identity` (node-id
+  construction/normalization), and `model.graph_vocabulary` (the
+  `NODE_KINDS`/`EDGE_KINDS`-family constant blocks) — `buildsource/
+  graph_facts.py` is now itself the back-compat re-export shim this
+  bullet asked for, already exporting every original name (`X as X`)
+  rather than only what a repo-local usage scan could prove was called.
+  `GraphNode.id: str`/`label: str = ""` match this section's own later
+  design exactly (confirmed by reading the dataclass directly). This
+  bullet's own remaining, still-open work is therefore not the relocation
+  itself but picking `model.graph_facts` (the real current location) over
+  the stale `model.graph` name wherever a later slice writes
+  `from abicheck.model.graph import ...`.
+
+  **Applies to every other `model/graph.py` reference below in this same
+  Phase 3 section, not only this bullet's own text** (Codex review on
+  PR #958, catching that the correction above fixed only the one place it
+  was written and left the phase's own "Files" checklist and Phase 10's
+  cleanup-list row still instructing a future implementer to create a new
+  `model/graph.py` and migrate callers to it — actionable checklist items
+  a reader follows literally, unlike this bullet's own prose). Read every
+  `model/graph.py` elsewhere in this Phase 3 section, its own "Files" list,
+  and Phase 10's cleanup list below as `model.graph_facts` (for
+  `GraphNode`/`GraphEdge`/`GraphFact`/`FactConflict`/`merge_graph_facts`/
+  `ensure_facts_and_resolve`/`register_fact`/`edge_relation_key`/
+  `edge_occurrence_id`), `model.graph_identity` (node-id construction/
+  normalization, including `_normalize_if_decl_or_type`), or
+  `model.graph_vocabulary` (`NODE_KINDS`/`EDGE_KINDS`-family constants) as
+  the symbol requires — three already-existing modules, not one new file
+  to create. The "Files" section's own `abicheck/model/graph.py (new...)`
+  entry and its full-dependency-closure reasoning (which symbols must move
+  together) still correctly states what a from-scratch relocation would
+  need; only "new" and the single-file target are stale — every symbol it
+  names already lives in one of the three modules above, so nothing there
+  needs moving again. Phase 10's cleanup-list row is even further stale in
+  a second way: it describes `buildsource/graph_facts.py` as still holding
+  "the original, in-place copies," but that file is already the trimmed
+  re-export shim (confirmed above) — its own residual is narrower than
+  written, just "every real importer of the shim migrates to
+  `model.graph_facts`/`graph_identity`/`graph_vocabulary` directly." **Not
+  the "five named readers" the very next, separate row lists** (Codex
+  review on PR #958, catching a conflation in an earlier revision of this
+  same correction) — those five (`internal_leak.py`, `buildsource/
+  crosscheck.py`, `buildsource/evidence_report.py`, `evidence_depth.py`,
+  `cli_graph.py`) are that other row's own `BuildSourcePack.source_graph`
+  →`AbiSnapshot.surface_graph` migration, a different attribute path on a
+  different object; this row's own real importer set was never enumerated
+  in the original text. **Confirmed here by resolving every relative
+  `ImportFrom` node's actual target module via a real AST walk, not a
+  text grep for the string `graph_facts`** — a second review round on
+  this same commit correctly caught that the grep-based first attempt
+  counted a bare `from .graph_facts import ...` in `model/source_graph.py`/
+  `model/entity_resolver.py`/`model/entity_identity.py` as the shim
+  (Python resolves that relative import within `model/` itself, to the
+  already-canonical `model.graph_facts` — no migration needed), likewise
+  `buildsource/source_graph_findings.py`'s `from ..model.graph_facts
+  import GraphEdge` (already canonical), and a bare code-comment mention
+  in `checker_types.py` with no import at all. The real, resolved set is
+  ten files: `buildsource/archive_graph.py`, `buildsource/callback_graph.py`,
+  `buildsource/graph_impact.py`, `buildsource/macro_graph.py`,
+  `buildsource/template_graph.py`, `buildsource/type_graph.py`,
+  `buildsource/virtual_dispatch_graph.py`, `impact/consumer_graph.py`,
+  `impact/use_cases.py`, and `internal_leak.py` (also one of the *other*
+  row's five, since one module can need both migrations independently).
 - **A third, pre-existing graph-shaped module already answers a
   public-surface question independently, and a first draft of this phase
   missed it entirely — `abicheck/surface_graph.py`'s `SurfaceGraph`/
@@ -6576,8 +11498,28 @@ sibling:
   it is injective *on identity*, never on full structure) — used by both
   `model/graph.py`'s `GraphNode.id` for a `declaration`/`type` node and any
   other consumer that needs a collision-free, equality-consistent key
-  (`kind`/`leaf_name`/`extra` plus each segment's identity-only fields),
-  while `storage/entity_ids.py`'s `to_dto()` stays the separate,
+  (`kind`/`leaf_name`/`extra` plus each segment's identity-only fields).
+  **Already landed, ahead of this phase, under a different name** —
+  Phase 2's own `resolve_change_identity`-consumer slice added exactly
+  this contract as `EntityId.key` (a property, not a free function; a
+  local `_packed`/`_segment_key` length-prefixing scheme, independently
+  arriving at the identical "exclude every `compare=False` payload field"
+  rule this paragraph states), confirmed by reading `model/identity.py`
+  directly: it already excludes `Record.access` and is built from
+  `scope`/`kind.value`/`leaf_name`/`extra` only. **Superseded by Phase 3's
+  actual landing, corrected here rather than left to mislead a future
+  reader (Codex review, PR #958):** the internal-linkage `static`
+  collision this section raises next is real, so `GraphNode.id` for a
+  `declaration`/`type` node does *not* call `entity_id.key` directly —
+  `model/occurrence.py`'s landed `canonical_key(EntityId | OccurrenceId)`
+  overload is what `compare/surface_graph.py`'s node-id construction
+  actually calls, with an `OccurrenceId`, exactly as the "still collides
+  for a real, ordinary case" paragraph below this one specifies and
+  requires. `EntityId.key` alone stays the everyday case (an empty
+  disambiguator reduces `canonical_key(occurrence_id)` to it), but the
+  wrapper this paragraph once called "redundant" is the landed, correct
+  design, not a mistake to avoid. `storage/entity_ids.py`'s `to_dto()`
+  stays the separate,
   intentionally fuller encoding for its own persistence purpose —
   `GraphNode`'s own pre-existing `label: str` field (already documented as
   "human-readable name/path") is where the flattened, lossy `qualified_name`
@@ -7509,20 +12451,26 @@ spellings — the type-kind id silently excluded from the root set, not
 attempted-and-failed — confirmed to fail against a version of
 `public_roots()` that maps every received id unconditionally.
 
-**Acceptance criteria.** `surface.py`'s own traversal implementation and
-`export_surface.py`'s independent closure walk are deleted, not kept
-alongside the graph query (the actual removal happens in Phase 10's
-checklist, but this phase's own PR is incomplete if it leaves both
-implementations live past one release). No second node/edge dataclass
-hierarchy exists anywhere in the repository after this phase —
-`compare/surface_graph.py` constructs `model.graph.GraphNode`/`GraphEdge`
-instances with its own kind vocabulary, the same way `buildsource/
-source_graph.py` already does, never a parallel type. The new
-`AbiSnapshot.surface_graph` field bumps `serialization.SCHEMA_VERSION`
-the same way Phase 0's `Fact[...]` fields do (a third, independent bump
-by this plan, on top of Phase 0's and Phase 7's — all three are additive
-and bump the same pre-existing `AbiSnapshot`/report-schema counters, not
-ADR-062's `ProjectSnapshot` schema). FP-rate gate shows no regression.
+**Acceptance criteria.** `surface.py`'s own traversal implementation is
+**deleted, not kept alongside the graph query** — landed 2026-09-01, see
+this phase's own "Traversal migration landed" paragraph above. `export_
+surface.py`'s independent closure walk is not a *second* implementation to
+separately delete: it always called `surface.py`'s `_walk_type_closure`
+verbatim rather than keeping its own copy, so once that one function
+migrated, both domains' closures did. What's still open there is narrower
+than "delete a closure walk" — `export_surface.py`'s own root-*seeding*
+(the export-table-matching logic, genuinely independent of the header
+domain) remains unmigrated, named explicitly as a residual rather than
+silently left. No second node/edge dataclass hierarchy exists anywhere in
+the repository after this phase — `compare/surface_graph.py` constructs
+`model.graph_facts.GraphNode`/`GraphEdge` instances with its own kind
+vocabulary, the same way `buildsource/source_graph.py` already does, never
+a parallel type. The new `AbiSnapshot.surface_graph` field bumps
+`serialization.SCHEMA_VERSION` the same way Phase 0's `Fact[...]` fields do
+(a third, independent bump by this plan, on top of Phase 0's and Phase 7's
+— all three are additive and bump the same pre-existing `AbiSnapshot`/
+report-schema counters, not ADR-062's `ProjectSnapshot` schema). FP-rate
+gate and per-tier accuracy gate both show no regression.
 
 ---
 
@@ -7640,18 +12588,32 @@ doesn't itself trip the `cli-contract` gate — but it's still not through
 `service.run_compare`/`resolve_compare_request`, so it never constructs an
 `AnalysisPlan` either and has no pre-flight check for its own inputs.
 `_resolve_stranded_library()` (the `--bundle-facts-out` path's own
-fallback for a library missing from the normal per-pair comparison) calls
-`cli_resolve._resolve_input()` directly — the same Tier-2 resolution
-`resolve_compare_request` itself calls, but reached independently, bypassing
-the `AnalysisPlan`-producing wrapper around it, with its own bespoke ELF
-fallback (`except Exception: ... AbiSnapshot(...)`) on top. Neither is
-this phase's own Goal to migrate (an `AnalysisPlan` pre-flight check for a
-probe-matrix build-config diff or a deliberately-degrading stranded-library
-fallback is a real, separate design question, not a drive-by widening of
-this phase's Files list) — named here explicitly instead, as a residual
-this phase does **not** close: `cli_compare_release.py`'s release fan-out
-is converged for its main per-pair comparison path only; these two
-narrower branches remain outside the typed `AnalysisPlan` pipeline, a gap
+fallback for a library missing from the normal per-pair comparison) used
+to call `cli_resolve._resolve_input()` directly — the same Tier-2
+resolution `resolve_compare_request` itself calls, but reached
+independently, bypassing the `AnalysisPlan`-producing wrapper around it,
+with its own bespoke ELF fallback (`except Exception: ... AbiSnapshot(...)`)
+on top. Neither was this phase's own Goal to migrate (an `AnalysisPlan`
+pre-flight check for a probe-matrix build-config diff or a
+deliberately-degrading stranded-library fallback is a real, separate
+design question, not a drive-by widening of this phase's Files list) —
+named here explicitly instead, as a residual this phase does **not**
+close.
+
+**`_resolve_stranded_library()` was later migrated (ADR-063 Phase 8
+follow-up, not this phase), narrowing the residual to one branch.** Unlike
+the matrix branch, a stranded library genuinely is one dump-shaped input
+(a path, headers, includes, version, language, an optional depth) once
+looked at correctly, so it now builds a real `DumpRequest` and runs it
+through `resolve_dump_request`/`execute_dump_request` — gaining a real
+`AnalysisPlanner.resolve()` pre-flight check and dropping its hand-rolled
+`depth=binary` header-clearing special-case, while keeping its
+degrade-to-ELF-only-on-failure fallback exactly as before. `_collect_
+matrix_result()` remains unmigrated and is expected to stay that way: it
+has no requested-vs-resolved evidence input for an `AnalysisPlan` to check
+feasibility of at all (two already-empty synthetic snapshots, an
+already-computed `extra_changes` list), so `cli_compare_release.py`'s
+release fan-out is now converged everywhere except that one branch, a gap
 for a future, separately-scoped pass to close rather than a silent
 omission from this plan's own accounting. `bundle.py`'s `compare_bundle()`
 takes already-computed `per_library_results` as an input rather than
@@ -7756,9 +12718,460 @@ reasons stated above — named explicitly rather than left for a future
 reader to rediscover by re-checking D1's adapter list against the Files
 section.
 
+**Landed (first slice) — one of the two named gaps closed, the other named
+out of scope, not silently dropped.** `abicheck/workflows/plan.py`
+(`AnalysisPlan`/`SidePlan`/`PlanningFailure`/`AnalysisPlanner`) and a new
+`PlanningError` in `abicheck/errors.py`. `AnalysisPlanner.resolve()` is
+wired into `service_compare_pipeline.resolve_compare_request` and
+`service_dump_pipeline.resolve_dump_request` immediately after
+`request.validate()`, before either function invokes a header-AST backend
+or a build-info adapter — the pre-extraction point this phase's own Design
+section requires. The `--build-target` + pre-captured Bazel
+`aquery`/`cquery` gap is closed as "option 2" from its own known-gap entry
+(reject, don't silently scope-miss): `_check_bazel_target_scoping` fires
+when a side's `build_targets` is non-empty and its `build_info` sniffs as a
+Bazel jsonproto (`buildsource.inline.sniff_build_info_format`), and does
+**not** fire for the documented safe workaround (a live `bazel query`, no
+pre-captured file) or for an ordinary, non-Bazel `build_info`. Every
+`service.run_compare()`/`run_compare_request()` caller — the release/bundle
+fan-out's `_run_compare_pair` included, per this phase's own Files-section
+correction above — gets this guarantee for free through the shared
+resolver; `tests/test_analysis_plan.py`'s
+`test_reaches_through_the_shared_resolve_compare_request_chokepoint` proves
+it at that one chokepoint rather than needing a separate release-fan-out
+fixture, since `service.run_compare`'s own keyword surface has no
+parameter to even express `build_targets`/a Bazel `build_info` in the
+first place.
+
+**The known-gap entry names both `dump` and `scan`; both are now closed,
+not only the `resolve_compare_request`/`resolve_dump_request` half.**
+`scan --against`'s own candidate resolution (`scan_engine._build_new_snapshot`)
+builds a raw `InputSpec` directly rather than a `CompareRequest`/
+`DumpRequest`, so it has no `AnalysisPlan` of its own to resolve through —
+checked against the real code rather than assumed closed by the
+`AnalysisPlanner` wiring alone. The check itself is factored into a free
+function, `workflows.plan.bazel_target_scoping_failure(label, build_info,
+build_targets)`, which `_check_bazel_target_scoping` wraps for the
+`AnalysisPlanner` path and which `_build_new_snapshot` now calls directly.
+**Corrected after a first pass and two further Codex review rounds found
+problems with each fix in turn**: the first version raised `PlanningError`
+inside the existing `try`/`except AbicheckError` block, which maps every
+`AbicheckError` to `click.ClickException` — exit 1, not the exit-64 usage
+error this combination actually is (AGENTS.md: "64 = usage error ... applies
+across commands"). Fixed by raising `click.UsageError` directly at the point
+of detection instead: since `click.UsageError` is not an `AbicheckError`, it
+propagates straight past that `except` clause unmodified — no `PlanningError`
+intermediate, no second `except` clause, and (debt-no-growth is `no_growth`
+for this file) no added lines either. The *second* round found this check
+never even ran on `scan --dry-run`/`scan --artifact-set --dry-run`, both of
+which return their preview before `_build_new_snapshot` is ever called — a
+dry-run could claim success (single-binary: an "UNSCOPED"-but-informational
+estimate) for a request the real run then rejected. Fixed by running the
+identical `bazel_target_scoping_failure` check in `cli_scan.py` itself,
+before both dry-run renderers, raising the same `click.UsageError`.
+`tests/test_bazel_root_targets.py::test_scan_candidate_build_target_with_precaptured_aquery_raises_planning_error`
+pins the real-execution path; `tests/test_bazel_root_targets_scan.py`'s
+three new cases pin both dry-run shapes and the real-run parity case. The
+baseline side of `scan --against` was checked and found not to reach the
+Bazel adapter with `build_targets` at all (`--against` compares against an
+already-produced baseline, not a second live build), so it needed no
+equivalent call. **The *third* round found the "no `PlanningError`
+intermediate" shortcut from the first fix was itself wrong**: `_build_new_
+snapshot` also backs the typed `run_scan(ScanRequest(...))` API (`service_
+scan.run_scan`/`run_scan_set`), which has no Click context to catch a
+`click.UsageError` for — a library caller with no CLI in the picture would
+see a Click-framework exception leak out of a pure Python API, the same
+class of layering violation `PlanningError` exists to prevent for `dump`/
+`compare`. Fixed by raising `PlanningError` at the point of detection after
+all (moved to just *before* the `try`/`except AbicheckError` block, not
+inside it, so that pre-existing catch still can't recatch and remap it) and
+adding the missing translation at the one real CLI boundary: `cli_scan.py`'s
+`scan_cmd` now catches `PlanningError` around its `run_scan_core` call and
+raises `click.UsageError` there, mirroring the `cli_resolve.py`/
+`cli_buildsource.py` pattern `dump`/`compare` already use. (The
+`--artifact-set` path's own pre-flight `bazel_target_scoping_failure` call in
+`cli_scan.py` — a second, CLI-layer-only check that runs before `run_scan_set`
+— needed no change: it already raised `click.UsageError` directly from CLI
+code, never from the engine, and `run_scan_set`'s own `except (ArtifactSetError,
+ValueError)` around `run_scan_set(req)` already catches a `PlanningError`
+that reaches it too, since `PlanningError` is also a plain `ValueError`
+subclass.) This closed the debt-no-growth line-count budget in the same
+zero-net-growth way as the first fix: the check moved out of the `try` block
+line-for-line, with only the raised exception's name changing.
+`tests/test_bazel_root_targets.py`'s same test now asserts `PlanningError`
+instead of `click.UsageError` for the direct engine-level call, and a new
+`tests/test_bazel_root_targets_scan.py::
+test_run_scan_typed_api_raises_planning_error_not_click_usage_error` pins the
+typed-API guarantee end to end (`run_scan(ScanRequest(...))` raises
+`PlanningError`, never `click.UsageError`), alongside the pre-existing
+`test_scan_cli_real_run_rejects_the_identical_combination` pinning that the
+CLI path still exits 64.
+
+**A *fourth* round found the third fix's own placement inside
+`_build_new_snapshot` was still too late.** `run_scan_core` runs its S3
+pattern scan (`scan_files`) and points-of-interest build
+(`_build_scan_poi`, which reads both sides' L0 export tables) *before* ever
+calling `_build_new_snapshot` — real, if cheap, work a typed `run_scan()`/
+`run_scan_subprocess()` caller (no `cli_scan.py` pre-flight ahead of it) paid
+for on every rejected request. Fixed by moving the check to the very top of
+`run_scan_core`, before that work, guarded on `collection_for_ci_mode(
+collect_mode)[1]` being non-empty — the same condition, restated against the
+already-resolved `collect_mode` rather than a raw depth string, that
+`workflows.plan._check_bazel_target_scoping` uses for its own
+`depth="binary"` exemption. The check was then *removed* from
+`_build_new_snapshot` rather than left as a second copy: `run_scan_core` is
+its only production caller, so the check had become pure duplication once
+both were correctly guarded — and removing it caught a real, independent bug
+in the process. **The old `_build_new_snapshot`-only check had no
+`depth=binary` exemption at all**: the third round's own reasoning ("scan's
+own path was already immune") verified only that `cli_scan.py`'s
+`_normalize_depth_inputs` prunes `build_info` to `None` at that depth for the
+*CLI*, but never checked `service_scan.run_scan`, which does not prune it —
+so a typed `ScanRequest(depth="binary", build_info=<precaptured jsonproto>,
+build_targets=(...))` was wrongly rejected by the unguarded check, the exact
+false-positive class the `depth=binary` exemption exists to prevent.
+`tests/test_bazel_root_targets_scan.py` gained two more cases:
+`test_run_scan_rejects_before_wasted_pattern_scan_and_poi_work` (monkeypatches
+`scan_files` to raise if called, proving the check now runs first) and
+`test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check`
+(monkeypatches `bazel_target_scoping_failure` itself to raise if called,
+proving the moved check's exemption actually fires rather than merely
+succeeding for some unrelated reason). `tests/test_bazel_root_targets.py`'s
+own scan-side test was retired to a comment pointing at these three, since
+`_build_new_snapshot` no longer performs the check that test exercised.
+`scan_engine.py`'s `no_growth` debt baseline moved 1483 → 1495 (`architecture/
+debt.yaml`'s own entry has the accounting) — the first fix's "no `PlanningError`
+intermediate" zero-cost trick doesn't apply here, since removing the old
+check's two lines is smaller than the ~14 lines the new guarded check plus
+its two module-level imports needed net; a smaller diff that still states
+both the check and why the old copy was removed was not found.
+
+**Not landed in this slice: the second named scenario, and the
+`cli-contract`/`engine-cli-boundary` gate widening.** Re-checked against
+the real code (not assumed from this section's own prose), "a `-H` flag
+accepted by a collect mode that cannot use it" does not correspond to any
+isolated, currently-open known-gap entry — the one real combination
+matching that description (`--depth binary` with an explicit header list,
+which silently clears the headers to `[]`) is intentional, already-shipped,
+reviewed behavior with its own dedicated regression tests
+(`tests/test_cli_scan.py::test_depth_binary_clears_headers_in_scan`,
+`tests/test_service_unit.py::test_depth_binary_clears_headers`,
+`tests/test_typed_dump_request.py`, `tests/test_depth_vocabulary.py`).
+Turning it into a hard `PlanningError` would be an unreviewed behavior
+change to already-tested surface, not a same-phase fix for a documented
+silent failure — named here explicitly, per this file's own governing
+"acknowledged gap over risky reactive patch" convention, rather than
+forced to fit or silently left for a future reader to rediscover. A
+genuinely new, currently-silent "input accepted by a collect mode that
+cannot use it" case would be `AnalysisPlanner`'s second check, whenever one
+is found. The `scripts/check_ai_readiness.py` `cli-contract`/
+`engine-cli-boundary` gate widening this phase's own Files section names is
+also not attempted in this slice: both functions this phase changed are
+already the sole callers `AnalysisPlanner.resolve()` needs to reach through,
+so there is no second, independent call site for either gate to newly
+police yet — a future phase adding one should widen them then, not this
+one preemptively.
+
+**Second slice (later session): the `dump --dry-run`/`compare --dry-run`/
+`scan --dry-run` parity gap named above is now closed, via the narrower of
+the two designs that paragraph named rather than either literal option.**
+Neither "(a) a `build_config` field on the typed request objects" nor "(b)
+a duplicated discovery-then-merge slice in three renderers" turned out to
+be necessary once the actual seam was checked again: `SidePlan` (`dump`/
+`compare`) already carries `sources` — exactly what auto-discovery needs
+(`discover_build_config(sources)`, mirroring `embed_build_source`'s own
+`cfg_path = build_config or discover_build_config(raw_sources)`) — and
+`scan`'s `ScanRequest` already carries both `sources` *and* `build_config`
+(the explicit `--config` override, a seam `dump`/`compare` don't have at
+the request level at all). So the fix is a widening of the *check itself*,
+not a new field or a second discovery pass: `bazel_target_scoping_failure`
+gained two new, defaulted keyword parameters (`sources`, `build_config`);
+when the request's own `build_targets` is empty, it now falls back to
+`_discovered_config_build_targets(sources, build_config)` — an explicit
+`build_config` wins outright (mirrors `cfg_path = build_config or ...`),
+otherwise a `.abicheck.yml` is auto-discovered at `sources` (skipped for a
+pack directory, mirroring `embed_build_source`'s own `raw_sources = None`
+for one) — reproducing `embed_build_source`'s own `targets=list(
+build_targets) if build_targets else cfg.targets` precedence exactly. A
+malformed config is deliberately swallowed to "no config found" here
+(`except ValueError: return ()`) rather than raised as a second,
+independently-worded error — `embed_build_source` already raises a
+correctly-typed `ValidationError` for it at real-execution time, so
+duplicating that diagnosis pre-flight would itself be the "second,
+independently-maintained copy" drift this phase exists to avoid, for a
+case that already fails loudly downstream. `scan_bazel_scoping_failure`
+gained the identical two parameters and forwards them unchanged; its own
+depth/collect-mode/header exemption logic (eleven Codex rounds' worth,
+`docs/contribute/known-gaps.md`) is untouched, since that exemption
+answers "is `build_info` ever consulted at all," a question independent of
+*where* the requested target scope came from.
+
+Every existing caller of either function keeps passing neither parameter
+(both default `None`), so this is additive: `_check_bazel_target_scoping`
+(the `dump`/`compare` path, via `AnalysisPlanner`) now passes
+`sources=side.sources` — `dump`/`compare` have no `build_config` field to
+pass, so only the auto-discovery half applies to them, closing their
+dry-run parity for free (they resolve `--dry-run` through the identical
+`resolve_dump_request`/`resolve_compare_request` chokepoint the real run
+does, so no renderer needed touching). Three of `scan`'s four pre-flight
+call sites pass their own already-in-scope `sources`/`build_config` locals:
+`scan_engine.run_scan_core` (both real-run and, since it runs before any
+dry-run-vs-real-run branch, the dry-run path too) and `cli_scan.py`'s two
+direct `bazel_target_scoping_failure` call sites (`scan_cmd`'s single-binary
+pre-flight, which already ran ahead of both its real-run and `--dry-run`
+branches, and `_run_artifact_set`'s own pre-flight ahead of `--artifact-set`
+discovery) — closing both the explicit-`--config` and auto-discovered
+halves for the CLI-reachable `scan` shapes. **The fourth,
+`service_scan.run_scan_set`, was left unwidened for one session**:
+`service_scan.py` sat exactly at the AI-readiness 2000-line hard cap, and
+the widened call (5 positional args + 2 new keyword args) didn't fit
+`ruff format`'s column budget on one line — the resulting explosion would
+have pushed the file 8+ lines over. Trimming unrelated content elsewhere
+in that file to buy back the budget was rejected as its own kind of risk
+(that file's existing content is all load-bearing review-history
+documentation, not slack); adding it to `LARGE_FILE_ALLOWLIST` was
+rejected too, since that allowlist's own comment reserves it for
+pre-existing `scripts/`/`tests/` debt discovered when scanning was
+widened to those trees, not a fresh production-file exemption for an
+unrelated fix. So the change was reverted at that one call site and named
+here instead: `run_scan_set`'s own `.abicheck.yml`-only gap stayed open
+for a **direct typed-API call with no CLI in front of it** (`from
+abicheck.service_scan import run_scan_set; run_scan_set(ScanRequest(...))`)
+— `scan --artifact-set`'s own CLI path was unaffected, since
+`cli_scan._run_artifact_set`'s pre-flight (already widened) already ran
+ahead of `run_scan_set` and caught the mismatch first.
+
+**Closed in a later session, by splitting `service_scan.py` rather than
+raising its baseline.** `_descendant_pgids`/`_kill_process_tree` — the
+process-group kill machinery behind `run_scan_subprocess`/
+`run_scan_set_subprocess`, with zero dependency on anything scan-specific
+— moved to the new `abicheck/workflows/scan_subprocess.py`, re-exported
+from `service_scan.py` for backward compatibility (mirroring
+`cxx20_pair_dialect.py`'s own precedent: a genuine one-directional edge,
+since the worker/harness functions that actually call back into
+`run_scan`/`run_scan_set` stayed in `service_scan.py`, avoiding the
+mutual-dependency shape a full move of the subprocess harness would have
+created). It lives under `workflows/` rather than as a new flat
+`service_`-prefixed root sibling, since ADR-061's `frozen_root_families`
+closes that family to new members and `service_scan.py` is itself already
+classified into the `workflows` layer via that layer's own `legacy_paths`.
+That freed enough room for `run_scan_set`'s own `scan_bazel_scoping_failure`
+call to forward `sources=`/`build_config=` too, landing at a new, lowered
+`architecture/debt.yaml` baseline (2000 → 1933) with real room left below
+the hard cap. `tests/test_bazel_root_targets_scan.py::
+test_run_scan_set_config_sourced_target_scope_raises_planning_error` pins
+it, the `run_scan_set` sibling of `test_run_scan_depth_headers_config_
+sourced_target_scope_raises_planning_error`. Phase 4 is now complete: all
+four pre-flight call sites forward `sources=`/`build_config=`.
+`tests/test_analysis_plan.py::TestBazelBuildTargetScoping` gained six new
+cases (config-sourced scope raises for `dump`/`compare`; an explicit
+`build_targets` still wins over a present config, with the failure message
+correctly omitting the "auto-discovered" qualifier; the depth=binary
+exemption still holds with a config-sourced scope; no `.abicheck.yml`
+present is unaffected; a malformed one degrades to "no config found"
+rather than raising a second error).
+`tests/test_bazel_root_targets.py::test_dot_abicheck_yml_build_targets_dry_run_parity`
+pins the closed `dump --dry-run` gap end to end (CLI invocation, exit 64,
+same message as the pre-existing real-run sibling test immediately above
+it); `tests/test_bazel_root_targets_scan.py`'s
+`test_run_scan_depth_headers_config_sourced_target_scope_raises_planning_error`
+(renamed and re-asserted from the pre-existing `..._still_rejects_...` test,
+which had pinned the *pre-fix* `click.ClickException` leak this same gap
+caused for the typed `run_scan()` API — now a clean `PlanningError`,
+raised earlier too, from `run_scan_core`'s own pre-flight check rather
+than leaking out of `_build_new_snapshot`'s pre-existing `except
+AbicheckError` wart) confirms the fix at the typed-API layer as well as
+the CLI.
+
+**Third slice: `_run_artifact_set`'s own pre-flight had a narrower version
+of the same false-positive/false-negative pair, specific to an unset
+`--depth`.** The initial fix for this slice added a bespoke
+`workflows.plan.artifact_set_bazel_scoping_failure`, since
+`_run_artifact_set` (unlike `scan_cmd`'s single-binary path) has no
+per-member resolved `collect_mode` at this point — each discovered
+member resolves its own tier/level independently, later, inside
+`run_scan_set`. That function's first version treated an unset `--depth`
+as always non-`"off"`, matching every other caller's shape, but this
+false-positive-rejected a genuine no-op artifact-set request whose real
+per-member risk scoring would resolve to `"off"`. A revision treating it
+as always exempt instead false-negative-accepted a seeded, high-risk
+request (e.g. a public-header edit) that `run_scan_core`'s own later,
+correctly-resolved check would still reject with exit 64 — reproducing
+this same phase's own dry-run/execution parity defect one level narrower
+(real-run vs. real-run, not dry-run vs. real-run). Both were symptoms of
+approximating a value `AnalysisPlan`'s own design deliberately excludes
+from a pre-flight check: an unset `--depth` only resolves to a real
+`collect_mode` via risk scoring over the request's own seeded change.
+That resolution already exists as a shared primitive —
+`service_scan._resolve_member_scan_level`, the one `estimate_artifact_set`
+itself calls for its own `--dry-run` cost totals — so the fix drops the
+approximation and calls it directly: `_run_artifact_set` builds the same
+probe `ScanRequest` `estimate_artifact_set` would (request-level fields
+only, no `binaries`, no discovery needed), resolves the real `eff_depth`/
+`collect_mode`, and hands those to the existing, already-shared
+`scan_bazel_scoping_failure` — no bespoke artifact-set-shaped guard
+needed. The now-dead `artifact_set_bazel_scoping_failure` was deleted
+from `workflows/plan.py` rather than left as an unused second copy.
+`tests/test_bazel_root_targets_scan.py::
+test_scan_cli_artifact_set_unset_depth_low_risk_seed_config_scope_is_unaffected`/
+`test_scan_cli_artifact_set_high_risk_seed_config_scope_still_rejects` pin
+the no-op and risky cases respectively, keyed on a real low-risk vs.
+high-risk `--changed-path` seed rather than an unset-vs-set `--depth`
+alone. See `docs/contribute/known-gaps.md`'s matching "thirteenth review
+round" entry for the full account.
+
+**Adjacent, additive infrastructure landed under a separate name --
+`ResolvedExecutionContext` ("PR 1" of a follow-up review of this whole
+plan's own progress).** `abicheck/workflows/resolved_execution_context.py`
+(new): a frozen `ResolvedExecutionContext` composing `AnalysisPlan.
+operation`/`requested_depth` (via `ResolvedExecutionContext.from_plan`)
+with an already-resolved `CompatibilityEvaluationConfig` and a per-side
+`CompileContext` mapping into one typed container, plus a
+`resolution_digest()` fingerprint of that resolved input. Does not attempt
+to replace `effective_config_digest.py`'s two-tier digest (that module's
+own docstring already gives a considered reason no single object holds
+every configuration axis for every run; several rich-tier fields are
+themselves comparison *outcomes*, not inputs a pre-execution object could
+carry) -- `resolution_digest()` is a separate, narrower, differently-named
+fingerprint of the resolved *input* only, and deliberately excludes
+`evaluation_config.provenance` (Codex review, PR #1027: provenance records
+*how* a value was selected, not the value itself, so two front ends
+resolving the identical values must hash identically). Pure composition: it
+re-derives nothing from `AnalysisPlan`, `CompatibilityEvaluationConfig`, or
+`CompileContext`, and (like `compatibility_evaluation_frontend.py` before
+it) is landed with its own primitive-level test suite
+(`tests/unit/workflows/test_resolved_execution_context.py`) and no live caller yet -- the
+type, tested, before any command is migrated to build or consume one.
+
+**The "requested/effective/available depth" axis is now closed too, via a
+new `EvidenceView` type** (second slice, same PR) -- resolving without
+duplicating the one existing authority for "effective depth"
+(`analysis_assurance.AnalysisAssurance`, necessarily a *post*-execution
+fact: what a side's resolved snapshot actually turned out to carry, not
+knowable at the point a `ResolvedExecutionContext` is first assembled).
+`EvidenceView` always carries `requested_depth` (knowable pre-execution,
+via `EvidenceView.for_request`) and `available_depths` (the static
+four-rung `--depth` ladder, `buildsource.scan_levels.USER_DEPTHS` restated
+as plain values -- build-time vocabulary, not a per-run computed fact, so
+stating it duplicates nothing); `effective_depth`/`depth_satisfied` stay
+`None` until `EvidenceView.from_assurance()` copies them verbatim off a
+real, already-computed `AnalysisAssurance` (read via `getattr`, not an
+`isinstance` check against that heavier checker-layer type, so this
+`workflows`-layer leaf module stays import-cycle-free) -- never re-derived.
+`ResolvedExecutionContext.with_assurance()` returns a *new* context (frozen
+dataclasses don't mutate) whose `EvidenceView` is complete, for a caller
+that built a pre-execution context and only later has a real
+`AnalysisAssurance` to attach; `ResolvedExecutionContext.from_plan()` also
+takes an optional `assurance` parameter to build the full view directly,
+for a caller resolving the context after a run has already completed.
+`resolution_digest()` reads only `evidence.requested_depth`, never
+`effective_depth`/`depth_satisfied` -- an outcome has no place in a
+fingerprint of the resolved *input* (pinned by
+`test_unaffected_by_effective_depth_alone`).
+
+**A first real call site landed in a follow-up slice** (independent
+verification pass over this plan, 2026-09-03): `service_compare_pipeline.
+resolve_compare_request` — the one resolution implementation every front
+end (`compare`'s native CLI, the typed Python API, and directory/package
+fan-out) already calls through — now builds a `ResolvedExecutionContext`
+via `ResolvedExecutionContext.from_plan()` from the same `AnalysisPlan` it
+already resolves for its ADR-063 Phase 4 pre-flight check (previously
+discarded), and attaches it on the new `ResolvedComparePair.
+resolved_execution_context` field. This is additive and behavior-preserving
+— the field is optional, nothing downstream reads it, and no existing
+invocation's output changes — but it closes the literal "a type nothing
+outside its own tests constructs" gap for the `compare` path specifically:
+every real `compare` now builds one from real production inputs, not only
+from a hand-built `AnalysisPlan` inside a test.
+
+**Still open, and not attempted here:** the context built at this seam
+carries no `evaluation_config`/`compile_contexts` (this resolution runs
+before ADR-049 D7's evaluation config exists for the native CLI, and before
+any per-side `CompileContext` is captured back out of
+`resolve_side_snapshot`'s own internals — see the field's own docstring on
+`ResolvedComparePair`); nothing calls `with_assurance()` once a real
+`AnalysisAssurance` exists; `resolve_dump_request` remains fully unwired
+(its own `ResolvedDumpRequest` object has its own deliberately-scoped
+exclusions documented in its docstring, so folding this in needs the same
+kind of considered pass, not a copy-paste of this slice); and everything the
+review's "PR 2"-onward sequence describes (a semantic consumer cutover,
+`FactStatus`-aware detectors, and the rest) is still future work. This
+slice closes one real call site for `compare`, not consumer migration or
+full wiring.
+
+**"PR 2" (first slice) landed the query facade a consumer migration
+converges on, not the migration itself.** `model/semantic_ir_index.py`'s
+`SemanticIRIndex` wraps a `SemanticIR` and answers exactly the lookups the
+review's Phase 6B sketch names as prerequisite — `entity(EntityId)`,
+`occurrences_for(EntityId)`, `entities_of_kind(EntityKind)` (with
+`functions()`/`variables()`/`records()` convenience filters over it), and
+`fact(EntityId, fact_name)`. `references(entity)` — the review's sixth
+named query — is deliberately not implemented here: it names a
+graph-shaped traversal that belongs with the public-surface reference
+index this same plan's Phase 3/D5 amendment governs, and adding a second,
+ad hoc answer to "what does this reference" here would preempt that design
+rather than serve it. Same posture as `ResolvedExecutionContext`: pure
+composition over `SemanticIR.canonical_entities()`/`SemanticIR.
+occurrences_for()`, no re-derivation, its own primitive-level test suite
+(`tests/test_semantic_ir_index.py`), and **no live caller** — no detector
+in `diff_symbols.py`/`diff_types.py` reads through it yet. The actual
+consumer cutover (routing a detector family's matching through this index
+instead of the legacy `AbiSnapshot.functions`/`variables`/`types`
+projections, and proving the two agree via a parity test before any read
+path is removed) is still the next, larger, not-yet-attempted step this
+paragraph's own "still open" list already named.
+
+**Preparation step, same PR-2 umbrella: real-fixture parity between
+`SemanticIRIndex` and the legacy function-matching key.** Before any
+matcher rewrite, `tests/test_semantic_ir_index_function_parity.py` proves,
+on a real compiled fixture (two overloads plus one `extern "C"` function,
+both header-AST backends), the concrete fact a cutover of
+`diff_symbols._match_old_function`'s exact-key join would depend on:
+`SemanticIRIndex.functions()` sees *exactly* the same identity set as
+`AbiSnapshot.functions` (no function invisible to the index, no phantom
+entity absent from the legacy list), and two functions the legacy
+`Function.mangled`-keyed join keeps apart never collapse onto one
+`EntityId`. **Explicitly not claimed by this preparation step**: the
+extern "C" *alias-fallback* tier (`SymbolIdentityIndex.unique_alias_match`,
+`_match_old_function`'s `name:` join) is not shown to already agree with
+`EntityId` equality in general — that fallback joins on a bare, unscoped
+display name, while `entity_id_for_function`'s own `extern_c` tag is
+scope-qualified (see `model/identity.py`'s own docstring and
+`test_model_identity.py::test_extern_c_ignores_param_types`). A real
+fixture's extern "C" function sits at global scope on both sides, so this
+asymmetry does not surface in the case tested — it is recorded here as an
+open question the eventual matcher must resolve (either widen the
+extern-C `EntityId` tag to be scope-oblivious, matching production's
+unscoped alias join, or keep the alias-fallback tier as a distinct,
+non-`EntityId` join even after the exact-key tier cuts over), not silently
+assumed away by this step.
+
 ---
 
 ### Phase 5 — the fact/capability registry (generalizes `change_registry.py`)
+
+**Landed (complete, 2026-09-02): infrastructure *and* the full
+field-by-field population.** The registry, the
+`fact-registry-completeness` gate and the generated
+`docs/reference/fact-registry.md` landed first (schema v30), followed by
+nine conversion batches (schema v31-v40) — the case-(b) population first,
+then the harder case-(a) half this section's own eligibility discussion
+below exists for. `KNOWN_UNCONVERTED_ELIGIBLE_FACTS` is now the empty set:
+every field either half of the scan finds eligible carries a `Fact[T]`
+sibling and exactly one `FactDefinition`, and a newly-added eligible field
+fails the gate outright rather than joining a baseline. Two pieces of
+shared machinery came out of the case-(a) half —
+`storage/fact_codec.apply_case_a_fact_backfill` (one navigator + a
+`CaseAFactRule` table, replacing Phase 0's three open-coded legacy-load
+corrections) and `decode_fact_with_legacy_presence` — plus fixes for five
+real merge-path mutation traps the conversions surfaced. Per-batch commit
+detail is not separately tracked beyond this summary and the PR history for
+Phase 5's landing commits; what this phase deliberately did **not** attempt
+(no detector branches on `FactStatus`; no codegen of the model field, the
+serialization pair, or suppression/report wiring) is recorded here, in this
+paragraph, rather than in ADR-063 — its own duplicated per-phase status
+block was removed (PR 0, 2026-09-02) to keep this plan the single place
+that detail lives.
 
 **Goal.** A new fact requires declaring the model field plus one registry
 entry, not nine touched files spread across serialization, diff,
@@ -8031,6 +13444,1170 @@ three phases.
 ---
 
 ### Phase 6 — canonical `SemanticIR` between backends and the checker
+
+**LANDED (first slice): the IR, its persistence, and the hybrid merge's
+reconciliation of it — no parser narrowing.** Exactly the ordering this
+phase's own Design section requires ("this model file, and a
+primitive-level test suite pinning its shape directly ... land as their own
+first step in this phase, before any of the following narrowing work"), so
+the per-backend migrations have one concrete target to converge on.
+Landed: `abicheck/model/semantic_ir.py` (`SemanticIR`/`CanonicalEntity`/
+`canonical_cv_qualification`/`semantic_ir_conflict_key`);
+`AbiSnapshot.semantic_ir`/`semantic_ir_conflicts`;
+`abicheck/storage/semantic_ir_codec.py` (schema v38, the list-of-entries
+encoding this section specifies) called from `serialization.py`'s two
+chokepoints; `abicheck/extract/semantic_ir_merge.py` wired into
+`dumper_hybrid.merge_snapshots()`; and four test modules
+(`test_model_semantic_ir.py`, `test_semantic_ir_merge.py`,
+`test_semantic_ir_serialization.py`, `test_dumper_hybrid_semantic_ir.py`).
+
+Three deliberate deviations from this section's letter, each in service of
+its own stated reasoning:
+
+1. **`encode_semantic_ir`/`decode_semantic_ir` live in `storage/`, not in
+   `serialization.py` itself.** The reason this section moved them off the
+   domain types was the `model -> storage` edge ADR-061 forbids; a
+   `storage`-resident codec has no such problem (`storage -> model` is the
+   allowed direction), matches this package's two sibling codecs
+   (`entity_id_codec.py`, `surface_graph_codec.py`), and keeps
+   `serialization.py` — already at its `architecture/debt.yaml` no-growth
+   baseline — to the call-site plumbing.
+2. **An ambiguous group is not "unioned verbatim" for an occurrence both
+   sides key identically** — that phrasing has no meaning for a key
+   collision, and taking it literally means `setdefault` silently discarding
+   the overlay's entity, losing exactly the facts and conflict records this
+   step exists to preserve (Codex review, PR #991). One `OccurrenceId` names
+   one occurrence by that type's own definition, so an exact key match is
+   not a guessed pairing: it merges under the ordinary base-plus-backfill
+   rule. What stays fail-closed is what the ambiguity is actually about —
+   two occurrences pair only when at most one side supplies a
+   disambiguator, never when both supply one and they disagree. (Differing
+   *keys* are not themselves the refusal: castxml supplies no disambiguator
+   at all, so the ordinary match pairs an empty key with a non-empty one.)
+3. **The "two occurrences on one side sharing a non-empty disambiguator"
+   ambiguity is unreachable from a real `SemanticIR`**, because that pair
+   *is* one `OccurrenceId` and therefore one dict key. The guard stays (the
+   matcher takes plain lists, and the invariant belongs to the caller's key
+   type), is tested at that entry point directly, and the limit is recorded
+   rather than papered over with a test that only looks like it covers the
+   case.
+
+**LANDED (second slice): `extract/semantic_normalizer.py`, wired through the
+shared ELF header-AST assembly path -- `semantic_ir` is now real on an
+ordinary `dump`/`compare`.** A re-scoping this slice makes explicit rather
+than silently assuming: the plan's original Design section (below, kept
+verbatim) specified `normalize(raw: RawCastXmlFacts | RawClangFacts | ...)
+-> SemanticIR` operating on *pre-canonicalization* facts, from parsers
+narrowed to stop resolving identity themselves. That narrowing turned out to
+be unnecessary for identity specifically, because Phase 2's implementation
+PR chose **option (a)**: `EntityId` computed once, at parse time, and
+carried as a field on the parsed declaration itself. By the time this slice
+landed, both header-AST backends (`dumper_castxml.py`, `dumper_clang.py`)
+already attached a real, canonically-scoped `entity_id` to every
+`RecordType`/`EnumType` they produce, and an identically-keyed `EntityId`
+sidecar to every typedef -- confirmed directly (`entity_id_for_type`/
+`entity_id_for_enum`/`entity_id_for_typedef` calls exist in both backends'
+`records.py`/`enums.py` and `parse_typedef_entity_ids()`), not assumed from
+this section's own earlier text. What remained genuinely duplicated per
+backend -- this phase's actual "happens once, not once per backend" goal --
+is the *payload* canonicalization `CanonicalEntity` holds, not a second
+identity-resolution pass. `normalize_header_ast` is therefore a normalizer
+over each backend's own already-parsed, already-identified output, not a
+raw-fact interpreter: it computes nothing about identity, only reads the
+`entity_id` each backend already resolved and projects each declaration's
+already-canonical spelling (`RecordType.qualified_name or .name`,
+`EnumType.qualified_name or .name`, a typedef's own resolved underlying-type
+string) into a `CanonicalEntity`. Backend-agnostic by construction -- both
+backends expose the identical `parse_types()`/`parse_enums()`/
+`parse_typedefs_qualified()`/`parse_typedef_entity_ids()` shape, verified
+directly, so one function serves both.
+
+**Scope of this slice: records, enums, and typedefs only.** Functions and
+variables are deliberately **not** normalized yet: a function's canonical
+signature spelling and a variable's canonical type spelling are exactly the
+still-open "two backends, two readings of canonical" problem (return/
+parameter type rendering, not just identity) -- reusing either backend's own
+current spelling here would not unify anything, it would just carry each
+backend's pre-existing disagreement into `SemanticIR` under a name that
+claims otherwise. Constants are omitted for a different reason:
+`CanonicalEntity.canonical_spelling` is specified as a declaration's own
+*type* spelling, and `parse_constants()` captures only a constant's value
+expression, never a captured type string, to canonicalize. Both gaps are
+named here, not silently deferred, per this repository's own bug-class
+discipline (AGENTS.md's "Fix the cause, not the instance").
+
+**Wired at one shared choke point, not per format handler.**
+`dumper_manifest.ElfHeaderAstResult` gained a `semantic_ir` field, computed
+once inside `resolve_header_ast_result()` from the already-merged
+`types`/`enums`/`typedefs_qualified`/`typedef_entity_ids` (after
+`tu_merge`'s own cross-TU reconciliation, so this normalizer never has to
+re-implement cross-TU merge logic itself) -- this single function backs
+*both* the legacy single-header ELF dump and a real `--dump-manifest` dump,
+which turned out to already share this one result type and never construct
+`AbiSnapshot` from a second, independent call site the way the plan's
+original Design section (written before that consolidation) assumed. Only
+`dumper.py`'s `_dump_elf` (`ast_result.semantic_ir`) reads the new field
+today; `_dump_pe`/`_dump_macho` in the same module call
+`parser.parse_types()`/`parse_enums()`/... directly and are **not** wired in
+this slice, deliberately -- `dumper.py` sits exactly at its
+`architecture/debt.yaml` no-growth baseline (raised by 6 lines for Phase 2's
+own closing slice already), and adding a second, inline
+`normalize_header_ast()` call per PE/Mach-O construction site would grow it
+again for a slice whose whole point is staying small. BTF/CTF/PDB are
+untouched, as before -- those backends do not populate `entity_id` at all
+yet, so this normalizer has nothing to read from them.
+
+**Real, non-empty exercise of the first slice's hybrid-merge reconciliation,
+for the first time.** With both `castxml` and `clang` now populating
+`semantic_ir`, an `--ast-frontend hybrid` dump's `merge_snapshots()` step
+(landed inert in the first slice, since `semantic_ir` was always empty)
+runs its real reconciliation logic against real data. A concrete fixture
+(a namespaced record, a namespaced enum, and a typedef spelling a
+partially-qualified nested type) confirms the two backends resolve the
+record's/enum's `EntityId` identically (this phase's actual point: identity
+canonicalized once) while genuinely *disagreeing* on the typedef's
+underlying-type spelling (castxml resolves it to the bare `"Point"`; clang
+resolves it to the partially-qualified `"inner::Point"`) -- exactly the
+kind of cross-backend canonicalization gap this phase exists to make
+visible, which the hybrid merge now correctly keeps castxml's value as base
+and records under `semantic_ir_conflicts` rather than silently picking a
+winner. See `tests/test_semantic_ir_end_to_end.py`.
+
+**Cache/versioning.** No `serialization.SCHEMA_VERSION` bump: the v38 wire
+shape for `semantic_ir` (list-of-entries encoding, landed in the first
+slice) is unchanged -- only its *content* is now non-empty for a real dump.
+`snapshot_cache._SNAPSHOT_CACHE_VERSION` **is** bumped (23 -> 24): a
+snapshot cached by an older abicheck build would otherwise silently keep
+serving `semantic_ir=None` forever for identical cache-key inputs, per that
+constant's own documented purpose ("bumped whenever a change to the
+dumping/provenance pipeline could alter a snapshot's content without
+changing any of the caller-supplied cache-key inputs").
+`qualified_name_segments._LAMBDA_IDENTITY_FIELDS` **is** extended to walk
+`semantic_ir` (Codex review, PR #1001) -- the first slice's own note had
+flagged this as an open question once occurrences are real, and this slice
+closes it: `SemanticIR.occurrences`' dict KEYS (an `OccurrenceId` wrapping
+an `EntityId`, a reach path the generic walk's dict-handling previously
+only rewrote for a plain string key) and values are both renumbered in
+step with the flat `types`/`enums`/`typedefs` spelling they describe.
+`semantic_ir_conflicts` -- packed-key text a naive in-place rewrite would
+corrupt -- gets its own dedicated re-key/re-value function
+(`model.semantic_ir.renumber_conflict_keys`), including a marker present
+*only* in a conflict's discarded value (never among the retained
+declarations), assigned an ordinal as a pure continuation that never
+disturbs an already-assigned real ordinal. See
+`tests/test_lambda_identity_semantic_ir.py`.
+
+**LANDED (third slice): functions and variables are normalized, and
+`_dump_pe`/`_dump_macho` are wired.** `extract/semantic_normalizer.
+normalize_header_ast` gained `functions`/`variables` parameters (default
+`()`, so a caller that has not migrated needs no change). Unlike
+records/enums/typedefs, a function's return/parameter types and a
+variable's own type are not already canonical the way a resolved qualified
+name is -- castxml and clang genuinely spell an identical type differently.
+This slice does not invent a new canonicalization for that gap: it reuses
+the two primitives `entity_id_for_function`/`resolve_function_identity`
+already apply for the identical cross-backend problem --
+`model.signature_normalization.canonicalize_function_signature_param_type`
+for each parameter type (also dropping a top-level by-value cv-qualifier,
+matching the mangling rule that such a qualifier is not a discriminator) and
+`name_classification.canonicalize_type_name` for the return type (matching
+`entity_id_for_function`'s own choice for that position). A function's
+`canonical_spelling` is `"<return>(<param>, ...)"` built from those two
+canonicalizations; `is_const`/`is_volatile` (member-function
+cv-qualification) is carried via `CanonicalEntity.cv_qualification`, the
+field this IR already reserves for exactly that purpose. *Deliberately
+excluded from this slice, named rather than silently dropped*: a function's
+`ref_qualifier`/variadic status are structural facts both backends already
+compute identically (not a spelling problem), and `CanonicalEntity` has no
+dedicated slot for either -- adding one is a model-shape decision for a
+future slice. A variable's `canonical_spelling` is
+`canonicalize_type_name(variable.type)`.
+
+**A variable's `cv_qualification` is NOT read from `Variable.is_const`
+(Codex review, PR #1012, fourth round, fresh evidence) -- an earlier
+revision did, mirroring the function treatment, and that mirroring was
+wrong.** Both header-AST backends compute `is_const` via a bare
+word-boundary search for `"const"` over the WHOLE type spelling
+(`dumper_castxml.py`'s/`dumper_clang.py`'s `parse_variables()`), which is
+correct for that field's own narrower, pre-existing question ("would
+writing through this pointer/reference SIGSEGV") but conflates a mutable
+pointer to const data (`const int *g` -- the pointee is const, the pointer
+itself is not) with a genuinely const declaration. `cv_qualification` is
+this IR's own STRUCTURAL top-level qualification, the same distinction
+`model.signature_normalization`'s "outermost vs. pointee position"
+discipline and `extract/headers/castxml/type_resolution.
+cv_qualifies_pointer_value` already treat as load-bearing elsewhere in this
+codebase -- so reusing the legacy boolean reintroduced exactly the
+conflation those primitives exist to avoid. `_variable_top_level_cv_
+qualification` derives it structurally instead: finds the last top-level
+(nesting-depth-0) pointer/reference sigil in the type string, then reads
+`const`/`volatile` keywords only from the text after it (or from the WHOLE
+string when there is no top-level sigil at all, the by-value case) --
+mirroring `model.declarator_qualifiers._extract_top_level_cv`'s identical
+depth-aware discipline, so a `const` inside a template argument
+(`vector<const int> *g`) is never mistaken for this declaration's own.
+
+**No function is excluded from normalization at all -- not gated on
+`Function.is_compiler_generated`, nor on a synthetic ctor/dtor mangled key
+(Codex review, PR #1012, three rounds, fresh evidence each time).** The
+first revision of this slice skipped every compiler-generated function --
+too broad (a compiler-generated function with a real mangled name, e.g. a
+synthesized `operator=`, has no cross-backend hazard at all: `AbiSnapshot.
+functions` already includes it, so excluding it from `semantic_ir` was
+itself the representation-disagreement this IR exists to avoid) and it also
+missed the real hazard. The second revision re-gated on the actual hazard --
+a function whose `mangled` is castxml's own synthetic ctor/dtor snapshot key
+(`model.synthetic_key.is_synthetic_ctor_key`/`is_synthetic_dtor_key` --
+assigned whenever castxml "may omit a constructor/destructor's real mangled
+name even for a public user-declared" one, per `extract/headers/castxml/
+functions.py`'s own `function_mangled_name` docstring, so this can hit a
+genuinely hand-written, non-implicit constructor too, not only an implicit
+one) is NOT a stable cross-backend identity, since `dumper_hybrid.
+_merge_functions` can rewrite it to a real clang-matched one during a hybrid
+merge, a rewrite this per-backend normalizer (which runs before that merge
+step) cannot see -- but that revision still unconditionally excluded such a
+function even from a plain, non-hybrid dump, where no rewrite step exists
+at all and the occurrence is exactly as real as any other function's.
+**The third round closes the hazard at its actual source instead of
+dodging it in the normalizer**: `_merge_functions` now returns (via an
+output-param dict) every `old_entity_id -> new_entity_id` substitution its
+own ctor/dtor structural match makes, and `dumper_hybrid.merge_snapshots()`
+applies the identical substitution to `castxml_snap.semantic_ir` (through
+`_rewrite_semantic_ir_entity_ids`, the same primitive the Mach-O
+mangled-name fix below introduces) *before* reconciling it with clang's --
+so a matched declaration is never left keyed under its retired synthetic
+identity in one representation while `merged_functions` already carries the
+real one. With the hazard closed at the merge step, the normalizer excludes
+nothing: every function is normalized unconditionally, synthetic-keyed and
+compiler-generated ones included. Confirmed as a real, not merely
+theoretical, gap at every round by the real castxml/clang end-to-end
+fixture in `tests/test_semantic_ir_end_to_end.py` (first round: `Point`'s
+implicit constructors/destructor, genuinely synthetic-keyed, surfaced with
+an empty `leaf_name`; its real-mangled copy/move assignment operators were
+then wrongly excluded too until the second round) and by a new unit test in
+`tests/test_dumper_hybrid_semantic_ir.py` pinning the third round's fix
+directly (a matched synthetic ctor's `semantic_ir` occurrence ends up under
+the real, rewritten key, not duplicated or left stale under the synthetic
+one).
+
+**The unresolved-type-sentinel check tracks nesting depth, not a plain
+substring test, and definitely not exact equality (Codex review, PR #1012,
+second and third rounds, fresh evidence each time).** castxml's own type
+resolver (`extract/headers/castxml/type_resolution.py`'s
+`type_name_uncached`) composes an unresolved nested type into the enclosing
+spelling -- a pointer/reference/array wrapping an unresolvable pointee
+renders as `"?*"`/`"?&"`/`"?[]"`, a cv-qualified one as `"const ?"` -- so an
+exact-equality check (correct only for the typedef branch's `underlying`
+value, always the outermost `type_name()` result with nothing further
+wrapped around it) misses every composite shape for a function/parameter/
+variable type, and shares the identical gap for a typedef whose underlying
+type is itself one of these composite shapes (second round: fixed with a
+plain substring test). **The third round found a plain substring test is
+itself unsafe**: a real, fully-resolved type spelling can legally contain a
+literal `"?"` -- clang emits one verbatim for a dependent, unevaluated
+ternary expression inside a `decltype(...)` (e.g. a non-type template
+argument's own spelling, `"S<decltype(flag ? A{} : B{})>"`), which a
+substring test wrongly marks `Fact.failed(...)`, discarding real canonical
+evidence. `_has_unresolved_component` now tracks nesting depth over
+`()`/`[]`/`<>` instead: castxml's own sentinel-composing recursion never
+emits a `"?"` inside such a grouping -- it only ever prepends/appends a
+bare pointer/reference sigil, array brackets, or a cv keyword directly
+beside it -- while a ternary's `"?"` is, by C++ grammar, only reachable
+inside an expression context that for a type spelling means already being
+inside `decltype(...)`'s parens or a template argument list's angle
+brackets. So a `"?"` found at nesting depth zero is the sentinel; one found
+at depth > 0 is real, resolved evidence. Replaces the exact-equality check
+everywhere, typedef branch included.
+
+**One wrapper is a deliberate, named exception to plain depth-tracking
+(Codex review, PR #1012, fourth round, fresh evidence): castxml's own
+`_Atomic(...)` composition.** `type_name_uncached`'s `AtomicType` branch
+renders an unresolved wrapped type as the literal `"_Atomic(?)"` --
+genuine sentinel output, using a REAL parenthesis pair as part of the
+resolver's own grammar, not an expression context a real, resolved `"?"`
+could ever be found inside instead. Depth-tracking alone treats that `"("`
+exactly like a `decltype(...)`'s, hiding the sentinel at depth 1 and
+wrongly reporting the composite as resolved. `"_Atomic("` is recognized as
+a transparent token instead -- skipped without incrementing depth -- so a
+sentinel directly inside it is still caught at its effective depth 0, the
+same treatment a bare `"?"` already gets; `_Atomic(...)` is also real,
+valid C11 syntax for an otherwise fully-resolved type (`"_Atomic(int)"`),
+which this special-casing does not disturb.
+
+**A declarator-grouping paren is transparent to `_variable_top_level_cv_
+qualification`'s own sigil search, not depth-increasing (Codex review, PR
+#1012, fifth round, fresh evidence).** A const function-pointer/
+pointer-to-array/pointer-to-member-function variable wraps its own sigil in
+a real, syntactic `(...)` group -- clang spells `"int (*const)(int)"` for
+`int (* const fp)(int)` -- which an ordinary opaque-paren depth count
+treats exactly like a parameter list, hiding the sigil at depth 1 and
+reporting no qualification at all. Reuses `model.declarator_qualifiers.
+_is_declarator_group`, the identical classifier `signature_normalization.
+canonicalize_function_signature_param_type` already applies for this exact
+shape. The same round also extended the cv-keyword matcher to recognize
+`restrict` -- **reverted the very next round** (see below).
+
+**Sixth round, two further fixes, one addition and one revert (fresh
+evidence each).** (1) A pointer-to-member-function's own trailing parameter
+list now ends the region `_variable_top_level_cv_qualification` reads
+qualifiers from, reusing `_split_at_trailing_param_list` (the identical
+primitive `canonicalize_function_signature_param_type` already uses for
+this split): for `"void (C::*)(int) const"`, the `const` after the
+parameter list qualifies the POINTED-TO member function, not the pointer
+variable itself, and the fifth round's naive whole-suffix scan wrongly
+attributed it to the variable, reporting an identical `("const",)` for both
+a mutable and a genuinely const member-function pointer. (2) The fifth
+round's `restrict` recognition is reverted: `CanonicalEntity.
+cv_qualification`'s vocabulary names `restrict` alongside `const`/
+`volatile`, but recognizing it via a plain text scan is backend-asymmetric
+-- clang's own qualType spells it verbatim (`"int *restrict"`), while
+castxml's `type_name_uncached` never emits the word at all, by castxml's
+own deliberate choice (unlike a function *parameter*'s `Param.is_restrict`,
+which both backends already populate structurally). A castxml-produced
+entity therefore claimed a CONFIRMED `()` for a qualifier its own backend
+structurally cannot see, and `merge_semantic_ir`'s backfill (which only
+ever backfills a *non*-present base fact) treated that false confirmation
+identically to a genuine, deliberate absence -- a hybrid dump then
+downgraded clang's real `("restrict",)` to a mere two-sided disagreement
+against castxml's structurally-blind `()`, discarding it as the merged/
+authoritative value instead of backfilling it. `Fact[tuple[str, ...]]`
+cannot express "confirmed for two of three qualifiers, blind to the third"
+within one fact; a real fix needs a structural, reliability-tracked
+`Variable.is_restrict` fact populated by both backends the way `Param.
+is_restrict` already is (`resolve_cv_restrict`/`clang_param_is_restrict`,
+both directly reusable for a variable's own type id/node), almost
+certainly with its own `AbiSnapshot` reliability flag mirroring
+`clang_restrict_facts_reliable` -- a model-shape decision for a future
+slice, not a normalizer-only change, the same reasoning already given for
+leaving a function's `ref_qualifier`/variadic status out of this IR.
+`restrict` is therefore left unrecognized (never reported) for a variable
+today, rather than reported unreliably.
+
+`dumper.py`'s `_dump_pe`/`_dump_macho` (the two PE/Mach-O construction sites
+the second slice deliberately left unwired, per that slice's own note) now
+populate `semantic_ir` too, via a new shared choke point,
+`extract/header_ast_fields.parse_header_ast_fields` -- a new leaf module
+(not inlined in either already-capped `dumper.py`/`dumper_manifest.py`)
+that runs a single-parser's own `parse_*()` methods once each and projects
+the result through `normalize_header_ast`, structurally typed
+(`_HeaderAstParser`, a `Protocol`) rather than importing
+`dumper_castxml._CastxmlParser`/`dumper_clang._ClangAstParser` directly,
+which would be an `extract ->` (unclassified flat root module) edge the
+architecture gate forbids for a migrated package. `dumper.py`'s
+`architecture/debt.yaml` no-growth baseline is raised by 7 for this (see
+that entry's own rationale for the exact accounting). `extract/
+semantic_ir_merge.py`'s reconciliation needed no code change to handle a
+function-populated IR -- it is generic over `CanonicalEntity`'s `Fact`
+fields, not specialized to any entity kind -- and this slice's own real
+castxml/clang/hybrid fixture (a function taking a record by const reference)
+is the first non-synthetic proof of that: the hybrid merge matches the
+function's shared, real-mangled-name `EntityId` one-to-one and records the
+identical kind of namespace-qualification-spelling conflict the typedef
+case already has, not a new failure mode.
+
+**LANDED (fourth slice): constants.** `extract/semantic_normalizer.
+normalize_header_ast` gained `constants`/`constant_entity_ids` parameters
+(default `{}`, so a caller that has not migrated needs no change), mirroring
+`typedefs_qualified`/`typedef_entity_ids`'s own pairing. Both header-AST
+backends already attach a real `EntityId` to every public constant
+(`parse_constant_entity_ids()`, Phase 2) -- the identity half of this
+slice's work was already done before it landed; what remained was wiring
+the existing maps into this normalizer at all, plus the two call sites
+(`dumper_manifest.resolve_header_ast_result`, `extract/header_ast_fields.
+parse_header_ast_fields`) that already compute both maps for the legacy
+`AbiSnapshot.constants`/`constant_entity_ids` fields. **Deliberately no
+canonicalization is applied to the value text.** Every prior slice's
+`canonical_spelling` closes a real, *observed* cross-backend type-spelling
+disagreement (`"char const*"` vs. `"char const *"`, a bare `"Point"` vs.
+`"inner::Point"`); a constant's parsed representation carries only its value
+expression, never a captured type string, and no comparable disagreement in
+*value* spelling has been observed between the two backends. `canonical_
+spelling` is therefore the raw `parse_constants()` string, unchanged --
+mirroring `diff_symbols._diff_constants`'s own `CONSTANT_CHANGED` detector,
+which has always compared the two backends' raw value strings with a plain
+`!=` and never canonicalized either side. Inventing a value-spelling
+canonicalizer with no known target divergence to fix would be exactly the
+kind of speculative heuristic this codebase's own bug-class discipline warns
+against elsewhere (see `_type_index_items`'s/`_diff_constants`'s own
+docstrings on an identity heuristic falsified twice, and the "attempted
+twice, reverted twice" discipline that follows from it) -- a canonicalizer
+in search of a bug to fix, not a fix for an observed one. A constant carries
+no `cv_qualification`/`template_arguments`: it has no captured type for
+either fact to describe. `snapshot_cache._SNAPSHOT_CACHE_VERSION` is bumped
+(25 -> 26) for the same reason every prior slice bumped it: a snapshot
+cached by an older abicheck build would otherwise silently keep serving a
+`semantic_ir` with no constant occurrences forever for identical
+cache-key inputs. `dumper_scoping._scoped_semantic_ir` needed no change:
+both backends already scope `parse_constants()`/`parse_constant_entity_ids()`
+to the public-header surface at parse time (the same `_have_public_set`
+filtering pass Phase 2 already applies), so there is no dependency-header
+constant occurrence for that function to additionally exclude, unlike
+functions/variables/types/enums which are scoped post-hoc.
+
+**Fourth slice, three fixes (Codex review, seventh round, fresh evidence
+each).** (1) `merged.constants` deliberately stays `castxml_snap.constants`
+verbatim (a pre-existing exception, unrelated to this slice -- see that
+field's own comment), but `merge_semantic_ir` is generic over every
+`EntityKind` and appends an unmatched clang-only `CONSTANT` occurrence into
+the merged IR unconditionally, the same as it correctly does for a
+clang-only function/variable/type/enum (all of which genuinely ARE unioned
+into their own flat fields, unlike constants). Left unfiltered, a
+clang-only constant would surface through `semantic_ir` with no
+corresponding entry in `merged.constants`/`constant_entity_ids` at all --
+`dumper_hybrid._drop_unmatched_constant_occurrences` closes the gap,
+filtering the merged IR's `CONSTANT` occurrences (and their conflict-key
+entries) to the identical kept-entity-id set `constant_entity_ids`'s own
+union-then-filter already computes. (2) `dumper_clang_expr._expr_
+fingerprint` stamps a compound constant initializer (anything beyond a
+lone literal) with a build-stable STRUCTURAL fingerprint
+(`"expr:" + sha256(...)[:16]`), not a spelling of the source text -- that
+module's own docstring is explicit that cross-backend constant *values*
+are not expected to match for this case. Publishing the fingerprint as
+`Fact.present(...)` made `merge_semantic_ir` report a spurious conflict
+against castxml's real initializer text for every unchanged compound
+constant; `normalize_header_ast` now recognizes the fingerprint's own
+literal prefix structurally (by the value's own shape, not by branching on
+`producer == "clang"`) and marks it `Fact.unsupported()` instead -- the
+same "state genuinely incomparable evidence honestly" discipline ADR-063
+Phase 0 established. (3) `_has_unresolved_component`'s depth tracker is now
+a bracket-KIND-aware stack, not a flat counter: for a resolved dependent
+type like `"S<(N >> 1 ? 1 : 2)>"`, a flat counter decrements once per `>`
+character, so the real right-shift operator's `">>"` wrongly drops the
+running depth to zero WHILE STILL inside the `(...)` grouping, misreading
+the ternary's own `"?"` as the sentinel at real depth > 0 (confirmed
+against a real `clang++ -Xclang -ast-dump=json` repro for exactly this
+`qualType` shape on a dependent function return/variable type). A `">"`
+now only legitimately closes a template level when the innermost
+still-open bracket is itself a `"<"` (`vector<vector<int>>`'s own `">>"`
+still correctly closes two); when the innermost open bracket is a
+`"("`/`"["` instead, a `">"` is a real, resolved operator character
+belonging to that expression and is left untouched. A genuinely ambiguous
+bare `"<"` (a real less-than operator, not a template open) remains an
+accepted, pre-existing residual this fix does not attempt to solve -- doing
+so needs real expression parsing, and no concrete evidence of that
+specific shape has been found the way this `">>"` shape was.
+
+**Known, accepted limitation, documented rather than fixed (Codex review,
+eighth round, fresh evidence): a top-level qualifier hidden behind a
+typedef is not detected.** For `typedef int * const ConstPtr; extern
+ConstPtr p;`, both backends pass `_variable_top_level_cv_qualification`
+the ALIAS spelling (`"ConstPtr"`) -- neither castxml's `type_name()` nor
+clang's plain (sugared) `qualType` resolves through the typedef the way
+this function's text scan would need to see the real `int * const`
+underneath, so it finds no sigil/keyword and reports a confirmed `()`
+even though the variable's real top-level qualification is `("const",)`.
+A real fix needs new structural evidence this function has no access to
+today: clang's separate `desugaredQualType` string (already used
+elsewhere for the identical problem on a field), and castxml's own
+structured, typedef-following resolver (`resolve_cv_restrict`, which
+already walks `Typedef`/`ElaboratedType` nodes) -- neither is currently
+threaded onto `Variable` for this function to read. Adding either is a
+new, per-backend model field (mirroring `Param.is_restrict`'s own
+structural-fact treatment), not a normalizer-only change -- the identical
+"model-shape decision for a future slice" conclusion this section already
+reached for `restrict`. Left undetected rather than guessed at from text
+that cannot see through the alias; pinned by a dedicated regression test
+(`test_normalize_header_ast_typedef_hidden_qualifier_is_a_known_limitation`)
+so a future fix has something that starts failing once it lands.
+
+**A castxml opaque `FunctionType` tag is `Fact.unsupported()`, not
+`Fact.present(...)` (Codex review, ninth round, fresh evidence).**
+castxml's resolver has no dedicated rendering for an anonymous
+`FunctionType` node (unlike `Struct`/`Class`/`Union`/`Typedef`/... which
+all have one), so a direct function-pointer parameter/variable/return type
+resolves to the literal opaque tag string `"FunctionType"` (wrapped in
+whatever sigil surrounds it, e.g. `"FunctionType*"`), never a real
+declarator spelling the way clang's own `"void (*)(int)"` is -- the
+identical shape `idioms._is_callback_type` already checks for elsewhere in
+this codebase (`"FunctionType" in type_str`). This is NOT
+`_has_unresolved_component`'s unresolved-type sentinel case: the resolver
+ran and produced a real, structurally-final answer, it just cannot express
+one for this shape -- exactly `FactStatus.UNSUPPORTED`'s own definition
+("this producer cannot express this family at all... a different producer
+might"), not `FAILED`. Publishing the opaque tag as `Fact.present` made a
+hybrid merge report a spurious conflict against clang's real, useful
+spelling for an unchanged callback declaration; `_function_spelling_fact`/
+`_variable_spelling_fact` now check for the marker (on the RAW components,
+same as the unresolved-sentinel check) and mark `Fact.unsupported()`
+instead, which `merge_semantic_ir`'s backfill treats as absent and
+correctly prefers clang's real evidence with no conflict recorded.
+
+**Two follow-up fixes to the `FunctionType`/`expr:` artifact checks, plus a
+file split (Codex review, tenth/eleventh rounds, fresh evidence each).**
+(1) The clang expr-fingerprint check now matches the FULL shape
+(`^expr:[0-9a-f]{16}$`) rather than merely the `"expr:"` prefix -- a plain
+prefix test also matched castxml's own raw, verbatim source-text
+initializer whenever it happened to spell a qualified name whose next
+component is literally `expr` (`"expr::NAMESPACE_VALUE"`), mirroring
+`diff_default_value_reliability._is_expr_fingerprint`'s identical fix for
+the identical mistake (PR #720). (2) The `FunctionType` check is anchored
+to the WHOLE (cv/sigil-stripped) string and gated on `producer ==
+"castxml"`, not a bare substring test: a naive `"FunctionType" in
+raw_type` also matched a real, legitimately-named type
+(`"MyFunctionTypeWrapper*"`) and fired for clang too, even though clang
+never emits this literal tag text at all. Neither fix fully eliminates
+every theoretical collision (a real type named EXACTLY `"FunctionType"`
+still collides, the same accepted residual `idioms._is_callback_type`
+already carries) -- closing that needs real structural evidence from the
+parser, not a normalizer-only text fix. These three artifact-recognition
+functions (`has_unresolved_component`, `is_castxml_opaque_function_type`,
+`CLANG_EXPR_FINGERPRINT_RE`) were split out into a new sibling leaf module,
+`extract/semantic_normalizer_artifacts.py`, once their accumulated
+docstrings pushed `semantic_normalizer.py` itself past the AI-readiness
+gate's 800-line cap for a new file -- mirroring `model.declarator_
+qualifiers.py`'s own split from `model.signature_normalization.py` for the
+identical reason.
+
+**The sigil-finding scan in `_variable_top_level_cv_qualification` gets
+the identical bracket-KIND-aware stack fix (Codex review, twelfth round,
+fresh evidence), for the same underlying primitive bug found in a
+different function.** For clang's own spelling of `template<int N> extern
+S<(N < 0)> * const gp` (`"S<(N < 0)> *const"`), a flat depth counter
+treats the comparison `<` as another template opener; after the real
+`)`/`>` closers the running depth never returns to zero, so the sigil
+search never finds the real top-level `*` at all, silently reporting no
+qualification for a genuinely const pointer. Fixed symmetrically with the
+existing `">"` rule: a `"<"` only pushes a new bracket level when the
+innermost still-open entry is NOT itself a `"("`/`"["` -- a real
+comparison `<` sitting inside an already-open paren/bracket expression is
+left untouched the same way its own closing `>` already is, so the two
+never spuriously push a level a later real `)` would then incorrectly pop
+instead of the paren it actually closes. Applied proactively to
+`has_unresolved_component` too (same file split, `extract/semantic_
+normalizer_artifacts.py`), since it carries the identical latent bug for
+the identical shape even though no concrete failure was reported there --
+"fix the cause, not the instance" applied to a shared primitive weakness
+rather than only the one call site that happened to be caught.
+
+**The opaque-`FunctionType` regex gets one more shape (Codex review,
+thirteenth round, fresh evidence): a cv-qualifier can also appear AFTER a
+pointer/reference sigil, not only before the tag.** `type_resolution.py`'s
+own `CvQualifiedType` branch renders a cv-qualified POINTER VALUE (not a
+cv-qualified pointee) as a SUFFIX, matching this codebase's own "T *
+const" convention elsewhere -- so a const function-pointer's opaque
+fallback resolves to `"FunctionType* const"`, not `"const FunctionType*"`.
+An earlier revision of the anchored regex only recognized a LEADING
+cv-keyword, so this suffix-qualified shape was wrongly published as
+present, conflicting with clang's real spelling in a hybrid dump of an
+unchanged const callback. The regex now allows a cv-keyword run after
+EVERY sigil, since castxml's recursive wrapping can in principle nest more
+than one (`"FunctionType** const volatile"`).
+
+**A clang Python-`bool`-derived literal constant is also `Fact.unsupported()`,
+not `Fact.present(...)` (Codex review, fourteenth round, fresh evidence).**
+clang's compound-initializer-expression parser stringifies a captured
+Python `bool` constant value with plain `str(...)`, which spells `True`/
+`False` with a capital first letter -- not the C/C++ source spelling
+(`true`/`false`) either backend's *own* literal text would show, and not a
+spelling castxml ever produces for the same declaration. Left as
+`Fact.present("True")`, an unchanged boolean constant read identically by
+both backends' real evidence still reported a spurious hybrid conflict the
+moment clang's own producer-specific stringification diverged from
+castxml's genuine source-text capture -- the identical class of bug the
+`expr:` fingerprint and opaque-`FunctionType` fixes above already closed
+for their own producer-specific artifacts, just for a third one this
+normalizer had not yet recognized. The fix checks for the exact two-value
+set `{"True", "False"}` rather than a case-insensitive comparison or a
+substring test, since a real declared string/identifier constant that
+happens to spell exactly `True` or `False` as its own source text is
+legitimate, comparable evidence, not an artifact to discard. The
+decimal-integer/character/float-literal residual this normalizer still
+cannot distinguish from a genuinely spelled literal (e.g. castxml
+composing `0x10` and clang composing `16` for an unchanged constant) is
+a known, accepted, documented limitation, not attempted here: unlike the
+boolean case, there is no structural signal in the value text alone that
+marks a normalized-but-equivalent numeric spelling as producer-specific
+rather than a real value difference worth reporting, and closing it
+correctly needs either a shared literal-grammar normalizer both backends
+route through or a new structural fact recording each backend's original,
+un-normalized token -- a model-shape decision for a future slice, the
+same conclusion already reached for `restrict` and the typedef-hidden
+top-level qualifier above. Pinned by a dedicated regression test (a
+decimal integer constant continues to report `Fact.present(...)`
+unchanged) so a future fix has something that starts failing once it
+lands.
+
+**`tests/test_semantic_normalizer.py` split a second time, mirroring the
+production-code split (Codex review round, same principle as the
+eleventh-round production split above).** Adding the two regression tests
+for the boolean-literal fix pushed the test file to 1217 lines, past the
+AI-readiness gate's 1200-line cap for a new test file. The 21 tests
+exercising `semantic_normalizer_artifacts.py`'s own primitives (the
+unresolved-type sentinel, the opaque `FunctionType` tag, the clang
+expression fingerprint, and the two boolean-literal tests just added) moved
+to a new sibling file, `tests/test_semantic_normalizer_artifacts.py`,
+leaving the general projection/canonicalization tests in the original file.
+
+**The bool-literal exception is gated on `producer == "clang"` (Codex
+review, fifteenth round, fresh evidence): `"True"`/`"False"` are legal
+C++ identifier spellings, not exclusively a clang artifact.** The
+fourteenth-round fix above discarded any constant value spelling exactly
+`"True"`/`"False"` regardless of which backend produced it, but
+`constexpr bool True = true; constexpr bool k = True;` is real,
+case-sensitive, compilable C++ -- castxml's verbatim `init` text for `k`
+genuinely reads `"True"` too, and the producer-agnostic check discarded
+that real castxml evidence outright (in a castxml-only snapshot) or left
+no way for a hybrid merge to backfill it (clang's own value for the same
+identifier reference is itself an unsupported expression fingerprint, not
+a bare `"True"`/`"False"` the old check could match). Restricting the
+exception to `producer == "clang"` closes the gap: the capitalization
+signal is safe once scoped to clang's own `str(bool)`-derived
+stringification specifically, since no *clang-parsed* boolean literal is
+ever spelled this way -- only a clang-parsed identifier REFERENCE could
+theoretically collide, and that case already routes through the
+expression-fingerprint branch instead (`dumper_clang_expr._initializer_value`
+only stringifies a bare `bool` for a literal, not an identifier
+reference). Pinned by `test_normalize_header_ast_castxml_true_named_identifier_stays_present`.
+
+**A Mach-O plain-C hybrid dump's `entity_id` mismatched castxml's own
+`extern "C"` tag with clang's mangled-name tag (Codex review, fifteenth
+round, fresh evidence) -- fixed at the identity source, not by patching
+the Mach-O `semantic_ir` rewrite.** A genuinely plain-C compilation unit
+has no `LinkageSpecDecl` at all (that AST node exists only in C++'s
+grammar), so `dumper_clang.py`'s `entry.extern_c` -- set only by walking
+into one -- never becomes `True` for a plain-C declaration. The existing
+`raw_mangled == name` fallback still recovers this on most platforms
+(clang's `mangledName` for a plain-C declaration is otherwise the bare
+source name), but Mach-O is the one platform where it doesn't: Darwin's
+linker prepends a leading underscore to every global symbol (`"_foo"` for
+source-level `"foo"`), so clang's own `mangledName` for the identical
+plain-C declaration is `"_foo"`, and the bare-equality check never
+matches. Left unfixed, such a declaration's `entity_id` stayed tagged
+`("mangled", "_foo")` while castxml -- which observes no `mangledName`
+XML attribute at all for a plain-C `Function`/global `Variable` -- tags
+the identical declaration `("extern_c",)`, so `merge_semantic_ir`'s
+bare-`EntityId` matching never recognized the two as one declaration and
+retained it TWICE in the merged `semantic_ir`, even though the flat
+`functions`/`variables` lists (matched on the bare mangled string, not
+`EntityId`, via `dumper_hybrid._merge_functions`'s own `clang_by_mangled`
+lookup) already unified it. `dumper_hybrid.py`'s own Mach-O
+underscore-stripping rewrite (`_macho_normalize_semantic_ir`) could not
+have closed this even in principle: it only re-spells the `"mangled"`
+tag's VALUE, never its KIND, so a `("mangled", "_foo")` identity stays
+tagged `"mangled"` no matter how the trailing string is normalized. The
+real fix is upstream, in both `extract.headers.clang.functions.
+parse_functions` and `dumper_clang._ClangAstParser.parse_variables`:
+`raw_mangled == name` becomes `name in symbol_candidates(raw_mangled)`,
+reusing `extract.headers.clang.context.symbol_candidates` -- the identical
+tolerant-match helper `visibility()` already uses for this exact Mach-O
+underscore quirk -- instead of a second, independently-spelled check.
+Pinned by `tests/test_dumper_clang_extern_c_identity.py` (a new, dedicated
+file rather than added to `test_dumper_clang.py`, which already sits at
+its `architecture/debt.yaml` `no_growth` baseline).
+
+**Two more real findings, sixteenth round, fresh evidence each: the
+Darwin de-prefixing fallback needs a target gate, and the opaque-
+`FunctionType` regex needs a sized-array suffix.**
+
+First: the fifteenth round's `name in symbol_candidates(raw_mangled)`
+fallback was target-agnostic -- it fired on every platform, not only
+Darwin. On a NON-Darwin target, a real, explicit `asm("_foo")` label
+genuinely produces `raw_mangled == "_foo"` while `name == "foo"` and
+`entry.extern_c` stays `False` -- that is a real, distinct mangled
+identity (an asm label), not a linker-decoration artifact, and castxml's
+own resolver keeps the identical declaration tagged `("mangled",
+"_foo")`. The ungated fallback misread this as C linkage too, discarding
+the genuine mangled identity clang correctly observed and producing the
+identical class of cross-backend `EntityId` mismatch the fifteenth
+round's own fix was meant to close -- just with the two backends'
+tags swapped. The fix adds `extract.headers.clang.context.
+is_darwin_target(target_triple)` (checking for `"apple"` in the lowercased
+triple, covering both the `...-apple-darwin...` and `...-apple-macosx...`
+spellings this codebase's own test fixtures already use) and requires it
+alongside the de-prefixed match -- but NOT alongside the pre-existing
+plain `raw_mangled == name` equality, which holds on every platform
+regardless of Darwin and must stay ungated (an early revision of this
+very fix wrapped the WHOLE `is_extern_c` expression in the Darwin gate,
+which broke the ordinary, non-underscored plain-C case,
+`test_parse_functions_extern_c_via_mangled_equals_name`, on every
+platform including Darwin itself -- caught immediately by that
+pre-existing regression test, not shipped). `symbol_candidates` itself
+stays target-agnostic, since it also backs `visibility()`'s pure
+export-table-membership check, where trying the de-prefixed form is
+always safe regardless of platform; only the *identity* decision built on
+top of it needed the gate. Pinned by two new sibling tests proving the
+non-Darwin asm-label case stays `("mangled", "_foo")` (function and
+variable), plus a `target_triple=None` case (a synthetic/unprobeable AST
+must default to the same conservative "not Darwin" answer, never assume
+Darwin from an absence of evidence) and a small parametrized unit test for
+`is_darwin_target` itself.
+
+Second: castxml's `ArrayType` renderer spells a fixed-size array of
+function pointers (`void (*callbacks[3])(int)`) as `"FunctionType*[3]"`
+-- a SIZED array suffix, not only the unsized `"[]"` the anchored regex
+already recognized (an unsized array, e.g. a function-pointer array
+PARAMETER, decays to a pointer with no bound). An earlier revision of
+`_CASTXML_OPAQUE_FUNCTION_TYPE_RE` matched only `"[]"`, so a sized
+function-pointer array's own opaque-tag fallback was wrongly published as
+`Fact.present`, conflicting in a hybrid dump against clang's real,
+complete declarator for an unchanged callback array -- the identical
+class of "the opaque fallback's own contribution is always exactly the
+bare tag text with nothing else glued onto it" reasoning the pointer/
+reference/cv-suffix branches above already apply, just for a bracket
+shape not yet covered. Fixed by widening `\[\]` to `\[\d*\]` in the regex.
+Pinned by a new regression test using a sized-array `Variable`.
+
+**A third wrapper shape, seventeenth round, fresh evidence: `_Atomic(...)`
+can enclose the whole opaque spelling too.** castxml's resolver composes
+`_Atomic(void (*)(int)) callback` into `"_Atomic(FunctionType*)"` -- the
+identical "outer wrapping node, not glued onto the tag" shape the
+pointer/cv/array branches above already accept, just realized as a real
+paren pair instead of a sigil or keyword (mirroring
+`has_unresolved_component`'s own pre-existing `_ATOMIC_WRAPPER_PREFIX`
+transparent-wrapper treatment for the identical `_Atomic(...)`
+composition on the unresolved-sentinel side). An earlier revision of
+`_CASTXML_OPAQUE_FUNCTION_TYPE_RE` had no `_Atomic(...)` branch at all,
+so this shape fell through as a real, present spelling, conflicting in a
+hybrid dump against clang's complete `_Atomic(void (*)(int))` spelling
+while keeping the opaque, useless base value. Fixed by splitting the
+regex into a reusable inner pattern
+(`_CASTXML_OPAQUE_FUNCTION_TYPE_INNER`) and matching it either bare or
+wrapped in `_Atomic(...)`, rather than trying to fold the wrapper into
+one already-dense pattern. Pinned by a new regression test using an
+`_Atomic`-wrapped `Variable`.
+
+**The `_Atomic(...)`-wrapped form can itself be wrapped again, eighteenth
+round, fresh evidence -- fixed by factoring the wrapping pattern out and
+applying it uniformly around both atoms, not by chasing each new shape
+with another alternative.** `const _Atomic(void (*)(int)) callback`,
+`_Atomic(void (*)(int)) *callback`, and an array of atomic callbacks
+render as `"const _Atomic(FunctionType*)"`, `"_Atomic(FunctionType*)*"`,
+and `"_Atomic(FunctionType*)[3]"` respectively -- a cv-prefix/sigil/array
+wrapper OUTSIDE the `_Atomic(...)` parens, on top of the wrapper already
+recognized INSIDE them. The seventeenth round's fix treated `_Atomic(...)`
+as only ever the WHOLE string (its own two-alternative regex had no
+wrapping outside either branch), so none of these further-wrapped shapes
+matched, and the normalizer published castxml's opaque fallback as
+present -- the same false-conflict-in-a-hybrid-dump failure mode every
+prior round in this thread has fixed, just for another wrapping position.
+Rather than adding a THIRD alternative (and inevitably a fourth once a
+combination of wrapper positions surfaces next), the fix restructures the
+regex around two reusable fragments -- `_CASTXML_OPAQUE_FUNCTION_TYPE_
+CV_PREFIX` (the leading `const`/`volatile` run) and `_CASTXML_OPAQUE_
+FUNCTION_TYPE_WRAPPING` (the repeating sigil/array-with-trailing-cv
+suffix) -- and an `_CASTXML_OPAQUE_FUNCTION_TYPE_ATOM` alternation
+(`FunctionType` bare, or `_Atomic(FunctionType` + the SAME wrapping
+pattern + `)`) that the cv-prefix and wrapping are then applied around
+UNIFORMLY, once, regardless of which atom matched. A nested SECOND
+`_Atomic(...)` is deliberately not modeled -- this normalizer has no
+observed evidence castxml ever emits one -- so the wrapping pattern used
+inside the parens is the same one used outside them, just not applied
+recursively. Pinned by a parametrized regression test covering all three
+newly-reported shapes.
+
+**Nineteenth round, fresh evidence, two independent findings on the SAME
+commit -- both narrowing the Darwin-gated extern-"C" de-prefix fallback
+further.**
+
+First: `is_darwin_target` checked only for an `"apple"` VENDOR substring
+in the whole triple, missing a valid triple like
+`"x86_64-unknown-darwin"` -- clang genuinely accepts this triple and
+mangles for it exactly like a real Mach-O target, since the Darwin
+underscore-decoration behavior this whole gate exists to recognize is an
+OS-level linker behavior, not anything vendor-specific. Fixed by
+splitting the triple on `"-"` and checking each COMPONENT against a set
+of known Darwin OS names (`darwin`/`macos`/`ios`/`tvos`/`watchos`) via
+`startswith` (tolerating a trailing version suffix like
+`"darwin20.6.0"`), in addition to the pre-existing `"apple"` vendor
+check -- rather than a bare substring test over the whole string, which
+would also risk a false match from an unrelated component that merely
+CONTAINS one of these tokens.
+
+Second, a materially different and more subtle gap: the Darwin gate
+ALONE is not sufficient, because a real, explicit `asm("_foo")` label is
+just as possible ON Darwin as off it -- the sixteenth round's own fix
+already established this for the non-Darwin case, and this round is the
+identical failure mode surfacing on Darwin itself. This fallback's whole
+justification is "a genuinely plain-C compilation unit has no
+`LinkageSpecDecl`", and that justification only holds for a declaration
+with NO enclosing scope at all: C has no namespaces, so a plain-C
+declaration is always global-scope. A NAMESPACED Darwin C++ declaration
+(`namespace n { void foo() asm("_foo"); }`) is never plain C regardless
+of platform, so the fallback needs `entry.scope` as a THIRD, independent
+gate alongside the target check -- mirroring how `entry.extern_c` itself
+is only ever set by walking into a real `LinkageSpecDecl`, which (per
+this same normalizer's own commentary elsewhere) always resets scope
+too. Both `extract.headers.clang.functions.parse_functions` and
+`dumper_clang._ClangAstParser.parse_variables` now also require `not
+entry.scope`. Retagging such a declaration `("extern_c",)` would have
+been a double loss, not merely a wrong tag: `entity_id_for_function`/
+`entity_id_for_variable`'s `is_extern_c` branch always resolves
+`scope=()`, so the fix also protects the namespace itself from being
+silently discarded, not only the genuine asm-label mangled identity.
+Pinned by two new regression tests (`is_darwin_target`'s own parametrize
+list gains the `"x86_64-unknown-darwin"` case, plus `ios`/`tvos`/
+`watchos` OS-component cases; a new namespaced-Darwin-declaration test
+proves the scope gate for both functions and variables), all in
+`tests/test_dumper_clang_extern_c_identity.py`.
+
+**Landed (fifth slice, 2026-09-02): DWARF, the first non-header-AST
+producer.** ADR-063 Phase 2's "fourteenth slice" (2026-09-02, same day)
+already gave `dwarf_snapshot.py` a real, typed `ScopePath` and a populated
+`entity_id` on every `RecordType`/`EnumType`/`Function`/`Variable`/typedef
+it produces -- this normalizer's own "reads identity, never resolves it"
+contract meant DWARF needed no *new* identity work to become a caller, only
+a new call site: `dumper_elf_fallback._dwarf_semantic_ir` (a thin wrapper
+around the same `normalize_header_ast`, called from `_try_dwarf_snapshot`
+right after `build_snapshot_from_dwarf` returns, rather than inside
+`dwarf_snapshot.py` itself, which sits at its own `architecture/debt.yaml`
+no-growth line-count baseline) passes the builder's
+`types`/`enums`/`typedefs` (already namespace-qualified-keyed, matching
+`typedefs_qualified`'s own convention)/`typedef_entity_ids`/`functions`/
+`variables` straight through, with `producer="dwarf"` and
+`constants={}`/`constant_entity_ids={}` (DWARF carries no constexpr
+initializer evidence at all).
+
+Records/enums/typedefs needed no DWARF-specific handling. Functions and
+variables each needed one producer-specific `cv_qualification` carve-out
+(`extract/semantic_normalizer_dwarf.py`, split into its own leaf module to
+keep `semantic_normalizer.py` under the 800-line production cap, the
+identical reason `semantic_normalizer_artifacts.py` was split out one slice
+earlier): a function's is unconditionally `Fact.not_collected()`, since
+`dwarf_snapshot._build_function` never reads a method's own const/volatile
+qualifier from the DIE at all (`Function.is_const`/`is_volatile` are always
+their dataclass default here, never a confirmed reading -- reusing the
+castxml/clang branch's `Fact.present(...)` would misrepresent "never
+looked" as "confirmed not const"); a variable's is read from the
+already-extracted, structurally-sound `Variable.is_const` field instead of
+`_variable_top_level_cv_qualification`'s text scan, which castxml/clang
+need specifically because *their own* `is_const` is computed with a bare
+whole-string word search that conflates a mutable pointer to const data
+with a genuinely const pointer -- DWARF's `is_const` is not computed that
+way at all (`dwarf_snapshot._process_variable` sets it from whether the
+variable's own outermost type DIE is `DW_TAG_const_type`), so the same
+conflation this normalizer exists to avoid for the other two backends does
+not apply to DWARF, and reading `is_const` there is correct rather than a
+regression. Verified against a real compiled fixture covering all four
+cases (`const int g`, `int* const g`, `const int* g`, `const int* const
+g`): `int* const` and `const int*` render as the IDENTICAL text
+(`"const int *"`) by `dwarf_snapshot._compute_type_name`'s own
+const/pointer composition order, so a text scan could never have told them
+apart for DWARF even in principle -- only the structural field can, which
+is exactly why the DWARF branch reads it instead of reusing the text
+scanner. DWARF extracts no structural volatile fact for a variable at all
+(no backend has an `is_volatile` field on `Variable`), so a DWARF
+variable's `cv_qualification` can only ever contain `"const"`, never
+`"volatile"` -- a documented, accepted gap, not a claimed absence.
+`snapshot_cache._SNAPSHOT_CACHE_VERSION` bumped (26 -> 27), the same
+"a stale cache entry would otherwise silently keep serving `semantic_ir=
+None` forever" reasoning every prior slice's own cache bump gives. New
+tests: `tests/test_semantic_normalizer.py` gained a `producer="dwarf"`
+unit-test section (hand-built objects, no compiler needed, mirroring every
+other producer's tests in that file); `tests/test_dwarf_semantic_ir.py`
+(new) exercises the real production wiring end to end against gcc/g++
+compiled fixtures, the same lightweight `skipif`-gated pattern
+`test_dwarf_entity_id.py` uses (no `integration` marker, since this needs
+no castxml/clang).
+
+**Landed (sixth slice, 2026-09-02): `CanonicalEntity.template_arguments`,
+for records.** Backend-agnostic and extraction-free, unlike every prior
+slice's own per-producer work: a concrete class-template specialization's
+`RecordType.qualified_name`/`name` already embeds its full `Name<Arg1,
+Arg2>` compound spelling on every backend that surfaces one at all
+(confirmed with real castxml AND DWARF output -- castxml's `type_name_
+uncached` resolves a specialization to an ordinary, indistinguishable-
+from-non-template `<Struct name="Box&lt;int, 3&gt;">` element; a
+compiler's own DWARF `DW_AT_name` for an emitted instantiation is the
+identical compound spelling), so decomposing it needs no new identity
+work and no producer-specific branch at all: `extract/semantic_normalizer_
+template_args.py`'s `split_template_arguments` (a new leaf module, split
+out purely for line budget) is a pure bracket/paren/angle-aware text
+splitter over whatever text `canonical_spelling` already reads -- it finds
+the record's own leaf segment's (after its last top-level `::`, so a
+nested specialization's own arguments are never confused with an enclosing
+scope's) top-level `<...>` and splits its contents on top-level commas,
+verbatim. Deliberately never runs an argument through `canonicalize_type_
+name`: a plain text split cannot tell a type argument from a non-type one
+(a literal value, an enumerator) apart from its own text alone, and no
+concrete cross-backend value-spelling divergence is observed to justify
+guessing -- the identical "no canonicalizer without a known target
+divergence to fix" discipline the fourth slice's constants already
+established. Wired into `normalize_header_ast`'s existing `types` loop
+(one line, `template_arguments=Fact.present(split_template_arguments(rt_
+name) or ())`) -- `Fact.present(())` (a confirmed, not merely absent,
+non-template) for every record that isn't one.
+
+A closure-typed argument's own raw `"(lambda at <path>:<line>:<col>)"`
+marker is stored UNrenumbered by this function -- deliberately, since
+`template_arguments` was never added to `qualified_name_segments.
+_PAYLOAD_FIELD_EXCLUSIONS`, so the pre-existing `renumber_anonymous_
+closure_identities` walk (already reaching every string in `AbiSnapshot.
+semantic_ir`, confirmed by grep before assuming it) canonicalizes it
+post-hoc to the identical stable ordinal it already gives the SAME marker
+embedded in the record's own `canonical_spelling`/`EntityId` -- confirmed
+end to end against a REAL compiled fixture, not assumed: a template
+instantiated with a real lambda's closure type, run through the actual
+`dump()` production pipeline, shows the decomposed argument and the
+record's own identity key converging on byte-identical renumbered text
+(`tests/test_semantic_ir_end_to_end.py`'s new closure-parameterized-
+template test -- exactly this slice's own named acceptance-criteria
+fixture).
+
+**clang is a confirmed, named exception, and it is a missing OCCURRENCE,
+not a wrong FACT.** `dumper_clang.py`'s categorizing walk collects
+`CXXRecordDecl`/`RecordDecl` nodes for `self._records` (and therefore
+`parse_types()`) but never a `ClassTemplateSpecializationDecl` (confirmed
+directly -- `extract.headers.clang.templates.build_specialization_
+index`'s own docstring states this exactly, for an unrelated vtable/
+base-lookup reason), so a concrete specialization is never itself a
+`RecordType` on that backend at all; only the UNINSTANTIATED PATTERN
+(bare `"Box"`, never `"Box<int, 3>"`) is. Every clang-produced record this
+normalizer sees is therefore, unconditionally and confirmedly, NOT an
+instantiation -- `Fact.present(())` is the CORRECT, confirmed answer for
+every one of them, not a gap. What clang cannot do is produce ANY
+occurrence at all for a concrete specialization, so this phase's own
+acceptance-criteria fixture cannot show cross-backend AGREEMENT on that
+specific entity -- confirmed with a real end-to-end test
+(`test_semantic_ir_template_arguments_end_to_end`) that asserts exactly
+this asymmetry (castxml: one real, decomposed occurrence; clang: none at
+all) rather than assuming parity, squarely within this phase's own stated
+acceptance bar ("not... an identical `SemanticIR` regardless of source
+backend").
+
+Functions/typedefs/variables/enums are deliberately untouched: none of
+them can themselves be a template instantiation the way a record can in
+this codebase's model. A function TEMPLATE's own instantiation is real
+(`identity<int>`), but neither backend's `Function.name` embeds the
+argument spelling the way a record's compound name does -- confirmed with
+real castxml output: an instantiated function's own `name` stays the
+bare, unparameterized `"identity"`, with only the Itanium-MANGLED name
+carrying the argument, needing a real demangler to decode it back into
+argument spellings -- a materially different, larger project (a
+mangled-name argument decoder, not a compound-spelling text split) than
+this slice attempted. An enum/typedef/variable can never itself be a
+template entity at all in the vocabulary this codebase's model tracks.
+
+**Seventh slice landed: PDB, types only (`RecordType`/`EnumType` via TPI).**
+The identical Phase 2 `EntityId` treatment DWARF's fifth slice needed, but
+structurally harder to apply: PDB's own TPI type records carry no scope
+tree at all to walk (unlike DWARF's DIE tree or the two header-AST
+backends' AST trees) -- CodeView names each struct/class/union/enum with
+its own FLAT, already-`"::"`-qualified spelling as one string
+(`"NS::Outer::Inner"`), with no separate parent-scope reference. The new
+`extract/pdb_scope.py` therefore does the reverse of `extract/
+dwarf_scope.py`'s/the header-AST backends' own scope-construction modules:
+it PARSES a qualified name string back into typed `ScopePath` segments,
+rather than building one while walking a tree.
+
+That parsing itself needed a shared primitive `extract` could actually
+import: `qualified_name_segments.raw_segments` already had the exact
+bracket-depth-aware `"::"`-splitting algorithm needed, but that module
+belongs to the `compare` layer, which `extract` may not depend on (ADR-061
+-- the identical constraint `extract/headers/scope_segments.py`'s own
+docstring already documents for that module's `version_suffix`). Rather
+than reimplementing the same fiddly splitting loop a second time -- exactly
+the "two independently constructible representations of the same fact"
+shape this codebase's own governing invariant forbids elsewhere -- the
+primitive itself moved down to a new leaf module,
+`model/qualified_name_split.py`, which both `qualified_name_segments.
+raw_segments` (now a one-line delegate) and `extract/pdb_scope.py` build
+on. `raw_segments`'s own existing 152-test coverage (lambda-identity,
+scope-segments, semantic_ir-template-args, qualified-type-matching) all
+passed unchanged against the delegating version, confirming the move
+preserved behavior exactly.
+
+The one genuinely new judgment call: given a qualified name's flat text
+alone, is an enclosing segment a namespace or a nested class? CodeView's
+spelling carries no direct signal either way. `pdb_scope.py` resolves it
+by checking whether the ACCUMULATED prefix up to that segment is itself a
+name this same PDB separately recorded as a struct/class/union (the
+caller's own `DwarfMetadata.structs` key set, already computed and
+in hand -- no second pass needed) -- a `Record` segment if so, `Namespace`
+otherwise. **This heuristic is UNVERIFIED against real MSVC output**: this
+environment has no MSVC/`cl.exe` toolchain (the `windows-msvc` CI lane's
+own `msvc`-marker gate is the only place that exists), so it is covered
+only by hand-built qualified-name-string tests -- the identical "no
+compiler needed" discipline `tests/test_pdb_parser.py`'s synthetic
+MSF/TPI/DBI byte-stream fixtures already establish for this backend,
+applied one layer up (post-parse qualified-name strings, not raw TPI
+bytes). Its own documented, accepted limitation: a purely
+forward-declared-and-never-defined enclosing class would not appear in
+the known-record-names set (`pdb_metadata._is_user_visible` filters
+forward-ref-only entries out entirely) and would misclassify as a
+namespace -- an edge case the qualified-name text alone cannot resolve,
+matching the DWARF/header-AST backends' own practice of documenting an
+evidence gap explicitly rather than guessing past it. No anonymous-type
+handling either: CodeView synthesizes an internal name for an unnamed
+struct/union/enum rather than leaving it genuinely anonymous the way a
+DWARF DIE or a Clang/castxml AST node can be, and `_is_user_visible`
+already filters those compiler-internal names out before they ever reach
+this module.
+
+`pdb_model.py`'s `_record_from_layout`/`_enum_from_info` now stamp a real
+`entity_id` via this module, and the new `pdb_model.pdb_semantic_ir()`
+calls the existing, UNMODIFIED `normalize_header_ast` -- no PDB-specific
+`Fact`-carve-out module needed for this types-only slice (unlike DWARF's
+fifth slice, which needed `extract/semantic_normalizer_dwarf.py` for its
+own cv_qualification gaps): the normalizer's `types`/`enums` loop never
+touches `cv_qualification` at all (a functions/variables-only fact this
+slice does not populate for PDB), so `producer="pdb"` needs no new
+producer-dispatch branch there. Wired into the real production call chain
+(`service_dump_native_pe._dump_pe`'s existing header-scoping fallback
+branch -- the same narrow "headers requested, castxml could not resolve a
+surface" path `pdb_model.py`'s own pre-existing docstring already
+describes, not a new call site) and verified end to end through that real
+chain (`tests/test_pdb_provenance.py::TestDumpPeFallbackBuildsPdbTypes`),
+not only in isolation.
+
+**Still not landed on the PDB side**: PDB's own function/variable
+identity. The DBI module symbol streams -- where CodeView's
+`S_GPROC32`/`S_LPROC32`/`S_GDATA32`/`S_LDATA32` records live, the PDB
+analogue of `DW_TAG_subprogram`/`DW_TAG_variable` -- are parsed by
+NOTHING today (`pdb_parser.py`'s own DBI header fields for these streams
+are read but never acted on), so there is no PDB-native `Function`/
+`Variable` at all to attach an `EntityId` to yet. Giving PDB function/
+variable identity is therefore not "add an `entity_id=` field to an
+existing extraction path" the way DWARF's third slice was -- it needs
+genuinely new parser work first, a materially larger, separate project
+this types-only slice does not attempt.
+
+**Ninth slice landed: BTF/CTF, types only.** Both `btf_metadata.
+parse_btf_metadata` and `ctf_metadata.parse_ctf_metadata` reduce their own
+richer, format-specific parse to the shared `DwarfMetadata` shape (via
+`BtfMetadata.to_dwarf_metadata`/`CtfMetadata.to_dwarf_metadata`) purely so
+the checker's pre-existing `_diff_dwarf`/`_diff_advanced_dwarf` detectors
+work against any of the three debug formats unmodified -- but that
+conversion carries only flat, name-keyed `StructLayout`/`EnumInfo` dicts,
+never a `RecordType`/`EnumType` model object, so nothing along that path
+had ever had an `entity_id` to build an occurrence from. New
+`extract/debug_layout_semantic_ir.py` bridges that shared shape into
+transient `RecordType`/`EnumType` objects carrying a real `entity_id`, then
+feeds them through the same `normalize_header_ast` every other producer
+uses. Wired into the ELF headerless (symbol-only) fallback path
+(`dumper_elf_fallback._build_symbol_only_snapshot`, the only place a
+BTF/CTF-resolved `dumper.py` run reaches -- a real DWARF resolution instead
+goes through `dwarf_snapshot.build_snapshot_from_dwarf`, whose own
+`entity_id`-bearing types have existed since Phase 2).
+
+No PDB-style scope-resolution heuristic applies at all: BTF (the Linux
+kernel's BPF Type Format) and CTF (illumos/Solaris's Compact C Type
+Format) are both pure-C debug formats with no namespace/class nesting
+whatsoever, so every `ScopePath` this slice builds is unconditionally
+empty -- none of PDB's own documented limitations (namespace-vs-record
+ambiguity, forward-declared enclosing classes, function-local scopes,
+nested anonymous aggregates) have a BTF/CTF analogue, and none needed
+inventing here.
+
+**Deliberately does not widen `AbiSnapshot.types`/`.enums`.** Every prior
+Phase 6 slice (DWARF and PDB) only ever adds `entity_id`/`SemanticIR`
+normalization on top of a model-type bridge that already existed
+*independently* of Phase 6, for other reasons (DWARF's own DIE-walk
+builder predates this phase entirely; PDB's own `pdb_model.py` bridge,
+wired into the PE header-scoping fallback so those types reach
+`AbiSnapshot.types`/`.enums` and, from there, `surface.py`/vtable/
+internal-leak detection, likewise predates this phase). BTF/CTF never had
+such a bridge at all, so building one that newly feeds `.types`/`.enums`
+would be a genuinely new, larger change -- newly exposing BTF/CTF structs
+to every other `.types`-consuming detector for the first time, a
+materially larger, separately-scoped design question this slice does not
+attempt. This slice's own `RecordType`/`EnumType` values are therefore
+transient: consumed only by `normalize_header_ast` and discarded
+immediately after, with `AbiSnapshot.types`/`.enums` left exactly as they
+already are for a BTF/CTF-sourced snapshot (empty, on the current
+headerless fallback path). A future slice giving BTF/CTF real model-type
+population (mirroring what PDB's own PE-fallback wiring already does) can
+reuse this same `entity_id` assignment without redoing it.
+
+Function/variable/typedef identity is a further, unattempted gap:
+`BtfMetadata`/`CtfMetadata`'s own `func_protos`/`typedefs` fields are not
+even carried across either format's own `to_dwarf_metadata()` conversion
+(see that method's own docstring) -- there is no *matching*
+`EntityId`-bearing evidence reaching the normalizer for those kinds at
+all, not a case this slice silently drops.
+
+`service.py`'s own BTF/CTF dispatch (a third production assembler this
+phase's own "not the only production assembly call sites" note above
+names -- the separate call site around where it parses a raw BTF/CTF blob
+and constructs an `AbiSnapshot` directly from `btf.to_dwarf_metadata()`/
+`_typeinfo_functions(btf.func_protos)`/`dict(btf.typedefs)`, and the
+identical CTF branch beside it, NOT the `dumper_elf_fallback.py` path this
+slice wires) has since been wired too (Codex review, fresh evidence): that
+dispatch lives on today as `workflows/input_resolution.py::
+_resolve_raw_typeinfo` (ADR-061 Phase 4 relocated it out of `service.py`
+verbatim, before this slice's own review round), and now calls
+`semantic_ir_from_debug_metadata` for both its BTF and CTF branches, the
+same as `dumper_elf_fallback.py`'s own call site.
+
+**Still not landed, and therefore this phase is not complete:**
+the phase's own acceptance criteria (a
+closure-parameterized template fixture) remain only PARTIALLY met --
+castxml's own occurrence now really does decompose and canonicalize a
+closure-typed template argument end to end, but clang produces no
+comparable occurrence to agree with it at all (above), and a function
+template's own template-argument list remains a separate, unattempted
+gap (also above). A manifest (`--dump-manifest`) dump's own occurrence-
+detail loss (Codex review, PR #1001) is now closed -- see the corrected
+account below, kept in full for the institutional-memory reasons the
+paragraph itself explains.
+
+**Multi-TU manifest occurrence detail: two wrong analyses, then the real
+fix (Codex, PR #1024) -- recorded precisely rather than quietly
+corrected a third time.** An earlier revision of
+this section argued the obvious close (normalize each `TuFragment` before
+`merge_fragments` collapses identities, keyed by a real per-TU
+disambiguator) was a no-op, reasoning that a `RecordType`'s forward-
+declaration/full-definition split produces two byte-identical
+`CanonicalEntity` PAYLOADS (`canonical_spelling`/`template_arguments` both
+derive from the qualified name text alone; `cv_qualification` is
+`NOT_COLLECTED` for every record regardless) and concluding genuinely
+closing the gap needed `CanonicalEntity` to grow a new completeness/
+availability field. That conflated the payload with the occurrence: two
+occurrences with identical payloads are still two distinct declarations,
+and `SemanticIR.occurrences` (keyed by `OccurrenceId`, not `EntityId`)
+exists precisely to preserve occurrence COUNT independent of whether two
+payloads happen to coincide -- so the "pure duplication" framing, and the
+model-extension conclusion drawn from it, were both wrong.
+
+**A second analysis then claimed the blocker was sharper still: that
+nothing today distinguishes a genuine cross-TU declaration split from the
+ordinary, far more common case of the identical declaration observed
+redundantly because many TUs `#include` the same header, and that closing
+it needed `tu_merge.py` to expose a new per-entity trivial-vs-genuine-
+variance signal it does not have today.** This was also wrong, and a
+second Codex review round on PR #1024 pointed at the fix directly: the
+distinguishing signal already exists, on the pre-merge candidates
+themselves, and does not need `tu_merge.py` to expose anything new.
+`RecordType`/`EnumType`/`Function`/`Variable` (both header-AST backends)
+already carry their own `source_location` (`"file:line"`) from parsing --
+a genuine cross-TU split (a public header's forward declaration, a
+private header's full definition) reports two *different* locations,
+while the ordinary redundant-`#include` case reports the *identical*
+location from every including TU, since it is literally the same file and
+line. That is exactly the distinction the second analysis said did not
+exist.
+
+**The actual fix, landed:** `extract/manifest_semantic_ir.py`'s new
+`manifest_semantic_ir(fragments)` normalizes each contributing TU's own
+raw, pre-merge `TuFragment` independently (never reading
+`merge_fragments`'s already-folded output at all) and unions the
+resulting per-fragment `SemanticIR.occurrences` maps (first-fragment-wins
+on a key collision, fragments ordered by `tu_name` to stay deterministic).
+`extract/semantic_normalizer.normalize_header_ast` gained a
+`disambiguate_by_source_location: bool = False` parameter (default
+preserves every existing caller's behavior unchanged); when true, each
+type/enum/function/variable occurrence's `OccurrenceId.disambiguator` is
+set to that declaration's own `source_location`. Typedefs/constants carry
+no `source_location` in this codebase's model at all (neither has an
+"incomplete" form to begin with), so this pass leaves them exactly as
+`merge_fragments`'s own flat fields already do. `dumper_manifest.
+run_tu_loop` calls `manifest_semantic_ir(fragments)` and attaches the
+result to `MergedTuFragments.semantic_ir` (a new field);
+`resolve_header_ast_result` prefers that richer value when present,
+falling back to the legacy single-pass `normalize_header_ast` call only
+when a caller's `MergedTuFragments` never set it. Verified against real
+clang output in `tests/test_dumper_manifest_semantic_ir.py`: a genuine
+two-TU forward-declaration/full-definition split produces exactly two
+occurrences with two distinct `source_location`-derived disambiguators,
+and three TUs sharing one unmodified header collapse to exactly one
+occurrence -- confirming both the fix and that it does not regress the
+overwhelmingly common shared-header case into per-TU noise. A single-TU
+manifest dump is unaffected either way (nothing for the merge to collapse
+ahead of it, and the resulting IR matches a single-header dump's own
+shape). See `extract/semantic_normalizer.py`'s and
+`extract/manifest_semantic_ir.py`'s own docstrings for the same account.
+The original Design/Files/Tests/Acceptance-criteria sections below are
+kept verbatim as the phase's full target shape -- each slice is a step
+toward that target, not a redefinition of it.
 
 **Goal.** Type-spelling, scope, template-argument, anonymous/lambda, and
 CV-qualification canonicalization happens once, not once per backend.
@@ -8577,6 +15154,15 @@ expected `FactStatus` for the facts only one of them can produce (e.g.
 only the clang backend extracts) — stated as one parameterized test with
 two assertions per fixture, not one assertion claiming full equality.
 
+**RESOLVED (2026-08-29, PR #943): Phase 2's implementation PR chose option
+(a), so everything this paragraph and the next conditionally assign to
+Phase 6 stays in Phase 2 and is NOT this phase's work.** The two
+paragraphs are kept verbatim below rather than deleted, because they still
+record why the dependency exists and what it would have cost; read them as
+the branch that did not happen. (Phase 2's own third-slice finding does
+re-sequence the consumer migration *within* Phase 2 -- behind persistence
+and the `finding_identity.py` move -- but nowhere near Phase 6.)
+
 **If Phase 2's implementation PR resolves its own open option-(a)-vs-(b)
 question (above) as option (b), this phase's Files/Tests/Acceptance
 criteria above do not by themselves cover what that choice defers here —
@@ -8631,6 +15217,37 @@ reference two phases back with no phase left to claim it.
 ---
 
 ### Phase 7 — `RunOutcome` and the last inline exit-code computation
+
+**Landed (2026-09-02).** `abicheck/policy/outcome.py` (new) implements
+`RunOutcome`/`PolicyGateDecision`/`OperationalStatus`/`TargetLifecycle`
+exactly per this section's corrected design below (`severity.GateDecision`
+untouched). Every writer this section's Files list names emits the new
+`run_outcome` block additively: `reporter.py`'s four JSON entry points
+(via a new leaf, `report_run_outcome.py`, threaded through
+`reporter_contract_blocks.render_json_with_side_facts`'s shared tail —
+split out purely to keep `reporter.py`/`service_scan.py` under the
+file-size hard cap, not a design change); the three `buildsource/
+check_report.py` synthetic builders; `scan_engine.ScanOutcome.to_dict()`
+and `service_scan.ScanResult.to_dict()`/`ScanSetResult.to_dict()`; and all
+three real callers of the not-comparable refusal document
+(`report/not_comparable.py`'s two functions, `cli_compare_helpers.py`'s
+JSON branch, and `cli_compare_release_pairwise.py`'s per-library refusal
+branch — this last one is the file the plan's own Files list named
+`cli_compare_release.py` for, corrected here against the real call site).
+`workflows/aggregate/gate.py` reads structured-first with legacy decode as
+the named fallback, exactly as designed; `fold.py` needed no change, as
+predicted. `buildsource/check_report.py`'s `_neutralize_gate()`/
+`_escalate_removed_library_severity()` both gained the identical
+`run_outcome.gate` treatment described below. Report schema bumped to
+2.48 (`compare`/release)/1.24 (`scan`); the package schema gained the
+`run_outcome` definition, republished to the docs mirror via
+`scripts/publish_schemas.py`. The `no-inline-gate-computation` AI-readiness
+check landed as `scripts/no_inline_gate_computation.py` (WARN), scoped per
+this section's own Acceptance Criteria text (does not flag `fold.py`'s
+`GateInfo.exit_code` aggregation). All of this section's own Tests are
+implemented in `tests/test_run_outcome.py`/`tests/test_no_inline_gate_
+computation.py`. `action/run.sh` is untouched, exactly as this section's
+own explicit exception states.
 
 **Goal.** The multi-target *aggregate* path (`gate.py`/`fold.py`) stops
 decoding and re-aggregating raw `exit_code` integers as semantic data;
@@ -9167,6 +15784,72 @@ see.
 
 ### Phase 8 — wire storage v2's writer/reader to the domain layer (closes ADR-062 Phase 1, jointly with D8)
 
+**Update (2026-09-02, landed — full D8 section split plus default CLI
+wiring as a single-file shape; not the whole phase).** ADR-062 Phase 0's
+primitives are no longer inert: every legacy document field is split
+across D8's section vocabulary, and `dump`/`compare`/`scan --against`
+now read/write that split by default — packaged as one JSON document
+(`storage.sectioned_document`), not the directory-backed package this
+phase originally targeted (see the CLI-wiring paragraph below for why).
+`abicheck/storage/dto.py` is the D8-constrained
+`SectionDTO` envelope this phase's Files section asked for, built on
+`storage/semantic_ir_codec.py`'s existing explicit `SemanticIR` encoding
+(extracted into a pure `semantic_ir_to_document`/`semantic_ir_from_document`
+pair this DTO layer calls, rather than duplicating it). `abicheck/storage/
+legacy_sections.py` (new) is what closes this slice's previously-open
+gap: `split_legacy_document`/`join_legacy_document` partition every
+remaining document field across D8's `binary`/`declarations`/`types`/
+`layout`/`debug`/`build`/`graph`/`provenance` sections via one explicit,
+per-section field allowlist (an unassigned or misfiled field is a hard
+error, never silently dropped into a catch-all) — a completeness test
+enumerates `AbiSnapshot`'s real dataclass fields and fails until each has a
+section. `abicheck/storage/import_v1.py`'s `import_legacy_snapshot`/
+`export_legacy_snapshot` (the second now new too — the exact inverse) write/
+read one `SectionDTO` per present section. `abicheck/project_snapshot_store.py`
+(flat-root — this phase's directory-backed writer, kept outside `storage/`
+for the same import-layering reason `package.py`'s own docstring already
+gives) is a real `DirectoryObjectStore` plus a manifest/ref writer and
+reader implementing D6's directory layout (everything except the `.tar.zst`
+transport form); the new legacy-document round-trip functions
+(`write_legacy_snapshot_package`/`read_legacy_snapshot_document`/
+`is_project_snapshot_package_dir`) live in a sibling,
+`abicheck/project_snapshot_legacy.py`, since `project_snapshot_store.py`
+itself had only two lines of headroom under the 800-line architecture cap.
+`scripts/check_ai_readiness.py`'s `project-snapshot-dto-no-asdict` check
+now also watches `legacy_sections.py`.
+
+**CLI wiring — redesigned (2026-09-02) as the default single-file shape,
+not a directory package.** The directory package's real value (content
+dedup, independent per-section objects) only pays off once a project shares
+content across multiple artifacts, which nothing produces yet; for the
+single-artifact case every `dump` performs today it was pure storage-UX
+cost. `storage.sectioned_document` packages the identical D8 split as one
+JSON document instead, wired into `serialization.snapshot_to_json`/
+`write_snapshot` (write) and `snapshot_from_dict`/`load_snapshot` (read,
+transparently unwrapping either shape) — every `dump`/`compare`/`scan`
+invocation gets it by default, no flag, and an older flat `.abi.json` a
+prior build wrote stays fully readable. The directory writer/reader
+(`project_snapshot_legacy.write_legacy_snapshot_package`/
+`read_legacy_snapshot_document`) remain available as typed-API primitives;
+`compare`/`scan --against` still accept a directory package as an input
+path (`workflows.input_resolution.resolve_input`'s directory branch,
+`cli_resolve.classify_compare_operand`/`frontends/cli/scan_against.py`'s
+validation distinguishing it from a plain directory-of-libraries operand
+and a `BuildSourcePack`'s identically-named `manifest.json`) — but no
+`dump` CLI flag writes one today. **What this slice does not attempt**:
+decoding a section's own *internal* shape into a typed domain object beyond
+`semantic_ir` (each section still carries the pre-existing JSON encoding
+for its fields); multi-artifact packages (a real multi-library
+`ProjectSnapshot`); folding baseline sets/`BundleFacts` into sections, the
+`.tar.zst` transport form, `bundle_variants:` config wiring (A1.4-A1.7),
+and non-ELF membership specifics beyond `ArtifactRef.kind` (A1.8) remain
+open. See `docs/contribute/plans/
+storage-format-v2.md`'s "Landed in Phase 1" section and
+`docs/contribute/adr/062-project-snapshot-storage-v2.md`'s Status for the
+authoritative, jointly-maintained account — this note exists so a reader of
+this plan doesn't have to cross-reference the ADR to learn Phase 8 is no
+longer purely a proposal.
+
 **Goal.** ADR-062 Phase 0's primitives stop being inert. A real
 `ProjectSnapshot` can be written and read, using `Fact[T]`/`EntityId` from
 Phases 0/2 as its domain representation rather than a second identity/
@@ -9206,6 +15889,35 @@ earlier phases already establish as the pattern.
 ---
 
 ### Phase 9 — selector/suppression/reclassification consolidation (D10)
+
+**Landed (complete).** `abicheck/policy/selectors.py`'s `SelectorSet` is the
+one selector grammar `Suppression.__post_init__`/`ReclassifyRule.
+__post_init__` each construct internally and delegate all validation/
+matching to, exactly as designed below — including both selectors this
+section's own history flags as easy to omit (`binding`, `finding_id`) and
+the `finding_id`-matcher upward-dependency fix this section's own Design
+section calls out by name (a first draft did make that mistake again here;
+it was caught and corrected the same way before landing). The namespace-glob
+compilation machinery (`_SegmentGlobMatcher` and everything it depends on)
+moved into a sibling leaf, `abicheck/policy/selectors_namespace_glob.py`,
+purely to keep both files under the architecture gate's 800-line ceiling —
+not part of the original design, a mechanical split forced by the moved
+code's own size (the same reason `diff_types_vtable.py` exists). Every
+pre-existing `suppression.py`/`reclassify.py` selector test is unmodified
+and green; a new `tests/test_policy_selectors.py` exercises the shared leaf
+directly. `reclassify.py`'s `importlib.import_module` workaround and its
+`_suppression_cls()` helper are both deleted, replaced by a static
+`from .policy.selectors import SelectorSet` — confirmed via a repo-wide
+grep that no `importlib.import_module` call remains in that module.
+`scripts/check_architecture.py` gained the `selector-leaf-purity` check
+this section's own Files subsection specifies, exercised in
+`tests/test_architecture_check.py` against a deliberately-reintroduced
+cyclic-import fixture (one test per denylisted module, plus the
+submodule-import and no-op-when-absent cases) to confirm it fails closed.
+The paragraph above is this phase's own user-facing summary — ADR-063
+itself no longer restates per-phase detail (its duplicated status block was
+removed by PR 0, 2026-09-02); see this plan's own pointer paragraph at the
+top of the document for the current set of status sources.
 
 **Goal.** `suppression.py` and `reclassify.py` share one selector-matching
 primitive instead of two independent grammars kept in sync by hand, and

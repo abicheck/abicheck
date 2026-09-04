@@ -1,3 +1,12 @@
+---
+doc_type: migration
+audience:
+  - library-maintainer
+  - ci-owner
+lifecycle: migration
+generated: false
+---
+
 # Migrating to the Current CLI (pre-1.0)
 
 abicheck's CLI went through two rounds of change before 1.0: a 0.5.0 flag
@@ -51,6 +60,43 @@ abicheck compare old.so new.so -H include/ --required-symbol foo_init
 See [Application Compatibility](appcompat.md) and [Plugin & Host
 Systems](plugin-systems.md) for the full guides — treat their command-line
 examples as the ones that matter, this page only summarizes the mapping.
+
+## Removed scan axes (`s0…s6`, `--mode`, `--source-method`, `--max`)
+
+Earlier releases let you pick evidence in two other ways. As of the ADR-043
+pre-1.0 CLI reset, both are **removed outright, not deprecated** — `scan`
+no longer accepts `--mode`/`--source-method`/`--max` at all; passing any of
+them is a plain "no such option" usage error (exit 64), same as any other
+unrecognized flag. There is no warn-and-map compatibility shim: this table is
+here only for anyone migrating an old command line, not as a live alias list.
+The internal `s0`…`s6` / `ScanMode` vocabulary still exists inside the engine
+(`buildsource/scan_levels.py`) — the internal Python service API
+(`ScanRequest`, used by other programmatic callers) still accepts it —
+but it must never leak into the public CLI, `--help`, reports, the config
+schema, or GitHub Action inputs. Prefer `--depth`.
+
+**`--source-method s0…s6`** (the old "how it gathers evidence" axis):
+
+| Removed | Was | Use instead |
+|------------|-----|-------------|
+| `s0` / `s3` | diff classifier / lexical pattern scan (compiler-free) | `--depth binary` (or `headers` for +L2) |
+| `s1` | compile-DB / build-flag scan (L3) | `--depth build` |
+| `s2` | preprocessor macro/include capture | folded into `--depth build` (runs when `clang -E` + a compile DB are present) |
+| `s4` | symbol/reference index → the *cheap* L5 structural graph (no L4 replay, no call edges) | **no user-facing `--depth` rung**: the graph-only level is internal. `--depth source` gives L5 edges but pays for the L4 replay; there is no cheap graph-only depth |
+| `s5` | semantic AST replay of changed TUs (L4) | `--depth source` |
+| `s6` | full AST replay of all TUs (L4) | `--depth source` — the old `full` rung collapsed into `source` (ADR-043 D6); they only ever differed in replay *scope*, and `scan --depth source` with no `--since`/`--changed-path` seed already analyses the whole target, matching what `s6`/`full` used to give |
+
+**`--mode`** presets:
+
+| Removed | Was | Use instead |
+|------------|-----|-------------|
+| `pr` | diff-seeded L4 replay (per-PR gate) | `--depth source --since <ref>` (or just `auto` with a seed) |
+| `pr-deep` | `pr` + the *whole-library* L5 reachability graph (`GRAPH`) | no exact `--depth` equivalent — the full graph is internal-only. `--depth source` gives the change-scoped edges; the full-graph preset is reachable only via the internal Python service API now |
+| `baseline` | whole-library replay of a release | `--depth source` with no `--since`/`--changed-path` seed (resolves to TARGET scope — the whole current library target, ADR-043 D7) |
+| `audit` | intra-version hygiene lint, no baseline | omit `--against` — the always-on hygiene/cross-source checks run on every scan regardless, and omitting `--against` is already a one-build audit (the old standalone `--audit` flag was itself removed as redundant, ADR-043 D5) |
+
+`--source-method auto` (risk-driven escalation) is now simply the default when
+you **omit** `--depth`.
 
 ## Still commands today
 

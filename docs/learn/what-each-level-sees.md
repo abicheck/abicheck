@@ -59,10 +59,10 @@ flowchart TB
     ART -.-> ORTH
 ```
 
-The one rule that never bends is the **authority rule**: the artifact tiers
-(L0–L2) set any `BREAKING` verdict; the build/source tiers (L3–L5) add findings,
-scope out false positives, and *explain* — but **never manufacture or delete** an
-artifact-proven break.
+The one rule that never bends is the
+[*authority rule*](evidence-and-detectability.md#how-they-combine): the
+artifact tiers set any `BREAKING` verdict and the build/source tiers never
+manufacture or delete an artifact-proven break.
 
 ---
 
@@ -503,13 +503,14 @@ rule](build-source-data.md#the-authority-rule-the-one-rule-that-matters)):
 The source scan reaches a *different* set of changes — macros, bodies, build
 flags, hygiene, cross-source conflicts — not a "better" version of the artifact
 scan. It is additive, not a replacement. To enable it on a real project, see the
-[source scan on the ABI/API Compatibility page](abi-api-handling.md#going-deeper-than-artifacts-the-source-scan)
+[`--depth` dial on Evidence & Detectability](evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect)
 and the [`--depth` dial](evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect).
 
 ---
 
-**Next:** [Evidence & Detectability](evidence-and-detectability.md) tracks each
-layer's false-positive / false-negative contribution as a CI gate and maps the
-`L0`–`L5` layers to the [`--depth` dial](evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect) ·
-[Limitations](limitations.md) is the authoritative per-change detectability
-matrix.
+Ready to run it? [Source-Scan Depth](../use/scan-levels.md) owns the `--depth`
+choice.
+
+---
+
+**Ladder:** ← [Evidence & Detectability](evidence-and-detectability.md) · Concepts c2 · The evidence model · [ELF-Only Mode and Symbol Filtering](elf-symbol-filtering.md) →

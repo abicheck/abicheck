@@ -180,7 +180,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             result = resolve_input(p, is_elf=True)
         assert result is snap
         mock.assert_called_once()
@@ -189,7 +189,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p, is_elf=True, include_dependencies=False)
         assert mock.call_args.kwargs["include_dependencies"] is False
 
@@ -197,7 +197,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p, is_elf=True)
         assert mock.call_args.kwargs["include_dependencies"] is True
 
@@ -221,7 +221,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p, is_elf=True)
         _, kwargs = mock.call_args
         assert "header_graph" not in kwargs
@@ -233,7 +233,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p)
         _, kwargs = mock.call_args
         assert "header_graph" not in kwargs
@@ -251,7 +251,7 @@ class TestResolveInput:
         script = tmp_path / "libfoo.so"
         script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(script)
         assert mock.call_count == 1
         _, kwargs = mock.call_args
@@ -269,7 +269,7 @@ class TestResolveInput:
         script = tmp_path / "libfoo.so"
         script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(script, include_dependencies=False)
         assert mock.call_count == 1
         _, kwargs = mock.call_args
@@ -431,7 +431,7 @@ class TestResolveInput:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap):
+        with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap):
             result = resolve_input(p)
         assert result is snap
 
@@ -497,14 +497,14 @@ class TestResolveInput:
         p = tmp_path / "snap.json"
         snap = AbiSnapshot(library="test", version="1.0")
         p.write_text('{"library": "test"}')
-        with patch("abicheck.service.load_snapshot", return_value=snap):
+        with patch("abicheck.workflows.input_resolution.load_snapshot", return_value=snap):
             result = resolve_input(p, is_elf=False)
         assert result is snap
 
     def test_json_load_error_wraps_in_snapshot_error(self, tmp_path):
         p = tmp_path / "bad.json"
         p.write_text("{invalid json")
-        with patch("abicheck.service.load_snapshot", side_effect=ValueError("bad")):
+        with patch("abicheck.workflows.input_resolution.load_snapshot", side_effect=ValueError("bad")):
             with pytest.raises(SnapshotError, match="Failed to load JSON"):
                 resolve_input(p, is_elf=False)
 
@@ -512,8 +512,8 @@ class TestResolveInput:
         p = tmp_path / "dump.pl"
         p.write_text("$VAR1 = {};")
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.detect_binary_format", return_value=None):
-            with patch("abicheck.service.sniff_text_format", return_value="perl"):
+        with patch("abicheck.workflows.input_resolution.detect_binary_format", return_value=None):
+            with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="perl"):
                 with patch(
                     "abicheck.compat.abicc_dump_import.import_abicc_perl_dump",
                     return_value=snap,
@@ -524,8 +524,8 @@ class TestResolveInput:
     def test_perl_import_error(self, tmp_path):
         p = tmp_path / "dump.pl"
         p.write_text("$VAR1 = {};")
-        with patch("abicheck.service.detect_binary_format", return_value=None):
-            with patch("abicheck.service.sniff_text_format", return_value="perl"):
+        with patch("abicheck.workflows.input_resolution.detect_binary_format", return_value=None):
+            with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="perl"):
                 with patch(
                     "abicheck.compat.abicc_dump_import.import_abicc_perl_dump",
                     side_effect=ValueError("parse fail"),
@@ -536,8 +536,8 @@ class TestResolveInput:
     def test_unknown_format_raises(self, tmp_path):
         p = tmp_path / "mystery"
         p.write_text("???")
-        with patch("abicheck.service.detect_binary_format", return_value=None):
-            with patch("abicheck.service.sniff_text_format", return_value="unknown"):
+        with patch("abicheck.workflows.input_resolution.detect_binary_format", return_value=None):
+            with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="unknown"):
                 with pytest.raises(ValidationError, match="Cannot detect format"):
                     resolve_input(p, is_elf=False)
 
@@ -1785,7 +1785,7 @@ class TestCollectMetadata:
     def test_binary_file(self, tmp_path):
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        with patch("abicheck.service.sniff_text_format", return_value="unknown"):
+        with patch("abicheck.workflows.input_resolution.sniff_text_format", return_value="unknown"):
             meta = collect_metadata(p)
         assert meta is not None
         assert meta.path == str(p)
@@ -1911,14 +1911,17 @@ class TestLoadSuppressionAndPolicy:
     def test_dedup_scope_shared_with_cli_params_loader(self, tmp_path, capsys, caplog):
         """`dedup_policy_override_warnings()` must dedupe across *both*
         loaders, not just repeated `service.load_suppression_and_policy()`
-        calls -- `compare-release` also loads through `cli_params.
-        _load_suppression_and_policy` (its early strict-suppression
-        validation and probe-matrix paths), and a scope covering only one
-        loader would still let the same warning through twice (Codex
-        review: fresh evidence on the follow-up commit)."""
+        calls -- `compare-release` also loads through
+        `frontends.cli.options.params._load_suppression_and_policy` (its
+        early strict-suppression validation and probe-matrix paths), and a
+        scope covering only one loader would still let the same warning
+        through twice (Codex review: fresh evidence on the follow-up
+        commit)."""
         import logging
 
-        from abicheck.cli_params import _load_suppression_and_policy
+        from abicheck.frontends.cli.options.params import (
+            _load_suppression_and_policy,
+        )
 
         pf = tmp_path / "policy.yaml"
         pf.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
@@ -3228,15 +3231,54 @@ class TestContractEvaluationThreading:
         # pack_policy_overrides/pack_internal_namespaces (CLI cleanup phase
         # two, "PR B" slice 1) were appended after contract_mode in turn,
         # following the same rule; compile_context (both-sides L2 compile
-        # context for the directory/package release fan-out) was appended
-        # after those in turn.
-        assert params[-1] == "compile_context"
-        assert params[-2] == "pack_internal_namespaces"
-        assert params[-3] == "pack_policy_overrides"
-        assert params[-4] == "contract_mode"
-        assert params[-5] == "include_dependencies"
-        assert params[-6] == "contract_evaluation"
-        assert params[-7] == "diagnostic_comparison"
+        # context for the release fan-out), then depth (D1, CLI-audit), then
+        # severity_preset/exit_code_scheme (ADR-064/PR G2, Codex review:
+        # run_compare had no way to forward the severity-aware gate).
+        assert params[-1] == "exit_code_scheme"
+        assert params[-2] == "severity_preset"
+        assert params[-3] == "depth"
+        assert params[-4] == "compile_context"
+        assert params[-5] == "pack_internal_namespaces"
+        assert params[-6] == "pack_policy_overrides"
+        assert params[-7] == "contract_mode"
+        assert params[-8] == "include_dependencies"
+        assert params[-9] == "contract_evaluation"
+        assert params[-10] == "diagnostic_comparison"
+
+    def test_new_gate_params_are_keyword_only_without_breaking_older_ones(self):
+        """CodeRabbit review, fresh evidence, PR #1032, then corrected by a
+        P1 Codex finding on the first fix: this docstring has claimed every
+        param from `debuginfod_url` onward is "keyword-only" since PR #551,
+        but no `*` separator ever enforced it -- `severity_preset`/
+        `exit_code_scheme` (ADR-064/PR G2) were added under that same claim
+        and, like every param before them, still silently accepted
+        positional binding. The first fix added `*` before `debuginfod_url`,
+        which closed the gap for the two new params but retroactively made
+        every *pre-existing* param from `debuginfod_url` onward (e.g.
+        `compile_context`, `depth`) keyword-only too -- a public-API break
+        for any real caller still passing one of them positionally, which
+        this same docstring's "keeps binding positionally" guarantee
+        forbids. Corrected by moving the `*` to right before
+        `severity_preset`: only the two newest, never-previously-released
+        params are actually enforced; every older param keeps accepting
+        positional binding exactly as before."""
+        import inspect
+
+        params = inspect.signature(run_compare).parameters
+        assert params["severity_preset"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert params["exit_code_scheme"].kind is inspect.Parameter.KEYWORD_ONLY
+        for name in (
+            "debuginfod_url",
+            "diagnostic_comparison",
+            "contract_evaluation",
+            "include_dependencies",
+            "contract_mode",
+            "pack_policy_overrides",
+            "pack_internal_namespaces",
+            "compile_context",
+            "depth",
+        ):
+            assert params[name].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD, name
 
     def test_get_type_hints_resolves_without_nameerror(self):
         """Codex review: `run_compare` moved from `service.py` into
@@ -5250,7 +5292,7 @@ class TestRunCompareRequestResolutionParity:
 
     def _stub_dump(self, monkeypatch) -> dict[str, dict[str, object]]:
         """Record resolve_input's debug kwargs per side, without a real parse."""
-        import abicheck.service as service_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
 
         seen: dict[str, dict] = {}
 
@@ -5261,7 +5303,7 @@ class TestRunCompareRequestResolutionParity:
             }
             return AbiSnapshot(library=Path(path).name, version="x")
 
-        monkeypatch.setattr(service_mod, "run_dump", _fake)
+        monkeypatch.setattr(input_resolution_mod, "run_dump", _fake)
         return seen
 
     def _request(self, tmp_path, **kwargs) -> CompareRequest:
@@ -5376,7 +5418,7 @@ class TestDebugFormatResolution:
         )
 
     def _spy(self, monkeypatch) -> dict[str, object]:
-        import abicheck.service as service_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
 
         seen: dict[str, object] = {}
 
@@ -5384,7 +5426,7 @@ class TestDebugFormatResolution:
             seen["debug_format"] = kwargs.get("debug_format")
             return AbiSnapshot(library=Path(path).name, version="x")
 
-        monkeypatch.setattr(service_mod, "run_dump", _fake)
+        monkeypatch.setattr(input_resolution_mod, "run_dump", _fake)
         return seen
 
     def test_auto_becomes_none_not_the_literal_string(self, tmp_path, monkeypatch):
@@ -5549,88 +5591,3 @@ class TestComparePipelinePhases:
         assert result.diff.layer_coverage == rows
         assert len(attached) == 1
         assert attached[0][0] is result.diff
-
-
-class TestResolveSidesSequentially:
-    """ADR-050 D6 / G32 Phase E, generalised by ADR-055 D1.
-
-    A manifest-driven dump sizes its per-TU worker pool from a live
-    ``MemAvailable`` reading, so two starting concurrently size two full pools
-    off the same reading and jointly overcommit. That guard used to be
-    implicit — the native ``compare`` CLI simply resolved sequentially, and
-    ``run_compare_request`` was documented as unable to reach a manifest at
-    all. ``InputSpec.dump_manifest`` made that documentation stale: the typed
-    path could reach a manifest *and* resolved concurrently. Now that both
-    front ends share one resolution, the guard is explicit and lives with it.
-    """
-
-    def _request(self, tmp_path, *, old_manifest=None, new_manifest=None):
-        return CompareRequest(
-            old=InputSpec(path=tmp_path / "old.so", dump_manifest=old_manifest),
-            new=InputSpec(path=tmp_path / "new.so", dump_manifest=new_manifest),
-        )
-
-    def test_plain_pair_may_resolve_concurrently(self, tmp_path, monkeypatch):
-        from abicheck.service import resolve_sides_sequentially
-
-        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
-        assert resolve_sides_sequentially(self._request(tmp_path)) is False
-
-    @pytest.mark.parametrize("side", ["old", "new"])
-    def test_a_dump_manifest_on_either_side_forces_sequential(
-        self, tmp_path, monkeypatch, side
-    ):
-        from types import SimpleNamespace
-
-        from abicheck.service import resolve_sides_sequentially
-
-        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
-        manifest = SimpleNamespace(translation_units=[])
-        request = self._request(tmp_path, **{f"{side}_manifest": manifest})
-        assert resolve_sides_sequentially(request) is True
-
-    @pytest.mark.parametrize("value", ["0", "false", "no", "NO", " 0 "])
-    def test_env_opt_out_forces_sequential(self, tmp_path, monkeypatch, value):
-        from abicheck.service import resolve_sides_sequentially
-
-        monkeypatch.setenv("ABICHECK_PARALLEL_EXTRACTION", value)
-        assert resolve_sides_sequentially(self._request(tmp_path)) is True
-
-    def test_manifest_request_really_resolves_one_side_at_a_time(
-        self, tmp_path, monkeypatch
-    ):
-        """The behavioural half: not just the predicate, but the resolution.
-
-        Without the guard this is exactly the double-pool-sizing case — two
-        manifest dumps in a ``ThreadPoolExecutor``, overlapping in time.
-        """
-        import time
-        from types import SimpleNamespace
-
-        from abicheck import service as service_mod
-        from abicheck.service import resolve_compare_request
-
-        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
-        spans: list[tuple[str, float, float]] = []
-
-        def _fake_resolve(path, headers, includes, version, lang, **kwargs):
-            start = time.monotonic()
-            time.sleep(0.05)
-            spans.append((version, start, time.monotonic()))
-            return AbiSnapshot(library="libtest", version=version)
-
-        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve)
-        old_p = tmp_path / "old.so"
-        new_p = tmp_path / "new.so"
-        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        manifest = SimpleNamespace(translation_units=[])
-        resolve_compare_request(
-            CompareRequest(
-                old=InputSpec(path=old_p, version="old", dump_manifest=manifest),
-                new=InputSpec(path=new_p, version="new", dump_manifest=manifest),
-            )
-        )
-        assert len(spans) == 2
-        (_old_v, _old_start, old_end), (_new_v, new_start, _new_end) = spans
-        assert new_start >= old_end

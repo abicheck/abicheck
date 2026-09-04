@@ -37,7 +37,7 @@ Cross-references:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
@@ -452,6 +452,66 @@ def policy_kind_sets(
         frozenset(COMPATIBLE_KINDS),
         frozenset(RISK_KINDS),
     )
+
+
+def apply_policy_file_overrides(
+    kind_sets: tuple[
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+    ],
+    overrides: Mapping[ChangeKind, Verdict] | None,
+) -> tuple[
+    frozenset[ChangeKind],
+    frozenset[ChangeKind],
+    frozenset[ChangeKind],
+    frozenset[ChangeKind],
+]:
+    """Move each overridden kind into its target verdict's set.
+
+    *kind_sets* is ``(breaking, api_break, compatible, risk)`` — typically
+    :func:`policy_kind_sets`'s own return value, but callable on any kind-set
+    tuple in that shape. *overrides* is a ``PolicyFile.overrides`` mapping
+    (kind -> the verdict a document explicitly pins that kind to); a falsy
+    value (``None`` or empty) returns *kind_sets* unchanged.
+
+    ADR-061 Phase 4 (checker_types.py's own module docstring history): this
+    was previously the *inline* body of ``checker_types.DiffResult.
+    _effective_kind_sets`` — real policy-resolution logic (not a data lookup)
+    executing directly inside a ``model``-owned dataclass's own method,
+    independent of and unaffected by the ``PolicyFileProtocol`` field-typing
+    fix `model/policy_file_protocol.py` already closed (that fix narrows
+    what the ``policy_file`` *field's declared type* can be; it does nothing
+    for an algorithm living in a method body). Moved here so ``DiffResult``
+    only ever *consumes* an already-computed kind-set tuple — its own method
+    becomes a single delegating call, with zero local branching/looping —
+    closing the ADR's own recorded gap rather than leaving it as a re-stated
+    known limitation. Not a behavior change: the override-application rule
+    (discard from every set, then add to the target verdict's set; an
+    override naming a verdict outside the four is silently ignored, matching
+    the pre-existing lenient ``.get(verdict)`` lookup) is unchanged, only its
+    location moved.
+    """
+    breaking, api_break, compatible, risk = kind_sets
+    if not overrides:
+        return breaking, api_break, compatible, risk
+
+    b, a, c, r = set(breaking), set(api_break), set(compatible), set(risk)
+    verdict_to_set_idx = {
+        Verdict.BREAKING: 0,
+        Verdict.API_BREAK: 1,
+        Verdict.COMPATIBLE: 2,
+        Verdict.COMPATIBLE_WITH_RISK: 3,
+    }
+    sets = [b, a, c, r]
+    for kind, verdict in overrides.items():
+        for s in sets:
+            s.discard(kind)
+        idx = verdict_to_set_idx.get(verdict)
+        if idx is not None:
+            sets[idx].add(kind)
+    return frozenset(b), frozenset(a), frozenset(c), frozenset(r)
 
 
 def effective_category(

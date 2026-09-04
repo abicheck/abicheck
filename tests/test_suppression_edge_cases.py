@@ -627,7 +627,10 @@ class TestNamespaceGlobstarSemantics:
         # fragment). Exercised directly against the wrapper/segment helper
         # rather than depending on which anchor the *running* interpreter's
         # fnmatch happens to emit.
-        from abicheck.suppression import _SEGMENT_RE_WRAPPER, _fnmatch_segment_regex
+        from abicheck.policy.selectors_namespace_glob import (
+            _SEGMENT_RE_WRAPPER,
+            _fnmatch_segment_regex,
+        )
 
         assert _SEGMENT_RE_WRAPPER.match("(?s:ns)\\Z") is not None
         assert _SEGMENT_RE_WRAPPER.match("(?s:ns)\\z") is not None

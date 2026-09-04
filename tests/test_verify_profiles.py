@@ -375,7 +375,8 @@ def test_ci_ai_readiness_job_calls_verify_py() -> None:
     )
     assert (
         "scripts/verify.py --profile pr --only fp-rate,tier-accuracy,"
-        "usecase-docs-sync,docs-contract,agent-skills-generated,repo-facts" in ci
+        "usecase-docs-sync,docs-contract,learning-ladder,agent-skills-generated,"
+        "repo-facts" in ci
     )
 
 

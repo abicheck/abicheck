@@ -183,6 +183,88 @@ Core pipeline (in order of data flow):
    `from abicheck.elf_metadata import ElfMetadata` still resolves. **A new
    fact's field goes in `model/`, next to the format it belongs to — not in
    the parser.**
+   `model/semantic_ir.py` is ADR-063 Phase 6's canonical, backend-independent
+   IR (`SemanticIR.occurrences`, keyed by `OccurrenceId` so an ODR-duplicate
+   pair is never collapsed; `CanonicalEntity` holds only the non-identity
+   payload). Persisted as `AbiSnapshot.semantic_ir` (schema v38,
+   `storage/semantic_ir_codec.py`) and reconciled across the two header-AST
+   backends by `extract/semantic_ir_merge.py`. **Third slice landed:**
+   `extract/semantic_normalizer.py`'s `normalize_header_ast` projects each
+   header-AST backend's already-parsed `RecordType`/`EnumType`/typedef/
+   `Function`/`Variable` output (all already carry a real `entity_id`, per
+   Phase 2's option (a)) into a real `SemanticIR` — functions/variables
+   reuse the same cross-backend spelling primitives `entity_id_for_function`/
+   `resolve_function_identity` already apply
+   (`model.signature_normalization.
+   canonicalize_function_signature_param_type` per parameter,
+   `name_classification.canonicalize_type_name` for the return/variable
+   type), with `is_const`/`is_volatile` carried via `CanonicalEntity.
+   cv_qualification`. Wired through `dumper_manifest.
+   resolve_header_ast_result` (legacy single-TU ELF dump and a real
+   manifest dump) and, via the new `extract/header_ast_fields.
+   parse_header_ast_fields` choke point, `dumper.py`'s `_dump_pe`/
+   `_dump_macho` too — every header-AST platform now populates
+   `semantic_ir`, including through `--ast-frontend hybrid`'s
+   reconciliation (`dumper_hybrid.py`'s own Mach-O mangled-name and
+   ctor/dtor synthetic-key identity rewrites are propagated into
+   `semantic_ir` via `_rewrite_semantic_ir_entity_ids`, so a hybrid merge
+   never leaves one representation keyed under a retired identity another
+   already moved past). **Fourth slice landed:** constants too — both
+   backends already attach a real `entity_id` to every public constant
+   (`parse_constant_entity_ids()`, Phase 2), so the identity half was
+   already done; the normalizer projects `parse_constants()`'s raw value
+   text verbatim as `canonical_spelling`, deliberately uncanonicalized
+   (mirrors `diff_symbols._diff_constants`'s own long-standing raw-string
+   `!=` comparison — there is no *observed* cross-backend value-spelling
+   disagreement the way there is for a function/variable's type spelling,
+   so inventing a canonicalizer here would be a heuristic in search of a
+   bug, not a fix for one) — **except** clang's own compound-initializer
+   value, which is a build-stable structural fingerprint
+   (`dumper_clang_expr._expr_fingerprint`'s `"expr:" + sha256(...)[:16]`),
+   not a spelling of the source text at all; that one case is `Fact.
+   unsupported()` rather than a raw-value `Fact.present(...)`, matched by
+   the exact fingerprint shape (not merely its `"expr:"` prefix, which
+   would also misfire on a real castxml `expr::`-namespaced qualified
+   name). A castxml-only value that resolves to its own opaque
+   `FunctionType` tag (a direct function-pointer parameter/variable/return
+   type castxml's resolver has no dedicated rendering for) gets the same
+   `Fact.unsupported()` treatment. A clang-only lone boolean literal
+   (`dumper_clang_expr._initializer_value` stringifies a captured Python
+   `bool` via plain `str(...)`, spelling `"True"`/`"False"` — never the
+   real `true`/`false` source text) gets the same treatment too, gated on
+   `producer == "clang"`: `"True"`/`"False"` are otherwise legal C++
+   identifier spellings a castxml `init` text could genuinely carry
+   verbatim, so the exception applies only to clang's own artifact, not to
+   every occurrence of those two strings. Both PDB and BTF/CTF now have
+   their own Phase 6 slice landed, types only, each with function/variable
+   identity explicitly out of scope. **PDB's own slice:**
+   `extract/pdb_scope.py` parses CodeView's flat, already-`"::"`-qualified
+   struct/class/union/enum names back into typed `ScopePath` segments (the
+   reverse of DWARF's/the header-AST backends' own tree-walk construction
+   — CodeView carries no parent-scope tree to walk), disambiguating an
+   enclosing segment as a `Record` only when the accumulated prefix up to
+   it is itself a name PDB separately recorded as a struct/class/union,
+   defaulting to `Namespace` otherwise — an unverified heuristic (no MSVC
+   toolchain in this environment to check it against). A named declaration
+   nested inside a CodeView-synthesized anonymous scope (e.g.
+   `N::<unnamed-tag>::Inner`) still reaches the model with its layout
+   facts, but its `entity_id` is left unset (`extract/pdb_scope.py` builds
+   no `Anonymous` scope segment at all). See ADR-063 Phase 6's PDB slice
+   for the full account, including its documented, accepted limitations.
+   **BTF/CTF's own slice:** `extract/debug_layout_semantic_ir.py` bridges
+   the shared `DwarfMetadata` shape both formats reduce to
+   (`BtfMetadata.to_dwarf_metadata`/`CtfMetadata.to_dwarf_metadata`) into
+   transient, `entity_id`-bearing `RecordType`/`EnumType` objects — no
+   scope heuristic needed at all (both are pure-C formats with no
+   namespace/class nesting, so every `ScopePath` is unconditionally empty,
+   unlike PDB's own unverified namespace-vs-record heuristic). Wired into
+   the ELF headerless fallback path; deliberately leaves
+   `AbiSnapshot.types`/`.enums` untouched for a BTF/CTF-sourced snapshot
+   (only `semantic_ir` gains occurrences) — widening what other
+   `.types`-consuming detectors see is a separate, larger design question
+   this slice does not attempt. Function/variable/typedef identity remains
+   unimplemented for both formats (neither's own richer parse carries that
+   evidence across its own `to_dwarf_metadata()` conversion at all).
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info
@@ -493,6 +575,14 @@ Core pipeline (in order of data flow):
    - `sarif.py` — SARIF 2.1.0 output
    - `junit_report.py` — JUnit XML output
    - `report_summary.py`, `report_classifications.py` — report helpers
+   - `report/` — ADR-061 Phase 2's canonical `ReportDocument` and the pure
+     projection every format now goes through (`render_json.py` covers
+     SARIF too; also `render_xml.py`, `render_text.py`, `render_markdown.py`,
+     `render_html.py`). Markdown/HTML split two ways: a `compute_*` half in
+     `reporter_markdown.py`/`html_report.py` returning frozen structs of
+     plain values, a `render_*` half here that formats and decides nothing —
+     **add a report section to that pair, never to a renderer alone**
+     (`abicheck/report/AGENTS.md`)
 7. **Application compatibility** — `appcompat.py`, `appcompat_html.py`
 8. **Utilities**
    - `binary_utils.py` — binary file helpers
@@ -548,10 +638,20 @@ Core pipeline (in order of data flow):
      `fold_dump_provenance_into_json`). Since CLI cleanup phase two's PR 3A
      the native `dump` CLI *does* build a real `DumpRequest`
      (`cli_dump_request.py`) and `--dry-run` renders from
-     `resolve_dump_request`'s `ResolvedDumpRequest` — but the real ELF/PE/
-     Mach-O run still executes through `perform_elf_dump`/
-     `handle_non_elf_dump`, not `execute_dump_request`; see the "PR C" entry
-     under "Known gaps" for what that last step needs
+     `resolve_dump_request`'s `ResolvedDumpRequest`. The real **ELF** run now
+     executes through `execute_dump_request` too (PR C, landed) — the same
+     shared pipeline `compare`'s implicit-dump operand and `scan`'s
+     candidate resolution already use, with the legacy `-p`/`--compile-db`
+     auto-match threaded through as an explicit pass-through rather than a
+     typed-API field (`execute_dump_request`'s own docstring). PE/Mach-O
+     now routes through the identical shared executor too (ADR-063 Phase
+     1) — `handle_non_elf_dump` stays defined, unchanged, only for its own
+     direct unit tests, never called from the CLI's real dispatch;
+     verified via mock-based CLI/unit tests only, since no PE/Mach-O
+     toolchain was available to verify a migration against a real binary.
+     See the "PR C" entry under "Known gaps" for the full ELF account,
+     including the L4 source-extractor default change that migration
+     carries
    - `cli_dump_request.py` — CLI cleanup phase two, PR 3A: `dump_cmd`'s ~30
      Click parameters as one `DumpRequest`, plus the Tier-2-to-Click error
      translation the boundary owes. Fed the CLI's *already-resolved* compile
@@ -761,6 +861,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `adr-index-nav-sync` | ERROR | Every `docs/contribute/adr/*.md` is linked from `adr/index.md`, and the ADR index page itself (not each individual ADR — relaxed, since that overloaded top-level nav with 50+ flat entries for no reader benefit) is listed in `mkdocs.yml`'s nav, so every ADR stays reachable from published navigation (this is what originally caught ADR-041 going missing from nav despite being accepted). Also requires every ADR to carry a Status metadata line/heading, and an ADR whose status leads with "Superseded" to link to its replacement |
 | `adr-status-sync` | ERROR on contradiction / bad receipt, WARN on staleness | An ADR's own `**Status:**` line and its row in `adr/index.md` may not *contradict* each other — one claiming nothing is implemented while the other claims something is (how ADR-056's row went stale), or disagreeing on the decision word. Paraphrase is explicitly allowed: the index cell is an abridgement, and a stricter prototype flagged 15 of 56 ADRs, nearly all false positives. Separately validates the optional `**Verified:** <ref>@<sha> on <YYYY-MM-DD>` receipt (see `adr/index.md`'s convention section): exactly one per ADR, well-formed, a real non-future date, and naming a commit reachable from the default branch — a receipt anchored to the branch that adds it vanishes on merge and then fails this required job on `main` permanently. It then WARNs when commits after that sha touched a first-party file the Status paragraph names, which is the only mechanism here that catches *document-vs-code* drift (ADR-049's status claimed its evaluator was unwired for five merged PRs after it wasn't). **A file is watched only when the Status names it by full repo-relative path** (any `FIRST_PARTY_PY_ROOTS` tree, not just `abicheck/`); a bare `x.py` is accepted only when it resolves to `abicheck/x.py`, and family shorthand (`_resolver.py`) is deliberately not guessed at — see `adr/index.md` for why. Lives in `scripts/adr_status_sync.py`, a sibling leaf module, since `check_ai_readiness.py` is already past the 2000-line hard cap |
 | `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
+| `project-snapshot-dto-no-asdict` | ERROR | No `dataclasses.asdict()`/`asdict()` call in a `ProjectSnapshot` DTO file (`abicheck/storage/dto.py`, `abicheck/storage/import_v1.py`, `abicheck/project_snapshot_store.py`, `abicheck/storage/semantic_ir_codec.py`) — ADR-063 Phase 8's D8 constraint, made mechanical |
 | `license-header` | WARN | Every `abicheck/**/*.py` carries the Apache-2.0 header / SPDX identifier |
 | `test-assertion-density` | WARN | Every `test_*` function asserts something (directly or via a same-file helper) — flags zero-assertion smoke tests so coverage isn't "filled" without verification |
 
@@ -900,9 +1001,23 @@ allowlist). To see today's large files, run:
 python scripts/check_ai_readiness.py 2>&1 | grep "exceeds soft limit"
 ```
 
-As of this writing the WARN set (>1500 lines) is `cli.py`, `dumper.py`, and
-`buildsource/crosscheck.py` — the main CLI, binary-metadata extraction, and the
-cross-check engine. Treat that command output (not this sentence) as current.
+That sentence is load-bearing: this paragraph previously named the WARN set as
+"`cli.py`, `dumper.py`, and `buildsource/crosscheck.py`" long after it had
+stopped being true (`cli.py` is now a 131-line registration facade), which is
+exactly the drift the "don't trust hard-coded line counts" warning above is
+about. As a shape rather than a list: the WARN set is **large — roughly 100
+files, about a third of them under `abicheck/`** — and a meaningful number sit
+within a few lines of the 2000-line hard cap, so a routine addition to one can
+turn an ERROR on. Run the command; don't reason from any count written here.
+
+`architecture/debt.yaml` is the sharper gate for these files and the one you
+will actually trip: every one of them carries a `no_growth` baseline
+(`python scripts/check_architecture.py`), so growing one is a reviewed
+debt-baseline change, not an ordinary edit. ADR-061's definition of done wants
+that file empty or holding only accepted exceptions — **the way to shrink an
+entry is to move responsibility out to a properly-owned module, never to
+trim the file to fit** (`report/render_html.py` is a worked example: it took
+~200 lines of formatting out of `html_report.py` by giving them an owner).
 
 When editing any large file, read the specific section you need rather than the
 whole file. Several big commands have already been split into sibling
@@ -978,7 +1093,7 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - `compare` command (legacy, with no severity setting in effect): 0 = compatible, 2 = source break, 4 = ABI break
 - `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
-- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's assignments apply the same way an explicit `--severity-preset`/`--exit-code-scheme` does, and cannot override one that was actually given (CLI or `.abicheck.yml`).
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme), 7 = evidence-contract error (ADR-037 D5 — a pinned `--depth`/`--source-method` with no source evidence collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module; no comparison ever ran). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's assignments apply the same way an explicit `--severity-preset`/`--exit-code-scheme` does, and cannot override one that was actually given (CLI or `.abicheck.yml`).
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
   `scan --against` alike:** under `--contract`, the selected
   domain whose required evidence is incomplete contributes

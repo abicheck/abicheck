@@ -40,6 +40,16 @@ from abicheck.buildsource.check_report import (
     validate_identifier,
 )
 
+#: The clean `ExitDecision.to_dict()` shape, shared by every `augment_report`
+#: neutralization assertion below so a future schema bump touches one spot.
+_CLEAN_EXIT_BLOCK = {
+    "code": 0, "reasons": ["clean"], "compatibility_contribution": 0,
+    "contract_coverage_contribution": 0, "analysis_assurance_contribution": 0,
+    "crosscheck_promotion_contribution": 0, "operational_error_contribution": 0,
+    "evidence_contract_error_contribution": 0, "budget_overflow_contribution": 0,
+    "not_comparable_contribution": 0, "removed_required_library_contribution": 0,
+}
+
 
 class TestValidateIdentifier:
     def test_accepts_safe_charset(self):
@@ -749,14 +759,7 @@ class TestAugmentReport:
             requested_depth="headers",
             gate_mode="advisory",
         )
-        assert out["exit"] == {
-            "code": 0,
-            "reasons": ["clean"],
-            "compatibility_contribution": 0,
-            "contract_coverage_contribution": 0,
-            "analysis_assurance_contribution": 0,
-            "crosscheck_promotion_contribution": 0,
-        }
+        assert out["exit"] == _CLEAN_EXIT_BLOCK
 
     def test_advisory_neutralizes_a_scan_reports_nested_exit_block(self):
         """A ``scan --against`` report carries this block under ``diff``,
@@ -786,14 +789,7 @@ class TestAugmentReport:
             requested_depth="headers",
             gate_mode="advisory",
         )
-        assert out["diff"]["exit"] == {
-            "code": 0,
-            "reasons": ["clean"],
-            "compatibility_contribution": 0,
-            "contract_coverage_contribution": 0,
-            "analysis_assurance_contribution": 0,
-            "crosscheck_promotion_contribution": 0,
-        }
+        assert out["diff"]["exit"] == _CLEAN_EXIT_BLOCK
 
     def test_neutralization_covers_every_block_the_aggregate_reads(self):
         # The invariant behind the fix: the writer must zero exactly the

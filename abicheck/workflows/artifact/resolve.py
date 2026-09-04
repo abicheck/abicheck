@@ -50,6 +50,7 @@ cycle (AGENTS.md "What NOT to do").
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -228,7 +229,7 @@ def _gated_build_query_inputs(
     evidence, two rounds).
 
     ``build_query`` is a trusted **executable command** (``build.query`` in
-    ``.abicheck.yml``, or ``--build-query`` on the CLI); ``build_config`` is a
+    ``.abicheck.yml``, or a programmatic ``build_query``); ``build_config`` is a
     path to a ``.abicheck.yml`` that may itself carry a ``build.query`` key,
     so it carries the identical execution risk *by proxy of that one key* --
     it is forced to ``None`` unless *allow_build_query* is exactly ``True``,
@@ -240,7 +241,7 @@ def _gated_build_query_inputs(
     function** (see its own call sites) -- it is a bare path/glob naming an
     *existing* ``compile_commands.json``, a pure data read with "no such
     restriction" (matching this repo's own established ``dump
-    --build-compile-db`` vs. ``--build-query`` distinction, and
+    build_compile_db`` vs. ``build_query`` distinction, and
     ``embed_build_source``'s own pre-existing behavior). Gating it the same
     way as the executable inputs would silently degrade a caller's real
     include paths/defines/dialect for supplying data that was never a
@@ -288,6 +289,90 @@ def _gated_build_query_inputs(
     return gated_config, gated_query
 
 
+def _fold_legacy_compile_db_tokens(
+    ctx: CompileContext | None, tokens: tuple[str, ...]
+) -> CompileContext | None:
+    """Merge already-derived legacy ``-p``/``--compile-db`` castxml flags into
+    *ctx* (ADR-063 Phase 1 -- see ``docs/contribute/known-gaps.md``'s
+    "ADR-063 Phase 1" entry).
+
+    A no-op (*ctx* returned unchanged, ``None`` included) when *tokens* is
+    empty -- the overwhelmingly common case, since a caller passes a
+    non-empty tuple only when the CLI's own legacy ``-p``/``--compile-db``
+    auto-match genuinely derived something.
+
+    *tokens* are already-split argv entries (``build_context.to_castxml_
+    flags()``'s own return -- e.g. ``("-I", "/opt/SDK Files/include")``, one
+    element per argv position, never pre-joined), so they ride verbatim in
+    :attr:`CompileContext.gcc_option_tokens` rather than being ``" ".join``-ed
+    into the :attr:`~CompileContext.gcc_options` free-form string and later
+    re-split by :func:`~abicheck._compiler_options.split_gcc_options`
+    (Codex review, fresh evidence on ``8f2c22d``): a token containing
+    embedded whitespace -- a Windows SDK path with a space, or a compile-db
+    ``-DNAME=a b`` define -- would otherwise silently split back into the
+    wrong number of tokens, corrupting the derived include path or macro
+    value the moment it reached the real parse.
+
+    Precedence is preserved exactly: this function's caller already
+    guarantees *ctx*'s own ``gcc_options``/``gcc_option_tokens`` are never a
+    legacy-derived value (see ``_seeded_includes_and_compile_context``'s own
+    docstring, "Precedence" paragraph) -- an explicit, caller-supplied value
+    must still win over the legacy match for a conflicting flag. Since
+    :func:`~abicheck._compiler_options.split_gcc_options`'s combined-token
+    order always places ``gcc_options`` ahead of ``gcc_option_tokens``
+    (later wins), *ctx*'s own ``gcc_options`` string is split *here* -- with
+    the identical splitter every consumer already applies to it downstream,
+    so this changes no token list, only where the split happens -- and
+    interleaved as ``(*tokens, *split(ctx.gcc_options), *ctx.gcc_option_
+    tokens)``: the legacy tokens first (lowest precedence), then whatever
+    *ctx* already carried, in the same relative order it always had.
+    Mirrors ``cli_helpers_compare._merge_gcc_options``'s own ordering intent
+    (that function cannot be imported here: it lives in a ``cli_*`` module,
+    and this file is under ``workflows/artifact/`` -- an engine-layer tree
+    ``scripts/check_ai_readiness.py``'s ``engine-cli-boundary`` check
+    forbids importing a CLI sibling from) -- the combined *effective* token
+    sequence a real ``-p compile_commands.json`` run would produce is
+    identical to what ``_merge_gcc_options``'s own string-join path
+    produces for any token *without* embedded whitespace (every existing
+    precedence test's fixture shape); it is *this* function that is now
+    correct where ``_merge_gcc_options`` still is not, for a token that
+    does carry embedded whitespace.
+    """
+    if not tokens:
+        return ctx
+    from ..._compiler_options import split_gcc_options
+
+    base_tokens: tuple[str, ...] = ()
+    existing_tokens: tuple[str, ...] = ()
+    if ctx is not None:
+        if ctx.gcc_options:
+            base_tokens = tuple(split_gcc_options(ctx.gcc_options))
+        existing_tokens = ctx.gcc_option_tokens
+    combined = tuple(tokens) + base_tokens + existing_tokens
+    if ctx is None:
+        from ...compile_context import CompileContext
+
+        return CompileContext(gcc_option_tokens=combined)
+    return dataclasses.replace(ctx, gcc_options=None, gcc_option_tokens=combined)
+
+
+def _legacy_compile_db_achieved(matched: bool, tokens: tuple[str, ...]) -> bool:
+    """Whether the legacy ``-p``/``--compile-db`` auto-match should count as
+    having achieved real build context (Codex review, fresh evidence on
+    ``f381deb``).
+
+    *matched* alone under-counts: a caller may pass non-empty *tokens*
+    (proof the match already derived real castxml flags) while leaving
+    *matched* at its default ``False``, as the tokens-only call shape in
+    ``tests/test_legacy_compile_db_typed_threading.py`` does. Non-empty
+    tokens are themselves sufficient evidence of a match, independent of
+    whether *matched* was also passed -- and *matched* remains necessary on
+    its own for a genuinely matched compile unit that legitimately derives
+    zero flags, which an empty token tuple cannot represent at all.
+    """
+    return matched or bool(tokens)
+
+
 def _seeded_includes_and_compile_context(
     side: InputSpec,
     evidence: SideEvidence,
@@ -300,6 +385,8 @@ def _seeded_includes_and_compile_context(
     allow_build_query: bool = False,
     build_config_locally_trusted: bool = False,
     collect_mode: str | None = None,
+    legacy_compile_db_tokens: tuple[str, ...] = (),
+    legacy_compile_db_matched: bool = False,
 ) -> tuple[list[Path], CompileContext | None, bool, list[Callable[[], None]]]:
     """This input's L2 include-dir seed *and* its P0.3 L3->L2 compile-context
     fold, resolved together in one L3 collection (PR C, typed dump/scan
@@ -370,10 +457,52 @@ def _seeded_includes_and_compile_context(
     defaulted to ``None`` so every existing caller (``compare``'s typed
     pipeline, ``dump``'s ``execute_dump_request``) is unaffected. These exist
     only so a caller resolving a side that still carries the CLI's live
-    ``--build-query``/``--build-compile-db``/``--config`` flags (``dump``'s
+    ``build_query``/``build_compile_db`` arguments and ``--config`` flag (``dump``'s
     ELF path, until PR 3C removes them) can route through this one shared
     primitive instead of a second, independent call to the same underlying
     function.
+
+    *legacy_compile_db_tokens* (ADR-063 Phase 1, threading the ``-p``/
+    ``--compile-db`` legacy auto-match into the typed pipeline -- see
+    ``docs/contribute/known-gaps.md``'s "ADR-063 Phase 1" entry for the
+    precise mechanism this closes): the castxml flags
+    ``cli_helpers_compare._resolve_build_context_flags`` already derived
+    from that *separate*, older ``build_context_for_header``/
+    ``build_context_union_fallback`` match -- passed in already-computed,
+    the same way ``perform_elf_dump``'s own ``legacy_build_context_flags``
+    parameter carries them, rather than re-derived here (this function has
+    no ``--compile-db``/``compile_db_filter`` matching logic of its own, and
+    must not grow a second one). Defaulted to ``()`` so every existing
+    caller is unaffected.
+
+    **Precedence, mirroring ``perform_elf_dump``'s own "legacy-match
+    overlap" fix exactly**: never fed to the P0.3 fold above as if it were
+    explicit user context -- ``ctx.gcc_options`` (this side's own
+    caller-supplied :class:`CompileContext`, never a legacy-derived value)
+    is the fold's only explicit input, same as it already was. The tokens
+    are folded in *after* the fold decides, only when the fold's own
+    ``applied`` came back ``False`` -- the fold's result wins and supersedes
+    the legacy match whenever the fold *does* match a header, identical to
+    ``perform_elf_dump``'s own reassignment. This is additive threading
+    only: no caller of this function is wired to actually pass a non-empty
+    tuple yet (that is ``dump_cmd``'s real-execution branch, which still
+    executes through ``perform_elf_dump``/``handle_non_elf_dump``, not this
+    typed pipeline -- see the known-gaps entry for what remains open).
+
+    *legacy_compile_db_matched* (Codex review, fresh evidence): whether the
+    legacy match actually matched a compile unit at all -- the second
+    element of ``cli_helpers_compare._resolve_build_context_flags``'s own
+    return, mirroring ``perform_elf_dump``'s ``compile_db_context_matched``
+    parameter exactly. A separate signal from *legacy_compile_db_tokens*
+    on purpose: a genuinely matched compile unit that legitimately derives
+    zero castxml flags is real build-context evidence (the returned
+    ``applied`` must become ``True`` so ``parsed_with_build_context`` gets
+    stamped, same as ``perform_elf_dump``'s own gate), but an empty token
+    tuple alone cannot distinguish that case from "the legacy match never
+    ran" -- collapsing the two would either wrongly claim context for an
+    unmatched header or (this parameter's absence, before this fix) wrongly
+    deny it for a matched one whose own flags folded in silently without
+    ever flipping ``applied``.
 
     **Enforced here, not merely forwarded (Codex review, fresh evidence, two
     rounds)**: *allow_build_query* gates whether *build_config*/*build_query*
@@ -396,7 +525,8 @@ def _seeded_includes_and_compile_context(
     this function's own docstring already warns against for the *inferred*
     query below; explicit ``build.query`` needs the identical discipline.
     The CLI's own gating (``dump_cmd`` only resolves a non-``None``
-    ``build_config``/``build_query`` when ``--config``/``--build-query`` was
+    ``build_config``/``build_query`` when ``--config`` (or a programmatic
+    ``build_query``) was
     genuinely typed) is a different, CLI-side act of consent that this
     parameter existing lets that one call site assert explicitly, rather than
     this function inferring consent from mere presence.
@@ -415,7 +545,14 @@ def _seeded_includes_and_compile_context(
     never silently resolved by picking one).
     """
     if not (side.sources or side.build_info) or not evidence.headers:
-        return list(side.includes), evidence.compile, False, []
+        return (
+            list(side.includes),
+            _fold_legacy_compile_db_tokens(evidence.compile, legacy_compile_db_tokens),
+            _legacy_compile_db_achieved(
+                legacy_compile_db_matched, legacy_compile_db_tokens
+            ),
+            [],
+        )
     from ...buildsource.l2_seed import seed_includes_and_fold_compile_context
 
     # See _gated_build_query_inputs's own docstring: build_compile_db is a
@@ -467,4 +604,33 @@ def _seeded_includes_and_compile_context(
     # because unrelated build evidence was supplied and matched nothing.
     if not applied and ctx is None:
         effective_ctx = None
+    # ADR-063 Phase 1: the legacy `-p`/`--compile-db` auto-match's own
+    # already-derived flags are folded in ONLY when the P0.3 fold above did
+    # NOT itself apply -- the fold's result wins and supersedes the legacy
+    # match whenever the fold does match a header, exactly the same
+    # "legacy-match overlap" precedence `perform_elf_dump`'s own
+    # `l3_context_applied` reassignment already enforces for the CLI's
+    # real-execution path. `applied=True` means real L3 evidence was folded
+    # in above using `ctx.gcc_options` (never a legacy-derived value) as the
+    # fold's own explicit input, so the legacy tokens are simply discarded
+    # here rather than double-counted on top of it.
+    if not applied:
+        effective_ctx = _fold_legacy_compile_db_tokens(
+            effective_ctx, legacy_compile_db_tokens
+        )
+        # Codex review, fresh evidence (twice over): folding the legacy
+        # tokens into effective_ctx above is not enough on its own --
+        # `applied` is what `_resolve_side_snapshot_impl` actually gates
+        # `parsed_with_build_context` on (mirroring `perform_elf_dump`'s own
+        # `compile_db_context_matched` OR `l3_context_applied` condition).
+        # Two independent ways a call can prove a real match: an explicit
+        # `legacy_compile_db_matched=True` (a real match with zero derived
+        # tokens, which an empty token tuple alone can't represent), or a
+        # non-empty `legacy_compile_db_tokens` (which is itself proof a
+        # match already derived real flags, even when a caller left
+        # `legacy_compile_db_matched` at its default). See
+        # `_legacy_compile_db_achieved`.
+        applied = _legacy_compile_db_achieved(
+            legacy_compile_db_matched, legacy_compile_db_tokens
+        )
     return includes, effective_ctx, applied, cleanups

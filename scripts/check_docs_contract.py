@@ -66,6 +66,11 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from findings_report import Findings as _SharedFindings  # noqa: E402
+from learning_ladder import check_learning_ladder  # noqa: E402
+from pipeline_status_ledger import (  # noqa: E402
+    check_pipeline_status_ledger,
+    load_pipeline_status,
+)
 
 DOCS = ROOT / "docs"
 #: The example-case tree whose per-case READMEs `gen_examples_docs.py`
@@ -1805,6 +1810,10 @@ def main() -> int:
     if terms is not None:
         _check_terminology_entries(f, terms)
         _check_duplicate_term_definitions(f, terms)
+    pipeline_status = load_pipeline_status(f)
+    if pipeline_status is not None:
+        check_pipeline_status_ledger(f, pipeline_status)
+    check_learning_ladder(f)
     _check_duplicate_paragraphs(f)
     _check_stale_process_language(f)
     _check_retired_surfaces(f)

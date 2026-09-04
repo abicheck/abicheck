@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
 
+from .fact import Fact, bridge_legacy_and_fact
+
 
 class PeSymbolType(str, Enum):
     EXPORTED = "exported"  # ordinal / name in export table
@@ -72,6 +74,18 @@ class PeMetadata:
     # Minimum OS floor: OPTIONAL_HEADER.MajorSubsystemVersion.MinorSubsystemVersion
     # (e.g. "6.1" = Windows 7). "" = not captured (legacy snapshot).
     subsystem_version: str = ""
+
+    # ADR-063 Phase 5 (seventh batch): Fact[...] sibling of delay_imports --
+    # the identical schema-version-driven case-(b) shape as ElfMetadata's
+    # own three case-(b) fields.
+    delay_imports_fact: Fact[dict[str, list[str]] | None] | None = field(
+        default=None, kw_only=True
+    )
+
+    def __post_init__(self) -> None:
+        self.delay_imports, self.delay_imports_fact = bridge_legacy_and_fact(
+            self.delay_imports, self.delay_imports_fact, None, None
+        )
 
     @cached_property
     def export_map(self) -> dict[str, PeExport]:

@@ -45,13 +45,25 @@ Its own module, not an addition to ``cli.py`` (1800+ lines, WARN) or
 ``cli_dump_helpers.py`` (at the 2000-line hard cap) — AGENTS.md, "Files that
 are large".
 
-**Scope, stated plainly**: the real ELF/PE/Mach-O run still executes through
-``perform_elf_dump``/``handle_non_elf_dump``, not through
-``service_dump_pipeline.execute_dump_request``. Three separate obstacles block
-that half (post-processing passes driven by CLI-only inputs, the write-time
-vs. resolve-time embed, and the source-only branch's own pipeline); see the
-plan's PR 3A section. This module is the prerequisite that migration needs,
-consumed today by ``--dry-run``.
+**Scope, stated plainly**: the real run for both binary formats has since
+migrated (CLI cleanup phase two, PR C — ELF first, PE/Mach-O following in
+ADR-063 Phase 1) — ``frontends/cli/commands/dump.py`` builds a second,
+execution-scoped ``ResolvedDumpRequest`` from the object this module
+produces and calls ``frontends.cli.dump_execute``, which runs it through
+``service_dump_pipeline.execute_dump_request`` instead of the retired
+``perform_elf_dump``/``handle_non_elf_dump`` call sites (both still
+defined, for any other caller that depends on them, but no longer imported
+by ``dump_cmd``). The legacy ``-p``/``--compile-db`` auto-match this note
+used to call a blocker is threaded through as an explicit pass-through
+(``execute_dump_request(..., legacy_compile_db_tokens=...,
+legacy_compile_db_matched=...)``) rather than a typed-API field — see
+``docs/contribute/known-gaps.md``'s "PR C" entry for the precise mechanism.
+The PE/Mach-O half was verified only via mock-based CLI/unit tests, not a
+real PE/Mach-O toolchain — none was available where this was done.
+This module's object is consumed by both branches today: ``--dry-run``
+renders it directly, and ``dump_cmd``'s real run (either format) builds the
+execution-scoped ``ResolvedDumpRequest`` described above from it before
+calling ``execute_dump_cli_run``.
 """
 
 from __future__ import annotations

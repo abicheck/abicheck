@@ -26,16 +26,50 @@ arrangement would have made the two modules a cycle.
 The key encoding lives here too, since it is what makes an identifier an
 identifier: :func:`_packed` length-prefixes every part, so no content a part
 can carry changes how a key parses.
+
+**``EntityKind``/``ObservationKind`` are relocated, not redefined, as of
+ADR-063 Phase 2.** They are domain vocabulary (what kind of thing an
+identity names), not a storage wire concern, so they now live in
+:mod:`abicheck.model.identity` — the leaf module ADR-061's ``storage ->
+model`` import direction requires them to live in, and re-exported here
+under their original names so every existing ``storage.entity_ids.
+EntityKind``/``storage.entity_ids.ObservationKind`` import keeps resolving
+unchanged. ``model.identity`` also defines a second, independent
+``EntityId``/``ScopePath``-based domain identity type of its own.
+
+**The two ``EntityId``s are bridged, not merged, as of Phase 2's storage v2
+wire-schema slice.** ``EntityId``/``OccurrenceId`` below remain the packed-
+key wire DTO this module has always been (``kind``/``qualified_name``/
+``discriminator``, unchanged) — that shape stays the one thing a caller
+that only needs a flat, orderable, key-producing identity reaches for.
+:func:`domain_entity_id_to_dto`/:func:`domain_entity_id_from_dto` are a
+*separate* bridge pair operating on ``model.identity.EntityId`` directly,
+producing its own wire-schema-versioned JSON document (schema version 2)
+that encodes ``ScopePath`` as an explicit list of typed segment records —
+see their own docstrings for why a rendered ``qualified_name`` string
+cannot be the wire shape for that type (two distinct ``ScopePath``s can
+render identically) and for the version-1-document migration adapter.
 """
 
 from __future__ import annotations
 
-import enum
 import functools
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..model.identity import (
+    Anonymous,
+    EntityId as _DomainEntityId,
+    EntityKind,
+    InlineNamespace,
+    LocalToFunction,
+    Namespace,
+    ObservationKind,
+    Record,
+    ScopePath as _DomainScopePath,
+    ScopeSegment as _DomainScopeSegment,
+)
 from .guards import (
     decision_key as _decision_key,
     enum_member as _enum_member,
@@ -44,15 +78,28 @@ from .guards import (
     mapping as _mapping,
     required_field as _required_field,
     row_sequence as _row_sequence,
+    strict_int as _strict_int,
 )
 
 __all__ = [
+    "DOMAIN_ENTITY_ID_SCHEMA_VERSION",
     "EntityId",
     "EntityKind",
     "ObservationKind",
     "OccurrenceId",
+    "domain_entity_id_from_dto",
+    "domain_entity_id_to_dto",
     "elf_symbol_occurrence",
 ]
+
+#: Wire-schema version for :func:`domain_entity_id_to_dto`'s own document
+#: shape. Version 1 is the pre-existing bare ``kind``/``qualified_name``/
+#: ``discriminator`` shape (what this module's own :class:`EntityId`
+#: produces) — never written by :func:`domain_entity_id_to_dto` itself, but
+#: still readable by :func:`domain_entity_id_from_dto` via
+#: :func:`_domain_entity_id_from_v1_dto`, D8's "a migration adapter per DTO
+#: version."
+DOMAIN_ENTITY_ID_SCHEMA_VERSION = 2
 
 
 def _packed(*parts: str) -> str:
@@ -81,37 +128,6 @@ def _packed(*parts: str) -> str:
     no byte a part can contain that changes how the key parses.
     """
     return "".join(f"{len(part)}:{part}" for part in parts)
-
-
-class EntityKind(enum.Enum):
-    """What kind of logical thing an :class:`EntityId` names."""
-
-    FUNCTION = "function"
-    VARIABLE = "variable"
-    TYPE = "type"
-    ENUM = "enum"
-    TYPEDEF = "typedef"
-    CONSTANT = "constant"
-    SYMBOL = "symbol"
-    FIELD = "field"
-    BASE = "base"
-
-
-class ObservationKind(enum.Enum):
-    """Where an :class:`OccurrenceId` was observed.
-
-    This is the axis that makes multiplicity legible: the same logical
-    function observed by Clang, by CastXML, in DWARF, and in the export
-    table is four occurrences of one entity, not four competing answers.
-    """
-
-    AST = "ast"
-    DWARF = "dwarf"
-    PDB = "pdb"
-    EXPORT_TABLE = "export_table"
-    TRANSLATION_UNIT = "translation_unit"
-    SOURCE_LOCATION = "source_location"
-    BUILD_UNIT = "build_unit"
 
 
 def _attribute_pair(pair: Any) -> tuple[str, str]:
@@ -421,6 +437,263 @@ class OccurrenceId:
                 for pair in _row_sequence(data.get("attributes", ()), "attributes")
             ),
         )
+
+
+# --------------------------------------------------------------------------
+# model.identity.EntityId <-> wire-schema-v2 document bridge
+#
+# See this module's own docstring for why a rendered `qualified_name` string
+# (this module's pre-existing v1 EntityId shape, above) cannot be the wire
+# form for the `ScopePath`-based domain EntityId: two distinct `ScopePath`s
+# can render to the identical string, so `from_dict` reconstructing a domain
+# `EntityId` from one could not recover which one it was. `to_dto`/`from_dto`
+# below encode `ScopePath` as an explicit list of typed segment records
+# instead, one entry per segment, so no information `ScopePath` itself
+# carries is lost in the round trip.
+# --------------------------------------------------------------------------
+
+
+def _domain_segment_to_dict(segment: _DomainScopeSegment) -> dict[str, Any]:
+    """One ``ScopePath`` segment, encoded with its own kind tag.
+
+    A discriminated union of five segment types has no single "the" shape —
+    tagging each with its own ``"kind"`` string (distinct from
+    :class:`EntityKind`'s vocabulary; a scope segment and the entity it
+    contains are never the same kind of thing) is what lets
+    :func:`_domain_segment_from_dict` dispatch back to the right dataclass
+    rather than guessing from which optional keys happen to be present.
+    """
+    if isinstance(segment, Namespace):
+        return {"kind": "namespace", "name": segment.name}
+    if isinstance(segment, Record):
+        return {"kind": "record", "name": segment.name, "access": segment.access}
+    if isinstance(segment, InlineNamespace):
+        return {
+            "kind": "inline_namespace",
+            "name": segment.name,
+            "version_tag": segment.version_tag,
+        }
+    if isinstance(segment, Anonymous):
+        # `segment.kind` is that segment's OWN payload field (what kind of
+        # anonymous scope it is — "struct"/"union"/"namespace"/"enum"), not
+        # this dict's own discriminator tag — spelled `scope_kind` here so
+        # the two `"kind"`-shaped things sharing one document never collide.
+        return {
+            "kind": "anonymous",
+            "scope_kind": segment.kind,
+            "ordinal": segment.ordinal,
+        }
+    if isinstance(segment, LocalToFunction):
+        return {
+            "kind": "local_to_function",
+            # Recursive, not a bare string: `owner` is itself a full domain
+            # `EntityId` (this module's own docstring on `LocalToFunction`
+            # explains why a bare name would collide two overloads' same-named
+            # locals), so it needs the identical typed round trip this
+            # function's own caller is providing for the outer entity.
+            "owner": domain_entity_id_to_dto(segment.owner),
+            "block_ordinal": segment.block_ordinal,
+        }
+    raise TypeError(f"unrecognized ScopePath segment type: {type(segment).__name__}")
+
+
+def _ordinal_field(document: Mapping[str, Any], key: str, record: str) -> int:
+    """A required, strictly-integer ordinal field — never a ``bool``.
+
+    Both :class:`Anonymous`/:class:`LocalToFunction`'s own ordinal fields
+    are identity, so two structurally distinct wire values (``true`` and
+    the integer ``1``) must not reconstruct to equal, same-hash segments —
+    see :func:`~abicheck.storage.guards.strict_int` for why plain
+    ``_instance_of(value, int, ...)`` is not enough.
+    """
+    return _strict_int(_required_field(document, key, record), key)
+
+
+def _domain_segment_from_dict(data: Any) -> _DomainScopeSegment:
+    """The inverse of :func:`_domain_segment_to_dict`.
+
+    Every field the writer (:func:`_domain_segment_to_dict`) always emits is
+    read via :func:`_required_field`, never ``.get(key, default)`` — a v2
+    document is written with ``access``/``version_tag`` present on every
+    record/inline-namespace segment regardless of value, so a document
+    missing one is truncated or hand-edited, not a producer that legitimately
+    had nothing to say (Codex review; the same "absence is not evidence"
+    rule :func:`~abicheck.storage.guards.row_sequence` already states for a
+    sibling field shape).
+    """
+    _mapping(data, "a scope-segment document")
+    segment_kind = _required_field(data, "kind", "a scope-segment document")
+    if segment_kind == "namespace":
+        return Namespace(
+            name=_identity_text(
+                _required_field(data, "name", "a namespace segment document"),
+                "name",
+            )
+        )
+    if segment_kind == "record":
+        return Record(
+            name=_identity_text(
+                _required_field(data, "name", "a record segment document"), "name"
+            ),
+            access=_identity_text(
+                _required_field(data, "access", "a record segment document"), "access"
+            ),
+        )
+    if segment_kind == "inline_namespace":
+        return InlineNamespace(
+            name=_identity_text(
+                _required_field(data, "name", "an inline-namespace segment document"),
+                "name",
+            ),
+            version_tag=_identity_text(
+                _required_field(
+                    data, "version_tag", "an inline-namespace segment document"
+                ),
+                "version_tag",
+            ),
+        )
+    if segment_kind == "anonymous":
+        return Anonymous(
+            kind=_identity_text(
+                _required_field(data, "scope_kind", "an anonymous segment document"),
+                "scope_kind",
+            ),
+            ordinal=_ordinal_field(data, "ordinal", "an anonymous segment document"),
+        )
+    if segment_kind == "local_to_function":
+        return LocalToFunction(
+            owner=domain_entity_id_from_dto(
+                _required_field(data, "owner", "a local-to-function segment document")
+            ),
+            block_ordinal=_ordinal_field(
+                data, "block_ordinal", "a local-to-function segment document"
+            ),
+        )
+    raise ValueError(
+        f"unrecognized scope-segment kind {segment_kind!r} in a scope-segment document"
+    )
+
+
+def domain_entity_id_to_dto(entity_id: _DomainEntityId) -> dict[str, Any]:
+    """``model.identity.EntityId`` -> a wire-schema-v2 JSON document.
+
+    Every field ``model.identity.EntityId`` carries is represented as its
+    own typed entry — ``scope`` as a list of :func:`_domain_segment_to_dict`
+    records, ``leaf_name``/``extra`` kept as their own fields rather than
+    folded into one ``discriminator`` string — so
+    :func:`domain_entity_id_from_dto` can reconstruct the identical domain
+    object, not merely some string that happens to describe it.
+    """
+    return {
+        "schema_version": DOMAIN_ENTITY_ID_SCHEMA_VERSION,
+        "scope": [_domain_segment_to_dict(segment) for segment in entity_id.scope],
+        "kind": entity_id.kind.value,
+        "leaf_name": entity_id.leaf_name,
+        "extra": list(entity_id.extra),
+    }
+
+
+def _domain_entity_id_from_v1_dto(data: Mapping[str, Any]) -> _DomainEntityId:
+    """Best-effort reconstruction of a version-1 (``kind``/``qualified_name``/
+    ``discriminator``) document as a domain ``EntityId``.
+
+    Version 1 never recorded which kind a scope segment was — it only ever
+    stored one flat, already-rendered ``qualified_name`` string — so this is
+    necessarily lossy: every ``::``-separated component becomes an untyped
+    :class:`Namespace` segment (the closest v2 shape a v1 document's own
+    information supports), even when the real declaration nested inside a
+    record, an inline namespace, or an anonymous scope instead. A v1-loaded
+    ``EntityId`` is a best-effort reconstruction, not guaranteed equal to the
+    v2 encoding the same logical declaration would produce today — this is an
+    accepted, one-time migration-boundary gap (D8's "a migration adapter per
+    DTO version"), not a property the wire format promises going forward.
+
+    Empty ``::``-separated components are preserved, not discarded --
+    ``storage.entity_ids.EntityId.qualified_name`` places no grammar
+    restriction on this identity-bearing string (only that it is a plain
+    ``str``), so ``"A::B"`` and ``"A::::B"`` are two structurally different,
+    equally legal values a v1 producer could have written, and dropping the
+    empty component collapsed both onto the identical scope/leaf, colliding
+    two distinct identities rather than merely losing which *kind* each
+    segment was (Codex review). Preserving it as an explicit, empty-named
+    ``Namespace`` segment keeps the two distinguishable without asserting
+    anything about what an empty component originally meant.
+    """
+    kind = EntityKind(_required_field(data, "kind", "an entity-id document"))
+    qualified_name = _identity_text(
+        _required_field(data, "qualified_name", "an entity-id document"),
+        "qualified_name",
+    )
+    discriminator = _identity_text(data.get("discriminator", ""), "discriminator")
+    # str.split always returns at least one element (even for "" or "::"
+    # alone), so no separate empty-input branch is needed.
+    *scope_names, leaf_name = qualified_name.split("::")
+    scope: _DomainScopePath = tuple(Namespace(name=name) for name in scope_names)
+    extra = (discriminator,) if discriminator else ()
+    return _DomainEntityId(scope=scope, kind=kind, leaf_name=leaf_name, extra=extra)
+
+
+def _entity_id_schema_version(data: Mapping[str, Any]) -> int:
+    """The document's ``schema_version``, defaulting to ``1`` when absent.
+
+    Compared for dispatch by identity, not by ``==`` on the raw value: a
+    numeric ``==`` treats JSON ``true`` as equal to ``1`` and ``2.0`` as
+    equal to ``2`` (``bool`` subclasses ``int`` in Python, and ``int``/
+    ``float`` compare across type), so either would silently dispatch to a
+    real version's own parser on a value that was never that version (Codex
+    review) — see :func:`~abicheck.storage.guards.strict_int`. Rejected
+    outright rather than coerced, matching every other identity-bearing
+    field in this module.
+    """
+    if "schema_version" not in data:
+        return 1
+    return _strict_int(data["schema_version"], "schema_version")
+
+
+def domain_entity_id_from_dto(data: Mapping[str, Any]) -> _DomainEntityId:
+    """The inverse of :func:`domain_entity_id_to_dto`.
+
+    Dispatches on ``schema_version``: an absent version, or an explicit
+    ``1``, is this module's own pre-existing v1 shape, handled by
+    :func:`_domain_entity_id_from_v1_dto`'s best-effort migration adapter; the
+    current :data:`DOMAIN_ENTITY_ID_SCHEMA_VERSION` is the lossless round
+    trip :func:`domain_entity_id_to_dto` produces. Any other version is
+    refused outright rather than guessed at — a document from a wire schema
+    this build has never written is not this function's to interpret.
+
+    ``extra`` is read via :func:`~abicheck.storage.guards.required_field`,
+    not ``.get(key, default)`` — :func:`domain_entity_id_to_dto` always
+    emits it, empty list included, so a v2 document missing it entirely is
+    truncated or hand-edited rather than a producer that legitimately had
+    nothing to say (Codex review, same reasoning as
+    :func:`_domain_segment_from_dict`'s per-segment fields).
+    """
+    _mapping(data, "an entity-id document")
+    version = _entity_id_schema_version(data)
+    if version == 1:
+        return _domain_entity_id_from_v1_dto(data)
+    if version != DOMAIN_ENTITY_ID_SCHEMA_VERSION:
+        raise ValueError(
+            f"unsupported entity-id wire schema version: {version!r} "
+            f"(this build reads v1 and v{DOMAIN_ENTITY_ID_SCHEMA_VERSION})"
+        )
+    scope = tuple(
+        _domain_segment_from_dict(segment)
+        for segment in _row_sequence(
+            _required_field(data, "scope", "an entity-id document"), "scope"
+        )
+    )
+    kind = EntityKind(_required_field(data, "kind", "an entity-id document"))
+    leaf_name = _identity_text(
+        _required_field(data, "leaf_name", "an entity-id document"), "leaf_name"
+    )
+    extra = tuple(
+        _identity_text(entry, "an extra entry")
+        for entry in _row_sequence(
+            _required_field(data, "extra", "an entity-id document"), "extra"
+        )
+    )
+    return _DomainEntityId(scope=scope, kind=kind, leaf_name=leaf_name, extra=extra)
 
 
 def elf_symbol_occurrence(

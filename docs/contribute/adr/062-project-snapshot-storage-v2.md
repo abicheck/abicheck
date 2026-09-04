@@ -4,17 +4,60 @@
 **Status:** Proposed — partially implemented. Phase 0 primitives implemented (`abicheck/storage/`:
 fact availability, entity/occurrence identity with conflict preservation,
 canonical encoding and semantic digest, and the separated version axes).
-Phase 1's A1.1 is itself partially implemented: `abicheck/storage/package.py`
-carries the `ProjectSnapshot` manifest/ref/object-store *object model*
+Phase 1's A1.1-A1.3 are implemented: `abicheck/storage/package.py` carries
+the `ProjectSnapshot` manifest/ref/object-store *object model*
 (`PackageManifest`, `VariantRef`, `ArtifactRef`, `ObjectRef`, the `ObjectStore`
-protocol, and the D6 path-layout functions), but no directory-backed
-`ObjectStore` implementation, `.tar.zst` transport, or writer exists yet. No
-producer, reader, or comparison path consumes any of this, so every
-existing snapshot, baseline set, and `BundleFacts` document is bit-for-bit
-unchanged. The rest of Phase 1 (the v1-v25 import adapter, expressing a
-single-library dump as a one-artifact project, folding baseline sets/
-`BundleFacts` into sections, variant capture/CLI wiring) and all of Phase 2
-are not implemented.
+protocol, and the D6 path-layout functions); `abicheck/project_snapshot_store.py`
+is a real, directory-backed `ObjectStore` implementation
+(`DirectoryObjectStore`) plus a manifest/ref writer and reader over ADR-059's
+physical envelope — everything in D6's layout except the `.tar.zst` transport
+form, which remains open; `abicheck/storage/import_v1.py`'s
+`import_legacy_snapshot`/`export_legacy_snapshot` are the v1-v25 import
+adapter and its exact inverse, expressing a single-library legacy document as
+a one-artifact, one-variant project that round-trips through the store at the
+semantic-digest level. Landed jointly with ADR-063 Phase 8, whose own D8
+constraint (`abicheck/storage/dto.py`'s `SectionDTO` — a distinct, versioned,
+explicitly-encoded class per section, never `asdict`) this now satisfies for
+every legacy document field, not just `semantic_ir`/`semantic_ir_conflicts`:
+`abicheck/storage/legacy_sections.py`'s `split_legacy_document`/
+`join_legacy_document` partition the rest across D8's `binary`/
+`declarations`/`types`/`layout`/`debug`/`build`/`graph`/`provenance` sections,
+each independently versioned and explicitly allowlisted per field (an
+unassigned field is a hard import-time error, never a silent catch-all). What
+remains unsplit is each section's own *internal* shape — `elf`/`dwarf`/
+`build_source`/... still carry the existing JSON encoding inside their own
+section, not a further per-field typed decode.
+
+**This is now wired into `dump`/`compare`/`scan` as the default, single-file
+shape (Phase 8 redesign).** The directory-backed package this ADR
+originally specified (`manifest.json`/`refs/`/`objects/sha256/...`) turned
+out to be pure storage-UX cost for the single-artifact case every `dump`
+performs today — many small files instead of one, awkward to
+`scp`/commit/upload as a CI artifact — for none of its real payoff (content
+dedup, independent per-section objects), which only materializes once a
+project shares content across multiple artifacts. `storage.sectioned_document`
+packages the identical D8 section split as **one JSON document** instead;
+`serialization.snapshot_to_json`/`write_snapshot` write it and
+`snapshot_from_dict`/`load_snapshot` read it by default, with no CLI flag
+required. An older flat `.abi.json` a prior build wrote stays fully
+readable. The directory writer/reader
+(`abicheck/project_snapshot_legacy.py`'s `write_legacy_snapshot_package`/
+`read_legacy_snapshot_document`) remain available as typed-API primitives —
+`compare`/`scan --against` still accept a directory package as an input
+path — but no `dump` CLI flag produces one today.
+Folding baseline sets/`BundleFacts` into sections, multi-artifact packages,
+variant capture, and the `.tar.zst` transport form (A1.4-A1.8) remain not
+implemented — note this is the **remainder of Phase 1**, not Phase 2 (Phase
+2 is the separate scale/performance work: lazy loading, streaming encode,
+cache migration, indexes). A full per-item design for A1.1's `.tar.zst`
+remainder and A1.4-A1.8 (Goal/Design/Files/Tests/Acceptance criteria each)
+now exists in `docs/contribute/plans/storage-format-v2.md`'s "Phases" →
+"Phase 1" section — design only, not implemented by that addition; the
+object model these items build on (`PackageManifest.artifact_refs`/
+`variant_refs`, `ArtifactRef.kind`/`.sections`) already supports every one
+of them without a schema change, which is why each item below is scoped as
+a producer/CLI-wiring gap rather than a storage-format gap. All of Phase 2
+is not implemented.
 **Decision maker:** abicheck maintainers
 **Supersedes (partially):** [ADR-015](015-snapshot-serialization.md)'s
 single-document logical model. [ADR-059](059-compressed-snapshot-storage.md)'s
@@ -30,7 +73,10 @@ now coexist:
 2. baseline sets (`manifest.json` plus per-library snapshots, sometimes with
    staged binaries);
 3. `BundleFacts`, which embeds every per-library snapshot in one JSON
-   document (`BUNDLE_FACTS_SCHEMA_VERSION = 1`);
+   document (schema version tracked by `BUNDLE_FACTS_SCHEMA_VERSION` in
+   `abicheck/bundle_facts.py`, bumped by CLI cleanup phase two's
+   `artifact_type` self-describing-marker addition; still one undivided
+   document regardless of the exact version);
 4. `BuildSourcePack`, which may be embedded inside each snapshot or stored
    out of band.
 

@@ -290,7 +290,8 @@ explanation = localize_symbol(graph, "_ZN3foo3barEv")
 ```
 
 Both load a `SourceGraphSummary` — from a pack directory's
-`graph/source_graph_summary.json`, or from `BuildSourcePack.load(path).source_graph`.
+`graph/source_graph_summary.json`, or from
+`abicheck.buildsource.pack_io.load(path).source_graph`.
 Per the authority rule, this only explains and prioritizes impact; it never
 decides or suppresses an artifact-proven ABI break on its own. What *did*
 carry forward automatically into `compare` is the graph's **derived

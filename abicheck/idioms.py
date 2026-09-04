@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .checker_policy import ChangeKind, Confidence
-from .model import ParamKind, RecordType, ScopeOrigin, Visibility
+from .model import ParamKind, RecordType, ScopeOrigin, Visibility, resolved_fact_value
 from .surface_graph import SurfaceGraph
 
 # Provenance origins that are NOT part of the public ABI surface — a type defined
@@ -293,7 +293,8 @@ def _recognise_factory(graph: SurfaceGraph) -> dict[str, IdiomTag]:
         rec = graph.types_by_name.get(pointee) or graph.types_by_name.get(
             pointee.rsplit("::", 1)[-1]
         )
-        if rec is not None and rec.vtable:
+        rec_vtable = resolved_fact_value(rec.vtable_fact, []) if rec is not None else []
+        if rec is not None and rec_vtable:
             out[fn.name] = IdiomTag(
                 idiom=Idiom.FACTORY,
                 confidence=Confidence.MEDIUM,
@@ -430,7 +431,8 @@ def _has_virtual_destructor(rec: RecordType) -> bool:
     slot has a non-virtual destructor — deleting through a base pointer
     is UB.
     """
-    for entry in rec.vtable:
+    vtable = resolved_fact_value(rec.vtable_fact, [])
+    for entry in vtable:
         if entry.startswith("~"):
             return True
         if _MSVC_DTOR_RE.search(entry):
@@ -613,12 +615,22 @@ def _collect_base_targets(
     suppress a *newly introduced* public factory risk for the same Base in
     _emit_new_antipatterns(). When no public-header set was supplied every
     record is UNKNOWN, which is treated as in-surface (no behaviour change).
+
+    ADR-063 Phase 5B audit note: ``bases_fact`` stays on the plain
+    ``resolved_fact_value(..., [])`` bridge deliberately. This is a
+    single-snapshot (ADR-027 "surface-report") anti-pattern scan, not an
+    old/new comparison — a ``bases_fact`` evidence gap here only shrinks
+    ``base_targets``, which can miss a real
+    ``POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR`` (a false negative) but can never
+    fabricate one, so it carries none of the two-sided fabrication risk
+    :func:`~abicheck.compare.fact_comparison.compare_facts` exists to gate.
     """
     base_targets: set[str] = set()
     for rec in graph.snapshot.types:
         if rec.origin in _NON_PUBLIC_ORIGINS:
             continue
-        for b in rec.bases:
+        bases = resolved_fact_value(rec.bases_fact, [])
+        for b in bases:
             resolved = _resolve_type_name(b, all_type_names, by_short)
             if resolved is not None:
                 base_targets.add(resolved)
@@ -652,7 +664,8 @@ def _detect_non_virtual_dtor(
     """Collect POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR findings."""
     found: list[AntiPattern] = []
     for rec in graph.snapshot.types:
-        if not rec.vtable:
+        vtable = resolved_fact_value(rec.vtable_fact, [])
+        if not vtable:
             continue
         used_as_base = rec.name in base_targets
         used_as_factory = rec.name in factory_targets

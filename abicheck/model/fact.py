@@ -44,9 +44,48 @@ from typing import Generic, TypeVar
 
 from .availability import FactStatus
 
-__all__ = ["Fact", "replace_with_fact_sync"]
+__all__ = [
+    "Fact",
+    "replace_with_fact_sync",
+    "resolved_fact_value",
+    "sync_present_facts",
+]
 
 T = TypeVar("T")
+
+
+def resolved_fact_value(fact: Fact[T] | None, default: T) -> T:
+    """``fact.value`` when present, else *default* -- narrows a ``Fact[T] |
+    None``-typed dataclass field (``RecordType.bases_fact`` and its
+    siblings) the way every ADR-063 Phase 0 migrated reader needs to.
+
+    The declared type is ``Fact[T] | None`` only because of the direct-
+    construction compatibility bridge (see :func:`bridge_legacy_and_fact`'s
+    own docstring): ``None`` means "the caller passed nothing and
+    ``__post_init__`` hasn't resolved it yet", which is never true for an
+    already-constructed ``RecordType``/``Param`` -- but mypy cannot see
+    that invariant across instances, so every call site needs the same
+    narrowing. This is that one, shared, audited narrowing, not a second
+    per-callsite ``is None`` check that could drift.
+
+    **This is not a general-purpose "detector-safe" unwrap** -- see
+    :meth:`Fact.value_or`'s own docstring for why collapsing "not
+    collected" and "confirmed empty" to one default is unsafe for an
+    arbitrary detection decision. It is safe for exactly the five fields
+    this phase converted (``bases``/``virtual_bases``/``vtable``/
+    ``vptr_offset_bits``/``is_va_list``), because ``bridge_legacy_and_fact``
+    establishes a *provable* invariant for those specific fields: the
+    retained legacy field already equals
+    ``resolved_fact_value(rec.bases_fact, [])`` for every constructed
+    instance, so this is a pure re-spelling of the value a direct read
+    would already have returned -- representation-only, not a new
+    availability collapse. A reader that wants genuine per-status handling
+    (Phase 5's job) still matches on ``fact.status`` directly instead of
+    calling this.
+    """
+    if fact is None:
+        return default
+    return fact.value_or(default)
 
 
 class _Omitted:
@@ -106,6 +145,25 @@ def bridge_legacy_and_fact(
     derives ``Fact.present(new_value)`` and passes both into ``replace()``,
     so the two representations cannot drift out of sync at the one call
     site capable of keeping them honest — the one making the change.
+
+    **A second, related trap this function cannot see either (Codex
+    review, confirmed to already reproduce identically on ``bases`` — not
+    something a later conversion introduces): plain post-construction
+    attribute mutation.** ``record.is_final = True`` (or ``record.bases =
+    [...]``) never re-invokes ``__post_init__`` at all — this bridge only
+    runs at construction time, so the sibling ``Fact[T]`` is never
+    re-derived, and the pair is left holding the *new* legacy value beside
+    the *stale* fact. Both directions of the earlier gap are true again for
+    the identical reason: the pair is now internally inconsistent, and
+    ``encode_fact_fields``/``decode_fact`` (``storage/fact_codec.py``) trust
+    the ``Fact[T]`` sibling over the legacy field on the next
+    encode-then-decode round trip, silently reverting the mutation.
+    ``replace_with_fact_sync`` does not help here — it only wraps
+    ``dataclasses.replace()`` calls, not attribute assignment. There is no
+    mechanical guard against this today; treat every bridged field
+    (anything with a ``<field>_fact`` sibling) as effectively immutable
+    after construction — build a fresh instance (or use
+    ``replace_with_fact_sync``) instead of assigning to it directly.
     """
     if explicit_fact is not None:
         value = (
@@ -150,6 +208,22 @@ def replace_with_fact_sync(obj: T, **updates: object) -> T:
             continue
         resolved[fact_name] = Fact.present(value)
     return replace(obj, **resolved)  # type: ignore[type-var]
+
+
+def sync_present_facts(obj: object, *field_names: str) -> None:
+    """In place: set ``<name>_fact = Fact.present(getattr(obj, name))`` for
+    each *field_names* on *obj* (a mutable, non-frozen dataclass).
+
+    For the shape ``replace_with_fact_sync`` doesn't cover: a parser that
+    mutates a legacy field via plain attribute assignment across several
+    statements (not one ``dataclasses.replace(...)`` call), where
+    ``__post_init__`` already ran and so cannot re-derive the ``Fact[...]``
+    sibling itself (ADR-063 Phase 5 -- see ``elf_metadata._parse_dynamic``/
+    ``pe_metadata._parse``/``macho_metadata.parse_macho_metadata`` for real
+    call sites, one per binary-format case-(b) batch).
+    """
+    for name in field_names:
+        setattr(obj, f"{name}_fact", Fact.present(getattr(obj, name)))
 
 
 @dataclass(frozen=True)

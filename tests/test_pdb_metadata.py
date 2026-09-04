@@ -28,7 +28,7 @@ import pytest
 
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
 from abicheck.dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
-from abicheck.pdb_metadata import parse_pdb_debug_info
+from abicheck.pdb_metadata import _is_user_visible, parse_pdb_debug_info
 
 # Import test helpers from test_pdb_parser
 from tests.test_pdb_parser import (
@@ -430,6 +430,111 @@ class TestPdbToAdvancedDwarfMetadata:
         _, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
         assert "Vec3" in adv.all_struct_names
         assert "Data" in adv.all_struct_names
+
+
+# ---------------------------------------------------------------------------
+# _is_user_visible -- compiler-internal / anonymous name filtering
+# ---------------------------------------------------------------------------
+
+class TestIsUserVisible:
+    """``_is_user_visible`` must reject a compiler-internal/anonymous name
+    wherever it appears in a qualified name, not just as the whole string's
+    own prefix (Codex review, PR #1025) -- CodeView emits a fully-qualified
+    name for a nested anonymous aggregate too, e.g. ``"N::O::<unnamed-tag>"``
+    for an unnamed struct/union nested inside ``N::O``."""
+
+    def test_forward_ref_rejected(self) -> None:
+        assert _is_user_visible("Widget", is_forward_ref=True) is False
+
+    def test_none_name_rejected(self) -> None:
+        assert _is_user_visible(None, is_forward_ref=False) is False
+
+    def test_ordinary_qualified_name_accepted(self) -> None:
+        assert _is_user_visible("NS::Widget", is_forward_ref=False) is True
+
+    def test_whole_name_compiler_internal_rejected(self) -> None:
+        assert _is_user_visible("<unnamed-tag>", is_forward_ref=False) is False
+        assert _is_user_visible("__vc_attributes", is_forward_ref=False) is False
+
+    def test_nested_anonymous_leaf_rejected(self) -> None:
+        """The bug this test guards against: only the leaf segment is
+        compiler-internal, but the qualified name as a whole does not start
+        with ``<``/``__``."""
+        assert _is_user_visible("N::O::<unnamed-tag>", is_forward_ref=False) is False
+
+    def test_nested_anonymous_middle_segment_rejected(self) -> None:
+        """The same defect could also hide in a *middle* segment, not just
+        the leaf -- e.g. a named type nested inside an anonymous union
+        that is itself nested inside a named enclosing type."""
+        assert (
+            _is_user_visible("N::<unnamed-tag>::Inner", is_forward_ref=False) is False
+        )
+
+    def test_compiler_internal_middle_segment_still_rejected(self) -> None:
+        """A genuinely compiler-internal ``__``-prefixed segment (MSVC's own
+        ``__vc_attributes``, not a recognized ABI-tag inline namespace) must
+        still be rejected wherever it appears, including a middle segment --
+        this is exactly what the per-segment ``__`` check exists to catch,
+        and narrowing it for ABI-tag namespaces (below) must not widen it."""
+        assert (
+            _is_user_visible("N::__vc_attributes::Inner", is_forward_ref=False) is False
+        )
+
+    def test_libcxx_abi_inline_namespace_preserved(self) -> None:
+        """libc++'s ``std::__1`` ABI-tag inline namespace must NOT be treated
+        as compiler-internal: ``std::__1::vector<int>`` is a real,
+        user-visible type whose layout facts/entity ID/SemanticIR occurrence
+        would otherwise be silently dropped (Codex review, PR #1025)."""
+        assert _is_user_visible("std::__1::vector<int>", is_forward_ref=False) is True
+
+    def test_libstdcxx_abi_inline_namespace_preserved(self) -> None:
+        """libstdc++'s ``std::__cxx11`` dual-ABI inline namespace must NOT be
+        treated as compiler-internal, for the same reason as libc++'s
+        ``__1`` above."""
+        assert (
+            _is_user_visible("std::__cxx11::basic_string<char>", is_forward_ref=False)
+            is True
+        )
+
+    def test_customized_libcxx_abi_namespace_preserved(self) -> None:
+        """Codex review, third round, fresh evidence: `_LIBCPP_ABI_NAMESPACE`
+        is a documented, build-configurable macro, so a vendor's own
+        customized spelling (e.g. `__vendor`) is a real, legitimate inline
+        namespace even though it matches no known-standard ABI-tag shape
+        (`__1`, `__cxx11`, ...). The non-leaf admit-by-default rule must
+        preserve it the same way a recognized tag is preserved -- rejecting
+        an unrecognized-but-real ABI-tag namespace would drop this
+        declaration's layout facts, entity ID, and SemanticIR occurrence
+        entirely."""
+        assert _is_user_visible("std::__vendor::Widget", is_forward_ref=False) is True
+
+    def test_abi_inline_namespace_leaf_name_still_checked(self) -> None:
+        """A recognized ABI-tag namespace segment does not exempt an
+        otherwise-anonymous leaf nested inside it."""
+        assert (
+            _is_user_visible("std::__1::<unnamed-tag>", is_forward_ref=False) is False
+        )
+
+    def test_abi_tag_spelled_leaf_declaration_still_rejected(self) -> None:
+        """Codex review, second round, fresh evidence: the ABI-tag exemption
+        applies only to a non-leaf (enclosing-scope) segment. A globally
+        named UDT whose own declaration leaf happens to be spelled
+        ``__1``/``__v2``/``__cxx11`` is not an inline namespace at all --
+        admitting it would add spurious layout facts, entity IDs, and
+        SemanticIR occurrences for what is, from CodeView's own name, a
+        compiler-reserved-looking declaration, not a real inline-namespace
+        member."""
+        assert _is_user_visible("__1", is_forward_ref=False) is False
+        assert _is_user_visible("__v2", is_forward_ref=False) is False
+        assert _is_user_visible("__cxx11", is_forward_ref=False) is False
+
+    def test_abi_tag_spelled_leaf_rejected_under_a_real_namespace_too(self) -> None:
+        """The same leaf-vs-non-leaf distinction holds when the ABI-tag-
+        spelled name is itself the declared type, nested under an ordinary
+        (non-ABI-tag) namespace -- only the ENCLOSING ``__1``/``__cxx11``
+        segment is ever transparent, never the leaf itself."""
+        assert _is_user_visible("NS::__1", is_forward_ref=False) is False
+        assert _is_user_visible("NS::__cxx11", is_forward_ref=False) is False
 
 
 # ---------------------------------------------------------------------------

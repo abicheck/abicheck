@@ -92,6 +92,22 @@ def _severity_config(tmp_path: Path, **levels: str) -> Path:
     return cfg
 
 
+def _gate(preset, abi=None, potential=None, quality=None, addition=None, scheme=None):
+    """Build a :class:`~abicheck.cli_compare_release_helpers.GateOptions` the
+    way :func:`~abicheck.cli_compare_release_helpers.resolve_release_gate_options`
+    would (minus pack folding, irrelevant to these unit tests) -- since
+    ADR-064's rewrite, ``_fold_release_global_severity`` takes the resolved
+    object, not the six raw preset/category/scheme strings directly."""
+    from abicheck.cli_compare_release_helpers import GateOptions
+
+    severity = _resolve_release_severity_config(
+        preset, abi, potential, quality, addition
+    )
+    return GateOptions(
+        exit_code_scheme=scheme, severity_preset=preset, severity=severity
+    )
+
+
 def _suppression_strict_config(tmp_path: Path) -> Path:
     """A project config setting ``suppression.strict`` (was ``--strict-suppressions``)."""
     cfg = tmp_path / "strict.abicheck.yml"
@@ -383,20 +399,33 @@ class TestSmallHelpers:
         # ADR-037 D3 (Codex): --compiler-option is now threaded into the native
         # PE/Mach-O header-scoping path (resolved before format dispatch), so the
         # old "will be ignored" warning is gone and the context reaches the dump.
+        #
+        # ADR-063 Phase 1: the real PE/Mach-O run now executes through
+        # `execute_dump_request`, not the retired `handle_non_elf_dump` --
+        # patch `abicheck.service_dump_native._dump_macho` instead (the same
+        # depth below the format dispatch `abicheck.dumper.dump` sits at for
+        # the ELF precedent, `test_compile_context_parity.py::
+        # test_dump_reads_compile_block_from_config`), and assert on the
+        # `compile` CompileContext it receives.
         import struct
 
-        import abicheck.frontends.cli.commands.dump as cli_mod
+        from abicheck.model import AbiSnapshot
 
         dylib = tmp_path / "fake.dylib"
         dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
         captured: dict[str, object] = {}
+
+        def _fake_dump_macho(*args: object, **kwargs: object) -> AbiSnapshot:
+            captured.update(kwargs)
+            return AbiSnapshot(library="fake.dylib", version="1.0")
+
         monkeypatch.setattr(
-            cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
+            "abicheck.service_dump_native._dump_macho", _fake_dump_macho
         )
         result = CliRunner().invoke(main, ["dump", str(dylib), "--compiler-option=-DX"])
         assert result.exit_code == 0, result.output
         assert "will be ignored" not in result.output
-        assert getattr(captured["compile_context"], "gcc_option_tokens") == ("-DX",)
+        assert getattr(captured["compile"], "gcc_option_tokens") == ("-DX",)
 
     def test_dump_compile_db_flags_and_match_threaded_to_non_elf(
         self, tmp_path, monkeypatch
@@ -408,11 +437,17 @@ class TestSmallHelpers:
         rejecting a --depth build backed only by that database). It arrives
         via --build-info now; the -p/--build-dir + --compile-db pair folded
         into it.
+
+        ADR-063 Phase 1: the real PE/Mach-O run now executes through
+        `execute_dump_request` -- patch `abicheck.service_dump_native.
+        _dump_macho` (see the sibling test above) and assert on the folded
+        `compile` context it receives, the same signal `compile_context`
+        carried before this migration.
         """
         import json
         import struct
 
-        import abicheck.frontends.cli.commands.dump as cli_mod
+        from abicheck.model import AbiSnapshot
 
         header = tmp_path / "foo.h"
         header.write_text("int f();\n", encoding="utf-8")
@@ -435,17 +470,21 @@ class TestSmallHelpers:
         dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
 
         captured: dict[str, object] = {}
+
+        def _fake_dump_macho(*args: object, **kwargs: object) -> AbiSnapshot:
+            captured.update(kwargs)
+            return AbiSnapshot(library="fake.dylib", version="1.0")
+
         monkeypatch.setattr(
-            cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
+            "abicheck.service_dump_native._dump_macho", _fake_dump_macho
         )
         result = CliRunner().invoke(
             main, ["dump", str(dylib), "-H", str(header), "--build-info", str(db)]
         )
         assert result.exit_code == 0, result.output
-        assert captured["compile_db_context_matched"] is True
-        gcc_options = getattr(captured["compile_context"], "gcc_options")
-        assert "-std=c++17" in gcc_options
-        assert "-DFOO=1" in gcc_options
+        gcc_option_tokens = getattr(captured["compile"], "gcc_option_tokens")
+        assert "-std=c++17" in gcc_option_tokens
+        assert "-DFOO=1" in gcc_option_tokens
 
     def test_dump_compiler_option_help(self) -> None:
         # G21.5: the repeatable --compiler-option is documented on dump. It's a
@@ -833,7 +872,7 @@ class TestCompareCommand:
         new_f = _write_snap(tmp_path / "new.json", new)
         result = _invoke("compare", str(old_f), str(new_f), "--profile", "quick")
         assert result.exit_code == 4
-        assert "\n" not in result.output.strip()
+        assert "\n" not in result.stdout.strip()  # stderr carries the scope warning
 
     def test_probe_matrix_one_side_usage_error(self, tmp_path: Path) -> None:
         snap = _snap()
@@ -1047,19 +1086,7 @@ class TestReleaseVerdictOrder:
 
 class TestFoldReleaseGlobalSeverity:
     def test_no_config_returns_base(self) -> None:
-        assert (
-            _fold_release_global_severity(
-                2,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            == 2
-        )
+        assert _fold_release_global_severity(2, None, None, _gate(None)) == 2
 
     def test_matrix_findings_raise_code(self) -> None:
         mr = DiffResult(
@@ -1072,16 +1099,7 @@ class TestFoldReleaseGlobalSeverity:
                 ),
             ],
         )
-        code = _fold_release_global_severity(
-            0,
-            None,
-            mr,
-            "default",
-            None,
-            None,
-            None,
-            None,
-        )
+        code = _fold_release_global_severity(0, None, mr, _gate("default"))
         assert code >= 0
 
 
@@ -1331,6 +1349,49 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke("compare", str(old), str(new), "--used-by", str(app))
         assert result.exit_code == 2
+
+    def test_json_run_outcome_reflects_scoped_gate_not_full_library(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """ADR-063 Phase 7 regression (Codex review, P1): the full-library
+        compare below removes `foo` (a real, unrelated ABI break), but the
+        app-scoped gate is stubbed compatible -- the app never actually
+        called `foo`. `run_outcome` must describe the *scoped* gate (the one
+        the process exit code actually reflects), not the stale full-library
+        one `report_run_outcome.run_outcome_dict_for_diff_result` computed
+        before scoping ran; the full-library value moves to
+        `full_run_outcome`, mirroring the existing `verdict`/`full_verdict`
+        and `severity`/`full_severity` swap."""
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        # NEW drops `foo` entirely -- a real, unscoped ABI break.
+        monkeypatch.setattr(
+            dumper_mod,
+            "dump",
+            MagicMock(side_effect=[_snap("1.0"), _snap("2.0", funcs=[])]),
+        )
+        # The app itself never used `foo` -- scoped gate stays compatible.
+        res = self._result(verdict=Verdict.COMPATIBLE)
+        self._patch_scope(monkeypatch, res)
+
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["full_verdict"] == "BREAKING"
+        assert data["verdict"] == "COMPATIBLE"
+        assert "run_outcome" in data
+        assert "full_run_outcome" in data
+        assert data["full_run_outcome"]["gate"] == "abi_breaking"
+        assert data["run_outcome"]["gate"] == "none"
+        assert data["run_outcome"]["compatibility"] == "COMPATIBLE"
 
     def test_full_mode_output_to_file(self, tmp_path, monkeypatch) -> None:
         res = self._result()
@@ -1858,6 +1919,7 @@ class TestUsedByScoping:
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
             "--profile", "quick",
+            "--depth", "headers",  # else ADR-063's ceiling fix demotes to FUNC_REMOVED_ELF_ONLY
         )
         assert result.exit_code == 4
         assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
@@ -2470,73 +2532,6 @@ class TestUsedByScoping:
     # covers the still-live path.
 
 
-class TestFoldEvidenceDepthOutOfBandPack:
-    """``_fold_evidence_depth_into_json`` with an out-of-band pack directory.
-
-    Regression (Codex review): an out-of-band ``--old/new-build-info``/
-    ``--old/new-sources`` *pack directory* (as opposed to a raw checkout,
-    which gets embedded into the snapshot before this point) is resolved via
-    ``_resolve_side_pack`` inside ``prepare_embedded_build_source`` /
-    ``diff_embedded_build_source`` but never attached back onto the snapshot
-    object itself -- so reading only ``snap.build_source`` for the JSON
-    ``old_evidence_depth``/``new_evidence_depth`` fields reported the
-    snapshot's own (absent) embedded depth instead of the pack that was
-    actually used to produce the comparison's build/source findings.
-    """
-
-    def test_out_of_band_pack_depth_beats_absent_embedded_snapshot(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        import json as json_mod
-
-        from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-        from abicheck.buildsource.pack import BuildSourcePack
-        from abicheck.cli_compare_helpers import _fold_evidence_depth_into_json
-
-        old_snap = _snap("1.0", library="libfoo.so")
-        new_snap = _snap("2.0", library="libfoo.so")
-        assert old_snap.build_source is None
-        assert new_snap.build_source is None
-
-        pack = BuildSourcePack(
-            root=tmp_path,
-            build_evidence=BuildEvidence(
-                compile_units=[CompileUnit(id="cu1", source="a.c")]
-            ),
-        )
-        monkeypatch.setattr(
-            "abicheck.cli_buildsource_helpers._resolve_side_pack",
-            lambda build_info, sources, snap: pack,
-        )
-
-        text = json_mod.dumps({"changes": []})
-        result_text = _fold_evidence_depth_into_json(
-            text, "json", old_snap, new_snap,
-            old_build_info=tmp_path / "old_build", new_build_info=tmp_path / "new_build",
-        )
-        data = json_mod.loads(result_text)
-        assert data["old_evidence_depth"] == "build"
-        assert data["new_evidence_depth"] == "build"
-
-    def test_no_pack_args_falls_back_to_snapshot_embedded_depth(self) -> None:
-        # Without --old/new-build-info/--old/new-sources, behavior is
-        # unchanged: depth comes straight from each snapshot's own embedded
-        # build_source (or absence thereof).
-        import json as json_mod
-
-        from abicheck.cli_compare_helpers import _fold_evidence_depth_into_json
-
-        old_snap = _snap("1.0", library="libfoo.so")
-        new_snap = _snap("2.0", library="libfoo.so")
-        new_snap.from_headers = True
-
-        text = json_mod.dumps({"changes": []})
-        result_text = _fold_evidence_depth_into_json(text, "json", old_snap, new_snap)
-        data = json_mod.loads(result_text)
-        assert data["old_evidence_depth"] == "binary"
-        assert data["new_evidence_depth"] == "headers"
-
-
 class TestUsedByScopingWithSnapshotInputs:
     """`compare --used-by` OLD/NEW as saved JSON snapshots (ADR-043 follow-up).
 
@@ -2749,27 +2744,13 @@ class TestFoldReleaseGlobalSeverityBundle:
         # A bundle break under a 'default' preset should not stay below the
         # per-library base code; folding considers bundle findings.
         code = _fold_release_global_severity(
-            0,
-            _bundle_with_findings(),
-            None,
-            "default",
-            None,
-            None,
-            None,
-            None,
+            0, _bundle_with_findings(), None, _gate("default")
         )
         assert code >= 0
 
     def test_matrix_findings_considered(self) -> None:
         code = _fold_release_global_severity(
-            0,
-            None,
-            _matrix_with_changes(),
-            "default",
-            None,
-            None,
-            None,
-            None,
+            0, None, _matrix_with_changes(), _gate("default")
         )
         assert code >= 0
 
@@ -2891,7 +2872,7 @@ class TestCompareReleaseExtraFlows:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
 
-        import abicheck.cli_compare_release as cr_mod
+        import abicheck.cli_compare_release_pairwise as cr_mod
 
         def boom(*a, **k):
             raise ValueError("corrupt snapshot")

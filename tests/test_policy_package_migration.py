@@ -33,6 +33,18 @@ import pytest
 
 _MODULES = ("severity", "exit_decision", "contract_coverage_exit")
 
+#: A shimmed module's public surface normally lives entirely in the one
+#: `abicheck.policy.<name>` module ADR-061 moved it to. `exit_decision` is
+#: the one exception: ADR-064 added `resolve_scan_exit_decision`/
+#: `resolve_release_exit_decision` directly to a sibling leaf module,
+#: `exit_decision_precedence`, purely to keep `exit_decision.py` itself
+#: under this package's 800-line production cap (Codex review: the combined
+#: module reached 824 lines) -- so this flat shim's own `__all__` entries
+#: are split across both real modules instead of the usual single one.
+_ADDITIONAL_REAL_MODULES: dict[str, tuple[str, ...]] = {
+    "exit_decision": ("exit_decision_precedence",),
+}
+
 
 class TestOldAndNewImportPathsAgree:
     """Every re-exported name is the same object via either import path."""
@@ -42,19 +54,24 @@ class TestOldAndNewImportPathsAgree:
         self, name: str
     ) -> None:
         old = importlib.import_module(f"abicheck.{name}")
-        new = importlib.import_module(f"abicheck.policy.{name}")
+        real_modules = [importlib.import_module(f"abicheck.policy.{name}")]
+        real_modules.extend(
+            importlib.import_module(f"abicheck.policy.{extra}")
+            for extra in _ADDITIONAL_REAL_MODULES.get(name, ())
+        )
 
         assert hasattr(old, "__all__"), f"abicheck.{name} must declare __all__"
         assert old.__all__, f"abicheck.{name}.__all__ must not be empty"
 
         for attr in old.__all__:
-            assert hasattr(new, attr), (
-                f"abicheck.policy.{name} is missing {attr!r}, which the "
-                f"flat shim abicheck.{name} re-exports"
+            owner = next((m for m in real_modules if hasattr(m, attr)), None)
+            assert owner is not None, (
+                f"none of {[m.__name__ for m in real_modules]} defines "
+                f"{attr!r}, which the flat shim abicheck.{name} re-exports"
             )
-            assert getattr(old, attr) is getattr(new, attr), (
-                f"abicheck.{name}.{attr} and abicheck.policy.{name}.{attr} "
-                "must be the identical object, not merely an equal one"
+            assert getattr(old, attr) is getattr(owner, attr), (
+                f"abicheck.{name}.{attr} and {owner.__name__}.{attr} must "
+                "be the identical object, not merely an equal one"
             )
 
     @pytest.mark.parametrize("name", _MODULES)
@@ -87,6 +104,22 @@ class TestBothImportSpellingsWork:
 
         assert ExitDecision is not None
         assert resolve_exit_decision is not None
+
+    def test_from_abicheck_exit_decision_import_adr_064_resolvers(self) -> None:
+        """ADR-064's two additive resolvers (`resolve_scan_exit_decision`/
+        `resolve_release_exit_decision`) must reach the flat shim too, per
+        this file's own contract that a moved module's *full* public
+        surface stays reachable at the old path (Codex review: an earlier
+        revision added both only to `abicheck.policy.exit_decision`,
+        leaving this exact import raising `ImportError`).
+        """
+        from abicheck.exit_decision import (
+            resolve_release_exit_decision,
+            resolve_scan_exit_decision,
+        )
+
+        assert resolve_scan_exit_decision is not None
+        assert resolve_release_exit_decision is not None
 
     def test_from_abicheck_import_exit_decision(self) -> None:
         from abicheck import exit_decision

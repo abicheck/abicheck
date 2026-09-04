@@ -27,7 +27,7 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.cli_params import DEPTH_PARAM
+from abicheck.frontends.cli.options.params import DEPTH_PARAM
 
 
 def _registered() -> dict:
@@ -425,7 +425,9 @@ def test_dump_json_records_depth_provenance(tmp_path) -> None:  # type: ignore[n
         ["dump", "--sources", str(src), "--depth", "build", "-o", str(out)],
     )
     assert res.exit_code == 0, _all_output(res)
-    data = json.loads(out.read_text(encoding="utf-8"))
+    from abicheck.serialization import load_snapshot_document
+
+    data = load_snapshot_document(out)
     assert data["dump_provenance"] == {
         "requested_depth": "build",
         "effective_depth": "build",
@@ -454,7 +456,6 @@ def test_dump_depth_binary_ignores_headers_for_the_scope_contract(tmp_path) -> N
     `ScopeMismatchError` (exit 16) -- at the one depth that is supposed to
     ignore headers entirely (Codex review).
     """
-    import json
 
     from abicheck.cli import main
 
@@ -473,7 +474,9 @@ def test_dump_depth_binary_ignores_headers_for_the_scope_contract(tmp_path) -> N
             args += ["-H", str(h)]
         res = CliRunner().invoke(main, args)
         assert res.exit_code == 0, _all_output(res)
-        outputs.append(json.loads(out.read_text(encoding="utf-8")))
+        from abicheck.serialization import load_snapshot_document
+
+        outputs.append(load_snapshot_document(out))
 
     contracts = [(d.get("contract") or {}) for d in outputs]
     # The headers differ; the scope contract must not.
@@ -621,6 +624,7 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_pa
     instead of failing for the unrelated "--depth source not satisfied"
     reason -- an empty pack would make this test pass even if the hybrid
     rejection fired but got masked by that other failure first."""
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
@@ -633,7 +637,7 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_pa
             reachable_declarations=[SourceEntity(id="foo", kind="function")]
         ),
     )
-    pack.write()
+    pack_io.write(pack)
     res = CliRunner().invoke(
         main,
         [
@@ -650,10 +654,11 @@ def test_dump_depth_source_hybrid_frontend_rejected_for_mixed_raw_and_pack(tmp_p
     pack must not skip the rejection -- the other (raw) side still reaches
     collect_inline_pack with extractor=hybrid, so the unsupported L4 path
     can still run for it."""
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.pack import BuildSourcePack
 
     pack_dir = tmp_path / "prebuilt-pack"
-    BuildSourcePack.empty(pack_dir).write()
+    pack_io.write(BuildSourcePack.empty(pack_dir))
     src = tmp_path / "raw-src"
     src.mkdir()
     res = CliRunner().invoke(
@@ -682,6 +687,7 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_pack_sources_raw_bui
     hybrid has no effect here and must not be rejected, matching the
     prebuilt-pack case above rather than the mixed-raw-and-pack one (which
     has the raw side on --sources, not --build-info)."""
+    from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
@@ -694,7 +700,7 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_pack_sources_raw_bui
             reachable_declarations=[SourceEntity(id="foo", kind="function")]
         ),
     )
-    pack.write()
+    pack_io.write(pack)
     build_info_tree = tmp_path / "raw-build-info"
     build_info_tree.mkdir()
     res = CliRunner().invoke(

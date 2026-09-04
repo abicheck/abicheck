@@ -265,13 +265,13 @@ def test_unknown_builtin_policy_name_returns_none() -> None:
 # ── cli_params.PolicyFileParam (Click type) ───────────────────────────────
 
 def test_policy_file_param_accepts_builtin_name() -> None:
-    from abicheck.cli_params import POLICY_FILE_PARAM
+    from abicheck.frontends.cli.options.params import POLICY_FILE_PARAM
     out = POLICY_FILE_PARAM.convert("security", None, None)
     assert Path(out).name == "security.yaml"
 
 
 def test_policy_file_param_accepts_existing_path(tmp_path: Path) -> None:
-    from abicheck.cli_params import POLICY_FILE_PARAM
+    from abicheck.frontends.cli.options.params import POLICY_FILE_PARAM
     p = tmp_path / "my.yaml"
     p.write_text("base_policy: strict_abi\n", encoding="utf-8")
     out = POLICY_FILE_PARAM.convert(str(p), None, None)
@@ -281,7 +281,7 @@ def test_policy_file_param_accepts_existing_path(tmp_path: Path) -> None:
 def test_policy_file_param_rejects_unknown_name() -> None:
     import click
 
-    from abicheck.cli_params import POLICY_FILE_PARAM
+    from abicheck.frontends.cli.options.params import POLICY_FILE_PARAM
     with pytest.raises(click.BadParameter):
         POLICY_FILE_PARAM.convert("does-not-exist.yaml", None, None)
 

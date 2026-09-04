@@ -17,10 +17,11 @@
 
 The dataclasses an ELF binary's dynamic section and symbol tables are read
 *into*. Parsing them is ``abicheck.elf_metadata``'s job; this module holds no
-parsing logic and imports nothing first-party, so ``model`` can own the shape
-of an ELF fact without depending on the extractor that fills it in
-(ADR-061 Phase 5 — "``*_metadata.py`` conflate a model dataclass with its
-parser").
+parsing logic and imports nothing outside ``model/`` itself (ADR-063 Phase 5's
+``.fact`` bridge is a sibling leaf module, not the extractor), so ``model``
+can own the shape of an ELF fact without depending on the extractor that
+fills it in (ADR-061 Phase 5 — "``*_metadata.py`` conflate a model dataclass
+with its parser").
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
+
+from .fact import Fact, bridge_legacy_and_fact
 
 
 class SymbolBinding(str, Enum):
@@ -203,6 +206,28 @@ class ElfMetadata:
     # (.hash → "sysv", .gnu.hash → "gnu"; ld --hash-style). Dropping a style
     # drops loaders/tools that only support that style.
     hash_styles: frozenset[str] = field(default_factory=frozenset)
+
+    # ADR-063 Phase 5 (seventh batch): Fact[...] siblings for this
+    # dataclass's own schema-version-driven case-(b) fields -- the identical
+    # "resting value can't distinguish not-captured from confirmed-empty"
+    # shape as the four declaration dataclasses' own case-(b) fields, gated
+    # by a persisted schema_version rather than a per-run backend choice.
+    dynamic_flags_fact: Fact[frozenset[str] | None] | None = field(
+        default=None, kw_only=True
+    )
+    has_init_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+    has_fini_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        self.dynamic_flags, self.dynamic_flags_fact = bridge_legacy_and_fact(
+            self.dynamic_flags, self.dynamic_flags_fact, None, None
+        )
+        self.has_init, self.has_init_fact = bridge_legacy_and_fact(
+            self.has_init, self.has_init_fact, None, None
+        )
+        self.has_fini, self.has_fini_fact = bridge_legacy_and_fact(
+            self.has_fini, self.has_fini_fact, None, None
+        )
 
     @cached_property
     def symbol_map(self) -> dict[str, ElfSymbol]:

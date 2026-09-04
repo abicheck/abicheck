@@ -113,7 +113,6 @@ finishes in ~45 seconds.
   `StepResult.output_lines` exposes the raw records, so an *injected extra*
   `$GITHUB_OUTPUT` line is visible and not just a wrong value. See
   `test_reusable_workflow_execution.py`.
-
 ## What NOT to do
 
 - Don't change the marker scheme — CI gates depend on it.

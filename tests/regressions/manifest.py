@@ -259,12 +259,13 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "temp-directory location, or unrelated line/column drift from "
             "an edit elsewhere in the file."
         ),
-        fixed_by=(837, 843, 846, 868),
+        fixed_by=(837, 843, 846, 868, 985),
         seed_tests=(
             "tests/test_castxml_anonymous_type_location.py",
             "tests/test_anon_type_location_properties.py",
             "tests/test_lambda_identity_ordinal.py",
             "tests/test_identity_taint_end_to_end.py",
+            "tests/test_source_graph_directory_taint.py",
         ),
         axes={"frontend": ("clang", "castxml")},
         known_gaps=(
@@ -425,6 +426,8 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_action_compile_context_parity.py",
             "tests/test_gha_expr.py",
             "tests/test_consumer_compile_full_chain_propagation.py",
+            "tests/test_explicit_source_extractor_propagation.py",
+            "tests/test_dump_scan_l3_comparability.py",
         ),
         known_gaps=(
             KnownGap(
@@ -439,9 +442,24 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "per-entry-point concern beyond this one profile field, "
                     "include roots, evidence-pack/target attribution, "
                     "safety budgets, suppression/filtering, per-library "
-                    "override, output/report options) — none has yet had "
-                    "this same five-state/full-chain/mutation-check "
-                    "treatment; consumer_compile was chosen as the first "
+                    "override, output/report options) — of these only the "
+                    "frontend concern has since had any of this treatment, "
+                    "and only for one chain: `--ast-frontend` -> the L4 "
+                    "source-ABI replay backend, where `scan` accepted the "
+                    "value and then ignored it "
+                    "(tests/test_explicit_source_extractor_propagation.py, "
+                    "exhaustive over the frontend x env domain, grounded in "
+                    "_make_source_extractor, with the end-to-end half in "
+                    "tests/test_dump_scan_l3_comparability.py). The same "
+                    "concern's *other* consumers (the L2 header parse, the "
+                    "preprocessor/pattern pre-scans) are untouched, and one "
+                    "frontend divergence is deliberately still open rather "
+                    "than closed: an UNFLAGGED `auto` resolves to clang for "
+                    "`scan` and castxml for `dump`/`compare`, which is a "
+                    "real default change to make deliberately (the CLI "
+                    "cleanup phase-two plan's PR 3A item 2), not a "
+                    "propagation bug to patch. consumer_compile was chosen "
+                    "as the first "
                     "worked example specifically because #860/#883's own "
                     "history and this class's pre-existing seed tests "
                     "already pointed at it, not because it's necessarily "
@@ -688,6 +706,103 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                 ),
                 reference="tests/test_dumper_clang_compiler_generated.py::"
                 "test_parse_functions_skips_implicit_declarations_entirely",
+            ),
+        ),
+    ),
+    BugClass(
+        id="adapter.duck_typed_view_attribute_drift",
+        invariant=(
+            "A duck-typed read-back adapter presented to a consuming "
+            "function as a richer type (e.g. `_ReportChangeView` "
+            '`cast("Change", ...)`-ed into `resolve_change_identity`) '
+            "must expose every attribute that function actually reads on "
+            "the real type -- not just the attributes it read when the "
+            "adapter was written. Extending the consuming function's "
+            "attribute surface without extending every such adapter in "
+            "lockstep breaks it uniformly for any input at all, not a "
+            "corner case: the function's own read is unconditional, so "
+            "every call through the stale adapter raises the same "
+            "`AttributeError` regardless of what the caller passed."
+        ),
+        fixed_by=(961,),
+        seed_tests=("tests/test_report_change_view_entity_id.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "This class is pinned for exactly one adapter/consumer "
+                    "pair (`_ReportChangeView` / `resolve_change_identity`). "
+                    "No structural check (e.g. comparing the adapter "
+                    "dataclass's fields against the consuming function's "
+                    "actual attribute reads via AST analysis, the way "
+                    "`scripts/fact_detector_misuse.py` does for a "
+                    "different attribute-access pattern) enforces the "
+                    "invariant generically across the codebase -- a future "
+                    "sibling adapter drifting the same way would not be "
+                    "caught until it also breaks every call through it."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/961",
+            ),
+        ),
+    ),
+    BugClass(
+        id="serialization.str_enum_downcast_via_generic_rewrite",
+        invariant=(
+            "A generic tree-walking string-collect/rewrite primitive "
+            "(`isinstance(value, str)`-gated) must never treat a "
+            "`str`-subclass `Enum` field (e.g. `ParamKind(str, Enum)`) as "
+            "ordinary rewritable free text -- even though isinstance() is "
+            "true for it too -- because a real rewrite function (`re.sub`) "
+            "returns a genuinely new, plain `str` object even on zero "
+            "substitutions, silently downcasting the field's type while "
+            "leaving its string value unchanged. The walk must exclude any "
+            "`str`-subclass `Enum` member regardless of that enum's own "
+            "vocabulary, not special-case the one field that happened to "
+            "crash a caller."
+        ),
+        fixed_by=(985,),
+        seed_tests=(
+            "tests/test_param_kind_enum_identity.py",
+            "tests/test_str_enum_downcast_walk.py",
+        ),
+    ),
+    BugClass(
+        id="tooling.platform_dependent_path_key",
+        invariant=(
+            "A repo-relative path computed to serve as a lookup/comparison "
+            "key -- an allowlist entry, a cache key, anything compared "
+            "against a hand-written or previously-persisted forward-slash "
+            "string -- must render with `.as_posix()`, never bare "
+            "`str(Path)`. `str()` of a relative `Path` renders with the "
+            "*host's native* separator (backslash on Windows), so a key "
+            "computed that way silently fails to match every "
+            "forward-slash-spelled entry on Windows alone, in both "
+            "directions: an already-reviewed, allowlisted call site reads "
+            "as a fresh, unreviewed violation, and a genuinely live "
+            "allowlist entry reads as stale. Distinct from the "
+            "canonical-identity `environment_taint` shape this registry "
+            "otherwise tracks -- this is a path-*rendering* bug, not an "
+            "identity or environment-capture one, and it fails "
+            "deterministically on every Windows run rather than "
+            "intermittently."
+        ),
+        fixed_by=(995, 1004),
+        seed_tests=("tests/test_fact_bridged_replace_guard.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "This class's fix and seed test are scoped to the one "
+                    "file CI actually reported as broken "
+                    "(`tests/test_fact_bridged_replace_guard.py`). No "
+                    "repo-wide audit was run against the other AST-scan "
+                    "gates that compute a similar path-shaped lookup key "
+                    "(`scripts/check_ai_readiness.py`, "
+                    "`scripts/fact_detector_misuse.py`/`fact_field_"
+                    "readers.py` and their siblings) to confirm none of "
+                    "them share the identical `str(path.relative_to(...))` "
+                    "spelling -- a real, separate follow-up this class "
+                    "does not yet close."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1004",
             ),
         ),
     ),

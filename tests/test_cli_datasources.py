@@ -16,6 +16,7 @@ from pathlib import Path
 import click
 import pytest
 
+from abicheck.buildsource import pack_io
 from abicheck.buildsource.build_evidence import BuildEvidence
 from abicheck.buildsource.model import (
     CoverageStatus,
@@ -135,7 +136,7 @@ def test_source_abi_falls_back_to_build_info_when_sources_lacks_it() -> None:
 
 def _valid_pack_dir(root: Path) -> Path:
     """Write a minimal but well-formed BuildSourcePack directory to *root*."""
-    BuildSourcePack.empty(root).write()
+    pack_io.write(BuildSourcePack.empty(root))
     return root
 
 

@@ -157,8 +157,8 @@
     },
     "check_id": {
       "type": "string",
-      "description": "Schema 2.12 (ADR-047 report-identity envelope, G30 P0.3). This check's full identity: \"target@profile#baseline_channel@requested_depth\". Nothing in abicheck's CLI/service layer sets this yet -- reserved for the GitHub Actions integration-model primitives planned in G30 P1 (resolve-baseline, check-target). Each of the four components is constrained to ADR-047 \u00a77's safe identifier charset (no further '@'/'#' inside a component) so the delimiter-joined form stays unambiguous.",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*#[A-Za-z0-9][A-Za-z0-9._-]*@(binary|headers|build|source)$"
+      "description": "Schema 2.12 (ADR-047 report-identity envelope, G30 P0.3). This check's full identity: \"target@profile#baseline_channel@requested_depth\", optionally followed by a \"!<environment_id>\" and/or \"~<explicit_id>\" tail (schema 2.49, G42). Each of the four base components is constrained to ADR-047 \u00a77's safe identifier charset (no further '@'/'#' inside a component) so the delimiter-joined form stays unambiguous. \"!<environment_id>\" is a named-environment qualifier (reserved -- no generator sets it yet); \"~<explicit_id>\" is a project author's checks[].id (G42's \"Explicit check identifiers\" phase). Both are independently optional and compose in this fixed order.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*#[A-Za-z0-9][A-Za-z0-9._-]*@(binary|headers|build|source)(![A-Za-z0-9][A-Za-z0-9._-]*)?(~[A-Za-z0-9][A-Za-z0-9._-]*)?$(?!\\n)"
     },
     "profile_id": {
       "type": "string",
@@ -343,9 +343,16 @@
     "severity": {
       "$ref": "#/$defs/severity"
     },
+    "run_outcome": {
+      "$ref": "#/$defs/run_outcome"
+    },
     "full_severity": {
       "description": "Schema 2.9. The full-library severity gate result, present alongside severity only for a scoped (--used-by/--required-symbol(s)) compare whose gating result was recomputed for the scoped changes array -- mirrors the verdict/full_verdict split.",
       "$ref": "#/$defs/severity"
+    },
+    "full_run_outcome": {
+      "description": "ADR-063 Phase 7. The full-library run_outcome, present alongside run_outcome only for a scoped (--used-by/--required-symbol(s)) compare whose run_outcome was recomputed for the scoped changes array -- mirrors the verdict/full_verdict and severity/full_severity splits.",
+      "$ref": "#/$defs/run_outcome"
     },
     "changes": {
       "type": "array",
@@ -1153,14 +1160,19 @@
     },
     "exit": {
       "type": "object",
-      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution), the identical value cli._exit_with_severity_or_verdict computes for the real process exit (crosscheck_promotion_contribution is always 0 for a native compare report — it has no meaning outside scan --against's own maintainer-promoted --crosscheck KEY=error finding). reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. Deliberately does not yet cover not_comparable/scan-budget/release-removed-library exits, which are raised through different code paths today.",
+      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42; ADR-064 stage 1b added the five operational_error_contribution..removed_required_library_contribution keys at schema 2.47): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution, operational_error_contribution) for a native compare report (the four remaining ADR-064 dominant fields are early-return axes, not fold participants — see ExitDecision's own docstring), the identical value cli._exit_with_severity_or_verdict computes for the real process exit (every ADR-064 field is always 0 for a native compare report — none of them have meaning outside scan --against/the release fan-out). reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. compare's own code still never covers not_comparable/scan-budget/release-removed-library exits (raised through different code paths today) — the five new keys are always-0 placeholders here, shared shape with scan/release reports where they can be nonzero.",
       "required": [
         "code",
         "reasons",
         "compatibility_contribution",
         "contract_coverage_contribution",
         "analysis_assurance_contribution",
-        "crosscheck_promotion_contribution"
+        "crosscheck_promotion_contribution",
+        "operational_error_contribution",
+        "evidence_contract_error_contribution",
+        "budget_overflow_contribution",
+        "not_comparable_contribution",
+        "removed_required_library_contribution"
       ],
       "properties": {
         "code": {
@@ -1202,6 +1214,31 @@
           "type": "integer",
           "const": 0,
           "description": "schema 2.42: what a maintainer-promoted --crosscheck KEY=error finding contributes. This schema validates only native compare reports (scan's own report shape -- ScanOutcome.to_dict() -- is not validated against this file, see test_report_schema.py), where this axis has no meaning outside scan --against's own scan_engine._promote_published_gate and is therefore always 0 -- const, not just a floor, so a malformed compare report claiming a nonzero contribution fails validation instead of silently passing."
+        },
+        "operational_error_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.47 (ADR-064): a directory/package release comparison's operational-ERROR fold participant. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "evidence_contract_error_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.47 (ADR-064): scan --against's evidence-contract-error dominant axis. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "budget_overflow_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.47 (ADR-064): scan --against's budget-overflow dominant axis. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "not_comparable_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.47 (ADR-064): the not-comparable dominant axis (scan --against/release fan-out). Always 0 for a native compare report, which has no ExitDecision at all for its own not_comparable outcome -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "removed_required_library_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.47 (ADR-064): a directory/package release comparison's removed-required-library dominant axis. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
         }
       },
       "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."
@@ -1429,6 +1466,71 @@
               "addition"
             ]
           }
+        }
+      }
+    },
+    "run_outcome": {
+      "type": "object",
+      "description": "ADR-063 Phase 7: the report's independent-axis outcome (policy.outcome.RunOutcome), additive alongside the unchanged verdict/exit_code/severity fields. compatibility/assurance are null for a report that never ran a real comparison (a bootstrap/new-target/operational-error synthetic report).",
+      "required": [
+        "schema_version",
+        "compatibility",
+        "assurance",
+        "gate",
+        "operational",
+        "lifecycle"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "schema_version": {
+          "type": "string"
+        },
+        "compatibility": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "NO_CHANGE",
+            "COMPATIBLE",
+            "COMPATIBLE_WITH_RISK",
+            "API_BREAK",
+            "BREAKING",
+            null
+          ]
+        },
+        "assurance": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "gate": {
+          "type": "string",
+          "enum": [
+            "none",
+            "addition_quality",
+            "potential_breaking",
+            "abi_breaking"
+          ]
+        },
+        "operational": {
+          "type": "string",
+          "enum": [
+            "none",
+            "budget_overflow",
+            "not_comparable",
+            "evidence_contract_error",
+            "extraction_error"
+          ]
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": [
+            "existing",
+            "bootstrap",
+            "new_target"
+          ]
         }
       }
     },

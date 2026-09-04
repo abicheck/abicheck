@@ -27,10 +27,8 @@ re-exported from ``abicheck.cli`` to keep existing import sites (sibling
 from __future__ import annotations
 
 import dataclasses
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -47,10 +45,10 @@ if TYPE_CHECKING:
     from .checker_types import Change, DiffResult
     from .compatibility_evaluation_frontend import PublicSymbolsList
     from .model import AbiSnapshot
-    from .policy_file import PolicyFile
     from .service_scan import CompileContext
     from .workflows.extraction import BuildConfig
     from .workflows.gate import SeverityConfig
+    from .workflows.policy_file import PolicyFile
 
 
 def _provenance_timestamp(source_date_epoch: str | None) -> str:
@@ -390,57 +388,17 @@ from .workflows.extraction import (  # noqa: E402,I001
 )
 
 
-def _version_sort_key(
-    path: Path, canonical_key: str
-) -> tuple[list[tuple[int, int | str]], str]:
-    """Build a version-aware sort key for ambiguous library candidates.
-
-    Uses the vendor-hash-stripped name (G9) so an auditwheel/delocate content
-    hash never enters the comparison — otherwise the hash's digits/letters can
-    outrank the real SONAME version tokens and ``_build_match_map`` picks a
-    stale duplicate over the newer one (Codex review, PR #551).
-    """
-    lower = strip_vendor_hash(path.name.lower())
-    # ADR-059 (Codex review): strip a compressed snapshot's storage suffix
-    # (".json.gz"/".json.zst") up front, before anything else touches
-    # `lower` -- _canonical_library_key already groups a plain and a
-    # compressed snapshot of the same release under one bucket, but this
-    # function ranks candidates *within* that bucket to pick which one
-    # wins, and `lower` feeds both the token comparison below AND the
-    # raw-string tie-break returned at the end. Left unstripped, a ".gz"/
-    # ".zst" tail becomes an extra alphabetic sort token (and an
-    # alphabetically-later raw string) that always outranks a plain
-    # ".json" -- and ".zst" always outranks ".gz" -- regardless of which
-    # file is actually current. A stale compressed sibling left over from
-    # a previous release could then silently win over a freshly-written
-    # plain/differently-compressed snapshot. (Two candidates differing
-    # only by encoding now reduce to the same sort key -- genuinely
-    # ambiguous, indistinguishable from the filename alone, and already
-    # surfaced by `_build_match_map`'s own "Ambiguous match" warning for
-    # any multi-candidate bucket.)
-    from .snapshot_io import _COMPRESSED_SUFFIXES
-
-    for suffix, _compression in _COMPRESSED_SUFFIXES:
-        if lower.endswith(suffix):
-            lower = lower[: -len(suffix[len(".json") :])]
-            break
-    remainder = lower
-    if canonical_key.endswith(".so") and canonical_key in lower:
-        remainder = lower[lower.find(canonical_key) + len(canonical_key) :]
-    # strip known wrapper extensions for snapshots/dumps
-    for suffix in (".json", ".pl", ".pm"):
-        if remainder.endswith(suffix):
-            remainder = remainder[: -len(suffix)]
-            break
-    remainder = remainder.lstrip("._-")
-    tokens = re.findall(r"\d+|[a-z]+", remainder)
-    parsed: list[tuple[int, int | str]] = []
-    for tok in tokens:
-        if tok.isdigit():
-            parsed.append((1, int(tok)))
-        else:
-            parsed.append((0, tok))
-    return parsed, lower
+#: Owned by ``binary_utils.py`` for the identical ADR-061 reason
+#: ``_canonical_library_key`` is (``bundle_side_input.py``, classified
+#: ``workflows``, may not import this ``frontends``-legacy module) --
+#: re-exported here for back-compat, mirroring ``_canonical_library_key``'s
+#: own re-export immediately above. Reached via ``workflows.extraction``,
+#: not a direct ``from .binary_utils import ...``: ``frontends`` may only
+#: import ``model``/``workflows``/``report`` (architecture/modules.yaml),
+#: and ``binary_utils.py`` is classified ``extract``.
+from .workflows.extraction import (  # noqa: E402,I001
+    _version_sort_key as _version_sort_key,
+)
 
 
 def _collect_release_inputs(path: Path) -> list[Path]:
@@ -462,49 +420,21 @@ def _collect_release_inputs(path: Path) -> list[Path]:
 def _build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
     """Build key->path map with version-aware duplicate resolution.
 
-    Raises ``click.ClickException`` for a genuine top-of-ranking tie (Codex
-    review, PR #699, second round on the same fix): stripping a compressed
-    snapshot's storage suffix (ADR-059) from the sort key makes two
-    candidates differing *only* by encoding -- e.g. ``libfoo.abicheck.json``
-    and a stale ``libfoo.abicheck.json.zst`` left over from a previous
-    release -- reduce to an *identical* sort key, not merely "multiple
-    candidates present". ``sorted()``'s stability then means the winner is
-    decided by each candidate's position in the original, lexically-sorted
-    input list -- itself alphabetically biased toward whichever compression
-    suffix sorts last (``.zst`` after ``.gz`` after plain) -- so silently
-    picking ``ordered[-1]`` and only warning would deterministically prefer
-    a stale compressed sibling over a fresh one every time. There is no
-    information left in the filename to break a genuine tie correctly, so
-    this is a hard error instead of a guess; a real multi-version bucket
-    (each candidate's sort key genuinely differs) is unaffected and still
-    resolves with a warning, exactly as before.
+    The CLI-facing wrapper over :func:`abicheck.binary_utils.build_match_map`
+    (the pure, Click-free primitive -- ADR-061: it lives there so
+    ``bundle_side_input.py``, classified ``workflows``, can call it without a
+    forbidden ``workflows -> frontends`` import): translates
+    :class:`~abicheck.errors.AmbiguousLibraryMatchError` into
+    ``click.ClickException`` with the identical message, so every existing
+    ``compare``/``compare-release`` call site is unaffected.
     """
-    buckets: dict[str, list[Path]] = {}
-    for p in paths:
-        buckets.setdefault(_canonical_library_key(p), []).append(p)
+    from .errors import AmbiguousLibraryMatchError
+    from .workflows.extraction import build_match_map
 
-    mapping: dict[str, Path] = {}
-    warnings: list[str] = []
-    for key, vals in buckets.items():
-        # `partial` binds this iteration's key rather than closing over the
-        # loop variable (the sort runs eagerly here, but the explicit binding
-        # keeps that independent of when the key function is called).
-        sort_key = partial(_version_sort_key, canonical_key=key)
-        ordered = sorted(vals, key=sort_key)
-        if len(ordered) > 1 and sort_key(ordered[-1]) == sort_key(ordered[-2]):
-            raise click.ClickException(
-                f"Ambiguous match for '{key}': {[v.name for v in ordered]} "
-                "are indistinguishable except by storage encoding -- cannot "
-                "tell which is current. Remove the stale duplicate(s), or "
-                "pass the intended file directly instead of a directory."
-            )
-        selected = ordered[-1]
-        mapping[key] = selected
-        if len(ordered) > 1:
-            warnings.append(
-                f"Ambiguous match for '{key}': {[v.name for v in ordered]}; using '{selected.name}'"
-            )
-    return mapping, warnings
+    try:
+        return build_match_map(paths)
+    except AmbiguousLibraryMatchError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _resolve_severity(

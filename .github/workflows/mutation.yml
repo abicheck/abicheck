@@ -108,6 +108,8 @@ jobs:
               - 'abicheck/finding_identity.py'
               - 'abicheck/name_classification.py'
               - 'abicheck/suppression.py'
+              - 'abicheck/policy/selectors.py'
+              - 'abicheck/policy/selectors_namespace_glob.py'
               - 'abicheck/snapshot_io.py'
               - 'abicheck/serialization.py'
               # The lane's own infrastructure. Without these a change to
@@ -150,6 +152,8 @@ jobs:
               - 'tests/test_finding_identity*.py'
               - 'tests/test_name_classification*.py'
               - 'tests/test_suppression*.py'
+              - 'tests/test_selectors*.py'
+              - 'tests/test_selectors_namespace_glob*.py'
               - 'tests/test_snapshot_io*.py'
               - 'tests/test_serialization*.py'
       - name: Decide whether to run
@@ -204,26 +208,25 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
-    # A diff-scoped run still has to measure every mutant in a touched module.
-    # `serialization.py` alone has more than 1,300 candidates, so the former
-    # two-hour cap cancelled a valid run before it produced a receipt. The
-    # full baseline has also taken just over two hours on GitHub-hosted
-    # runners, so keep a hard ceiling but leave enough headroom for either
-    # measurement to finish and produce a receipt rather than being
-    # cancelled at 120 minutes.
-    #
-    # P2 review: this job timeout must stay STRICTLY ABOVE
-    # check_mutation_score.py's own MUTMUT_RUN_TIMEOUT_SECONDS (240 minutes)
-    # -- matching them exactly meant the whole JOB (checkout, dependency
-    # install, the real-mutmut-parser probe, scope calculation, and the
-    # result-export/artifact-upload steps that run AFTER `mutmut run`) was
-    # terminated by this outer limit before a long-but-successful `mutmut
-    # run` invocation could even hit its own inner timeout and raise
-    # `TimeoutExpired` cleanly -- so no receipt was ever written either way.
-    # 30 minutes of headroom above the inner subprocess ceiling covers those
-    # surrounding steps and leaves room for the inner timeout to actually
-    # fire and be handled.
-    timeout-minutes: 270
+    # The full baseline took just over two hours when this was first set to
+    # 240 minutes (2x headroom over that). `only_mutate` has grown since
+    # (identity, suppression and serialization joined diff_*/checker_policy),
+    # and the weekly `schedule` run (job 99506019384, 2026-08-31) ran the
+    # full 240 minutes and was cancelled by this exact timeout before
+    # producing a receipt -- confirmed via its own "Run mutation testing
+    # (baseline drift)" step, which the job log shows starting and then
+    # nothing until being killed at the wall-clock limit. 360 minutes is
+    # GitHub-hosted runners' own hard per-job ceiling (not configurable
+    # higher), so this raises the budget to platform maximum minus a few
+    # minutes of buffer for the surrounding checkout/install/save/upload
+    # steps in the same job -- not a guarantee this now always fits (the
+    # weekly run genuinely may still need more than a single job's
+    # ceiling allows, in which case scoping `only_mutate` down or splitting
+    # the run across multiple scheduled invocations is the real fix, not a
+    # bigger number). The "Flag a cancelled or incomplete run" step below
+    # already turns a repeat of this into a loud, greppable step-summary
+    # warning rather than a silent gap.
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v6
         with:

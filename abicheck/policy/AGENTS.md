@@ -52,6 +52,92 @@ or a CLI flag directly is in the wrong layer.
 - `contract_coverage_exit.py` — ADR-049 Phase 7's contract-coverage exit
   contribution. Moved from `abicheck/contract_coverage_exit.py`; same shim
   treatment.
+- `gate_decision.py` — ADR-061 Phase 2's `gate_decision_for_result`: the one
+  call site that turns a `DiffResult` + optional `SeverityConfig` into a
+  `GateDecision`, so `reporter.py`/`sarif.py`/`html_report.py` each call one
+  shared function instead of independently re-assembling
+  `compute_gate_decision`'s arguments from the result. New module, not a
+  moved one — no flat shim exists or is needed.
+- `public_surface.py` / `public_surface_closure.py` — ADR-063 Phase 3 D5's
+  public-surface relevance query, split across two sibling leaf modules
+  purely to keep each under the 800-line new-file cap (mechanical
+  extraction, not a redesign): `public_surface.py` owns the `PublicSurface`
+  result dataclass and the declaration/type indexing (`_index_surface_types`
+  and its own origin/ambiguity bookkeeping); `public_surface_closure.py`
+  owns the actual closure-walk algorithm (`_seed_public_roots`/
+  `_walk_type_closure`/`_walk_exact_type_closure` and siblings) and the real
+  entry point, `resolve_public_surface()` — reads *what a declaration/type/
+  typedef references* from `compare/surface_graph.py`'s
+  `referenced_identifiers_by_node()`, a pure function of the snapshot's own
+  current declarations computed fresh on every call, not the independent
+  regex re-parse `surface.py`'s pre-migration implementation used to be, and
+  (after two further Codex review rounds — see this module's own docstring
+  and `docs/contribute/known-gaps.md`'s ADR-063 Phase 3 entry) deliberately
+  **not** `AbiSnapshot.surface_graph`'s own persisted `GraphNode.attrs`
+  either: a stale or adversarial persisted fact could otherwise silently
+  outrank a fresh, correct recomputation through the graph's own
+  cross-producer evidence-merge precedence. Both are leaf modules with respect to
+  `surface.py`/`export_surface.py`: neither imports either of those, so both
+  (and `export_surface.py`'s own export-domain closure, which reuses
+  `_walk_type_closure` verbatim) can depend on this package without a cycle.
+  `surface.py` re-exports `PublicSurface` for its existing callers.
+  `resolve_public_surface`/`PublicSurfaceQuery` historically lived directly
+  in `public_surface.py` before this split; a lazy `__getattr__` shim at
+  the bottom of that module (the pattern below) resolves them via
+  `importlib.import_module` from their new homes, so `from abicheck.policy.
+  public_surface import resolve_public_surface, PublicSurfaceQuery` keeps
+  working (Codex review, PR #979) without a static import re-introducing
+  the cycle the split exists to avoid.
+- `public_surface_query.py` — `PublicSurfaceQuery`, the orchestrator on top
+  of the two modules above: the only place in this package that depends on
+  *both* `public_surface_closure.py` (the public-domain query) and
+  `export_surface.py` (the `contract=exports` domain's own root-seeding) at
+  once. Kept separate from `public_surface_closure.py` specifically because
+  that dependency pair would otherwise close a real import cycle
+  (`public_surface_closure.py -> export_surface.py -> public_surface.py` and
+  siblings) — see this module's own docstring for the full reasoning.
+
+- `selectors.py` / `selectors_namespace_glob.py` — ADR-063 D10
+  (implementation plan Phase 9): the shared selector-matching primitive
+  (`SelectorSet`) behind `suppression.py`'s `Suppression` and
+  `reclassify.py`'s `ReclassifyRule` — one grammar (`symbol`/
+  `symbol_pattern`/`type_pattern`/`member_name`/`namespace`/
+  `entity_namespace`/`cause_namespace`/`source_location`/`change_kind`/
+  `binding`/`finding_id`/`expires`) instead of two independently-maintained
+  copies. **Genuinely dependency-free leaves** — zero import of
+  `checker_types.py`/`suppression.py`/`reclassify.py`/`policy_file.py`/
+  `finding_identity.py`, checked directly by
+  `scripts/check_architecture.py` (narrower than the general
+  `policy -> compare` layer edge, which would otherwise permit
+  `finding_identity.py`) — which is what lets `reclassify.py` import
+  `selectors.py` **statically**: before this phase it built a `Suppression`
+  instance purely for its selector grammar, resolved via a runtime
+  `importlib.import_module` call to dodge the cycle a static import would
+  have closed (`policy_file -> reclassify -> suppression -> checker_types
+  -> policy_file`); now neither module needs to import the other.
+  `selectors_namespace_glob.py` holds the fnmatch/regex namespace-glob
+  compilation machinery, split out purely to keep `selectors.py` itself
+  under the 800-line cap below (mechanical extraction, same pattern as
+  `public_surface.py`/`public_surface_closure.py` above).
+- `depth_projection.py` — ADR-063 Phase 8 follow-up: the `--depth`
+  *ceiling* half `docs/contribute/known-gaps.md`'s "floor for live
+  extraction, not a ceiling for a pre-built snapshot" entry named but did
+  not attempt. `project_snapshot_to_depth()` is a pure gating decision
+  ("which facts may a comparison at this depth see"), mirrored from the
+  one prior validated reference implementation of the same idea —
+  `scripts/check_tier_accuracy.py`'s `project()` — generalized from that
+  script's synthetic corpus onto a real `AbiSnapshot` and its own public
+  `binary`/`headers`/`build`/`source` ladder (`evidence_depth.DEPTH_RANK`,
+  a `model`-layer leaf, not `compare`). `service_compare_pipeline.
+  classify_compare_pair` applies it as a view over what gets classified,
+  right after `workflows.artifact.execute.enforce_requested_depth`
+  confirms the floor — the two functions are deliberately kept separate
+  (floor vs. ceiling), not merged into one. `project_build_source_pack_to_
+  depth()` is the sibling entry point for a `BuildSourcePack` resolved
+  *out-of-band* (an explicit `--old/new-sources`/`--old/new-build-info`
+  pack, not a snapshot's embedded payload) — `cli_compare_helpers.
+  run_compare` is the one caller, since that pack never lives on the
+  snapshot object `project_snapshot_to_depth` itself projects.
 
 ## Conventions
 

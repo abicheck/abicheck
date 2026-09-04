@@ -514,6 +514,15 @@ class TestUseCaseImpactOnCompare:
         res = _compare(
             manifest, old, new,
             "--profile", "quick",
+            # Explicit flag overrides the profile's own `depth=binary`
+            # (apply_compare_profile's documented precedence) -- this test's
+            # `--use-cases` needs the fixtures' `build_source.source_graph`
+            # (an L5 fact) to resolve entrypoints, which ADR-063 Phase 8's
+            # `--depth` ceiling (project_snapshot_to_depth) now correctly
+            # clears below `source`, same as a real `--depth binary` run
+            # would. `quick`'s one-line *format* is what this test
+            # exercises, not its depth.
+            "--depth", "source",
             "--write", f"json={secondary}",
         )
         assert res.exit_code == 4, res.output

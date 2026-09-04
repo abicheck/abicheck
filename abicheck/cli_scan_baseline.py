@@ -47,9 +47,9 @@ from .workflows.scan_config import RiskRules
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
-    from .policy_file import PolicyFile
     from .service_scan import CompileContext
-    from .suppression import SuppressionList
+    from .workflows.policy_file import PolicyFile
+    from .workflows.suppression import SuppressionList
 
 
 def _public_provenance_set(
@@ -1107,6 +1107,12 @@ def _run_baseline_compare(
             f"Failed to load --baseline {baseline}: {exc}"
         ) from exc
 
+    # ADR-063 Phase 8 "--depth" ceiling (PR #1020): mirrors
+    # `cli_compare_helpers.run_compare`'s own capped view.
+    from .service_compare_pipeline import project_pair_to_depth
+
+    old_snap, new_snap = project_pair_to_depth(old_snap, new_snap, requested_depth)
+
     # Preserve hard L0 removals even when the richer header/source view cannot
     # prove public-header ownership for the removed entity.  A source/full scan
     # may parse both sides' headers through different consumer macro contexts;
@@ -1261,7 +1267,7 @@ def _run_baseline_compare(
     )
 
     from .cli_compare_helpers import _verdict_exit_code
-    from .workflows.gate import fold_coverage_exit
+    from .workflows.gate import fold_coverage_exit, gate_decision_for_result
 
     verdict = diff.verdict.value
     # Mirrors `compare`'s own `_exit_with_severity_or_verdict` (cli.py):
@@ -1279,15 +1285,15 @@ def _run_baseline_compare(
         # exits 1), and without the gate block the report said `COMPATIBLE`
         # with exit 1 and no stated cause -- indistinguishable from ADR-049's
         # orthogonal contract-coverage 1 (Codex review). Built by
-        # `reporter._build_severity_json`, the same function that produces
-        # `compare`'s own `severity` block, so the two commands' gate
-        # receipts are comparable field-by-field rather than merely both
-        # present. Emitted only under the severity scheme: a legacy-scheme
-        # scan has no gate to report, so its summary stays byte-identical
-        # to before.
+        # `reporter._build_severity_json` via the shared
+        # `gate_decision_for_result` chokepoint (ADR-061 D9), so the two
+        # commands' gate receipts are comparable field-by-field.
+        computed_gate = gate_decision_for_result(diff, sev_config)
+        assert computed_gate is not None  # sev_config is not None here
         gate = _build_severity_json(
             list(diff.changes),
             sev_config,
+            gate=computed_gate,
             policy=diff.policy,
             kind_sets=diff._effective_kind_sets(),
             policy_file=diff.policy_file,

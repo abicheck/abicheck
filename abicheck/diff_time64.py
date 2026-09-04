@@ -26,6 +26,7 @@ emits ONE grouped diagnostic naming the root cause.
 Requires typedef evidence (L1 DWARF / L2 headers): an L0 symbol-only snapshot
 carries no ``typedefs`` map, so the detector is naturally silent there.
 """
+
 from __future__ import annotations
 
 import re
@@ -35,15 +36,22 @@ from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .diff_integer_model import _int_width_bucket
-from .model import AbiSnapshot, RecordType, Visibility
+from .model import AbiSnapshot, RecordType, Visibility, resolved_fact_value
 
 #: Typedefs resized by glibc's ``_TIME_BITS=64`` (time64) option.
 _TIME64_TYPEDEFS = frozenset({"time_t", "suseconds_t"})
 
 #: Typedefs resized by glibc's ``_FILE_OFFSET_BITS=64`` (LFS) option.
-_LFS_TYPEDEFS = frozenset({
-    "off_t", "ino_t", "blkcnt_t", "fsblkcnt_t", "fsfilcnt_t", "rlim_t",
-})
+_LFS_TYPEDEFS = frozenset(
+    {
+        "off_t",
+        "ino_t",
+        "blkcnt_t",
+        "fsblkcnt_t",
+        "fsfilcnt_t",
+        "rlim_t",
+    }
+)
 
 _FAMILY = _TIME64_TYPEDEFS | _LFS_TYPEDEFS
 
@@ -123,13 +131,27 @@ def _seed_surface_tokens(snap: AbiSnapshot) -> set[str]:
 
 
 def _fold_record_tokens(tokens: set[str], rec: RecordType) -> None:
-    """Fold a reachable record's field and base-class type spellings into *tokens*."""
+    """Fold a reachable record's field and base-class type spellings into *tokens*.
+
+    ADR-063 Phase 5B audit note: ``bases_fact``/``virtual_bases_fact`` stay
+    on the plain ``resolved_fact_value(..., [])`` bridge deliberately. This
+    is a single-snapshot reachability walk, folded into
+    ``_public_surface_tokens(old) | _public_surface_tokens(new)`` by
+    ``_diff_time64_abi`` below — a *union* of both sides, so an evidence gap
+    on either side only narrows the surface-token set, which can miss a
+    real ``time64`` roll-up (a false negative, already an accepted
+    limitation of this token-reachability heuristic) but never fabricates
+    one. No old/new pair exists at this call site for
+    :func:`~abicheck.compare.fact_comparison.compare_facts` to gate.
+    """
     for fld in rec.fields:
         _add_tokens(tokens, getattr(fld, "type", ""))
     # Inherited layout is public layout: fold base-class names in
     # so a base carrying time_t/off_t is visited too (Codex
     # review #510, round 6).
-    for base in list(rec.bases) + list(rec.virtual_bases):
+    bases = resolved_fact_value(rec.bases_fact, [])
+    virtual_bases = resolved_fact_value(rec.virtual_bases_fact, [])
+    for base in list(bases) + list(virtual_bases):
         _add_tokens(tokens, base)
 
 
@@ -250,8 +272,7 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         else "64-bit → 32-bit (time64/LFS disabled)"
     )
     detail = (
-        f"{', '.join(sorted(flipped))}; {direction} — "
-        f"likely {' / '.join(macros)} drift"
+        f"{', '.join(sorted(flipped))}; {direction} — likely {' / '.join(macros)} drift"
     )
     return [
         make_change(

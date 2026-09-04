@@ -25,13 +25,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from .binary_utils import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
 from .diff_symbols import _should_filter_transitive_runtime_symbols
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, Visibility
+from .model.binary_naming import strip_vendor_hash
 
 _INTERNAL_NAME_PATTERNS = (
     "internal",

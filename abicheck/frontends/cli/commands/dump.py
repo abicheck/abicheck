@@ -33,13 +33,11 @@ from ....cli_dump_helpers import (
     compile_db_filter_scope_error,
     compile_db_for_filter_scope_check,
     compile_db_from_build_info,
-    perform_elf_dump,
     reject_snapshot_compression_conflict,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
     resolve_dump_debug_format,
 )
-from ....cli_dump_non_elf import handle_non_elf_dump
 from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
     _build_match_map as _build_match_map,
     _canonical_library_key as _canonical_library_key,
@@ -64,16 +62,15 @@ from ....cli_options import (
     snapshot_compression_option,
     verbose_option,
 )
-from ....cli_params import (
-    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
-)
 from ....cli_resolve import (
-    _dump_native_binary,
+    _click_notify,
     _expand_header_inputs,
     _normalize_binary_input,
-    _populate_dependency_info,
 )
 from ....frontends.cli import help as cli_help
+from ..options.params import (
+    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
+)
 
 if TYPE_CHECKING:
     from ....service_scan import CompileContext
@@ -254,7 +251,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              git_tag: str | None, build_id: str | None, no_git: bool,
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
-             build_query: str | None = None, build_compile_db: str | None = None,
              build_targets: tuple[str, ...] = (),
              depth: str | None = None,
              header_graph_deprecated: bool = False,
@@ -432,7 +428,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         compiler_option_tokens=compiler_option_tokens,
     )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
-    gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
+    _gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
     header_backend = _cc.frontend
 
     # CLI-audit P1: --ast-frontend hybrid dual-runs castxml+clang for the L2
@@ -526,14 +522,20 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # to nothing; that is worse than two implementations kept in sync by hand,
     # because nothing fails when they drift.
     #
-    # The real ELF/PE/Mach-O run still *executes* through `perform_elf_dump`/
-    # `handle_non_elf_dump` rather than `execute_dump_request` (that migration
-    # needs the ADR-039 collector's CLI-only inputs represented in the typed
-    # API, and `_write_snapshot_output`'s provenance/`--inputs`/depth-gate
-    # sequence reordered around a resolve-time embed). What changed is which
-    # object supplies its *resolved inputs*: they now come from
-    # `ResolvedDumpRequest`, not from a parallel set of locals that merely
-    # happened to agree.
+    # CLI cleanup phase two, PR C: the real ELF run now executes through
+    # `execute_dump_request` too, given the legacy `-p`/`--compile-db`
+    # auto-match's own derived flags (`_resolve_build_context_flags`,
+    # computed below, strictly after `_resolved` here) as an explicit
+    # pass-through (ADR-063 Phase 1's `legacy_compile_db_tokens`/
+    # `legacy_compile_db_matched` parameters) -- see the real-run call site
+    # below, and `docs/contribute/known-gaps.md`'s "PR C" entry for the
+    # precise mechanism this closes. PE/Mach-O now executes through the
+    # identical `execute_dump_request` pipeline too (ADR-063 Phase 1's own
+    # PE/Mach-O slice) -- see the PE/Mach-O branch below and
+    # `handle_non_elf_dump`'s own module docstring (it is retired for this
+    # call site, kept defined for its own direct unit tests only). Verified
+    # only via mock-based CLI/unit tests, not a real PE/Mach-O toolchain --
+    # none was available where this was done.
     _dump_request = build_dump_request(
         so_path=so_path, headers=headers, includes=includes,
         version=version, lang=lang, lang_explicit=lang_explicit,
@@ -571,11 +573,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             compile_db_path, None, headers, compile_db_filter,
         )
         _dry_result = render_dump_dry_run(
-            so_path=so_path, headers=_resolved.headers, sources=sources,
-            build_info=build_info, build_config=build_config,
-            depth=_resolved.requested_depth,
-            collect_mode=_resolved.collect_mode,
-            header_backend=_resolved.header_backend, output=output,
+            _resolved,
+            output=output,
+            build_config=build_config,
             snapshot_compression=snapshot_compression,
             has_compile_db=compile_db_path is not None,
             # External review: dry-run previously only checked bare -p/
@@ -591,7 +591,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             build_info_is_pack=(
                 is_pack_dir(build_info) or _is_inputs_pack_dir(build_info)
             ),
-            dump_manifest=parsed_dump_manifest,
         )
         # CLI cleanup phase two, PR 3C prerequisite 3: show whether/why
         # build.query would execute, without ever running it.
@@ -601,7 +600,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             sources=sources, headers=headers,
             collect_mode=collect_mode, build_info=build_info,
             build_config=build_config,
-            build_query=build_query, build_compile_db=build_compile_db,
         )
         emit_dry_run(_dry_result)
 
@@ -642,7 +640,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 err=True,
             )
         from ....cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
         return
 
     effective_compile_db = compile_db_path
@@ -655,7 +653,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     build_context_flags, compile_db_matched = _resolve_build_context_flags(
         effective_compile_db, headers, compile_db_filter,
     )
-    effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
 
     # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
     # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;
@@ -666,111 +663,104 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             f"--{effective_debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
         )
 
+    # ADR-063 Phase 1: both binary formats now execute through the identical
+    # `execute_dump_request` pipeline (`perform_elf_dump`/`handle_non_elf_dump`
+    # are both retired for this call site, kept defined for their own direct
+    # unit tests) via the shared tail `dump_execute.
+    # execute_and_write_dump_cli_run` -- see that function's own docstring,
+    # and `dump_execute.execute_dump_cli_run`'s docstring for the rest of
+    # this call's design notes (pdb/depth/embed/legacy-token handling is
+    # identical and format-generic; `execute_dump_request`/
+    # `_resolve_side_snapshot_impl` took no format-specific branch to
+    # support PE/Mach-O here). Split into a sibling module purely to keep
+    # this file under the architecture gate's file-size cap, and it
+    # deliberately does not import back into the CLI-registration family
+    # this module itself sits in, which is why the re-resolution below
+    # (re-pointing at the *normalized* `so_path`, nulling `requested_depth`
+    # -- see that docstring for why) happens here rather than there.
     if binary_fmt in ("pe", "macho"):
         if parsed_dump_manifest is not None:
             raise click.UsageError(
                 f"--dump-manifest is not yet supported for {binary_fmt.upper()} "
                 "binaries (ADR-050 D3); use a single-header dump for this format."
             )
-        native_cc = (
-            dataclasses.replace(_cc, gcc_options=effective_gcc_options)
-            if effective_gcc_options != _cc.gcc_options
-            else _cc
-        )
-        # Same rule as the ELF call below: the resolved plan supplies every
-        # field it owns, so the PE/Mach-O run consumes exactly what
-        # `--dry-run` rendered.
-        handle_non_elf_dump(
-            so_path, binary_fmt, _resolved.headers, includes, version,
-            _resolved.lang, pdb_path,
-            follow_deps, git_tag, build_id, no_git, output,
-            _dump_native_binary, _stamp_provenance, _write_snapshot_output_fn,
-            _resolved.public_headers, _resolved.public_header_dirs,
-            build_info, sources, build_config,
-            allow_build_query, _resolved.collect_mode, build_query,
-            build_compile_db,
-            build_targets=build_targets,
-            header_backend=_resolved.header_backend, compile_context=native_cc,
-            depth=_resolved.requested_depth,
-            compile_db_context_matched=compile_db_matched,
-            include_dependencies=include_dependencies,
-            snapshot_compression=snapshot_compression,
-            lang_explicit=_resolved.lang_explicit,
-        )
-        return
+        if follow_deps:
+            click.echo(
+                "Warning: --follow-deps is only supported for ELF binaries.",
+                err=True,
+            )
+    else:
+        # Debug artifact resolution (ADR-021a): resolved here for the "Debug
+        # info: ..." UX echo only. CLI cleanup phase two, PR C: the real run
+        # below now reaches `execute_dump_request` -> `service.resolve_input`,
+        # which resolves the identical artifact itself from the same
+        # `debug_roots`/`debuginfod`/`debuginfod_url` already carried on
+        # `_dump_request.input` -- so, unlike before this migration, the
+        # resolved path is not threaded any further from here; it would only
+        # ever reach the same result a second time. ELF only: PE/Mach-O never
+        # resolved a detached debug artifact from here either, before this
+        # migration.
+        if debug_roots or debuginfod:
+            artifact = _resolve_debug_artifact(
+                so_path, debug_roots, debuginfod, debuginfod_url,
+            )
+            if artifact:
+                click.echo(f"Debug info: {artifact.source}", err=True)
 
-    # Debug artifact resolution (ADR-021a): resolve before dump. P1.1: thread
-    # a resolved detached debug file (build-id tree / path-mirror / debuginfod
-    # — distinct from so_path itself) into the actual DWARF parse instead of
-    # only logging it, so a stripped binary still gets DWARF-aware comparison.
-    debug_info_path: Path | None = None
-    if debug_roots or debuginfod:
-        artifact = _resolve_debug_artifact(
-            so_path, debug_roots, debuginfod, debuginfod_url,
-        )
-        if artifact:
-            click.echo(f"Debug info: {artifact.source}", err=True)
-            if artifact.dwarf_path and artifact.dwarf_path.resolve() != so_path.resolve():
-                debug_info_path = artifact.dwarf_path
+    _exec_request = dataclasses.replace(
+        _dump_request,
+        input=dataclasses.replace(_dump_request.input, path=so_path),
+    )
+    _exec_resolved = dataclasses.replace(
+        resolve_dump_request_for_cli(_exec_request), requested_depth=None,
+    )
+    from ....workflows.extraction import (
+        dump_manifest_header_roots,
+        resolve_source_frontend_clang_bin,
+    )
+    from ..dump_execute import execute_and_write_dump_cli_run
 
-    # ADR-061 Phase 3: every field below that the resolved plan owns is read
-    # off `_resolved`, not off the local that happened to agree with it. The
-    # two were pinned equal by `TestResolvedRequestAgreesWithTheCliLocals`;
-    # reading the plan makes the agreement structural instead of tested, so
-    # `--dry-run` cannot describe a plan the run did not consume.
-    perform_elf_dump(
-        so_path=so_path,
-        debug_info_path=debug_info_path,
-        headers=_resolved.headers,
-        includes=includes,
-        version=version,
-        lang=_resolved.lang,
-        lang_explicit=_resolved.lang_explicit,
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        effective_gcc_options=effective_gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        user_gcc_options=gcc_options,
-        compile_db_filter=compile_db_filter,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        dwarf_only=dwarf_only,
-        effective_debug_format=effective_debug_format,
-        public_headers=_resolved.public_headers,
-        public_header_dirs=_resolved.public_header_dirs,
-        header_backend=_resolved.header_backend,
-        effective_compile_db=effective_compile_db,
-        follow_deps=follow_deps,
-        search_paths=search_paths,
-        ld_library_path=ld_library_path,
-        git_tag=git_tag,
-        build_id=build_id,
-        no_git=no_git,
-        output=output,
-        build_info=build_info,
-        sources=sources,
+    execute_and_write_dump_cli_run(
+        _exec_resolved,
+        notify=_click_notify,
         build_config=build_config,
-        allow_build_query=allow_build_query,
-        collect_mode=_resolved.collect_mode,
-        expand_header_inputs=_expand_header_inputs,
-        populate_dependency_info=_populate_dependency_info,
+        legacy_compile_db_tokens=tuple(build_context_flags),
+        legacy_compile_db_matched=compile_db_matched,
+        # Codex review, two real regressions on the original ELF migration:
+        # `perform_elf_dump` always forwarded its own resolved collect mode
+        # to the L2 seed (running a zero-config inferred build query for a
+        # `--sources` tree with no compile database) and always replayed L4
+        # source through the L3 fold's own compiler once it applied -- both
+        # must be preserved here, exactly as `scan`'s own candidate
+        # resolution already does. Applies identically to PE/Mach-O, which
+        # shares this same tail.
+        seed_collect_mode=_resolved.collect_mode,
         stamp_provenance=_stamp_provenance,
         write_snapshot_output=_write_snapshot_output_fn,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
+        git_tag=git_tag, build_id=build_id, no_git=no_git,
+        output=output, build_info=build_info, sources=sources,
+        allow_build_query=allow_build_query,
+        collect_mode=_resolved.collect_mode,
         build_targets=build_targets,
-        compile_context=_cc,
-        depth=_resolved.requested_depth,
-        compile_db_context_matched=compile_db_matched,
-        dump_manifest=parsed_dump_manifest,
-        include_labels=_resolved_include_labels,
+        header_backend=_resolved.header_backend,
+        requested_depth=_resolved.requested_depth,
         include_dependencies=include_dependencies,
+        # `--dump-manifest` is ELF-only (rejected above for PE/Mach-O), so
+        # `dump_manifest_header_roots(parsed_dump_manifest)` is always `()`
+        # there -- included unconditionally rather than branched, since it's
+        # a no-op for the format that doesn't support it.
+        header_roots=tuple(headers)
+        + dump_manifest_header_roots(parsed_dump_manifest)
+        + tuple(_resolved.public_headers)
+        + tuple(_resolved.public_header_dirs),
+        clang_bin=resolve_source_frontend_clang_bin(
+            gcc_path, gcc_prefix, exclude_cl_style=False,
+        ),
         snapshot_compression=snapshot_compression,
-        # CLI cleanup phase two, PR 3A: the legacy -p/--compile-db auto-match's
-        # own derived flags, already folded into effective_gcc_options above --
-        # forwarded so perform_elf_dump can unfold them when the P0.3 L3->L2
-        # fold resolves a context from the same --build-info database (the two
-        # would otherwise both apply, recording the same evidence twice).
-        legacy_build_context_flags=tuple(build_context_flags),
+        # L4 replay classifies declarations against these roots; with none it
+        # classifies everything private and links nothing (measurement in
+        # `_write_snapshot_output`'s own docstring).
+        public_headers=tuple(_resolved.public_headers),
+        public_header_dirs=tuple(_resolved.public_header_dirs),
     )
 

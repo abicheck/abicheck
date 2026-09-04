@@ -92,6 +92,17 @@ def _hybrid_note(row: FactRow) -> str:
     )
 
 
+def _escape_table_cell(text: str) -> str:
+    """Escape a literal ``|`` before interpolating free-form ``text`` (a
+    ``FactRow.note``) into a Markdown table cell — GFM parses a raw ``|``
+    as a column delimiter even inside inline-code backticks, so a note
+    quoting a union type (e.g. `` `Fact[bool | None]` ``, real since
+    ADR-063 Phase 5's `is_final_fact` row) would otherwise gain an extra
+    cell and shift every later column in that row.
+    """
+    return text.replace("|", "\\|")
+
+
 def _render_owner(owner: str) -> str:
     """One declaration dataclass's fact table."""
     lines = [
@@ -101,7 +112,7 @@ def _render_owner(owner: str) -> str:
         "|------|---------|--------------|--------|-------|",
     ]
     for row in rows_for(owner):
-        note = (row.note + _hybrid_note(row)).strip() or "—"
+        note = _escape_table_cell((row.note + _hybrid_note(row)).strip()) or "—"
         lines.append(
             f"| `{row.field}` | {_CELL[row.castxml]} | {_CELL[row.clang]} "
             f"| {_CELL[hybrid_capability(row)]} | {note} |"

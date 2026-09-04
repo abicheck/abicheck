@@ -128,7 +128,7 @@ from .model import AbiSnapshot
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
-    from .buildsource.source_graph import SourceGraphSummary
+    from .model.source_graph import SourceGraphSummary
 
 __all__ = [
     "ANALYSIS_ASSURANCE_SCHEMA_VERSION",

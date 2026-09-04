@@ -35,6 +35,7 @@ from .diff_versioning import (  # noqa: F401 — re-exported for existing caller
 )
 from .model import AbiSnapshot, stdlib_namespaces_excluded
 from .model.elf_facts import SymbolBinding, SymbolType
+from .model.identity import EntityId
 from .name_classification import is_stdlib_local_name_symbol
 
 # Module-level constant: ELF visibility values that form the default<->protected pair (case51).
@@ -507,6 +508,19 @@ def _resolve_size_change_kind(
     )
 
 
+def _matched_var_entity_id(
+    old: AbiSnapshot, new: AbiSnapshot, sym_name: str
+) -> EntityId | None:
+    """The matched ``Variable``'s ``entity_id`` on whichever side resolves it
+    (ADR-063 Phase 2) -- shared by the two exported-object findings below.
+    """
+    old_var = old.var_by_mangled(sym_name)
+    if old_var is not None and old_var.entity_id is not None:
+        return old_var.entity_id
+    new_var = new.var_by_mangled(sym_name)
+    return new_var.entity_id if new_var is not None else None
+
+
 def _check_symbol_size_change(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -542,6 +556,7 @@ def _check_symbol_size_change(
             name=sym_name,
             old=str(s_old.size),
             new=str(s_new.size),
+            entity_id=_matched_var_entity_id(old, new, sym_name),
         )
     ]
 
@@ -670,6 +685,7 @@ def _check_object_alignment_reduced(
             name=sym_name,
             old=str(old_align),
             new=str(new_align),
+            entity_id=_matched_var_entity_id(old, new, sym_name),
         )
     ]
 

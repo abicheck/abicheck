@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .model import CoverageStatus, DataLayer, ExtractorRecord, LayerCoverage
-from .pack import BuildSourcePack, _normalize_source_abi_payload, _payload_sha256
+from .pack import BuildSourcePack
+from .pack_io import _normalize_source_abi_payload, _payload_sha256
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
@@ -261,7 +262,7 @@ def _append_chosen_payload_digests(
         if payload is None:
             continue
         # _normalize_source_abi_payload strips the same replay wall-clock/
-        # cache-hit fields BuildSourcePack._artifact_digests() already
+        # cache-hit fields pack_io._artifact_digests() already
         # strips from an on-disk/self-contained pack's source_abi.json --
         # without it here, a combined/embedded pack (this function's own
         # docstring: an inline-collected --sources contributor that was
@@ -493,7 +494,7 @@ def _detect_merge_layer_conflicts(
     >1 input supplies that layer with *differing* normalized facts.
 
     The comparison is an order-independent **per-layer payload digest** of just
-    that layer's facts, not the pack-wide ``BuildSourcePack.content_hash()`` —
+    that layer's facts, not the pack-wide ``pack_io.content_hash()`` —
     the pack hash folds in every layer plus coverage/extractor metadata, so two
     inputs with identical L4/L5 facts but a differing unrelated layer would
     false-positive. A layer with one contributor, or several contributors that

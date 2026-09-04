@@ -663,3 +663,151 @@ def test_layer_coverage_to_dict_carries_new_fields():
     assert d["link_units"] == 1
     restored = LayerCoverage.from_dict(d)
     assert restored == row
+
+
+# `scan --against`'s own candidate resolution has no `CompareRequest`/
+# `DumpRequest` of its own to resolve through `AnalysisPlanner`, so it reuses
+# the identical Bazel-scoping check directly -- closing the `scan` half of
+# docs/contribute/known-gaps.md's `--build-target` + pre-captured Bazel
+# jsonproto gap (the `dump`/`compare` half is covered by
+# tests/test_analysis_plan.py above). That check used to be pinned here via a
+# direct `scan_engine._build_new_snapshot()` call, but a second Codex review
+# round found it needed to run once, earlier, at the top of `scan_engine.
+# run_scan_core` (before its S3 pattern scan/POI work) rather than only inside
+# `_build_new_snapshot` -- a typed `run_scan(ScanRequest(...))`/
+# `run_scan_subprocess` caller has no `cli_scan.py` pre-flight ahead of
+# `run_scan_core` the way the CLI does, so the original placement let it pay
+# for that work before being rejected. The scenario is now pinned end-to-end
+# via the typed API in tests/test_bazel_root_targets_scan.py instead:
+# `test_run_scan_typed_api_raises_planning_error_not_click_usage_error`
+# (raises `PlanningError`, not `click.UsageError`),
+# `test_run_scan_rejects_before_wasted_pattern_scan_and_poi_work` (fires
+# before the S3 pass), and
+# `test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check` (the
+# depth=binary exemption still holds at the new call site). See
+# `test_scan_cli_real_run_rejects_the_identical_combination` in that same
+# file for the CLI's exit-64 translation.
+
+
+# ── ADR-063 Phase 4 follow-up (Codex review): `.abicheck.yml`-sourced scope ──
+#
+# The AnalysisPlanner/scan_engine checks above only see InputSpec.
+# build_targets, populated from an explicit --build-target. A root-target
+# scope declared in .abicheck.yml's own `build.targets:` instead reaches
+# BuildConfig.targets through a different fold (embed_build_source's own
+# CLI-overrides-config merge) that those request-level pre-flight checks
+# have no seam for -- config discovery hasn't run yet at that point. Fixed
+# at the one place both sources are already unified: _maybe_collect_bazel_
+# build_info() itself, which every embed_build_source caller (dump/compare/
+# scan alike) goes through.
+
+
+def test_maybe_collect_bazel_build_info_rejects_configured_targets(tmp_path: Path):
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.inline import _maybe_collect_bazel_build_info
+
+    aquery = tmp_path / "aquery.json"
+    aquery.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+    with pytest.raises(ValueError, match="pre-captured Bazel aquery"):
+        _maybe_collect_bazel_build_info(
+            aquery, BuildEvidence(), [], tmp_path, ("//:from_config",)
+        )
+
+
+def test_maybe_collect_bazel_build_info_no_configured_targets_is_unaffected(
+    tmp_path: Path,
+):
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.inline import _maybe_collect_bazel_build_info
+
+    aquery = tmp_path / "aquery.json"
+    aquery.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+    assert _maybe_collect_bazel_build_info(aquery, BuildEvidence(), [], tmp_path, ())
+
+
+def test_dot_abicheck_yml_build_targets_with_precaptured_aquery_rejected(
+    tmp_path: Path,
+):
+    """End to end: `.abicheck.yml`'s `build.targets:` alone (no
+    `--build-target`) combined with a pre-captured `--build-info` jsonproto
+    must reject exactly like the explicit-flag case, not silently collect
+    the unscoped graph."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.cpp").write_text("int f() { return 0; }\n", encoding="utf-8")
+    (src / ".abicheck.yml").write_text(
+        "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+        encoding="utf-8",
+    )
+    aquery = tmp_path / "aquery.json"
+    aquery.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "dump",
+            "--sources",
+            str(src),
+            "--build-info",
+            str(aquery),
+            "-o",
+            str(tmp_path / "out.json"),
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output
+
+
+def test_dot_abicheck_yml_build_targets_dry_run_parity(tmp_path: Path):
+    """ADR-063 Phase 4's second slice: ``dump --dry-run`` must reject the
+    identical ``.abicheck.yml``-only (no ``--build-target`` flag) scope
+    mismatch the real run above rejects, not silently preview success for a
+    request the real run then refuses -- the dry-run/execution parity gap
+    ``docs/contribute/known-gaps.md`` and this ADR's own plan doc named as
+    still open. ``dump --dry-run`` resolves via the same
+    ``resolve_dump_request`` -> ``AnalysisPlanner.resolve`` chokepoint the
+    real run does, so widening the check there (auto-discovering
+    ``.abicheck.yml`` at ``--sources``, mirroring ``embed_build_source``'s
+    own fallback) closes this for free, with no change to the dry-run
+    renderer itself."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.cpp").write_text("int f() { return 0; }\n", encoding="utf-8")
+    (src / ".abicheck.yml").write_text(
+        "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
+        encoding="utf-8",
+    )
+    aquery = tmp_path / "aquery.json"
+    aquery.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "dump",
+            "--sources",
+            str(src),
+            "--build-info",
+            str(aquery),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "pre-captured Bazel aquery" in result.output

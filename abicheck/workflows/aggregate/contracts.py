@@ -141,28 +141,51 @@ AGGREGATE_SCHEMA_VERSION = "1.7"
 #: known-shaped tail segments is safe even if ``target`` itself were ever to
 #: contain a stray ``@``/``#`` (bundle/target ids are also identifiers today,
 #: but this regex does not need to assume that to parse correctly).
+#:
+#: G42 adds two further optional, composable tail segments, in this fixed
+#: order: ``!<environment_id>`` (a named-environment qualifier — reserved
+#: here, not yet produced by any generator; see the G42 plan's "Named
+#: environments" phase) and ``~<explicit_id>`` (a project-author-supplied
+#: ``checks[].id``, G42's "Explicit check identifiers" phase). Both are
+#: independently omittable and neither collides with the base charset —
+#: ``!``/``~`` never appear inside a component (``_IDENTIFIER_RE`` above).
+#: Absent both, the generated string and its parse are bit-for-bit
+#: unchanged from the pre-G42 shape (``environment_id=None``,
+#: ``explicit_id=None``) — this is the backward-compatibility guarantee.
 _CHECK_ID_RE = re.compile(
     r"^(?P<target>.+)@(?P<profile>[A-Za-z0-9][A-Za-z0-9._-]*)"
     r"#(?P<channel>[A-Za-z0-9][A-Za-z0-9._-]*)"
-    r"@(?P<depth>binary|headers|build|source)$"
+    r"@(?P<depth>binary|headers|build|source)"
+    r"(?:!(?P<environment_id>[A-Za-z0-9][A-Za-z0-9._-]*))?"
+    # \Z, not a trailing $ -- $ also matches just before a trailing \n
+    # (Codex review; see checker_types.CHECK_ID_PATTERN's identical fix,
+    # kept in lockstep with this pattern per this module's own docstring).
+    r"(?:~(?P<explicit_id>[A-Za-z0-9][A-Za-z0-9._-]*))?\Z"
 )
 
 
 @dataclass(frozen=True)
 class CheckIdParts:
-    """A parsed ``check_id``-shaped ``target_id`` (ADR-047 §7)."""
+    """A parsed ``check_id``-shaped ``target_id`` (ADR-047 §7, extended by G42).
+
+    :attr:`environment_id`/:attr:`explicit_id` are ``None`` for a
+    pre-G42-shaped id (no ``!``/``~`` tail) — the common case today.
+    """
 
     target: str
     profile: str
     baseline_channel: str
     requested_depth: str
+    environment_id: str | None = None
+    explicit_id: str | None = None
 
 
 def parse_check_id(target_id: str) -> CheckIdParts | None:
     """Split *target_id* into its ``check_id`` components, or ``None``.
 
     ``None`` means *target_id* does not follow the
-    ``target@profile#baseline_channel@requested_depth`` shape
+    ``target@profile#baseline_channel@requested_depth`` shape (optionally
+    followed by a ``!environment_id`` and/or ``~explicit_id`` tail, G42)
     ``buildsource.check_report.build_check_id`` produces — e.g. a bare
     filename-derived id (:func:`target_id_from_path`) from a report that
     never went through the run-plan/``check-target`` pipeline. This is the
@@ -178,6 +201,8 @@ def parse_check_id(target_id: str) -> CheckIdParts | None:
         profile=m.group("profile"),
         baseline_channel=m.group("channel"),
         requested_depth=m.group("depth"),
+        environment_id=m.group("environment_id"),
+        explicit_id=m.group("explicit_id"),
     )
 
 
@@ -217,6 +242,43 @@ DEFAULT_REPORT_PREFIX = "abi-report-"
 #: fan-in preserves it as a blocking gate rather than a verdictless report.
 _OPERATIONAL_ERROR_VERDICT = "ERROR"
 
+#: ``scan``'s own four abort verdicts (ADR-064 stage 1b's native-CLI abort
+#: report, ``cli_scan._emit_scan_abort_report``, plus the two ADR-050 D2/P2
+#: sentinels below) -- none is a :class:`Verdict` enum member, so like
+#: ``_OPERATIONAL_ERROR_VERDICT`` above (and unlike
+#: ``_BOOTSTRAP_VERDICT``/``_NEW_TARGET_VERDICT`` below, which are
+#: legitimately tolerated) all four must force a blocking gate rather than
+#: fall through to an unavailable/verdictless report: an unfinished scan is a
+#: real failure a required-target policy must not silently treat as "nothing
+#: to compare yet" (Codex review, fresh evidence -- the earlier envelope fix
+#: made `GateInfo.from_scan_report` accept these payloads in isolation, but
+#: `_load_report_file` never reaches it, since it only calls that after
+#: `parse_report_verdict` succeeds, and none of these four strings is a
+#: `Verdict` member). Unlike `_OPERATIONAL_ERROR_VERDICT`, though, the target
+#: stays *unavailable* for the compatibility axis
+#: (`compatibility_verdict=None`) rather than a synthetic `Verdict.BREAKING`
+#: -- a scan that aborted before comparing never produced an ABI-break
+#: finding, so counting it as one, or as an "analyzed" target, fabricates
+#: information a reader would reasonably trust (Codex review, fresh evidence:
+#: `AggregateResult.to_dict()` reported `compatibility.verdict: "BREAKING"`
+#: and a complete `analyzed_targets` count for a comparison that never ran).
+#: See `TargetReport`'s own docstring and
+#: `AggregateResult._forced_gate_targets` for how the gate still counts
+#: without inventing that verdict.
+_SCAN_BUDGET_OVERFLOW_VERDICT = "BUDGET_OVERFLOW"
+_SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT = "EVIDENCE_CONTRACT_ERROR"
+#: ADR-050 D2's comparability refusal (`scan_engine.run_baseline_diff`'s own
+#: `ProfileMismatchError`/`ScopeMismatchError` handling) -- scan's legacy
+#: exit 6, mirroring `OperationalStatus.NOT_COMPARABLE`.
+_SCAN_NOT_COMPARABLE_VERDICT = "NOT_COMPARABLE"
+#: `service_scan.run_scan_set`'s P2 sentinel: the cross-library bundle audit
+#: itself never ran even though every member scanned clean, so the set's own
+#: outcome must still block rather than read as a full pass (Codex review,
+#: fresh evidence -- this and `_SCAN_NOT_COMPARABLE_VERDICT` were the two
+#: `run_outcome`-blocking sentinels this dict was still missing, discarding
+#: `run_outcome.operational` for either one).
+_SCAN_BUNDLE_INCOMPLETE_VERDICT = "BUNDLE_INCOMPLETE"
+
 #: ``actions/check-target``'s two advisory, never-a-compatibility-verdict
 #: sentinels (``check_report.BOOTSTRAP_VERDICT``/``NEW_TARGET_VERDICT`` —
 #: duplicated as bare strings here rather than imported, same as
@@ -254,10 +316,11 @@ class TargetReport:
     """One target's contribution to the aggregate.
 
     ``compatibility_verdict`` is ``None`` exactly when the target is
-    *unavailable* — its report was expected but never arrived or was
-    unreadable — in which case ``gate`` is also ``None`` and ``reason``
-    explains why. ``unexpected`` marks a report whose target was not in the
-    expected set (a new/not-yet-declared matrix target).
+    *unavailable* — its report was expected but never arrived, was
+    unreadable, or (see below) ran but never reached a comparison. ``gate``
+    is usually also ``None`` in that case, with ``reason`` explaining why.
+    ``unexpected`` marks a report whose target was not in the expected set
+    (a new/not-yet-declared matrix target).
 
     ``reason`` is also populated (with ``compatibility_verdict`` forced to
     ``BREAKING`` and ``gate`` a synthetic blocking one,
@@ -267,6 +330,18 @@ class TargetReport:
     genuine break checks ``gate.blocking_categories`` for
     ``"not_comparable"``, the same way an operational-error report
     (``blocking_categories=("operational_error",)``) is already told apart.
+
+    A *third* shape exists for ``scan``'s own two abort verdicts
+    (``BUDGET_OVERFLOW``/``EVIDENCE_CONTRACT_ERROR``): unlike not_comparable/
+    operational-error, these carry a non-``None`` ``gate`` while
+    ``compatibility_verdict`` stays ``None`` — the target remains
+    *unavailable* for compatibility-reporting purposes (no comparison ever
+    ran, so no verdict/analyzed-target count is invented for it), while its
+    forced ``gate`` still counts toward :meth:`AggregateResult.exit_code`/
+    :attr:`AggregateResult.blocking_targets` regardless of the target's own
+    required/optional declaration (Codex review: the earlier synthetic
+    ``BREAKING`` verdict made an aborted scan read as an analyzed ABI break).
+    See :attr:`AggregateResult._forced_gate_targets`.
     """
 
     target_id: str

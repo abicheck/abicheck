@@ -124,6 +124,25 @@ class ManifestValidationError(AbicheckError, ValueError):
     """
 
 
+class AmbiguousLibraryMatchError(AbicheckError, ValueError):
+    """Raised by :func:`abicheck.binary_utils.build_match_map` when two or
+    more candidate files for one canonical library key are indistinguishable
+    except by storage encoding (e.g. a plain ``libfoo.abicheck.json`` and a
+    stale ``.gz``/``.zst`` sibling left over from a previous release, ADR-059)
+    -- there is no information left in the filename to break the tie
+    correctly, so this fails closed instead of guessing (Codex review, PR
+    #699, second round on the same fix).
+
+    A plain :class:`AbicheckError`/:class:`ValueError`, not a CLI-specific
+    exception: :func:`build_match_map` is a pure matching primitive with
+    callers outside any Click command (e.g. ``bundle_side_input.py``).
+    ``cli_helpers_compare._build_match_map`` -- the CLI-facing wrapper every
+    ``compare``/``compare-release`` call site already used before this
+    class existed -- catches this and re-raises ``click.ClickException``
+    with the identical message, so no existing CLI-facing behavior changes.
+    """
+
+
 class TuMergeError(SnapshotError):
     """Raised by :func:`abicheck.tu_merge.merge_fragments` when two
     translation-unit fragments from one manifest-driven dump declare the
@@ -264,6 +283,36 @@ class PackManifestError(AbicheckError, ValueError):
     Inherits ValueError for the same backward-compatible catch-all reason
     every other error in this module does.
     """
+
+
+class PlanningError(AbicheckError, ValueError):
+    """Raised by :func:`abicheck.workflows.plan.AnalysisPlanner.resolve` when a
+    request cannot be satisfied by any resolved collector/backend combination
+    (ADR-063 D4/Phase 4).
+
+    An :class:`~abicheck.workflows.plan.AnalysisPlan` is built *before* any
+    extraction runs — no collector or header-AST backend has been invoked yet
+    — precisely so a request that names an evidence input a resolved side
+    cannot use is rejected up front, with a named reason, instead of silently
+    accepted and then dropped somewhere inside extraction with no diagnostic
+    at all (the failure mode this decision exists to close; see
+    ``docs/contribute/known-gaps.md``'s ``--build-target`` + pre-captured
+    Bazel ``aquery``/``cquery`` entry for the motivating case).
+
+    Carries every failed requirement found for the request, not only the
+    first — :attr:`failures` is a non-empty tuple of
+    :class:`~abicheck.workflows.plan.PlanningFailure`, each naming what was
+    *requested* and *why* no resolved combination can honour it.
+
+    Inherits ``ValueError`` for the same backward-compatibility reason every
+    other error in this module does — a generic ``except ValueError`` around
+    request resolution still catches it.
+    """
+
+    def __init__(self, failures: tuple[object, ...]) -> None:
+        self.failures = failures
+        message = "; ".join(str(f) for f in failures)
+        super().__init__(f"request cannot be satisfied: {message}")
 
 
 class UseCaseManifestError(AbicheckError, ValueError):

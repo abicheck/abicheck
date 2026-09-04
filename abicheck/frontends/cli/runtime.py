@@ -67,14 +67,14 @@ from ...cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli 
     _version_sort_key as _version_sort_key,
     _warn_ignored_flags as _warn_ignored_flags,
 )
-from ...cli_params import (
-    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
-)
 from ...cli_resolve import (
     _detect_binary_format,
     _sniff_text_format,
 )
 from ...frontends.cli import help as cli_help
+from .options.params import (
+    _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
+)
 
 if TYPE_CHECKING:
     from ...checker_types import Change
@@ -85,12 +85,33 @@ from ...model import AbiSnapshot
 
 _logger = logging.getLogger("abicheck")
 
+# Marker attribute (P3, CLI-audit) stamped on every handler `_setup_verbosity`
+# installs, so a repeated call within one process (the `compare-release`
+# fan-out invokes each library comparison's CLI entry point in-process, and
+# any test harness that calls a command function more than once in the same
+# session does too) can find and remove its own prior handler before adding a
+# new one. Without this, `_logger.addHandler` accumulates one duplicate
+# `StreamHandler(sys.stderr)` per call, so every `-v`/warning message after
+# the first invocation prints once per accumulated handler.
+_VERBOSITY_HANDLER_MARKER = "_abicheck_verbosity_handler"
 
 
 def _setup_verbosity(verbose: bool) -> None:
-    """Configure logging verbosity for native commands."""
+    """Configure logging verbosity for native commands.
+
+    Idempotent (P3, CLI-audit): removes any handler this function previously
+    installed (identified via ``_VERBOSITY_HANDLER_MARKER``) before adding a
+    new one, so calling it more than once in the same process — as the
+    ``compare-release`` fan-out and some test harnesses do — never
+    accumulates duplicate stderr handlers that would each re-emit the same
+    log line.
+    """
+    for existing in list(_logger.handlers):
+        if getattr(existing, _VERBOSITY_HANDLER_MARKER, False):
+            _logger.removeHandler(existing)
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    setattr(handler, _VERBOSITY_HANDLER_MARKER, True)
     _logger.addHandler(handler)
     _logger.setLevel(logging.DEBUG if verbose else logging.WARNING)
 
@@ -143,6 +164,13 @@ def _stamp_provenance(
 
 def _collect_metadata(path: Path) -> LibraryMetadata | None:
     """Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, Perl dump, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it."""
+    if path.is_dir():
+        # A storage-v2 `ProjectSnapshot` package dir (the one directory
+        # `classify_compare_operand` still routes through the single-pair
+        # path) is not a single hashable file -- same "not a binary" no-op
+        # `_sniff_text_format`'s own text-format branches below already
+        # apply, without `read_bytes()` raising `IsADirectoryError` first.
+        return None
     text_fmt = _sniff_text_format(path)
     if text_fmt in ("json", "perl", "symvers"):
         return None

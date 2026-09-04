@@ -54,6 +54,8 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `lang_explicit` | `bool` | `False` |
 | `pack_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
+| `severity_preset` | `str \| None` | `None` |
+| `exit_code_scheme` | `str \| None` | `None` |
 
 ## `CompareResult`
 
@@ -67,6 +69,8 @@ What one :class:`CompareRequest` produced — the typed result (ADR-055 D2).
 | `old_snapshot` | `AbiSnapshot` | *(required)* |
 | `new_snapshot` | `AbiSnapshot` | *(required)* |
 | `suppression` | `SuppressionList \| None` | `None` |
+| `exit_decision` | `ExitDecision \| None` | `None` |
+| `severity_config` | `SeverityConfig \| None` | `None` |
 
 ## `CompileContext`
 
@@ -191,6 +195,7 @@ Both sides of a comparison, resolved and ready to classify.
 | `new_fmt` | `str \| None` | *(required)* |
 | `old_evidence` | `SideEvidence` | *(required)* |
 | `new_evidence` | `SideEvidence` | *(required)* |
+| `resolved_execution_context` | `ResolvedExecutionContext \| None` | `None` |
 
 ## `ScanArtifactResult`
 
@@ -247,10 +252,12 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `changed_src` | `str` | `'run_scan_set'` |
 | `max_findings` | `int \| None` | `None` |
 | `build_targets` | `tuple[str, ...]` | `()` |
+| `severity_preset` | `str \| None` | `None` |
+| `exit_code_scheme` | `str \| None` | `None` |
 
 ## `ScanResult`
 
-Typed result of an executed scan (ADR-035 D10) — the one object the CLI and library callers consume.
+Typed result of an executed scan (ADR-035 D10) — the one object the CLI and library callers consume. ``findings`` are the raw cross-source :class:`Change` objects; ``layers`` is the per-layer coverage; ``confidence`` is the §6.8 provider-agreement matrix; ``estimate`` is the projected per-layer cost for comparison against the actual run.
 
 *Dataclass.*
 
@@ -339,7 +346,7 @@ Detect binary format from magic bytes.
 
 ## `estimate_scan`
 
-Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10).
+Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10). Probes the project (TU count, header fan-out, collect mode) and returns one :class:`CostEstimate` per L-layer the level would touch -- **without running any compiler or parsing any binary**. Coarse anchors (see ``_COST_PER_*``): ranks layers for a depth/budget pick, not a precise wall-clock prediction.
 
 | Parameter | Type | Default |
 |---|---|---|
@@ -373,7 +380,7 @@ Load suppression list and policy file from paths.
 
 ## `render_output`
 
-Render comparison result in the requested output format.
+Render comparison result in the requested output format. See :func:`abicheck.service_render.render_output`.
 
 | Parameter | Type | Default |
 |---|---|---|
@@ -489,6 +496,10 @@ Compare two ABI inputs and return the classified diff result.
 | `pack_policy_overrides` | `dict[Any, Any] \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 | `compile_context` | `CompileContext \| None` | `None` |
+| `depth` | `str \| None` | `None` |
+| *(keyword-only below)* | | |
+| `severity_preset` | `str \| None` | `None` |
+| `exit_code_scheme` | `str \| None` | `None` |
 
 **Returns:** `CompareResult`
 
@@ -550,7 +561,7 @@ Resolve *request* into one :class:`~abicheck.model.AbiSnapshot`.
 
 ## `run_scan`
 
-Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10).
+Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10). The single engine entry point behind the ``scan`` CLI and the MCP scan tool: resolves the deterministic level from *req* (as :func:`estimate_scan` does), drives the shared orchestration core (``scan_engine.run_scan_core``), and folds the projected ``estimate_scan`` cost in for projected-vs-actual comparison. ``--budget`` overflow surfaces as ``exit_code`` 5 (never shrinks scope).
 
 | Parameter | Type | Default |
 |---|---|---|
@@ -560,7 +571,7 @@ Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10).
 
 ## `run_scan_set`
 
-Execute an audit-mode, no-old-side scan over a *set* of artifacts (ADR-056, ``scan --artifact-set``).
+Execute an audit-mode, no-old-side scan over a *set* of artifacts (ADR-056, ``scan --artifact-set``). The plural sibling of :func:`run_scan`, sharing `ScanRequest` but never touching `run_scan`'s own code path -- `req.binaries` must have 2+ entries. `req.baseline` must be ``None``: a service-layer guard so a directly-constructed `ScanRequest(binaries= [...], baseline=old)` can't silently compare every member against the same baseline (ADR-056 D2 scopes `--artifact-set` to audit-only).
 
 | Parameter | Type | Default |
 |---|---|---|

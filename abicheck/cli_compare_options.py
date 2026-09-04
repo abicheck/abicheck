@@ -196,6 +196,89 @@ def _reject_set_input_flags(
         )
 
 
+def _reject_depth_for_set_inputs(ctx: click.Context) -> str | None:
+    """Resolve (or reject) an explicit ``--depth`` for a directory/package compare.
+
+    D1: ``--depth`` used to be rejected wholesale by
+    ``cli_resolve._reject_evidence_flags_for_set_inputs``, lumped in with
+    ``--sources``/``--build-info``/``--dump-manifest`` under one message
+    whose own reasoning ("the per-library fan-out does not collect inline
+    build/source evidence") never applied to every rung of the dial:
+
+    * ``binary`` requests *less* evidence than the fan-out already collects
+      by default (each pair is compared from its own binary plus whatever
+      header/compile-context evidence the release's own
+      ``-H``/``--include-dir`` already resolves) — there is nothing about an
+      explicit ``--depth binary`` assertion the fan-out can't provide, so it
+      is accepted here and forwarded to every pair (mirrors a single-pair
+      ``compare --depth binary``, which just clears header/build/source
+      evidence rather than requiring anything new). This used to only clear
+      *separately supplied* header/include inputs, inheriting the
+      single-pair path's own "floor, not a ceiling" gap for a
+      directory/package member that is itself an already-dumped JSON
+      snapshot carrying richer embedded evidence — see
+      ``docs/contribute/known-gaps.md``'s "``--depth`` is a floor for live
+      extraction, not a ceiling for a pre-built snapshot" entry for the
+      full history. That gap is now closed for both shapes at once: each
+      pair here is forwarded through ``service.run_compare`` the same way a
+      plain single-pair ``compare`` is, so ``classify_compare_pair``'s
+      ``abicheck.policy.depth_projection.project_snapshot_to_depth``
+      projection (applied uniformly, not specific to directory/package
+      operands) already caps what each pair's classification sees down to
+      the requested rung, regardless of whether the richer evidence came
+      from a fresh extraction or a pre-built snapshot on disk.
+    * ``headers`` is still rejected, but for a narrower, distinct reason than
+      build/source: the fan-out *does* resolve per-pair header evidence
+      (the same ``-H``/compile-context plumbing a plain directory `compare`
+      already threads through), so it isn't blocked by "no inline
+      build/source evidence". What's actually missing is depth's *floor*
+      enforcement (``workflows.artifact.execute.enforce_requested_depth`` —
+      failing the run when a pair didn't actually reach the requested rung)
+      — that has no home in the per-library fan-out today. Lumping it into
+      build/source's message would misstate why it's rejected, so it gets
+      its own message instead (D1).
+    * ``build``/``source`` are rejected for the original reason: they need
+      inline build/source evidence the release fan-out has no per-library
+      way to collect (the flags that would feed it — ``--sources``/
+      ``--build-info`` — are exactly what the caller's own
+      ``_EVIDENCE_SET_INPUT_FLAGS`` rejects).
+
+    Returns the accepted depth value (currently always ``"binary"`` or
+    ``None``) for the caller to forward to the fan-out; raises
+    ``click.UsageError`` for anything else explicitly requested. Lives here
+    (not next to its caller in ``cli_resolve.py``) purely because that
+    module has no line-count budget left (`architecture/debt.yaml`'s
+    ``no_growth`` baseline) — this module's own ``click``-only, no-abicheck-
+    import leaf contract (see the module docstring) fits it exactly as
+    well.
+    """
+    if ctx.get_parameter_source("depth") != click.core.ParameterSource.COMMANDLINE:
+        return None
+    depth: str | None = ctx.params.get("depth")
+    if depth is None:
+        return None
+    value = depth.lower()
+    if value == "binary":
+        return value
+    if value == "headers":
+        raise click.UsageError(
+            "--depth headers is not supported for directory/package (release) "
+            "comparisons: the per-library fan-out does not enforce a "
+            "per-library evidence floor (it already resolves per-pair header "
+            "evidence via -H/--include-dir, it just can't yet fail the run "
+            "when a pair falls short of the requested rung). Compare the "
+            "libraries individually (where --depth headers is honoured) to "
+            "require header-level evidence."
+        )
+    raise click.UsageError(
+        f"--depth {depth} is not supported for directory/package (release) "
+        "comparisons: the per-library fan-out does not collect inline "
+        "build/source evidence. Compare the libraries individually (or "
+        "pre-dump snapshots with `dump --sources/--build-info`) to collect "
+        "L3-L5 evidence."
+    )
+
+
 def _reject_bundle_facts_out_for_single_pair(bundle_facts_out: Path | None) -> None:
     """Reject ``--bundle-facts-out`` on a single-file/snapshot comparison.
 
@@ -235,10 +318,10 @@ def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
 
     Default ON for the human-facing formats (markdown/review/html), OFF for
     machine formats (json/sarif/junit) whose consumers match on the raw
-    mangled symbol. HTML demangles safely because ``html_report.
-    _symbol_cell``/``_changes_table`` always run ``demangle_text`` BEFORE
-    ``html.escape`` — never the reverse — so a demangled signature's own
-    ``<``/``>``/``&`` are escaped like any other text, not injected raw
+    mangled symbol. HTML demangles safely because ``report.render_html.
+    abbr_symbol_text``/``render_changes_table`` always run ``demangle_text``
+    BEFORE ``html.escape`` — never the reverse — so a demangled signature's
+    own ``<``/``>``/``&`` are escaped like any other text, not injected raw
     (this was previously assumed unsafe and HTML defaulted OFF; abicheck
     code-review report item 8). An explicit flag always wins over the
     per-format default.

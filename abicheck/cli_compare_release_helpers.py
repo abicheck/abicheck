@@ -21,6 +21,17 @@ release summary (JSON / Markdown / JUnit) live here, split out of
 :mod:`abicheck.cli_compare_release` to keep that module under the
 AI-readiness file-size limit. They are re-exported from
 ``cli_compare_release`` to preserve the public import surface.
+
+``GateOptions``/``resolve_release_gate_options``/``apply_release_gate_pack``/
+``_resolve_release_severity_config`` (ADR-064's release-fan-out gate
+resolution) live in :mod:`abicheck.policy.release_gate_options` instead --
+this package's own home for deciding gate/severity effect
+(``abicheck/policy/AGENTS.md``), and also outside the file-size no-growth
+budget this module is at. This (a ``frontends``-classified module) reaches
+them through :mod:`abicheck.workflows.gate`'s facade rather than importing
+``policy`` directly (``frontends -> policy`` is forbidden), and re-exports
+them here so every pre-existing import of them from this module keeps
+working.
 """
 
 from __future__ import annotations
@@ -29,7 +40,6 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import click
@@ -37,13 +47,21 @@ import click
 from .bundle import BundleDiffResult, render_bundle_findings_markdown
 from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
+from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 from .model import AbiSnapshot
+from .workflows.gate import (
+    GateOptions as GateOptions,  # re-exported, ADR-064
+    _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
+    apply_release_gate_pack as apply_release_gate_pack,  # re-exported, ADR-064
+    resolve_release_exit_decision_for_report,
+    resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
+)
 
 if TYPE_CHECKING:
     from .pack_application import PackApplication
-    from .policy_file import PolicyFile
     from .workflows.extraction import PackageExtractor
     from .workflows.gate import SeverityConfig
+    from .workflows.policy_file import PolicyFile
 
 
 _RELEASE_VERDICT_ORDER: dict[str, int] = {
@@ -59,6 +77,78 @@ _RELEASE_VERDICT_ORDER: dict[str, int] = {
     # in the same release, including a genuine crash.
     "not_comparable": 6,
 }
+
+
+def _release_global_verdict(bundle_result: BundleDiffResult | None, matrix_result: DiffResult | None) -> str:
+    """Release-global (bundle/probe-matrix) verdict alone -- unlike
+    ``worst_verdict``'s own fold of it, never masked by an unrelated
+    library's ``ERROR``/``not_comparable`` (Codex review, fresh evidence)."""
+    worst = "NO_CHANGE"
+    for v in (bundle_result.bundle_verdict.value if bundle_result else None, matrix_result.verdict.value if matrix_result else None):
+        if v is not None and _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(worst, 0):
+            worst = v
+    return worst
+
+
+#: The two release-level sentinels that are not real `Verdict` values and
+#: must never mask a *different*, already-completed compatibility result
+#: on `RunOutcome.compatibility`'s own independent axis (Codex review, fresh
+#: evidence): `worst_verdict`'s own `_RELEASE_VERDICT_ORDER` rollup ranks
+#: both above every real verdict by design (an operational failure/refusal
+#: dominates the release's own reported "verdict"), which is exactly the
+#: right behavior for the *reported* release verdict but the wrong one for
+#: `run_outcome.compatibility`, a genuinely separate axis.
+_RELEASE_OPERATIONAL_SENTINELS = frozenset({"ERROR", "not_comparable"})
+
+
+def _release_completed_compatibility_verdict(
+    library_results: list[dict[str, object]],
+    release_global_verdict: str,
+    *,
+    release_global_ran: bool,
+) -> str | None:
+    """The worst real `Verdict` among *library_results* + *release_global_
+    verdict*, with the two operational sentinels excluded -- for
+    ``run_outcome.compatibility``, never for the release's own reported
+    ``verdict`` (``worst_verdict`` stays exactly what it always was).
+
+    One `BREAKING` library plus a second, unrelated library's `ERROR` still
+    surfaces `compatibility: "BREAKING"` here, even though `worst_verdict`
+    itself (correctly) reports `"ERROR"` -- the real compatibility result
+    is not lost just because a different library's operational failure
+    dominates the release-level rollup.
+
+    Returns ``None`` -- never the floor ``"NO_CHANGE"`` -- when no real
+    compatibility result was actually observed at all (every library
+    result is one of the two operational sentinels, and no bundle/probe-
+    matrix comparison ran either): `run_outcome.compatibility` must stay
+    unknown, not falsely claim a clean completed comparison (Codex review,
+    fresh evidence). *release_global_ran* -- whether a bundle or matrix
+    comparison actually ran -- must be passed explicitly rather than
+    inferred from *release_global_verdict* alone: `_release_global_
+    verdict`'s own floor default is `"NO_CHANGE"`, indistinguishable from a
+    real completed no-change bundle/matrix result by string value alone.
+    """
+    worst: str | None = None
+    for entry in library_results:
+        v = str(entry.get("verdict", "NO_CHANGE"))
+        if v in _RELEASE_OPERATIONAL_SENTINELS:
+            continue
+        if worst is None or _RELEASE_VERDICT_ORDER.get(
+            v, 0
+        ) > _RELEASE_VERDICT_ORDER.get(worst, 0):
+            worst = v
+    if (
+        release_global_ran
+        and release_global_verdict not in _RELEASE_OPERATIONAL_SENTINELS
+        and (
+            worst is None
+            or _RELEASE_VERDICT_ORDER.get(release_global_verdict, 0)
+            > _RELEASE_VERDICT_ORDER.get(worst, 0)
+        )
+    ):
+        worst = release_global_verdict
+    return worst
 
 
 def _resolve_release_headers(
@@ -607,133 +697,16 @@ def _cleanup_temp_dirs(temp_dir_paths: list[str], keep_extracted: bool) -> None:
         click.echo(f"Extracted files kept in: {kept_paths}", err=True)
 
 
-def apply_release_gate_pack(
-    pack_application: PackApplication | None,
-    *,
-    release_exit_code_scheme: str | None,
-    severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
-) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
-    """Fold a selected ``kind: gate`` pack's contribution into the release
-    fan-out's own raw exit-code-scheme/severity inputs (CLI cleanup phase
-    two, "PR B" slice 2).
-
-    Returns ``(release_exit_code_scheme, severity_preset,
-    severity_abi_breaking, severity_potential_breaking,
-    severity_quality_issues, severity_addition)`` -- the exact six values
-    the caller already threads through every downstream severity/exit-code
-    resolution (``_resolve_release_severity_config``,
-    ``_compute_release_severity_exit_code``,
-    ``_fold_release_global_severity``, and the per-library JSON write), so
-    calling this **once**, before any of those, is what makes every one of
-    them agree with the pack -- mirroring how ``compare_release_cmd``
-    already reassigns ``release_exit_code_scheme``/``severity_preset``
-    once, early, for the ``.abicheck.yml``-only ``exit_code_scheme:
-    severity`` case just above this function's own call site.
-
-    The release fan-out has no ``ResolvedCompareConfig``-shaped object of
-    its own to fold onto the way :func:`~abicheck.pack_application.
-    apply_to_compare_config` does for a single-pair ``compare`` -- its
-    severity/exit-code-scheme resolution is a set of raw CLI-or-config
-    strings, re-derived at several call sites. So this mirrors that
-    function's *logic* against the release fan-out's raw-string shape
-    instead: a pack-supplied ``gate.severity.<category>`` overrides the
-    matching raw string (only ever reached when nothing more explicit --
-    ``--severity-<category>``/``.abicheck.yml`` -- already stated it,
-    since :func:`~abicheck.pack_application.pack_application` already
-    excludes a field an explicit source shadowed), and a pack-supplied
-    ``gate.exit_code_scheme`` overrides *that* raw string the same way --
-    with the identical "resolver's own already-decided ``auto`` answer,
-    not a re-derivation" fallback when only a severity level moved and no
-    scheme was directly assigned (see ``apply_to_compare_config``'s own
-    docstring for why re-deriving one here would be wrong: a severity
-    level *is* severity being configured, and the resolver's own
-    ``resolved_exit_code_scheme`` already reflects that while still
-    letting an explicit ``--exit-code-scheme``/``.abicheck.yml`` value
-    outrank it).
-
-    A no-op when *pack_application* is ``None`` (no ``--pack`` given) or
-    contributed neither field -- every pre-existing invocation reaches the
-    six inputs completely unchanged.
-    """
-    if pack_application is None:
-        return (
-            release_exit_code_scheme,
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
-        )
-    levels = pack_application.severity_levels
-    if levels:
-        severity_abi_breaking = levels.get("abi_breaking", severity_abi_breaking)
-        severity_potential_breaking = levels.get(
-            "potential_breaking", severity_potential_breaking
-        )
-        severity_quality_issues = levels.get("quality_issues", severity_quality_issues)
-        severity_addition = levels.get("addition", severity_addition)
-    scheme = pack_application.exit_code_scheme
-    if scheme is None and levels:
-        scheme = pack_application.resolved_exit_code_scheme
-    if scheme is not None:
-        release_exit_code_scheme = scheme
-    return (
-        release_exit_code_scheme,
-        severity_preset,
-        severity_abi_breaking,
-        severity_potential_breaking,
-        severity_quality_issues,
-        severity_addition,
-    )
-
-
-def _resolve_release_severity_config(
-    severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
-) -> SeverityConfig | None:
-    """Resolve the severity config, or None when no severity setting was in effect."""
-    if not any(
-        v is not None
-        for v in (
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
-        )
-    ):
-        return None
-    from .workflows.gate import resolve_severity_config
-
-    return resolve_severity_config(
-        severity_preset,
-        abi_breaking=severity_abi_breaking,
-        potential_breaking=severity_potential_breaking,
-        quality_issues=severity_quality_issues,
-        addition=severity_addition,
-    )
-
-
 def _compute_release_severity_exit_code(
     library_results: list[dict[str, object]],
-    severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
+    gate: GateOptions,
 ) -> int | None:
     """Compute the severity-aware exit code aggregated across all libraries.
 
     Returns ``None`` when no severity setting was in effect (callers
-    keep the legacy verdict-based exit). Otherwise returns the worst
-    :func:`compute_exit_code` over the per-library changes. Each library is
+    keep the legacy verdict-based exit) -- i.e. when ``gate.severity is
+    None``. Otherwise returns the worst :func:`compute_exit_code` over the
+    per-library changes. Each library is
     classified with *its own* ``DiffResult._effective_kind_sets()`` (kind-level
     ``--policy-file`` overrides) *and* its own ``policy``/``policy_file`` (the
     per-finding frozen-namespace floor — Codex review on #549: without
@@ -747,14 +720,7 @@ def _compute_release_severity_exit_code(
     entries are stripped; release-global bundle/matrix findings are folded in
     separately via :func:`_fold_release_global_severity`.
     """
-    resolved_config = _resolve_release_severity_config(
-        severity_preset,
-        severity_abi_breaking,
-        severity_potential_breaking,
-        severity_quality_issues,
-        severity_addition,
-    )
-    if resolved_config is None:
+    if gate.severity is None:
         return None
 
     from .workflows.gate import compute_exit_code
@@ -765,7 +731,7 @@ def _compute_release_severity_exit_code(
         if isinstance(diff, DiffResult):
             code = compute_exit_code(
                 diff.changes,
-                resolved_config,
+                gate.severity,
                 policy=diff.policy,
                 kind_sets=diff._effective_kind_sets(),
                 policy_file=diff.policy_file,
@@ -778,11 +744,7 @@ def _fold_release_global_severity(
     base_code: int,
     bundle_result: BundleDiffResult | None,
     matrix_result: DiffResult | None,
-    severity_preset: str | None,
-    severity_abi_breaking: str | None,
-    severity_potential_breaking: str | None,
-    severity_quality_issues: str | None,
-    severity_addition: str | None,
+    gate: GateOptions,
 ) -> int:
     """Fold release-global (bundle + matrix) findings into the severity exit.
 
@@ -791,15 +753,10 @@ def _fold_release_global_severity(
     computed later and update ``worst_verdict``. Without this, a release whose
     per-library diffs are clean but whose bundle/matrix analysis flags an
     error-level break would exit 0 under, e.g., the default preset. Returns the
-    worst of *base_code* and the bundle/matrix severity codes.
+    worst of *base_code* and the bundle/matrix severity codes. A no-op
+    (returns *base_code* unchanged) when ``gate.severity is None``.
     """
-    config = _resolve_release_severity_config(
-        severity_preset,
-        severity_abi_breaking,
-        severity_potential_breaking,
-        severity_quality_issues,
-        severity_addition,
-    )
+    config = gate.severity
     if config is None:
         return base_code
 
@@ -926,38 +883,31 @@ def _format_release_summary(
     new_map: dict[str, Path],
     warning_msgs: list[str],
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None = None,
-    bundle_result: BundleDiffResult | None = None,
-    matrix_result: DiffResult | None = None,
-    severity_config: SeverityConfig | None = None,
-    severity_exit_code: int | None = None,
-    contract_coverage_exit_contribution: int = 0,
-    contract_coverage_failure_count: int = 0,
+    bundle_result: BundleDiffResult | None = None, matrix_result: DiffResult | None = None,
+    severity_config: SeverityConfig | None = None, severity_exit_code: int | None = None,
+    contract_coverage_exit_contribution: int = 0, contract_coverage_failure_count: int = 0,
+    fail_on_removed: bool = False,
+    policy: str = DEFAULT_POLICY_PROFILE, policy_file_path: Path | None = None,
+    suppress: Path | None = None, pack_application: PackApplication | None = None,
+    scope_public_headers: bool = True,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
         return _format_release_junit(
-            diff_pairs,
-            matrix_result,
-            library_results,
-            severity_config=severity_config,
+            diff_pairs, matrix_result, library_results, severity_config=severity_config,
         )
     if fmt == "json":
         return _format_release_json(
-            worst_verdict,
-            old_dir,
-            new_dir,
-            library_results,
-            removed_keys,
-            added_keys,
-            old_map,
-            new_map,
-            warning_msgs,
-            bundle_result,
-            matrix_result,
+            worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
+            old_map, new_map, warning_msgs, bundle_result, matrix_result,
             severity_config=severity_config,
             severity_exit_code=severity_exit_code,
             contract_coverage_exit_contribution=contract_coverage_exit_contribution,
             contract_coverage_failure_count=contract_coverage_failure_count,
+            fail_on_removed=fail_on_removed,
+            policy=policy, policy_file_path=policy_file_path,
+            suppress=suppress, pack_application=pack_application,
+            scope_public_headers=scope_public_headers,
         )
     return _format_release_markdown(
         worst_verdict,
@@ -1033,8 +983,11 @@ def _format_release_json(
     matrix_result: DiffResult | None,
     severity_config: SeverityConfig | None = None,
     severity_exit_code: int | None = None,
-    contract_coverage_exit_contribution: int = 0,
-    contract_coverage_failure_count: int = 0,
+    contract_coverage_exit_contribution: int = 0, contract_coverage_failure_count: int = 0,
+    fail_on_removed: bool = False,
+    policy: str = DEFAULT_POLICY_PROFILE, policy_file_path: Path | None = None,
+    suppress: Path | None = None, pack_application: PackApplication | None = None,
+    scope_public_headers: bool = True,
 ) -> str:
     """Render the release summary as a JSON document."""
     changed_libraries = [
@@ -1042,6 +995,9 @@ def _format_release_json(
         for lib in library_results
         if str(lib.get("verdict")) not in ("NO_CHANGE", "ERROR")
     ]
+    from .report.not_comparable import run_outcome_dict_for_release
+    release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
+    exit_dict = resolve_release_exit_decision_for_report(worst_verdict, fail_on_removed, removed_keys, severity_exit_code, contract_coverage_exit_contribution, library_results, release_global_verdict).to_dict()
     summary: dict[str, object] = {
         "verdict": worst_verdict,
         "old_dir": str(old_dir),
@@ -1051,11 +1007,38 @@ def _format_release_json(
         "unmatched_old": [old_map[k].name for k in removed_keys],
         "unmatched_new": [new_map[k].name for k in added_keys],
         "warnings": warning_msgs,
+        "exit": exit_dict,
+        "run_outcome": run_outcome_dict_for_release(
+            _release_completed_compatibility_verdict(
+                library_results,
+                release_global_verdict,
+                release_global_ran=(
+                    bundle_result is not None or matrix_result is not None
+                ),
+            ),
+            exit_dict,
+        ),
     }
     # Severity config block (present only when a severity setting was in effect), mirroring
     # compare mode so downstream consumers (e.g. the PR-comment renderer) can see
     # which categories are gated to error and bucket findings accordingly.
     if severity_config is not None:
+        # Escalate to 4 (the abi_breaking ceiling) when the removed-required-
+        # library axis is what's driving run_outcome.gate above, mirroring
+        # buildsource/check_report.py's _escalate_removed_library_severity
+        # exactly (Codex review, fresh evidence): without this, a severity-
+        # scheme release whose ordinary findings contribute 0 emits
+        # severity.exit_code: 0 alongside run_outcome.gate: abi_breaking --
+        # the exact disagreement GateInfo.from_report_data's own
+        # contradiction check (this same PR) fails closed on, turning a
+        # legitimate --fail-on-removed-library escalation into an
+        # unavailable target for aggregate rather than preserving it.
+        removed_lib_contribution = exit_dict.get("removed_required_library_contribution")
+        escalated_exit_code = (
+            max(severity_exit_code or 0, 4)
+            if isinstance(removed_lib_contribution, int) and removed_lib_contribution != 0
+            else severity_exit_code
+        )
         summary["severity"] = {
             "config": {
                 "abi_breaking": severity_config.abi_breaking.value,
@@ -1063,7 +1046,7 @@ def _format_release_json(
                 "quality_issues": severity_config.quality_issues.value,
                 "addition": severity_config.addition.value,
             },
-            "exit_code": severity_exit_code,
+            "exit_code": escalated_exit_code,
         }
     # ADR-049 Phase 7's orthogonal contract-coverage axis (CLI-audit P1,
     # release/package parity), max()-aggregated across every library. Only
@@ -1134,41 +1117,21 @@ def _format_release_json(
     # `to_json` sidecar files, which reach `add_contract_context` on their
     # own -- so the release-fan-out parity this digest exists to provide
     # needs its own, explicit stamp here too. `_release_summary_effective_
-    # config_block` is the one shared helper both this function and
-    # `_write_release_summary_file` (`cli_compare_release.py`, the
-    # `--output-dir` sibling of this same primary-report gap) call, so the
-    # two release-level summary documents can never independently drift.
-    digest, fields = _release_summary_effective_config_block(severity_config)
+    # config_block` (`cli_compare_receipt.py` -- this module is at its
+    # `no_growth` line-count cap, P1/CLI-audit) is the one shared helper
+    # both this function and `_write_release_summary_file`
+    # (`cli_compare_release_matrix.py`) call, so the two summary documents
+    # can never independently drift.
+    from .cli_compare_receipt import _release_summary_effective_config_block
+
+    digest, fields = _release_summary_effective_config_block(
+        severity_config, policy=policy, policy_file_path=policy_file_path,
+        suppress=suppress, pack_application=pack_application,
+        scope_public_headers=scope_public_headers,
+    )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields
     return json.dumps(summary, indent=2)
-
-
-def _release_summary_effective_config_block(
-    severity_config: SeverityConfig | None,
-) -> tuple[str, dict[str, str]]:
-    """The ``(digest, fields)`` pair for a release-level *summary* document
-    (the primary release JSON and ``--output-dir``'s ``summary.json``
-    alike) -- narrower than a per-library sidecar's own digest, since no
-    ``CompatibilityEvaluationConfig``/``PolicyFile``/suppression object
-    exists at release-summary scope at all (see
-    ``effective_config_digest.py``'s own module docstring for the two
-    tiers and this known, documented gap), but real: two releases
-    resolving different severity configuration no longer collide on this
-    field. Computed from a lightweight stand-in (`SimpleNamespace`)
-    carrying only what this scope actually has -- *severity_config*.
-    """
-    from .effective_config_digest import (
-        effective_config_digest,
-        effective_config_fields,
-    )
-
-    ec_result = SimpleNamespace()
-    ec_scheme = "severity" if severity_config is not None else "legacy"
-    ec_fields = effective_config_fields(
-        ec_result, severity_config=severity_config, exit_code_scheme=ec_scheme
-    )
-    return effective_config_digest(ec_fields), ec_fields
 
 
 def _release_json_scope(scoped_libs: list[dict[str, object]]) -> dict[str, object]:
@@ -1204,6 +1167,8 @@ def _format_release_markdown(
     matrix_result: DiffResult | None,
 ) -> str:
     """Render the release summary as a Markdown document."""
+    from .cli_compare_receipt import _release_md_library_findings
+
     _VERDICT_EMOJI = {
         "NO_CHANGE": "✅",
         "COMPATIBLE": "✅",
@@ -1232,6 +1197,7 @@ def _format_release_markdown(
     lines += _release_md_libraries_table(library_results, _VERDICT_EMOJI)
     lines += _release_md_coverage_warnings(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
+    lines += _release_md_library_findings(library_results)
     lines += _release_md_bundle_findings(bundle_result)
     lines += _release_md_matrix_findings(matrix_result)
     return "\n".join(lines)

@@ -1,0 +1,3 @@
+### Fixed
+
+- **A typed `compare` caller selecting the severity exit-code scheme got a rendered JSON report that contradicted `CompareResult.exit_decision`.** `classify_compare_pair` resolved `exit_decision` from the request's `severity_preset`/`exit_code_scheme`, but `CompareResult` carried no way to pass that same resolved gate into `reporter.to_json`/`render_output` — their own `severity_config` argument defaults to `None`, silently recomputing a different, legacy-scheme exit. `CompareResult.severity_config` now carries the same resolved `SeverityConfig` `exit_decision` was scored under, so passing `severity_config=result.severity_config` into rendering agrees with `exit_decision`, matching the native `compare` CLI's own parity.

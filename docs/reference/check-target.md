@@ -118,6 +118,7 @@ caller-provided directory of the candidate build's own member binaries.
 | `candidate-build-output` | no | `''` | Forwarded to `resolve-baseline`'s `incompatible_evidence` check. |
 | `allow-new-target` | no | `false` | Forwarded to `resolve-baseline`'s `allow-new-target` — `false` means a target absent from an otherwise-resolved baseline-set always fails `ambiguous`; `true` opts this check into the `new_target` outcome instead, an advisory, non-fatal lifecycle state for a target checked before it has ever been published in a baseline-set (e.g. a new library's first release). Only meaningful for `kind: target`; rejected outright for `kind: bundle` (a bundle comparison needs one coherent release where every member already coexisted). Pair with `baseline-required: false`, or a required-coverage gate would still block on the target's first appearance. |
 | `requested-depth` | yes | — | `binary` \| `headers` \| `build` \| `source` — for `kind: bundle`, only `binary` is supported (`headers`/`build`/`source` are all rejected: a bundle's baseline is always raw binaries with no historical header/build/source evidence staged per member). |
+| `explicit-id` | no | `''` | (G42 "Explicit check identifiers") This check's `checks[].id`, if the project declared one — folded into `check-id`'s `~<explicit_id>` tail so two checks sharing (`name`, `profile`, `baseline-channel`, `requested-depth`) but declaring different analysis method/policy/assurance each produce a distinct, non-colliding `check-id`/report. Omit (default) for the pre-G42, unqualified `check-id` shape. |
 | `gate-mode` | no | `local` | `local` \| `deferred` \| `advisory`. |
 | `project` | no | `${{ github.repository }}` | Recorded in the report envelope. |
 | `head-sha` | no | `${{ github.sha }}` | Recorded in the report envelope. |
@@ -134,7 +135,7 @@ caller-provided directory of the candidate build's own member binaries.
 | Output | Meaning |
 |--------|---------|
 | `outcome` | The `resolve-baseline` outcome, or `skipped` when `baseline-channel: none`. |
-| `check-id` | `target@profile#baseline_channel@requested_depth` — always includes the depth suffix, even in the common single-depth case (ADR-047 §7). |
+| `check-id` | `target@profile#baseline_channel@requested_depth` — always includes the depth suffix, even in the common single-depth case (ADR-047 §7). Gains a `~<explicit_id>` tail when `explicit-id` is set (G42), e.g. `target@profile#baseline_channel@requested_depth~my-id`. |
 | `verdict` | The legacy `verdict` field: one of the five `Verdict` values, `ERROR` (operational failure), `NO_BASELINE` (bootstrap pass), or `NEW_TARGET` (`allow-new-target: true` pass) — the latter two are deliberately not `Verdict` members, never a compatibility verdict. |
 | `compatibility-verdict` | Mirrors `verdict`'s casing, empty when unavailable (an operational-failure or bootstrap report). |
 | `policy-gate-decision` | `pass` or `fail` — this check's own real gate decision, computed before any `gate-mode: advisory` neutralization. |

@@ -1,3 +1,13 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: advanced
+depends_on:
+  - abicheck/environment_matrix.py
+lifecycle: active
+generated: false
+---
 # Environment & Toolchain Drift
 
 Two builds of the *same source* can differ in ABI-relevant ways because the
@@ -31,7 +41,8 @@ longer loads on older distros.
   (`GLIBC_2.28 → GLIBC_2.34`) and **which imported symbols pulled it up**.
   A floor raised only by `__libc_start_main` is a pure relink artifact; a
   floor raised by a real API symbol (say `pthread_cond_clockwait`) means the
-  code genuinely depends on the newer runtime.
+  code genuinely depends on the newer runtime. The fixture for exactly this
+  relink drift is [case170](../reference/examples/case170_env_runtime_floor_raised.md).
 - **`time64_abi_changed`** — the 32-bit time64/LFS flip: `time_t`/`off_t`-family
   typedefs resized together (`_TIME_BITS=64` / `_FILE_OFFSET_BITS=64`,
   glibc ≥ 2.34). This one is `BREAKING` — every public function or struct
@@ -156,3 +167,7 @@ Compiler and standard-library drift is covered by `toolchain_version_changed`
 abicheck parses ELF in pure Python (pyelftools), so its *analysis results* do
 not depend on the host's installed binutils version — unlike tools that shell
 out to `readelf` or link against elfutils.
+
+---
+
+**Ladder:** ← [Dependency & Runtime Floors](dependency-floors.md) · Step 8 · At Scale · [Packages and Consumers](packages-and-consumers.md) →

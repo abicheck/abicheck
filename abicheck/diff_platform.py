@@ -19,7 +19,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from .binary_utils import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .detector_registry import registry
@@ -69,13 +68,14 @@ from .model import (
     is_non_abi_surface_type,
     stdlib_namespaces_excluded,
 )
+from .model.binary_naming import strip_vendor_hash
 from .model.elf_facts import SymbolType
 from .name_classification import RTTI_DATA_PREFIXES
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Set as AbstractSet
 
-    from .dwarf_metadata import FieldInfo, StructLayout
+    from .model.dwarf_facts import FieldInfo, StructLayout
 
 
 def _pe_export_id(e: Any) -> str:
@@ -98,7 +98,7 @@ def _diff_elf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         detect_version_node_changes,
         detect_version_script_missing,
     )
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -127,7 +127,7 @@ def _diff_elf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 )
 def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """PE-specific detectors for Windows DLL ABI changes."""
-    from .pe_metadata import PeMetadata
+    from .model.pe_facts import PeMetadata
 
     o: PeMetadata = getattr(old, "pe", None) or PeMetadata()
     n: PeMetadata = getattr(new, "pe", None) or PeMetadata()
@@ -711,7 +711,7 @@ def _diff_macho_reexports(o: Any, n: Any) -> list[Change]:
 )
 def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Mach-O-specific detectors for macOS dylib ABI changes."""
-    from .macho_metadata import MachoMetadata
+    from .model.macho_facts import MachoMetadata
 
     o: MachoMetadata = getattr(old, "macho", None) or MachoMetadata()
     n: MachoMetadata = getattr(new, "macho", None) or MachoMetadata()
@@ -884,7 +884,7 @@ def _diff_macho_weak_exports(o: Any, n: Any) -> list[Change]:
 @registry.detector("tls_checks")
 def _diff_tls_symbols(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect size changes for exported TLS (thread-local) symbols."""
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -920,7 +920,7 @@ def _diff_protected_visibility(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
     Function DEFAULT↔PROTECTED is already handled by func_visibility_protected_changed.
     This detector covers data/object symbols where the change can break copy relocations.
     """
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -966,7 +966,7 @@ def _diff_symbol_version_aliases(old: AbiSnapshot, new: AbiSnapshot) -> list[Cha
     without retaining the old version as a non-default alias, old binaries
     requesting the previous default may fail.
     """
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -1156,7 +1156,7 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     may get different mangled names or versions even though the class layout
     hasn't changed. This breaks cross-DSO RTTI and exception handling.
     """
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -1285,7 +1285,7 @@ def _diff_abi_surface(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     A large increase in exported symbols may indicate a lost -fvisibility=hidden.
     A large decrease may indicate an overly aggressive version script.
     """
-    from .elf_metadata import ElfMetadata
+    from .model.elf_facts import ElfMetadata
 
     o: ElfMetadata = getattr(old, "elf", None) or ElfMetadata()
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
@@ -1338,7 +1338,7 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     import logging as _logging
 
-    from .dwarf_metadata import DwarfMetadata
+    from .model.dwarf_facts import DwarfMetadata
 
     _log = _logging.getLogger(__name__)
 
@@ -1695,7 +1695,7 @@ def _existing_field_changes(
 
 
 def _diff_enum_layouts(o: object, n: object) -> list[Change]:
-    from .dwarf_metadata import EnumInfo
+    from .model.dwarf_facts import EnumInfo
 
     old_enums: dict[str, EnumInfo] = getattr(o, "enums", {})
     new_enums: dict[str, EnumInfo] = getattr(n, "enums", {})
@@ -1860,9 +1860,8 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
                 # binding-scoped suppression rule must see this too, or it
                 # can never match here even though f_old already carries the
                 # captured binding.
-                symbol_binding=(
-                    f_old.elf_binding.value if f_old.elf_binding else None
-                ),
+                symbol_binding=(f_old.elf_binding.value if f_old.elf_binding else None),
+                entity_id=f_old.entity_id or f_new.entity_id,
             )
         )
 
