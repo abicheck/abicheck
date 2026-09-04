@@ -972,15 +972,20 @@ Sections:
    each: SONAME skew (`case84`), intra-bundle dependency removed
    (`case90`), intra-bundle signature drift (`case91`), provider changed
    (`case92`), manifest drift (`case93`).
-5. **Declaring what the bundle promises** — `--manifest` with its three
+5. **Declaring what the bundle promises** — `--instantiation-manifest`
+   (renamed from `--manifest`, CLI cleanup phase two) with its three
    entry shapes (`pattern:`, `template:` + `instantiations:`, `symbol:`),
-   with the template shape deferred to B7; `--bundle-system-providers`
-   for libc/libstdc++-class providers; `--bundle-cohort`.
+   with the template shape deferred to B7; `.abicheck.yml`'s `bundle:`
+   block (`system_providers:` for libc/libstdc++-class providers,
+   `cohorts:`) — CLI cleanup phase two demoted both off the CLI, replacing
+   `--bundle-system-providers`/`--bundle-cohort`.
 6. **Comparing against stored facts** — capture with
-   `--bundle-facts-out` on one release, compare a later release with
-   `--old-bundle-facts` without re-opening the old binaries; per-library
-   header roots and compile contexts for products whose libraries share
-   one include tree.
+   `--bundle-facts-out` on one release, compare a later release by pointing
+   `compare` at the stored `.bundlefacts.json` directly (OLD_INPUT is
+   auto-classified as a stored BundleFacts document — no separate
+   `--old-bundle-facts` flag) without re-opening the old binaries;
+   per-library header roots and compile contexts for products whose
+   libraries share one include tree.
 7. **Fan-out and fan-in** — one check per target, `aggregate` folding
    the reports into one gate. `aggregate` needs to know the expected
    target set: `--run-plan plan.json` from `project plan` (the
@@ -993,8 +998,8 @@ Sections:
    depth only in the declarative topology (README's migration blockers,
    linked, not copied).
 
-Runs: the directory compare; a `--manifest` compare; the
-`--bundle-facts-out` / `--old-bundle-facts` pair; `abicheck aggregate
+Runs: the directory compare; a `--instantiation-manifest` compare; the
+`--bundle-facts-out` capture / stored-BundleFacts compare pair; `abicheck aggregate
 reports/ --run-plan plan.json` (and the `--discovered-only` form once,
 labelled as the opt-out). Cases: 84, 90–93 — the bundle cases only.
 `case151` (a single-build audit corroborating the header AST against the
@@ -1023,7 +1028,7 @@ Sections:
    implicit instantiations live in the *consumer's* binary; explicit
    instantiations are the only symbols the library owns (Part 4 §3 in one
    paragraph, link).
-2. **The contract is the instantiation matrix** — the `--manifest`
+2. **The contract is the instantiation matrix** — the `--instantiation-manifest`
    `template:` + `instantiations:` shape; dozens of entries describing
    thousands of mangled symbols; bootstrapping the manifest from a dump
    (link `use/multi-binary.md` §Bootstrapping). Cases: 17, 79.
@@ -1051,7 +1056,7 @@ Sections:
    `static-and-header-only.md` (Tier 3) for the shape without a binary;
    `case191` for a header-graph field-type change.
 
-Runs: the seeded `--dry-run` scan; a `--manifest` compare; a
+Runs: the seeded `--dry-run` scan; a `--instantiation-manifest` compare; a
 `--dump-manifest` dump. Cases: 17, 77, 79, 85, 87, 122, 191. Links, not
 restatements: backend capabilities (reference), performance numbers
 (contribute), manifest schema (`use/multi-binary.md`). Done when: the
