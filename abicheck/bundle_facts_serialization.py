@@ -303,7 +303,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     return BundleFacts(
         schema_version=schema_version,
         variant_fingerprint=validated_variant_fingerprint(
-            d.get("variant_fingerprint"), default=DEFAULT_VARIANT_FINGERPRINT
+            d.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
         ),
         per_library_snapshots={
             name: snapshot_from_dict(sd) for name, sd in raw_snapshots.items()

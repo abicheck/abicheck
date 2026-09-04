@@ -265,6 +265,37 @@ class TestCompareStoredBundleFactsPair:
         with pytest.raises(ValueError, match="variant_fingerprint"):
             compare_stored_bundle_facts_pair(old_path, new_path)
 
+    def test_explicit_null_variant_fingerprint_is_refused_not_defaulted(
+        self, tmp_path: Path
+    ) -> None:
+        """An explicit ``\"variant_fingerprint\": null`` must be rejected,
+        not silently treated as an absent key and defaulted -- prior to
+        this fix the loader's ``d.get(\"variant_fingerprint\")`` call (no
+        default arg) returned ``None`` for both cases alike, so a malformed
+        document naming an explicit null could compare as the default
+        variant against a genuinely coordinate-less document, bypassing
+        the stored-pair identity check entirely (Codex review, PR #1060,
+        round 9)."""
+        import json
+
+        old_path = tmp_path / "old.bundlefacts.json"
+        old_path.write_text(
+            json.dumps(
+                {
+                    "artifact_type": "abicheck.bundle-facts",
+                    "schema_version": 2,
+                    "per_library_snapshots": {},
+                    "variant_fingerprint": None,
+                }
+            )
+        )
+        new_path = self._facts_path(
+            tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
+        )
+
+        with pytest.raises(ValueError, match="variant_fingerprint"):
+            compare_stored_bundle_facts_pair(old_path, new_path)
+
     def test_new_only_manifest_is_not_silently_discarded(self, tmp_path: Path) -> None:
         """When no explicit --manifest is given and only the NEW document
         captured one, it must still be consulted -- compare_bundle_from_

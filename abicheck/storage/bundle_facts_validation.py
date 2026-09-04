@@ -239,7 +239,7 @@ def validated_alias_map(raw: object) -> dict[str, tuple[str, ...]]:
     return aliases
 
 
-def validated_variant_fingerprint(raw: object, *, default: str) -> str:
+def validated_variant_fingerprint(raw: object) -> str:
     """Validate a persisted top-level ``variant_fingerprint`` field.
 
     Rejects a non-string value (Codex review, PR #1060, round 8) instead of
@@ -248,16 +248,23 @@ def validated_variant_fingerprint(raw: object, *, default: str) -> str:
     "1"`` both loaded as the identical string ``"1"``, so
     ``compare_stored_bundle_facts_pair()``'s own mismatch/empty-fingerprint
     checks (which compare this field for identity) could not tell a real
-    match from a coincidental one. *raw* is ``None`` when the key was absent
-    from the document entirely (``dict.get`` with no default, as every other
-    caller here passes it) -- that case returns *default* unchanged, exactly
-    :data:`~abicheck.bundle_facts.DEFAULT_VARIANT_FINGERPRINT`'s prior
-    fallback; a present-but-wrong-typed value is rejected outright rather
-    than coerced. *default* is a parameter, not imported, so this leaf
-    module's own "no ``bundle_facts.py`` import" contract (this module's own
-    docstring) stays intact."""
-    if raw is None:
-        return default
+    match from a coincidental one.
+
+    Deliberately no ``default``/``None``-means-absent special case (Codex
+    review, PR #1060, round 9): an earlier version of this function treated
+    ``raw is None`` as "key absent, use the default", but the caller's own
+    ``d.get("variant_fingerprint")`` (no default arg) returns ``None`` for
+    an *explicit* JSON ``null`` too -- collapsing "never captured" and "a
+    malformed document naming an explicit null" onto the same fallback, the
+    same class of bug the non-string fix just above closed for an int/list/
+    dict value. The caller now passes ``d.get("variant_fingerprint",
+    default)`` instead (mirroring ``validated_alias_map``'s/
+    ``validated_filename_map``'s own identical two-arg ``.get`` call
+    immediately below): a truly absent key resolves to *default* -- a
+    valid string -- before this function ever sees it, while an explicit
+    ``null`` reaches this function as ``None`` and is rejected by the
+    ``isinstance`` check like any other wrong-typed value, never silently
+    defaulted."""
     if not isinstance(raw, str):
         raise ValueError(
             f"bundle facts: 'variant_fingerprint' must be a string, got {raw!r}"
