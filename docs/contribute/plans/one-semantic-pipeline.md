@@ -562,14 +562,19 @@ all nineteen audited case-(b) fields (zero findings) plus the six
 detector-unconsumed snapshot-level fields (nothing to audit). 5B's own
 removal gate ("every detector... for at least one full fact family") is
 satisfied for `bases`/`virtual_bases`/`is_va_list`/`is_const`/
-`is_volatile`/`is_mutable`/`is_restrict`/`access` (fully gated) and
-documented-open for `vtable`/`vptr_offset_bits`'s own residual
-`TYPE_VTABLE_CHANGED` cluster (`diff_types_vtable._vtable_transition_is_
-evidenced`/`_vtable_transition_rests_on_unresolved_evidence` still read
-`vtable_fact`/`vptr_offset_bits_fact` via the collapsed
-`resolved_fact_value`, not a direct status branch — see the third PR's own
-account above) and the seven `fact_provenance`-gated fields — the
-sub-phase's remaining work is that one cluster, not a further audit sweep.
+`is_volatile`/`is_mutable`/`is_restrict`/`access`/`vptr_offset_bits` (fully
+gated — `vptr_offset_bits_fact`'s only detector consumer is `diff_layout.
+_check_vptr_introduced`'s own direct-status pre-check, above) and
+documented-open for `vtable`'s own residual `TYPE_VTABLE_CHANGED` cluster
+(`diff_types_vtable._vtable_transition_is_evidenced`/
+`_vtable_transition_rests_on_unresolved_evidence` still read `vtable_fact`
+via the collapsed `resolved_fact_value`, not a direct status branch — see
+the third PR's own account above; this cluster deliberately never consults
+`vptr_offset_bits_fact` at all — see that module's own "NOT consulted
+here" comment, so `vptr_offset_bits` carries no residual gap through this
+cluster) and the seven `fact_provenance`-gated fields — the sub-phase's
+remaining work is that one cluster (`vtable` only), not a further audit
+sweep.
 
 **Known gap surfaced by review (Codex security review, this PR, not
 closed): a "decline rather than fabricate" evidence gate can be an

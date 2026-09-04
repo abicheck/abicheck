@@ -68,10 +68,14 @@ that function consult this cluster's own evidenced/not-evidenced verdict
 before deferring) needs an import this leaf module's own no-cycle
 constraint (above) does not allow without further restructuring. Recorded
 here, not silently left implicit, per this repo's own "say so explicitly
-and record the gap" convention -- the sub-phase's own "vtable/
-vptr_offset_bits, all five fields gated" removal gate is therefore still
-open for this specific cluster, even though the two sibling detectors it
-correlates with are now gated.
+and record the gap" convention -- the sub-phase's own "vtable... all five
+fields gated" removal gate is therefore still open for ``vtable`` through
+this specific cluster, even though the two sibling detectors it correlates
+with are now gated (Codex review, fresh evidence: this cluster never reads
+``vptr_offset_bits``/``vptr_offset_bits_fact`` at all -- see the "NOT
+consulted here" comment in the body below -- so ``vptr_offset_bits``
+itself carries no residual gap through this cluster; it is fully gated via
+``diff_layout._check_vptr_introduced``'s own direct-status pre-check).
 """
 
 from __future__ import annotations
