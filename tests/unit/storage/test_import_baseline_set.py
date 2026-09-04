@@ -18,7 +18,7 @@ from abicheck.storage.import_baseline_set import (
     export_baseline_set,
     import_baseline_set as _import_baseline_set,
 )
-from abicheck.storage.package import InMemoryObjectStore
+from abicheck.storage.package import ArtifactRef, InMemoryObjectStore, PackageManifest
 
 
 def import_baseline_set(*args: Any, **kwargs: Any) -> Any:
@@ -137,7 +137,11 @@ class TestImportBaselineSet:
         manifest = import_baseline_set(doc, snapshots, store=store)
         assert len(manifest.artifact_refs) == 2
         artifact_ids = {a.artifact_id for a in manifest.artifact_refs}
-        assert artifact_ids.isdisjoint({"libFoo.so", "libfoo.so"})
+        # `resolve_ref_ids`'s own membership-independent design: the
+        # already-canonical spelling (`libfoo.so`) keeps its literal id,
+        # only the non-canonical one (`libFoo.so`) goes opaque.
+        assert "libFoo.so" not in artifact_ids
+        assert "libfoo.so" in artifact_ids
         _metadata, exported_snapshots = export_baseline_set(manifest, store=store)
         assert set(exported_snapshots) == {"libFoo.so", "libfoo.so"}
 
@@ -291,6 +295,33 @@ class TestImportBaselineSet:
         manifest = import_baseline_set(doc, _snapshot_documents(), store=store)
         with pytest.raises(ValueError, match="no variant"):
             export_baseline_set(manifest, store=store, variant_id="does-not-exist")
+
+    def test_export_rejects_duplicate_recovered_library_names(self) -> None:
+        """The same defensive check as `import_bundle_facts.export_
+        bundle_facts`'s own duplicate-library-name finding (Codex review,
+        fresh evidence): `PackageManifest` enforces unique `artifact_id`s
+        but not unique recovered `native_identity['library_name']`
+        values."""
+        doc = _manifest_document()
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(doc, _snapshot_documents(), store=store)
+        duplicated_artifacts = tuple(
+            ArtifactRef(
+                artifact_id=artifact.artifact_id,
+                variant_id=artifact.variant_id,
+                kind=artifact.kind,
+                native_identity={"library_name": "liba.so"},
+                sections=artifact.sections,
+            )
+            for artifact in manifest.artifact_refs
+        )
+        doctored = PackageManifest(
+            versions=manifest.versions,
+            variant_refs=manifest.variant_refs,
+            artifact_refs=duplicated_artifacts,
+        )
+        with pytest.raises(ValueError, match="more than one artifact"):
+            export_baseline_set(doctored, store=store)
 
     def test_export_rejects_a_variant_with_no_metadata_section(self) -> None:
         from abicheck.storage.import_v1 import import_legacy_snapshot

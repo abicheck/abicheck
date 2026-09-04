@@ -20,7 +20,7 @@ from abicheck.storage.import_bundle_facts import (
     export_bundle_facts,
     import_bundle_facts as _import_bundle_facts,
 )
-from abicheck.storage.package import InMemoryObjectStore
+from abicheck.storage.package import ArtifactRef, InMemoryObjectStore, PackageManifest
 
 
 def import_bundle_facts(*args: Any, **kwargs: Any) -> Any:
@@ -99,9 +99,12 @@ class TestImportBundleFacts:
     def test_case_colliding_library_names_get_opaque_artifact_ids(self) -> None:
         """`libFoo.so`/`libfoo.so` are two distinct, valid libraries to
         `BundleFacts` and its canonical reader, but would collide as
-        `ArtifactRef` ids on a case-insensitive filesystem -- both fall
-        back to safe, opaque ids instead of one failing to import at all
-        (Codex review)."""
+        `ArtifactRef` ids on a case-insensitive filesystem -- the import
+        still succeeds (rather than failing outright) by giving the
+        non-canonical spelling (`libFoo.so`) an opaque id, while the
+        already-canonical one (`libfoo.so`) keeps its own literal spelling
+        (`resolve_ref_ids`'s own membership-independent design; Codex
+        review)."""
         doc = _bundle_document(
             per_library_snapshots={
                 "libFoo.so": snapshot_to_dict(
@@ -116,7 +119,8 @@ class TestImportBundleFacts:
         manifest = import_bundle_facts(doc, store=store)
         assert len(manifest.artifact_refs) == 2
         artifact_ids = {a.artifact_id for a in manifest.artifact_refs}
-        assert artifact_ids.isdisjoint({"libFoo.so", "libfoo.so"})
+        assert "libFoo.so" not in artifact_ids
+        assert "libfoo.so" in artifact_ids
         roundtrip = export_bundle_facts(manifest, store=store)
         assert set(roundtrip["per_library_snapshots"]) == {"libFoo.so", "libfoo.so"}
 
@@ -374,9 +378,37 @@ class TestImportBundleFacts:
         with pytest.raises(ValueError, match="no variant"):
             export_bundle_facts(manifest, store=store, variant_id="does-not-exist")
 
+    def test_export_rejects_duplicate_recovered_library_names(self) -> None:
+        """`PackageManifest` enforces unique `artifact_id`s but not unique
+        recovered `native_identity['library_name']` values -- a manifest
+        built or loaded some other way (not `import_bundle_facts` itself)
+        can still carry two artifacts that recover the same library name.
+        Export must raise rather than silently dropping one artifact's
+        snapshot via a dict-key overwrite (Codex review, fresh evidence)."""
+        doc = _bundle_document()
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        duplicated_artifacts = tuple(
+            ArtifactRef(
+                artifact_id=artifact.artifact_id,
+                variant_id=artifact.variant_id,
+                kind=artifact.kind,
+                native_identity={"library_name": "liba.so"},
+                sections=artifact.sections,
+            )
+            for artifact in manifest.artifact_refs
+        )
+        doctored = PackageManifest(
+            versions=manifest.versions,
+            variant_refs=manifest.variant_refs,
+            artifact_refs=duplicated_artifacts,
+        )
+        with pytest.raises(ValueError, match="more than one artifact"):
+            export_bundle_facts(doctored, store=store)
+
     def test_export_rejects_a_variant_with_no_composition_section(self) -> None:
         from abicheck.storage.import_v1 import import_legacy_snapshot
-        from abicheck.storage.package import PackageManifest, VariantRef
+        from abicheck.storage.package import VariantRef
 
         store = InMemoryObjectStore()
         single = import_legacy_snapshot(

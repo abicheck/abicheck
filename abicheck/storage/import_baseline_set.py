@@ -435,6 +435,24 @@ def export_baseline_set(
         # id, not the real library name -- `native_identity` is where
         # `import_baseline_set` stashed the real one.
         library = artifact.native_identity.get(_LIBRARY_NAME_KEY, artifact_id)
+        if library in snapshot_documents:
+            # `import_baseline_set` itself can never produce this --
+            # `resolve_ref_ids` is keyed by the manifest's own,
+            # already-validated-unique library names -- but
+            # `PackageManifest` only enforces unique `artifact_id`s, not
+            # unique recovered `native_identity[_LIBRARY_NAME_KEY]` values,
+            # so a manifest built or loaded some other way can still carry
+            # two artifacts that recover the same library name. A plain
+            # dict assignment would silently drop one artifact's snapshot
+            # rather than surfacing the ambiguity (Codex review, fresh
+            # evidence, the same finding already fixed in
+            # `import_bundle_facts.export_bundle_facts`).
+            raise ValueError(
+                f"variant {variant_id!r} has more than one artifact "
+                f"recovering library name {library!r} -- this manifest "
+                "was not produced by import_baseline_set, or was "
+                "hand-edited"
+            )
         snapshot_documents[library] = export_legacy_snapshot(
             artifact, store=store, source_schema_version=source_schema_version
         )

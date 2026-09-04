@@ -21,12 +21,22 @@ class TestResolveRefIds:
         result = resolve_ref_ids(["liba.so", "libb.so"], opaque_prefix="lib")
         assert result == {"liba.so": "liba.so", "libb.so": "libb.so"}
 
-    def test_case_colliding_names_all_fall_back_to_opaque_ids(self) -> None:
+    def test_only_the_non_canonical_member_of_a_colliding_pair_goes_opaque(
+        self,
+    ) -> None:
+        """Exactly one string per case/normalization fold class is its own
+        canonical fold (`libfoo.so`, already lowercase); that one keeps its
+        literal spelling unconditionally, and only the other, non-canonical
+        spelling (`libFoo.so`) falls back to an opaque id -- resolving the
+        pair's own membership-dependence the whole-set-fallback design (and
+        its per-call-collision-detection successor) both still had (Codex
+        review, fresh evidence: see `resolve_ref_ids`'s own docstring for
+        the two prior falsified designs)."""
         result = resolve_ref_ids(["libFoo.so", "libfoo.so"], opaque_prefix="lib")
-        assert set(result) == {"libFoo.so", "libfoo.so"}
+        assert result["libfoo.so"] == "libfoo.so"
         assert result["libFoo.so"] != "libFoo.so"
-        assert result["libfoo.so"] != "libfoo.so"
-        # Every fallback id is itself safe and mutually non-colliding.
+        # The fallback id is itself safe and doesn't collide with the
+        # literal one it sits alongside.
         ids = list(result.values())
         assert len(set(ids)) == len(ids)
         for ref_id in ids:
@@ -37,35 +47,36 @@ class TestResolveRefIds:
         self,
     ) -> None:
         """A colliding pair's own opaque fallback must not touch a third,
-        unrelated, safe name's resolution -- an earlier version fell the
-        *whole* set back to opaque ids, which meant adding one new
-        colliding library anywhere in a bundle silently reassigned a
-        completely unrelated, already-safe library's own `artifact_id`,
-        breaking release-to-release matching keyed by that id (Codex
-        review, fresh evidence: this is the concrete "a stable library
-        gets reidentified when an unrelated sibling is added" scenario)."""
+        unrelated, safe name's resolution."""
         result = resolve_ref_ids(
             ["libFoo.so", "libfoo.so", "libbar.so"], opaque_prefix="lib"
         )
         assert result["libbar.so"] == "libbar.so"
+        assert result["libfoo.so"] == "libfoo.so"
         assert result["libFoo.so"] != "libFoo.so"
-        assert result["libfoo.so"] != "libfoo.so"
 
-    def test_adding_a_colliding_sibling_does_not_change_an_existing_ids_resolution(
+    def test_adding_a_colliding_sibling_never_changes_any_existing_resolution(
         self,
     ) -> None:
         """The exact scenario named by the Codex finding: `libfoo.so`
         alone resolves to its own literal spelling; adding a
-        case-colliding `LIBFOO.SO` must not change that resolution for any
-        *other* member of the set (here, none -- the two-name case is
-        covered directly by verifying `libfoo.so` keeps its own previous
-        resolution across both calls, holding all libraries besides the
-        newly-added one fixed)."""
+        case-colliding `LIBFOO.SO` must not change that resolution for
+        `libfoo.so` itself, nor for any other member of the set."""
         before = resolve_ref_ids(["libfoo.so", "libbar.so"], opaque_prefix="lib")
         after = resolve_ref_ids(
             ["libfoo.so", "libbar.so", "LIBFOO.SO"], opaque_prefix="lib"
         )
+        assert after["libfoo.so"] == before["libfoo.so"]
         assert after["libbar.so"] == before["libbar.so"]
+
+    def test_a_non_canonical_but_otherwise_safe_name_alone_goes_opaque(self) -> None:
+        """`resolve_ref_ids` decides purely from each name's own spelling,
+        never from what else is in the call -- a non-canonical name (here,
+        with no colliding sibling at all) still gets an opaque id, since
+        its own canonical fold (`"libfoo.so"`) is a *different* string it
+        does not itself spell."""
+        result = resolve_ref_ids(["libFoo.so"], opaque_prefix="lib")
+        assert result["libFoo.so"] != "libFoo.so"
 
     def test_an_unsafe_name_falls_only_itself_back_to_an_opaque_id(self) -> None:
         """An unrelated, safe, non-colliding name's own resolution never

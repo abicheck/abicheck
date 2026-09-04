@@ -558,6 +558,22 @@ def export_bundle_facts(
         # id, not the real library name -- `native_identity` is where
         # `import_bundle_facts` stashed the real one.
         library_name = artifact.native_identity.get(_LIBRARY_NAME_KEY, artifact_id)
+        if library_name in per_library_snapshots:
+            # `import_bundle_facts` itself can never produce this --
+            # `resolve_ref_ids` is keyed by the original, already-unique
+            # `per_library_snapshots` dict keys -- but `PackageManifest`
+            # only enforces unique `artifact_id`s, not unique recovered
+            # `native_identity[_LIBRARY_NAME_KEY]` values, so a manifest
+            # built or loaded some other way can still carry two artifacts
+            # that recover the same library name. A plain dict assignment
+            # would silently drop one artifact's snapshot rather than
+            # surfacing the ambiguity (Codex review, fresh evidence).
+            raise ValueError(
+                f"variant {variant_id!r} has more than one artifact "
+                f"recovering library name {library_name!r} -- this "
+                "manifest was not produced by import_bundle_facts, or was "
+                "hand-edited"
+            )
         per_library_snapshots[library_name] = export_legacy_snapshot(
             artifact, store=store, source_schema_version=source_schema_version
         )

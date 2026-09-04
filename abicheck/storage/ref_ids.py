@@ -199,46 +199,61 @@ def _folded(name: str) -> str:
 def resolve_ref_ids(names: Sequence[str], *, opaque_prefix: str) -> dict[str, str]:
     """Map each of *names* to a ref-id-safe, collision-free identifier --
     preferring the literal name (for on-disk readability, e.g. in
-    `refs/artifacts/<id>.json`) for a name that itself passes `safe_ref_id`
-    and does not fold (case/Unicode-normalization-insensitively) to the
-    same value as another, *differently spelled* name in *names*; falling
-    back to a deterministic, opaque, sha256-derived id (see
-    `_opaque_ref_id`) for that one name otherwise.
+    `refs/artifacts/<id>.json`) for a name that passes `safe_ref_id` *and*
+    is already its own canonical fold (`name == _folded(name)` -- already
+    lowercase, already NFD-normalized); falling back to a deterministic,
+    opaque, sha256-derived id (see `_opaque_ref_id`) for every other name.
 
-    Each name's own fate never depends on an unrelated name elsewhere in
-    *names* -- only on whether *that* name is itself unsafe, or itself
-    folds the same as some other, differently-spelled name in the set (a
-    real `BundleFacts`/baseline-set document may legitimately name two
-    libraries differing only by case, e.g. `libFoo.so`/`libfoo.so`, which
-    this package's own cross-platform ref-id safety would otherwise reject
-    outright even though the canonical `BundleFacts` reader treats them as
-    two distinct, valid entries). An earlier version fell the *whole* set
-    back to opaque ids the moment any single name was unsafe or collided,
-    which meant adding one new colliding library anywhere in a bundle
-    silently reassigned a completely unrelated, already-safe library's own
-    artifact_id -- breaking release-to-release matching that keys by that
-    id (`docs/contribute/plans/storage-format-v2.md`'s A1.7 design; Codex
-    review, fresh evidence). Two names that are themselves *exactly*
-    identical are never a collision (the same name given twice resolves to
-    one shared entry) -- only two differently-spelled names folding to the
-    same value are.
+    **Each name's fate depends only on that one name -- never on any other
+    name in *names*, present or absent.** This is what makes the result
+    truly membership-independent, which matters because
+    `docs/contribute/plans/storage-format-v2.md`'s A1.7 design keys
+    release-to-release matching by `ArtifactRef.artifact_id`: an id that
+    could change because an unrelated (or even a related, colliding)
+    sibling was added or removed would make that matching misreport an
+    unchanged library as removed-and-re-added.
+
+    Two prior designs were each falsified by a concrete counterexample
+    (Codex review, in order):
+
+    1. **Whole-set fallback** -- any single unsafe/colliding name fell the
+       *entire* set back to opaque ids. Adding one new colliding library
+       anywhere in a bundle silently reassigned every other, completely
+       unrelated, already-safe library's own id.
+    2. **Per-name collision detection against the actual call's *names*** --
+       only genuinely colliding names fell back, fixing (1). But a
+       colliding pair's own two members still flipped identity depending
+       on whether the call included both of them: `libfoo.so` alone
+       resolved to literal `"libfoo.so"`; adding `LIBFOO.SO` alongside it
+       reclassified `libfoo.so` itself as colliding, changing its own id
+       even though `libfoo.so`'s own spelling never changed.
+
+    The fix is to stop asking "does this name collide with another name
+    *actually present*" (a question whose answer depends on the batch) and
+    ask instead "is this name the *unique* literal spelling its own fold
+    class could ever produce" (a question the name alone answers). Exactly
+    one string per fold class satisfies `name == _folded(name)` -- the
+    already-canonical one -- so two *different* canonical names can never
+    fold to the same value, and a name's own canonical-ness never depends
+    on what else is being resolved alongside it. `libfoo.so` (already
+    lowercase, so `_folded("libfoo.so") == "libfoo.so"`) always keeps its
+    literal spelling, with or without `LIBFOO.SO` present; `LIBFOO.SO`
+    (`_folded("LIBFOO.SO") == "libfoo.so"`, not equal to itself) always
+    gets an opaque id, with or without `libfoo.so` present -- both
+    unconditionally, decided from each name alone.
 
     Raises nothing itself -- a name this function cannot make safe always
     has a working opaque fallback.
     """
-    fold_groups: dict[str, set[str]] = {}
-    for name in names:
-        fold_groups.setdefault(_folded(name), set()).add(name)
-
     result: dict[str, str] = {}
     for name in names:
-        is_safe = True
         try:
             safe_ref_id(name, "name")
+            is_safe = True
         except ValueError:
             is_safe = False
-        collides = len(fold_groups[_folded(name)]) > 1
+        is_canonical = name == _folded(name)
         result[name] = (
-            name if is_safe and not collides else _opaque_ref_id(name, opaque_prefix)
+            name if is_safe and is_canonical else _opaque_ref_id(name, opaque_prefix)
         )
     return result
