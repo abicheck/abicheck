@@ -292,8 +292,25 @@ def _parse_info_v3(info: int) -> tuple[int, int, bool]:
 def _parse_types(
     type_data: bytes,
     version: int,
+    truncated: list[bool] | None = None,
 ) -> list[CtfType]:
-    """Parse all CTF type entries from the type section."""
+    """Parse all CTF type entries from the type section.
+
+    P2 review, fresh evidence (mirrors the identical BTF fix): every early
+    exit from the loop below is a ``break`` on insufficient remaining bytes,
+    none of which raise -- so a truncated final entry silently returns every
+    type parsed before the cut instead of signaling incompleteness.
+    *truncated*, when passed a one-element list, has ``True`` appended to it
+    at each such ``break`` site (a header, size field, or extra-data
+    truncation), and is left empty when the loop's own ``while`` condition
+    ends it after fully consuming the section -- an out-parameter, not a
+    ``pos < len(type_data)`` postcondition, since a truncated header can
+    happen to consume exactly the remaining bytes (e.g. a well-formed
+    12-byte v3 header immediately followed by missing extra data), which
+    would leave ``pos == len(type_data)`` despite the entry being cut off.
+    An opt-in out-parameter rather than a return-type change, so every
+    existing caller that only wants the type list is unaffected.
+    """
     types: list[CtfType] = [CtfType(type_id=0, name_off=0, info=0, size_or_type=0)]
 
     parse_info = _parse_info_v3 if version >= CTF_VERSION_3 else _parse_info_v2
@@ -307,12 +324,16 @@ def _parse_types(
         # v3 always uses 4-byte size_or_type
         if version >= CTF_VERSION_3:
             if pos + 12 > len(type_data):
+                if truncated is not None:
+                    truncated.append(True)
                 break
             name_off, info, size_or_type = struct.unpack_from("<III", type_data, pos)
             pos += 12
         else:
             # CTF v2: name(4) + info(2) + size_or_type(2 or 4)
             if pos + 6 > len(type_data):
+                if truncated is not None:
+                    truncated.append(True)
                 break
             name_off = struct.unpack_from("<I", type_data, pos)[0]
             info = struct.unpack_from("<H", type_data, pos + 4)[0]
@@ -330,6 +351,8 @@ def _parse_types(
                 size_or_type = struct.unpack_from("<H", type_data, pos)[0]
                 pos += 2
             else:
+                if truncated is not None:
+                    truncated.append(True)
                 break
             # Re-encode info for uniform handling (v3 layout)
             info = (kind << 24) | (int(isroot) << 31) | vlen
@@ -343,6 +366,8 @@ def _parse_types(
         extra_size = _extra_data_size(kind, vlen, version, size_or_type)
         if pos + extra_size > len(type_data):
             log.warning("CTF type %d (kind=%d) truncated", type_id, kind)
+            if truncated is not None:
+                truncated.append(True)
             break
 
         extra = type_data[pos : pos + extra_size]
@@ -605,8 +630,9 @@ def parse_ctf_from_bytes(data: bytes) -> CtfMetadata:
     type_data = data[type_start:type_end]
     str_data = data[str_start:str_end]
 
+    type_truncated: list[bool] = []
     try:
-        types = _parse_types(type_data, header.version)
+        types = _parse_types(type_data, header.version, type_truncated)
     except (struct.error, ValueError) as exc:
         log.warning("parse_ctf_from_bytes: type parsing failed: %s", exc)
         return empty
@@ -614,6 +640,12 @@ def parse_ctf_from_bytes(data: bytes) -> CtfMetadata:
     resolver = _TypeResolver(types, str_data, header.version)
 
     meta = CtfMetadata(has_ctf=True, type_count=len(types) - 1)
+    if type_truncated:
+        # P2 review, fresh evidence: a truncated final type entry doesn't
+        # raise -- it logs and returns every type parsed before the cut --
+        # so the receipt must not silently claim "parsed" for a channel
+        # whose type table was read incomplete.
+        meta.extraction_partial = True
 
     try:
         meta.structs = _extract_structs(types, resolver, str_data, header.version)

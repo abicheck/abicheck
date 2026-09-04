@@ -183,6 +183,53 @@ class TestParseTypes:
         assert len(types) == 2  # void + int
         assert types[1].kind == BTF_KIND_INT
 
+    def test_empty_section_is_not_truncated(self) -> None:
+        """A zero-length type section is a legitimately empty (not
+        truncated) parse -- `truncated` must not be set."""
+        truncated: list[bool] = []
+        types = _parse_types(b"", truncated)
+        assert len(types) == 1
+        assert truncated == []
+
+    def test_extra_data_cut_off_mid_entry_sets_truncated(self) -> None:
+        """P2 review, fresh evidence: a type whose fixed 12-byte header is
+        present but whose kind-specific extra data is cut off must not
+        raise -- it logs and returns every type parsed before the cut, and
+        the opt-in `truncated` out-param must record the incompleteness."""
+        # A BTF_KIND_INT header claiming 4 bytes of extra encoding data, but
+        # with zero bytes of extra data actually following it.
+        info = BTF_KIND_INT << 24
+        header_only = struct.pack("<III", 0, info, 4)
+        truncated: list[bool] = []
+        types = _parse_types(header_only, truncated)
+        assert len(types) == 1  # only the void sentinel -- the INT was cut
+        assert truncated == [True]
+
+    def test_trailing_bytes_too_short_for_next_header_sets_truncated(self) -> None:
+        """A well-formed final type followed by fewer than 12 trailing
+        bytes -- not enough for even the next entry's fixed header -- is
+        also a truncation, via the outer post-loop check rather than the
+        inner extra-data one."""
+        int_enc = struct.pack("<I", 32)
+        info = BTF_KIND_INT << 24
+        one_type = struct.pack("<III", 0, info, 4) + int_enc
+        truncated: list[bool] = []
+        types = _parse_types(one_type + b"\x00\x00\x00", truncated)
+        assert len(types) == 2  # void + the one complete INT
+        assert truncated == [True]
+
+    def test_fully_consumed_section_is_not_truncated(self) -> None:
+        """Sanity check: a type section with no leftover bytes at all must
+        not be flagged, positive control for the two truncation tests
+        above."""
+        int_enc = struct.pack("<I", 32)
+        info = BTF_KIND_INT << 24
+        one_type = struct.pack("<III", 0, info, 4) + int_enc
+        truncated: list[bool] = []
+        types = _parse_types(one_type, truncated)
+        assert len(types) == 2
+        assert truncated == []
+
 
 # ---------------------------------------------------------------------------
 # Full parse: structs
@@ -486,6 +533,37 @@ class TestToDwarfMetadata:
         dwarf = meta.to_dwarf_metadata()
         assert dwarf.has_dwarf is True
         assert dwarf.evidence_state == "partial"
+
+    def test_truncated_type_section_propagates_to_partial(self, monkeypatch) -> None:
+        """P2 review, fresh evidence: `_parse_types()` silently truncating a
+        type record (log + return, never raise) must still mark the
+        receipt `partial`, not `parsed` -- the earlier fix only covered a
+        raised-and-caught extraction-stage exception, not a truncation the
+        type parser itself swallows before extraction even runs. Exercises
+        the real `parse_btf_from_bytes` -> `_parse_types` wiring, with
+        `_parse_types` itself only stubbed to report the same "truncated"
+        signal the real function's own unit tests (TestParseTypes) already
+        prove it produces for a genuinely cut-off buffer."""
+        from abicheck import btf_metadata as btf_mod
+
+        real_parse_types = btf_mod._parse_types
+
+        def wrapped(type_data: bytes, truncated=None):
+            result = real_parse_types(type_data)
+            if truncated is not None:
+                truncated.append(True)
+            return result
+
+        monkeypatch.setattr(btf_mod, "_parse_types", wrapped)
+
+        b = BtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", BTF_KIND_INT, 0, 4, extra=int_enc)
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.has_btf is True
+        assert meta.extraction_partial is True
+        assert meta.to_dwarf_metadata().evidence_state == "partial"
 
     def test_enum_only_extraction_failure_still_marks_partial(
         self, monkeypatch
