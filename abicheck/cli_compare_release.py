@@ -330,7 +330,6 @@ def compare_release_cmd(
     severity_potential_breaking: str | None = None,
     severity_quality_issues: str | None = None,
     severity_addition: str | None = None,
-    release_exit_code_scheme: str | None = None,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     # CLI cleanup phase two, PR B slice 1: `compare`'s directory/package
@@ -513,22 +512,21 @@ def compare_release_cmd(
 
             # CLI cleanup phase two, ADR-064 "GateOptions" rewrite: one
             # resolution replaces the release fan-out's previous three
-            # independent re-derivations of the same SeverityConfig from six
-            # raw preset/category/scheme strings. `resolve_release_gate_options`
-            # folds a selected `kind: gate` pack's gate.exit_code_scheme/
-            # gate.severity.<category> contribution
-            # (`apply_release_gate_pack`), then resolves the severity config
-            # and applies the same `.abicheck.yml`-only `exit_code_scheme:
-            # severity` default-preset fallback and forced-`legacy` clearing
-            # this call site used to apply itself. Every downstream consumer
-            # (this function's own `severity_config`, the per-library JSON
-            # write inside `_compare_release_libraries`,
+            # independent re-derivations of the same SeverityConfig from
+            # five raw preset/category strings. `resolve_release_gate_
+            # options` folds a selected `kind: gate` pack's gate.severity.
+            # <category> contribution (`apply_release_gate_pack`), then
+            # resolves the severity config -- since PR G2 removed the
+            # manual algorithm selector, `gate.exit_code_scheme` is purely
+            # derived from whether `gate.severity` ended up non-`None`, not
+            # a fourth independent input any more. Every downstream
+            # consumer (this function's own `severity_config`, the
+            # per-library JSON write inside `_compare_release_libraries`,
             # `_compute_release_severity_exit_code`,
             # `_fold_release_global_severity`) now reads the resulting
             # `GateOptions` instead of independently re-deriving it.
             gate = resolve_release_gate_options(
                 pack_application,
-                release_exit_code_scheme=release_exit_code_scheme,
                 severity_preset=severity_preset,
                 severity_abi_breaking=severity_abi_breaking,
                 severity_potential_breaking=severity_potential_breaking,
@@ -540,10 +538,8 @@ def compare_release_cmd(
             # (schema 2.43/2.44, computed inside _compare_release_libraries's
             # primary pass and read by the Action, not the CLI) reflect the same
             # severity-aware gate as the exit code below, instead of the legacy
-            # kind-set mapping. `None` when no severity setting was in effect,
-            # or when the resolved scheme pins legacy for set inputs.
+            # kind-set mapping. `None` when no severity setting was in effect.
             severity_config = gate.severity
-            release_exit_code_scheme = gate.exit_code_scheme
             severity_preset = gate.severity_preset
 
             # JUnit, bundle analysis, and annotations all reuse the

@@ -317,22 +317,26 @@ assignments:
 
 A pack really configures the run: it changes the verdict and the exit code
 exactly as the equivalent `--policy` overrides would. It just never wins
-against one — an explicitly stated value (a `--policy` override, an
-`--exit-code-scheme`, a `--severity-*` flag, a `--profile`, or `.abicheck.yml`)
+against one — an explicitly stated value (a `--policy` override, a
+`--severity-*` flag, a `--profile`, or `.abicheck.yml`)
 always outranks a pack, and two selected packs disagreeing about the same
 field are a usage error rather than a silent last-one-wins.
 
 `kind: contract` and `kind: gate` packs carry the other two namespaces
-(internal namespaces and `contract.unresolved`; and the exit-code scheme /
-severity levels). `contract.unresolved` needs `--contract` to have
-any effect — it configures the contract-coverage exit, which is only computed
-when a domain is selected to measure coverage of — so assigning it without
-that flag is a usage error rather than a silently inert setting.
+(internal namespaces and `contract.unresolved`; and the severity levels —
+there is no exit-code-scheme field for a gate pack to assign at all: the
+scheme is fully automatic, purely derived from whether a severity setting is
+in effect, see [CI Gating → the two exit-code
+schemes](ci-gating.md#the-two-exit-code-schemes)). `contract.unresolved`
+needs `--contract` to have any effect — it configures the contract-coverage
+exit, which is only computed when a domain is selected to measure coverage
+of — so assigning it without that flag is a usage error rather than a
+silently inert setting.
 
 Where each form is accepted follows from what a command has to configure:
 a `kind: gate` pack applies to `scan --against` the same way
-`--severity-preset`/`--exit-code-scheme` given directly already do — `scan`'s
-exit code has honoured the resolved severity/exit-code-scheme config since
+`--severity-preset` given directly already does — `scan`'s
+exit code has honoured the resolved severity config since
 the fix that closed the "scan never consults severity" gap, and a gate pack
 is one more source for that same gate.
 A `kind: policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/

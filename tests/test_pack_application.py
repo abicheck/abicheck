@@ -311,32 +311,22 @@ class TestD8Precedence:
         )
         assert result.exit_code == 4, result.output
 
-    @pytest.mark.parametrize(
-        ("scheme_flag", "expected"),
-        [
-            # An explicitly selected scheme is a stated value; a pack may not
-            # move it, whichever way the pack's own levels would point.
-            (["--exit-code-scheme", "legacy"], 4),
-            (["--exit-code-scheme", "severity"], 0),
-            # Nothing stated it, so the pack's own level decides `auto`.
-            ([], 0),
-        ],
-    )
-    def test_a_gate_pack_never_overrides_a_stated_exit_code_scheme(
-        self,
-        pair: tuple[Path, Path],
-        tmp_path: Path,
-        scheme_flag: list[str],
-        expected: int,
+    def test_a_gate_pack_severity_level_selects_the_algorithm_it_earns(
+        self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
-        """A warning-level gate pack must not silently un-fail a legacy run.
+        """A gate-pack-supplied severity level is itself a severity setting
+        in effect, so it moves the (purely automatic, since CLI cleanup
+        phase two PR G2) algorithm to `"severity"` and is then scored under
+        it -- a `warning`-level `abi_breaking` assignment demotes what would
+        otherwise be a legacy-scheme exit 4 BREAKING to exit 0, since
+        `warning` is not an error level.
 
-        The first revision re-derived the scheme locally (`"severity" if
-        severity_active`), which turned an explicit `--exit-code-scheme
-        legacy` BREAKING run's exit 4 into 0 — a pack overriding a stated
-        value, which is exactly what D8 forbids (Codex review). The fix reads
-        the resolver's own answer instead, so this parametrization pins all
-        three directions rather than only the one that regressed.
+        (Before PR G2, this test parametrized three cases: an explicit
+        `--exit-code-scheme legacy`/`severity` pinning the algorithm
+        regardless of the pack, and the no-flag case below. The manual
+        selector no longer exists at all -- there is no longer a stated
+        value for the pack to be forbidden from overriding, so only the
+        "nothing stated it, the pack's own level decides" case survives.)
         """
         gate = _pack(
             tmp_path,
@@ -344,10 +334,8 @@ class TestD8Precedence:
             "id: lenient\nversion: 1\nkind: gate\n"
             "assignments:\n  gate.severity.abi_breaking: warning\n",
         )
-        result = _compare(
-            CliRunner(), pair, "--format", "json", "--pack", str(gate), *scheme_flag
-        )
-        assert result.exit_code == expected, result.output
+        result = _compare(CliRunner(), pair, "--format", "json", "--pack", str(gate))
+        assert result.exit_code == 0, result.output
 
     def test_two_packs_disagreeing_on_one_field_is_a_usage_error(
         self, pair: tuple[Path, Path], tmp_path: Path
@@ -729,19 +717,18 @@ class TestOnlyAppliedFieldsAreAccepted:
         summary = json.loads(result.output)
         assert summary["verdict"] == "BREAKING"
 
-    def test_a_gate_pack_cannot_override_an_explicit_project_auto_scheme(
+    def test_a_gate_pack_asserting_exit_code_scheme_is_rejected_on_scan_too(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
-        """A project's explicit `exit_code_scheme: auto` is a real, stated
-        selection -- it must outrank a gate pack's concrete scheme, not read
-        as "unstated" purely because `BuildConfig.exit_code_scheme` also
-        defaults an absent key to the string ``"auto"`` (Codex review, fresh
-        evidence). ``severity.preset: info-only`` activates the severity
-        scheme (auto -> severity) with every category at `info`, so a
-        removed export exits 0 under it -- while the pack's `legacy` scheme
-        would exit 4 for the same BREAKING verdict, which is exactly the
-        divergence this precedence protects against.
-        """
+        """CLI cleanup phase two PR G2: `gate.exit_code_scheme` is not a
+        pack-assignable field at all any more, on any front end -- a gate
+        pack asserting it is rejected at load time (`PackManifestError`,
+        surfaced by `scan` as the same `click.UsageError`/exit 64 an
+        unroutable pack field always gets, mirroring `compare`'s identical
+        rejection). Before PR G2, this test proved a project's explicit
+        `exit_code_scheme: auto` outranked a gate pack's concrete scheme --
+        that whole precedence question no longer applies, since neither the
+        project config key nor the pack field exist to compete over."""
         old, new = pair
         gate = _pack(
             tmp_path,
@@ -749,22 +736,15 @@ class TestOnlyAppliedFieldsAreAccepted:
             "id: legacy_scheme\nversion: 1\nkind: gate\n"
             "assignments:\n  gate.exit_code_scheme: legacy\n",
         )
-        cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text(
-            "exit_code_scheme: auto\nseverity:\n  preset: info-only\n",
-            encoding="utf-8",
-        )
         result = CliRunner().invoke(
             main,
             [
                 "scan", str(new), "--against", str(old),
-                "--config", str(cfg),
                 "--format", "json", "--pack", str(gate),
             ],
         )
-        assert result.exit_code == 0, result.output
-        summary = json.loads(result.output)
-        assert summary["verdict"] == "BREAKING"
+        assert result.exit_code == 64, result.output
+        assert "may not assign" in result.output
 
     def test_scan_rejects_an_unapplied_field_from_the_resolution(
         self, pair: tuple[Path, Path], tmp_path: Path
@@ -1111,13 +1091,16 @@ class TestOnlyAppliedFieldsAreAccepted:
         `test_policy_pack_is_applied_to_a_release_comparison` states for the
         policy half: an exit code that differs with and without the pack.
 
-        Exercises both fields a gate pack can assign at once
-        (`gate.exit_code_scheme` *and* `gate.severity.<category>`), on a
-        release whose only change is a compatible addition -- normally exit
-        0 regardless of scheme, since neither the legacy verdict mapping nor
-        the severity default (`addition: info`) makes an addition-only
-        release non-zero. The pack moves it to exit 1 by forcing both the
-        scheme and the addition category to error.
+        Exercises the one field a gate pack can assign
+        (`gate.severity.<category>` -- `gate.exit_code_scheme` was deleted
+        in CLI cleanup phase two PR G2, no longer a pack-assignable field at
+        all), on a release whose only change is a compatible addition --
+        normally exit 0 regardless of scheme, since neither the legacy
+        verdict mapping nor the severity default (`addition: info`) makes an
+        addition-only release non-zero. The pack moves it to exit 1 by
+        forcing the addition category to error, which is itself a severity
+        setting in effect and so also (purely automatically) selects the
+        severity algorithm.
         """
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
@@ -1143,7 +1126,6 @@ class TestOnlyAppliedFieldsAreAccepted:
             "strict-additions.yml",
             "id: strict_additions\nversion: 1\nkind: gate\n"
             "assignments:\n"
-            "  gate.exit_code_scheme: severity\n"
             "  gate.severity.addition: error\n",
         )
         without_pack = CliRunner().invoke(
@@ -1277,7 +1259,6 @@ class TestOnlyAppliedFieldsAreAccepted:
                 policy_file_path=None,
                 suppress=None,
                 require_justification=False,
-                exit_code_scheme=None,
                 severity_preset=None,
                 pack_paths=(),
                 contract_evaluation=False,
@@ -1443,19 +1424,19 @@ class TestNoPackChangesNothing:
         sentinel = object()
         assert apply_to_compare_config(sentinel, inert) is sentinel
 
-    def test_a_severity_pack_never_invents_a_scheme_the_resolver_did_not_give(
+    def test_a_severity_pack_always_moves_the_purely_derived_scheme(
         self,
     ) -> None:
-        """The last fallback in `apply_to_compare_config`: with a gate pack's
-        severity levels to fold but no resolved scheme to read, the run keeps
-        the scheme it already had.
-
-        Reachable only if the resolver somehow answered nothing -- which is
-        exactly why it must not re-derive one. The reverted revision computed
-        `"severity" if severity_active else ...` here, which turned an
-        explicitly selected `--exit-code-scheme legacy` into severity scoring
-        whenever a pack assigned a level (Codex review).
-        """
+        """CLI cleanup phase two PR G2 simplified `apply_to_compare_config`
+        down to one fold: a gate pack's severity levels merge in, and
+        `severity_active` becomes true -- there is no separate scheme value
+        to read, invent, or fall back to any more (no `resolved_exit_code_
+        scheme`/`exit_code_scheme` field on `PackApplication` at all; the
+        prior three-tier "read the resolver's own already-decided answer,
+        never re-derive one" fallback this test used to pin only existed
+        because a manual override could disagree with the derivation --
+        with no override left, the derivation is the only answer, always
+        computed fresh from `severity_active`)."""
         from abicheck.cli_helpers_compare import resolve_compare_config
         from abicheck.pack_application import PackApplication, apply_to_compare_config
         from abicheck.severity import SeverityLevel
@@ -1469,15 +1450,14 @@ class TestNoPackChangesNothing:
         application = PackApplication(
             policy_overrides={},
             severity_levels={"abi_breaking": SeverityLevel.WARNING},
-            # The resolver stated nothing -- the case the fallback exists for.
-            resolved_exit_code_scheme=None,
         )
         folded = apply_to_compare_config(resolved, application)
-        # The level is folded in, and the scheme is the pre-pack one, not one
-        # this module decided for itself.
+        # The level is folded in, and the now-active severity setting moves
+        # the purely-derived scheme to "severity" -- there is no longer a
+        # "keep the pre-pack scheme" fallback path to reach at all.
         assert folded.severity.abi_breaking == SeverityLevel.WARNING
         assert folded.severity_active is True
-        assert folded.exit_code_scheme == "legacy"
+        assert folded.exit_code_scheme == "severity"
 
 
 class TestReceiptAgreesWithWhatScored:
@@ -1571,12 +1551,23 @@ class TestReceiptAgreesWithWhatScored:
         """The gate is the one field the CLI takes from `resolve_compare_config`
         while reporting the canonical resolver's provenance. A gate pack moves
         the value on one side only unless the two really agree.
+
+        (Before CLI cleanup phase two PR G2, the pack asserted
+        `gate.exit_code_scheme: severity` directly and this test also
+        checked a `gate.exit_code_scheme` provenance entry existed with
+        `source_kind == "pack_manifest"`. Neither exists any more: the field
+        was deleted as a pack-assignable route entirely, and the purely-
+        derived scheme carries no provenance entry of its own -- see
+        `compatibility_evaluation_frontend.py`'s resolver docstring. A
+        `gate.severity.<category>` assignment is the pack's only remaining
+        way to move the scheme, indirectly, by putting a severity setting
+        in effect -- which this test now asserts instead.)
         """
         gate = _pack(
             tmp_path,
             "scheme.yml",
             "id: scheme\nversion: 1\nkind: gate\n"
-            "assignments:\n  gate.exit_code_scheme: severity\n",
+            "assignments:\n  gate.severity.abi_breaking: error\n",
         )
         report = tmp_path / "report.json"
         result = _compare(
@@ -1597,6 +1588,6 @@ class TestReceiptAgreesWithWhatScored:
         ]
         assert ctx["resolved_config"]["gate"]["exit_code_scheme"] == "severity"
         assert (
-            ctx["field_provenance"]["gate.exit_code_scheme"]["source_kind"]
+            ctx["field_provenance"]["gate.severity.abi_breaking"]["source_kind"]
             == "pack_manifest"
         )

@@ -131,8 +131,6 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
         # per-library comparison always exits through the legacy verdict
         # mapping regardless of what was requested. Rejected rather than
         # silently scoring/gating the run differently than asked.
-        # --exit-code-scheme is rejected below, by the same shared helper
-        # the live release fan-out uses for it.
         raise click.UsageError(
             "--severity-preset/--pack are not supported together with "
             "a stored-bundle-facts OLD_INPUT."
@@ -153,7 +151,6 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
     from ....cli_compare_options import _reject_set_input_flags
 
     _reject_set_input_flags(
-        kwargs.get("exit_code_scheme"),
         bool(kwargs.get("reconcile_build_context", False)),
         kwargs.get("env_matrix_path"),
         used_by_apps=tuple(kwargs.get("used_by_apps") or ()),
@@ -424,8 +421,10 @@ def reject_unsupported_options(kwargs: dict[str, Any]) -> None:
             or _bc.suppression_require_justification is not None
         ):
             _unsupported_config_blocks.append("suppression:")
-        if _bc.exit_code_scheme_explicit:
-            _unsupported_config_blocks.append("exit_code_scheme:")
+        # exit_code_scheme: no longer exists as a config key at all (CLI
+        # cleanup phase two PR G2) -- an unknown top-level key is now a hard
+        # ValueError at BuildConfig parse time, so there is nothing left for
+        # this dispatcher to detect and reject here.
         if any(
             getattr(_bc, field) is not None
             for field in (

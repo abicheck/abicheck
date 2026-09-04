@@ -759,7 +759,7 @@ outputs:
       For dump: COMPATIBLE or ERROR.
       For scan: COMPATIBLE, COMPATIBLE_WITH_RISK (same exit-0 risk tier as
       compare's, above), SEVERITY_ERROR (with --against and a
-      severity or `--exit-code-scheme` setting, when an error-level
+      severity setting, when an error-level
       category has findings), COVERAGE_INCOMPLETE, ANALYSIS_INCOMPLETE
       (with --against and the require-complete-analysis input, same
       axis as compare's), API_BREAK, BREAKING,

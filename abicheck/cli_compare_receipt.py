@@ -75,7 +75,6 @@ COMPARE_CONFIG_PARAMS: tuple[str, ...] = (
     "policy_file_path",
     "suppress",
     "require_justification",
-    "exit_code_scheme",
     "severity_preset",
     "pack_paths",
 )
@@ -143,10 +142,13 @@ def _profile_inputs(run_profile: Mapping[str, Any] | None) -> Any:
     if not run_profile:
         return None
     injected = run_profile.get("injected") or {}
-    scheme = injected.get("exit_code_scheme")
+    # CLI cleanup phase two PR G2: `ci-gate` now injects `severity_preset`
+    # (not the deleted `exit_code_scheme`) to get the identical severity-
+    # aware behavior -- see `RunProfileInputs`'s own docstring.
+    preset = injected.get("severity_preset")
     return RunProfileInputs(
         name=run_profile.get("name"),
-        exit_code_scheme=str(scheme) if scheme is not None else None,
+        severity_preset=str(preset) if preset is not None else None,
     )
 
 
@@ -428,8 +430,9 @@ def resolve_release_pack_application(
     once per library, rather than one merged object upfront.
 
     **Accepts a ``kind: gate`` pack (CLI cleanup phase two, "PR B" slice 2).**
-    Folds ``PackApplication``'s ``exit_code_scheme``/``severity_levels``
-    into the release fan-out's own resolved
+    Folds ``PackApplication``'s ``severity_levels`` (no ``exit_code_scheme``
+    any more -- PR G2 deleted the manual selector, so a pack can no longer
+    assign one at all) into the release fan-out's own resolved
     :class:`~abicheck.policy.release_gate_options.GateOptions`
     (``resolve_release_gate_options``, ADR-064, landed 2026-09-02) via
     ``cli_compare_release_helpers.apply_release_gate_pack`` -- which still
@@ -476,8 +479,8 @@ def resolve_release_pack_application(
         config,
         # `gate_supported` defaults to True: since CLI cleanup phase two "PR
         # B" slice 2, the release fan-out folds a `kind: gate` pack's
-        # `exit_code_scheme`/`severity.*` into its own raw severity/exit-
-        # code-scheme inputs (`cli_compare_release_helpers.
+        # `severity.*` (no `exit_code_scheme` any more, PR G2) into its own
+        # raw severity inputs (`cli_compare_release_helpers.
         # apply_release_gate_pack`) the same way `compare --pack` folds them
         # into `ResolvedCompareConfig` -- see this function's own docstring.
         # `contract_evaluation=True` here is deliberate, not a copy-paste of
@@ -510,7 +513,6 @@ def resolve_release_pack_application_from_ctx(
     policy_file_path: Path | None,
     suppress: Path | None,
     require_justification: bool,
-    exit_code_scheme: str | None,
     severity_preset: str | None,
     pack_paths: tuple[Path, ...],
     contract_evaluation: bool,
@@ -579,7 +581,6 @@ def resolve_release_pack_application_from_ctx(
                 "policy_file_path": policy_file_path,
                 "suppress": suppress,
                 "require_justification": require_justification,
-                "exit_code_scheme": exit_code_scheme,
                 "severity_preset": severity_preset,
                 "pack_paths": pack_paths,
             },
@@ -667,10 +668,7 @@ def record_resolved_config(
     ctx = getattr(result, "contract_context", None)
     if not isinstance(ctx, PersistedContractContext):
         return
-    from .compatibility_evaluation_frontend import (
-        EXIT_CODE_SCHEME_FIELD,
-        SEVERITY_CATEGORY_FIELDS,
-    )
+    from .compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
     from .contract_context import with_resolved_config, with_resolved_gate
 
     ctx = with_resolved_config(ctx, config)
@@ -681,7 +679,6 @@ def record_resolved_config(
         ctx,
         exit_code_scheme=resolved_cfg.exit_code_scheme,
         severity=resolved_cfg.severity,
-        scheme_provenance=config.provenance[EXIT_CODE_SCHEME_FIELD],
         severity_provenance={
             category: config.provenance[SEVERITY_CATEGORY_FIELDS[category]]
             for category in _SEVERITY_CATEGORIES

@@ -67,10 +67,14 @@ class TestApplyProfileUnit:
         apply_compare_profile(_FakeCtx(explicit=set()), kwargs)
         # profile is consumed (never forwarded to run_compare)
         assert "profile" not in kwargs
-        # ci-gate defaults land where the user didn't choose
+        # ci-gate defaults land where the user didn't choose. CLI cleanup
+        # phase two PR G2 migrated this profile from injecting
+        # exit_code_scheme: "severity" (a manual override, since deleted
+        # entirely) to injecting severity_preset: "default" -- the field
+        # that actually flips the now-purely-derived scheme to "severity".
         assert kwargs["depth"] == "headers"
         assert kwargs["fmt"] == "review"
-        assert kwargs["exit_code_scheme"] == "severity"
+        assert kwargs["severity_preset"] == "default"
 
     def test_explicit_flag_beats_profile(self) -> None:
         kwargs: dict[str, object] = {"profile": "ci-gate", "depth": None, "fmt": "json"}

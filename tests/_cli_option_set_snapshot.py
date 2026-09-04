@@ -60,7 +60,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--dwarf",
         "--dwarf-only",
         "--env-matrix",
-        "--exit-code-scheme",
         "--explain-patterns",
         "--fail-on-removed-library",
         "--follow-deps",

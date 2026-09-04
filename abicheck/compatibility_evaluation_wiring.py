@@ -76,7 +76,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from .change_registry_types import Verdict
 from .compatibility_evaluation_config import (
-    VALID_EXIT_CODE_SCHEMES,
     VALID_UNRESOLVED_BEHAVIORS,
     ImmutableIdentity,
     SelectedByEntry,
@@ -729,11 +728,12 @@ CONTRACT_PACK_FIELD_ROUTES: Mapping[str, Callable[[Hashable, str, str], Hashable
 #: gate packs "affect ``GateDecision`` and compose with every compatibility
 #: policy"). ``gate.preset``/``gate.packs`` are not routable: a preset is an
 #: identity a pack cannot mint for itself, and packs listing packs is
-#: self-reference.
+#: self-reference. ``gate.exit_code_scheme`` is deliberately absent (PR G2
+#: deleted the manual selector everywhere): a pack asserting it now hits the
+#: same "not a route this kind may assign" ``PackManifestError``.
 GATE_PACK_FIELD_ROUTES: Mapping[str, Callable[[Hashable, str, str], Hashable]] = (
     MappingProxyType(
         {
-            "gate.exit_code_scheme": _route_choice(VALID_EXIT_CODE_SCHEMES),
             "gate.severity.abi_breaking": _route_severity_level,
             "gate.severity.potential_breaking": _route_severity_level,
             "gate.severity.quality_issues": _route_severity_level,

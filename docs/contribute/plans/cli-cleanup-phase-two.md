@@ -3993,6 +3993,73 @@ second top-level spelling of the same fact.
 > codes.md`'s `scan --artifact-set` note and `docs/use/github-action.md`'s
 > `exit-code` output row for the user-facing statement.
 
+> **Update (2026-09-04): PR G2/PR 4 fully DONE — `--exit-code-scheme`
+> itself deleted.** With the `--format text` gap above closed, nothing was
+> left blocking the atomic removal this ADR's "Decision to encode" section
+> below describes. Deleted outright, with no replacement selector anywhere:
+> the `--exit-code-scheme` Click option on `compare` and `scan --against`
+> (`abicheck/frontends/cli/commands/compare.py`, `abicheck/cli_scan.py`);
+> `.abicheck.yml`'s top-level `exit_code_scheme:`/`exit_code_scheme_explicit`
+> keys (`abicheck/buildsource/build_config.py` — an unknown top-level key is
+> a hard `ValueError` at parse time, not a warning, so a stale config now
+> fails fast); the `kind: gate` pack schema's `gate.exit_code_scheme`
+> assignable field (`abicheck/compatibility_evaluation_wiring.py`'s
+> `GATE_PACK_FIELD_ROUTES` — a pack still asserting it now hits the generic
+> "not a route this kind may assign" `PackManifestError`); and
+> `CompareRequest`/`ScanRequest`'s typed-API `exit_code_scheme` fields
+> (`abicheck/api_types.py`, `abicheck/service_scan.py`). The D7 resolver's
+> whole scheme-candidate-building machinery in
+> `compatibility_evaluation_frontend.py` (`EXIT_CODE_SCHEME_FIELD`,
+> `_stated_exit_code_scheme()`, the explicit/profile/project candidate
+> list, the D8 pinned-gate conflict exemption) is replaced by pure
+> derivation from `_severity_active()` — no candidates, no provenance entry,
+> no precedence resolution, because there is nothing left to resolve
+> between. The `--profile ci-gate` bundle, which used to state
+> `exit_code_scheme: "severity"`, now states `severity_preset: "default"`
+> instead (`abicheck/frontends/cli/options/profiles.py`) — behavior-
+> preserving, since `PRESET_DEFAULT` is exactly `SeverityConfig()`'s
+> defaults, and stating a severity preset is what makes the scheme resolve
+> to `severity` under the new, fully-automatic rule anyway.
+>
+> What was deliberately **kept**, unrenamed: every place `exit_code_scheme`
+> already existed as a purely-*derived*, already-resolved value rather than
+> a settable input — `ResolvedCompareConfig.exit_code_scheme`,
+> `GateOptions.exit_code_scheme` (now typed `str`, never `str | None`, since
+> it is unconditionally resolved), `GateConfig.exit_code_scheme`, the JSON
+> report's `gate.exit_code_scheme` and
+> `effective_config_fields["gate.exit_code_scheme"]` (confirmed via
+> `effective_config_digest.py`: this one is a direct resolved-value string,
+> not a `field_provenance` lookup, so no JSON-schema change was needed —
+> `python scripts/publish_schemas.py --check` passes unchanged), and the
+> unrelated `scoped_exit_code_scheme` result field
+> (`abicheck/cli_compare_fold.py`, `abicheck/junit_report.py`) — none of
+> these needed to move or disappear, only their *settability* did. This
+> distinction — raw-override sites deleted, already-resolved-value sites
+> left alone — is what kept the actual edit surface tractable against an
+> initial ~100-file grep hit list.
+>
+> Every test asserting the old manual-override behavior was rewritten, not
+> just deleted, to assert the surviving auto-only behavior instead (e.g.
+> `tests/test_pack_application.py`'s
+> `test_a_gate_pack_severity_level_selects_the_algorithm_it_earns`,
+> `tests/test_typed_api_gate_options.py`'s
+> `test_compare_request_no_longer_has_an_exit_code_scheme_field`/
+> `test_scan_request_no_longer_has_an_exit_code_scheme_field`, and
+> `tests/test_config_rebalance.py`'s
+> `test_top_level_exit_code_scheme_key_no_longer_exists`, which asserts the
+> real `ValueError` an unknown top-level config key now raises). Docs
+> updated repo-wide (`docs/reference/exit-codes.md`,
+> `docs/reference/config-file.md`,
+> `docs/reference/compatibility-evaluation-config.md`, `docs/use/ci-gating.md`,
+> `docs/use/policies.md`, `docs/use/build-evidence-setup.md`,
+> `docs/learn/rollout-and-governance.md`, `docs/start/upgrading-to-0.6.md`,
+> `action.yml`, plus the generated CLI/Action/Python-API/config references);
+> `scripts/check_docs_contract.py`'s `_RETIRED_SURFACES` registry gained an
+> entry for `--exit-code-scheme`/`exit_code_scheme:` naming the pages that
+> legitimately still mention it in historical/explanatory capacity. ADR-064's
+> own Status line and `docs/contribute/adr/index.md`'s row were updated the
+> same day.
+
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
 `--exit-code-scheme auto|legacy|severity` is not a spelling choice; it selects
@@ -5041,9 +5108,9 @@ PR F  trusted build config            = PR 3C — build.query executes only
       └─ DELETE dump --build-query, dump --build-compile-db — DONE, both are
          now `No such option` / exit 64
 PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
-      (ADR-064 accepted; stage 1a done,   schema / report / Action parity.
-       stage 1b: GateOptions landed       GateOptions (the release fan-out's
-       2026-09-02, rest partially wired)  own typed severity/exit-code-scheme
+      (DONE, 2026-09-04)                   schema / report / Action parity.
+                                       GateOptions (the release fan-out's
+                                       own typed severity/exit-code-scheme
                                        object) landed 2026-09-02
                                        (abicheck/policy/release_gate_options.py,
                                        reached from the frontends-classified
@@ -5071,11 +5138,22 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        (2026-09-03, Round 6 -- the JSON-
                                        verdict check a marker-file/exit-code
                                        rewrite had silently regressed is
-                                       restored); still open: the same
-                                       signal for --format text, since the
-                                       Action never requests a JSON
-                                       secondary for --artifact-set runs
-      └─ then DELETE --exit-code-scheme
+                                       restored), then closed for --format
+                                       text too (2026-09-04): the same
+                                       dedicated exit 7 generalizes to
+                                       --artifact-set with no new signal
+                                       needed (see this plan's own
+                                       2026-09-04 update above PR 4's
+                                       section). --exit-code-scheme itself
+                                       -- the CLI flag, .abicheck.yml's
+                                       exit_code_scheme: key, the kind: gate
+                                       pack field, and both typed requests'
+                                       exit_code_scheme fields -- deleted
+                                       2026-09-04 (ADR-064's Status line and
+                                       docs/contribute/adr/index.md's row
+                                       both updated the same day)
+      └─ DELETE --exit-code-scheme — DONE, 2026-09-04: `No such option` /
+         exit 64 on both compare and scan
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax slice DONE)               duplicated symbols, cost and dry-run;
                                        syntax refinement (DONE) was the one

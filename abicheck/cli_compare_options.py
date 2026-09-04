@@ -80,7 +80,6 @@ def _merge_cli_debug_format(
 
 
 def _reject_set_input_flags(
-    exit_code_scheme: str | None,
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
     used_by_apps: tuple[Path, ...] = (),
@@ -103,15 +102,10 @@ def _reject_set_input_flags(
     supports it directly (``compare_release_cmd``'s own
     ``secondary_output_options``/``reject_incoherent_secondary_output``
     call), so there is nothing left for this function to reject.
+    ``--exit-code-scheme`` is not one of these either any more -- CLI
+    cleanup phase two PR G2 deleted the flag entirely, so there is nothing
+    left to reject it against on a release comparison either.
     """
-    if exit_code_scheme is not None:
-        raise click.UsageError(
-            "--exit-code-scheme is not supported for directory/package "
-            "(release) comparisons: the per-library fan-out uses the legacy "
-            "verdict scheme, or severity-aware when severity is configured in "
-            ".abicheck.yml. Compare libraries individually for explicit "
-            "scheme control."
-        )
     if reconcile_build_context:
         raise click.UsageError(
             "--reconcile-build-context is not supported for directory/package "

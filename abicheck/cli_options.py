@@ -1435,7 +1435,7 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
     declares **only** when the user left that option at its default.
 
     **Profiles are single-pair-only.** A profile bundles single-pair-only knobs
-    (``--depth``, ``--exit-code-scheme``) and single-pair report formats
+    (``--depth``, ``--severity-preset``) and single-pair report formats
     (``review``) that the directory/package *release fan-out* deliberately does
     not accept — the fan-out sources those from ``.abicheck.yml`` instead. Rather
     than silently drop half a profile (the codebase rejects such flags loudly on
@@ -1463,7 +1463,7 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
         raise click.UsageError(
             f"--profile {name} is not supported for directory/package (release) "
             "comparisons: profiles bundle single-pair-only knobs (--depth, "
-            "--exit-code-scheme, the 'review' format). Configure release defaults "
+            "--severity-preset, the 'review' format). Configure release defaults "
             "in .abicheck.yml (the fan-out reads format/severity/scheme from it), "
             "or compare the libraries individually to use a profile."
         )

@@ -38,8 +38,8 @@ Bring these to them, since they are the parts the docs cannot answer:
    and catches signature and layout breaks; `build` depth needs the build
    system reachable in CI. See
    [evidence-and-depth.md](evidence-and-depth.md).
-3. **What blocks vs. what warns.** The severity and exit-code-scheme
-   decision, not a detector decision. See
+3. **What blocks vs. what warns.** The severity/gate configuration is a
+   grading decision, not a detector decision. See
    [policies-and-suppressions.md](policies-and-suppressions.md).
 4. **Whether the toolchain is pinned.** An unpinned runner image turns every
    image bump into a spurious incident

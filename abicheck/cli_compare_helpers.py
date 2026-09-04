@@ -120,7 +120,6 @@ def _resolve_compare_config(
     config: Path | None,
     severity_preset: str | None,
     scope_public_headers: bool,
-    exit_code_scheme: str | None,
     debug_format_opt: str | None,
     debug_format: str | None,
     dwarf_only: bool,
@@ -154,7 +153,6 @@ def _resolve_compare_config(
         project_cfg,
         cli_severity_preset=severity_preset,
         cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
-        cli_exit_code_scheme=exit_code_scheme,
         # ADR-040 Lever 2: debug-resolution demoted to config.
         # ``--debug-format``/``--debuginfod-url`` default to None (absent ⇒
         # config wins); the is_flags need the COMMANDLINE-source gate so their
@@ -485,8 +483,6 @@ def _report_not_comparable(
         xml = to_junit_xml_not_comparable(old.library, old.version, new.version, kind, message)
         _write_or_echo(output, xml)
 
-
-#: The ``compare`` parameters that can set a gate field on the command line. ``exit_code_scheme`` is its own field; the rest all feed one resolved :class:`~abicheck.severity.SeverityConfig`, so any one of them being typed makes the resolved severity explicitly CLI-selected.
 
 def _reject_incoherent_compare_flags(
     *,
@@ -823,7 +819,7 @@ def _resolve_evaluation_config(
     contract_mode: str | None, contract_evaluation: bool,
     scope_public_headers: bool,
     require_justification: bool,
-    exit_code_scheme: str | None, severity_preset: str | None,
+    severity_preset: str | None,
     pack_paths: tuple[Path, ...],
     policy_selected_by: str | None, policy_selected_path: Path | None,
     policy_selected_sha: str | None,
@@ -858,7 +854,6 @@ def _resolve_evaluation_config(
                 "policy_file_path": policy_file_path,
                 "suppress": suppress,
                 "require_justification": require_justification,
-                "exit_code_scheme": exit_code_scheme,
                 "severity_preset": severity_preset,
                 "pack_paths": pack_paths,
             },
@@ -1033,7 +1028,7 @@ def _attach_suppression_audit(result: Any, suppression: Any) -> None:
 
 def _reject_flags_unsupported_for_set_inputs(
     ctx: click.Context, *,
-    exit_code_scheme: str | None, reconcile_build_context: bool,
+    reconcile_build_context: bool,
     env_matrix_path: Path | None,
     used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
     diagnostic_comparison: bool, audit_suppressions: bool,
@@ -1060,7 +1055,7 @@ def _reject_flags_unsupported_for_set_inputs(
     everything else outright).
     """
     _reject_set_input_flags(
-        exit_code_scheme, reconcile_build_context, env_matrix_path,
+        reconcile_build_context, env_matrix_path,
         used_by_apps=used_by_apps, required_symbols=required_symbols,
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
@@ -1335,7 +1330,6 @@ def run_compare(
     dwarf_only: bool,
     severity_preset: str | None,
     config: Path | None,
-    exit_code_scheme: str | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
     include_dependencies: bool,
     show_only: str | None,
@@ -1433,7 +1427,6 @@ def run_compare(
         config=config,
         severity_preset=severity_preset,
         scope_public_headers=scope_public_headers,
-        exit_code_scheme=exit_code_scheme,
         debug_format_opt=debug_format_opt,
         debug_format=debug_format,
         dwarf_only=dwarf_only,
@@ -1531,7 +1524,6 @@ def run_compare(
     if {old_kind, new_kind} & {"directory", "package"}:
         release_depth = _reject_flags_unsupported_for_set_inputs(
             ctx,
-            exit_code_scheme=exit_code_scheme,
             reconcile_build_context=reconcile_build_context,
             env_matrix_path=env_matrix_path,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
@@ -1550,7 +1542,7 @@ def run_compare(
                 contract_mode=contract_mode, scope_public_headers=scope_public_headers,
                 policy=policy, policy_file_path=policy_file_path, suppress=suppress,
                 require_justification=require_justification,
-                exit_code_scheme=exit_code_scheme, severity_preset=severity_preset,
+                severity_preset=severity_preset,
                 pack_paths=pack_paths, contract_evaluation=contract_evaluation,
                 project_cfg=project_cfg, project_path=cfg_path, project_sha256=cfg_sha,
                 policy_option=policy_selected_by, policy_path=policy_selected_path,
@@ -1666,7 +1658,6 @@ def run_compare(
             severity_potential_breaking=resolved_cfg.merged_severity_potential_breaking,
             severity_quality_issues=resolved_cfg.merged_severity_quality_issues,
             severity_addition=resolved_cfg.merged_severity_addition,
-            release_exit_code_scheme=resolved_cfg.exit_code_scheme,
             probe_matrix_old=probe_matrix_old, probe_matrix_new=probe_matrix_new,
             verbose=verbose,
             contract_evaluation=contract_evaluation,
@@ -1878,7 +1869,7 @@ def run_compare(
         contract_mode=contract_mode, contract_evaluation=contract_evaluation,
         scope_public_headers=scope_public_headers,
         require_justification=require_justification,
-        exit_code_scheme=exit_code_scheme, severity_preset=severity_preset,
+        severity_preset=severity_preset,
         pack_paths=pack_paths,
         policy_selected_by=policy_selected_by,
         policy_selected_path=policy_selected_path,

@@ -87,7 +87,7 @@ what precedence order, and what the resolution receipt records.
 | `surface` | Explicit scope and surface hints | `explicit_scope`, `internal_namespaces` |
 | `assurance` | Required evidence/coverage | `require_evidence` |
 | `policy` | What a change to an in-contract entity means | `base`, `packs`, `overrides` |
-| `gate` | What blocks CI | `exit_code_scheme`, `preset`, `packs`, `severity.*` |
+| `gate` | What blocks CI | `exit_code_scheme` (purely derived — see below), `preset`, `packs`, `severity.*` |
 | `suppressions` | Which findings are explicitly silenced | `rules`, `sha256` |
 
 Keeping them separate is the point: a gate pack tightening what fails CI never
@@ -161,8 +161,7 @@ the shadowed input is retained in the receipt
 | `policy.base` | `--policy` `base_policy`; legacy `--policy` | `policy` | — | — |
 | `policy.overrides` | `--policy` `overrides:` | — | — | `policy` |
 | `policy.packs` | *(pack paths)* | — | — | — |
-| `gate.exit_code_scheme` | `--exit-code-scheme`; `--profile` (see below) | — | `exit_code_scheme` | `gate` |
-| `gate.preset` | `--severity-preset` | — | `severity.preset` | — |
+| `gate.preset` | `--severity-preset`; `--profile` (see below) | — | `severity.preset` | — |
 | `gate.severity.*` | `severity.abi_breaking: error`, … | — | `severity.*` | `gate` |
 | `gate.packs` | *(pack paths)* | — | — | — |
 | `suppressions` | `--suppress` | `suppress` | — | — |
@@ -172,17 +171,17 @@ the project's symbol list rather than replacing it (ADR-037 D4's existing
 behaviour), so the resolved value is the union and the receipt lists every
 contributor.
 
-`--exit-code-scheme auto` never appears as a resolved *value*: it means "decide
-from whether a severity setting is in effect", so it is resolved to `legacy` or
-`severity` before the object is built. Selecting it is still a stated choice,
-though — an explicit `--exit-code-scheme auto` outranks a project config's
-concrete scheme, and the receipt records `auto` as what was selected. A
-project config's own `exit_code_scheme: auto` is the same kind of stated
-choice, *provided the key was actually written* — `BuildConfig` defaults an
-absent key to the identical string `"auto"`, so presence is tracked
-separately (`exit_code_scheme_explicit`) and only a literally-written `auto`
-resolves and outranks a lower-precedence gate pack the same way the explicit
-CLI flag does; an absent key still contributes nothing.
+`gate.exit_code_scheme` is absent from the table above on purpose: it is not
+resolved from any CLI flag, API field, config key, or pack — there is no
+input for it at all (CLI cleanup phase two PR G2 deleted the
+`--exit-code-scheme` flag, the `.abicheck.yml` `exit_code_scheme:` key, and
+the `gate.exit_code_scheme` pack field, the three ways it used to be
+independently stated and could disagree with the automatic derivation). It
+is a **purely derived** value, computed once every other field is resolved:
+`"severity"` when `gate.severity` ended up non-default/in effect (any
+`gate.preset`/`gate.severity.*` source above), otherwise `"legacy"`. It
+carries no `field_provenance` receipt entry either, for the same
+reason — there is no selector whose source layer it could name.
 
 `suppression.strict: true` and `suppression.require_justification: true` are real inputs with no
 field in ADR-049's typed shape; they stay outside this object.
@@ -192,18 +191,24 @@ field in ADR-049's typed shape; they stay outside this object.
 `--profile` fills each setting its bundle declares only where you left the
 corresponding flag alone, so it sits at D7's `run_profile` tier: below an
 explicit flag, above `.abicheck.yml`. Exactly one field of this object is
-reachable that way — `gate.exit_code_scheme`, which `ci-gate` sets to
-`severity`. The bundle's other keys (`depth`, the report format) are
-execution and report settings with no field here.
+reachable that way — `gate.preset`, which `ci-gate` sets to `default`. The
+bundle's other keys (`depth`, the report format) are execution and report
+settings with no field here. (Before CLI cleanup phase two PR G2, `ci-gate`
+reached this tier through `gate.exit_code_scheme` instead, set to
+`"severity"` directly — that field no longer exists at all, so `ci-gate` was
+migrated to state `severity.preset: default` instead: the identical
+`SeverityConfig` the old forced scheme paired with, expressed as an actual
+severity setting, which is what now drives the purely-automatic algorithm to
+`"severity"` and preserves the profile's exact prior behavior.)
 
 That one field is a **known deviation** from D7, which scopes the
-`run_profile` tier to execution fields and puts the exit-code scheme in the
-`gate` namespace. It is recorded as what it is rather than smoothed over:
-`ci-gate` predates ADR-049 and really does select the scheme, so resolving
-the field without the profile would report a value the run was not scored
-with. Removing the deviation means either moving the key out of `ci-gate`
-into a gate pack or amending D7 — both user-visible changes in their own
-right. Any *other* field a future profile tried to assign is rejected.
+`run_profile` tier to execution fields and puts severity in the `gate`
+namespace. It is recorded as what it is rather than smoothed over: `ci-gate`
+predates ADR-049 and really does select a severity preset, so resolving the
+field without the profile would report a value the run was not scored with.
+Removing the deviation means either moving the key out of `ci-gate` into a
+gate pack or amending D7 — both user-visible changes in their own right. Any
+*other* field a future profile tried to assign is rejected.
 
 ## Pack manifests
 
@@ -216,7 +221,6 @@ id: security_hardening
 version: 1
 kind: gate                 # contract | policy | gate
 assignments:
-  gate.exit_code_scheme: severity
   gate.severity.addition: error
 ```
 
@@ -224,12 +228,16 @@ assignments:
 |---|---|---|
 | `contract` | `contract.unresolved`, `contract.overlays`, `surface.internal_namespaces`, `assurance.require_evidence` | `surface.internal_namespaces` and `contract.unresolved` |
 | `policy` | any `ChangeKind` slug → `break` / `warn` / `risk` / `ignore` | all |
-| `gate` | `gate.exit_code_scheme`, `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare`, single-pair or directory/package; not `scan`) |
+| `gate` | `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare`, single-pair or directory/package; not `scan`) |
 
 Deliberately **not** assignable: `contract.mode` (which evidence domain a run
 judges against stays the user's own per-run choice — ADR-049 D3 forbids a
 hidden preset that switches it), `policy.base` (packs compose over a base, they
-do not replace it), and any `*.packs` field (self-reference).
+do not replace it), `gate.exit_code_scheme` (CLI cleanup phase two PR G2
+deleted the manual algorithm selector entirely — a gate pack asserting it is
+a hard load error, `may not assign gate.exit_code_scheme`, the same as any
+other out-of-namespace field below), and any `*.packs` field
+(self-reference).
 
 Conflicts are checked **within one kind only** (ADR-049 D8): two selected gate
 packs assigning different values to the same field are a usage error until an
@@ -260,7 +268,7 @@ A further restriction, for the same "configure or reject" reason: `--pack`
 needs `--against` on `scan` (a pack's only application there is the baseline
 comparison's policy). On a directory/package (release) `compare`, a `kind:
 policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/`surface.
-internal_namespaces`/`gate.exit_code_scheme`/`gate.severity.<category>` all
+internal_namespaces`/`gate.severity.<category>` all
 apply to every library uniformly (CLI cleanup phase two, "PR B" slices 1
 and 2) — the gate half is folded into the release fan-out's own resolved
 `GateOptions` object (ADR-064, landed 2026-09-02). `contract.unresolved` is

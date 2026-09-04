@@ -309,16 +309,17 @@ below, plus a dedicated code for removed libraries:
 On the release path the severity-aware code (`0/1/2/4`) replaces the
 verdict-based `2/4` mapping only when a severity *map* is actually in effect —
 that is, any `--severity-*` flag is passed **or** `.abicheck.yml` carries a
-`severity:` block (a preset or per-category levels). Setting `exit_code_scheme:
-severity` on its own is **not** enough for directory/package inputs: with no
-severity values to apply, the fan-out has nothing to score against and falls
-back to the legacy verdict mapping. Under the legacy mapping, an operational `ERROR` exit 4 or nonzero API/ABI
+`severity:` block (a preset or per-category levels). There is no manual
+override any more (ADR-064 / CLI cleanup phase two PR G2 removed
+`--exit-code-scheme` and `.abicheck.yml`'s `exit_code_scheme:` key): the
+scheme is fully automatic, so with no severity values to apply, the fan-out
+has nothing to score against and falls back to the legacy verdict mapping —
+there is no way to pin it to `severity` without one. Under the legacy
+mapping, an operational `ERROR` exit 4 or nonzero API/ABI
 verdict exit (`2`/`4`) wins before the removed-library check; under an effective
 severity map, removed-library exit `8` wins over the aggregated `0/1/2/4` code.
 An operational `ERROR` without a higher-priority removed-library result still
-floors the severity-aware exit at `4`. (`--exit-code-scheme` is rejected on
-directory/package inputs; pin the legacy scheme in config with
-`exit_code_scheme: legacy` if you want to force it.) One consequence worth
+floors the severity-aware exit at `4`. One consequence worth
 gating on: with an effective severity map, a release whose worst verdict is
 `BREAKING` can still exit `0` if that map downgrades ABI breaks (e.g.
 `abi_breaking: warning`) — parse the `verdict` from JSON output if you need
@@ -361,8 +362,8 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 > indistinguishable from a genuine CLI usage error at exit `1`. Re-checking
 > that constraint found it didn't actually block a dedicated code: the
 > *set's* own single process exit was always free to use `7`, since
-> `--artifact-set` accepts no severity policy (`--severity-preset`/
-> `--exit-code-scheme` are rejected outright) and no other code path ever
+> `--artifact-set` accepts no severity policy (`--severity-preset` is
+> rejected outright) and no other code path ever
 > returned it. Exit `1` for a set is unambiguous too, now that it's no
 > longer shared: it means either a genuine CLI/operational error, or the
 > unrelated `BUNDLE_INCOMPLETE` case (the cross-library audit itself
@@ -371,9 +372,9 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 ### `scan --against` and severity (mirrors `compare`)
 
 `scan --against` accepts the same severity surface as `compare` —
-`--severity-preset`, the hidden per-category `--severity-*` overrides, and
-`--exit-code-scheme` (plus `.abicheck.yml`'s `severity:`/`exit_code_scheme`
-keys) — and, like `compare`, uses them to compute the `0`/`2`/`4` portion of
+`--severity-preset` and the hidden per-category `--severity-*` overrides
+(plus `.abicheck.yml`'s `severity:` block) — and, like `compare`, uses them
+to compute the `0`/`2`/`4` portion of
 the exit code above from `severity.compute_exit_code` instead of the raw
 verdict when the resolved scheme is `severity`. A `BREAKING` verdict under
 `--severity-preset info-only` can therefore exit `0`, exactly as it can with
@@ -425,7 +426,7 @@ codes — so the preview matches the run it is predicting.
 
 A gate pack (`--pack`) folds a `gate.*` assignment into a scan's severity
 the same way it does for `compare`, and cannot override a value that was
-actually stated — by an explicit `--severity-*`/`--exit-code-scheme` flag,
+actually stated — by an explicit `--severity-*` flag,
 or by `.abicheck.yml`. Every flag in this family is a comparison-only flag (rejected as a
 usage error without `--against`, exit `64`) — see the table above. The
 budget (`5`), `NOT_COMPARABLE` (`6`), and evidence-contract-error exit codes
@@ -714,7 +715,7 @@ one of those.
 In the `scan` column, the value left of the `/` is the legacy (verdict-based)
 mapping — the default — and the value right of it applies once `scan
 --against` resolves the `severity` scheme (any `--severity-preset`/
-`--severity-*`/`--exit-code-scheme severity`, or a config `severity:` block),
+`--severity-*`, or a config `severity:` block),
 where it follows the same `compare` exit (severity) column; see
 ["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare)
 above.
@@ -749,8 +750,8 @@ read the `verdict` field where available.
 default) collapses every compatible/advisory-only state (no break,
 deployment risk, additions, quality signals) to exit `0` — read `--format
 json` if your pipeline needs to distinguish them. Under a resolved
-`severity` scheme (`scan --against` with any `--severity-*`/
-`--exit-code-scheme severity`, or a config `severity:` block) `scan` follows
+`severity` scheme (`scan --against` with any `--severity-*` flag,
+or a config `severity:` block) `scan` follows
 the `compare` exit (severity) column on the same `*` terms, in **both**
 directions: `severity.addition: error` exits `1` on an additions-only diff,
 and `--severity-preset info-only` exits `0` on a `BREAKING` one. See

@@ -404,7 +404,11 @@ def test_scan_against_bad_env_matrix_is_usage_error(tmp_path: Path) -> None:
         ["--policy", "sdk_vendor"],
         ["--pattern-verdicts"],
         ["--severity-preset", "info-only"],
-        ["--exit-code-scheme", "severity"],
+        # --exit-code-scheme no longer exists at all (CLI cleanup phase two
+        # PR G2) -- it fails with "No such option" before this comparison-
+        # only-flag guard would even run, which is covered elsewhere
+        # (test_compare_dispatch.py's test_exit_code_scheme_flag_no_longer_
+        # exists), not here.
         ["--max-findings", "5"],
         ["--require-complete-analysis"],
     ],

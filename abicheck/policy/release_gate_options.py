@@ -44,13 +44,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from .severity import PRESET_DEFAULT, SeverityConfig, resolve_severity_config
-
-#: The three spellings `--exit-code-scheme`/`.abicheck.yml`'s `exit_code_
-#: scheme` accept (`cli_scan.py`'s own `click.Choice`, mirrored by
-#: `compare`'s equivalent option) -- `None` (not stated) is separately
-#: valid at every call site below, so it isn't included here.
-_VALID_EXIT_CODE_SCHEMES = ("auto", "legacy", "severity")
+from .severity import SeverityConfig, resolve_severity_config
 
 
 class _GatePackApplication(Protocol):
@@ -63,123 +57,67 @@ class _GatePackApplication(Protocol):
     structurally, with no coupling beyond attribute names. Declared as
     read-only properties, not plain attributes: a `Protocol` attribute is
     implicitly settable (get *and* set), which the real class's frozen
-    (read-only) dataclass fields can never satisfy structurally."""
+    (read-only) dataclass fields can never satisfy structurally.
+
+    CLI cleanup phase two PR G2: no ``exit_code_scheme``/
+    ``resolved_exit_code_scheme`` members any more -- a gate pack can no
+    longer assign the (now deleted) manual algorithm selector at all; see
+    ``PackApplication``'s own field docstrings and
+    ``compatibility_evaluation_wiring.py``'s pack-field routing table for
+    where that assignment is now rejected at load time.
+    """
 
     @property
     def severity_levels(self) -> Mapping[str, Any]: ...
-    @property
-    def exit_code_scheme(self) -> str | None: ...
-    @property
-    def resolved_exit_code_scheme(self) -> str | None: ...
-
-
-def resolve_gate_pack_exit_code_scheme(
-    *,
-    pack_exit_code_scheme: str | None,
-    pack_resolved_exit_code_scheme: str | None,
-    severity_levels_present: bool,
-    current_scheme: str | None,
-) -> str | None:
-    """The exit-code-scheme a gate pack's contribution resolves to, shared
-    by :func:`apply_release_gate_pack` (the release fan-out's raw-string
-    shape) and :func:`~abicheck.pack_application.apply_to_compare_config`
-    (single-pair ``compare``'s already-resolved ``ResolvedCompareConfig``
-    shape).
-
-    This is the one piece of "which way does the scheme move" reasoning
-    both callers previously re-derived independently (ADR-063 Track A,
-    7B) -- and the specific piece with a real regression history (Codex
-    review, PR #1032: an earlier ``apply_to_compare_config`` revision
-    re-derived ``"severity" if severity_active else ...`` here instead of
-    reading the resolver's own answer, which silently overrode an
-    explicitly selected ``--exit-code-scheme legacy`` whenever a gate pack
-    assigned a severity level). Three-tier precedence, in order:
-
-    1. *pack_exit_code_scheme* -- the pack's own explicit ``gate.
-       exit_code_scheme`` assignment, when it supplied one.
-    2. *pack_resolved_exit_code_scheme* -- **only** consulted when the pack
-       supplied a severity level with no explicit scheme of its own: a
-       severity level *is* severity being configured, so it can move an
-       unstated ``auto`` scheme toward ``"severity"``, exactly as a level
-       set in ``.abicheck.yml`` already does. This is deliberately the
-       resolver's *own already-decided* answer (which already folds the
-       pack's own levels into its ``auto`` computation and lets an
-       explicit ``--exit-code-scheme``/``.abicheck.yml`` value outrank it)
-       -- never a value re-derived here from ``severity_levels_present``
-       alone, which is exactly the bug this function's docstring opens
-       with.
-    3. *current_scheme* -- the pre-pack value, unchanged, when neither of
-       the above resolved anything (no pack, or a pack that touched
-       neither field).
-
-    Callers pass their own already-resolved "no pack" fallback as
-    *current_scheme*: :func:`apply_release_gate_pack` passes the release
-    fan-out's own raw ``release_exit_code_scheme`` (leaving it untouched on
-    a full miss, which is the identical outcome as returning it unchanged
-    here), and :func:`~abicheck.pack_application.apply_to_compare_config`
-    passes ``resolved_cfg.exit_code_scheme``.
-    """
-    scheme = pack_exit_code_scheme
-    if scheme is None and severity_levels_present:
-        scheme = pack_resolved_exit_code_scheme
-    if scheme is None:
-        scheme = current_scheme
-    return scheme
 
 
 def apply_release_gate_pack(
     pack_application: _GatePackApplication | None,
     *,
-    release_exit_code_scheme: str | None,
     severity_preset: str | None,
     severity_abi_breaking: str | None,
     severity_potential_breaking: str | None,
     severity_quality_issues: str | None,
     severity_addition: str | None,
-) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
-    """Fold a selected ``kind: gate`` pack's contribution into the release
-    fan-out's own raw exit-code-scheme/severity inputs (CLI cleanup phase
-    two, "PR B" slice 2).
+) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    """Fold a selected ``kind: gate`` pack's severity contribution into the
+    release fan-out's own raw severity inputs (CLI cleanup phase two, "PR
+    B" slice 2; narrowed by PR G2 to severity only -- a gate pack can no
+    longer assign an exit-code-scheme override at all, see this module's
+    own docstring).
 
-    Returns ``(release_exit_code_scheme, severity_preset,
-    severity_abi_breaking, severity_potential_breaking,
-    severity_quality_issues, severity_addition)`` -- the exact six raw
-    values. Since ADR-064's ``GateOptions`` rewrite, callers should not call
-    this directly: :func:`resolve_release_gate_options` calls it exactly
-    once, ahead of the one resolution into :class:`GateOptions` every
-    downstream severity/exit-code consumer (``_compute_release_severity_
-    exit_code``, ``_fold_release_global_severity``, and the per-library
-    JSON write, via ``GateOptions.severity``) now reads instead of
-    independently re-deriving from the raw strings -- this function stays a
-    separate, directly-unit-tested step of that pipeline rather than being
-    inlined into it.
+    Returns ``(severity_preset, severity_abi_breaking,
+    severity_potential_breaking, severity_quality_issues,
+    severity_addition)`` -- the exact five raw values. Since ADR-064's
+    ``GateOptions`` rewrite, callers should not call this directly:
+    :func:`resolve_release_gate_options` calls it exactly once, ahead of
+    the one resolution into :class:`GateOptions` every downstream severity
+    consumer (``_compute_release_severity_exit_code``,
+    ``_fold_release_global_severity``, and the per-library JSON write, via
+    ``GateOptions.severity``) now reads instead of independently
+    re-deriving from the raw strings -- this function stays a separate,
+    directly-unit-tested step of that pipeline rather than being inlined
+    into it.
 
     The release fan-out has no ``ResolvedCompareConfig``-shaped object of
     its own to fold onto the way :func:`~abicheck.pack_application.
     apply_to_compare_config` does for a single-pair ``compare`` -- its
-    severity/exit-code-scheme resolution is a set of raw CLI-or-config
-    strings, re-derived at several call sites, so applying a pack-supplied
+    severity resolution is a set of raw CLI-or-config strings, re-derived
+    at several call sites, so applying a pack-supplied
     ``gate.severity.<category>`` is necessarily shaped differently here
-    (overriding one of six independent optional raw strings, only ever
+    (overriding one of five independent optional raw strings, only ever
     reached when nothing more explicit -- ``--severity-<category>``/
     ``.abicheck.yml`` -- already stated it, since :func:`~abicheck.
     pack_application.pack_application` already excludes a field an explicit
     source shadowed) than it is for ``apply_to_compare_config`` (a single
     ``dataclasses.replace`` on an already-resolved ``SeverityConfig``).
 
-    The exit-code-scheme fold is **not** independently re-derived, though:
-    :func:`resolve_gate_pack_exit_code_scheme` is the identical function
-    both this and ``apply_to_compare_config`` call for that piece (ADR-063
-    Track A, 7B) -- see its own docstring for the three-tier precedence and
-    the regression history behind it.
-
     A no-op when *pack_application* is ``None`` (no ``--pack`` given) or
-    contributed neither field -- every pre-existing invocation reaches the
-    six inputs completely unchanged.
+    contributed no severity level -- every pre-existing invocation reaches
+    the five inputs completely unchanged.
     """
     if pack_application is None:
         return (
-            release_exit_code_scheme,
             severity_preset,
             severity_abi_breaking,
             severity_potential_breaking,
@@ -194,14 +132,7 @@ def apply_release_gate_pack(
         )
         severity_quality_issues = levels.get("quality_issues", severity_quality_issues)
         severity_addition = levels.get("addition", severity_addition)
-    release_exit_code_scheme = resolve_gate_pack_exit_code_scheme(
-        pack_exit_code_scheme=pack_application.exit_code_scheme,
-        pack_resolved_exit_code_scheme=pack_application.resolved_exit_code_scheme,
-        severity_levels_present=bool(levels),
-        current_scheme=release_exit_code_scheme,
-    )
     return (
-        release_exit_code_scheme,
         severity_preset,
         severity_abi_breaking,
         severity_potential_breaking,
@@ -261,16 +192,20 @@ class GateOptions:
 
     ``severity is None`` is this object's single source of truth for "no
     severity setting is in effect for this release run" -- it already folds
-    together both ways that can happen (an explicitly forced ``legacy``
-    scheme, or no severity configuration at all), the same simplification
-    ``ResolvedCompareConfig``'s own severity field already gives
-    `compare`/`scan`. ``exit_code_scheme``/``severity_preset`` are kept
-    alongside it for provenance/reporting (e.g. a dry-run scheme label) --
-    they are not authoritative for "should severity be folded", ``severity``
-    is.
+    together both ways that could happen before CLI cleanup phase two PR G2
+    removed the manual algorithm selector (an explicitly forced ``legacy``
+    scheme, or no severity configuration at all) -- since PR G2 there is
+    only one way: ``severity is None`` exactly when no severity setting is
+    in effect. Still the same simplification ``ResolvedCompareConfig``'s
+    own severity field already gives `compare`/`scan`. ``exit_code_scheme``
+    is kept alongside it, purely derived (``"severity"`` when ``severity``
+    is not ``None``, else ``"legacy"``) for provenance/reporting (e.g. a
+    dry-run scheme label) -- it is not authoritative for "should severity be
+    folded", ``severity`` is, and it is no longer a settable input anywhere
+    in this module.
     """
 
-    exit_code_scheme: str | None
+    exit_code_scheme: str
     severity_preset: str | None
     severity: SeverityConfig | None
 
@@ -278,7 +213,6 @@ class GateOptions:
 def resolve_release_gate_options(
     pack_application: _GatePackApplication | None,
     *,
-    release_exit_code_scheme: str | None,
     severity_preset: str | None,
     severity_abi_breaking: str | None,
     severity_potential_breaking: str | None,
@@ -287,21 +221,19 @@ def resolve_release_gate_options(
 ) -> GateOptions:
     """Resolve the release fan-out's :class:`GateOptions` exactly once.
 
-    Folds a selected ``kind: gate`` pack's contribution
+    Folds a selected ``kind: gate`` pack's severity contribution
     (:func:`apply_release_gate_pack`), then resolves the severity config
-    (:func:`_resolve_release_severity_config`) and applies the same two
-    scheme-dependent corrections ``compare_release_cmd`` used to apply at
-    its own call site: a resolved ``exit_code_scheme == "severity"`` with no
-    severity setting actually in effect falls back to
-    :data:`PRESET_DEFAULT` (mirroring single-pair ``compare``'s
-    ``ResolvedCompareConfig.severity``, which is unconditionally populated
-    and only *gated* by scheme, never left ``None``); an explicit
-    ``exit_code_scheme == "legacy"`` clears the severity config regardless
-    of what was otherwise configured, so a forced legacy run never scores a
-    severity-based exit even if a severity block is technically present.
+    (:func:`_resolve_release_severity_config`). The one automatic gate
+    algorithm (ADR-064/CLI cleanup phase two PR G2): ``exit_code_scheme`` is
+    ``"severity"`` exactly when a severity setting ended up in effect
+    (``severity_config is not None``), else ``"legacy"`` -- there is no
+    manual override any more. (Before PR G2, an explicit
+    ``--exit-code-scheme``/``.abicheck.yml``/pack override could force
+    either direction regardless of what severity configuration was
+    present; removed along with the CLI flag, the config key, and the
+    pack field.)
     """
     (
-        release_exit_code_scheme,
         severity_preset,
         severity_abi_breaking,
         severity_potential_breaking,
@@ -309,34 +241,12 @@ def resolve_release_gate_options(
         severity_addition,
     ) = apply_release_gate_pack(
         pack_application,
-        release_exit_code_scheme=release_exit_code_scheme,
         severity_preset=severity_preset,
         severity_abi_breaking=severity_abi_breaking,
         severity_potential_breaking=severity_potential_breaking,
         severity_quality_issues=severity_quality_issues,
         severity_addition=severity_addition,
     )
-    if (
-        release_exit_code_scheme is not None
-        and release_exit_code_scheme not in _VALID_EXIT_CODE_SCHEMES
-    ):
-        # Every caller here is past its own front-end's usage-error
-        # handling (Click's `--exit-code-scheme` is a `click.Choice`; a
-        # pack's `gate.exit_code_scheme` is validated at load time) --
-        # except a typed `CompareRequest`/`ScanRequest` caller, which has
-        # none: an unchecked, misspelled scheme (e.g. "legacy " with
-        # trailing whitespace) would otherwise silently fail neither the
-        # `== "severity"`/`== "legacy"` branch below, so a caller that also
-        # set a severity_preset would get the severity algorithm merely
-        # because `severity_config` came back non-None -- a breaking
-        # change could then exit 0 instead of the misspelling being
-        # rejected (Codex review, PR #1032). `ValueError`, matching
-        # `resolve_severity_config`'s own contract for an invalid
-        # `severity_preset` just below.
-        raise ValueError(
-            f"invalid exit_code_scheme {release_exit_code_scheme!r}; "
-            f"must be one of {_VALID_EXIT_CODE_SCHEMES} or None"
-        )
     severity_config = _resolve_release_severity_config(
         severity_preset,
         severity_abi_breaking,
@@ -344,13 +254,8 @@ def resolve_release_gate_options(
         severity_quality_issues,
         severity_addition,
     )
-    if release_exit_code_scheme == "severity" and severity_config is None:
-        severity_config = PRESET_DEFAULT
-        severity_preset = "default"
-    if release_exit_code_scheme == "legacy":
-        severity_config = None
     return GateOptions(
-        exit_code_scheme=release_exit_code_scheme,
+        exit_code_scheme="severity" if severity_config is not None else "legacy",
         severity_preset=severity_preset,
         severity=severity_config,
     )

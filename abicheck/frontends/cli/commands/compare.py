@@ -523,25 +523,20 @@ def _embed_inline_source_side(
 @app_usage_scope_options
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
 @severity_options
-# ── Project config & exit-code scheme (ADR-037 D4 / D12) ──────────────────────
+# ── Project config (ADR-037 D4) ────────────────────────────────────────────
+# No manual --exit-code-scheme selector any more (CLI cleanup phase two PR
+# G2, ADR-064): the one automatic gate algorithm is fully determined by
+# whether a severity setting is in effect anywhere (--severity-preset, a
+# --profile, .abicheck.yml's severity: block, or a kind: gate pack's
+# gate.severity.<category>) -- no gate/severity policy configured means the
+# compatibility verdict decides 0/2/4; one in effect means the resolved
+# GateDecision decides 0/1/2/4.
 @click.option("--config", "config", type=click.Path(exists=True, dir_okay=False, path_type=Path),
               default=None,
               help="Path to the project .abicheck.yml (ADR-037 D4). Default: the "
                    "nearest .abicheck.yml found from the current directory upward. "
                    "Supplies stable project settings (severity map, scope/FP "
-                   "tuning, suppression policy, exit-code scheme); CLI flags "
-                   "override it.")
-@click.option("--exit-code-scheme", "exit_code_scheme",
-              type=click.Choice(["auto", "legacy", "severity"], case_sensitive=True),
-              default=None,
-              help="Exit-code scheme (ADR-037 D12): 'legacy' (0/2/4 verdict), "
-                   "'severity' (per-category error levels), or 'auto' (severity "
-                   "when a severity setting is in effect, else legacy). Declared "
-                   "explicitly here so passing --severity-preset no longer silently "
-                   "changes the scheme. Default: config's exit_code_scheme, else auto. "
-                   "Deliberately kept visible (unlike the removed per-category "
-                   "--severity-* family) -- ADR-040 D4 keeps it a coarse override; "
-                   "see test_config_rebalance.py's test_coarse_overrides_stay_visible.")
+                   "tuning, suppression policy); CLI flags override it.")
 @click.option("--follow-deps", is_flag=True, default=False,
               help="Resolve transitive dependencies for both old and new, compute symbol "
                    "bindings, and include a dependency-change section in the report. ELF only.")

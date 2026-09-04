@@ -79,9 +79,11 @@ severity.blocking_categories / categories / config
 
 The `severity` block appears whenever severity-aware grading was **resolved**
 — which is not only from a `--severity-*` flag. A `.abicheck.yml` carrying a
-`severity:` map or `exit_code_scheme: severity`, a selected run profile, or a
+`severity:` map, a selected run profile, or a
 gate pack all activate it just as well, so a repository can have a gate you
-did not ask for on the command line. Verified: a `compare` run with no
+did not ask for on the command line. There is no manual override for this —
+the gate algorithm is fully automatic, determined only by whether any of
+those set a severity value at all. Verified: a `compare` run with no
 severity flag at all still emits the block when the project config supplies
 one.
 
@@ -156,7 +158,7 @@ invoked:
 
 | Block | Present when |
 |---|---|
-| `severity` | severity-aware grading was resolved from *any* source — a `--severity-*` flag, a `.abicheck.yml` `severity:` map or `exit_code_scheme: severity`, a run profile, or a gate pack |
+| `severity` | severity-aware grading was resolved from *any* source — a `--severity-*` flag, a `.abicheck.yml` `severity:` map, a run profile, or a gate pack |
 | `scope` | `--scope-public-headers` was requested |
 | `contract_coverage_failures`, `contract_coverage_exit_contribution`, `contract_context` | `--contract` was passed |
 | `root_causes`, `root_cause_count` | `--report-mode root-cause` |

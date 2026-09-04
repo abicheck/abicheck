@@ -586,34 +586,31 @@ def classify_compare_pair(
         old_pack=getattr(old, "build_source", None),
         new_pack=getattr(new, "build_source", None),
     )
-    # ADR-064/PR G2: resolve severity/exit-code-scheme into the same
-    # `GateOptions` the release fan-out uses, then the canonical decision.
+    # ADR-064/PR G2: resolve severity into the same `GateOptions` the
+    # release fan-out uses, then the canonical decision. No manual
+    # exit-code-scheme selector to pass any more -- the algorithm is purely
+    # derived from whether `severity_preset` (or a resolved gate pack) put a
+    # severity setting in effect.
     from .policy.exit_decision import resolve_compare_exit_decision
     from .workflows.gate import resolve_release_gate_options
 
     gate = resolve_release_gate_options(
         None,
-        release_exit_code_scheme=request.exit_code_scheme,
         severity_preset=request.severity_preset,
         severity_abi_breaking=None,
         severity_potential_breaking=None,
         severity_quality_issues=None,
         severity_addition=None,
     )
-    # The resolved scheme both calls below score with -- never
-    # gate.exit_code_scheme itself, which can still be "auto" here.
-    effective_scheme = "severity" if gate.severity is not None else "legacy"
     exit_decision = resolve_compare_exit_decision(
-        result, gate.severity, effective_scheme
+        result, gate.severity, gate.exit_code_scheme
     )
 
     # Installs the same gate onto result.contract_context; see
     # workflows.compare_gate_receipt's own docstring for the full account.
     from .workflows.compare_gate_receipt import install_resolved_gate_receipt
 
-    install_resolved_gate_receipt(
-        result, request, gate, pf, suppression, effective_scheme
-    )
+    install_resolved_gate_receipt(result, request, gate, pf, suppression)
 
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
@@ -699,7 +696,6 @@ def run_compare(
     depth: str | None = None,
     *,
     severity_preset: str | None = None,
-    exit_code_scheme: str | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -710,13 +706,15 @@ def run_compare(
     Trailing params (``debuginfod_url`` onward) are appended after every
     pre-existing one, so a positional caller keeps binding each argument to
     the same parameter it always did (Codex review, PR #551). Only
-    ``severity_preset``/``exit_code_scheme`` (the two newest, never
-    previously released) are actually ``*``-enforced keyword-only --
-    enforcing it retroactively for the older ones too would reject a real
-    caller still passing one positionally, the public-API break that
-    "keeps binding positionally" promise forbids (Codex review, fresh
-    evidence, PR #1032). ``include_dependencies`` applies to *both* sides —
-    build a ``CompareRequest`` for a per-side override.
+    ``severity_preset`` (the newest, never previously released) is actually
+    ``*``-enforced keyword-only -- enforcing it retroactively for the older
+    ones too would reject a real caller still passing one positionally, the
+    public-API break that "keeps binding positionally" promise forbids
+    (Codex review, fresh evidence, PR #1032). (Its sibling
+    ``exit_code_scheme`` parameter was deleted in CLI cleanup phase two PR
+    G2 -- the manual algorithm selector no longer exists anywhere.)
+    ``include_dependencies`` applies to *both* sides — build a
+    ``CompareRequest`` for a per-side override.
 
     ``pack_policy_overrides``/``pack_internal_namespaces``: an already-
     resolved ``--pack``'s ``policy.overrides``/``surface.internal_namespaces``
@@ -737,8 +735,8 @@ def run_compare(
     release fan-out's ``_run_compare_pair`` needed a way to forward its own
     resolved ``--depth binary`` per pair; every other caller passes ``None``.
 
-    ``severity_preset``/``exit_code_scheme`` (Codex review): forward onto
-    ``CompareRequest``'s identically-named fields; ``None`` is a no-op.
+    ``severity_preset`` (Codex review): forwards onto ``CompareRequest``'s
+    identically-named field; ``None`` is a no-op.
 
     Returns:
         A :class:`~abicheck.api_types.CompareResult`. This returned the bare
@@ -795,6 +793,5 @@ def run_compare(
         pack_internal_namespaces=pack_internal_namespaces,
         depth=depth,
         severity_preset=severity_preset,
-        exit_code_scheme=exit_code_scheme,
     )
     return run_compare_request(request)

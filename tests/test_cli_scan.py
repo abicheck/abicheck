@@ -148,8 +148,8 @@ def test_scan_breaking_with_severity_info_only_exits_zero(
     runner, baseline_snap, new_snap_breaking
 ):
     # AGENTS.md "Known gaps": `scan --against` used to compute its exit code
-    # from the verdict alone, ignoring `--severity-*`/`--exit-code-scheme` --
-    # unlike `compare`, where `--severity-preset info-only` can leave a
+    # from the verdict alone, ignoring `--severity-*` -- unlike `compare`,
+    # where `--severity-preset info-only` can leave a
     # BREAKING verdict at exit 0. Same BREAKING fixture as
     # test_scan_breaking_exits_four above, but now severity-gated to 0.
     res = runner.invoke(
@@ -170,10 +170,10 @@ def test_scan_breaking_with_severity_info_only_exits_zero(
 def test_scan_breaking_with_severity_default_still_exits_four(
     runner, baseline_snap, new_snap_breaking
 ):
-    # `--exit-code-scheme severity` with the *default* severity preset keeps
-    # abi_breaking at error level, so the exit code is unchanged from the
-    # legacy scheme's 4 -- the severity path is a strict superset of the
-    # legacy one, not merely "different".
+    # A stated `--severity-preset default` (no manual `--exit-code-scheme`
+    # selector any more -- PR G2) keeps abi_breaking at error level, so the
+    # exit code is unchanged from the legacy scheme's 4 -- severity is a
+    # strict superset of legacy, not merely "different".
     res = runner.invoke(
         main,
         [
@@ -181,8 +181,8 @@ def test_scan_breaking_with_severity_default_still_exits_four(
             str(new_snap_breaking),
             "--against",
             str(baseline_snap),
-            "--exit-code-scheme",
-            "severity",
+            "--severity-preset",
+            "default",
         ],
     )
     assert res.exit_code == 4, res.output
@@ -1416,7 +1416,7 @@ def test_published_gate_reflects_a_promoted_crosscheck(runner, tmp_path):
         [
             "scan", str(new), "--against", str(old),
             "--crosscheck", "header_build_context_mismatch=error",
-            "--exit-code-scheme", "severity",
+            "--severity-preset", "default",
             "--format", "json",
         ],
     )
@@ -1443,7 +1443,7 @@ def test_a_promoted_crosscheck_never_lowers_an_already_blocking_gate(
         [
             "scan", str(new_snap_breaking), "--against", str(baseline_snap),
             "--crosscheck", "exported_not_public=error",
-            "--exit-code-scheme", "severity",
+            "--severity-preset", "default",
             "--format", "json",
         ],
     )
@@ -1504,7 +1504,7 @@ def test_exit_decision_matches_severity_gate_exit_code(
         main,
         [
             "scan", str(new_snap_breaking), "--against", str(baseline_snap),
-            "--exit-code-scheme", "severity", "--format", "json",
+            "--severity-preset", "default", "--format", "json",
         ],
     )
     assert res.exit_code == 4, res.output
@@ -1623,7 +1623,7 @@ def test_a_tying_promoted_crosscheck_still_names_itself_in_the_severity_gate(
         [
             "scan", str(new), "--against", str(old),
             "--crosscheck", "header_build_context_mismatch=error",
-            "--exit-code-scheme", "severity",
+            "--severity-preset", "default",
             "--format", "json",
         ],
     )
