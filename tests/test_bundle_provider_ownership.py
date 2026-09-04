@@ -41,7 +41,7 @@ from abicheck.bundle import (
     _compute_resolution_graph,
 )
 from abicheck.checker_policy import ChangeKind
-from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding
 
 
 def _meta(*, soname: str = "", exports: list[str] | None = None) -> ElfMetadata:
@@ -91,6 +91,46 @@ class TestDetectDuplicateProviders:
             }
         )
         assert self._detect(new) == []
+
+    def test_weak_comdat_duplicate_not_flagged(self) -> None:
+        # Codex review, fresh evidence: ordinary C++ vague linkage (the
+        # same inline function / template instantiation compiled into 2+
+        # DSOs) emits an identical STB_WEAK COMDAT copy in each -- expected,
+        # deduplicated by the dynamic linker at load time, not an ownership
+        # conflict.
+        liba = _meta(soname="liba.so.1")
+        liba.symbols.append(
+            ElfSymbol(name="_ZN3Foo6inlineEv", binding=SymbolBinding.WEAK)
+        )
+        libb = _meta(soname="libb.so.1")
+        libb.symbols.append(
+            ElfSymbol(name="_ZN3Foo6inlineEv", binding=SymbolBinding.WEAK)
+        )
+        new = _snapshot({"liba.so": liba, "libb.so": libb})
+        assert self._detect(new) == []
+
+    def test_one_strong_one_weak_not_flagged(self) -> None:
+        # A single strong provider alongside a weak COMDAT copy elsewhere is
+        # still just one real owner -- only 2+ *strong* providers of the
+        # same symbol name a genuine, unresolved conflict.
+        liba = _meta(soname="liba.so.1")
+        liba.symbols.append(ElfSymbol(name="foo", binding=SymbolBinding.GLOBAL))
+        libb = _meta(soname="libb.so.1")
+        libb.symbols.append(ElfSymbol(name="foo", binding=SymbolBinding.WEAK))
+        new = _snapshot({"liba.so": liba, "libb.so": libb})
+        assert self._detect(new) == []
+
+    def test_two_strong_providers_flagged_even_with_a_third_weak_one(self) -> None:
+        liba = _meta(soname="liba.so.1")
+        liba.symbols.append(ElfSymbol(name="foo", binding=SymbolBinding.GLOBAL))
+        libb = _meta(soname="libb.so.1")
+        libb.symbols.append(ElfSymbol(name="foo", binding=SymbolBinding.GLOBAL))
+        libc = _meta(soname="libc.so.1")
+        libc.symbols.append(ElfSymbol(name="foo", binding=SymbolBinding.WEAK))
+        new = _snapshot({"liba.so": liba, "libb.so": libb, "libc.so": libc})
+        findings = self._detect(new)
+        assert len(findings) == 1
+        assert findings[0].affected_libraries == ["liba.so", "libb.so"]
 
     def test_nondefault_duplicate_not_flagged(self) -> None:
         # Both providers export the symbol, but only as a non-default

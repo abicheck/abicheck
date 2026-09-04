@@ -752,7 +752,10 @@ def _compute_resolution_graph(
                 continue
             graph.provides.setdefault(sym.name, []).append(
                 ProviderEntry(
-                    library=name, version=sym.version, is_default=sym.is_default
+                    library=name,
+                    version=sym.version,
+                    is_default=sym.is_default,
+                    binding=sym.binding,
                 ),
             )
 

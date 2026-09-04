@@ -407,42 +407,49 @@ _LINKER_SYNTHESIZED_SYMBOLS: frozenset[str] = frozenset(
 
 
 def _detect_duplicate_providers(new: BundleSnapshot) -> list[BundleFinding]:
-    """Audit-mode: flag a symbol exported as a *default* definition by 2+
-    members of one ``--artifact-set``.
+    """Audit-mode: flag a symbol exported as a *strong, default* definition
+    by 2+ members of one ``--artifact-set``.
 
     ADR-056 D2 (PR H): a single-side sibling of :func:`_detect_provider_changed`
-    -- that detector needs an old side (removed-here/added-there) an audit
-    doesn't have. What an audit *can* see directly is "ownership ambiguity
-    right now": two libraries both defining the identical symbol as their
-    own default-bound export means an unversioned reference resolves to
-    whichever the dynamic linker's symbol-interposition/load-order rules
-    pick first, not a declared contract. Only ``is_default`` providers are
-    compared -- a symbol shipped by both only as a non-default, explicitly-
-    versioned definition is not actually ambiguous to an unversioned
-    consumer (mirrors :class:`~abicheck.bundle_models.ProviderEntry.is_default`).
+    -- that needs an old side (removed-here/added-there) an audit doesn't
+    have. What an audit *can* see: two libraries both defining the same
+    symbol as their own strong (``STB_GLOBAL``), default-bound export means
+    an unversioned reference resolves to whichever the dynamic linker's
+    load-order rules pick first, not a declared contract. Only
+    ``is_default`` providers count (mirrors
+    :class:`~abicheck.bundle_models.ProviderEntry.is_default`).
+
+    **Only strong providers count** (Codex review, fresh evidence): a
+    weak/``STB_GNU_UNIQUE`` copy is ordinary C++ vague linkage (an inline
+    function/template instantiation COMDAT every DSO that uses it emits
+    identically), deduplicated by the dynamic linker at load time -- not
+    two libraries disputing ownership.
 
     Deliberately conservative on false positives: linker/runtime-
-    synthesized per-object symbols (:data:`_LINKER_SYNTHESIZED_SYMBOLS`,
-    each library's own crt-provided ``_edata``/``_end``/...) and libstdc++-
-    shaped mangled names (:func:`~abicheck.bundle_detector_heuristics.
-    _looks_system_symbol`) are excluded -- flagging either would fire on
-    nearly every real multi-library set for no ownership reason at all.
+    synthesized per-object symbols (:data:`_LINKER_SYNTHESIZED_SYMBOLS`)
+    and libstdc++-shaped names (:func:`~abicheck.bundle_detector_heuristics.
+    _looks_system_symbol`) are excluded -- either would fire on nearly
+    every real multi-library set for no ownership reason at all.
 
-    **Known, deliberately-deferred gap:** no L4 symbol reconciliation is
-    applied here (same gap as :func:`~abicheck.bundle.
-    artifact_set_member_exports`, see ``docs/contribute/known-gaps.md``) --
-    two raw exports spelling one declaration under different mangling
-    variants (a ctor ABI clone, an ABI-tag drift) could misread as two
+    **Known, deliberately-deferred gap:** no L4 symbol reconciliation
+    (same gap as :func:`~abicheck.bundle.artifact_set_member_exports`, see
+    ``docs/contribute/known-gaps.md``) -- two raw exports spelling one
+    declaration under different mangling variants could misread as two
     single-provider symbols rather than one duplicate, or vice versa.
     Closing it needs each member's own L4 mapping threaded into the bundle
-    layer, which has no per-member ``AbiSnapshot`` to read it from -- a
-    materially larger change, left for a follow-up.
+    layer, a materially larger change left for a follow-up.
     """
     findings: list[BundleFinding] = []
     for symbol, providers in sorted(new.resolution.provides.items()):
         if symbol in _LINKER_SYNTHESIZED_SYMBOLS or _looks_system_symbol(symbol):
             continue
-        default_libs = sorted({p.library for p in providers if p.is_default})
+        default_libs = sorted(
+            {
+                p.library
+                for p in providers
+                if p.is_default and p.binding == SymbolBinding.GLOBAL
+            }
+        )
         if len(default_libs) < 2:
             continue
         findings.append(
@@ -450,11 +457,11 @@ def _detect_duplicate_providers(new: BundleSnapshot) -> list[BundleFinding]:
                 kind=ChangeKind.BUNDLE_DUPLICATE_PROVIDER,
                 symbol=symbol,
                 description=(
-                    f"{symbol} is exported as a default definition by "
-                    f"{len(default_libs)} libraries in this artifact set "
-                    f"({', '.join(default_libs)}); which one a consumer "
-                    "resolves against depends on load order / symbol "
-                    "interposition, not a declared contract."
+                    f"{symbol} is exported as a strong (non-weak) default "
+                    f"definition by {len(default_libs)} libraries in this "
+                    f"artifact set ({', '.join(default_libs)}); which one a "
+                    "consumer resolves against depends on load order / "
+                    "symbol interposition, not a declared contract."
                 ),
                 affected_libraries=default_libs,
             ),
