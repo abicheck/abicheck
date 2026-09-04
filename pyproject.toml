@@ -577,6 +577,32 @@ pytest_add_cli_args = [
     # stdlib, `jsonschema`, `pytest`, and `agent-evals/run_task.py` loaded
     # by path, none of which is mutated.
     "--ignore=tests/test_agent_evals.py",
+    # Different failure class from every entry above (none of those is a
+    # "narrowed config" problem): the PR lane's own "Narrow mutation scope"
+    # workflow step (mutation.yml) runs `mutation_scope.py` BEFORE `mutmut
+    # run`, which rewrites this real, on-disk `pyproject.toml`'s
+    # `only_mutate` array in place to only the module(s) this PR's diff
+    # implicates -- by design, so `mutmut run` doesn't waste budget
+    # generating mutants for untouched modules. `mutmut` then copies that
+    # already-narrowed `pyproject.toml` into `mutants/` (it is always
+    # `also_copy`d, see the comment above `also_copy` in this file) and runs
+    # the full "not slow" suite from there, including this test --
+    # `test_load_only_mutate_globs_reads_the_real_pyproject_toml`'s own
+    # "Sanity: the real config this repo ships parses and names real
+    # modules" docstring is only true when nothing upstream of this test's
+    # execution has rewritten that file, which the diff-scoped lane always
+    # does whenever the PR-implicated subset excludes one of this test's two
+    # hardcoded modules (`diff_symbols.py`/`checker_policy.py`) -- true for
+    # any PR whose diff touches only some *other* `only_mutate` module (PR
+    # #784: `abicheck/serialization.py` alone). Not caused by this PR's own
+    # diff content, and not fixable by picking different assertion modules
+    # (the same class of failure recurs for whichever module a future PR's
+    # scope excludes) -- the test's premise itself doesn't hold inside this
+    # one lane, the same reason the repository-structure entries above are
+    # excluded rather than patched. No mutation-kill cost: it asserts
+    # against parsed config data, not `only_mutate` module behavior, so it
+    # cannot kill a detector mutant either way (confirmed by grep).
+    "--deselect=tests/test_mutation_run_scoping.py::test_load_only_mutate_globs_reads_the_real_pyproject_toml",
 ]
 
 # ---------------------------------------------------------------------------

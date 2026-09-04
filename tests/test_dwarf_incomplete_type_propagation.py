@@ -258,6 +258,74 @@ class TestStandaloneParserFlagsIncompleteTypeResolution:
         assert result.cu_failed == 0
         assert result.evidence_state == "partial"
 
+    def test_unsupported_tag_fallback_marks_partial(self) -> None:
+        """P1 review, fresh evidence (Codex): a standard tag with no
+        dedicated _compute_type_info() branch (e.g.
+        DW_TAG_ptr_to_member_type, which typically carries no
+        DW_AT_name) falls through to _compute_fallback_type_info(), which
+        previously substituted a name/tag placeholder the same way an
+        unresolved DW_AT_type reference does -- but without touching the
+        completeness accumulator. Two DIEs sharing this fallback (e.g.
+        `int A::*` vs `long A::*`, both bare DW_TAG_ptr_to_member_type
+        with no name) would resolve to the identical placeholder string
+        on both sides, reading as NO_CHANGE with evidence_state=parsed,
+        silently masking a real field-type change."""
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "field", "DW_AT_type": _Attr(70, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "HasPtrToMember", "DW_AT_byte_size": 8},
+            children=[member],
+        )
+        # No DW_AT_name -- the exact shape that falls through to the
+        # tag-string placeholder rather than a real type name.
+        ptr_to_member = _Die(
+            "DW_TAG_ptr_to_member_type",
+            {"DW_AT_byte_size": 8},
+            offset=70,
+        )
+        die_map = {70: ptr_to_member}
+
+        result = _run_parse([struct], die_map)
+        assert result.cu_failed == 0
+        assert result.evidence_state == "partial"
+        # Best-effort output still emitted (the tag itself, since there is
+        # no DW_AT_name), not dropped entirely.
+        assert (
+            result.structs["HasPtrToMember"].fields[0].type_name
+            == "DW_TAG_ptr_to_member_type"
+        )
+
+    def test_unsupported_tag_with_name_is_not_flagged(self) -> None:
+        """Positive control: a fallback-shape tag that DOES carry a real
+        DW_AT_name (so _compute_fallback_type_info returns real
+        information, not a placeholder) must not be flagged."""
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "field", "DW_AT_type": _Attr(71, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "HasNamedFallback", "DW_AT_byte_size": 8},
+            children=[member],
+        )
+        named_fallback = _Die(
+            "DW_TAG_unspecified_type",
+            {"DW_AT_name": "decltype(nullptr)", "DW_AT_byte_size": 8},
+            offset=71,
+        )
+        die_map = {71: named_fallback}
+
+        result = _run_parse([struct], die_map)
+        assert result.cu_failed == 0
+        assert result.evidence_state == "parsed"
+        assert (
+            result.structs["HasNamedFallback"].fields[0].type_name
+            == "decltype(nullptr)"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Unified single-pass entry point (dumper.py's real ELF-dump path)

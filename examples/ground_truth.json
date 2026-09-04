@@ -1445,12 +1445,13 @@
    "expected": "BREAKING",
    "min_evidence": "L1",
    "note": "the deployment-risk (GLIBCXX runtime floor) finding alone is visible at L0 and would read COMPATIBLE_WITH_RISK there; with debug info present (this catalog's actual run tier) abicheck's DWARF/CFI channel additionally reports frame_register_changed for reset() under GCC (rsp -> rbp, since GCC now emits a frame pointer for the throwing implementation) -- a real binary-level (not source-level) signal, raising the verdict to BREAKING. Was previously masked by a CFI-extraction bug (pyelftools EH_CFI_entries()/CFI_entries() vs. the wrong get_-prefixed names this parser called) that made this detector dead code against every real binary; fixed in this same PR. Toolchain-dependent -- see known_gap.",
-   "known_gap": "Clang: unlike GCC, clang's codegen for Buffer::reset() keeps an rsp-based CFA in both v1 (noexcept) and v2 (throwing) -- no frame_register_changed signal exists to detect under this toolchain, so the verdict stays COMPATIBLE_WITH_RISK (the deployment-risk findings alone). Verified directly: parse_advanced_dwarf().frame_registers reports 'rsp' for _ZN6Buffer5resetEv in both clang-built v1.so and v2.so, vs. GCC's rsp -> rbp.",
+   "known_gap": "Two independent producer-side gaps both suppress the frame_register_changed signal, leaving only the deployment-risk findings (verdict COMPATIBLE_WITH_RISK): (1) Clang: unlike GCC, clang's codegen for Buffer::reset() keeps an rsp-based CFA in both v1 (noexcept) and v2 (throwing) at every optimization level tested -- no frame_register_changed signal exists to detect under this toolchain at all. Verified directly: parse_advanced_dwarf().frame_registers reports 'rsp' for _ZN6Buffer5resetEv in both clang-built v1.so and v2.so, vs. GCC's rsp -> rbp. (2) GCC, but only when optimized (-Og/-O2/-O3, e.g. this catalog's CMake-driven release-headers/build-source artifact variants, which build with CMAKE_BUILD_TYPE=Release): GCC's own rsp -> rbp switch for the throwing reset() only occurs at -O0 (this case's own documented command, and the debug-headers/stripped-headers variants' CMake Debug build type, both of which have no explicit -O flag and so default to -O0) -- verified directly by rebuilding with -g -Og and -g -O3 -DNDEBUG and observing frame_registers stay 'rsp' in both versions either way, vs. the genuine switch at -g -O0. This data model has no way to express an OR of two independent (toolchain, variant) conditions in one entry, so known_gap_toolchains below covers both producers unscoped by variant -- deliberately less precise than case64_calling_convention_changed's own single-condition gap, accepted since known_gap_observed still pins the exact wrong verdict this covers.",
    "known_gap_observed": [
     "COMPATIBLE_WITH_RISK"
    ],
    "known_gap_toolchains": [
-    "clang"
+    "clang",
+    "gcc"
    ],
    "platforms": [
     "linux"

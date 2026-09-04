@@ -676,7 +676,7 @@ def _compute_type_info(
     if tag == "DW_TAG_subroutine_type":
         return ("fn(...)", _attr_int(die, "DW_AT_byte_size"))
 
-    return _compute_fallback_type_info(die, tag)
+    return _compute_fallback_type_info(die, tag, incomplete=incomplete)
 
 
 def _compute_record_type_info(die: Any, tag: str) -> tuple[str, int]:
@@ -784,13 +784,28 @@ def _resolve_inner_type_name(
     return inner[0] if inner is not None else None
 
 
-def _compute_fallback_type_info(die: Any, tag: str) -> tuple[str, int]:
+def _compute_fallback_type_info(
+    die: Any, tag: str, *, incomplete: list[bool] | None = None
+) -> tuple[str, int]:
     name = _attr_str(die, "DW_AT_name")
     size = _attr_int(die, "DW_AT_byte_size")
     # Log unknown DWARF type tags so gaps in type resolution are visible.
     # This helps diagnose missing coverage for new/vendor-specific DWARF extensions.
     # abi-dumper #6: __unknown__ type entries should produce a diagnostic.
     if not name:
+        # P1 review, fresh evidence (Codex): a standard tag with no
+        # dedicated _compute_type_info() branch (e.g.
+        # DW_TAG_ptr_to_member_type, which typically carries no
+        # DW_AT_name) previously fell through to this same placeholder
+        # substitution as an unresolved DW_AT_type reference does, but
+        # without touching the completeness accumulator -- so two DIEs
+        # sharing this fallback (e.g. `int A::*` vs `long A::*`, both
+        # bare DW_TAG_ptr_to_member_type with no name) resolve to the
+        # identical "DW_TAG_ptr_to_member_type" placeholder string on
+        # both sides, reading as NO_CHANGE while analysis_assurance still
+        # reports "parsed" -- silently masking a real field-type change.
+        if incomplete is not None:
+            incomplete.append(True)
         tag_key = tag or "<empty>"
         if tag_key not in _SEEN_UNKNOWN_DWARF_TAGS:
             _SEEN_UNKNOWN_DWARF_TAGS.add(tag_key)
