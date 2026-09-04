@@ -149,6 +149,28 @@ PR #1042, three rounds):**
    :func:`_decode_json_string_token`, the same ``json.loads``-based
    decoding the marker's *value* already went through from the start --
    now shared by both halves of the check instead of only the value half.
+7. **A byte sequence that is a genuine, complete, self-closing JSON object
+   from the start can satisfy every token-level check above while never
+   being a real ``BundleFacts`` document at all (Codex review, round 6,
+   fresh evidence).** A ``.tar``/``.tar.gz`` release package's very first
+   bytes are its first member's ``name`` field -- unlike every other
+   archive format this module rules out, tar has no leading magic, so a
+   member deliberately named e.g. ``{"artifact_type":"abicheck.bundle-
+   facts"}`` decodes to bytes that are a complete, valid, gap-free JSON
+   object satisfying points 1-6 with nothing left to catch it: the marker
+   scan finds and returns the value before ever reaching the bytes that
+   would reveal this isn't really a JSON document (the rest of the tar
+   header). No token-level check can distinguish this from a real
+   document, because the offending bytes genuinely *are* a valid encoding
+   of exactly the shape being checked for -- the only distinguishing
+   signal is structural, at the whole-file level, which token scanning
+   never looks at. Answered by checking the decoded prefix against
+   ``tarfile.is_tarfile()`` (:func:`_decoded_prefix_is_a_real_tar_stream`)
+   before the marker scan runs at all -- a genuine tar stream is
+   structurally verifiable (checksummed header) and a real JSON document's
+   bytes can never accidentally satisfy that check, so this closes the gap
+   with no false-negative risk on a real stored-facts document, unlike
+   point 2's reverted filename-suffix veto.
 
 **Residual, accepted gap (same shape as the pre-marker-v1 gap above):** a
 reordered document whose marker falls beyond :data:`_MARKER_SCAN_BYTES` of
@@ -165,8 +187,10 @@ than chased further.
 
 from __future__ import annotations
 
+import io
 import json as _json
 import re
+import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -175,13 +199,25 @@ from pathlib import Path
 #: one token, escapes included, so a structural character inside a string
 #: value is never mistaken for real JSON structure -- the same "string
 #: alternative tried first" discipline ``storage.json_budget``'s own
-#: container-token regex already establishes), or one of the six
-#: structural characters that matter for depth/key-value tracking.
-#: Numbers/``true``/``false``/``null`` are deliberately not tokenized --
-#: this scan only ever needs to recognize string keys/values, and
-#: ``re.finditer`` simply skips over bytes no alternative matches, which is
-#: exactly "ignore" for a token kind this scan doesn't care about.
-_JSON_STRUCTURE_TOKEN_RE = re.compile(rb'"(?:[^"\\]|\\.)*"|[{}\[\]:,]', re.DOTALL)
+#: container-token regex already establishes), one of the six structural
+#: characters that matter for depth/key-value tracking, or a bare
+#: number/``true``/``false``/``null`` scalar (matching ``storage.
+#: json_budget``'s own number pattern -- loose, not a strict JSON-number
+#: grammar, since validating syntax is ``json.loads()``'s job, not this
+#: scan's). Scalars are tokenized -- even though the scan never treats one
+#: as a key or value candidate -- purely so :func:`_root_level_artifact_type`
+#: can require *every* byte between one recognized token and the next to be
+#: JSON whitespace (Codex review, round 6, fresh evidence -- see that
+#: function's own docstring for why "any byte re.finditer doesn't match is
+#: just skipped" is not safe to leave unchecked).
+_JSON_STRUCTURE_TOKEN_RE = re.compile(
+    rb'"(?:[^"\\]|\\.)*"|[{}\[\]:,]|-?\d[\d.eE+-]*|true|false|null', re.DOTALL
+)
+
+#: JSON's own whitespace set (RFC 8259 -- space, tab, CR, LF). The *only*
+#: bytes :func:`_root_level_artifact_type` permits between two recognized
+#: tokens once scanning is underway.
+_JSON_WHITESPACE_RE = re.compile(rb"[ \t\r\n]*")
 
 #: The root marker key, as JSON actually compares it -- decoded, not the
 #: raw token spelling. See :func:`_decode_json_string_token`.
@@ -256,6 +292,22 @@ def _root_level_artifact_type(prefix: bytes) -> bytes | None:
     (returning ``None`` here means "not found in the visible window", the
     caller does not distinguish that from a genuine absence -- both simply
     fail to classify as stored bundle facts).
+
+    Requires every byte between one recognized token and the next to be
+    JSON whitespace, not merely "whatever ``re.finditer`` happened to skip
+    over" (Codex review, round 6, fresh evidence). Without this, a crafted
+    non-JSON byte stream carrying the marker's token *sequence* embedded in
+    otherwise-arbitrary bytes -- e.g. a ``.tar.gz`` release package whose
+    first tar member is deliberately named ``{"artifact_type":"abicheck.
+    bundle-facts"}`` -- would still satisfy this scan: a tar header starts
+    with the member name, so those exact header bytes read as a root JSON
+    object to a scan that only checks token *order*, not that the bytes
+    *between* tokens are legal JSON separators. Rejecting any stray
+    (non-whitespace) byte between tokens is what a real JSON document (a
+    from-`json.dumps` or pretty-printed encoding of a real ``BundleFacts``
+    document alike) never produces in the first place -- it closes the gap
+    without reintroducing a suffix-only package veto (point 2's own
+    rejected fix).
     """
     stripped = prefix.lstrip(b" \t\r\n")
     if not stripped.startswith(b"{"):
@@ -263,7 +315,18 @@ def _root_level_artifact_type(prefix: bytes) -> bytes | None:
     depth = 0
     just_saw_colon = False
     pending_key_is_marker = False
+    expected_pos = 0
     for m in _JSON_STRUCTURE_TOKEN_RE.finditer(stripped):
+        if m.start() != expected_pos:
+            gap = stripped[expected_pos : m.start()]
+            if not _JSON_WHITESPACE_RE.fullmatch(gap):
+                # A byte between two recognized tokens that isn't JSON
+                # whitespace -- not a real JSON document (any legal
+                # encoding, minified or pretty-printed, separates tokens
+                # with whitespace only), so stop trusting anything this
+                # scan has matched so far.
+                return None
+        expected_pos = m.end()
         tok = m.group(0)
         if tok in (b"{", b"["):
             depth += 1
@@ -286,6 +349,14 @@ def _root_level_artifact_type(prefix: bytes) -> bytes | None:
             just_saw_colon = False
             pending_key_is_marker = False
             continue
+        if not tok.startswith(b'"'):
+            # A bare number/true/false/null scalar -- always a value
+            # (JSON has no unquoted key syntax), so it can never complete
+            # the marker (whose value is a JSON string) and never starts a
+            # pending key.
+            just_saw_colon = False
+            pending_key_is_marker = False
+            continue
         # A string literal -- a value if it immediately follows ':', a key
         # otherwise (JSON's own key/value alternation, tracked explicitly
         # rather than assumed from position, so "artifact_type" appearing
@@ -301,6 +372,40 @@ def _root_level_artifact_type(prefix: bytes) -> bytes | None:
                 depth == 1 and _decode_json_string_token(tok) == _ARTIFACT_TYPE_KEY
             )
     return None
+
+
+def _decoded_prefix_is_a_real_tar_stream(prefix: bytes) -> bool:
+    """``True`` when *prefix* is the start of a genuine tar stream (Codex
+    review, PR #1042, round 6, fresh evidence).
+
+    Every other archive format this module rules out (the G40 zip archive,
+    wheel/deb/rpm/conda) starts with a fixed magic that can never begin with
+    ``{`` -- but a tar stream's very first bytes *are* its first member's
+    ``name`` field, attacker- or tool-controlled content with no leading
+    magic at all. A ``.tar``/``.tar.gz``/``.tar.bz2``/``.tar.xz`` release
+    package whose first member is deliberately named a complete, valid,
+    self-closing JSON object (e.g. ``{"artifact_type":"abicheck.bundle-
+    facts"}``) satisfies every check :func:`_root_level_artifact_type` can
+    make from content alone -- there is no gap, no reordering, nothing
+    syntactically wrong with those exact bytes as a JSON prefix, because
+    they *are* a complete, valid encoding of exactly the shape being
+    checked for. The only way to tell it apart from a real ``BundleFacts``
+    document is a signal ``_root_level_artifact_type`` cannot see at all:
+    that the *whole file* is independently, structurally a tar archive.
+    ``tarfile.is_tarfile()`` checks exactly that (the first 512-byte header
+    block's own checksum, well within :data:`_MARKER_SCAN_BYTES`), and
+    never accepts real JSON text as a tar header -- so this has no
+    collision risk with a genuine stored-facts document the way an
+    ``is_package()`` *filename*-suffix veto did (point 2, reverted): this
+    checks the decoded content structurally, not the path's suffix.
+    """
+    try:
+        return tarfile.is_tarfile(io.BytesIO(prefix))
+    except Exception:
+        # is_tarfile() is documented to raise on some malformed inputs
+        # rather than only ever returning False -- never let a corrupt or
+        # truncated candidate turn a classification helper into a crash.
+        return False
 
 
 def _looks_like_stored_bundle_facts_archive(path: Path) -> bool:
@@ -337,12 +442,16 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
     ``False`` for anything that is not a regular file (a directory), or
     that this module's bounded prefix reader cannot decode at all (corrupt,
     or a format ``snapshot_io`` doesn't recognize). A real package archive
-    (wheel/deb/rpm/tar/conda) is not special-cased -- the depth-scoped
-    marker scan (this module's own docstring, points 3-4) already cannot
-    match one, so excluding it separately would only reintroduce point 2's
-    false-negative on a genuine stored-facts document with a package-like
-    filename suffix. Never raises, never fully decompresses or JSON-parses
-    a plain-JSON candidate -- see this module's own docstring for why. A
+    (wheel/deb/rpm/conda) is not special-cased by *filename* -- the
+    depth-scoped marker scan (this module's own docstring, points 3-4)
+    already cannot match one by content, so excluding it by suffix would
+    only reintroduce point 2's false-negative on a genuine stored-facts
+    document with a package-like filename suffix. A tar-based archive is
+    the one exception, ruled out by decoded *content* rather than filename
+    (point 7, :func:`_decoded_prefix_is_a_real_tar_stream`) -- a
+    filename-blind check, so it carries none of point 2's false-negative
+    risk. Never raises, never fully decompresses or JSON-parses a
+    plain-JSON candidate -- see this module's own docstring for why. A
     ``True`` answer still leaves full validation to the ordinary
     bundle-facts read path (``load_bundle_facts`` / ``bundle_facts_from_
     dict``); this only decides *routing*.
@@ -356,6 +465,12 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
 
     prefix = bounded_decoded_prefix(path, _MARKER_SCAN_BYTES)
     if prefix is None:
+        return False
+    if _decoded_prefix_is_a_real_tar_stream(prefix):
+        # A genuine tar stream can never be a real BundleFacts document
+        # (see _decoded_prefix_is_a_real_tar_stream's own docstring) --
+        # ruled out before the marker scan even runs, so a tar member
+        # deliberately named to look like the marker is never trusted.
         return False
     value = _root_level_artifact_type(prefix)
     if value is None:

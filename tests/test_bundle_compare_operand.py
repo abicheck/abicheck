@@ -111,6 +111,51 @@ class TestLooksLikeStoredBundleFacts:
         assert p.stat().st_size > 8192
         assert looks_like_stored_bundle_facts(p) is True
 
+    def test_tar_member_deliberately_named_as_the_marker_is_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 6): a tar stream's very first
+        bytes are its first member's own name field -- unlike every other
+        archive format this module rules out, tar has no leading magic, so
+        a member deliberately named a complete, valid, self-closing JSON
+        marker object satisfies every token-level check on its own. Only a
+        whole-file structural check (is this really a tar stream?) can
+        catch it."""
+        tar_path = tmp_path / "release.tar"
+        with tarfile.open(tar_path, "w") as tf:
+            info = tarfile.TarInfo(name=_MARKER_JSON)
+            info.size = 0
+            tf.addfile(info, io.BytesIO(b""))
+        assert looks_like_stored_bundle_facts(tar_path) is False
+
+    def test_gzipped_tar_member_named_as_the_marker_is_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Same attack as above, through the gzip-compressed shape a real
+        --bundle-facts-out JSON document could also take (bounded_decoded_
+        prefix decodes gzip transparently either way)."""
+        tar_path = tmp_path / "release.tar.gz"
+        with tarfile.open(tar_path, "w:gz") as tf:
+            info = tarfile.TarInfo(name=_MARKER_JSON)
+            info.size = 0
+            tf.addfile(info, io.BytesIO(b""))
+        assert looks_like_stored_bundle_facts(tar_path) is False
+
+    def test_garbage_between_reordered_root_tokens_is_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """A non-whitespace byte between two recognized root-level tokens
+        means this isn't a real JSON document at all (a genuine encoding,
+        minified or pretty-printed, never separates tokens with anything
+        but whitespace) -- must not be silently skipped the way an
+        unconstrained token scan otherwise would."""
+        p = tmp_path / "garbage_gap.json"
+        p.write_bytes(
+            b'{"schema_version":2,\x00\x01\x02"artifact_type":'
+            b'"abicheck.bundle-facts"}'
+        )
+        assert looks_like_stored_bundle_facts(p) is False
+
     def test_escaped_marker_key_still_classifies_as_stored(
         self, tmp_path: Path
     ) -> None:
