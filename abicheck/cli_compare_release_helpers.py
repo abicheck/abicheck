@@ -246,7 +246,7 @@ def _run_bundle_analysis(
     per_lib_results: list[DiffResult],
     *,
     manifest_path: Path | None,
-    bundle_system_providers: str,
+    bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...] = (),
     policy: str = "strict_abi",
     old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
@@ -321,9 +321,11 @@ def _run_bundle_analysis(
                 f"Failed to load manifest {manifest_path}: {exc}",
             ) from exc
 
-    system_extra: list[str] = [
-        s.strip() for s in bundle_system_providers.split(",") if s.strip()
-    ]
+    # Consumed directly as a sequence -- no comma-join/split round trip
+    # (Codex review, fresh evidence: joining then re-splitting on "," would
+    # corrupt a provider entry that itself contains a comma; entries are
+    # already stripped/filtered once, at BuildConfig.from_dict()).
+    system_extra: list[str] = list(bundle_system_providers)
     result = analyze_bundle(
         old_snap,
         new_snap,
@@ -632,7 +634,7 @@ def _collect_bundle_result(
     new_map: dict[str, Path],
     worst_verdict: str,
     manifest_path: Path | None,
-    bundle_system_providers: str,
+    bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...] = (), policy: str = "strict_abi", policy_file: PolicyFile | None = None,
 ) -> tuple[BundleDiffResult | None, str]:
     """Extract stashed DiffResults, run bundle analysis, update worst verdict.

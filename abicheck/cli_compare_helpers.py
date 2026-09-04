@@ -1657,7 +1657,7 @@ def run_compare(
             devel_pkg1=devel_pkg1, devel_pkg2=devel_pkg2,
             include_private_dso=include_private_dso, keep_extracted=keep_extracted,
             manifest_path=manifest_path,
-            bundle_system_providers=",".join(resolved_cfg.bundle_system_providers),
+            bundle_system_providers=resolved_cfg.bundle_system_providers,
             bundle_cohorts=resolved_cfg.bundle_cohorts, no_bundle_analysis=no_bundle_analysis,
             bundle_facts_out=bundle_facts_out, scope_public_headers=scope_public_headers,
             include_dependencies=include_dependencies,

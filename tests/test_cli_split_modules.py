@@ -496,9 +496,47 @@ class TestCompareReleaseErrorPaths:
                 new_map={"libfoo.so": new_path},
                 per_lib_results=[],
                 manifest_path=None,
-                bundle_system_providers="",
+                bundle_system_providers=(),
             )
         assert result is None
+
+    def test_system_providers_with_comma_survive_intact(self, tmp_path: Path) -> None:
+        """Codex review, fresh evidence: bundle_system_providers is a real
+        sequence now (PR J), consumed directly -- no comma-join/split round
+        trip through a legacy string parameter. A provider entry containing
+        a literal comma (a real, if unusual, valid SONAME character) must
+        reach analyze_bundle() as one entry, not two."""
+        from abicheck.bundle import BundleDiffResult
+        from abicheck.cli_compare_release import _run_bundle_analysis
+
+        fake_snap = type("S", (), {"root": tmp_path})()
+        old_path = tmp_path / "libfoo.so"
+        old_path.write_bytes(b"\x7fELF")
+
+        captured: dict[str, object] = {}
+
+        def _fake_analyze_bundle(*args: object, **kwargs: object) -> BundleDiffResult:
+            captured["system_providers"] = kwargs.get("system_providers")
+            return BundleDiffResult(old_root=tmp_path, new_root=tmp_path)
+
+        with patch(
+            "abicheck.bundle.build_bundle_snapshot",
+            return_value=fake_snap,
+        ), patch(
+            "abicheck.bundle_analysis.analyze_bundle",
+            side_effect=_fake_analyze_bundle,
+        ):
+            _run_bundle_analysis(
+                old_map={"libfoo.so": old_path},
+                new_map={"libfoo.so": old_path},
+                per_lib_results=[],
+                manifest_path=None,
+                bundle_system_providers=("libvendor,compat.so.1", "libcuda.so.1"),
+            )
+        assert captured["system_providers"] == [
+            "libvendor,compat.so.1",
+            "libcuda.so.1",
+        ]
 
     def test_bundle_analysis_compare_raises_returns_empty(self, tmp_path: Path) -> None:
         """If compare_bundle itself raises, _run_bundle_analysis returns
@@ -522,7 +560,7 @@ class TestCompareReleaseErrorPaths:
                 new_map={"libfoo.so": old_path},
                 per_lib_results=[],
                 manifest_path=None,
-                bundle_system_providers="sysA,sysB",
+                bundle_system_providers=("sysA", "sysB"),
             )
         assert isinstance(result, BundleDiffResult)
 
@@ -551,7 +589,7 @@ class TestCompareReleaseErrorPaths:
                     new_map={"libfoo.so": old_path},
                     per_lib_results=[],
                     manifest_path=bad_manifest,
-                    bundle_system_providers="",
+                    bundle_system_providers=(),
                 )
 
     def test_bundle_analysis_forwards_selected_policy(self, tmp_path: Path) -> None:
@@ -582,7 +620,7 @@ class TestCompareReleaseErrorPaths:
                 new_map={"libfoo.so": old_path},
                 per_lib_results=[],
                 manifest_path=None,
-                bundle_system_providers="",
+                bundle_system_providers=(),
                 policy="plugin_abi",
             )
         assert captured.get("policy") == "plugin_abi"
@@ -613,7 +651,7 @@ class TestCompareReleaseErrorPaths:
                 new_map={"libfoo.so": old_path},
                 worst_verdict="COMPATIBLE",
                 manifest_path=None,
-                bundle_system_providers="",
+                bundle_system_providers=(),
                 policy="plugin_abi",
             )
         assert captured.get("policy") == "plugin_abi"

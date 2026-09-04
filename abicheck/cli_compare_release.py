@@ -295,7 +295,7 @@ def compare_release_cmd(
     verbose: bool,
     jobs: int,
     manifest_path: Path | None,
-    bundle_system_providers: str,
+    bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...],
     no_bundle_analysis: bool,
     bundle_facts_out: Path | None,
