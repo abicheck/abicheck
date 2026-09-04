@@ -215,13 +215,36 @@ def write_bundle_facts_package(
     Raises `ValueError` if the per-library imports disagree on
     `source_schema_version` — see the module docstring's "schema-version
     consistency requirement" section for why that is checked explicitly
-    rather than silently resolved.
+    rather than silently resolved — or if *facts* itself already exceeds
+    either limit `read_bundle_facts_package` enforces on the way back in
+    (`DEFAULT_MAX_LIBRARY_COUNT`/`DEFAULT_MAX_BUNDLE_DECODED_BYTES`): this
+    public writer must not hand back a `PackageManifest` its own promised
+    inverse refuses to reopen (Codex review).
     """
+    if len(facts.per_library_snapshots) > DEFAULT_MAX_LIBRARY_COUNT:
+        raise ValueError(
+            f"facts.per_library_snapshots names "
+            f"{len(facts.per_library_snapshots)} libraries, exceeding "
+            f"DEFAULT_MAX_LIBRARY_COUNT ({DEFAULT_MAX_LIBRARY_COUNT}) -- "
+            "refusing to write a package read_bundle_facts_package would "
+            "itself then refuse to reconstruct"
+        )
     artifact_refs: list[ArtifactRef] = []
     section_schema_versions: dict[str, int] = {}
     source_schema_version: int | None = None
+    decoded_bytes_so_far = 0
     for library_name, snapshot in facts.per_library_snapshots.items():
         document = snapshot_to_dict(snapshot)
+        decoded_bytes_so_far += len(json.dumps(document).encode("utf-8"))
+        if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+            raise ValueError(
+                f"facts.per_library_snapshots' encoded documents exceed "
+                f"DEFAULT_MAX_BUNDLE_DECODED_BYTES "
+                f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes) -- reached "
+                f"while encoding {library_name!r}; refusing to write a "
+                "package read_bundle_facts_package would itself then "
+                "refuse to reconstruct"
+            )
         library_manifest = import_legacy_snapshot(
             document,
             store=store,
@@ -279,7 +302,17 @@ def write_bundle_facts_package(
 
     project_sections: dict[str, ObjectRef] = {}
     if facts.manifest is not None:
-        digest = store.put(_manifest_document_for_storage(facts.manifest))
+        manifest_document = _manifest_document_for_storage(facts.manifest)
+        decoded_bytes_so_far += len(json.dumps(manifest_document).encode("utf-8"))
+        if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+            raise ValueError(
+                f"facts' encoded documents plus its instantiation manifest "
+                f"exceed DEFAULT_MAX_BUNDLE_DECODED_BYTES "
+                f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes) -- refusing to "
+                "write a package read_bundle_facts_package would itself "
+                "then refuse to reconstruct"
+            )
+        digest = store.put(manifest_document)
         project_sections[INSTANTIATION_MANIFEST_SECTION_KIND] = ObjectRef(
             kind=INSTANTIATION_MANIFEST_SECTION_KIND, digest=digest
         )
@@ -404,7 +437,36 @@ def read_bundle_facts_package(
     instantiation_manifest = None
     manifest_ref = manifest.project_sections.get(INSTANTIATION_MANIFEST_SECTION_KIND)
     if manifest_ref is not None:
+        # `manifest_ref.kind` is a caller-controlled label, not verified by
+        # `PackageManifest`/`ObjectRef` construction -- a corrupted or
+        # hand-assembled package could map this key to an `ObjectRef` whose
+        # own `kind` names something else entirely, the same
+        # stored-kind-vs-requested-kind mismatch `export_legacy_snapshot`
+        # already guards against for per-artifact sections (Codex review:
+        # "differs from per-artifact section reconstruction, which validates
+        # the stored section kind").
+        if manifest_ref.kind != INSTANTIATION_MANIFEST_SECTION_KIND:
+            raise ValueError(
+                f"project_sections[{INSTANTIATION_MANIFEST_SECTION_KIND!r}] "
+                f"names an ObjectRef of kind {manifest_ref.kind!r}, not "
+                f"{INSTANTIATION_MANIFEST_SECTION_KIND!r} -- the package is "
+                "corrupted or was hand-edited"
+            )
         raw: Any = store.get(manifest_ref.digest)
+        # The project-level manifest object is untrusted decoded content
+        # too, and reaches here *after* the per-artifact budget loop above
+        # -- it must be charged against the same aggregate ceiling, not
+        # fetched and parsed for free once the artifacts alone already
+        # passed (Codex review, third finding on this same guard).
+        decoded_bytes_so_far += len(json.dumps(raw).encode("utf-8"))
+        if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+            raise ValueError(
+                f"variant {variant_id!r}'s reconstructed artifacts plus its "
+                f"{INSTANTIATION_MANIFEST_SECTION_KIND!r} project section "
+                f"exceed DEFAULT_MAX_BUNDLE_DECODED_BYTES "
+                f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes) -- refusing to "
+                "retain it"
+            )
         instantiation_manifest = manifest_from_dict(
             _manifest_document_from_storage(raw)
         )

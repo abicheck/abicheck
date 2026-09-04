@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,8 @@ from abicheck.project_snapshot_store import (
     read_project_manifest,
     write_project_manifest,
 )
+from abicheck.serialization import snapshot_to_dict
+from abicheck.storage.import_v1 import export_legacy_snapshot
 from abicheck.storage.package import InMemoryObjectStore
 
 
@@ -299,6 +302,130 @@ class TestReadBundleFactsPackage:
 
         with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
             read_bundle_facts_package(manifest, store=store)
+
+    def test_charges_the_project_manifest_against_the_decoded_size_budget(
+        self, monkeypatch: Any
+    ) -> None:
+        """The instantiation manifest is fetched *after* the per-artifact
+        budget loop -- it must be charged too, not parsed for free once the
+        artifacts alone already passed (Codex review, third finding on this
+        same guard)."""
+        import abicheck.bundle_facts_store as module
+
+        instantiation_manifest = InstantiationManifest(
+            entries=(ManifestEntry(symbol="_Z3fooi"),)
+        )
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so")}, manifest=instantiation_manifest
+        )
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+
+        # A budget comfortably above the lone artifact's own decoded size,
+        # but too small once the project-level manifest's decoded size is
+        # also charged.
+        artifact_document = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        artifact_bytes = len(json.dumps(artifact_document).encode("utf-8"))
+        monkeypatch.setattr(
+            module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", artifact_bytes + 1
+        )
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
+            read_bundle_facts_package(manifest, store=store)
+
+    def test_refuses_a_project_section_whose_ref_kind_does_not_match(self) -> None:
+        """A `project_sections` key and its `ObjectRef.kind` are two
+        independent fields (Codex review) -- a corrupted or hand-assembled
+        package naming `instantiation_manifest` but pointing at an
+        `ObjectRef` of a different declared kind must be refused, the same
+        way `export_legacy_snapshot` already refuses a per-artifact section
+        mismatch."""
+        import dataclasses
+
+        instantiation_manifest = InstantiationManifest(
+            entries=(ManifestEntry(symbol="_Z3fooi"),)
+        )
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so")}, manifest=instantiation_manifest
+        )
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+        real_ref = manifest.project_sections[INSTANTIATION_MANIFEST_SECTION_KIND]
+        corrupted = dataclasses.replace(
+            manifest,
+            project_sections={
+                INSTANTIATION_MANIFEST_SECTION_KIND: dataclasses.replace(
+                    real_ref, kind="not_an_instantiation_manifest"
+                )
+            },
+        )
+
+        with pytest.raises(ValueError, match="not_an_instantiation_manifest"):
+            read_bundle_facts_package(corrupted, store=store)
+
+
+class TestWriteBundleFactsPackageMirrorsReaderLimits:
+    """`write_bundle_facts_package` must not hand back a `PackageManifest`
+    its own promised inverse, `read_bundle_facts_package`, then refuses to
+    reconstruct (Codex review)."""
+
+    def test_refuses_to_write_past_the_library_count_bound(
+        self, monkeypatch: Any
+    ) -> None:
+        import abicheck.bundle_facts_store as module
+
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
+        )
+        store = InMemoryObjectStore()
+
+        monkeypatch.setattr(module, "DEFAULT_MAX_LIBRARY_COUNT", 1)
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_LIBRARY_COUNT"):
+            write_bundle_facts_package(facts, store=store)
+
+    def test_refuses_to_write_past_the_decoded_size_budget(
+        self, monkeypatch: Any
+    ) -> None:
+        import abicheck.bundle_facts_store as module
+
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
+        )
+        store = InMemoryObjectStore()
+
+        monkeypatch.setattr(module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 1)
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
+            write_bundle_facts_package(facts, store=store)
+
+    def test_refuses_to_write_a_manifest_that_crosses_the_budget(
+        self, monkeypatch: Any
+    ) -> None:
+        import abicheck.bundle_facts_store as module
+
+        instantiation_manifest = InstantiationManifest(
+            entries=(ManifestEntry(symbol="_Z3fooi"),)
+        )
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so")}, manifest=instantiation_manifest
+        )
+        store = InMemoryObjectStore()
+
+        # Let the lone library through, then cross the budget on the
+        # project-level manifest itself.
+        document = snapshot_to_dict(facts.per_library_snapshots["liba.so"])
+        library_bytes = len(json.dumps(document).encode("utf-8"))
+        monkeypatch.setattr(
+            module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", library_bytes + 1
+        )
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
+            write_bundle_facts_package(facts, store=store)
 
 
 class TestBundleFactsPackageThroughDirectoryStore:
