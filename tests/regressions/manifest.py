@@ -806,6 +806,71 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="identity.platform_decorated_mangled_name",
+        invariant=(
+            "A signal derived from comparing a declaration's mangled "
+            "spelling against its bare name (or matching a mangled string "
+            "against an Itanium marker like `_Z`/`_ZL`/`_GLOBAL__N_`) must "
+            "not assume the mangled spelling carries no platform-specific "
+            "decoration. On a Darwin target, the linker convention "
+            "prepends one leading underscore to *every* global symbol "
+            "clang emits, mangled or not -- so `mangled == name` never "
+            'holds for a genuinely plain-C/`extern "C"` declaration, and '
+            "a real Itanium-mangled symbol reads as `__ZL...`/`__ZN...`, "
+            "not `_ZL...`/`_ZN...`. Any call site deriving a linkage/"
+            "locality/identity signal this way must normalize the extra "
+            "underscore away first (or read an already-normalized "
+            "upstream field, e.g. `Function.is_extern_c`) -- not only for "
+            "the one call site a report named, but for every call site "
+            "sharing the same `mangled == name` or bare-Itanium-prefix "
+            "shape. This is not a new bug shape in this codebase: "
+            "`model/mangled_name.py`'s `_itanium_strip_prefix` and "
+            "`dumper_clang.py`'s `parse_variables`/`parse_functions` "
+            "`is_extern_c` fallback already carry the identical fix for "
+            "their own call sites -- `tu_merge.py`'s `_function_key`/"
+            "`_variable_key`/`_has_local_linkage_mangling` (and their "
+            "`extract/manifest_semantic_ir.py` mirrors, which may not "
+            "import the root-level `tu_merge` module per ADR-061) simply "
+            "hadn't been audited against it yet."
+        ),
+        fixed_by=(1048,),
+        seed_tests=(
+            "tests/test_tu_merge_darwin_linkage.py",
+            "tests/test_manifest_semantic_ir_locality.py",
+        ),
+        # Both seed-test files build fake Function/Variable/TuFragment
+        # objects reproducing the exact Darwin-decorated mangled-name
+        # shapes a real clang parse reports (confirmed via this
+        # codebase's own `dumper_clang.py`/`known-gaps.md` documentation
+        # of the quirk) and call `tu_merge.merge_fragments`/
+        # `manifest_semantic_ir.manifest_semantic_ir` directly -- neither
+        # goes through a CLI/API entry point or a real clang invocation,
+        # so `public_surfaces` stays empty and no `"frontend"`/`"platform"`
+        # axis is claimed (this module's own docstring: an axis claim
+        # requires exercising the real backend/target, not a hand-built
+        # fixture standing in for one).
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Verified only at the primitive level against fake "
+                    "Function/Variable/TuFragment objects built to the "
+                    "documented Darwin mangled-name shape -- no macOS "
+                    "toolchain was available to run this fix's own "
+                    "`clang`-gated, self-skipping-on-Linux real-backend "
+                    "tests (`tests/test_dumper_manifest_semantic_ir.py`, "
+                    "`tests/test_tu_merge_variable_linkage.py`) against an "
+                    "actual `--target=*-apple-darwin*` clang invocation, "
+                    "only against the plain Linux target this sandbox's "
+                    "installed clang defaults to. The real macOS CI run "
+                    "on the PR that adds this entry is what closes that "
+                    "gap; if it doesn't, this invariant's Darwin shape was "
+                    "wrong somewhere the fake fixtures didn't catch."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1048",
+            ),
+        ),
+    ),
 )
 
 
