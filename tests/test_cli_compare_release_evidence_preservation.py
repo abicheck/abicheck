@@ -688,6 +688,57 @@ class TestEmbeddedManifestForEmptyVariant:
         )
 
 
+class TestBundleFactsOutCarriesEmbeddedManifest:
+    """Codex review, fresh evidence: the embedded manifest resolved for
+    bundle *analysis* was never threaded to `--bundle-facts-out`'s own
+    writer, which still received the raw (`None`, since no explicit
+    `--manifest` was given) `manifest_path` -- so a captured baseline
+    silently dropped the manifest-drift contract the live comparison
+    itself was enforcing in the same run."""
+
+    def test_bundle_facts_out_captures_the_stored_sides_embedded_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+        from abicheck.serialization import load_bundle_facts
+
+        old_libs, _ = _old_new_libraries()
+        manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))
+        facts = _with_filenames(
+            capture_bundle_facts(
+                old_libs, manifest=manifest, variant_fingerprint="gcc13-avx2"
+            )
+        )
+        old_pkg = tmp_path / "old_pkg"
+        store = DirectoryObjectStore(old_pkg)
+        pkg_manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
+        write_project_manifest(old_pkg, pkg_manifest)
+
+        _, new_libs = _old_new_libraries()
+        new_pkg = tmp_path / "new_pkg"
+        _write_directory(new_pkg, new_libs)
+
+        out_path = tmp_path / "captured.json"
+        ec, out = _invoke(
+            "compare",
+            str(old_pkg),
+            str(new_pkg),
+            "--format",
+            "json",
+            "-j",
+            "1",
+            "--bundle-facts-out",
+            str(out_path),
+        )
+        assert out_path.exists(), f"--bundle-facts-out was not written: {out}"
+        captured = load_bundle_facts(out_path)
+        assert captured.manifest is not None, (
+            "the stored old side's embedded manifest was not carried into "
+            "the captured --bundle-facts-out baseline"
+        )
+        assert captured.manifest.symbols == {"core_mul"}
+
+
 class TestMalformedEmbeddedManifestRaises:
     """CodeRabbit review, security finding: a declared-but-corrupted
     embedded manifest section previously decoded to `None`, identical to
@@ -840,3 +891,74 @@ class TestMaterializationRenameCollision:
         assert set(resolved) == {"afoo.so", "afoo.so-afoo.so"}
         for sub_dir in resolved.values():
             assert sub_dir.is_dir()
+
+
+class TestBundleFactsOutDoesNotDuplicateStoredLibraries:
+    """Codex review, fresh evidence: `write_bundle_facts_out`'s own
+    ``basename_to_key`` lookup matched a successful diff's
+    ``Path(diff.library).name`` against ``old_map``'s *values* -- for a
+    stored operand those values are ``resolve_release_package_map``'s own
+    materialized sub-package directories (e.g. ``liba.so-<artifact_id>``),
+    not the real, possibly-versioned library filename a snapshot reports
+    (``liba.so.1.2.3``). The basename lookup always missed for a versioned
+    stored library, so the diffed snapshot was captured a first time under
+    its own unmatched literal name, and then a *second* time by the
+    separate "stranded library" fallback loop under the real canonical
+    ``old_map`` key -- producing a captured ``--bundle-facts-out`` baseline
+    with the same library counted twice."""
+
+    def test_versioned_stored_library_is_captured_exactly_once(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.serialization import (
+            SCHEMA_VERSION,
+            load_bundle_facts,
+            snapshot_to_dict,
+        )
+        from abicheck.storage.import_bundle_facts import (
+            BUNDLE_FACTS_ARTIFACT_TYPE,
+            import_bundle_facts,
+        )
+
+        versioned_name = "liba.so.1.2.3"
+        old_snapshot = _snap(versioned_name, "1.0", [_fn("foo", "_Z3foov")])
+        doc = {
+            "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
+            "schema_version": 2,
+            "variant_fingerprint": "default",
+            "per_library_snapshots": {versioned_name: snapshot_to_dict(old_snapshot)},
+            "filesystem_aliases": {},
+            "library_filenames": {},
+            "manifest": None,
+        }
+        old_pkg = tmp_path / "old_pkg"
+        store = DirectoryObjectStore(old_pkg)
+        manifest = import_bundle_facts(
+            doc, store=store, max_known_schema_version=SCHEMA_VERSION, variant_id="v1"
+        )
+        write_project_manifest(old_pkg, manifest)
+
+        # Live new side: same versioned filename, one function removed --
+        # a genuine, non-trivial diff pair for `versioned_name` so the
+        # lookup this bug affects is actually exercised.
+        new_pkg = tmp_path / "new_pkg"
+        _write_directory(new_pkg, {versioned_name: _snap(versioned_name, "2.0", [])})
+
+        out_path = tmp_path / "captured.json"
+        ec, out = _invoke(
+            "compare",
+            str(old_pkg),
+            str(new_pkg),
+            "--format",
+            "json",
+            "-j",
+            "1",
+            "--bundle-facts-out",
+            str(out_path),
+        )
+        assert out_path.exists(), f"--bundle-facts-out was not written: {out}"
+        captured = load_bundle_facts(out_path)
+        assert len(captured.per_library_snapshots) == 1, (
+            "the versioned stored library was captured more than once in "
+            f"the --bundle-facts-out baseline: {sorted(captured.per_library_snapshots)}"
+        )

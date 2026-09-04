@@ -58,6 +58,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _release_md_changed_libraries,
     _release_md_libraries_table,
     _release_md_matrix_findings,
+    _resolve_bundle_manifest,
     _resolve_release_headers,
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
     _run_bundle_analysis,
@@ -717,6 +718,14 @@ def compare_release_cmd(
                     manifest_path,
                     old_map,
                     resolve_stranded_library=_resolve_stranded_library,
+                    # ADR-062 A1.7: the same explicit-or-embedded manifest
+                    # resolution the bundle-analysis call below applies,
+                    # so a stored side's manifest-drift contract is
+                    # captured into this baseline too (Codex review,
+                    # fresh evidence).
+                    resolved_manifest=_resolve_bundle_manifest(
+                        manifest_path, old_dir, new_dir, old_map, new_map
+                    ),
                 )
 
             # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated

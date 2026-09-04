@@ -58,6 +58,7 @@ from .workflows.gate import (
 )
 
 if TYPE_CHECKING:
+    from .bundle_manifest import InstantiationManifest
     from .pack_application import PackApplication
     from .workflows.extraction import PackageExtractor
     from .workflows.gate import SeverityConfig
@@ -240,6 +241,70 @@ def _collect_release_warnings(
         )
 
 
+def _resolve_bundle_manifest(
+    manifest_path: Path | None,
+    old_root: Path | None,
+    new_root: Path | None,
+    old_map: dict[str, Path],
+    new_map: dict[str, Path],
+) -> InstantiationManifest | None:
+    """The one place `--manifest`/embedded-manifest resolution happens for
+    a release comparison -- shared by `_run_bundle_analysis` and
+    `cli_compare_release.py`'s own `--bundle-facts-out` call site (Codex
+    review, fresh evidence: the embedded-manifest resolution this function
+    performs was previously computed only for the local bundle-analysis
+    result and never reached `write_bundle_facts_out`, so a captured
+    baseline silently lost the manifest-drift contract even when the
+    release comparison itself enforced it).
+
+    An explicit *manifest_path* always wins and fails loudly on a bad file
+    (a user error, not an environmental quirk). Otherwise falls back to a
+    stored side's own embedded `InstantiationManifest`
+    (`materialize_release_variant_artifacts` already preserves
+    `write_bundle_facts_package`'s `project_sections` section on disk):
+    *old_root*/*new_root* (the release operands themselves) are checked
+    directly first, so a package whose selected variant carries zero
+    artifacts still has its own manifest consulted; *old_map*/*new_map*'s
+    member sub-packages are the fallback for a caller that predates the
+    root parameters. `old_root`/`old_map` before `new_root`/`new_map` (the
+    side a manifest more naturally describes as a baseline). Best-effort:
+    a package written by `storage.import_bundle_facts` stores its own
+    captured manifest in a different shape `read_embedded_instantiation_
+    manifest` does not translate and simply yields `None`, same as no
+    manifest at all -- but a *declared*, corrupted section raises
+    `click.UsageError` rather than degrading silently (CodeRabbit review,
+    security finding: a corrupted section must not silently disable the
+    manifest-drift check it was meant to enforce).
+    """
+    from .bundle import load_manifest
+    from .bundle_facts_store import read_embedded_instantiation_manifest
+
+    if manifest_path is not None:
+        try:
+            return load_manifest(manifest_path)
+        except Exception as exc:
+            raise click.ClickException(
+                f"Failed to load manifest {manifest_path}: {exc}",
+            ) from exc
+
+    roots: list[Path] = [r for r in (old_root, new_root) if r is not None]
+    if not roots:
+        roots = [p for m in (old_map, new_map) for p in m.values()]
+    for candidate_root in roots:
+        if not candidate_root.is_dir():
+            continue
+        try:
+            manifest = read_embedded_instantiation_manifest(candidate_root)
+        except Exception as exc:
+            raise click.UsageError(
+                f"{candidate_root}: embedded instantiation manifest is "
+                f"declared but could not be decoded: {exc}"
+            ) from exc
+        if manifest is not None:
+            return manifest
+    return None
+
+
 def _run_bundle_analysis(
     old_map: dict[str, Path],
     new_map: dict[str, Path],
@@ -302,7 +367,7 @@ def _run_bundle_analysis(
     can still carry a manifest, and the required-symbol check was silently
     skipped for it).
     """
-    from .bundle import build_bundle_snapshot_mixed, load_manifest
+    from .bundle import build_bundle_snapshot_mixed
     from .bundle_analysis import analyze_bundle
 
     if not old_map and not new_map:
@@ -325,56 +390,9 @@ def _run_bundle_analysis(
         click.echo(f"Warning: bundle analysis skipped: {exc}", err=True)
         return None
 
-    manifest = None
-    if manifest_path is not None:
-        try:
-            manifest = load_manifest(manifest_path)
-        except Exception as exc:
-            # Manifest is an *explicit* user input. A malformed --manifest
-            # is a user error, not an environmental quirk; fail loudly so
-            # the contract violation isn't hidden behind a stderr warning.
-            raise click.ClickException(
-                f"Failed to load manifest {manifest_path}: {exc}",
-            ) from exc
-    else:
-        # ADR-062 A1.7: fall back to a stored side's own embedded
-        # InstantiationManifest (`materialize_release_variant_artifacts`
-        # already preserves `write_bundle_facts_package`'s project_sections
-        # section on disk) rather than silently skipping the manifest-drift
-        # contract entirely for a stored comparison with no explicit
-        # --manifest (Codex review, fresh evidence). old_map is checked
-        # first (the side a manifest more naturally describes as a
-        # baseline); new_map only if old carries none. Best-effort: a
-        # package written by `storage.import_bundle_facts` stores its own
-        # captured manifest in a different shape this reader does not
-        # translate (see `read_embedded_instantiation_manifest`'s own
-        # docstring) and simply yields None, same as no manifest at all.
-        from .bundle_facts_store import read_embedded_instantiation_manifest
-
-        roots: list[Path] = [r for r in (old_root, new_root) if r is not None]
-        if not roots:
-            # No root threaded through (a caller that predates this
-            # parameter) -- fall back to searching stored member
-            # sub-packages, same as before. Never reaches a zero-artifact
-            # variant's own manifest (see this function's own docstring).
-            roots = [p for m in (old_map, new_map) for p in m.values()]
-        for candidate_root in roots:
-            if not candidate_root.is_dir():
-                continue
-            try:
-                manifest = read_embedded_instantiation_manifest(candidate_root)
-            except Exception as exc:
-                # A declared-but-corrupted manifest section (see that
-                # function's own docstring) is a genuine usage error, not
-                # a best-effort miss -- silently degrading here would let a
-                # required-symbol check disappear along with the evidence
-                # that named it (CodeRabbit review, security finding).
-                raise click.UsageError(
-                    f"{candidate_root}: embedded instantiation manifest is "
-                    f"declared but could not be decoded: {exc}"
-                ) from exc
-            if manifest is not None:
-                break
+    manifest = _resolve_bundle_manifest(
+        manifest_path, old_root, new_root, old_map, new_map
+    )
 
     system_extra: list[str] = [
         s.strip() for s in bundle_system_providers.split(",") if s.strip()
@@ -571,6 +589,7 @@ def write_bundle_facts_out(
     old_map: dict[str, Path],
     *,
     resolve_stranded_library: Callable[[Path], AbiSnapshot],
+    resolved_manifest: InstantiationManifest | None = None,
 ) -> None:
     """Persist the OLD side's per-library snapshots (plus manifest, if any)
     to *bundle_facts_out* as a :class:`~abicheck.bundle_facts.BundleFacts`
@@ -644,6 +663,17 @@ def write_bundle_facts_out(
     hard-linked siblings) are captured while the files still exist on
     disk -- see that function's own docstring.
 
+    *resolved_manifest*, when given, is used as-is instead of loading
+    *manifest_path* here -- the caller's own already-resolved manifest
+    (`_resolve_bundle_manifest`, which also covers the embedded-manifest
+    fallback `--manifest` alone does not), so a stored side's manifest-
+    drift contract is captured into this baseline too, not just enforced
+    against the live comparison this call runs alongside (Codex review,
+    fresh evidence: this parameter's absence meant a captured
+    ``--bundle-facts-out`` baseline silently dropped that contract).
+    *manifest_path* is still respected when *resolved_manifest* is
+    `None`, for a caller that predates this parameter.
+
     Failure here (a bad *manifest_path*, an unwritable *bundle_facts_out*)
     is a genuine usage error -- unlike bundle *analysis* itself, which
     degrades to a warning on failure (see ``_run_bundle_analysis``'s own
@@ -654,21 +684,34 @@ def write_bundle_facts_out(
     from .bundle_facts import capture_bundle_facts
     from .bundle_manifest import load_manifest
     from .serialization import save_bundle_facts
+    from .workflows.extraction import _canonical_library_key
 
     try:
-        manifest = load_manifest(manifest_path) if manifest_path is not None else None
-        # Basename -> canonical key, so a matched pair's DiffResult.library
-        # (the real, possibly-versioned filename) maps back onto the same
-        # key old_map/build_bundle_snapshot() would use for it. Falls back
-        # to the basename itself only if truly unmatched (shouldn't happen
-        # for a genuine diff_pairs entry, but degrades safely either way).
-        basename_to_key = {path.name: key for key, path in old_map.items()}
+        manifest: InstantiationManifest | None
+        if resolved_manifest is not None:
+            manifest = resolved_manifest
+        else:
+            manifest = load_manifest(manifest_path) if manifest_path is not None else None
+
+        # Canonicalize DiffResult.library itself (the real, possibly-
+        # versioned filename each compared snapshot reports) the same way
+        # old_map's own keys were derived, rather than matching by basename
+        # against old_map's *values* -- a stored operand's value is a
+        # materialized sub-package directory (its own display dirname, not
+        # the real library filename), which a basename match silently
+        # misses; the same successful diff pair then also (wrongly) reads
+        # as "stranded" below and gets appended a second time under its
+        # real canonical key (Codex review, fresh evidence: a stored
+        # comparison's captured baseline could contain the same library
+        # twice, reading as false library/provider findings). Falls back to
+        # the basename itself only if truly unmatched (shouldn't happen for
+        # a genuine diff_pairs entry, but degrades safely either way).
         per_library_snapshots: dict[str, AbiSnapshot] = {}
         for diff, old_snapshot in diff_pairs:
-            basename = Path(diff.library).name
-            per_library_snapshots[basename_to_key.get(basename, basename)] = (
-                old_snapshot
-            )
+            key = _canonical_library_key(Path(diff.library))
+            if key not in old_map:
+                key = Path(diff.library).name
+            per_library_snapshots[key] = old_snapshot
         for key, old_path in old_map.items():
             if key in per_library_snapshots:
                 continue
