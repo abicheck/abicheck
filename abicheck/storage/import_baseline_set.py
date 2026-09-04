@@ -103,6 +103,16 @@ _METADATA_KEYS = (
     "generator",
 )
 
+#: `abicheck.buildsource.baseline_set.SUPPORTED_MANIFEST_VERSIONS`, duplicated
+#: for the identical layering reason `import_bundle_facts.py`'s own
+#: duplicated constants give: `storage/` may not import `buildsource/` (a
+#: flat-root package). A `manifest_version` outside this set is a shape this
+#: adapter's own fixed `_METADATA_KEYS` partition has never been validated
+#: against — importing it anyway would silently retain only today's known
+#: keys and re-export the unsupported version unchanged, discarding whatever
+#: fields or semantics that future version actually added.
+_SUPPORTED_MANIFEST_VERSIONS = frozenset({1})
+
 
 def import_baseline_set(
     manifest_document: Mapping[str, Any],
@@ -118,16 +128,39 @@ def import_baseline_set(
     keyed by `BaselineArtifact.library`) as a one-variant, multi-artifact
     `ProjectSnapshot` package.
 
-    Raises `ValueError` if `manifest_document['artifacts']` is missing,
-    empty, or not a list; if an entry names no (or a duplicate) `library`;
-    if `snapshot_documents` has no entry for a library `artifacts[]` names;
-    or if the per-library snapshots do not all declare the same
-    `schema_version` (see `import_bundle_facts`'s own docstring for why one
+    `manifest_version` is validated against `_SUPPORTED_MANIFEST_VERSIONS`
+    the same way `buildsource.baseline_set.resolve_target`/`resolve_bundle`
+    already validate it — a version this adapter's fixed `_METADATA_KEYS`
+    partition was never checked against is refused rather than silently
+    imported and re-exported unchanged, discarding whatever that future
+    version actually added.
+
+    Raises `ValueError` if `manifest_version` is missing or not a supported
+    version; if `manifest_document['artifacts']` is missing, empty, or not a
+    list; if an entry names no (or a duplicate) `library`; if
+    `snapshot_documents` has no entry for a library `artifacts[]` names; or
+    if the per-library snapshots do not all declare the same `schema_version`
+    (see `import_bundle_facts`'s own docstring for why one
     `source_schema_version` is required — the identical constraint applies
     here for the identical reason).
     """
     _mapping(manifest_document, "manifest_document")
     _mapping(snapshot_documents, "snapshot_documents")
+    manifest_version = manifest_document.get("manifest_version")
+    # `bool` is an `int` subclass -- `True in {1}` is `True` -- so it must be
+    # excluded explicitly, or a manifest declaring `"manifest_version": true`
+    # would silently pass as version 1 (this package's own "never coerce a
+    # value a decision reads" convention, `storage/AGENTS.md` invariant 6).
+    if isinstance(manifest_version, bool) or manifest_version not in (
+        _SUPPORTED_MANIFEST_VERSIONS
+    ):
+        raise ValueError(
+            f"manifest_document manifest_version {manifest_version!r} is not "
+            "one this adapter understands (supported: "
+            f"{sorted(_SUPPORTED_MANIFEST_VERSIONS)}) -- upgrade this build, "
+            "or regenerate the baseline set with a compatible actions/baseline "
+            "version"
+        )
     raw_artifacts = manifest_document.get("artifacts")
     if not isinstance(raw_artifacts, list) or not raw_artifacts:
         raise ValueError(
@@ -166,8 +199,13 @@ def import_baseline_set(
             max_known_schema_version=max_known_schema_version,
         )
         (artifact,) = member_manifest.artifact_refs
-        binary_sha256 = entry.get("binary_sha256")
-        if binary_sha256:
+        if "binary_sha256" in entry:
+            binary_sha256 = entry["binary_sha256"]
+            if not isinstance(binary_sha256, str) or not binary_sha256:
+                raise ValueError(
+                    f"manifest_document['artifacts'][{index}]['binary_sha256'] "
+                    f"must be a non-empty string, not {binary_sha256!r}"
+                )
             # A fresh `ArtifactRef` carrying the same identity/sections plus
             # this one extra native-identity fact -- `ArtifactRef` is a
             # frozen dataclass, so this is reconstruction, not mutation.
@@ -175,7 +213,7 @@ def import_baseline_set(
                 artifact_id=artifact.artifact_id,
                 variant_id=artifact.variant_id,
                 kind=artifact.kind,
-                native_identity={"binary_sha256": str(binary_sha256)},
+                native_identity={"binary_sha256": binary_sha256},
                 sections=artifact.sections,
             )
         artifact_refs.append(artifact)

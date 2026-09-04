@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from abicheck.errors import IncompatibleSnapshotSchemaError
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
 from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
@@ -93,6 +94,48 @@ class TestImportBundleFacts:
         doc["per_library_snapshots"]["libb.so"]["schema_version"] = 1
         with pytest.raises(ValueError, match="schema_version"):
             import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    def test_rejects_a_container_schema_version_newer_than_this_build_knows(
+        self,
+    ) -> None:
+        doc = _bundle_document(schema_version=999)
+        with pytest.raises(IncompatibleSnapshotSchemaError):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    def test_rejects_schema_version_2_without_artifact_type(self) -> None:
+        doc = _bundle_document()
+        del doc["artifact_type"]
+        with pytest.raises(ValueError, match="artifact_type"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    def test_rejects_artifact_type_at_a_schema_version_that_predates_it(
+        self,
+    ) -> None:
+        doc = _bundle_document(schema_version=1)
+        with pytest.raises(ValueError, match="predates artifact_type"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    def test_accepts_a_true_legacy_document_with_neither_field(self) -> None:
+        doc = _bundle_document()
+        del doc["artifact_type"]
+        del doc["schema_version"]
+        manifest = import_bundle_facts(doc, store=InMemoryObjectStore())
+        assert manifest.variant_refs[0].variant_id == "default"
+
+    @pytest.mark.parametrize("bad_value", [1, 1.5, ["default"], {"x": "y"}])
+    def test_rejects_a_non_string_variant_fingerprint(self, bad_value: Any) -> None:
+        doc = _bundle_document(variant_fingerprint=bad_value)
+        with pytest.raises(ValueError, match="variant_fingerprint"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    def test_an_explicit_empty_variant_fingerprint_is_preserved_not_defaulted(
+        self,
+    ) -> None:
+        doc = _bundle_document(variant_fingerprint="")
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        roundtrip = export_bundle_facts(manifest, store=store)
+        assert roundtrip["variant_fingerprint"] == ""
 
     def test_export_is_the_exact_inverse(self) -> None:
         doc = _bundle_document()

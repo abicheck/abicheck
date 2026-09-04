@@ -72,6 +72,12 @@ class TestImportBaselineSet:
                 store=InMemoryObjectStore(),
             )
 
+    @pytest.mark.parametrize("bad_version", [None, 0, 2, "1", True])
+    def test_rejects_an_unsupported_manifest_version(self, bad_version: Any) -> None:
+        doc = _manifest_document(manifest_version=bad_version)
+        with pytest.raises(ValueError, match="manifest_version"):
+            import_baseline_set(doc, _snapshot_documents(), store=InMemoryObjectStore())
+
     def test_requires_a_non_empty_artifacts_list(self) -> None:
         doc = _manifest_document(artifacts=[])
         with pytest.raises(ValueError, match="artifacts"):
@@ -113,6 +119,13 @@ class TestImportBaselineSet:
         libb = next(a for a in manifest.artifact_refs if a.artifact_id == "libb.so")
         assert liba.native_identity["binary_sha256"] == "bbbb"
         assert "binary_sha256" not in libb.native_identity
+
+    @pytest.mark.parametrize("bad_value", [0, 1234, 0.0, [], {}, ""])
+    def test_rejects_a_non_string_binary_sha256(self, bad_value: Any) -> None:
+        doc = _manifest_document()
+        doc["artifacts"][0]["binary_sha256"] = bad_value
+        with pytest.raises(ValueError, match="binary_sha256"):
+            import_baseline_set(doc, _snapshot_documents(), store=InMemoryObjectStore())
 
     def test_attaches_a_baseline_set_metadata_section_to_the_variant(self) -> None:
         doc = _manifest_document()

@@ -68,6 +68,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from ..errors import IncompatibleSnapshotSchemaError
 from .dto import (
     BUNDLE_COMPOSITION_SECTION_KIND,
     SECTION_SCHEMA_VERSIONS,
@@ -128,14 +129,21 @@ def import_bundle_facts(
     multi-artifact `ProjectSnapshot` package, writing its content into
     *store* and returning the resulting `PackageManifest`.
 
-    `artifact_type`, when present, is checked against
-    `BUNDLE_FACTS_ARTIFACT_TYPE` and rejected on mismatch — whoever built the
-    document declared it as something else, and importing it as bundle
-    facts anyway would silently score a comparison against a document
-    nobody asked to be read this way, mirroring
-    `bundle_facts_serialization.bundle_facts_from_dict`'s own check. Absent
-    entirely (a pre-marker, schema_version 1 `BundleFacts` document) is
-    tolerated the same way that function tolerates it.
+    The container's own `schema_version` (distinct from any per-library
+    `AbiSnapshot.schema_version`) is validated exactly the way
+    `bundle_facts_serialization.bundle_facts_from_dict` validates it: a
+    value newer than `_BUNDLE_FACTS_SCHEMA_VERSION` is refused outright
+    (`IncompatibleSnapshotSchemaError`) rather than silently accepted and
+    reduced to today's four known composition keys, and a `schema_version`
+    of 2 or newer requires the `artifact_type` marker (added at exactly that
+    version) — either without the other is a self-contradictory,
+    hand-edited-or-corrupted document. `artifact_type`, when required or
+    merely present, is checked against `BUNDLE_FACTS_ARTIFACT_TYPE` and
+    rejected on mismatch — whoever built the document declared it as
+    something else, and importing it as bundle facts anyway would silently
+    score a comparison against a document nobody asked to be read this way.
+    A true legacy document (no `schema_version` key at all, or exactly `1`)
+    needs neither.
 
     `max_known_schema_version` is forwarded unchanged to
     `import_legacy_snapshot` for every per-library snapshot — see that
@@ -148,11 +156,44 @@ def import_bundle_facts(
     section).
     """
     _mapping(bundle_facts_document, "bundle_facts_document")
-    artifact_type = bundle_facts_document.get("artifact_type")
-    if artifact_type is not None and artifact_type != BUNDLE_FACTS_ARTIFACT_TYPE:
+    raw_container_schema_version = bundle_facts_document.get(
+        "schema_version", _BUNDLE_FACTS_SCHEMA_VERSION
+    )
+    if isinstance(raw_container_schema_version, bool) or not isinstance(
+        raw_container_schema_version, int
+    ):
         raise ValueError(
-            f"bundle facts: unexpected artifact_type {artifact_type!r} "
-            f"(expected {BUNDLE_FACTS_ARTIFACT_TYPE!r})"
+            "bundle_facts_document schema_version must be an int, not "
+            f"{type(raw_container_schema_version).__name__} "
+            f"({raw_container_schema_version!r})"
+        )
+    if raw_container_schema_version > _BUNDLE_FACTS_SCHEMA_VERSION:
+        raise IncompatibleSnapshotSchemaError(
+            f"bundle_facts_document schema_version {raw_container_schema_version} "
+            "is newer than this build knows how to interpret (supports up to "
+            f"schema_version {_BUNDLE_FACTS_SCHEMA_VERSION}); refusing to import "
+            "a document whose container semantics this build has not validated"
+        )
+    artifact_type = bundle_facts_document.get("artifact_type")
+    if artifact_type is not None:
+        if artifact_type != BUNDLE_FACTS_ARTIFACT_TYPE:
+            raise ValueError(
+                f"bundle facts: unexpected artifact_type {artifact_type!r} "
+                f"(expected {BUNDLE_FACTS_ARTIFACT_TYPE!r})"
+            )
+        if raw_container_schema_version < 2:
+            raise ValueError(
+                "bundle_facts_document: schema_version "
+                f"{raw_container_schema_version} predates artifact_type (added "
+                "in schema_version 2) -- such a document may not declare it"
+            )
+    elif (
+        "schema_version" in bundle_facts_document and raw_container_schema_version != 1
+    ):
+        raise ValueError(
+            "bundle_facts_document: schema_version "
+            f"{raw_container_schema_version} requires an 'artifact_type' key "
+            "(added in schema_version 2); none was given"
         )
     if "per_library_snapshots" not in bundle_facts_document:
         raise ValueError(
@@ -197,11 +238,18 @@ def import_bundle_facts(
             )
     assert source_schema_version is not None  # non-empty loop guarantees this
 
+    if "variant_fingerprint" in bundle_facts_document:
+        variant_fingerprint = bundle_facts_document["variant_fingerprint"]
+        if not isinstance(variant_fingerprint, str):
+            raise ValueError(
+                "bundle_facts_document['variant_fingerprint'] must be a "
+                f"string, not {type(variant_fingerprint).__name__} "
+                f"({variant_fingerprint!r})"
+            )
+    else:
+        variant_fingerprint = _DEFAULT_VARIANT_FINGERPRINT
     composition_payload = {
-        "variant_fingerprint": str(
-            bundle_facts_document.get("variant_fingerprint")
-            or _DEFAULT_VARIANT_FINGERPRINT
-        ),
+        "variant_fingerprint": variant_fingerprint,
         "manifest": bundle_facts_document.get("manifest"),
         "filesystem_aliases": dict(
             bundle_facts_document.get("filesystem_aliases") or {}

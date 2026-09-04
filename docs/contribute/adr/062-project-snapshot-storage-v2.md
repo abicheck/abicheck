@@ -26,7 +26,12 @@ each independently versioned and explicitly allowlisted per field (an
 unassigned field is a hard import-time error, never a silent catch-all). What
 remains unsplit is each section's own *internal* shape — `elf`/`dwarf`/
 `build_source`/... still carry the existing JSON encoding inside their own
-section, not a further per-field typed decode.
+section, not a further per-field typed decode. A1.4 is implemented too
+(ADR-063 Track C 8B): `abicheck/storage/import_bundle_facts.py`/
+`import_baseline_set.py` fold a persisted G38 `BundleFacts` document and an
+`actions/baseline` set respectively onto this same sectioned representation,
+calling `import_legacy_snapshot` once per library and attaching each
+container's own composition facts to a new `VariantRef.sections` field.
 
 **This is now wired into `dump`/`compare`/`scan` as the default, single-file
 shape (Phase 8 redesign).** The directory-backed package this ADR
@@ -45,12 +50,13 @@ readable. The directory writer/reader
 `read_legacy_snapshot_document`) remain available as typed-API primitives —
 `compare`/`scan --against` still accept a directory package as an input
 path — but no `dump` CLI flag produces one today.
-Folding baseline sets/`BundleFacts` into sections, multi-artifact packages,
-variant capture, and the `.tar.zst` transport form (A1.4-A1.8) remain not
-implemented — note this is the **remainder of Phase 1**, not Phase 2 (Phase
+Folding baseline sets/`BundleFacts` into sections (A1.4) is implemented
+(ADR-063 Track C 8B); digest-deduplicated shared evidence, multi-artifact
+packages, variant capture, and the `.tar.zst` transport form (A1.5-A1.8)
+remain not implemented — note this is the **remainder of Phase 1**, not Phase
 2 is the separate scale/performance work: lazy loading, streaming encode,
 cache migration, indexes). A full per-item design for A1.1's `.tar.zst`
-remainder and A1.4-A1.8 (Goal/Design/Files/Tests/Acceptance criteria each)
+remainder and A1.5-A1.8 (Goal/Design/Files/Tests/Acceptance criteria each)
 now exists in `docs/contribute/plans/storage-format-v2.md`'s "Phases" →
 "Phase 1" section — design only, not implemented by that addition; the
 object model these items build on (`PackageManifest.artifact_refs`/
