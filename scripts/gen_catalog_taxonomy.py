@@ -24,7 +24,10 @@ are orthogonal to implementation language and independent of the physical
 
     entity          "rule" | "scenario"
     scenario_kind   set only for entity == "scenario":
-                     "case-study" | "project-topology" | "capability" | "audit"
+                     "case-study" | "project-topology" | "capability" --
+                     never "audit": audit-ness is orthogonal to entity (see
+                     `operation` below), not a scenario_kind value the
+                     generator emits
     ecosystem       "generic" | "onetbb" | "sycl" | "onemkl" | "linux-kernel"
     topics          derived from expected_kinds via the change-catalog's own
                      symbols/types/platform/build/source split (AGENTS.md
