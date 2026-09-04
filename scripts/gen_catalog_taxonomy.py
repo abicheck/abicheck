@@ -253,10 +253,10 @@ RELATED_RULES: dict[str, list[str]] = {
 # a shared slug for its variant(s)).
 #
 # A second read (prompted by an external review of this plan) separated
-# these seven pairs further: three are exact duplicates with no meaningful
+# these seven pairs further: two are exact duplicates with no meaningful
 # distinguishing condition (`relation_axis=None` below) -- restating them as
 # "variants" inflated the catalog's demonstrated-robustness count by
-# counting the same demonstration twice. The other four are genuine
+# counting the same demonstration twice. The other five are genuine
 # variants, each with a named axis: the condition that makes the second case
 # worth keeping distinct from the first.
 #
