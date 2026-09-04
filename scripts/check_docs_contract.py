@@ -1616,10 +1616,18 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     because it scanned Markdown/case-README/scenario YAML only (Codex
     review, fresh evidence).
 
+    `examples/ground_truth.json` is here for the same reason one further
+    step out: it is the *other* machine-checked example-catalog source of
+    truth (alongside the case READMEs above), and its per-case
+    `description` fields document real invocations too -- PR J's
+    `--manifest` rename left case93's description advertising the retired
+    spelling, invisible to this sweep the same way (Codex review, fresh
+    evidence).
+
     Keyed repo-relative (`examples/caseNN.../README.md`,
-    `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`), which
-    cannot collide with a docs-relative key, so an allowlist entry stays
-    unambiguous about which tree it exempts.
+    `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`,
+    `examples/ground_truth.json`), which cannot collide with a docs-relative
+    key, so an allowlist entry stays unambiguous about which tree it exempts.
     """
     targets = [(p, p.relative_to(DOCS).as_posix()) for p in sorted(DOCS.rglob("*.md"))]
     targets += [
@@ -1634,6 +1642,9 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
         targets.append(
             (usecase_registry, "docs/contribute/usecase-registry.yaml")
         )
+    ground_truth = EXAMPLES / "ground_truth.json"
+    if ground_truth.is_file():
+        targets.append((ground_truth, "examples/ground_truth.json"))
     return targets
 
 

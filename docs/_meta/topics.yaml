@@ -199,6 +199,7 @@ topics:
       - abicheck/frontends/cli/commands/compare_bundle_facts.py
       - abicheck/frontends/cli/options/bundle_facts.py
       - abicheck/buildsource/build_config.py
+      - abicheck/buildsource/build_config_schema.py
     reference_page: reference/cli-reference.md
     task_pages:
       - use/multi-binary.md
