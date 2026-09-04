@@ -379,8 +379,10 @@ use_cases:
       equivalent elsewhere); cross-platform bundle analysis is tracked under
       G1 / UC-PLAT-*. All bundle detectors run through compare-release; case84
       is validated end-to-end. bundle_soname_skew is opt-in via
-      --bundle-cohort PREFIX so independent libraries are never inferred to be
-      co-versioned from their filenames. Caveat: wheels whose vendored
+      .abicheck.yml's bundle.cohorts: [PREFIX] (CLI cleanup phase two, PR J
+      moved this off --bundle-cohort) so independent libraries are never
+      inferred to be co-versioned from their filenames. Caveat: wheels whose
+      vendored
       dependencies carry auditwheel/delocate content-hash sonames are not yet
       paired across rebuilds — that topology is tracked separately as
       UC-WF-wheel-vendored (G9).

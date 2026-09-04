@@ -231,23 +231,42 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
 
     # CLI cleanup phase two, PR J removed --bundle-system-providers/
     # --bundle-cohort as CLI flags in favor of .abicheck.yml's `bundle:`
-    # block, resolved on the live/live compare path via
-    # cli_helpers_compare.resolve_compare_config -- this stored-BundleFacts
-    # dispatch is a separate, narrower engine (2026-09-01 checkpoint,
+    # block. This stored-BundleFacts dispatch is a separate, narrower engine
+    # from the live/live compare path (2026-09-01 checkpoint,
     # docs/contribute/plans/cli-cleanup-phase-two.md's "compare
-    # --old-bundle-facts is a second compare") that never consulted
-    # .abicheck.yml for anything, so it stays that way here rather than
-    # picking up an inconsistent partial config-discovery path as a side
-    # effect of this PR; folding it in is PR I's still-open
-    # BundleCompareRequest unification, not this one's scope.
-    # kwargs.get() below is now always empty (Click never populates a
-    # removed flag's key) -- kept as an explicit no-op read, not a stub, so
-    # a future PR I wiring pass has one clear line to replace.
-    bundle_system_providers = [
-        s.strip()
-        for s in str(kwargs.get("bundle_system_providers") or "").split(",")
-        if s.strip()
-    ]
+    # --old-bundle-facts is a second compare"), but silently dropping the
+    # config's bundle: settings here (rather than never having read them at
+    # all, pre-PR-J) would be a real regression -- stored-facts users would
+    # have no remaining way to suppress custom external providers or enable
+    # SONAME-cohort checks (Codex review, fresh evidence). ``kwargs["config"]``
+    # is already the resolved (explicit or auto-discovered) path -- see
+    # compare.py's own dispatch call site -- so read the same field
+    # ResolvedCompareConfig would, directly off the loaded BuildConfig,
+    # without pulling in the full resolve_compare_config machinery (which
+    # merges CLI flags this path no longer has any of).
+    # workflows.extraction (not buildsource.build_config_io directly): the
+    # architecture dependency-direction gate allows frontends -> workflows
+    # but not frontends -> extract, and build_config_io.py is classified
+    # under `extract` (architecture/modules.yaml).
+    from ....workflows.extraction import load_build_config_with_digest
+
+    _bundle_cfg_path = kwargs.get("config")
+    _bundle_cfg = None
+    if _bundle_cfg_path is not None:
+        # Already validated once by compare.py's own resolve_compile_context
+        # call ahead of dispatch() -- this ValueError guard is only for a
+        # caller that invokes dispatch() directly (tests) without that
+        # earlier pass.
+        try:
+            _bundle_cfg = load_build_config_with_digest(_bundle_cfg_path)[0]
+        except ValueError as exc:
+            raise click.ClickException(
+                f"Failed to load config {_bundle_cfg_path}: {exc}",
+            ) from exc
+    bundle_system_providers = (
+        list(_bundle_cfg.bundle_system_providers) if _bundle_cfg else []
+    )
+    bundle_cohorts = list(_bundle_cfg.bundle_cohorts) if _bundle_cfg else []
 
     # Codex review: NEW_INPUT is documented ("a live release directory/
     # package") to accept a package archive (wheel/deb/rpm/tar), but
@@ -369,7 +388,7 @@ def dispatch(*, compile_context: Any, **kwargs: Any) -> None:
                 include_private_dso=bool(kwargs.get("include_private_dso", False)),
                 manifest_path=kwargs.get("manifest_path"),
                 system_providers=bundle_system_providers or None,
-                cohorts=list(kwargs.get("bundle_cohorts") or ()) or None,
+                cohorts=bundle_cohorts or None,
                 policy=kwargs["policy"],
                 policy_file=policy_file,
                 suppress=suppression,

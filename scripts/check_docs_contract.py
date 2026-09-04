@@ -1315,6 +1315,10 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 # Names the retired spellings once, to point a reader at the
                 # --compiler* replacements -- the page documenting the family.
                 "use/dump-compare-flags.md",
+                # A point-in-time "shipped in PR #422" use-case record: names
+                # the flag as it was called then, in its own historical-
+                # record capacity.
+                "docs/contribute/usecase-registry.yaml",
             }
         ),
     ),
@@ -1414,6 +1418,10 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 "AGENTS.md",
                 "contribute/known-gaps.md",
                 "reference/github-action-inputs.md",
+                # A point-in-time use-case record describing the shipped
+                # security-policy hardening feature by the flag spelling it
+                # had then, in its own historical-record capacity.
+                "docs/contribute/usecase-registry.yaml",
             }
         ),
     ),
@@ -1429,7 +1437,15 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " on compare: --ast-frontend old=castxml --ast-frontend new=clang,"
         " ADR-040 Lever 1's prefix convention)",
         ("--old-ast-frontend", "--new-ast-frontend"),
-        frozenset({"AGENTS.md"}),
+        frozenset(
+            {
+                "AGENTS.md",
+                # A point-in-time use-case record describing the shipped
+                # per-side L2 backend selection feature by its then-current
+                # flag spelling, in its own historical-record capacity.
+                "docs/contribute/usecase-registry.yaml",
+            }
+        ),
     ),
     (
         "--include-dependencies (renamed --include-system-declarations: it"
@@ -1560,6 +1576,9 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 # historical-framing sentence, to point a reader coming from
                 # an old invocation at the `.abicheck.yml` replacement.
                 "use/multi-binary.md",
+                # Same "formerly ..." historical framing, in the use-case
+                # registry's bundle_soname_skew entry.
+                "docs/contribute/usecase-registry.yaml",
             }
         ),
     ),
@@ -1589,9 +1608,18 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     --compile-db` while both this sweep and those tests stayed green (Codex
     review). YAML rather than Markdown, but the same failure and the same fix.
 
+    `docs/contribute/usecase-registry.yaml` is here for the identical reason:
+    it is the machine-checked use-case source of truth, and its free-text
+    `note:` fields document real invocations a reader can copy -- CLI cleanup
+    phase two's PR J retired `--bundle-cohort` while this registry's
+    UC-WF-bundle-related entry kept advertising it, invisible to this sweep
+    because it scanned Markdown/case-README/scenario YAML only (Codex
+    review, fresh evidence).
+
     Keyed repo-relative (`examples/caseNN.../README.md`,
-    `tests/scenarios/x.yaml`), which cannot collide with a docs-relative key,
-    so an allowlist entry stays unambiguous about which tree it exempts.
+    `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`), which
+    cannot collide with a docs-relative key, so an allowlist entry stays
+    unambiguous about which tree it exempts.
     """
     targets = [(p, p.relative_to(DOCS).as_posix()) for p in sorted(DOCS.rglob("*.md"))]
     targets += [
@@ -1601,6 +1629,11 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     targets += [
         (p, f"tests/scenarios/{p.name}") for p in sorted(SCENARIOS.glob("*.yaml"))
     ]
+    usecase_registry = DOCS / "contribute" / "usecase-registry.yaml"
+    if usecase_registry.is_file():
+        targets.append(
+            (usecase_registry, "docs/contribute/usecase-registry.yaml")
+        )
     return targets
 
 
