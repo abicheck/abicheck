@@ -303,6 +303,49 @@ other half of why an escape hatch was not added back in a different shape).
    Accepted, narrow residual gap of the same shape as the paragraph
    below: a duplicate marker positioned beyond :data:`MARKER_SCAN_BYTES`
    that would override this fallback answer is not detected.
+15. **Point 14's own fallback still lost a real candidate when the
+   *larger* probe fails to decode at all rather than merely running out
+   before the root closed (Codex review, round 12, fresh evidence).** A
+   valid ``BundleFacts`` document over :data:`SMALL_MARKER_SCAN_BYTES` but
+   encoded with the same pathologically-high per-member compression
+   overhead point 9 answered can decode fine at the small probe's target
+   (finding the marker) while the *large* probe's own raw-read escalation
+   fails outright at its own larger target, returning no information at
+   all -- point 14's fallback used that probe's own answer unconditionally,
+   coercing "no information" straight to ``False`` and silently discarding
+   the small probe's real, already-found candidate. Answered by
+   :func:`root_level_artifact_type`
+   -- via :func:`_marker_lookup_at_window` -- reporting "no information"
+   as ``None`` (not a hardcoded negative) for a total decode failure too,
+   and having :func:`looks_like_stored_bundle_facts` fall back to the
+   *small* probe's own candidate specifically when the large probe itself
+   returns ``None`` -- a decode failure is a strictly worse data point
+   than an actual (if inconclusive) scan, never a better one, so it must
+   never be allowed to override an earlier probe's real finding.
+
+**Residual, accepted gap (zip/gzip nesting, not chased further):** a gzip
+stream's ``FEXTRA`` header sub-field (or, structurally analogously, a zstd
+skippable frame) can embed not just a forged central-directory record
+(point 12, closed) but a complete, minimal, genuinely valid zip member --
+real local file header included -- entirely within the compression
+envelope's own header metadata, before its compressed payload even begins.
+Such a file satisfies :func:`path_is_a_real_zip_container`'s own
+member-open check (Codex review, round 12, fresh evidence) while still
+being a real, independently-decodable envelope carrying the actual
+marker. Closing this fully would mean determining, for *any* raw byte
+offset a candidate zip member's local file header claims, whether that
+offset falls before or after the compression envelope's own true payload
+boundary -- which this module's own bounded-prefix design (this module's
+top docstring: "no full decompression, no JSON parse") cannot answer
+without either fully decompressing the file (defeating that design for
+every ordinary, non-adversarial invocation) or reaching into
+``gzip``/``zstandard``'s own private framing internals in a way this
+module has deliberately avoided elsewhere. Accepted as a routing-only
+gap, not a security one: `load_bundle_facts()` remains the actual
+validator of any document this classifier routes to it, and a document
+constructed purely to exploit this nesting serves no purpose beyond
+producing a confusing routing error, the same class of failure the
+pre-marker-v1 gap above already accepts.
 
 **Residual, accepted gap (same shape as the pre-marker-v1 gap above):** a
 reordered document whose marker falls beyond :data:`MARKER_SCAN_BYTES` of
@@ -363,23 +406,44 @@ def _marker_lookup_at_window(path: Path, n: int) -> tuple[bool | None, bool]:
     at decoded-prefix size *n*. Returns ``(is_stored, definitive)``:
     *is_stored* is ``True``/``False`` for the *last* root-level marker
     match seen so far (matching ``json.loads()``'s own last-key-wins
-    duplicate handling), or ``None`` if none was seen at all; *definitive*
-    mirrors :func:`root_level_artifact_type`'s own meaning -- ``False``
-    only when a larger *n* might still change the answer (a genuinely
-    truncated decode, whether or not a candidate was already found). A
+    duplicate handling), or ``None`` if none was seen at all -- either
+    because the scan never found one, or because *n* couldn't be decoded
+    at all (Codex review, round 12, fresh evidence: these two ``None``
+    cases share the same meaning, "no information from this probe," and
+    must be treated alike by the caller rather than one of them silently
+    acting as a negative classification). *definitive* mirrors
+    :func:`root_level_artifact_type`'s own meaning -- ``False`` only when
+    a larger *n* might still change the answer (a genuinely truncated
+    decode, whether or not a candidate was already found); a decode
+    failure is itself definitive *for this n* (retrying at the same size
+    would just fail the same way), but still carries no information, so a
     non-``None`` *is_stored* does **not** imply ``definitive`` is ``True``
-    (Codex review, round 11, fresh evidence) -- the caller decides whether
-    to trust an inconclusive candidate as a final fallback once it has no
+    (round 11) and a ``None`` *is_stored* does **not** imply the document
+    is unclassifiable (round 12) -- the caller decides whether to trust an
+    inconclusive or absent candidate as a final fallback once it has no
     larger window left to try (see :func:`looks_like_stored_bundle_facts`).
     """
     from ..snapshot_io import bounded_decoded_prefix
 
     prefix = bounded_decoded_prefix(path, n)
     if prefix is None:
-        # Cannot decode any prefix of this size at all -- not "needs a
-        # bigger window" (bounded_decoded_prefix already escalates its own
-        # raw read internally before giving up), so this is definitive.
-        return False, True
+        # Cannot decode any prefix of this size at all. Not the same as a
+        # confirmed absence: for a large n this can happen even when a
+        # smaller n decoded fine (a valid but pathologically-encoded
+        # compressed document -- point 9's own many-tiny-members scenario,
+        # scaled up until even the large window's own raw-read escalation
+        # cap can't decode anything at all) -- silently discarding an
+        # earlier, smaller probe's own real finding by treating this as a
+        # negative classification broke exactly that document (Codex
+        # review, round 12, fresh evidence). ``None`` here carries no
+        # information either way; "needs a bigger window" doesn't apply
+        # (bounded_decoded_prefix already escalates its own raw read
+        # internally before giving up), but *definitive* stays ``True``
+        # since retrying at this exact *n* would just fail the same way --
+        # the caller's own fallback to a smaller probe's candidate (see
+        # :func:`looks_like_stored_bundle_facts`) is what actually
+        # resolves this, not widening further.
+        return None, True
     if decoded_prefix_is_a_real_tar_stream(prefix):
         # A genuine tar stream can never be a real BundleFacts document
         # (see decoded_prefix_is_a_real_tar_stream's own docstring) --
@@ -477,6 +541,7 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
     is_stored, definitive = _marker_lookup_at_window(path, SMALL_MARKER_SCAN_BYTES)
     if definitive:
         return bool(is_stored)
+    small_probe_candidate = is_stored
     is_stored, _definitive = _marker_lookup_at_window(path, MARKER_SCAN_BYTES)
     # Whether or not *this* probe was itself definitive, its own answer is
     # the best one available -- no larger window is left to try, so it is
@@ -486,10 +551,25 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
     # library, nothing to do with a duplicate key) can exceed even
     # MARKER_SCAN_BYTES before its own root object closes; treating that
     # as "inconclusive, so not stored" silently broke every such document.
+    if is_stored is None:
+        # The large probe carries no information of its own -- either it
+        # never saw a candidate before running out, or it couldn't decode
+        # any prefix of that size at all (a pathologically-encoded
+        # compressed document whose per-member overhead defeats even the
+        # large window's own raw-read escalation, even though the small
+        # window decoded fine -- Codex review, round 12, fresh evidence).
+        # A larger window normally reprocesses everything a smaller one
+        # saw, but a *decode failure* is a strictly worse data point than
+        # an actual (if inconclusive) scan, not a better one -- falling
+        # back to the small probe's own candidate here, instead of
+        # coercing this "no information" answer straight to False, is
+        # what keeps round 11's own fix from being undone by exactly the
+        # failure mode round 11 was itself answering.
+        is_stored = small_probe_candidate
     # Accepted, narrow residual gap, same shape as the reordered-marker
     # gap this module's own docstring already documents: a duplicate
-    # marker positioned beyond MARKER_SCAN_BYTES that would override this
-    # one is not detected.
+    # marker positioned beyond MARKER_SCAN_BYTES that would override
+    # either probe's own candidate is not detected.
     return bool(is_stored)
 
 

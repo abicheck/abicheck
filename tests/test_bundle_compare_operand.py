@@ -405,6 +405,47 @@ class TestLooksLikeStoredBundleFacts:
             gzip.GzipFile(fileobj=io.BytesIO(raw[: 1024 * 1024])).read(1024 * 1024)
         assert looks_like_stored_bundle_facts(p) is True
 
+    def test_small_probe_candidate_survives_a_large_probe_decode_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 12): the small probe can decode
+        fine and find the marker (the document's root doesn't close
+        within SMALL_MARKER_SCAN_BYTES, so this alone is inconclusive),
+        while the *large* probe's own decode fails outright -- the same
+        pathologically-high-overhead encoding round 8 answered, scaled up
+        so even the 1 MiB raw-read cap can't reach the compressed
+        stream's natural end. The large probe's own "no information"
+        answer must not silently override the small probe's real,
+        already-found candidate."""
+        payload = json.dumps(
+            {
+                "artifact_type": "abicheck.bundle-facts",
+                "schema_version": 2,
+                "per_library_snapshots": {},
+                # Large enough that the root doesn't close within the
+                # small probe's own window, but the marker is still found
+                # well within it (right at the front).
+                "padding": "x" * 500000,
+            }
+        ).encode()
+        buf = io.BytesIO()
+        chunk_size = 10
+        for i in range(0, len(payload), chunk_size):
+            buf.write(gzip.compress(payload[i : i + chunk_size]))
+        raw = buf.getvalue()
+        assert len(raw) > 1024 * 1024  # premise: exceeds the large window
+        p = tmp_path / "small_probe_survives.json.gz"
+        p.write_bytes(raw)
+        # Premise checks: the small probe's own target decodes fine and
+        # finds the marker, while a large-window decode of the same
+        # stream fails outright -- both halves of the finding.
+        with gzip.GzipFile(fileobj=io.BytesIO(raw)) as g:
+            small = g.read(4096)
+        assert b'"artifact_type": "abicheck.bundle-facts"' in small
+        with pytest.raises((EOFError, zlib.error, gzip.BadGzipFile)):
+            gzip.GzipFile(fileobj=io.BytesIO(raw[: 1024 * 1024])).read(1024 * 1024)
+        assert looks_like_stored_bundle_facts(p) is True
+
     def test_gzip_fextra_forging_a_zip_eocd_is_still_stored(
         self, tmp_path: Path
     ) -> None:
