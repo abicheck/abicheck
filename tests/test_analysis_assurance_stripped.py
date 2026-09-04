@@ -19,7 +19,11 @@ from abicheck.dwarf_metadata import DwarfMetadata
 from abicheck.dwarf_presence import _section_presence_metadata
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.serialization import snapshot_from_dict, snapshot_to_json
+from abicheck.serialization import (
+    snapshot_from_dict,
+    snapshot_to_dict,
+    snapshot_to_json,
+)
 
 
 def _pair() -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -169,13 +173,15 @@ def test_debug_provenance_fields_round_trip_without_loss() -> None:
 
 
 def test_legacy_debug_blocks_are_presence_only_not_claimed_parsed() -> None:
-    raw = json.loads(
-        snapshot_to_json(
-            _debug_snapshot(
-                "1.0",
-                DwarfMetadata(has_dwarf=True),
-                AdvancedDwarfMetadata(has_dwarf=True),
-            )
+    # snapshot_to_dict() (not snapshot_to_json(), which wraps the flat shape
+    # in ADR-062/063 Phase 8's sectioned document envelope) so the dwarf/
+    # dwarf_advanced sub-dicts below are reachable directly, matching a real
+    # pre-v26 flat snapshot on disk.
+    raw = snapshot_to_dict(
+        _debug_snapshot(
+            "1.0",
+            DwarfMetadata(has_dwarf=True),
+            AdvancedDwarfMetadata(has_dwarf=True),
         )
     )
     # Provenance arrived in schema v26; a v25 snapshot cannot establish that

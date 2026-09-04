@@ -485,7 +485,9 @@ def test_serialization_roundtrip_no_crash() -> None:
     """snapshot_to_json must not raise TypeError on set fields."""
     from abicheck.storage.sectioned_document import from_sectioned_document
 
-    snap = _snap(_adv(calling={"foo": "program"}, packed={"A", "B"}, flags={"-fshort-enums"}))
+    snap = _snap(
+        _adv(calling={"foo": "program"}, packed={"A", "B"}, flags={"-fshort-enums"})
+    )
     # This must not raise TypeError: Object of type set is not JSON serializable
     json_str = snapshot_to_json(snap)
     data = from_sectioned_document(json.loads(json_str))

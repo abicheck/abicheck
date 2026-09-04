@@ -246,11 +246,24 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
         for name, e in d.get("enums", {}).items()
     }
 
+    has_dwarf = d.get("has_dwarf", False)
     return DwarfMetadata(
         structs=structs,
         enums=enums,
         base_types={k: int(v) for k, v in d.get("base_types", {}).items()},
-        has_dwarf=d.get("has_dwarf", False),
+        has_dwarf=has_dwarf,
+        # A legacy (pre-v44) block carries no debug-evidence provenance at
+        # all, so this fails closed rather than claiming a real parse: a
+        # has_dwarf block degrades to "presence_only" (the cheapest tier,
+        # not "parsed" -- has_dwarf alone never proved a completed parse),
+        # and no block at all degrades to "not_available". Mirrors the
+        # pre-merge dwarf_metadata_codec.legacy_dwarf_evidence_kwargs().
+        evidence_source=d.get("evidence_source", "unknown"),
+        evidence_state=d.get(
+            "evidence_state", "presence_only" if has_dwarf else "not_available"
+        ),
+        cu_total=d.get("cu_total", 0),
+        cu_failed=d.get("cu_failed", 0),
     )
 
 
@@ -265,8 +278,9 @@ def dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
         abi_flags=set(tc.get("abi_flags", [])),
         vector_abi_flags=set(tc.get("vector_abi_flags", [])),
     )
+    adv_has_dwarf = d.get("has_dwarf", False)
     return AdvancedDwarfMetadata(
-        has_dwarf=d.get("has_dwarf", False),
+        has_dwarf=adv_has_dwarf,
         target_arch=d.get("target_arch", ""),
         toolchain=toolchain,
         calling_conventions=d.get("calling_conventions", {}),
@@ -279,6 +293,12 @@ def dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
         callee_saved_regs={
             k: frozenset(v) for k, v in d.get("callee_saved_regs", {}).items()
         },
+        # See the matching comment in dwarf_from_dict.
+        evidence_state=d.get(
+            "evidence_state", "presence_only" if adv_has_dwarf else "not_available"
+        ),
+        cu_total=d.get("cu_total", 0),
+        cu_failed=d.get("cu_failed", 0),
     )
 
 

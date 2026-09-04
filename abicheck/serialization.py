@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from .bundle_facts import BundleFacts
     from .snapshot_io import SnapshotWriteResult
 from . import qualified_name_segments
-from .dwarf_metadata_codec import decode_dwarf_advanced_metadata, decode_dwarf_metadata
 from .errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .model import (
     AbiSnapshot,
