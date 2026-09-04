@@ -89,7 +89,6 @@ the libraries whose real version it discarded.
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -103,10 +102,12 @@ from .bundle_manifest import InstantiationManifest, manifest_from_dict, manifest
 from .serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 from .storage.bundle_archive_json_guard import bounded_encode_utf8
 from .storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
-from .storage.json_budget import (
-    DEFAULT_MAX_JSON_CONTAINER_NODES,
-    JsonContainerBudgetExceeded,
-    check_json_container_budget,
+from .storage.json_budget import DEFAULT_MAX_JSON_CONTAINER_NODES
+from .storage.native_identity_aliases import (
+    NATIVE_IDENTITY_ALIASES_KEY as _NATIVE_IDENTITY_ALIASES_KEY,
+    NATIVE_IDENTITY_FILENAME_KEY as _NATIVE_IDENTITY_FILENAME_KEY,
+    decode_native_identity_aliases as _decode_aliases,
+    encode_native_identity_aliases as _encode_aliases,
 )
 from .storage.package import (
     ArtifactRef,
@@ -134,8 +135,14 @@ INSTANTIATION_MANIFEST_SECTION_KIND = "instantiation_manifest"
 #: `ArtifactRef.native_identity` keys `BundleFacts.library_filenames`/
 #: `.filesystem_aliases` are folded onto, per library -- see the module
 #: docstring's "genuinely project-level vs. per-artifact" section.
-_NATIVE_IDENTITY_FILENAME_KEY = "library_filename"
-_NATIVE_IDENTITY_ALIASES_KEY = "filesystem_aliases"
+#: `_NATIVE_IDENTITY_FILENAME_KEY`/`_NATIVE_IDENTITY_ALIASES_KEY` themselves
+#: (plus the encode/decode pair below) now live in `storage.
+#: native_identity_aliases` -- see that module's own docstring for why
+#: (`abicheck.bundle` needs to read the identical evidence back without a
+#: `bundle -> bundle_facts_store` import-cycle edge) -- and are imported
+#: here under their original names purely so every reference in this
+#: module's own docstrings/comments above stays accurate without a
+#: repo-wide rename.
 #: The real `BundleFacts.per_library_snapshots` dict key, recorded here
 #: because `ArtifactRef.artifact_id` cannot hold it directly -- see
 #: `_artifact_id_for_library`'s own docstring.
@@ -171,54 +178,6 @@ def _artifact_id_for_library(library_name: str) -> str:
         library_name.encode("utf-8", errors="surrogateescape")
     ).hexdigest()
     return f"lib-{digest[:32]}"
-
-
-def _encode_aliases(aliases: tuple[str, ...]) -> str:
-    """`aliases`, folded into one `native_identity` string value.
-
-    JSON, not a delimiter-joined string: POSIX allows a newline (or any
-    byte but NUL/`/`) inside a real filename, so
-    `filesystem_alias_basenames()`'s own basenames are not guaranteed
-    delimiter-safe -- a joined-and-split encoding would silently split one
-    alias into two, or merge two into one, changing resolution evidence
-    (Codex review). `json.dumps` of a list of strings has no such ambiguity.
-    """
-    return json.dumps(sorted(aliases))
-
-
-def _decode_aliases(encoded: str, nodes_so_far: int) -> tuple[tuple[str, ...], int]:
-    """The exact inverse of `_encode_aliases`, returning the decoded tuple
-    alongside *nodes_so_far* updated with this array's own node count.
-
-    `check_json_container_budget` runs first, capped to the *remaining*
-    cross-bundle allowance rather than the full budget every time: an
-    untrusted array of millions of short strings can stay well under the
-    aggregate byte budget while still costing `json.loads()` one Python-
-    object allocation per element (a node-count amplification a byte-size
-    charge alone cannot see), and capping only *one* array in isolation is
-    not enough either -- N artifacts can each carry an array individually
-    under the limit while summing far past it in aggregate (Codex review,
-    fresh evidence on this same guard, twice). The pre-scan bounds this one
-    array against what's left of the shared budget; the actual decoded
-    element count is then charged into the running total the same way
-    `_charge_document_bytes` charges bytes.
-    """
-    remaining_nodes = max(DEFAULT_MAX_JSON_CONTAINER_NODES - nodes_so_far, 0)
-    check_json_container_budget(encoded.encode("utf-8"), remaining_nodes)
-    decoded = json.loads(encoded)
-    if not isinstance(decoded, list) or not all(
-        isinstance(item, str) for item in decoded
-    ):
-        raise ValueError(
-            f"native_identity[{_NATIVE_IDENTITY_ALIASES_KEY!r}] must decode to a "
-            f"JSON array of strings, got {encoded!r}"
-        )
-    # +1 for the array node itself, matching what `check_json_container_
-    # budget` itself counts (every container start plus every scalar leaf).
-    nodes_so_far += len(decoded) + 1
-    if nodes_so_far > DEFAULT_MAX_JSON_CONTAINER_NODES:
-        raise JsonContainerBudgetExceeded(nodes_so_far)
-    return tuple(decoded), nodes_so_far
 
 
 def _charge_document_bytes(

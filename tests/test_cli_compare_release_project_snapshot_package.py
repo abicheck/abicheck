@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
@@ -94,6 +95,32 @@ def _write_package(
 ) -> None:
     facts = _with_filenames(
         capture_bundle_facts(libraries, variant_fingerprint="gcc13-avx2")
+    )
+    store = DirectoryObjectStore(root)
+    manifest = write_bundle_facts_package(facts, store=store, variant_id=variant_id)
+    write_project_manifest(root, manifest)
+
+
+def _write_package_with_filenames(
+    root: Path,
+    libraries: dict[str, AbiSnapshot],
+    *,
+    library_filenames: dict[str, str],
+    variant_id: str = "default",
+) -> None:
+    """`_write_package`'s sibling for a test that needs the recovered
+    on-disk filename (`ArtifactRef.native_identity['library_filename']`) to
+    genuinely differ from the library's own bundle key -- `_write_package`
+    itself always stamps them identical (`_with_filenames`), which cannot
+    tell "the real filename was propagated" apart from "the bundle key was
+    reused as a synthetic path" (both produce the same `.name`)."""
+    facts = capture_bundle_facts(libraries, variant_fingerprint="gcc13-avx2")
+    facts = BundleFacts(
+        variant_fingerprint=facts.variant_fingerprint,
+        per_library_snapshots=facts.per_library_snapshots,
+        manifest=facts.manifest,
+        filesystem_aliases=facts.filesystem_aliases,
+        library_filenames=library_filenames,
     )
     store = DirectoryObjectStore(root)
     manifest = write_bundle_facts_package(facts, store=store, variant_id=variant_id)
@@ -361,6 +388,83 @@ class TestStoredBundleAnalysisSeesElfMetadata:
         )
         assert finding.symbol == "core_mul"
         assert finding.consumer_library == "libalgo.so"
+
+    def test_stored_library_real_filename_is_preserved(self, tmp_path: Path) -> None:
+        """Codex review, fourth round: the recovered `ElfMetadata` alone
+        isn't enough -- `_detect_soname_skew`'s own SONAME-major filename
+        fallback, and a sibling's `DT_NEEDED` naming the real on-disk
+        filename verbatim, both need `BundleSnapshot.libraries[name]` to be
+        the real filename (`ArtifactRef.native_identity['library_filename']`),
+        not a synthetic path derived from the bundle key alone. Uses a
+        filename that genuinely differs from the bundle key so the
+        assertion can't pass by coincidence."""
+        from abicheck.bundle import build_bundle_snapshot_mixed
+        from abicheck.elf_metadata import ElfMetadata
+        from abicheck.workflows.release_package import resolve_release_package_map
+
+        libs = {
+            "libcore.so": AbiSnapshot(
+                library="libcore.so",
+                version="1.0",
+                elf=ElfMetadata(soname="libcore.so.1"),
+                from_headers=False,
+            )
+        }
+        pkg = tmp_path / "pkg"
+        _write_package_with_filenames(
+            pkg, libs, library_filenames={"libcore.so": "libcore.so.2.5.1"}
+        )
+
+        stored_map = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        snap = build_bundle_snapshot_mixed(stored_map)
+        real_paths = {path.name for path in snap.libraries.values()}
+        assert real_paths == {"libcore.so.2.5.1"}
+
+    def test_stored_entry_is_never_probed_against_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, fourth round, security finding: a stored
+        sub-package's recovered filename is metadata, not a real path on
+        this filesystem -- `build_bundle_snapshot_mixed` must not let
+        `_compute_resolution_graph`'s `probe_filesystem=True` branch
+        (symlink-resolve / hard-link scan) run against it, or an unrelated
+        same-named symlink sitting in the caller's own cwd could silently
+        be picked up as a real filesystem alias for this library."""
+        from abicheck.bundle import build_bundle_snapshot_mixed
+        from abicheck.elf_metadata import ElfMetadata
+        from abicheck.workflows.release_package import resolve_release_package_map
+
+        libs = {
+            "libcore.so": AbiSnapshot(
+                library="libcore.so",
+                version="1.0",
+                elf=ElfMetadata(soname="libcore.so.1"),
+                from_headers=False,
+            )
+        }
+        pkg = tmp_path / "pkg"
+        _write_package_with_filenames(
+            pkg, libs, library_filenames={"libcore.so": "libcore.so.2.5.1"}
+        )
+        stored_map = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+
+        # A decoy: a real symlink, in the *process's own cwd*, sharing the
+        # recovered filename's exact basename -- what a relative
+        # Path("libcore.so.2.5.1").resolve() would follow if the stored
+        # entry were ever handed to the live-filesystem probe.
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        decoy_target = cwd / "decoy_real.so"
+        decoy_target.write_bytes(b"")
+        (cwd / "libcore.so.2.5.1").symlink_to(decoy_target)
+        monkeypatch.chdir(cwd)
+
+        snap = build_bundle_snapshot_mixed(stored_map)
+        assert "decoy_real.so" not in snap.resolution.soname_to_name
 
 
 class TestReverseMembershipValidation:

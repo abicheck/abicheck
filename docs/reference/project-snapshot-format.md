@@ -190,6 +190,42 @@ facade re-export (`frontends -> workflows -> storage`, ADR-061's layering):
   identical in-memory `AbiSnapshot` a `.abi.json`/sectioned file resolves
   to, so every downstream detector, report, and exit code behaves the same
   regardless of which of the three shapes the input actually is.
+- **`compare`'s release fan-out (a directory/package operand, ADR-062
+  A1.7)** also accepts a *multi*-artifact `ProjectSnapshot` package
+  directory as either side, alongside its original loose-directory-of-`.so`-
+  files operand — `cli_resolve.classify_compare_operand` distinguishes a
+  multi-artifact package (routed to the fan-out) from the single-artifact
+  shape above (still read directly as one snapshot) via
+  `workflows.release_package.is_multi_artifact_package`.
+  `workflows.release_package.resolve_release_package_map` unpacks the
+  selected variant into the same `{canonical_library_name: Path}` shape the
+  fan-out already builds from a live directory — one real,
+  independently-readable single-artifact sub-package per library
+  (`project_snapshot_legacy.materialize_release_variant_artifacts`, the
+  storage-layer half; kept in `workflows/` rather than
+  `project_snapshot_legacy.py` itself only because matching a stored
+  artifact's real filename to a live directory's own filename needs
+  `binary_utils._canonical_library_key`, an `extract`-layer primitive
+  `storage`-classified code may not import). The three sides of a
+  `compare`/`compare-release` pair may be mixed freely — stored/live,
+  live/stored, and stored/stored all produce the identical `DiffResult` set
+  a live/live run over the equivalent loose directories would, per-library
+  bundle analysis (`bundle.build_bundle_snapshot_mixed`) included.
+
+  `--old-variant`/`--new-variant` (`cli_options.variant_options`) select
+  which of a multi-variant package's `VariantRef`s to compare when a
+  package declares more than one; omitted, a package must declare exactly
+  one variant or the CLI raises a usage error (exit 64) naming the
+  ambiguity, the same "no silent first match" discipline
+  `SymbolIdentityIndex.unique_alias_match` already establishes elsewhere in
+  this codebase. Declared once on `compare` itself (`expose_value=False`,
+  stashed on `click.Context.meta` via `cli_options.
+  _stash_variant_in_context`) rather than threaded through every
+  intermediate dispatch function's own parameter list, and read back
+  (`cli_options.variant_kwargs_from_context`) from the still-current Click
+  context by `cli_compare_release.compare_release_cmd`'s own body — the one
+  function that actually needs them, reached whether the operand was
+  classified as a loose directory or a package.
 
 ## Related
 

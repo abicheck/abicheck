@@ -70,7 +70,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .bundle_detector_heuristics import (  # noqa: F401  (re-exported for back-compat)
     _build_demangled_index as _build_demangled_index,
@@ -214,9 +214,10 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
     directory-backed `ProjectSnapshot` sub-package
     (`project_snapshot_legacy.materialize_release_variant_artifacts`'s own
     output, or any other pre-resolved package directory) -- resolved via
-    `workflows.input_resolution.resolve_input` instead of a live ELF parse,
-    reusing whatever `ElfMetadata` its own stored `AbiSnapshot.elf` already
-    carries.
+    `_stored_elf_metadata` (a direct, `serialization.py`-free document read,
+    not the general `workflows.input_resolution.resolve_input` dispatcher --
+    see that helper's own docstring for why) instead of a live ELF parse,
+    reusing whatever `ElfMetadata` its own stored document already carries.
 
     Without this split, `_path_looks_like_elf` (which `build_bundle_
     snapshot` alone would apply) treats every directory as "not ELF, skip"
@@ -236,35 +237,167 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
     `build_bundle_snapshot` the single owner of "how a live path becomes
     `ElfMetadata`" and preserves it as the one seam a caller mocks to test
     bundle-analysis wiring without real binaries.
+
+    For each stored entry, also recovers its real on-disk filename and
+    filesystem aliases from the sub-package's own `ArtifactRef.
+    native_identity` (`_stored_library_identity`, best-effort -- absent for
+    a package a different writer produced without that evidence) and
+    threads them through as `build_bundle_snapshot_from_metadata`'s `paths`/
+    `extra_aliases`, the same way `bundle_facts.bundle_snapshot_from_facts`
+    already does for its own purely-metadata-driven reconstruction: without
+    this, a stored provider with no `DT_SONAME` is only ever known by its
+    bundle key (a canonical match key, or an artifact id -- never a real
+    filename), so `_detect_soname_skew`'s own SONAME-major filename
+    fallback and a sibling's DT_NEEDED naming that real filename verbatim
+    both silently fail to resolve (Codex review, fresh evidence: a real
+    intra-bundle break going unreported for exactly the case this function
+    exists to catch).
     """
     stored = {name: path for name, path in libraries.items() if path.is_dir()}
     if not stored:
         return build_bundle_snapshot(libraries)
 
-    from .workflows.input_resolution import resolve_input
-
     metadata: dict[str, ElfMetadata] = {}
+    stored_paths: dict[str, Path] = {}
+    extra_aliases: dict[str, tuple[str, ...]] = {}
     for name, path in stored.items():
-        try:
-            snapshot = resolve_input(path)
-        except Exception as exc:
-            log.warning("bundle: failed to resolve stored package %s: %s", path, exc)
+        elf = _stored_elf_metadata(path)
+        if elf is None:
             continue
-        if snapshot.elf is None:
-            log.debug("bundle: stored package %s has no ELF metadata", path)
-            continue
-        metadata[name] = snapshot.elf
+        metadata[name] = elf
+        real_filename, aliases = _stored_library_identity(path)
+        if real_filename is not None:
+            stored_paths[name] = real_filename
+        if aliases:
+            extra_aliases[name] = aliases
 
     live = {name: path for name, path in libraries.items() if name not in stored}
     if live:
         metadata.update(build_bundle_snapshot(live).metadata)
 
-    # probe_filesystem=True over *live* only -- a stored sub-package
-    # directory is never a real on-disk `.so` a symlink/hard-link alias
-    # probe would mean anything for.
+    # `probe_filesystem_names=frozenset(live)` -- *not* the merged `paths`
+    # below -- is what actually keeps the real-filesystem symlink-resolve/
+    # hard-link scan scoped to genuinely live paths: `stored_paths` above
+    # deliberately also lands in `paths` (for display and DT_NEEDED-name
+    # matching purposes), but a stored sub-package directory's recovered
+    # filename is never a real file *at that path* on this filesystem, so
+    # probing it would resolve against -- and could accidentally match an
+    # unrelated real file/symlink sitting in -- the caller's own cwd
+    # (Codex review, security finding: metadata-only resolution must not
+    # depend on ambient filesystem state).
     return build_bundle_snapshot_from_metadata(
-        metadata, paths=live, probe_filesystem=True
+        metadata,
+        paths={**stored_paths, **live},
+        probe_filesystem=True,
+        probe_filesystem_names=frozenset(live),
+        extra_aliases=extra_aliases or None,
     )
+
+
+def _stored_elf_metadata(path: Path) -> ElfMetadata | None:
+    """*path*'s own `ElfMetadata`, read directly from its materialized
+    single-artifact `ProjectSnapshot` sub-package document.
+
+    Deliberately **not** `workflows.input_resolution.resolve_input` (the
+    general dispatcher every other "turn a path into a snapshot" call site
+    in this codebase uses): that module reaches `serialization.py`, which
+    carries a `TYPE_CHECKING`-only `BundleFacts` import back to
+    `bundle_facts.py`, which itself reaches back into *this* module
+    (`bundle_snapshot_from_facts`, function-local) -- so `bundle.py`
+    importing that dispatcher, however deep, closes a real
+    `bundle -> workflows.input_resolution -> serialization -> bundle_facts
+    -> bundle` import cycle (`scripts/check_ai_readiness.py`'s
+    `import-cycle-growth` check; see `storage/native_identity_aliases.py`'s
+    own docstring for the sibling cycle its own split avoids).
+
+    `project_snapshot_legacy.read_legacy_snapshot_document` reads the exact
+    same flat, `serialization.snapshot_from_dict()`-shaped document without
+    ever importing `serialization.py` itself (it works directly with
+    `storage.import_v1`'s per-section dict reconstruction, never the parsed
+    `AbiSnapshot` type -- see that module's own docstring), and
+    `snapshot_platform_blocks.elf_from_dict` -- the identical parser
+    `serialization.snapshot_from_dict`'s own `elf` field uses -- is a
+    dependency-free leaf module. Combined, they parse the identical
+    `ElfMetadata` a full `resolve_input(path).elf` would, for the one
+    section `build_bundle_snapshot_mixed` actually needs, without ever
+    reaching `serialization.py`.
+
+    Returns `None` -- never raises -- for anything that doesn't parse as a
+    single-artifact package with ELF metadata present: matches
+    `build_bundle_snapshot`'s own "non-ELF/failed parse is skipped, not
+    fatal" contract.
+    """
+    from .project_snapshot_legacy import read_legacy_snapshot_document
+    from .snapshot_platform_blocks import elf_from_dict
+
+    try:
+        document = read_legacy_snapshot_document(path)
+    except Exception as exc:
+        log.warning("bundle: failed to resolve stored package %s: %s", path, exc)
+        return None
+    elf_data = document.get("elf")
+    if not isinstance(elf_data, dict):
+        log.debug("bundle: stored package %s has no ELF metadata", path)
+        return None
+    schema_version = int(document.get("schema_version", 1))
+    return cast("ElfMetadata", elf_from_dict(elf_data, schema_version))
+
+
+def _stored_library_identity(path: Path) -> tuple[Path | None, tuple[str, ...]]:
+    """Best-effort real on-disk filename + filesystem aliases for a stored
+    `ProjectSnapshot` sub-package directory at *path*, read from its sole
+    artifact's `ArtifactRef.native_identity` -- the same
+    `library_filename`/`filesystem_aliases` keys `bundle_facts_store.py`'s
+    own writer stamps there, defined in the shared leaf module `storage.
+    native_identity_aliases` rather than read back from `bundle_facts_store`
+    itself: that module is `workflows`-classified and imports `bundle_facts`
+    at module load, which reaches back into this module via a function-local
+    import (`bundle_snapshot_from_facts`) -- so a `bundle ->
+    bundle_facts_store` edge here would close a real
+    `bundle -> bundle_facts_store -> bundle_facts -> bundle` cycle
+    (`scripts/check_ai_readiness.py`'s `import-cycle-growth` check, see
+    `storage/native_identity_aliases.py`'s own docstring for the full
+    account). See `bundle_facts_store.py`'s module docstring for why there
+    are two independent, not-yet-reconciled writers of this native_identity
+    contract.
+
+    Returns `(None, ())` -- never raises -- for anything that doesn't parse
+    as a single-artifact package with that evidence recorded: a stored
+    package produced by something other than `project_snapshot_legacy.
+    materialize_release_variant_artifacts` (`build_bundle_snapshot_mixed`'s
+    own docstring accepts "any other pre-resolved package directory") may
+    simply not carry it, which is not itself an error --
+    `build_bundle_snapshot_from_metadata` already degrades to a synthetic
+    `Path(name)` when `paths` has no entry for a name.
+    """
+    from .project_snapshot_store import read_artifact_ref, read_manifest_summary
+    from .storage.native_identity_aliases import (
+        NATIVE_IDENTITY_ALIASES_KEY,
+        NATIVE_IDENTITY_FILENAME_KEY,
+        decode_native_identity_aliases,
+    )
+
+    try:
+        summary = read_manifest_summary(path)
+        if len(summary.artifact_ids) != 1:
+            return None, ()
+        artifact = read_artifact_ref(path, summary.artifact_ids[0])
+    except Exception as exc:
+        log.debug("bundle: no native_identity evidence for %s: %s", path, exc)
+        return None, ()
+
+    filename = artifact.native_identity.get(NATIVE_IDENTITY_FILENAME_KEY)
+    real_filename = Path(filename) if filename else None
+
+    aliases: tuple[str, ...] = ()
+    aliases_text = artifact.native_identity.get(NATIVE_IDENTITY_ALIASES_KEY)
+    if aliases_text:
+        try:
+            aliases, _ = decode_native_identity_aliases(aliases_text, 0)
+        except Exception as exc:
+            log.debug("bundle: malformed filesystem_aliases for %s: %s", path, exc)
+            aliases = ()
+    return real_filename, aliases
 
 
 def build_bundle_snapshot_from_metadata(
@@ -274,6 +407,7 @@ def build_bundle_snapshot_from_metadata(
     root: Path | None = None,
     probe_filesystem: bool = False,
     extra_aliases: dict[str, tuple[str, ...]] | None = None,
+    probe_filesystem_names: frozenset[str] | None = None,
 ) -> BundleSnapshot:
     """Build a :class:`BundleSnapshot` from already-parsed :class:`ElfMetadata`,
     without re-parsing (or even requiring) the underlying binary files.
@@ -332,6 +466,19 @@ def build_bundle_snapshot_from_metadata(
             only a genuinely metadata-only one (Codex review, fresh
             evidence — a second-round regression in the first-round fix
             above).
+        probe_filesystem_names: Restricts which names *probe_filesystem*
+            actually probes on the real filesystem, when given. ``None``
+            (the default) probes every name that has a caller-supplied
+            *paths* entry — ``build_bundle_snapshot``'s own behavior,
+            unchanged, since it always supplies one real path per name.
+            A caller that mixes real, live paths with paths that merely
+            *carry a real filename for display/matching* but are not
+            themselves resolvable on disk (``build_bundle_snapshot_mixed``'s
+            stored-package entries) must pass an explicit, narrower set —
+            otherwise ``_compute_resolution_graph`` would ``.resolve()`` a
+            non-live name's synthesized/recovered path against the
+            process's own current working directory (Codex review,
+            security finding).
     """
     from . import deadline
 
@@ -356,6 +503,11 @@ def build_bundle_snapshot_from_metadata(
         surviving_metadata,
         probe_filesystem=probe_filesystem,
         extra_aliases=extra_aliases,
+        probe_filesystem_names=(
+            frozenset(paths)
+            if probe_filesystem_names is None
+            else probe_filesystem_names
+        ),
     )
     # Use the first library's parent as the root if available; otherwise empty path
     resolved_root = (
@@ -699,6 +851,7 @@ def _compute_resolution_graph(
     *,
     probe_filesystem: bool = True,
     extra_aliases: dict[str, tuple[str, ...]] | None = None,
+    probe_filesystem_names: frozenset[str] | None = None,
 ) -> ResolutionGraph:
     """Index exports/imports across every library in the bundle.
 
@@ -723,6 +876,19 @@ def _compute_resolution_graph(
     library (Codex review, fresh evidence: an unrelated ``libfoo.so ->
     libfoo.so.1`` symlink sitting in the caller's cwd could silently
     change which DT_NEEDED edges resolve as intra-bundle).
+
+    *probe_filesystem_names*: further restricts *which* names the two
+    filesystem calls above run for, when ``probe_filesystem`` is ``True``.
+    ``None`` (every direct caller except :func:`build_bundle_snapshot_from_metadata`)
+    means no restriction — probe every name present in *libraries*, the
+    original behavior. :func:`build_bundle_snapshot_from_metadata` passes
+    an explicit set so a caller that mixes real, live paths with paths that
+    merely *carry a real filename for display* (recovered, not
+    filesystem-resolvable — :func:`build_bundle_snapshot_mixed`'s stored
+    entries) doesn't extend the live-filesystem probe to those too (Codex
+    review, security finding: same ambient-cwd-dependence concern as
+    ``probe_filesystem=False`` above, just reachable through a *subset* of
+    ``libraries`` instead of all of it).
     """
     graph = ResolutionGraph()
 
@@ -754,7 +920,9 @@ def _compute_resolution_graph(
         # when the discovered path already *was* the real file).
         if name in libraries:
             soname_to_name.setdefault(libraries[name].name, name)
-            if probe_filesystem:
+            if probe_filesystem and (
+                probe_filesystem_names is None or name in probe_filesystem_names
+            ):
                 try:
                     resolved_name = libraries[name].resolve().name
                 except OSError:
