@@ -113,10 +113,11 @@ def test_parse_args_pinned_suite():
 
 def test_pinned_suite_matches_historical_74_cases():
     mod = _load_benchmark()
-    cases = sorted(
-        d.name for d in (Path(__file__).parent.parent / "examples").iterdir()
-        if d.is_dir() and d.name.startswith("case")
-    )
+    # example_catalog.all_case_ids() (Phase 3, docs/contribute/plans/
+    # examples-catalog-split.md), not a directory scan -- benchmark_comparison.py
+    # already imports it at module load, so this reuses that instance rather
+    # than importing it separately.
+    cases = sorted(mod.example_catalog.all_case_ids())
     pinned = [c for c in cases if mod.PINNED_74_CASE_RE.match(c)]
 
     assert len(pinned) == 74
