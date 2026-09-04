@@ -21,11 +21,20 @@ Split out of ``diff_types.py`` to stay under its line-count cap (ADR-063
 Phase 0's detector migration pushed it over) -- a genuine leaf module (must
 not import from ``diff_types`` at all, to avoid an import cycle:
 ``diff_types.py`` imports ``_diff_type_vtable`` back for its own use, the
-only symbol this module exports). Everything else here
-(``_vtable_transition_is_evidenced``/``_vtable_transition_rests_on_
-unresolved_evidence``/``_layout_evidence_is_unverifiable``/
-``_owned_virtual_signatures``/``_owned_virtual_signatures_for_record``) is
-private to this cluster and was already only ever called from within it.
+only symbol this module exports). ``_vtable_transition_is_evidenced``/
+``_vtable_transition_rests_on_unresolved_evidence``/
+``_layout_evidence_is_unverifiable``/``_owned_virtual_signatures_for_
+record`` are private to this cluster and only ever called from within it.
+``_owned_virtual_signatures`` is the one exception (Codex review, fresh
+evidence): ``diff_vtable_layout._is_polymorphic`` also imports it directly
+as a sixth positive-evidence path (a retained ``Function.is_virtual``
+proves polymorphism independent of ``RecordType.vtable``, the same
+"different projection of the same debug info" reasoning this cluster
+already relies on) rather than reimplementing its own copy of the
+namespace-suffix-matching logic three separate Codex-review rounds already
+hardened here. This does not reintroduce the import-cycle constraint
+above: ``diff_vtable_layout.py`` imports nothing from ``diff_types``
+itself, only from this leaf module.
 
 **ADR-063 Phase 5B (vtable/vptr_offset_bits slice) re-audit, landed.** The
 plan's own "Deliberately not attempted" note (5B's first PR) flagged this

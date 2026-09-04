@@ -48,13 +48,17 @@ than fabricating a break.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
+from .diff_types_vtable import _owned_virtual_signatures
 from .model import (
     AbiSnapshot,
     FactStatus,
+    Function,
     RecordType,
     fact_confirmed_true,
     is_non_abi_surface_type,
@@ -73,6 +77,7 @@ def _is_polymorphic(
     memo: dict[str, bool | None],
     *,
     vtable_facts_reliable: bool = True,
+    funcs: Mapping[str, Function] | None = None,
 ) -> bool | None:
     """Whether class *name* is polymorphic (owns/inherits a vtable).
 
@@ -167,6 +172,28 @@ def _is_polymorphic(
     ``storage.fact_backfill`` rule exists for it at all), so this check is
     not gated on that flag -- the same treatment ``virtual_bases_fact``
     already gets above, for the identical reason.
+
+    *funcs* -- an optional ``snapshot.function_map`` (Codex review, fresh
+    evidence, fifth round) -- supplies a sixth, unconditional
+    positive-evidence path: ``snapshot.functions`` is a separate evidence
+    stream from the class DIE's virtual-method children
+    (``RecordType.vtable``), the same "different projection of the same
+    debug info" independence ``diff_types_vtable._vtable_transition_is_
+    evidenced`` already relies on for its own second branch -- so a
+    retained ``Function`` with ``is_virtual=True`` owned by this class
+    proves polymorphism even when ``vtable_fact`` itself is uncollected.
+    This matters most for a legacy direct-clang snapshot that predates
+    vtable reconstruction: its function-level ``is_virtual`` metadata
+    survives even though ``vtable``/``vtable_fact`` do not. Reuses
+    ``diff_types_vtable._owned_virtual_signatures`` rather than a fresh
+    ad hoc name-matching implementation -- that helper's own eager
+    namespace-suffix matching exists precisely because a naive exact-match
+    version was shown (by three separate Codex-review rounds) to silently
+    miss a namespaced class's own virtuals; reinventing a simpler version
+    here would risk reintroducing the same already-fixed bug class.
+    *funcs* is optional (defaults to ``None``, meaning "no function-level
+    evidence available") so every pre-existing caller that doesn't have a
+    ``function_map`` handy keeps today's behavior unchanged.
     """
     if name in memo:
         return memo[name]
@@ -184,7 +211,16 @@ def _is_polymorphic(
         and vptr_fact.value is not None
     )
     own_confirmed_abstract = fact_confirmed_true(rec.is_abstract_fact)
-    if vtable or virtual_bases or own_vptr_confirmed_present or own_confirmed_abstract:
+    own_has_retained_virtual_function = funcs is not None and bool(
+        _owned_virtual_signatures(name, funcs)
+    )
+    if (
+        vtable
+        or virtual_bases
+        or own_vptr_confirmed_present
+        or own_confirmed_abstract
+        or own_has_retained_virtual_function
+    ):
         memo[name] = True
         return True
     vtable_fact = rec.vtable_fact
@@ -202,7 +238,11 @@ def _is_polymorphic(
     bases = resolved_fact_value(rec.bases_fact, [])
     for base in bases:
         sub = _is_polymorphic(
-            base, types, memo, vtable_facts_reliable=vtable_facts_reliable
+            base,
+            types,
+            memo,
+            vtable_facts_reliable=vtable_facts_reliable,
+            funcs=funcs,
         )
         if sub is None:
             memo[name] = None
@@ -222,6 +262,7 @@ def _secondary_groups(
     memo: dict[str, bool | None],
     *,
     vtable_facts_reliable: bool = True,
+    funcs: Mapping[str, Function] | None = None,
 ) -> list[str] | None:
     """Ordered list of base names that own a *secondary* vtable group.
 
@@ -231,8 +272,8 @@ def _secondary_groups(
     contributes a secondary group in that order. Returns ``None`` if any base's
     polymorphism is indeterminate.
 
-    *vtable_facts_reliable* is threaded straight into ``_is_polymorphic`` —
-    see that function's own docstring.
+    *vtable_facts_reliable*/*funcs* are threaded straight into
+    ``_is_polymorphic`` — see that function's own docstring.
     """
     primary_taken = False
     groups: list[str] = []
@@ -240,7 +281,11 @@ def _secondary_groups(
     virtual_bases = resolved_fact_value(rec.virtual_bases_fact, [])
     for base in bases:  # direct, non-virtual, in declaration order
         poly = _is_polymorphic(
-            base, types, memo, vtable_facts_reliable=vtable_facts_reliable
+            base,
+            types,
+            memo,
+            vtable_facts_reliable=vtable_facts_reliable,
+            funcs=funcs,
         )
         if poly is None:
             return None
@@ -252,7 +297,11 @@ def _secondary_groups(
         groups.append(base)
     for vbase in virtual_bases:
         poly = _is_polymorphic(
-            vbase, types, memo, vtable_facts_reliable=vtable_facts_reliable
+            vbase,
+            types,
+            memo,
+            vtable_facts_reliable=vtable_facts_reliable,
+            funcs=funcs,
         )
         if poly is None:
             return None
@@ -331,12 +380,14 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 old_types,
                 old_memo,
                 vtable_facts_reliable=old.clang_vtable_facts_reliable,
+                funcs=old.function_map,
             )
             ng = _secondary_groups(
                 n,
                 new_types,
                 new_memo,
                 vtable_facts_reliable=new.clang_vtable_facts_reliable,
+                funcs=new.function_map,
             )
             if og is not None and ng is not None and og != ng:
                 changes.append(

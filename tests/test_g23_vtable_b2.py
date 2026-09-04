@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_vtable_layout import _is_polymorphic, _secondary_groups
-from abicheck.model import AbiSnapshot, Fact, RecordType
+from abicheck.model import AbiSnapshot, Fact, Function, RecordType
 
 
 def _snap(*types: RecordType) -> AbiSnapshot:
@@ -133,6 +133,31 @@ class TestSecondaryVtableGroup:
         ks = _kinds(compare(old, new))
         assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED not in ks
         assert ChangeKind.BASE_CLASS_POSITION_CHANGED in ks
+
+    def test_retained_virtual_function_evidence_reaches_the_real_detector(self):
+        # End-to-end (Codex review, fresh evidence, fifth round): B's own
+        # vtable_fact is uncollected on the old side (the legacy
+        # direct-clang shape), but a retained Function with is_virtual=True
+        # still proves B was polymorphic -- so losing that virtual (and the
+        # function) on the new side is a real SECONDARY_VTABLE_GROUP_CHANGED,
+        # not a silently-dropped indeterminate base.
+        a = _poly("A", vtable=["_ZN1A1fEv"])
+        b_old = RecordType(
+            name="B", kind="class", size_bits=64, vtable_fact=Fact.not_collected()
+        )
+        b_new = RecordType(name="B", kind="class", size_bits=64, vtable=[])
+        d = _poly("D", vtable=["_ZN1D1fEv"], bases=["A", "B"])
+        b_method = Function(
+            name="B::method",
+            mangled="_ZN1B6methodEv",
+            return_type="void",
+            is_virtual=True,
+        )
+        old = AbiSnapshot(
+            library="lib.so", version="1", types=[a, b_old, d], functions=[b_method]
+        )
+        new = AbiSnapshot(library="lib.so", version="2", types=[a, b_new, d])
+        assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED in _kinds(compare(old, new))
 
 
 # ── virtual_base_offset_changed ─────────────────────────────────────────────
@@ -537,3 +562,57 @@ class TestReconstructionFactStatus:
         )
         types = {"P": rec}
         assert _is_polymorphic("P", types, {}, vtable_facts_reliable=False) is True
+
+    def test_retained_virtual_function_proves_polymorphic(self):
+        # Codex review, fresh evidence, fifth round: a retained Function
+        # with is_virtual=True, owned by this class, is a separate evidence
+        # stream from RecordType.vtable (the class DIE's own virtual-method
+        # children) -- the same independence diff_types_vtable's own
+        # "class's own virtual functions" branch already relies on. This
+        # matters most for a legacy direct-clang snapshot that predates
+        # vtable reconstruction: function-level is_virtual metadata
+        # survives even though vtable/vtable_fact do not.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+        )
+        types = {"P": rec}
+        method = Function(
+            name="P::method",
+            mangled="_ZN1P6methodEv",
+            return_type="void",
+            is_virtual=True,
+        )
+        funcs = {method.mangled: method}
+        assert _is_polymorphic("P", types, {}, funcs=funcs) is True
+
+    def test_retained_non_virtual_function_does_not_prove_polymorphic(self):
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+        )
+        types = {"P": rec}
+        method = Function(
+            name="P::method",
+            mangled="_ZN1P6methodEv",
+            return_type="void",
+            is_virtual=False,
+        )
+        funcs = {method.mangled: method}
+        assert _is_polymorphic("P", types, {}, funcs=funcs) is None
+
+    def test_funcs_defaults_to_none_and_preserves_prior_behavior(self):
+        # Omitting funcs entirely (every pre-existing caller) must keep
+        # today's behavior unchanged -- no positive evidence to consult.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is None
