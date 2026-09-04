@@ -448,6 +448,33 @@ def _diff_type_vtable(
         # the unevidenced-transition guard below -- see
         # _vtable_transition_is_evidenced for the same discipline applied to
         # a different (genuinely ambiguous, rather than known-wrong) cause.
+        #
+        # This early return also carries a load-bearing side effect for the
+        # `old_value`/`new_value` strings built below (Codex review, Track 4
+        # 5B closure): they come from `resolved_fact_value(...,  [])`, which
+        # cannot distinguish "confirmed empty" from "not collected" any more
+        # than `_vtable_transition_is_evidenced` can. A `vtable_fact.status`
+        # of NOT_COLLECTED reaching that construction would render as an
+        # empty vtable rather than an unknown one -- but today it never can:
+        # `storage/fact_backfill.apply_case_a_fact_backfill` is the only
+        # producer of `Fact.not_collected()` for this field, gated on the
+        # identical `clang_vtable_facts_reliable` flag this function's own
+        # `vtable_facts_reliable` parameter is ANDed from
+        # (`diff_types.py`/`diff_symbols.py`), so a NOT_COLLECTED status on
+        # either side always makes this whole-snapshot flag False first and
+        # this function returns above before `old_value`/`new_value` are
+        # ever built. No producer sets `Fact.failed(...)` for this field at
+        # all. This coupling is verified, not assumed -- but it is a
+        # cross-module coincidence, not a structural guarantee: a future
+        # producer setting NOT_COLLECTED/FAILED here for a *different*
+        # reason (not tied to `clang_vtable_facts_reliable`) would
+        # reintroduce exactly this fabrication risk, unguarded. See the
+        # plan's own 5B "Known gap surfaced by review" note (Track 4 entry)
+        # for the full account; `tests/test_vtable_evidence_guard.py`
+        # exercises `_vtable_transition_is_evidenced` directly (bypassing
+        # this early return) specifically to test that function's own
+        # contract in isolation, which is why its fixtures can reach a
+        # combination this real call path cannot.
         return []
     if not _vtable_transition_is_evidenced(name, t_old, t_new, old_funcs, new_funcs):
         return []

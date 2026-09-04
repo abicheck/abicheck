@@ -733,6 +733,33 @@ populated vtable on the other (the real mixed shape a capture gap
 produces), still lets the owned-virtual-function and size-delta fallback
 streams fire.
 
+**Known gap surfaced by review (Codex review, this closure, not left
+unrecorded): the size-delta fallback proves the *transition* is evidenced
+but not that the *reported content* is.** When `_vtable_transition_is_
+evidenced` returns `True` via its size-delta branch specifically (not the
+owned-virtual-function branch), `_diff_type_vtable`'s own `old_value`/
+`new_value` strings are still built from `resolved_fact_value(...,  [])`
+— the same collapse this whole closure investigated for the evidence gate
+itself, but applied here to display *content*, a different question. A
+`NOT_COLLECTED` side would render as an empty vtable rather than an
+unknown one. Traced to ground rather than left as a hypothetical: this
+combination cannot reach that construction in any real comparison today —
+`storage/fact_backfill.apply_case_a_fact_backfill` is the only producer of
+`Fact.not_collected()` for this field, gated on the identical
+`clang_vtable_facts_reliable` flag `_diff_type_vtable`'s own
+`vtable_facts_reliable` parameter is ANDed from one level up
+(`diff_types.py`/`diff_symbols.py`), so a real snapshot carrying that
+status on either side always trips the whole-snapshot early return above
+`_vtable_transition_is_evidenced` is ever consulted; no producer sets
+`Fact.failed(...)` for this field at all. Declined as a live fix for
+exactly that reason (nothing to fix that is reachable), but recorded as a
+latent risk rather than silently relying on the coincidence: a future
+producer setting `NOT_COLLECTED`/`FAILED` on this field for a reason not
+tied to `clang_vtable_facts_reliable` would reintroduce the fabrication
+this note describes, unguarded by anything that currently exists.
+`diff_types_vtable.py`'s own `_diff_type_vtable` carries the same account
+next to the early return it depends on.
+
 This closes 5B's own removal gate for the `vtable` field family as a
 formal, investigated decline — the same disposition 2B's `entity:` alias
 promotion received (see that sub-phase's own note above) — rather than
