@@ -122,10 +122,29 @@ from . import (  # noqa: E402  — must run after `main` is defined
     cli_scan,  # noqa: F401  — registers scan
     cli_stack,  # noqa: F401  — registers deps (tree, compare)
 )
+from .cli_options import variant_options  # noqa: E402
 from .frontends.cli.commands import (  # noqa: E402
     compare as _compare_cmd,  # noqa: F401  — registers compare
     dump as _dump_cmd,  # noqa: F401  — registers dump
 )
+from .frontends.cli.commands.compare import compare_cmd  # noqa: E402
+
+# ADR-062 A1.7: --old-variant/--new-variant, applied to the already-
+# registered `compare` command from here rather than as a `@variant_options`
+# decorator inside frontends/cli/commands/compare.py itself -- that file is
+# capped at the 800-line production maximum, and `click.option(...)` (which
+# `variant_options` is built from) supports attaching a param to an
+# already-built `click.Command` exactly this way: it appends directly to
+# `compare_cmd.params` (`click.decorators._param_memo`'s own `isinstance(f,
+# Command)` branch), the identical mechanism a `@click.option` stacked
+# above `@main.command(...)` uses, just invoked as a function call instead
+# of decorator syntax. This module (a 131-line registration facade with no
+# `architecture/debt.yaml` entry at all) is where the CLI's other
+# post-registration wiring already lives, so `compare.py` needs neither a
+# new import nor a new debt-ledger baseline for this flag family (Codex
+# review: "the flag plumbing must not grow a previously-compliant capped
+# module").
+variant_options(compare_cmd)
 
 if __name__ == "__main__":
     main()

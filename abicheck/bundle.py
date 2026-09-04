@@ -285,12 +285,23 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
     # unrelated real file/symlink sitting in -- the caller's own cwd
     # (Codex review, security finding: metadata-only resolution must not
     # depend on ambient filesystem state).
+    # filesystem_backed=False (not `probe_filesystem`, which stays True so
+    # the *live* subset above still gets real resolution): the snapshot-wide
+    # flag alone can't say "only some members are live", and
+    # `_detect_soname_skew`'s own SONAME-major fallback reads only this one
+    # flag -- not `probe_filesystem_names` -- to decide whether re-resolving
+    # a member's path is safe. Whenever *any* stored entry participates
+    # (guaranteed here -- `stored` is non-empty past the early return
+    # above), leaving it True would let that detector re-resolve a stored,
+    # non-live path against the caller's own cwd (Codex review, fresh
+    # evidence).
     return build_bundle_snapshot_from_metadata(
         metadata,
         paths={**stored_paths, **live},
         probe_filesystem=True,
         probe_filesystem_names=frozenset(live),
         extra_aliases=extra_aliases or None,
+        filesystem_backed=False,
     )
 
 
@@ -408,6 +419,7 @@ def build_bundle_snapshot_from_metadata(
     probe_filesystem: bool = False,
     extra_aliases: dict[str, tuple[str, ...]] | None = None,
     probe_filesystem_names: frozenset[str] | None = None,
+    filesystem_backed: bool | None = None,
 ) -> BundleSnapshot:
     """Build a :class:`BundleSnapshot` from already-parsed :class:`ElfMetadata`,
     without re-parsing (or even requiring) the underlying binary files.
@@ -479,6 +491,22 @@ def build_bundle_snapshot_from_metadata(
             non-live name's synthesized/recovered path against the
             process's own current working directory (Codex review,
             security finding).
+        filesystem_backed: Overrides :attr:`BundleSnapshot.filesystem_backed`
+            when given; ``None`` (the default) uses *probe_filesystem*
+            unchanged, matching every existing caller. A caller whose
+            *paths* mixes genuinely live entries with recovered-but-not-
+            resolvable ones (``build_bundle_snapshot_mixed``, whenever any
+            stored entry participates) must pass ``False`` explicitly: the
+            snapshot-wide flag alone cannot distinguish "every member is
+            safe to re-resolve" from "some are" ``_detect_soname_skew``'s
+            own SONAME-major fallback reads only this one flag, not
+            *probe_filesystem_names* -- gating the resolution graph
+            correctly (via that parameter) still leaves this detector
+            free to re-resolve a stored, non-live path against the
+            caller's cwd unless this flag itself says not to (Codex
+            review, fresh evidence: the CWD-probe fix above protects
+            ``_compute_resolution_graph`` alone, not every consumer of
+            ``filesystem_backed``).
     """
     from . import deadline
 
@@ -522,9 +550,11 @@ def build_bundle_snapshot_from_metadata(
         libraries=surviving_paths,
         metadata=surviving_metadata,
         resolution=resolution,
-        # probe_filesystem already means "real, live paths" (see
-        # BundleSnapshot.filesystem_backed's own docstring).
-        filesystem_backed=probe_filesystem,
+        # probe_filesystem already means "real, live paths" for every
+        # existing caller (see BundleSnapshot.filesystem_backed's own
+        # docstring); filesystem_backed lets build_bundle_snapshot_mixed
+        # override that for its own mixed/stored case.
+        filesystem_backed=probe_filesystem if filesystem_backed is None else filesystem_backed,
     )
 
 

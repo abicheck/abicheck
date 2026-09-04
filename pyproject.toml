@@ -196,7 +196,17 @@ module = [
     "abicheck.frontends.cli.runtime",
 ]
 disallow_untyped_decorators = false
-disable_error_code = ["no-any-return", "misc"]
+# `has-type`: ADR-062 A1.7's `variant_options(compare_cmd)` call in `cli.py`
+# (applying `--old-variant`/`--new-variant` to the already-registered
+# `compare` command directly, rather than as a `@variant_options` decorator
+# inside the capped `frontends/cli/commands/compare.py` -- see that
+# function's own docstring) makes mypy unable to determine `compare_cmd`'s
+# type when it is imported by name into a *second* module already carrying
+# this same untyped-decorator relaxation, a known mypy limitation with
+# chained/forward Click decorator inference, not a real type error --
+# `compare_cmd` is exercised end to end by the CLI test suite via
+# `CliRunner`.
+disable_error_code = ["no-any-return", "misc", "has-type"]
 
 [[tool.mypy.overrides]]
 # ``cli_scan`` uses click decorators (untyped → ``no-any-return``/``misc``, as

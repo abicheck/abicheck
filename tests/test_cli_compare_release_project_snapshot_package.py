@@ -421,6 +421,13 @@ class TestStoredBundleAnalysisSeesElfMetadata:
         snap = build_bundle_snapshot_mixed(stored_map)
         real_paths = {path.name for path in snap.libraries.values()}
         assert real_paths == {"libcore.so.2.5.1"}
+        # Codex review, fifth round: a stored-only (or mixed) snapshot must
+        # never claim `filesystem_backed=True` -- `_detect_soname_skew`'s
+        # own SONAME-major fallback reads only this one snapshot-wide flag
+        # (not `probe_filesystem_names`) to decide whether re-resolving a
+        # member's path against the real filesystem is safe, and a stored
+        # member's recovered filename is never actually resolvable there.
+        assert snap.filesystem_backed is False
 
     def test_stored_entry_is_never_probed_against_cwd(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -659,3 +666,80 @@ class TestVariantSelection:
         assert ec == 4
         outcomes = _sorted_outcomes(out)
         assert any(o[0] == "BREAKING" and o[1] == 1 for o in outcomes)
+
+
+class TestMultiVariantSingleArtifactClassification:
+    """Codex review, fifth round: `is_multi_artifact_package` counted
+    artifacts only, so a package declaring two variants where just one of
+    them (``v1``) owns the package's sole artifact -- the other (``v2``) a
+    real, deliberately empty variant -- was misclassified as a
+    single-artifact "file". `cli_resolve.classify_compare_operand`'s
+    single-artifact reader (`project_snapshot_legacy.
+    read_legacy_snapshot_document`) has no variant-selection logic at all
+    -- it always reads the package's sole artifact unconditionally -- so an
+    explicit `--old-variant v2` was silently ignored rather than honored:
+    the comparison ran against `v1`'s real content regardless of which
+    variant was actually requested."""
+
+    def _single_artifact_two_variant_package(self, root: Path) -> None:
+        from abicheck.project_snapshot_store import (
+            read_project_manifest,
+            write_project_manifest,
+        )
+        from abicheck.storage.package import PackageManifest, VariantRef
+
+        old_libs, _ = _old_new_libraries()
+        _write_package(root, {"liba.so": old_libs["liba.so"]}, variant_id="v1")
+        existing = read_project_manifest(root)
+        empty_variant = VariantRef(variant_id="v2", artifact_ids=())
+        combined = PackageManifest(
+            versions=existing.versions,
+            variant_refs=existing.variant_refs + (empty_variant,),
+            artifact_refs=existing.artifact_refs,
+        )
+        write_project_manifest(root, combined)
+
+    def test_single_artifact_multi_variant_package_is_classified_as_directory(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.cli_resolve import classify_compare_operand
+        from abicheck.workflows.release_package import is_multi_artifact_package
+
+        pkg = tmp_path / "pkg"
+        self._single_artifact_two_variant_package(pkg)
+
+        assert is_multi_artifact_package(pkg) is True
+        assert classify_compare_operand(pkg) == "directory"
+
+    def test_old_variant_selecting_the_empty_variant_is_honored(
+        self, tmp_path: Path
+    ) -> None:
+        """Before the fix, `--old-variant v2` against this package silently
+        compared `v1`'s real `liba.so` (function `foo` removed -- a real
+        BREAKING finding, exit 4) since the flag was never consulted at
+        all. After the fix, the release fan-out actually resolves `v2` --
+        a real, valid, empty variant -- so nothing on the old side can
+        possibly match `liba.so` on the new side; the new library is
+        reported as *added*, not compared against `v1`'s content, and the
+        run must not report the BREAKING removal `v1` would have."""
+        _, new_libs = _old_new_libraries()
+        old_pkg = tmp_path / "old_pkg"
+        new_pkg = tmp_path / "new_pkg"
+        self._single_artifact_two_variant_package(old_pkg)
+        _write_directory(new_pkg, {"liba.so": new_libs["liba.so"]})
+
+        ec, out = _invoke(
+            "compare",
+            str(old_pkg),
+            str(new_pkg),
+            "--old-variant",
+            "v2",
+            "--format",
+            "json",
+            "-j",
+            "1",
+        )
+        doc = json.loads(out)
+        assert doc["libraries"] == []
+        assert doc["unmatched_new"] == ["liba.so.json"]
+        assert ec == 0

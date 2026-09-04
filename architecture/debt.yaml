@@ -852,16 +852,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/frontends/cli/commands/compare.py",
-      "baseline_lines": 801,
-      "target": "frontends",
-      "rule": "no_growth",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Crossed the 800-line production cap for a new-to-the-ledger file (ADR-062 A1.7) by 1 line: applying `cli_options.variant_options` to `compare_cmd` needs one import and one decorator line -- the entirety of what this file owes to `--old-variant`/`--new-variant`. Every other piece of the plumbing lives off this file's own budget: the option definitions/help text and the `expose_value=False` + `ctx.meta` stash (`cli_options.variant_options`/`_stash_variant_in_context`) live in `cli_options.py` (1977-line baseline, ample headroom); the read-back (`variant_kwargs_from_context`) was moved a second time (Codex review, fresh evidence: a first revision merged it into `_dispatch_release_compare` here, costing this file a further line for no reason a caller cared about) into `compare_release_cmd`'s own body (`cli_compare_release.py`, itself nowhere near its own much larger no_growth ceiling) via `click.get_current_context()` -- the same Click context `_dispatch_release_compare`'s direct `compare_release_cmd.callback(**kwargs)` call never pushes a new one over, so it's still the right context to read `ctx.meta` from one function deeper. No further reduction was found that keeps the flags declared on `compare` itself, the only registered entry point a directory/package operand reaches this dispatch through.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/finding_identity.py",
       "baseline_lines": 1923,
       "target": "compare",

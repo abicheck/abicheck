@@ -70,7 +70,6 @@ from ....cli_options import (
     set_input_options,
     severity_options,
     two_sided_input_options,
-    variant_options,
     verbose_option,
 )
 from ....cli_resolve import (
@@ -641,7 +640,6 @@ def _embed_inline_source_side(
                    "it raises a clean 0 to 1 and never lowers a 2/4. Single-pair "
                    "compares only, not the directory/package release fan-out. "
                    "See docs/reference/exit-codes.md.")
-@variant_options  # ADR-062 A1.7: --old-variant/--new-variant
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:

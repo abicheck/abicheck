@@ -72,14 +72,28 @@ _NATIVE_IDENTITY_LIBRARY_NAME_KEY = "library_name"
 
 def is_multi_artifact_package(path: str | Path) -> bool:
     """Whether the `ProjectSnapshot` package directory at *path* declares
-    more than one artifact -- ADR-062 A1.7's disambiguator between a
-    single-artifact package (`cli_resolve.classify_compare_operand` keeps
-    reading it directly as one snapshot, A1.3's original "file" shape,
-    unchanged since before A1.7) and a real multi-library release (routed
-    to the release fan-out instead, the same as a loose directory of `.so`
-    files). Read-only, best-effort: `False` -- never raises -- for anything
-    that fails to parse as a readable manifest; the caller has normally
-    already confirmed *path* passes `is_project_snapshot_package_dir`.
+    more than one artifact, **or** more than one variant -- ADR-062 A1.7's
+    disambiguator between a single-artifact package
+    (`cli_resolve.classify_compare_operand` keeps reading it directly as one
+    snapshot, A1.3's original "file" shape, unchanged since before A1.7) and
+    a real multi-library/multi-variant release (routed to the release
+    fan-out instead, the same as a loose directory of `.so` files).
+
+    The variant-count arm matters even for a package that happens to
+    publish exactly one artifact overall: a package can validly declare two
+    variants where only one of them owns that artifact (e.g. `v1` owns it,
+    `v2` is a real, deliberately empty variant). A1.3's single-artifact
+    reader (`project_snapshot_legacy.read_legacy_snapshot_document`) has no
+    `--old-variant`/`--new-variant` selection logic at all -- it always
+    reads the package's sole artifact unconditionally -- so treating such a
+    package as "file" would silently ignore an explicit
+    `--old-variant v2`/`--new-variant v2` and compare `v1`'s artifact
+    instead, rather than either honoring the selection (an empty variant,
+    correctly comparing zero libraries) or raising on it (Codex review).
+
+    Read-only, best-effort: `False` -- never raises -- for anything that
+    fails to parse as a readable manifest; the caller has normally already
+    confirmed *path* passes `is_project_snapshot_package_dir`.
     """
     from ..errors import SnapshotError
 
@@ -87,7 +101,7 @@ def is_multi_artifact_package(path: str | Path) -> bool:
         summary = read_manifest_summary(path)
     except (SnapshotError, OSError, ValueError, TypeError):
         return False
-    return len(summary.artifact_ids) > 1
+    return len(summary.artifact_ids) > 1 or len(summary.variant_ids) > 1
 
 
 def _release_match_key(artifact: ArtifactRef) -> str:
@@ -186,7 +200,24 @@ _DISPLAY_DIRNAME_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]")
 
 
 def _display_dirname(key: str, artifact_id: str) -> str:
+    """A readable display directory name for *artifact_id*, prefixed by a
+    sanitized form of *key*.
+
+    Suffixed with the **full** `artifact_id`, not a truncated prefix of it
+    -- collision-freedom must not depend on `key`'s own sanitization being
+    injective (two distinct canonical keys, e.g. `lib:a.so` and `lib?a.so`,
+    both collapse to `lib_a.so` under `_DISPLAY_DIRNAME_UNSAFE`) nor on a
+    truncated `artifact_id` prefix staying unique (two distinct, individually
+    unique artifact_ids could in principle share a short prefix). Since
+    `artifact_id` itself is already validated globally unique and
+    filesystem-safe (`ArtifactRef.__post_init__`/`storage.ref_ids.
+    safe_ref_id` -- the same guarantee `resolve_release_package_map`'s own
+    docstring already leans on for `materialize_release_variant_artifacts`
+    never colliding), keeping it in full makes every generated name
+    collision-free regardless of what `key` sanitizes to (Codex review,
+    fresh evidence on this same guard, twice).
+    """
     sanitized = _DISPLAY_DIRNAME_UNSAFE.sub("_", key).strip(". ")[:80]
     if not sanitized or sanitized in (".", ".."):
         sanitized = "lib"
-    return f"{sanitized}-{artifact_id[:12]}"
+    return f"{sanitized}-{artifact_id}"
