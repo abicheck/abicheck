@@ -87,12 +87,18 @@ __all__ = [
     "import_baseline_set",
 ]
 
-#: `manifest.json`'s own top-level metadata keys other than `artifacts[]` —
-#: `abicheck.buildsource.baseline_set.BaselineManifest`'s own field set,
-#: duplicated here as plain strings (never imported: `buildsource/` is a
-#: flat-root package `storage/` may not depend on) since this is the exact
-#: partition `import_baseline_set`/`export_baseline_set` fold onto
-#: `BASELINE_SET_SECTION_KIND`.
+#: `manifest.json`'s own top-level metadata keys other than `artifacts[]` --
+#: `abicheck.buildsource.baseline_set.BaselineManifest`'s own field set
+#: (`manifest_version` through `generator`), duplicated here as plain
+#: strings (never imported: `buildsource/` is a flat-root package
+#: `storage/` may not depend on), plus `freshness` -- a real top-level key
+#: `actions/baseline/build_manifest.py` always writes (its own
+#: `_compute_freshness()`) that `BaselineManifest` itself does not parse at
+#: all. Dropping it here anyway would still lose real content on a
+#: round-trip -- a normal manifest's `refresh_required` decision and its
+#: explanatory reasons -- even though the gap upstream in `BaselineManifest`
+#: is a separate, pre-existing completeness question this adapter does not
+#: attempt to fix (Codex review).
 _METADATA_KEYS = (
     "manifest_version",
     "project_ref",
@@ -101,6 +107,7 @@ _METADATA_KEYS = (
     "fact_set",
     "baseline_generation",
     "generator",
+    "freshness",
 )
 
 #: `abicheck.buildsource.baseline_set.SUPPORTED_MANIFEST_VERSIONS`, duplicated

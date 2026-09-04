@@ -37,6 +37,7 @@ def _manifest_document(**overrides: Any) -> dict[str, Any]:
         "fact_set": {"depth": "s4"},
         "baseline_generation": 3,
         "generator": {"tool": "actions/baseline", "version": "1.2.3"},
+        "freshness": {"refresh_required": False, "reasons": []},
         "artifacts": [
             {
                 "library": "liba.so",
@@ -162,6 +163,7 @@ class TestImportBaselineSet:
         assert metadata["profile"] == "default"
         assert metadata["baseline_generation"] == 3
         assert metadata["generator"] == {"tool": "actions/baseline", "version": "1.2.3"}
+        assert metadata["freshness"] == {"refresh_required": False, "reasons": []}
         assert set(snapshots) == {"liba.so", "libb.so"}
         assert snapshots["liba.so"]["library"] == "liba.so"
 
