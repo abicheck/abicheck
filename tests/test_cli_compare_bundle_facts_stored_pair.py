@@ -520,3 +520,61 @@ class TestStoredPairEndToEnd:
         assert code != 0
         assert code != 64  # a real ValidationError, not a Click usage error
         assert "evidence depth" in out
+
+    def test_incomparable_dependency_scope_exits_16_not_a_traceback(
+        self, tmp_path: Path
+    ) -> None:
+        """A matched pair whose extraction contracts disagree
+        (``dependency_scope`` "filtered" vs "full") makes
+        ``compare_snapshots()`` raise ``ScopeMismatchError`` from inside
+        ``compare_stored_bundle_facts_pair()``'s per-library loop -- neither
+        a ``ValueError``/``TypeError``/``SnapshotError``, so the dispatcher's
+        generic exception clause previously never saw it and let it surface
+        as an unhandled traceback (exit 1, no output) instead of native
+        ``compare``'s own established not-comparable response (exit 16)
+        (Codex review, PR #1060, round 12)."""
+        old_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="old",
+            elf=ElfMetadata(
+                soname="libcore.so",
+                symbols=[ElfSymbol(name="core_fn", visibility="default")],
+            ),
+            functions=[
+                Function(
+                    name="core_fn",
+                    mangled="core_fn",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            from_headers=True,
+            dependency_scope="filtered",
+        )
+        new_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="new",
+            elf=ElfMetadata(
+                soname="libcore.so",
+                symbols=[ElfSymbol(name="core_fn", visibility="default")],
+            ),
+            functions=[
+                Function(
+                    name="core_fn",
+                    mangled="core_fn",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            from_headers=True,
+            dependency_scope="full",
+        )
+        old_path = tmp_path / "old.bundlefacts.json"
+        new_path = tmp_path / "new.bundlefacts.json"
+        save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), old_path)
+        save_bundle_facts(capture_bundle_facts({"libcore.so": new_snapshot}), new_path)
+
+        code, out = _invoke("compare", str(old_path), str(new_path))
+
+        assert code == 16
+        assert "not comparable" in out

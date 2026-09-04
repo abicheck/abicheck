@@ -732,3 +732,34 @@ def reject_ast_override_flags_for_stored_pair(ctx: click.Context) -> None:
                 "are stored BundleFacts documents: neither side runs any "
                 "header-frontend AST extraction for it to affect."
             )
+
+
+def exit_bundle_facts_not_comparable(exc: Exception) -> None:
+    """Translate a ``ProfileMismatchError``/``ScopeMismatchError`` raised
+    from inside a per-library ``compare_snapshots()`` call into a clean CLI
+    failure, exit 16 -- the same code native ``compare``'s own ADR-050 D2
+    comparability gate uses (``frontends.cli.runtime._EXIT_NOT_COMPARABLE``),
+    rather than the generic exit-1 ``click.ClickException`` translation the
+    sibling ``except (SnapshotError, TypeError, ValueError, OSError)``
+    clause gives every other malformed-input case (Codex review, PR #1060,
+    round 12). Neither exception type is a ``ValueError``/``TypeError``/
+    ``SnapshotError`` (both are plain ``AbicheckError``), so it previously
+    reached neither clause and surfaced as a raw traceback instead. Shared
+    by both the stored/stored and stored/live dispatch branches, which both
+    diff each matched library through the identical ``compare_snapshots()``
+    chokepoint. Deliberately narrower than native compare's own
+    ``_report_not_comparable`` (no SARIF/JUnit rendering, no schema-
+    conformant JSON envelope): this dispatcher's own JSON output is the
+    simpler ``mode: "bundle_facts"`` shape, which has no not-comparable
+    document convention of its own to fabricate one for -- a clear stderr
+    message is what every non-JSON native-compare format already gets too."""
+    import sys
+
+    click.echo(
+        f"Error: not comparable: {exc}\n"
+        "Two matched libraries were not extracted under a comparable "
+        "profile/scope contract (ADR-050 D1/D2), so no verdict was "
+        "produced for this bundle.",
+        err=True,
+    )
+    sys.exit(16)

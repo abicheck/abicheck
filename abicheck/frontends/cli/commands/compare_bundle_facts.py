@@ -321,12 +321,12 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
     if new_is_stored:
         # PR I stored/stored: NEW_INPUT is itself a stored BundleFacts
         # document too -- no extraction, no header AST, no live NEW-side
-        # resolution at all (compare_stored_bundle_facts_pair() is a pure
-        # in-memory diff of both sides' already-persisted per-library
-        # AbiSnapshots). --max-json-object-nodes applies to *both* sides'
-        # load here (there is only the one, unscoped flag) rather than just
-        # OLD_INPUT's, unlike the stored/live branch below.
-        from ....errors import SnapshotError
+        # resolution (compare_stored_bundle_facts_pair() is a pure in-memory
+        # diff of both sides' already-persisted per-library AbiSnapshots).
+        # --max-json-object-nodes applies to *both* sides' load here (one
+        # unscoped flag), unlike the stored/live branch below.
+        from ....errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
+        from .compare_bundle_facts_rejections import exit_bundle_facts_not_comparable
 
         try:
             result = compare_stored_bundle_facts_pair(
@@ -342,11 +342,12 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 new_max_json_object_nodes=kwargs.get("max_json_object_nodes"),
                 depth=kwargs.get("depth"),
             )
-        # Same CLI-boundary translation the stored/live branch below applies
-        # to compare_release_against_bundle_facts() -- see its own comments
-        # for exactly why each of these four exception types is caught here.
+        # Same translation the stored/live branch below applies (its own
+        # comments explain each of these four exception types).
         except (SnapshotError, TypeError, ValueError, OSError) as exc:
             raise click.ClickException(str(exc)) from exc
+        except (ProfileMismatchError, ScopeMismatchError) as exc:
+            exit_bundle_facts_not_comparable(exc)  # not caught above (round 12)
     else:
         # Codex review: NEW_INPUT is documented ("a live release directory/
         # package") to accept a package archive (wheel/deb/rpm/tar), but
@@ -358,14 +359,14 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         # here. --devel-pkg new=... is honored the same way too (its header_dir
         # becomes the NEW-side header root when no explicit --new-header was
         # given, and its discovered include roots are appended) -- --debug-info
-        # is rejected above rather than silently dropped, since this driver has
-        # no debug-dir parameter to forward it to.
+        # is rejected above, since this driver has no debug-dir param for it.
         from ....cli_compare_release_helpers import (
             _discover_include_roots,
             _extract_if_package,
         )
-        from ....errors import SnapshotError
+        from ....errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
         from ....workflows.extraction import detect_extractor, is_package
+        from .compare_bundle_facts_rejections import exit_bundle_facts_not_comparable
 
         _temp_dir_paths: list[str] = []
 
@@ -505,15 +506,14 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 # (bundle_facts_serialization.bundle_facts_from_dict and
                 # storage.bundle_facts_validation's validators all raise plain
                 # ValueError, not SnapshotError, for these) -- would otherwise leak
-                # the same raw traceback. json.JSONDecodeError (genuinely malformed
-                # JSON, from the plain-JSON load path) is itself a ValueError
-                # subclass, so it's covered by the same clause. OSError (Codex
-                # review, fresh evidence) covers load_bundle_facts()'s own
-                # IsADirectoryError/PermissionError/etc when OLD_INPUT -- a plain
-                # click.Path(exists=True) argument, not dir_okay=False, since the
-                # ordinary live-directory compare mode needs a directory there --
-                # turns out to be a directory or otherwise unreadable file.
+                # the same raw traceback. json.JSONDecodeError (malformed JSON) is
+                # itself a ValueError subclass. OSError covers load_bundle_facts()'s
+                # own IsADirectoryError/PermissionError/etc when OLD_INPUT -- a plain
+                # click.Path(exists=True) argument, not dir_okay=False -- turns out
+                # to be a directory or otherwise unreadable file.
                 raise click.ClickException(str(exc)) from exc
+            except (ProfileMismatchError, ScopeMismatchError) as exc:
+                exit_bundle_facts_not_comparable(exc)  # round 12, see above
         finally:
             # Mirrors the live release fan-out's own --keep-extracted handling
             # (_cleanup_temp_dirs): remove the package-extraction tempdir unless
