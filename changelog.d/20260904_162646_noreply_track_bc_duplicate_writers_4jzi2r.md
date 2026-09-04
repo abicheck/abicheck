@@ -35,4 +35,6 @@
   into a comparison. `export_bundle_facts` also now rejects a stored
   manifest `provides` entry that is not itself a mapping (e.g. a JSON list
   of `[key, value]` pairs), instead of silently accepting it via a plain
-  `dict(entry)` conversion.
+  `dict(entry)` conversion, and a stored `manifest` that is not itself a
+  mapping with a list-valued `provides` key (previously an unhandled
+  `TypeError`/`KeyError` instead of the documented `ValueError`).

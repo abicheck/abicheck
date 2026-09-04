@@ -628,10 +628,11 @@ def export_bundle_facts(
     manifest was not built by it, or was hand-edited), if that section (or
     any artifact's own section) is not advertised in this package's
     `section_schema_versions`, if the stored composition's
-    `variant_fingerprint` is not a string, if a stored manifest `provides`
-    entry is not itself a mapping, or if a stored template instantiation
-    names the same parameter more than once -- or whatever *on_document*
-    itself raises.
+    `variant_fingerprint` is not a string, if the stored `manifest` is not
+    a mapping with a list-valued `provides` key, if a stored manifest
+    `provides` entry is not itself a mapping, or if a stored template
+    instantiation names the same parameter more than once -- or whatever
+    *on_document* itself raises.
     """
     variant = next(
         (v for v in manifest.variant_refs if v.variant_id == variant_id), None
@@ -740,6 +741,22 @@ def export_bundle_facts(
     if raw_manifest is None:
         exported_manifest = None
     else:
+        # Mirrors `_validated_manifest`'s own import-side shape check,
+        # applied symmetrically here: `composition` is untrusted stored
+        # content (the identical reasoning the `variant_fingerprint`/
+        # `provides`-entry checks above already give), so a stored
+        # `manifest` that is not a mapping, or has no list-valued
+        # `provides` key, must raise the documented `ValueError` rather
+        # than an unhandled `TypeError`/`KeyError` from the dict-spread/
+        # subscript below (Codex review).
+        if not isinstance(raw_manifest, Mapping) or not isinstance(
+            raw_manifest.get("provides"), list
+        ):
+            raise ValueError(
+                f"variant {variant_id!r}'s stored manifest must be a mapping "
+                f"with a list-valued 'provides' key, not {raw_manifest!r} -- "
+                "the package is corrupted or was hand-edited"
+            )
         exported_manifest = {
             **raw_manifest,
             "provides": [

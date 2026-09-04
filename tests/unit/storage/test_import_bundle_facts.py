@@ -657,3 +657,22 @@ class TestImportBundleFacts:
         )
         with pytest.raises(ValueError, match="mapping"):
             export_bundle_facts(doctored, store=store)
+
+    def test_export_rejects_a_stored_manifest_with_no_provides_list(self) -> None:
+        """Mirrors `_validated_manifest`'s own import-side shape check,
+        applied symmetrically on export: a stored `manifest` that is not a
+        mapping with a list-valued `provides` key must raise the
+        documented `ValueError`, not an unhandled `TypeError`/`KeyError`
+        from the dict-spread/subscript that follows (Codex review)."""
+        doctored, store = self._doctored_composition_manifest(
+            {"variant_fingerprint": "default", "manifest": {"not_provides": []}}
+        )
+        with pytest.raises(ValueError, match="provides"):
+            export_bundle_facts(doctored, store=store)
+
+    def test_export_rejects_a_non_mapping_stored_manifest(self) -> None:
+        doctored, store = self._doctored_composition_manifest(
+            {"variant_fingerprint": "default", "manifest": "not-a-mapping"}
+        )
+        with pytest.raises(ValueError, match="provides"):
+            export_bundle_facts(doctored, store=store)
