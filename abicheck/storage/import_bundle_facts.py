@@ -259,10 +259,33 @@ def _validated_manifest_entry(raw: Any) -> dict[str, Any]:
                 f"entry's 'instantiations' must be a list of mappings: "
                 f"{raw!r}"
             )
+        # Stored as an ordered list of `[key, value]` pairs, not a plain
+        # dict: `canonical.canonical_form` sorts every mapping's keys
+        # alphabetically before storage, and `_expand_instantiations`
+        # (`bundle_manifest.py`) builds each template's expanded signature
+        # from `inst.values()` in *insertion* order -- a non-lexical
+        # instantiation (e.g. `{"Z": "first", "A": "second"}`) would
+        # silently reorder to `T<second, first>` after import/export,
+        # potentially matching the wrong promised symbol (Codex review,
+        # fresh evidence). `_manifest_entry_for_export` is the inverse.
         normalized["instantiations"] = [
-            {str(k): str(v) for k, v in inst.items()} for inst in instantiations
+            [[str(k), str(v)] for k, v in inst.items()] for inst in instantiations
         ]
     return normalized
+
+
+def _manifest_entry_for_export(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """Inverse of `_validated_manifest_entry`'s order-preserving
+    `instantiations` encoding: reconstructs each instantiation as a plain
+    `dict`, built from its stored `[[key, value], ...]` pair list in the
+    same order, for callers of `export_bundle_facts` that expect the same
+    shape `bundle_manifest.manifest_entry_from_dict` itself accepts."""
+    exported = dict(entry)
+    if "instantiations" in exported:
+        exported["instantiations"] = [
+            dict(pairs) for pairs in exported["instantiations"]
+        ]
+    return exported
 
 
 def _validated_manifest(raw: Any) -> Any:
@@ -539,6 +562,17 @@ def export_bundle_facts(
             artifact, store=store, source_schema_version=source_schema_version
         )
 
+    raw_manifest = composition.get("manifest")
+    if raw_manifest is None:
+        exported_manifest = None
+    else:
+        exported_manifest = {
+            **raw_manifest,
+            "provides": [
+                _manifest_entry_for_export(entry) for entry in raw_manifest["provides"]
+            ],
+        }
+
     return {
         "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
         "schema_version": _BUNDLE_FACTS_SCHEMA_VERSION,
@@ -548,5 +582,5 @@ def export_bundle_facts(
         "per_library_snapshots": per_library_snapshots,
         "filesystem_aliases": composition.get("filesystem_aliases", {}),
         "library_filenames": composition.get("library_filenames", {}),
-        "manifest": composition.get("manifest"),
+        "manifest": exported_manifest,
     }

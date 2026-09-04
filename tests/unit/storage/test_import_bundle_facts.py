@@ -329,6 +329,31 @@ class TestImportBundleFacts:
             {"Float": "1.0"}
         ]
 
+    def test_a_non_lexical_instantiation_parameter_order_is_preserved(self) -> None:
+        """`_expand_instantiations` (`bundle_manifest.py`) builds each
+        template's expanded signature from `inst.values()` in *insertion*
+        order, not sorted order -- storing an instantiation as a plain
+        dict would let `SectionDTO` canonicalization sort its keys
+        alphabetically, silently reordering `{"Z": "first", "A": "second"}`
+        into `{"A": "second", "Z": "first"}` and changing
+        `T<first, second>` into `T<second, first>` on round-trip (Codex
+        review, fresh evidence)."""
+        doc = _bundle_document(
+            manifest={
+                "provides": [
+                    {
+                        "template": "t",
+                        "instantiations": [{"Z": "first", "A": "second"}],
+                    }
+                ]
+            }
+        )
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        roundtrip = export_bundle_facts(manifest, store=store)
+        instantiation = roundtrip["manifest"]["provides"][0]["instantiations"][0]
+        assert list(instantiation.items()) == [("Z", "first"), ("A", "second")]
+
     def test_export_is_the_exact_inverse(self) -> None:
         doc = _bundle_document()
         store = InMemoryObjectStore()

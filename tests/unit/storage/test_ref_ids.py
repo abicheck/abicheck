@@ -33,9 +33,49 @@ class TestResolveRefIds:
             safe_ref_id(ref_id, "artifact_id")
         reject_filesystem_collisions(ids, "artifact_id")
 
-    def test_an_unsafe_name_falls_the_whole_set_back_to_opaque_ids(self) -> None:
+    def test_an_unrelated_safe_name_is_unaffected_by_a_sibling_collision(
+        self,
+    ) -> None:
+        """A colliding pair's own opaque fallback must not touch a third,
+        unrelated, safe name's resolution -- an earlier version fell the
+        *whole* set back to opaque ids, which meant adding one new
+        colliding library anywhere in a bundle silently reassigned a
+        completely unrelated, already-safe library's own `artifact_id`,
+        breaking release-to-release matching keyed by that id (Codex
+        review, fresh evidence: this is the concrete "a stable library
+        gets reidentified when an unrelated sibling is added" scenario)."""
+        result = resolve_ref_ids(
+            ["libFoo.so", "libfoo.so", "libbar.so"], opaque_prefix="lib"
+        )
+        assert result["libbar.so"] == "libbar.so"
+        assert result["libFoo.so"] != "libFoo.so"
+        assert result["libfoo.so"] != "libfoo.so"
+
+    def test_adding_a_colliding_sibling_does_not_change_an_existing_ids_resolution(
+        self,
+    ) -> None:
+        """The exact scenario named by the Codex finding: `libfoo.so`
+        alone resolves to its own literal spelling; adding a
+        case-colliding `LIBFOO.SO` must not change that resolution for any
+        *other* member of the set (here, none -- the two-name case is
+        covered directly by verifying `libfoo.so` keeps its own previous
+        resolution across both calls, holding all libraries besides the
+        newly-added one fixed)."""
+        before = resolve_ref_ids(["libfoo.so", "libbar.so"], opaque_prefix="lib")
+        after = resolve_ref_ids(
+            ["libfoo.so", "libbar.so", "LIBFOO.SO"], opaque_prefix="lib"
+        )
+        assert after["libbar.so"] == before["libbar.so"]
+
+    def test_an_unsafe_name_falls_only_itself_back_to_an_opaque_id(self) -> None:
+        """An unrelated, safe, non-colliding name's own resolution never
+        depends on some other unsafe/colliding name elsewhere in the set
+        -- an earlier version fell the *whole* set back to opaque ids,
+        which meant adding one bad name anywhere reassigned every other
+        already-safe name's own artifact_id too (Codex review, fresh
+        evidence)."""
         result = resolve_ref_ids(["liba.so", "a/b"], opaque_prefix="lib")
-        assert result["liba.so"] != "liba.so"
+        assert result["liba.so"] == "liba.so"
         assert result["a/b"] != "a/b"
 
     def test_opaque_ids_are_deterministic(self) -> None:

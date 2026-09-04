@@ -188,39 +188,57 @@ def _opaque_ref_id(name: str, prefix: str) -> str:
     return f"{prefix}-{digest}"
 
 
+def _folded(name: str) -> str:
+    """The same canonical-caseless-matching fold
+    `reject_filesystem_collisions` itself uses, exposed here so
+    `resolve_ref_ids` can group names by it directly rather than only
+    detecting a collision as an exception."""
+    return unicodedata.normalize("NFD", unicodedata.normalize("NFD", name).casefold())
+
+
 def resolve_ref_ids(names: Sequence[str], *, opaque_prefix: str) -> dict[str, str]:
     """Map each of *names* to a ref-id-safe, collision-free identifier --
     preferring the literal name (for on-disk readability, e.g. in
-    `refs/artifacts/<id>.json`) when every name in *names* already passes
-    `safe_ref_id` and none collides with another on a case-insensitive or
-    normalization-insensitive filesystem (`reject_filesystem_collisions`);
-    falling back to a deterministic, opaque, sha256-derived id (see
-    `_opaque_ref_id`) for *every* name otherwise.
+    `refs/artifacts/<id>.json`) for a name that itself passes `safe_ref_id`
+    and does not fold (case/Unicode-normalization-insensitively) to the
+    same value as another, *differently spelled* name in *names*; falling
+    back to a deterministic, opaque, sha256-derived id (see
+    `_opaque_ref_id`) for that one name otherwise.
 
-    A single unsafe or colliding name falls the whole set back to opaque
-    ids, not just the offending one(s) -- deciding which of several
-    colliding names keeps its literal spelling would be an arbitrary
-    choice this function has no basis to make, and a set mixing opaque and
-    literal ids is more confusing to a reader of the resulting package than
-    a uniformly opaque one (Codex review: a real `BundleFacts`/baseline-set
-    document may legitimately name two libraries differing only by case --
-    `libFoo.so`/`libfoo.so` -- which this package's own cross-platform
-    ref-id safety would otherwise reject outright, even though the
-    canonical `BundleFacts` reader treats them as two distinct, valid
-    entries).
+    Each name's own fate never depends on an unrelated name elsewhere in
+    *names* -- only on whether *that* name is itself unsafe, or itself
+    folds the same as some other, differently-spelled name in the set (a
+    real `BundleFacts`/baseline-set document may legitimately name two
+    libraries differing only by case, e.g. `libFoo.so`/`libfoo.so`, which
+    this package's own cross-platform ref-id safety would otherwise reject
+    outright even though the canonical `BundleFacts` reader treats them as
+    two distinct, valid entries). An earlier version fell the *whole* set
+    back to opaque ids the moment any single name was unsafe or collided,
+    which meant adding one new colliding library anywhere in a bundle
+    silently reassigned a completely unrelated, already-safe library's own
+    artifact_id -- breaking release-to-release matching that keys by that
+    id (`docs/contribute/plans/storage-format-v2.md`'s A1.7 design; Codex
+    review, fresh evidence). Two names that are themselves *exactly*
+    identical are never a collision (the same name given twice resolves to
+    one shared entry) -- only two differently-spelled names folding to the
+    same value are.
 
     Raises nothing itself -- a name this function cannot make safe always
     has a working opaque fallback.
     """
-    safe_names: list[str] = []
+    fold_groups: dict[str, set[str]] = {}
     for name in names:
+        fold_groups.setdefault(_folded(name), set()).add(name)
+
+    result: dict[str, str] = {}
+    for name in names:
+        is_safe = True
         try:
             safe_ref_id(name, "name")
         except ValueError:
-            return {n: _opaque_ref_id(n, opaque_prefix) for n in names}
-        safe_names.append(name)
-    try:
-        reject_filesystem_collisions(safe_names, "name")
-    except ValueError:
-        return {n: _opaque_ref_id(n, opaque_prefix) for n in names}
-    return {n: n for n in names}
+            is_safe = False
+        collides = len(fold_groups[_folded(name)]) > 1
+        result[name] = (
+            name if is_safe and not collides else _opaque_ref_id(name, opaque_prefix)
+        )
+    return result
