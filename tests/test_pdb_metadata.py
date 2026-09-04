@@ -305,6 +305,65 @@ class TestPdbToDwarfMetadata:
         assert meta.has_dwarf and adv.has_dwarf
         assert meta.evidence_state == adv.evidence_state == "partial"
 
+    def test_truncated_tpi_stream_marks_basic_channel_partial(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
+        """P2 review, fresh evidence: ``parse_tpi_stream()`` can stop before
+        every promised type index was consumed (``TpiStream.truncated``)
+        while ``pdb.types`` is still non-``None`` -- the basic channel must
+        not read ``parsed`` for that shape."""
+        from abicheck import pdb_metadata as pdb_metadata_mod
+
+        real_parse_pdb = pdb_metadata_mod.parse_pdb
+
+        def _with_truncated_tpi(path):  # noqa: ANN001, ANN202
+            pdb = real_parse_pdb(path)
+            assert pdb.tpi is not None
+            pdb.tpi.truncated = True
+            return pdb
+
+        with patch.object(
+            pdb_metadata_mod, "parse_pdb", side_effect=_with_truncated_tpi
+        ):
+            meta, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
+
+        assert meta.has_dwarf is True
+        assert meta.evidence_state == "partial"
+
+    def test_failed_tpi_records_mark_basic_channel_partial(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
+        """Sibling shape: the stream parsed in full (not truncated), but
+        one or more individual records failed to decode
+        (``TypeDatabase.failed_record_count``) -- same required outcome."""
+        from abicheck import pdb_metadata as pdb_metadata_mod
+
+        real_parse_pdb = pdb_metadata_mod.parse_pdb
+
+        def _with_failed_records(path):  # noqa: ANN001, ANN202
+            pdb = real_parse_pdb(path)
+            assert pdb.types is not None
+            pdb.types.failed_record_count = 1
+            return pdb
+
+        with patch.object(
+            pdb_metadata_mod, "parse_pdb", side_effect=_with_failed_records
+        ):
+            meta, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
+
+        assert meta.has_dwarf is True
+        assert meta.evidence_state == "partial"
+
+    def test_clean_tpi_stream_reports_parsed(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
+        """Positive control: neither a truncated stream nor a failed record
+        -- the basic channel legitimately reads ``parsed`` (mirrors
+        ``test_advanced_channel_never_reports_parsed_on_clean_success``,
+        stated explicitly here as this fix's own positive control)."""
+        meta, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
+        assert meta.evidence_state == "parsed"
+
 
 # ---------------------------------------------------------------------------
 # Data model consistency: AdvancedDwarfMetadata from PDB

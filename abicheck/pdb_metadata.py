@@ -211,6 +211,17 @@ def parse_pdb_debug_info(
     # hits an error below.
     adv = AdvancedDwarfMetadata(has_dwarf=True, evidence_state="partial")
 
+    # P2 review, fresh evidence: parse_tpi_stream()/TypeDatabase.parse_all()
+    # can both silently drop data -- the TPI stream itself ending before
+    # every promised type index was consumed (TpiStream.truncated), or an
+    # individual structurally-intact record's decode raising and being
+    # skipped (TypeDatabase.failed_record_count) -- while pdb.types is
+    # still non-None, so meta's "parsed" default above would otherwise
+    # claim complete basic layout/enum evidence even though some was
+    # dropped before _extract_struct_layouts/_extract_enums ever saw it.
+    if (pdb.tpi is not None and pdb.tpi.truncated) or pdb.types.failed_record_count:
+        meta.evidence_state = "partial"
+
     # UDT name → defining source file (ADR-024 Phase 1 provenance), parsed from
     # the IPI stream. Empty when the PDB carries no IPI / source-line records.
     src_files = pdb.udt_source_files

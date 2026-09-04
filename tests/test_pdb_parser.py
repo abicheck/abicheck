@@ -508,6 +508,7 @@ class TestTpiParser:
         assert tpi.type_index_begin == 0x1000
         assert tpi.type_index_end == 0x1000
         assert len(tpi.records) == 0
+        assert tpi.truncated is False
 
     def test_single_structure(self) -> None:
         fieldlist_payload = _make_lf_fieldlist([
@@ -528,6 +529,7 @@ class TestTpiParser:
         assert tpi.records[0].leaf == LF_FIELDLIST
         assert tpi.records[1].type_index == 0x1001
         assert tpi.records[1].leaf == LF_STRUCTURE
+        assert tpi.truncated is False
 
     def test_too_small_tpi(self) -> None:
         with pytest.raises(ValueError, match="too small"):
@@ -907,6 +909,7 @@ class TestTpiParserExtended:
         header += b"\x00" * (56 - len(header))
         tpi = parse_tpi_stream(header + rec_data)
         assert len(tpi.records) == 0
+        assert tpi.truncated is True
 
     def test_tpi_get_method(self) -> None:
         """TpiStream.get() returns records by type index."""

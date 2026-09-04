@@ -364,6 +364,7 @@ class TpiStream:
     type_index_begin: int
     type_index_end: int
     records: list[TpiRecord]
+    truncated: bool = False  #: stopped short of type_index_end (P2 review)
     _record_map: dict[int, TpiRecord] = field(default_factory=dict, repr=False)
 
     def get(self, ti: int) -> TpiRecord | None:
@@ -391,7 +392,7 @@ def parse_tpi_stream(data: bytes) -> TpiStream:
 
     while pos + 4 <= end and current_ti < ti_end:
         (rec_len,) = struct.unpack_from("<H", data, pos)
-        if rec_len < 2:
+        if rec_len < 2 or pos + 2 + rec_len > len(data):
             break
         (leaf,) = struct.unpack_from("<H", data, pos + 2)
         rec_data = data[pos + 4:pos + 2 + rec_len]
@@ -409,6 +410,7 @@ def parse_tpi_stream(data: bytes) -> TpiStream:
         type_index_begin=ti_begin,
         type_index_end=ti_end,
         records=records,
+        truncated=current_ti < ti_end,
     )
 
 
@@ -714,6 +716,7 @@ class TypeDatabase:
         self._name_cache: dict[int, str] = {}
         self._size_cache: dict[int, int] = {}
         self._parsed = False
+        self.failed_record_count = 0  # records _parse_record raised on (P2 review)
 
     def parse_all(self) -> None:
         """Parse all TPI records into structured objects."""
@@ -725,6 +728,7 @@ class TypeDatabase:
             try:
                 self._parse_record(rec)
             except (struct.error, IndexError, ValueError) as exc:
+                self.failed_record_count += 1
                 log.debug("Failed to parse TPI record ti=0x%x leaf=0x%x: %s",
                           rec.type_index, rec.leaf, exc)
 
