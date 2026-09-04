@@ -1444,7 +1444,14 @@
    "category": "breaking",
    "expected": "BREAKING",
    "min_evidence": "L0",
-   "note": "the deployment-risk (GLIBCXX runtime floor) finding alone is visible at L0 and would read COMPATIBLE_WITH_RISK there; with debug info present (this catalog's actual run tier) abicheck's DWARF/CFI channel additionally reports frame_register_changed for reset() (rsp -> rbp, since GCC now emits a frame pointer for the throwing implementation) -- a real binary-level (not source-level) signal, raising the verdict to BREAKING. Was previously masked by a CFI-extraction bug (pyelftools EH_CFI_entries()/CFI_entries() vs. the wrong get_-prefixed names this parser called) that made this detector dead code against every real binary; fixed in this same PR.",
+   "note": "the deployment-risk (GLIBCXX runtime floor) finding alone is visible at L0 and would read COMPATIBLE_WITH_RISK there; with debug info present (this catalog's actual run tier) abicheck's DWARF/CFI channel additionally reports frame_register_changed for reset() under GCC (rsp -> rbp, since GCC now emits a frame pointer for the throwing implementation) -- a real binary-level (not source-level) signal, raising the verdict to BREAKING. Was previously masked by a CFI-extraction bug (pyelftools EH_CFI_entries()/CFI_entries() vs. the wrong get_-prefixed names this parser called) that made this detector dead code against every real binary; fixed in this same PR. Toolchain-dependent -- see known_gap.",
+   "known_gap": "Clang: unlike GCC, clang's codegen for Buffer::reset() keeps an rsp-based CFA in both v1 (noexcept) and v2 (throwing) -- no frame_register_changed signal exists to detect under this toolchain, so the verdict stays COMPATIBLE_WITH_RISK (the deployment-risk findings alone). Verified directly: parse_advanced_dwarf().frame_registers reports 'rsp' for _ZN6Buffer5resetEv in both clang-built v1.so and v2.so, vs. GCC's rsp -> rbp.",
+   "known_gap_observed": [
+    "COMPATIBLE_WITH_RISK"
+   ],
+   "known_gap_toolchains": [
+    "clang"
+   ],
    "platforms": [
     "linux"
    ],

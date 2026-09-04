@@ -394,7 +394,7 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:b5c29ca7cb79bc7bfb76dfbfc018249f515f0e7da7f48f165f1d3e694fb5c4be",
+      "digest": "sha256:0572d9917d7dce1015949eaa13678f2a0a11611e56861dc9acac999de46047f4",
       "expected": {
         "kinds": [
           "runtime_floor_raised",
