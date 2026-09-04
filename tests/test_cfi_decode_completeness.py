@@ -254,7 +254,7 @@ class TestUnmatchedExportedFunctionMarksIncomplete:
 
         from abicheck.dwarf_advanced import _build_exported_func_addrs
 
-        assert _build_exported_func_addrs(mock_elf) == set()
+        assert _build_exported_func_addrs(mock_elf, "x64") == set()
 
     def test_every_exported_function_covered_is_not_flagged(self) -> None:
         """Positive control, part 2: every exported function has a
@@ -541,3 +541,75 @@ class TestOtherArchitecturesGetCoverageByDefault:
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+
+
+class TestArmThumbAddressNormalization:
+    """P1 review, fresh evidence (Codex): 32-bit ARM (AAPCS) tags a
+    Thumb-mode function symbol's ``st_value`` with bit 0 set -- a real ELF
+    interworking convention, not a guess -- while an FDE's own
+    ``initial_location`` always names the true, bit-0-clear aligned code
+    address. Reproduces the exact finding scenario: st_value=0x10189
+    (Thumb-tagged), FDE at the aligned 0x10188."""
+
+    def test_thumb_tagged_symbol_matches_its_aligned_fde(self) -> None:
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "ARM"
+        dyn = MagicMock()
+        sym = _sym("thumb_fn", 0x10189)  # bit 0 set: Thumb-tagged
+        dyn.iter_symbols.return_value = [sym]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [_fde_for(0x10188, cfa_reg=7)]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        # The symbol's real (Thumb-tagged) name must still be the one
+        # reached by addr_to_syms lookup, keyed by the normalized address.
+        assert set(meta.frame_registers) == {"thumb_fn"}
+
+    def test_thumb_tagged_symbol_with_no_fde_is_still_flagged(self) -> None:
+        """Negative control: normalization must not paper over a genuine
+        gap -- a Thumb-tagged symbol whose aligned address has no FDE at
+        all must still read incomplete."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "ARM"
+        dyn = MagicMock()
+        sym = _sym("thumb_fn", 0x10189)
+        dyn.iter_symbols.return_value = [sym]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [_fde_for(0x2000)]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
+
+    def test_x86_64_odd_address_is_not_masked(self) -> None:
+        """x86/x86_64 has no code-alignment requirement at all -- a real
+        exported function's st_value can legitimately be odd there (a
+        real gcc-compiled shared library reproduces this: see
+        test_packed_struct_detected_from_real_dwarf in
+        test_sprint4_dwarf_advanced.py, whose touch_ctx symbol's real
+        address is 0x10f9). Masking bit 0 unconditionally would corrupt
+        that address instead of only normalizing an actually-tagged one;
+        this proves the fix stays scoped to ARM and doesn't regress x64."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        sym = _sym("odd_addr_fn", 0x10F9)
+        dyn.iter_symbols.return_value = [sym]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [_fde_for(0x10F9, cfa_reg=7)]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        assert set(meta.frame_registers) == {"odd_addr_fn"}

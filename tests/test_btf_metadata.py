@@ -269,6 +269,30 @@ class TestBtfStructs:
         assert s.fields[1].name == "y"
         assert s.fields[1].byte_offset == 4
 
+    def test_int_member_uses_declared_storage_size_not_bit_width(self) -> None:
+        """P2 review, fresh evidence (Codex): BTF_KIND_INT's size_or_type
+        is the type's real storage size in bytes; the encoding word's own
+        nr_bits (bits 0-7) is the *occupied bit width within that
+        storage*, not the storage size -- a narrower value can legitimately
+        sit in wider storage (e.g. an 8-bit value in 4-byte storage).
+        Reproduces the exact finding scenario: size_or_type=4 (4-byte
+        storage), nr_bits=8 (encoded via offset=8, width=8 to also
+        exercise the offset field) -- byte_size must follow the declared
+        storage size (4), not (nr_bits + 7) // 8 (which would wrongly
+        report 1)."""
+        b = BtfBuilder()
+        # encoding word: bits 0-7 = nr_bits(8), bits 16-23 = offset(8)
+        int_enc = struct.pack("<I", 8 | (8 << 16))
+        b.add_type("narrow_int", BTF_KIND_INT, 0, 4, extra=int_enc)
+
+        m_name = b.add_string("v")
+        members = struct.pack("<III", m_name, 1, 0)
+        b.add_type("s", BTF_KIND_STRUCT, 1, 4, extra=members)
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.structs["s"].fields[0].byte_size == 4
+        assert meta.extraction_partial is False
+
     def test_union(self) -> None:
         b = BtfBuilder()
         int_enc = struct.pack("<I", 32)

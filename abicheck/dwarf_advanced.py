@@ -1015,7 +1015,47 @@ def _build_addr_to_sym(elf: Any) -> dict[int, str]:
     return addr_to_sym
 
 
-def _build_addr_to_syms(elf: Any) -> dict[int, list[str]]:
+#: Architectures where an exported function symbol's ``st_value`` is
+#: known to carry an interworking-mode tag bit rather than naming the
+#: address unmodified.
+#:
+#: P1 review, fresh evidence (Codex): 32-bit ARM (AAPCS) tags a Thumb-mode
+#: function symbol's ``st_value`` with bit 0 set -- a real, documented ELF
+#: interworking convention, used to tell the linker/loader "branch to this
+#: address in Thumb state" -- while an FDE's own ``initial_location``
+#: always names the true, bit-0-clear aligned code address. Comparing the
+#: two directly (as this module's coverage/naming logic does) meant every
+#: exported Thumb function's address could never match its own FDE,
+#: wrongly reading "uncovered" and preventing ``addr_to_syms`` lookup from
+#: ever finding its name -- an otherwise fully-instrumented ARM binary
+#: read "partial" evidence purely from this mismatch.
+#:
+#: Deliberately NOT applied universally: unlike ARM/AArch32 (where code is
+#: always at least 2-byte-aligned, so bit 0 is otherwise always 0), x86/
+#: x86_64 has no code-alignment requirement at all -- a real, legitimate
+#: exported function's ``st_value`` can be odd there (confirmed against a
+#: real gcc-compiled shared library, ``touch_ctx`` in this file's own test
+#: suite, whose real address is ``0x10f9``), so masking bit 0
+#: unconditionally would corrupt real x86/x86_64 addresses instead of only
+#: normalizing tagged ones. AArch64 doesn't use this convention either (no
+#: Thumb-equivalent interworking mode), so only 32-bit ARM is listed.
+_INTERWORKING_TAGGED_ARCHES = frozenset({"ARM"})
+
+
+def _code_entry_addr(st_value: int, sym_type: str, arch: str) -> int:
+    """Normalize a function symbol's ``st_value`` to its real code-entry
+    address for architectures in ``_INTERWORKING_TAGGED_ARCHES`` (see its
+    own docstring for why this is architecture-scoped, not universal).
+    Deliberately scoped to ``STT_FUNC`` only: a data symbol's address
+    carries no such tagging convention, and byte-level data can
+    legitimately sit at an odd address even on those architectures.
+    """
+    if sym_type == "STT_FUNC" and arch in _INTERWORKING_TAGGED_ARCHES:
+        return st_value & ~1
+    return st_value
+
+
+def _build_addr_to_syms(elf: Any, arch: str) -> dict[int, list[str]]:
     """Every exported (STB_GLOBAL/STB_WEAK) symbol name at each address.
 
     Sibling of ``_build_addr_to_sym`` above, returning every alias rather
@@ -1039,7 +1079,9 @@ def _build_addr_to_syms(elf: Any) -> dict[int, list[str]]:
         if sect is None:
             continue
         for sym in sect.iter_symbols():
-            st_value = sym.entry.st_value
+            st_value = _code_entry_addr(
+                sym.entry.st_value, sym.entry.st_info.type, arch
+            )
             bind = sym.entry.st_info.bind
             if bind in ("STB_GLOBAL", "STB_WEAK") and st_value > 0:
                 key = (st_value, sym.name)
@@ -1050,7 +1092,7 @@ def _build_addr_to_syms(elf: Any) -> dict[int, list[str]]:
     return addr_to_syms
 
 
-def _build_exported_func_addrs(elf: Any) -> set[int]:
+def _build_exported_func_addrs(elf: Any, arch: str) -> set[int]:
     """Addresses of exported (STB_GLOBAL/STB_WEAK) *function* symbols only.
 
     A narrower sibling of ``_build_addr_to_sym``, which also matches data
@@ -1065,14 +1107,13 @@ def _build_exported_func_addrs(elf: Any) -> set[int]:
         if sect is None:
             continue
         for sym in sect.iter_symbols():
-            st_value = sym.entry.st_value
             bind = sym.entry.st_info.bind
             if (
                 bind in ("STB_GLOBAL", "STB_WEAK")
-                and st_value > 0
+                and sym.entry.st_value > 0
                 and sym.entry.st_info.type == "STT_FUNC"
             ):
-                addrs.add(st_value)
+                addrs.add(_code_entry_addr(sym.entry.st_value, "STT_FUNC", arch))
     return addrs
 
 
@@ -1310,7 +1351,7 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
     """
     try:
         arch_key = _normalize_arch(elf)
-        addr_to_syms = _build_addr_to_syms(elf)
+        addr_to_syms = _build_addr_to_syms(elf, arch_key)
         # P2 review, fresh evidence (Codex): the coverage set this pass is
         # actually accountable for -- exported *functions* specifically
         # (addr_to_sym also matches exported data symbols, which never
@@ -1337,7 +1378,7 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
         uncovered_funcs = (
             set()
             if arch_key in _FUNCTION_DESCRIPTOR_ARCHES
-            else _build_exported_func_addrs(elf)
+            else _build_exported_func_addrs(elf, arch_key)
         )
         source_failed: list[bool] = []
         # P2 review, fresh evidence (Codex): consult every CFI section that

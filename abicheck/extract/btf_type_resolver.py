@@ -329,11 +329,16 @@ class _TypeResolver:
             return t.size_or_type  # size field
 
         if kind == BTF_KIND_INT:
-            # INT encoding: bits 0-7 = nr_bits, bits 8-15 = unused, bits 16-23 = offset
-            if len(t.extra) >= 4:
-                enc: int = struct.unpack_from("<I", t.extra, 0)[0]
-                nr_bits = enc & 0xFF
-                return (nr_bits + 7) // 8
+            # P2 review, fresh evidence (Codex): size_or_type IS the
+            # storage size in bytes for BTF_KIND_INT (same field STRUCT/
+            # UNION/ENUM/FLOAT above already trust directly) -- the
+            # encoding word's own nr_bits (bits 0-7) is the *occupied bit
+            # width within that storage*, not the storage size itself, and
+            # can legitimately be narrower (e.g. an 8-bit value stored in
+            # 4-byte storage). Deriving size from nr_bits instead
+            # previously reported the wrong (too-small) byte_size whenever
+            # the two differ, and two snapshots whose storage size changed
+            # while nr_bits stayed fixed compared identically as a result.
             return t.size_or_type
 
         if kind == BTF_KIND_FLOAT:
