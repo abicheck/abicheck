@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.diff_types_vtable import _vtable_transition_is_evidenced
+from abicheck.diff_types_vtable import (
+    _owned_virtual_signatures,
+    _vtable_transition_is_evidenced,
+)
 from abicheck.model import Function, RecordType, Visibility
 
 NAME = "Abstract"
@@ -224,3 +227,18 @@ class TestPreExistingSignalsStillHold:
         assert not _vtable_transition_is_evidenced(
             NAME, _cls([]), _cls([f"{NAME}::f()"]), {}, {}
         )
+
+
+class TestOwnedVirtualSignaturesBackCompatWrapper:
+    """``diff_types_vtable._owned_virtual_signatures`` is a thin back-compat
+    wrapper over ``compare.vtable_evidence``'s own private helper of the
+    same name (ADR-063 Track 2, 5B closure) -- kept purely so
+    ``abicheck.diff_types._owned_virtual_signatures`` (a re-export by value)
+    keeps resolving for any existing call site. Not called from within this
+    module any more, so nothing else exercises it; pinned directly here."""
+
+    def test_delegates_to_the_shared_implementation(self) -> None:
+        assert _owned_virtual_signatures(NAME, _virtual()) == {f"_ZN8{NAME}1fEv"}
+
+    def test_an_unrelated_owner_is_excluded(self) -> None:
+        assert _owned_virtual_signatures("Unrelated", _virtual()) == set()

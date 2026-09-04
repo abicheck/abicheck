@@ -239,6 +239,57 @@ class TestVtableFactsUnreliableFallsThroughToTheOverrideCheck:
         assert change is None
 
 
+class TestReliableButUnevidencedFallthroughBranchCompleteness:
+    """Pins the ``vtable_transition_is_evidenced(...)`` call's own ``False``
+    branch when ``vtable_facts_reliable`` is left at its default ``True`` --
+    the one shape none of the classes above exercise.
+
+    Per ``virtual_method_addition``'s own docstring, this branch is not
+    reachable through the real ``diff_symbols.py`` call site for a
+    genuinely new virtual: the predicate's "class's own virtual functions"
+    branch always evidences a symbol that is present in ``new_funcs`` and
+    genuinely absent from ``old_funcs`` (see ``TestEvidencedDifference
+    StillDefersAsBefore``), and the one case it does *not* evidence -- an
+    identical mangled name already present in ``old_funcs`` -- is
+    intercepted earlier by the already-existed guard. Both real callers
+    (``diff_symbols.py``) always pass a ``new_funcs`` that already contains
+    ``f_new`` under its own mangled key (it is *sourced from* that same
+    map), so this exact combination cannot arise from that call site.
+
+    This test constructs it directly anyway, purely for branch-coverage
+    completeness on the fallthrough logic itself: pass a ``new_funcs`` that
+    (synthetically, unlike any real caller) does *not* include ``f_new`` at
+    all, so the predicate's owned-function sets read equal (both empty) on
+    both sides while the already-existed guard still does not fire (``f_new
+    .mangled`` is absent from ``old_funcs`` too). Confirms the fallthrough
+    reaches the override check -- and fires -- exactly the same way the
+    ``vtable_facts_reliable=False`` bypass already does.
+    """
+
+    def test_the_predicate_itself_reads_unevidenced_here(self) -> None:
+        t_old, t_new = _cls([]), _cls([f"{OWNER}::resize()"])
+        # Neither side's function map mentions f_new (or anything else) at
+        # all -- both owned-signature sets are empty, so the predicate's
+        # "class's own virtual functions" branch reads "unchanged" without
+        # any already-existed mangled-name collision at all.
+        assert not _is_evidenced(t_old, t_new, {}, {})
+
+    def test_falls_through_and_still_fires(self) -> None:
+        t_old, t_new = _cls([]), _cls([f"{OWNER}::resize()"])
+        f_new = _virtual_fn()
+        change = virtual_method_addition(
+            f_new,
+            {OWNER},
+            {OWNER: t_old},
+            {OWNER: t_new},
+            {},
+            {},  # old_funcs: f_new.mangled absent -- already-existed guard doesn't fire
+            {},  # new_funcs: deliberately omits f_new itself (see class docstring)
+        )
+        assert change is not None
+        assert change.kind.value == "virtual_method_added"
+
+
 class TestEqualArraysBlindSpotUnaffected:
     """The pre-existing, primary blind spot (DWARF/symbol-only snapshots
     that never populate ``vtable`` on either side at all) must be completely

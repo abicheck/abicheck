@@ -191,6 +191,24 @@ class TestOwnedVirtualSignaturesMatching:
             if not is_virtual and _reference_match(query_segments, owner_segments):
                 assert mangled not in result
 
+    @given(_segments)
+    def test_a_virtual_function_with_no_resolvable_owner_never_matches(
+        self, query_segments
+    ) -> None:
+        """A free (owner-less) virtual -- ``owner_class_of`` returning
+        ``None``, the shape a real free function or an unresolved owner
+        produces -- must never appear in any result, regardless of query.
+        Exercises the matcher's own early-exit for a falsy owner."""
+        mangled = "_Zfree"
+        funcs = {mangled: _virtual_fn(mangled)}
+        result = _owned_virtual_signatures(
+            _spelling(query_segments),
+            funcs,
+            owner_class_of=lambda fn: None,
+            namespace_suffix_spellings=_fake_namespace_suffix_spellings,
+        )
+        assert result == set()
+
     @given(
         query_segments=_segments,
         population=st.lists(
