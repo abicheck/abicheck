@@ -326,64 +326,35 @@ concepts:
     authority: mixed
     removal_gate: >-
       Phase 7B (boundary-consumer-migration): action/run.sh reads
-      run_outcome/exit from the machine report instead of decoding the
-      raw process exit code and stderr text itself. First PR landed
-      2026-09-03, scoped narrowly after inspection showed most of
-      run.sh's raw-exit-code dispatch is not actually closable this way
-      (the Click-usage-error-vs-real-verdict disambiguation has no
-      run_outcome to read at all, and scan's evidence-contract/budget-
-      overflow/not-comparable exit codes are deliberately exit-code-only
-      by ADR-037 D5's own design): _report_compat_verdict/
-      _severity_gate_exit -- the two shared functions compare and scan
-      alike consult -- now read run_outcome.compatibility/run_outcome.gate
-      first, falling back to the pre-existing verdict/severity.exit_code
-      field only when no run_outcome block is present. The release
-      fan-out's own "independent pair-semantics reimplementation" half of
-      this sub-phase's scope was investigated 2026-09-03 (see the plan's
-      own "7B's release-fan-out investigation landed" note) rather than
-      rewritten wholesale: depth, suppression, pack policy/namespace
-      overrides, compile context, and --contract mode/domain (the
-      contract_evaluation/contract_mode booleans) already route through one
-      service.run_compare chokepoint per pair; report composition has
-      nothing to unify (compare-release exposes neither --use-cases nor a
-      suppression-audit equivalent for a shared executor to fold in); and
-      the build-config matrix's own third
-      _load_suppression_and_policy/policy_file_with_packs call site is a
-      structurally-required pseudo-pair, not a divergent duplicate. Two
-      concrete gaps remain (a second found on review, Codex, PR #1050 --
-      not one, as first recorded). First: policy.release_gate_options.
-      apply_release_gate_pack mirrors, rather than calls,
-      pack_application.apply_to_compare_config, because the release
-      fan-out has no ResolvedCompareConfig-shaped object of its own to fold
-      packs onto -- is distinct from ADR-064's own GateOptions rewrite
-      (already landed 2026-09-02, per that ADR's own "Landed" note, and
-      what replaced the release fan-out's three independent severity/
-      exit-code-scheme re-derivations with one resolution). The fold
-      duplication itself remains open as the duplication-and-convergence-
-      assessment plan's own P0 EffectiveGate/EffectiveEvaluationConfig
-      target (docs/contribute/plans/duplication-and-convergence-
-      assessment.md), guarded meanwhile against silent drift by
-      tests/test_release_gate_pack_fold_parity.py's Hypothesis property
-      test pinning both fold implementations to agree on outcome. Second
-      (found on review, then itself corrected on a second review round --
-      Codex, PR #1050, two rounds): cli_compare_receipt.
-      resolve_release_pack_application unconditionally rejects a --pack
-      asserting contract.unresolved for a release comparison (a hard
-      PackManifestError, not a silent no-op) -- but not for lack of a
-      per-library PersistedContractContext for that field's consumer
-      (contract_coverage_exit._accepts_unresolved) to read, the first
-      round's premise. cli_compare_release_pairwise._run_compare_pair calls
-      record_release_resolved_config after every pair, which merges the
-      pack's resolved config into result.contract_context via
-      contract_context.with_resolved_config whenever --contract produced
-      one, and _compare_one_library reads coverage_exit_floor(result) off
-      exactly that context afterward -- so the context-plumbing already
-      exists; the rejection itself is the only blocker. Whether it remains
-      necessary now that the plumbing exists is unverified, not attempted
-      here. A release comparison cannot use contract.unresolved today,
-      unlike single-pair compare. No landed fix or confirmed-necessary
-      rationale yet; a live boundary-consumer gap for a future slice to
-      investigate and close, not merely a duplication risk.
+      run_outcome/exit from the machine report instead of decoding the raw
+      process exit code and stderr text itself; the release fan-out's own
+      "independent pair-semantics reimplementation" half of this
+      sub-phase's scope closes when its remaining gaps below land.
+      action/run.sh's first PR landed 2026-09-03, scoped narrowly (most of
+      its raw-exit-code dispatch was found not closable this way):
+      _report_compat_verdict/_severity_gate_exit now read
+      run_outcome.compatibility/run_outcome.gate first, falling back to
+      the pre-existing verdict/severity.exit_code field only when no
+      run_outcome block is present. The release fan-out's own half was
+      investigated 2026-09-03 and found substantially already unified
+      (depth, suppression, pack policy/namespace overrides, compile
+      context, and --contract mode/domain all already route through one
+      service.run_compare chokepoint per pair), with two concrete,
+      still-open gaps: policy.release_gate_options.apply_release_gate_pack
+      mirrors, rather than calls, pack_application.apply_to_compare_config
+      (deferred to the duplication-and-convergence-assessment plan's own
+      P0 EffectiveGate/EffectiveEvaluationConfig target, guarded meanwhile
+      by tests/test_release_gate_pack_fold_parity.py's parity property);
+      and cli_compare_receipt.resolve_release_pack_application
+      unconditionally rejects a --pack asserting contract.unresolved for a
+      release comparison, with no landed fix yet. Full investigation,
+      evidence, and this content's own review history (Codex, PR #1050,
+      several rounds correcting this same account) live in
+      docs/contribute/plans/one-semantic-pipeline.md's "7B's
+      release-fan-out investigation landed" section -- the narrative owner
+      for this concept per docs/AGENTS.md's fact-owner/narrative-owner
+      split; not reproduced here in full, to avoid the exact
+      ledger-vs-plan drift this same PR exists to fix.
 
   sectioned_storage:
     primitive: complete
