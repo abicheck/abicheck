@@ -293,12 +293,23 @@ def parse_msf(data: bytes) -> MsfFile:
 # Numeric leaf decoding
 # ---------------------------------------------------------------------------
 
-def _read_numeric_leaf(data: bytes, offset: int) -> tuple[int, int]:
+def _read_numeric_leaf(
+    data: bytes, offset: int, *, unsupported: list[bool] | None = None
+) -> tuple[int, int]:
     """Read a CodeView numeric leaf at *offset*.
 
     Returns ``(value, new_offset)`` where *new_offset* points past the leaf.
     If the 16-bit value at *offset* is < 0x8000 it is the value itself.
     Otherwise it is a leaf type tag followed by the actual value.
+
+    ``unsupported``, when given a list, has ``True`` appended whenever the
+    trailing "unknown leaf type" fallback below fires (P2 review, fresh
+    evidence, Codex): that branch silently substitutes 0 for the leaf's
+    real value, distinguishable from a legitimately-zero-valued leaf only
+    through this signal -- every caller that only reads back the returned
+    ``value`` cannot tell the two apart, so a discarded size/offset/enum
+    value previously left the enclosing record (and the receipt built from
+    it) reading as a complete, successful parse.
     """
     if offset + 2 > len(data):
         return (0, offset + 2)
@@ -332,6 +343,8 @@ def _read_numeric_leaf(data: bytes, offset: int) -> tuple[int, int]:
     # explicit support for the leaf type.
     # Note: skip length is not validated; unknown leaves may cause mis-alignment.
     log.debug("Unknown numeric leaf 0x%04x at offset %d", val, offset)
+    if unsupported is not None:
+        unsupported.append(True)
     return (0, offset + 6)
 
 
@@ -826,7 +839,8 @@ class TypeDatabase:
             (count, prop, field_ti, _derived_ti, _vshape_ti) = struct.unpack_from(
                 "<HHIII", d, 0)
             pos = 16
-        byte_size, pos = _read_numeric_leaf(d, pos)
+        leaf_unsupported: list[bool] = []
+        byte_size, pos = _read_numeric_leaf(d, pos, unsupported=leaf_unsupported)
         name, _pos, name_terminated = _read_cstring(d, pos)
         self._structs[ti] = CvStruct(
             type_index=ti,
@@ -838,7 +852,7 @@ class TypeDatabase:
             is_union=is_union,
             count=count,
         )
-        return name_terminated
+        return name_terminated and not leaf_unsupported
 
     def _parse_enum(self, ti: int, d: bytes) -> bool:
         if len(d) < 12:
@@ -932,13 +946,14 @@ class TypeDatabase:
             return None
         (attr, type_ti) = struct.unpack_from("<HI", d, pos)
         pos += 6
-        offset_val, pos = _read_numeric_leaf(d, pos)
+        leaf_unsupported: list[bool] = []
+        offset_val, pos = _read_numeric_leaf(d, pos, unsupported=leaf_unsupported)
         name, pos, name_terminated = _read_cstring(d, pos)
         members.append(CvMember(
             name=name, type_ti=type_ti,
             offset=offset_val, access=attr & 0x03,
         ))
-        return pos if name_terminated else None
+        return pos if name_terminated and not leaf_unsupported else None
 
     def _parse_lf_enumerate(
         self, d: bytes, pos: int, members: list[Any],
@@ -948,10 +963,11 @@ class TypeDatabase:
             return None
         (_attr,) = struct.unpack_from("<H", d, pos)
         pos += 2
-        val, pos = _read_numeric_leaf(d, pos)
+        leaf_unsupported: list[bool] = []
+        val, pos = _read_numeric_leaf(d, pos, unsupported=leaf_unsupported)
         name, pos, name_terminated = _read_cstring(d, pos)
         members.append(CvEnumerator(name=name, value=val))
-        return pos if name_terminated else None
+        return pos if name_terminated and not leaf_unsupported else None
 
     def _parse_lf_index(
         self, d: bytes, pos: int, members: list[Any], _visited: set[int],
@@ -1043,17 +1059,19 @@ class TypeDatabase:
             if pos + 6 > len(d):
                 return None
             pos += 6
-            _, pos = _read_numeric_leaf(d, pos)
-            return pos
+            leaf_unsupported: list[bool] = []
+            _, pos = _read_numeric_leaf(d, pos, unsupported=leaf_unsupported)
+            return None if leaf_unsupported else pos
 
         if sub_leaf in (LF_VBCLASS, LF_IVBCLASS):
             # attr(2) + direct_ti(4) + vbptr_ti(4) + vbpoff(numeric) + vbtableoff(numeric)
             if pos + 10 > len(d):
                 return None
             pos += 10
-            _, pos = _read_numeric_leaf(d, pos)
-            _, pos = _read_numeric_leaf(d, pos)
-            return pos
+            leaf_unsupported = []
+            _, pos = _read_numeric_leaf(d, pos, unsupported=leaf_unsupported)
+            _, pos = _read_numeric_leaf(d, pos, unsupported=leaf_unsupported)
+            return None if leaf_unsupported else pos
 
         return None  # unreachable: caller pre-filters to the leaves above
 
@@ -1107,7 +1125,8 @@ class TypeDatabase:
             return False
         (elem_ti, idx_ti) = struct.unpack_from("<II", d, 0)
         pos = 8
-        byte_size, pos = _read_numeric_leaf(d, pos)
+        leaf_unsupported: list[bool] = []
+        byte_size, pos = _read_numeric_leaf(d, pos, unsupported=leaf_unsupported)
         name, _, name_terminated = _read_cstring(d, pos)
         self._arrays[ti] = CvArray(
             type_index=ti,
@@ -1116,7 +1135,7 @@ class TypeDatabase:
             byte_size=byte_size,
             name=name,
         )
-        return name_terminated
+        return name_terminated and not leaf_unsupported
 
     def _parse_modifier(self, ti: int, d: bytes) -> bool:
         if len(d) < 6:

@@ -509,11 +509,21 @@ def _unwrap_qualifiers(
         else:
             break
     else:
-        # for-else: exhausted depth without finding a non-qualifier tag
+        # for-else: exhausted depth without finding a non-qualifier tag --
+        # a cyclic or genuinely more-than-twelve-level typedef/qualifier
+        # chain. P2 review, fresh evidence (Codex): previously only logged
+        # at debug level, so every caller (_value_abi_trait_for_typed_die
+        # and its siblings) silently received `cur` still pointing at an
+        # unresolved qualifier/typedef DIE -- not the real underlying type
+        # -- with no completeness signal, letting the advanced channel
+        # report "parsed" despite the value-ABI-trait facts for this type
+        # being degraded.
         log.debug(
             "_unwrap_qualifiers: depth limit reached at tag=%s",
             getattr(cur, "tag", "?"),
         )
+        if incomplete is not None:
+            incomplete.append(True)
 
     if cache is not None and key is not None:
         cache.unwrap[key] = cur
@@ -963,6 +973,32 @@ def _build_addr_to_sym(elf: Any) -> dict[int, str]:
     return addr_to_sym
 
 
+def _build_exported_func_addrs(elf: Any) -> set[int]:
+    """Addresses of exported (STB_GLOBAL/STB_WEAK) *function* symbols only.
+
+    A narrower sibling of ``_build_addr_to_sym``, which also matches data
+    symbols -- CFI/frame-register coverage is meaningful only for
+    functions, so tracking coverage against the wider set would flag a gap
+    for every exported global variable, which never has an FDE at all and
+    is not this analysis' concern.
+    """
+    addrs: set[int] = set()
+    for section_name in (".dynsym", ".symtab"):
+        sect = elf.get_section_by_name(section_name)
+        if sect is None:
+            continue
+        for sym in sect.iter_symbols():
+            st_value = sym.entry.st_value
+            bind = sym.entry.st_info.bind
+            if (
+                bind in ("STB_GLOBAL", "STB_WEAK")
+                and st_value > 0
+                and sym.entry.st_info.type == "STT_FUNC"
+            ):
+                addrs.add(st_value)
+    return addrs
+
+
 def _has_fde(entries: Any) -> bool:
     """Whether a CFI entry list contains at least one real FDE (as opposed
     to only CIE/ZERO terminator entries -- what an ``.eh_frame`` section
@@ -1128,13 +1164,25 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
     ``.debug_frame`` is present at all (both call sites only invoke this
     function when real DWARF DIEs exist, so a total absence of unwind
     sections means they were stripped independently of debug info, not
-    that there is nothing to extract). Callers downgrade ``evidence_state``
-    to ``"partial"`` on a ``False`` return, mirroring the cu_failed/
-    skeleton-CU downgrades they already apply.
+    that there is nothing to extract). ``False`` also whenever a real FDE
+    is present but at least one exported function symbol has no matching
+    FDE at all (P2 review, fresh evidence, Codex): the per-entry loop
+    below only ever skips an FDE whose ``pc_begin`` names no known symbol,
+    never the reverse -- an exported function this pass expects to cover
+    but that no FDE's ``pc_begin`` ever names was previously invisible,
+    since ``complete`` is only cleared by something the loop actually
+    iterated. Callers downgrade ``evidence_state`` to ``"partial"`` on a
+    ``False`` return, mirroring the cu_failed/skeleton-CU downgrades they
+    already apply.
     """
     try:
         arch_key = _normalize_arch(elf)
         addr_to_sym = _build_addr_to_sym(elf)
+        # P2 review, fresh evidence (Codex): the coverage set this pass is
+        # actually accountable for -- exported *functions* specifically
+        # (addr_to_sym also matches exported data symbols, which never
+        # have an FDE and aren't this analysis' concern).
+        uncovered_funcs = _build_exported_func_addrs(elf)
         source_failed: list[bool] = []
         cfi_src = _get_cfi_source(dwarf, source_failed=source_failed)
         if cfi_src is None:
@@ -1162,6 +1210,7 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
                 if entry.__class__.__name__ != "FDE":
                     continue
                 pc_begin: int = entry["initial_location"]
+                uncovered_funcs.discard(pc_begin)
                 sym_name = addr_to_sym.get(pc_begin, "")
                 if not sym_name:
                     continue
@@ -1188,6 +1237,17 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
             except (ELFError, OSError, ValueError, KeyError, IndexError) as exc:
                 log.debug("_parse_frame_registers: skipping FDE: %s", exc)
                 complete = False
+
+        if uncovered_funcs:
+            # At least one exported function symbol's address was never
+            # named by any FDE's own initial_location -- its CFI (and thus
+            # frame-register/callee-saved facts) was never evaluated at
+            # all, not merely skipped on a decode error.
+            log.debug(
+                "_parse_frame_registers: %d exported function(s) have no matching FDE",
+                len(uncovered_funcs),
+            )
+            complete = False
 
         return complete
 

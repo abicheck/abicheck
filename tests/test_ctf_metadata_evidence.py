@@ -607,3 +607,40 @@ class TestUnsupportedKindStopsTypeTableParsing:
                 b._type_entries[-1] += b"\x00" * extra_len
             meta = parse_ctf_from_bytes(b.build())
             assert meta.extraction_partial is False, f"kind {kind} was flagged"
+
+
+class TestReversedSectionOffsetsRejected:
+    """P2 review, fresh evidence (Codex): a header with ``type_off >
+    str_off`` (the type section reversed against the string section it's
+    supposed to precede) computes ``type_end = hdr_size + header.str_off``
+    below ``type_start`` -- ``data[type_start:type_end]`` is a plain Python
+    slice, so start > end silently yields ``b""`` rather than raising,
+    discarding every type record with no truncation signal at all. The
+    existing ``type_end > len(data)``/``str_end > len(data)`` bounds check
+    never catches this shape, since both computed endpoints can legitimately
+    sit within the buffer."""
+
+    def test_type_off_greater_than_str_off_is_rejected(self) -> None:
+        """The reviewer's exact repro: type_off=4, str_off=0, a one-byte
+        NUL string table -- both endpoints are in-bounds, only their
+        relative order is wrong."""
+        header = struct.pack("<HBB", CTF_MAGIC, CTF_VERSION_3, 0)
+        header += struct.pack("<IIIIIIII", 0, 0, 0, 0, 0, 4, 0, 1)
+        blob = header + b"\x00"
+
+        meta = parse_ctf_from_bytes(blob)
+        assert meta.has_ctf is False
+        assert meta.extraction_partial is False  # rejected outright, not "partial"
+
+    def test_normal_section_ordering_is_not_flagged(self) -> None:
+        """Positive control: the ordinary type-then-string layout (the
+        shape every other test in this suite already builds via
+        CtfBuilder) must not be rejected."""
+        b = CtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", CTF_K_INTEGER, 0, 4, extra=int_enc)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.has_ctf is True
+        assert meta.extraction_partial is False
+        assert meta.type_count == 1

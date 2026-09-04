@@ -191,3 +191,92 @@ class TestCfiSourceDecodeFailurePropagates:
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
         assert len(meta.frame_registers) == 0
+
+
+def _sym(name: str, addr: int, *, is_func: bool = True) -> MagicMock:
+    sym = MagicMock()
+    sym.name = name
+    sym.entry.st_value = addr
+    sym.entry.st_info.bind = "STB_GLOBAL"
+    sym.entry.st_info.type = "STT_FUNC" if is_func else "STT_OBJECT"
+    return sym
+
+
+class TestUnmatchedExportedFunctionMarksIncomplete:
+    """P2 review, fresh evidence (Codex): partial per-function CFI
+    coverage previously returned ``True`` -- when ``.eh_frame`` contains
+    valid FDEs but an exported *function* has no matching FDE at all, the
+    per-entry loop only ever downgrades ``complete`` for an entry it
+    actually iterated; a symbol the loop never saw at all left ``complete``
+    untouched. Fixed by tracking the set of exported function addresses
+    against every FDE's own ``initial_location`` and downgrading whenever
+    any remain unmatched after the loop."""
+
+    def test_exported_function_with_no_fde_marks_incomplete(self) -> None:
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        covered = _sym("covered_fn", 0x1000)
+        uncovered = _sym("uncovered_fn", 0x2000)
+        dyn.iter_symbols.return_value = [covered, uncovered]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        # Only one FDE, for the covered function -- uncovered_fn's own
+        # address never appears as any FDE's initial_location.
+        fde = MagicMock()
+        fde.__class__ = type("FDE", (), {})
+        fde.__class__.__name__ = "FDE"
+        fde.__getitem__ = MagicMock(return_value=0x1000)
+        decoded = MagicMock()
+        decoded.table = []
+        fde.get_decoded.return_value = decoded
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [fde]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
+
+    def test_exported_data_symbol_is_excluded_from_coverage_set(self) -> None:
+        """Positive control, part 1: an exported *data* symbol (STT_OBJECT)
+        never has an FDE and is not this analysis' concern -- must not be
+        counted against coverage. Checked directly against
+        _build_exported_func_addrs rather than end-to-end, which would
+        conflate this signal with the separate total-CFI-absence one."""
+        mock_elf = MagicMock()
+        dyn = MagicMock()
+        data_sym = _sym("exported_var", 0x3000, is_func=False)
+        dyn.iter_symbols.return_value = [data_sym]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        from abicheck.dwarf_advanced import _build_exported_func_addrs
+
+        assert _build_exported_func_addrs(mock_elf) == set()
+
+    def test_every_exported_function_covered_is_not_flagged(self) -> None:
+        """Positive control, part 2: every exported function has a
+        matching FDE -- must not be flagged."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        sym = _sym("covered_fn", 0x1000)
+        dyn.iter_symbols.return_value = [sym]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        fde = MagicMock()
+        fde.__class__ = type("FDE", (), {})
+        fde.__class__.__name__ = "FDE"
+        fde.__getitem__ = MagicMock(return_value=0x1000)
+        decoded = MagicMock()
+        decoded.table = []
+        fde.get_decoded.return_value = decoded
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [fde]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True

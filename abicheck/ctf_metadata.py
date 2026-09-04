@@ -714,6 +714,22 @@ def parse_ctf_from_bytes(data: bytes) -> CtfMetadata:
     if type_end > len(data) or str_end > len(data):
         log.warning("parse_ctf_from_bytes: section bounds exceed data size")
         return empty
+    if type_start > type_end:
+        # P2 review, fresh evidence (Codex): a header with type_off > str_off
+        # (the type section reversed against the string section it's
+        # supposed to precede) previously passed the length check above
+        # unnoticed -- data[type_start:type_end] is a plain Python slice, so
+        # start > end silently yields b"" rather than raising, discarding
+        # every type record with no truncation signal at all. Reject the
+        # malformed ordering outright, the same way a too-small header
+        # already is.
+        log.warning(
+            "parse_ctf_from_bytes: type section start %d exceeds its own end %d "
+            "(type_off > str_off)",
+            type_start,
+            type_end,
+        )
+        return empty
 
     type_data = data[type_start:type_end]
     str_data = data[str_start:str_end]

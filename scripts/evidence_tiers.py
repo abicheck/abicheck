@@ -289,6 +289,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "enum_underlying_size_changed": "L1",
     "enum_member_renamed": "L1",
     "calling_convention_changed": "L1",
+    "frame_register_changed": "L1",
     "tls_var_size_changed": "L1",
     "var_became_const": "L1",
     "var_type_changed": "L1",

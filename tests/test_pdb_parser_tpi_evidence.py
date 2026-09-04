@@ -43,6 +43,7 @@ import pytest
 
 from abicheck.pdb_parser import (
     LF_ARRAY,
+    LF_BCLASS,
     LF_ENUM,
     LF_FIELDLIST,
     LF_INDEX,
@@ -415,5 +416,102 @@ class TestFailedRecordCountNonExceptionTruncation:
                 (LF_FIELDLIST, data),  # the referencing fieldlist
             ]
         )
+        assert db.failed_record_count == 0
+
+
+class TestUnsupportedNumericLeafMarksFailed:
+    """P2 review, fresh evidence (Codex): when a recognized structure,
+    member, array, or enumerator contains an unsupported CodeView numeric-
+    leaf tag, ``_read_numeric_leaf()`` silently substituted zero and
+    skipped an assumed six bytes -- indistinguishable from a legitimately
+    zero-valued leaf to every caller that only reads back the returned
+    value. If the following name field still happened to be NUL-terminated
+    and aligned, every ``_parse_*`` method returned True and
+    ``failed_record_count`` stayed zero, so a discarded size/offset/enum
+    value could leave the receipt claiming complete PDB layout evidence.
+    Unsupported numeric tags now participate in the same
+    ``failed_record_count`` signal as a truncated payload."""
+
+    #: A leaf tag in the reserved gap between LF_ULONG (0x8004) and
+    #: LF_QUADWORD (0x8009) -- >= LF_NUMERIC (0x8000, so it takes the
+    #: "leaf type tag followed by a value" branch) but not one of the
+    #: recognized CHAR/SHORT/USHORT/LONG/ULONG/QUADWORD/UQUADWORD tags.
+    _UNSUPPORTED_LEAF = 0x8005
+
+    def _db(self, records: list[tuple[int, bytes]]) -> TypeDatabase:
+        tpi = parse_tpi_stream(_build_tpi_stream(records))
+        db = TypeDatabase(tpi)
+        db.parse_all()
+        return db
+
+    def _unsupported_numeric_leaf(self) -> bytes:
+        """A 6-byte unsupported leaf (2-byte tag + 4-byte discarded value)."""
+        return struct.pack("<Hi", self._UNSUPPORTED_LEAF, 0x1234)
+
+    def test_lf_structure_byte_size_marks_failed(self) -> None:
+        payload = (
+            struct.pack("<HHIII", 0, 0, 0, 0, 0)  # count, prop, field_ti, ...
+            + self._unsupported_numeric_leaf()
+            + _cv_cstring("S")
+        )
+        db = self._db([(LF_STRUCTURE, payload)])
+        assert db.failed_record_count == 1
+        # Best-effort output is still published (degraded, not dropped) --
+        # only the completeness signal was previously missing.
+        assert db.all_structs()[0x1000].name == "S"
+        assert db.all_structs()[0x1000].byte_size == 0
+
+    def test_lf_array_byte_size_marks_failed(self) -> None:
+        payload = (
+            struct.pack("<II", 0, 0)  # elem_ti, idx_ti
+            + self._unsupported_numeric_leaf()
+            + _cv_cstring("Arr")
+        )
+        db = self._db([(LF_ARRAY, payload)])
+        assert db.failed_record_count == 1
+
+    def test_fieldlist_member_offset_marks_failed(self) -> None:
+        member = (
+            struct.pack("<H", LF_MEMBER)
+            + struct.pack("<HI", 0, 0)  # attr, type_ti
+            + self._unsupported_numeric_leaf()
+            + _cv_cstring("field")
+        )
+        db = self._db([(LF_FIELDLIST, member)])
+        assert db.failed_record_count == 1
+        # The member is still emitted (best-effort) with the discarded
+        # offset read back as 0, same shape as the out-of-range-type-id
+        # case elsewhere in this suite.
+        assert db.get_fieldlist(0x1000)[0].name == "field"
+
+    def test_lf_bclass_offset_marks_failed(self) -> None:
+        """The reviewer's other named shape reaches through
+        ``_skip_subrecord`` (LF_BCLASS), not a top-level ``_parse_*``."""
+        sub = (
+            struct.pack("<H", LF_BCLASS)
+            + struct.pack("<HI", 0, 0)  # attr, type_ti
+            + self._unsupported_numeric_leaf()
+        )
+        db = self._db([(LF_FIELDLIST, sub)])
+        assert db.failed_record_count == 1
+
+    def test_recognized_quadword_leaf_is_not_flagged(self) -> None:
+        """Positive control: a real, *recognized* leaf tag (LF_QUADWORD)
+        must not be flagged -- only an unsupported tag is."""
+        payload = (
+            struct.pack("<HHIII", 0, 0, 0, 0, 0)
+            + struct.pack("<Hq", 0x8009, 12345)  # LF_QUADWORD
+            + _cv_cstring("S")
+        )
+        db = self._db([(LF_STRUCTURE, payload)])
+        assert db.failed_record_count == 0
+        assert db.all_structs()[0x1000].byte_size == 12345
+
+    def test_inline_small_value_leaf_is_not_flagged(self) -> None:
+        """Positive control: the common inline-value shape (< LF_NUMERIC,
+        no leaf tag at all) must not be flagged -- covered elsewhere in
+        this suite too, restated here for contrast with the unsupported-
+        tag shape above."""
+        db = self._db([(LF_STRUCTURE, _make_lf_structure(0, 0, 0, 4, "S"))])
         assert db.failed_record_count == 0
         assert db.get_fieldlist(0x1001) == []

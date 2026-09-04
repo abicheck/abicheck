@@ -183,6 +183,81 @@ class TestStandaloneParserFlagsIncompleteTypeResolution:
         assert result.evidence_state == "parsed"
         assert result.structs["Clean"].fields[0].type_name == "int"
 
+    def test_cyclic_pointer_chain_marks_partial(self) -> None:
+        """P2 review, fresh evidence (Codex): a cyclic type chain
+        (ptrA -> ptrB -> ptrA -> ...) can never resolve via
+        _resolve_ref/the memoisation cache alone -- each recursive step
+        writes to the cache only *after* it returns, so the same
+        (CU, offset) key is never seen mid-cycle. _die_to_type_info's own
+        `depth > 8` guard is the only thing that stops this from recursing
+        forever, substituting ("...", 0) once depth is exhausted -- but
+        previously did so without touching the completeness accumulator,
+        unlike every other placeholder-substitution site in this same call
+        chain (an unresolved DW_AT_type reference, an out-of-range ref)."""
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "p", "DW_AT_type": _Attr(60, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "Cyclic", "DW_AT_byte_size": 8},
+            children=[member],
+        )
+        ptr_a = _Die(
+            "DW_TAG_pointer_type",
+            {"DW_AT_type": _Attr(61, "DW_FORM_ref_addr"), "DW_AT_byte_size": 8},
+            offset=60,
+        )
+        ptr_b = _Die(
+            "DW_TAG_pointer_type",
+            {"DW_AT_type": _Attr(60, "DW_FORM_ref_addr"), "DW_AT_byte_size": 8},
+            offset=61,
+        )
+        die_map = {60: ptr_a, 61: ptr_b}
+
+        result = _run_parse([struct], die_map)
+        assert result.cu_failed == 0
+        assert result.evidence_state == "partial"
+        # Best-effort output still emitted (the cycle guard's own
+        # placeholder, wrapped in one "*" per pointer level unwound before
+        # the guard fired), not dropped entirely.
+        assert result.structs["Cyclic"].fields[0].type_name.startswith("...")
+
+    def test_deep_acyclic_chain_marks_partial(self) -> None:
+        """Sibling shape: a genuinely (not cyclic) more-than-nine-level
+        pointer chain also exhausts the same depth guard."""
+        depth_levels = 12
+        die_map: dict[int, _Die] = {}
+        base = _Die(
+            "DW_TAG_base_type", {"DW_AT_name": "int", "DW_AT_byte_size": 4}, offset=100
+        )
+        die_map[100] = base
+        next_offset = 100
+        for i in range(depth_levels):
+            this_offset = 200 + i
+            die_map[this_offset] = _Die(
+                "DW_TAG_pointer_type",
+                {
+                    "DW_AT_type": _Attr(next_offset, "DW_FORM_ref_addr"),
+                    "DW_AT_byte_size": 8,
+                },
+                offset=this_offset,
+            )
+            next_offset = this_offset
+        member = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "p", "DW_AT_type": _Attr(next_offset, "DW_FORM_ref_addr")},
+        )
+        struct = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "Deep", "DW_AT_byte_size": 8},
+            children=[member],
+        )
+
+        result = _run_parse([struct], die_map)
+        assert result.cu_failed == 0
+        assert result.evidence_state == "partial"
+
 
 # ---------------------------------------------------------------------------
 # Unified single-pass entry point (dumper.py's real ELF-dump path)

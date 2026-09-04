@@ -934,9 +934,9 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "frame_register_changed",
-      "examples": ""
+      "examples": "case15_noexcept_change"
     },
     {
       "kind": "func_added",

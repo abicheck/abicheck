@@ -394,13 +394,13 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:0572d9917d7dce1015949eaa13678f2a0a11611e56861dc9acac999de46047f4",
+      "digest": "sha256:efd321dae971f689794980f27b459eace736013efa1c8d770add10f936d7fbe6",
       "expected": {
         "kinds": [
           "runtime_floor_raised",
           "frame_register_changed"
         ],
-        "min_evidence": "L0",
+        "min_evidence": "L1",
         "resolved_from": "examples/ground_truth.json",
         "verdict": "BREAKING"
       },

@@ -594,6 +594,15 @@ def _die_to_type_info(  # noqa: PLR0911
     Depth limit = 8 guards against pathological typedef chains.
     """
     if depth > 8:
+        # P2 review, fresh evidence (Codex): a cyclic or genuinely
+        # more-than-nine-level typedef/qualifier chain hits this guard and
+        # substitutes a placeholder ("...", 0) the same way an unresolved
+        # DW_AT_type reference does -- but previously did so without
+        # touching the completeness accumulator, so the basic channel could
+        # report "parsed" despite a real field/return/parameter type being
+        # silently truncated here.
+        if incomplete is not None:
+            incomplete.append(True)
         return ("...", 0)
 
     cache_key = (CU.cu_offset, die.offset)

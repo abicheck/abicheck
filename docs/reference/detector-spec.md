@@ -109,7 +109,7 @@ One row per `ChangeKind` (397 total). Columns fuse the verdict partition (`check
 | `flexible_array_member_changed` | quality | `COMPATIBLE` | `warning` | L1 | `flexible_array_member_changed` | [case70](examples/case70_flexible_array_member_changed.md) |
 | `float_abi_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `float_abi_changed` | — |
 | `fortify_source_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `fortify_source_weakened` | — |
-| `frame_register_changed` | breaking | `BREAKING` | `error` | unspecified | `frame_register_changed` | — |
+| `frame_register_changed` | breaking | `BREAKING` | `error` | L1 | `frame_register_changed` | [case15](examples/case15_noexcept_change.md) |
 | `func_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_added` | [case03](examples/case03_compat_addition.md), [case111](examples/case111_enumerable_thread_specific_lambda_ambiguity.md), [case141](examples/case141_versioned_symbol_scheme.md), [case16](examples/case16_inline_to_non_inline.md), +5 |
 | `func_became_inline` | api_break | `API_BREAK` | `warning` | unspecified | `func_became_inline` | — |
 | `func_contract_attribute_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_contract_attribute_added` | — |

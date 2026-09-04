@@ -311,6 +311,54 @@ class TestValueAbiTraitIncompletePropagation:
         assert meta.value_abi_traits["_Z3barv"] == "ret:trivial"
 
 
+class TestUnwrapQualifiersDepthExhaustionIncompletePropagation:
+    """P2 review, fresh evidence (Codex): a cyclic typedef/qualifier chain
+    can never terminate via _unwrap_qualifiers' own for-loop condition --
+    only its 12-iteration depth cap stops it. That cap previously only
+    logged at debug level, leaving every caller (starting with
+    _value_abi_trait_for_typed_die) silently working from `cur` still
+    pointing at an unresolved qualifier/typedef DIE, not the real
+    underlying type, with no completeness signal."""
+
+    def test_cyclic_typedef_chain_on_return_type_marks_partial(self) -> None:
+        typedef_a = _Die(
+            "DW_TAG_typedef",
+            {"DW_AT_name": "A", "DW_AT_type": _Attr(61, "DW_FORM_ref_addr")},
+            offset=60,
+        )
+        typedef_b = _Die(
+            "DW_TAG_typedef",
+            {"DW_AT_name": "B", "DW_AT_type": _Attr(60, "DW_FORM_ref_addr")},
+            offset=61,
+        )
+        subprogram = _Die(
+            "DW_TAG_subprogram",
+            {
+                "DW_AT_external": _Attr(1),
+                "DW_AT_linkage_name": "_Z3bazv",
+                "DW_AT_type": _Attr(60, "DW_FORM_ref_addr"),
+            },
+        )
+        root = _Die("DW_TAG_compile_unit", children=[subprogram])
+        cu = _CU(top_die=root, offset=0)
+        cu._die_map = {60: typedef_a, 61: typedef_b}
+
+        mock_elf = MagicMock()
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = [cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        with (
+            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
+            patch("abicheck.dwarf_advanced._parse_frame_registers", return_value=True),
+        ):
+            meta = parse_advanced_dwarf(Path(__file__))
+
+        assert meta.cu_failed == 0
+        assert meta.evidence_state == "partial"
+
+
 class TestPackedTypedefIncompletePropagation:
     """P1 review, fresh evidence (Codex): _walk_cu threaded `incomplete`
     into the calling-convention path only -- the separate anonymous-
