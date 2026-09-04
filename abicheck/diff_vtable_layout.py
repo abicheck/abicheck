@@ -54,7 +54,7 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
-from .diff_types_vtable import _owned_virtual_signatures
+from .diff_types_vtable import _owned_virtual_signatures_for_record
 from .model import (
     AbiSnapshot,
     FactStatus,
@@ -184,13 +184,23 @@ def _is_polymorphic(
     proves polymorphism even when ``vtable_fact`` itself is uncollected.
     This matters most for a legacy direct-clang snapshot that predates
     vtable reconstruction: its function-level ``is_virtual`` metadata
-    survives even though ``vtable``/``vtable_fact`` do not. Reuses
-    ``diff_types_vtable._owned_virtual_signatures`` rather than a fresh
-    ad hoc name-matching implementation -- that helper's own eager
-    namespace-suffix matching exists precisely because a naive exact-match
-    version was shown (by three separate Codex-review rounds) to silently
-    miss a namespaced class's own virtuals; reinventing a simpler version
-    here would risk reintroducing the same already-fixed bug class.
+    survives even though ``vtable``/``vtable_fact`` do not.
+
+    Uses ``diff_types_vtable._owned_virtual_signatures_for_record`` --
+    *exact* qualified-identity matching -- not its sibling
+    ``_owned_virtual_signatures``'s eager namespace-suffix matching (Codex
+    review, fresh evidence, sixth round): that eager matching is safe only
+    for a *suppression*-oriented caller (over-inclusion just means "sets
+    differ more often," which keeps a finding rather than fabricating one
+    -- the safe direction for `_vtable_transition_is_evidenced`). Here the
+    match result directly becomes an affirmative ``True`` verdict, the
+    opposite safety direction: two unrelated classes sharing only a leaf
+    name (``ns1::Foo``/``ns2::Foo``) would let an unrelated namespace's
+    virtual method fabricate ``ns1::Foo``'s own polymorphism. The exact
+    variant needs a fully qualified identity, not the bare ``name`` this
+    function receives as its map key (which can itself be an unqualified
+    leaf on castxml) -- so it's computed the same way `diff_layout._index`
+    already does: ``rec.qualified_name or rec.name``.
     *funcs* is optional (defaults to ``None``, meaning "no function-level
     evidence available") so every pre-existing caller that doesn't have a
     ``function_map`` handy keeps today's behavior unchanged.
@@ -212,7 +222,7 @@ def _is_polymorphic(
     )
     own_confirmed_abstract = fact_confirmed_true(rec.is_abstract_fact)
     own_has_retained_virtual_function = funcs is not None and bool(
-        _owned_virtual_signatures(name, funcs)
+        _owned_virtual_signatures_for_record(rec.qualified_name or rec.name, funcs)
     )
     if (
         vtable

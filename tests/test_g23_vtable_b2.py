@@ -616,3 +616,31 @@ class TestReconstructionFactStatus:
         )
         types = {"P": rec}
         assert _is_polymorphic("P", types, {}) is None
+
+    def test_same_leaf_name_different_namespace_does_not_fabricate_polymorphic(
+        self,
+    ):
+        # Codex review, fresh evidence, sixth round: an unrelated class
+        # sharing only the leaf name "Foo" in a different namespace must
+        # not fabricate ns1::Foo's own polymorphism. Uses the *exact*
+        # qualified-identity matcher, not the eager namespace-suffix one
+        # _vtable_transition_is_evidenced's own suppression-oriented use
+        # gets away with -- that eager matching, reused verbatim here in
+        # an earlier revision, would have wrongly matched ns2::Foo's own
+        # virtual while checking ns1::Foo.
+        rec = RecordType(
+            name="Foo",
+            qualified_name="ns1::Foo",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+        )
+        types = {"ns1::Foo": rec}
+        unrelated_method = Function(
+            name="ns2::Foo::method",
+            mangled="_ZN3ns23Foo6methodEv",
+            return_type="void",
+            is_virtual=True,
+        )
+        funcs = {unrelated_method.mangled: unrelated_method}
+        assert _is_polymorphic("ns1::Foo", types, {}, funcs=funcs) is None
