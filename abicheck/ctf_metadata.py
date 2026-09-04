@@ -349,6 +349,21 @@ def _parse_types(
                     if pos + 4 <= len(type_data):
                         size_or_type = struct.unpack_from("<I", type_data, pos)[0]
                         pos += 4
+                    else:
+                        # P2 review, fresh evidence (mirrors the header/
+                        # extra-data truncation sites this function already
+                        # guards): the 16-bit large-size marker itself
+                        # decoded fine, but the mandatory 4-byte real size
+                        # that a "large" struct/union always carries next is
+                        # missing. Falling through here would keep the raw
+                        # marker value as size_or_type (never a real size)
+                        # and, for a small enough vlen (e.g. 0),
+                        # _extra_data_size could read as fully satisfied --
+                        # silently accepting a malformed/cut-off entry as a
+                        # complete parse.
+                        if truncated is not None:
+                            truncated.append(True)
+                        break
             elif pos + 2 <= len(type_data):
                 size_or_type = struct.unpack_from("<H", type_data, pos)[0]
                 pos += 2

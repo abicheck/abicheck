@@ -870,7 +870,9 @@ def _get_cfi_source(dwarf: Any) -> Any:
         return None
 
 
-def _extract_cfa_reg_from_fde(entry: Any, arch_key: str) -> str | None:
+def _extract_cfa_reg_from_fde(
+    entry: Any, arch_key: str, *, decode_failed: list[bool] | None = None
+) -> str | None:
     """Extract the dominant CFA register name from an FDE.
 
     Returns the register name string (e.g. 'rsp', 'rbp') or None if not found.
@@ -881,6 +883,15 @@ def _extract_cfa_reg_from_fde(entry: Any, arch_key: str) -> str | None:
       captures the settled function-body convention and avoids epilogue bias.
     - Break ties by selecting the register from the highest-PC row among tied
       candidates (preserves post-prologue behavior for 2-row entry/body tables).
+
+    ``decode_failed``, when given, has ``True`` appended whenever this FDE's
+    decode genuinely failed (as opposed to decoding cleanly into a table with
+    no CFA data, which is a legitimate ``None`` and never appended) -- so a
+    caller accumulating completeness across many FDEs (``_parse_frame_
+    registers``) can tell "no CFA row" apart from "decode raised," which this
+    helper's own ``except`` would otherwise silently collapse together (P1
+    review, fresh evidence: this helper previously reported both shapes as an
+    indistinguishable ``None``).
     """
     try:
         decoded = entry.get_decoded()
@@ -907,6 +918,8 @@ def _extract_cfa_reg_from_fde(entry: Any, arch_key: str) -> str | None:
 
         return _reg_name(dominant_reg, arch_key)
     except (ELFError, OSError, ValueError, KeyError, IndexError):
+        if decode_failed is not None:
+            decode_failed.append(True)
         return None
 
 
@@ -957,13 +970,26 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
                 sym_name = addr_to_sym.get(pc_begin, "")
                 if not sym_name:
                     continue
-                reg = _extract_cfa_reg_from_fde(entry, arch_key)
+                decode_failed: list[bool] = []
+                reg = _extract_cfa_reg_from_fde(
+                    entry, arch_key, decode_failed=decode_failed
+                )
                 if reg is not None:
                     meta.frame_registers[sym_name] = reg
                 # Extract callee-saved register fingerprint from prologue
-                saved = _extract_callee_saved_regs(entry, arch_key)
+                saved = _extract_callee_saved_regs(
+                    entry, arch_key, decode_failed=decode_failed
+                )
                 if saved is not None:
                     meta.callee_saved_regs[sym_name] = saved
+                if decode_failed:
+                    # P1 review, fresh evidence: both helpers above catch and
+                    # swallow their own decode errors (so callers of them
+                    # standalone keep getting a plain None), which otherwise
+                    # left this loop's own except below unreachable for that
+                    # failure shape -- this FDE's facts were genuinely
+                    # skipped, so the pass is not complete.
+                    complete = False
             except (ELFError, OSError, ValueError, KeyError, IndexError) as exc:
                 log.debug("_parse_frame_registers: skipping FDE: %s", exc)
                 complete = False
@@ -975,7 +1001,9 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
         return False
 
 
-def _extract_callee_saved_regs(entry: Any, arch_key: str) -> frozenset[str] | None:
+def _extract_callee_saved_regs(
+    entry: Any, arch_key: str, *, decode_failed: list[bool] | None = None
+) -> frozenset[str] | None:
     """Extract the set of register names saved in the function prologue.
 
     Uses DW_CFA_offset and DW_CFA_rel_offset rules (register is spilled to stack)
@@ -984,6 +1012,10 @@ def _extract_callee_saved_regs(entry: Any, arch_key: str) -> frozenset[str] | No
     Returns:
     - frozenset[str] on successful decode (including empty set), or
     - None when decoding failed and no trustworthy data is available.
+
+    ``decode_failed`` mirrors ``_extract_cfa_reg_from_fde``'s own parameter of
+    the same name -- see its docstring for why the distinction matters to a
+    caller accumulating completeness across many FDEs.
     """
     try:
         decoded = entry.get_decoded()
@@ -1005,6 +1037,8 @@ def _extract_callee_saved_regs(entry: Any, arch_key: str) -> frozenset[str] | No
                         saved.add(_reg_name(reg_key, arch_key))
         return frozenset(saved)
     except Exception:  # noqa: BLE001
+        if decode_failed is not None:
+            decode_failed.append(True)
         return None
 
 

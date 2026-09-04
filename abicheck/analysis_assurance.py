@@ -358,10 +358,6 @@ class AnalysisAssurance:
     #: missing side was never even attempted), or ``"not_evaluated"``
     #: (neither side has DWARF -- nothing to be asymmetric about).
     dwarf_context_status: str = "not_evaluated"
-    #: Per-side receipt of the three distinct debug states: a cheap
-    #: presence-only probe, parsed basic layouts, and parsed DWARF-advanced
-    #: calling-convention/value-ABI facts.  BTF/CTF expose basic facts only.
-    debug_evidence: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: ``"clean"`` (both sides carry an L3 ``BuildEvidence`` payload),
     #: ``"asymmetric"`` (only one side does -- the other's build-only
     #: changes were never checked at all;
@@ -396,6 +392,18 @@ class AnalysisAssurance:
     #: Human-readable notes explaining any non-``complete`` status, folded
     #: from the same underlying signals rather than duplicating their wording.
     notes: tuple[str, ...] = field(default_factory=tuple)
+    #: Per-side receipt of the three distinct debug states: a cheap
+    #: presence-only probe, parsed basic layouts, and parsed DWARF-advanced
+    #: calling-convention/value-ABI facts.  BTF/CTF expose basic facts only.
+    #: P2 review: appended after every pre-existing field and marked
+    #: keyword-only (mirrors ``AdvancedDwarfMetadata``'s own provenance
+    #: fields) so an external caller still constructing this dataclass
+    #: positionally cannot have this field silently absorb the argument
+    #: meant for ``l3_context_status`` (and every field after it shift by
+    #: one) without an exception.
+    debug_evidence: dict[str, dict[str, Any]] = field(
+        default_factory=dict, kw_only=True
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {

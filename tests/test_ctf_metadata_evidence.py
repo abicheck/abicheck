@@ -33,8 +33,10 @@ from __future__ import annotations
 import struct
 
 from abicheck.ctf_metadata import (
+    _CTF_V2_LSTRUCT_THRESH,
     CTF_K_INTEGER,
     CTF_K_POINTER,
+    CTF_K_STRUCT,
     CTF_MAGIC,
     CTF_VERSION_2,
     CTF_VERSION_3,
@@ -197,3 +199,51 @@ class TestParseTypesTruncationOutParam:
         result = _parse_types(one_type, CTF_VERSION_3, truncated)
         assert len(result) == 2  # void + the one complete integer
         assert truncated == []
+
+    def test_v2_truncated_large_struct_real_size_sets_truncated(self) -> None:
+        """P2 review, fresh evidence: a v2 struct/union whose 16-bit size
+        marker is >= ``_CTF_V2_LSTRUCT_THRESH`` ("large") must be followed
+        by a mandatory 4-byte real size. Ending the section right after that
+        marker (no real-size bytes at all) previously fell through silently
+        -- neither appending to ``truncated`` nor ``break``ing -- keeping the
+        raw 16-bit marker as ``size_or_type`` and (for ``vlen=0``) letting
+        ``_extra_data_size`` read 0 bytes of extra data, so the malformed
+        entry was accepted as a complete parse.
+        """
+        info = struct.pack("<H", CTF_K_STRUCT << 11)  # vlen=0, isroot=0
+        marker = struct.pack("<H", _CTF_V2_LSTRUCT_THRESH)
+        data = struct.pack("<I", 0) + info + marker  # no real-size bytes follow
+        truncated: list[bool] = []
+        result = _parse_types(data, CTF_VERSION_2, truncated)
+        assert truncated == [True]
+        # Only the synthetic void entry -- nothing else accepted.
+        assert len(result) == 1
+
+    def test_v2_truncated_large_struct_partial_real_size_sets_truncated(
+        self,
+    ) -> None:
+        """Sibling case: 1-3 leftover bytes (still not the full 4-byte real
+        size) must also be flagged, not just the exact 0-bytes-left shape
+        above -- the bug class is "insufficient bytes for the mandatory
+        field," not one specific byte count."""
+        info = struct.pack("<H", CTF_K_STRUCT << 11)
+        marker = struct.pack("<H", _CTF_V2_LSTRUCT_THRESH)
+        for leftover in (1, 2, 3):
+            data = struct.pack("<I", 0) + info + marker + (b"\x00" * leftover)
+            truncated: list[bool] = []
+            result = _parse_types(data, CTF_VERSION_2, truncated)
+            assert truncated == [True], f"leftover={leftover}"
+            assert len(result) == 1, f"leftover={leftover}"
+
+    def test_v2_large_struct_with_full_real_size_is_not_truncated(self) -> None:
+        """Positive control: the same "large" shape, but with the mandatory
+        4-byte real size actually present (and vlen=0, so no member data
+        follows) -- a legitimately complete entry, not truncated."""
+        info = struct.pack("<H", CTF_K_STRUCT << 11)
+        marker = struct.pack("<H", _CTF_V2_LSTRUCT_THRESH)
+        real_size = struct.pack("<I", 0x20000)  # an actual size >= the marker
+        data = struct.pack("<I", 0) + info + marker + real_size
+        truncated: list[bool] = []
+        result = _parse_types(data, CTF_VERSION_2, truncated)
+        assert truncated == []
+        assert len(result) == 2  # void + the one complete (empty) struct
