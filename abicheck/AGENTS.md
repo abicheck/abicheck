@@ -3,11 +3,13 @@
 This file scopes the repository-level `AGENTS.md` for production Python code.
 It is vendor-neutral and authoritative for this directory's *rules* (task
 routing, dependency direction, migration policy) — a tool-specific *adapter*
-file (one whose only job is pointing at the canonical source, e.g. this
-directory's own `CLAUDE.md`) must point here rather than restating those
-rules. This does not apply to a genuinely scoped subdirectory `CLAUDE.md`
-carrying its own per-area context (pipeline orientation, test pointers, and
-similar) — see root `CLAUDE.md`'s own distinction between an adapter and
+file (one whose only job is pointing at the canonical source, the way root
+`CLAUDE.md` points at root `AGENTS.md`) must point here rather than
+restating those rules. This does not apply to a genuinely scoped
+subdirectory `CLAUDE.md` carrying its own per-area context (pipeline
+orientation, test pointers, and similar — this directory's own `CLAUDE.md`
+is exactly that, not an adapter) — see root `CLAUDE.md`'s own distinction
+between an adapter and
 scoped context, which this directory's `CLAUDE.md` follows.
 
 ## Read order

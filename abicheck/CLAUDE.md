@@ -33,7 +33,9 @@ Pipeline order (data flow):
 - Read the matching section of the root `CLAUDE.md` before touching `cli.py`,
   `diff_platform.py`, `dumper.py`, or `compat/cli.py` — they are large
   legacy files, not a design precedent (see this directory's `AGENTS.md`
-  "Working with legacy large modules": debt may shrink, may not grow).
+  "Working with legacy large modules": a file already above its recorded
+  adoption baseline may not exceed that baseline, but may regrow up to it
+  after shrinking — not an absolute never-grow rule).
 - **New code goes to its ADR-061 target owner, not the flat legacy
   namespace.** Check the root `AGENTS.md`'s "Task routing and dependency
   direction" table before adding a new top-level `cli_*`, `service_*`,
