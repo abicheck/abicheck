@@ -164,18 +164,33 @@ def _entity_id_is_extern_c(entity_id: EntityId | None) -> bool:
     return entity_id is not None and entity_id.extra == ("extern_c",)
 
 
+def _looks_itanium_mangled(mangled: str) -> bool:
+    """See ``tu_merge._looks_itanium_mangled``'s own docstring -- reused,
+    not reinvented, for the identical ``extract/`` may-not-import-
+    ``tu_merge`` reason the rest of this module's small helpers already
+    give."""
+    if mangled.startswith("__Z"):
+        mangled = mangled[1:]
+    return mangled.startswith("_Z")
+
+
 def _is_locally_linked_function(fn: Function) -> bool:
     """See ``tu_merge._function_key``'s own docstring for the full
     reasoning behind each branch -- reused, not reinvented, including the
     ``entity_is_record_member`` gate closing that function's static-
     member-function sub-case (its sibling non-static-method collision
-    remains a separately-documented, still-open limitation) and the
+    remains a separately-documented, still-open limitation), the
     Darwin-leading-underscore fix (macOS CI, fresh evidence): ``fn.mangled
     == fn.name`` is not proof of "no C++ mangling" on a Darwin target, so
     ``fn.is_extern_c`` -- each header-AST backend's own Darwin-aware
-    determination -- is read directly instead, exactly mirroring
-    ``tu_merge._function_key``'s identical fix."""
-    if fn.mangled == fn.name or fn.is_extern_c:
+    determination -- is read directly instead, and the
+    :func:`_looks_itanium_mangled` guard closing the follow-up gap where a
+    static member nested inside an ``extern "C"`` block wrongly inherits
+    ``is_extern_c=True`` despite being genuinely Itanium-mangled -- all
+    exactly mirroring ``tu_merge._function_key``'s identical fixes."""
+    if fn.mangled == fn.name or (
+        fn.is_extern_c and not _looks_itanium_mangled(fn.mangled)
+    ):
         return fn.is_static and not entity_is_record_member(fn.entity_id)
     return _has_local_linkage_mangling(fn.mangled)
 
@@ -185,12 +200,18 @@ def _is_locally_linked_variable(var: Variable) -> bool:
     plain-C ``var.mangled == var.name`` fallback branch, closed by
     ``Variable.is_static`` (PR #1024, Codex/CodeRabbit review), the
     ``entity_is_record_member`` gate closing that same function's
-    uninstantiated-template-static-data-member gap, and the Darwin-
+    uninstantiated-template-static-data-member gap, the Darwin-
     leading-underscore fix (macOS CI, fresh evidence) mirroring
     ``tu_merge._variable_key``'s identical fix: :class:`Variable` carries
     no ``is_extern_c`` field of its own, so :func:`_entity_id_is_extern_c`
-    reads the same Darwin-aware signal back off ``var.entity_id`` instead."""
-    if var.mangled == var.name or _entity_id_is_extern_c(var.entity_id):
+    reads the same Darwin-aware signal back off ``var.entity_id`` instead,
+    and the :func:`_looks_itanium_mangled` guard closing the follow-up
+    static-member-inside-``extern "C"`` gap, exactly mirroring
+    ``tu_merge._variable_key``'s identical fix."""
+    if var.mangled == var.name or (
+        _entity_id_is_extern_c(var.entity_id)
+        and not _looks_itanium_mangled(var.mangled)
+    ):
         return var.is_static and not entity_is_record_member(var.entity_id)
     return _has_local_linkage_mangling(var.mangled)
 

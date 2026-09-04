@@ -187,6 +187,49 @@ def _has_local_linkage_mangling(mangled: str) -> bool:
     return _mangled_name_is_local_linkage(mangled) or "_GLOBAL__N_" in mangled
 
 
+def _looks_itanium_mangled(mangled: str) -> bool:
+    """Whether *mangled* carries the Itanium ``_Z`` magic-prefix marker at
+    all (Darwin's extra leading underscore stripped first, mirroring
+    :func:`_has_local_linkage_mangling`'s own normalization) -- i.e.
+    *some* genuine C++ name mangling was applied, independent of whether
+    that mangling denotes local linkage.
+
+    This is the guard :func:`_function_key`/:func:`_variable_key` need
+    before trusting ``is_extern_c`` as proof "no C++ mangling happened"
+    (Codex review, fresh evidence, fourth round): a class nested inside an
+    ``extern "C" { ... }`` block has its ``is_extern_c``/``entity_id``
+    ``extern_c`` tag wrongly inherited all the way down to its own
+    genuinely-C++-mangled static members by ``dumper_clang.py``'s
+    ``_walk`` (``child_extern_c = ... extern_c`` for every node kind other
+    than the ``LinkageSpecDecl`` itself -- there is no re-check when
+    descending into a nested ``CXXRecordDecl``), even though a static
+    member function/variable of an ordinarily-visible class still mangles
+    to an ordinary marker-free Itanium symbol (e.g. ``__ZN6Widget4makeEi``
+    on Darwin) with the class's own genuine external linkage, nothing to
+    do with C linkage at all. Without this guard, that inherited
+    ``is_extern_c=True`` routed such a member through the ``is_static``
+    fallback branch below with ``entity_id.scope`` already erased by
+    ``entity_id_for_function``'s own ``is_extern_c`` branch (which drops
+    every scope component unconditionally) -- so
+    ``entity_is_record_member`` could no longer see it *was* a record
+    member, and the member was wrongly TU-scoped as if it were a private,
+    file-local declaration; two TUs' identical externally-linked static
+    member then wrongly stayed split into two entities instead of merging
+    into one.
+
+    A mangled name that genuinely starts with the Itanium ``_Z`` prefix is
+    always more specific, trustworthy evidence than the (potentially
+    mis-inherited) ``is_extern_c`` flag -- real C linkage produces no such
+    prefix at all -- so when this returns ``True``, the caller should
+    prefer :func:`_has_local_linkage_mangling`'s own direct read of the
+    mangled name over the ``is_extern_c`` fallback, exactly as it already
+    does for the plain ``fn.mangled != fn.name`` case.
+    """
+    if mangled.startswith("__Z"):
+        mangled = mangled[1:]
+    return mangled.startswith("_Z")
+
+
 def _entity_id_is_extern_c(entity_id: EntityId | None) -> bool:
     """Whether *entity_id* was built via the ``is_extern_c`` branch of
     :func:`~abicheck.model.identity.entity_id_for_function`/
@@ -319,8 +362,22 @@ def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
     reading that field here instead of re-deriving the same signal from a
     platform-fragile string comparison closes the gap for every backend at
     once.
+
+    **Fourth known, accepted limitation, closed (macOS CI, fresh
+    evidence):** ``fn.is_extern_c`` is not always trustworthy either -- see
+    :func:`_looks_itanium_mangled`'s own docstring for the full account of
+    how a static member function nested inside an ``extern "C" { ... }``
+    block wrongly inherits ``is_extern_c=True`` from clang's AST walk
+    despite genuinely being Itanium-mangled with ordinary external
+    linkage. Gated on :func:`_looks_itanium_mangled` returning ``False``:
+    a mangled name that itself carries the Itanium ``_Z`` marker is always
+    more specific evidence than the (possibly mis-inherited) flag, so it
+    routes to :func:`_has_local_linkage_mangling`'s own direct read
+    instead of trusting ``is_extern_c``.
     """
-    if fn.mangled == fn.name or fn.is_extern_c:
+    if fn.mangled == fn.name or (
+        fn.is_extern_c and not _looks_itanium_mangled(fn.mangled)
+    ):
         is_local = fn.is_static and not entity_is_record_member(fn.entity_id)
     else:
         is_local = _has_local_linkage_mangling(fn.mangled)
@@ -388,8 +445,21 @@ def _variable_key(tu_name: str, var: Variable) -> tuple[str, str]:
     ``parse_variables()`` already makes -- :func:`_entity_id_is_extern_c`
     reads that back instead of re-deriving the same signal from a
     platform-fragile string comparison.
+
+    **Fourth known, accepted limitation, closed (macOS CI, fresh
+    evidence):** the identical gap :func:`_function_key`'s own docstring
+    now documents applies here too -- a static *member variable* nested
+    inside an ``extern "C" { ... }`` block wrongly inherits the
+    ``extern_c``-tagged ``entity_id`` from clang's AST walk despite being
+    genuinely Itanium-mangled with ordinary external linkage. Gated the
+    same way: :func:`_looks_itanium_mangled` returning ``True`` routes to
+    :func:`_has_local_linkage_mangling`'s own direct read instead of
+    trusting :func:`_entity_id_is_extern_c`.
     """
-    if var.mangled == var.name or _entity_id_is_extern_c(var.entity_id):
+    if var.mangled == var.name or (
+        _entity_id_is_extern_c(var.entity_id)
+        and not _looks_itanium_mangled(var.mangled)
+    ):
         is_local = var.is_static and not entity_is_record_member(var.entity_id)
     else:
         is_local = _has_local_linkage_mangling(var.mangled)

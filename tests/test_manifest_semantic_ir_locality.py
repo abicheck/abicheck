@@ -261,3 +261,44 @@ def test_darwin_cxx_mangled_static_member_functions_from_different_tus_collapse_
     ir = manifest_semantic_ir([a, b])
     occurrences = ir.occurrences_for(member_id)
     assert len(occurrences) == 1
+
+
+def test_static_member_function_wrongly_tagged_extern_c_collapses_to_one_occurrence():
+    # Third Darwin quirk instance (Codex review, fresh evidence): a static
+    # member function nested inside an extern "C" block wrongly inherits
+    # is_extern_c=True from clang's AST walk despite being genuinely
+    # Itanium-mangled with ordinary external linkage. Without
+    # _looks_itanium_mangled's guard, entity_id_for_function's own
+    # is_extern_c branch erases entity_id.scope, so
+    # entity_is_record_member can no longer recognize the member as one,
+    # and it wrongly gets TU-scoped as if private/file-local.
+    member_id = entity_id_for_function((), "make", is_extern_c=True)
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "make",
+                "__ZN6Widget4makeEi",
+                is_static=True,
+                is_extern_c=True,
+                entity_id=member_id,
+                source_location="widget.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "make",
+                "__ZN6Widget4makeEi",
+                is_static=True,
+                is_extern_c=True,
+                entity_id=member_id,
+                source_location="widget.h:1",
+            ),
+        ),
+    )
+    ir = manifest_semantic_ir([a, b])
+    occurrences = ir.occurrences_for(member_id)
+    assert len(occurrences) == 1

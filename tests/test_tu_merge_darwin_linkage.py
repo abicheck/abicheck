@@ -277,3 +277,77 @@ def test_merge_fragments_still_merges_darwin_cxx_static_member_variables_across_
     b = TuFragment(tu_name="b", variables=(_var("counter", "__ZN6Widget7counterE"),))
     merged = merge_fragments([a, b])
     assert len(merged.variables) == 1
+
+
+# ---------------------------------------------------------------------------
+# Darwin leading-underscore quirk, third instance (Codex review, fresh
+# evidence): a static member function/variable nested inside an
+# `extern "C" { ... }` block wrongly inherits `is_extern_c=True` from
+# clang's AST walk (`dumper_clang.py`'s `_walk` propagates `extern_c` to
+# every descendant node, with no re-check when descending into a nested
+# `CXXRecordDecl`), even though it still mangles as an ordinary,
+# externally-linked Itanium symbol (e.g. `__ZN6Widget4makeEi`) -- nothing
+# to do with C linkage. `entity_id_for_function`'s own `is_extern_c`
+# branch then unconditionally erases `entity_id.scope`, so
+# `entity_is_record_member` can no longer recognize the member as one.
+# Without `_looks_itanium_mangled`'s guard, the member was wrongly
+# TU-scoped as if it were a private, file-local declaration.
+# ---------------------------------------------------------------------------
+
+
+def test_merge_fragments_still_merges_static_member_function_wrongly_tagged_extern_c():
+    darwin_id = entity_id_for_function((), "make", is_extern_c=True)
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "make",
+                "__ZN6Widget4makeEi",
+                is_static=True,
+                is_extern_c=True,
+                entity_id=darwin_id,
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "make",
+                "__ZN6Widget4makeEi",
+                is_static=True,
+                is_extern_c=True,
+                entity_id=darwin_id,
+            ),
+        ),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.functions) == 1
+
+
+def test_merge_fragments_still_merges_static_member_variable_wrongly_tagged_extern_c():
+    darwin_id = entity_id_for_variable((), "counter", is_extern_c=True)
+    a = TuFragment(
+        tu_name="a",
+        variables=(
+            _var(
+                "counter",
+                "__ZN6Widget7counterE",
+                is_static=True,
+                entity_id=darwin_id,
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        variables=(
+            _var(
+                "counter",
+                "__ZN6Widget7counterE",
+                is_static=True,
+                entity_id=darwin_id,
+            ),
+        ),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.variables) == 1
