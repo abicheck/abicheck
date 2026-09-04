@@ -45,22 +45,25 @@ class FuncProto:
 def read_null_terminated_string(data: bytes, offset: int) -> tuple[str, bool]:
     """Read a null-terminated UTF-8 string from a binary section.
 
-    Shared by BTF and CTF parsers for reading their string tables.
+    Shared by BTF and CTF parsers for reading their string tables -- both
+    formats specify every string-table entry as NUL-terminated, so a
+    missing terminator is itself a corruption/truncation signal, not a
+    legitimate shape.
 
-    Returns ``(string, valid)`` (P2 review): ``valid`` is False only when
-    *offset* itself is out of ``data``'s bounds -- a corrupt/out-of-range
-    name offset a caller must not silently treat the same as a legitimate
-    zero-length name (both previously returned the bare string ``""`` with
-    no way to tell them apart). An in-bounds offset with no NUL terminator
-    before the end of the buffer is left as-is (decodes to the end of the
-    buffer, `valid=True`) -- unlike an out-of-range offset, that shape is
-    not necessarily corrupt data, just an untruncated trailing name.
+    Returns ``(string, valid)`` (P2 review, two rounds): ``valid`` is False
+    when *offset* itself is out of ``data``'s bounds (a corrupt/out-of-range
+    name offset), OR when no NUL terminator is found before the end of the
+    buffer (an in-bounds but truncated string table, e.g. a section cut off
+    mid-entry). Both shapes previously returned indistinguishable results
+    from a legitimate zero-length or trailing name -- the first round only
+    caught the out-of-bounds-offset shape and left the missing-terminator
+    one still reading `valid=True`.
     """
     if offset < 0 or offset >= len(data):
         return "", False
     end = data.find(b"\x00", offset)
     if end < 0:
-        return data[offset:].decode("utf-8", errors="replace"), True
+        return data[offset:].decode("utf-8", errors="replace"), False
     return data[offset:end].decode("utf-8", errors="replace"), True
 
 

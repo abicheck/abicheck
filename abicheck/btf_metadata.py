@@ -615,7 +615,19 @@ def parse_btf_from_bytes(data: bytes, pointer_size: int = 8) -> BtfMetadata:
         log.warning("parse_btf_from_bytes: type parsing failed: %s", exc)
         return empty
 
-    resolver = _TypeResolver(types, str_data, pointer_size=pointer_size)
+    # P2 review, fresh evidence: an out-of-bounds string offset (a
+    # corrupt/malformed BTF blob) doesn't raise either -- read_null_
+    # terminated_string() silently falls back to "", indistinguishable from
+    # a legitimate anonymous name, so this shared accumulator is what lets
+    # every extractor below report it into extraction_partial. Also handed
+    # to the resolver itself (P2 review, round 2): a type reached only
+    # through name()/size() resolution (e.g. a struct member's referenced
+    # scalar type) reads its own name_off via the resolver's private
+    # _str_at(), which no direct extractor's own accumulator observes.
+    invalid_strings: list[bool] = []
+    resolver = _TypeResolver(
+        types, str_data, pointer_size=pointer_size, invalid_strings=invalid_strings
+    )
 
     meta = BtfMetadata(has_btf=True, type_count=len(types) - 1)
     if type_truncated:
@@ -624,13 +636,6 @@ def parse_btf_from_bytes(data: bytes, pointer_size: int = 8) -> BtfMetadata:
         # so the receipt must not silently claim "parsed" for a channel
         # whose type table was read incomplete.
         meta.extraction_partial = True
-
-    # P2 review, fresh evidence: an out-of-bounds string offset (a
-    # corrupt/malformed BTF blob) doesn't raise either -- read_null_
-    # terminated_string() silently falls back to "", indistinguishable from
-    # a legitimate anonymous name, so this shared accumulator is what lets
-    # every extractor below report it into extraction_partial.
-    invalid_strings: list[bool] = []
 
     try:
         meta.structs = _extract_structs(

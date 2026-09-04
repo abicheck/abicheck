@@ -45,6 +45,7 @@ from abicheck.pdb_parser import (
     LF_ARRAY,
     LF_ENUM,
     LF_FIELDLIST,
+    LF_INDEX,
     LF_MEMBER,
     LF_STMEMBER,
     LF_STRUCTURE,
@@ -350,3 +351,45 @@ class TestFailedRecordCountNonExceptionTruncation:
         db = self._db([(LF_FIELDLIST, data)])
         assert db.failed_record_count == 1
         assert db.get_fieldlist(0x1000) == []
+
+    def test_lf_index_with_missing_continuation_marks_failed(self) -> None:
+        """P2 review, fresh evidence beyond the resolved payload-truncation
+        threads: an LF_INDEX continuation naming a type index that doesn't
+        exist in the TPI stream at all previously fell through to an
+        unconditional success return -- the continuation's members were
+        never resolved (never appended to the caller's list) yet the
+        fieldlist was reported complete."""
+        missing_ti = 0x9999
+        data = struct.pack("<H", LF_INDEX) + struct.pack("<HI", 0, missing_ti)
+        db = self._db([(LF_FIELDLIST, data)])
+        assert db.failed_record_count == 1
+        assert db.get_fieldlist(0x1000) == []
+
+    def test_lf_index_referencing_non_fieldlist_marks_failed(self) -> None:
+        """The reviewer's other named shape: LF_INDEX names a real type
+        index, but one that isn't itself an LF_FIELDLIST record."""
+        target_ti = 0x1000  # a real LF_STRUCTURE, not LF_FIELDLIST
+        data = struct.pack("<H", LF_INDEX) + struct.pack("<HI", 0, target_ti)
+        db = self._db(
+            [
+                (LF_STRUCTURE, _make_lf_structure(0, 0, 0, 4, "S")),
+                (LF_FIELDLIST, data),
+            ]
+        )
+        assert db.failed_record_count == 1
+        assert db.get_fieldlist(0x1001) == []
+
+    def test_lf_index_with_real_fieldlist_continuation_is_not_failed(self) -> None:
+        """Positive control: an LF_INDEX naming a real (here: legitimately
+        empty) LF_FIELDLIST must still resolve cleanly, as it did before
+        this fix."""
+        cont_ti = 0x1000
+        data = struct.pack("<H", LF_INDEX) + struct.pack("<HI", 0, cont_ti)
+        db = self._db(
+            [
+                (LF_FIELDLIST, b""),  # the continuation target -- empty
+                (LF_FIELDLIST, data),  # the referencing fieldlist
+            ]
+        )
+        assert db.failed_record_count == 0
+        assert db.get_fieldlist(0x1001) == []

@@ -676,7 +676,19 @@ def parse_ctf_from_bytes(data: bytes) -> CtfMetadata:
         log.warning("parse_ctf_from_bytes: type parsing failed: %s", exc)
         return empty
 
-    resolver = _TypeResolver(types, str_data, header.version)
+    # P2 review, fresh evidence: an out-of-bounds string offset (a
+    # corrupt/malformed CTF blob) doesn't raise either -- read_null_
+    # terminated_string() silently falls back to "", indistinguishable from
+    # a legitimate anonymous name, so this shared accumulator is what lets
+    # every extractor below report it into extraction_partial. Also handed
+    # to the resolver itself (P2 review, round 2): a type reached only
+    # through name()/size() resolution reads its own name_off via the
+    # resolver's private _str_at(), which no direct extractor's own
+    # accumulator observes.
+    invalid_strings: list[bool] = []
+    resolver = _TypeResolver(
+        types, str_data, header.version, invalid_strings=invalid_strings
+    )
 
     meta = CtfMetadata(has_ctf=True, type_count=len(types) - 1)
     if type_truncated:
@@ -685,13 +697,6 @@ def parse_ctf_from_bytes(data: bytes) -> CtfMetadata:
         # so the receipt must not silently claim "parsed" for a channel
         # whose type table was read incomplete.
         meta.extraction_partial = True
-
-    # P2 review, fresh evidence: an out-of-bounds string offset (a
-    # corrupt/malformed CTF blob) doesn't raise either -- read_null_
-    # terminated_string() silently falls back to "", indistinguishable from
-    # a legitimate anonymous name, so this shared accumulator is what lets
-    # every extractor below report it into extraction_partial.
-    invalid_strings: list[bool] = []
 
     try:
         meta.structs = _extract_structs(

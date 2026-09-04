@@ -1070,11 +1070,13 @@ class TestParseHeaderExtended:
         assert result.version == 99
 
     def test_string_no_null_terminator(self) -> None:
-        """String without null terminator returns remainder, still
-        valid=True -- an untruncated trailing name is not the same
-        corruption shape as an out-of-bounds offset."""
+        """P2 review, round 2: a string with no NUL terminator before the
+        end of the buffer is itself a truncation/corruption signal (both
+        BTF and CTF specify every string-table entry as NUL-terminated) --
+        valid=False, even though the remainder is still returned as a
+        best-effort decode."""
         data = b"no_null"
-        assert _read_string(data, 0) == ("no_null", True)
+        assert _read_string(data, 0) == ("no_null", False)
 
 
 # ---------------------------------------------------------------------------

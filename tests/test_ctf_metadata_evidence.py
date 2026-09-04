@@ -330,3 +330,49 @@ class TestInvalidStringOffsetPropagatesToPartial:
 
         meta = parse_ctf_from_bytes(b.build())
         assert meta.extraction_partial is False
+
+    def test_referenced_type_with_invalid_name_offset_marks_partial(self) -> None:
+        """P2 review, round 2: a validly-named struct whose member
+        references a type (here an INTEGER) resolved only through
+        ``_TypeResolver.name()``/``_str_at()`` -- not through any direct
+        extractor's own accumulator -- must still mark extraction_partial.
+        type_id 1 = INTEGER with an out-of-bounds name_off, type_id 2 =
+        struct "S" with one member of type 1."""
+        b = CtfBuilder()
+        b._type_entries.append(  # type_id 1: INTEGER, corrupt name_off
+            _corrupt_name_off_type(CTF_K_INTEGER, 0, 4, extra=struct.pack("<I", 32))
+        )
+        info = (CTF_K_STRUCT << 24) | (1 & 0xFFFF)
+        s_name = b.add_string("S")
+        m_name = b.add_string("field")
+        member = struct.pack("<II", m_name, (1 << 16) | 0)  # references type_id 1
+        entry = struct.pack("<III", s_name, info, 4) + member
+        b._type_entries.append(entry)  # type_id 2
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert "S" in meta.structs
+
+
+class TestUnterminatedStringMarksPartial:
+    """CTF sibling of the identical BTF finding (P2 review, round 2): an
+    in-bounds name offset with no NUL terminator before the end of the
+    string table is itself a truncation signal."""
+
+    def test_struct_name_missing_terminator_marks_partial(self) -> None:
+        b = CtfBuilder()
+        info = CTF_K_STRUCT << 24
+        entry = struct.pack("<III", len(b._strings), info, 4)
+        b._type_entries.append(entry)
+        b._strings.extend(b"S")  # no trailing NUL
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+
+    def test_well_terminated_name_is_not_flagged(self) -> None:
+        """Positive control: a normal, properly NUL-terminated name."""
+        b = CtfBuilder()
+        b.add_type("S", CTF_K_STRUCT, 0, 0)
+
+        meta = parse_ctf_from_bytes(b.build())
+        assert meta.extraction_partial is False

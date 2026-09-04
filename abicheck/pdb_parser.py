@@ -952,6 +952,12 @@ class TypeDatabase:
             members.extend(cont_members)
             if not cont_complete:  # propagate via the same None convention
                 return None
+        else:
+            # P2 review: an unresolved continuation (missing TI or wrong
+            # leaf) previously fell through to `return pos` unconditionally,
+            # reporting complete despite the continuation's members never
+            # being resolved. Propagate via the same None convention.
+            return None
         return pos
 
     def _parse_lf_onemethod(

@@ -747,7 +747,7 @@ class TestCtfEdgeCases:
         assert _read_string(b"abc\x00", -1) == ("", False)
 
     def test_string_no_null(self) -> None:
-        assert _read_string(b"no_null", 0) == ("no_null", True)
+        assert _read_string(b"no_null", 0) == ("no_null", False)
 
 
 # ---------------------------------------------------------------------------

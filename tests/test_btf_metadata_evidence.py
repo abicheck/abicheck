@@ -175,3 +175,55 @@ class TestInvalidStringOffsetPropagatesToPartial:
 
         meta = parse_btf_from_bytes(b.build())
         assert meta.extraction_partial is False
+
+    def test_referenced_type_with_invalid_name_offset_marks_partial(self) -> None:
+        """P2 review, round 2: a validly-named struct whose member
+        references a type (here an INT) resolved only through
+        ``_TypeResolver.name()``/``_str_at()`` -- not through any direct
+        extractor's own accumulator -- must still mark extraction_partial.
+        Type layout: type_id 1 = INT with an out-of-bounds name_off,
+        type_id 2 = struct "S" with one member of type 1."""
+        b = BtfBuilder()
+        b._type_entries.append(  # type_id 1: INT, corrupt name_off
+            _corrupt_name_off_type(BTF_KIND_INT, 0, 4, extra=struct.pack("<I", 32))
+        )
+        info = (BTF_KIND_STRUCT << 24) | (1 & 0xFFFF)
+        s_name = b.add_string("S")
+        m_name = b.add_string("field")
+        member = struct.pack("<III", m_name, 1, 0)  # references type_id 1
+        entry = struct.pack("<III", s_name, info, 4) + member
+        b._type_entries.append(entry)  # type_id 2
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+        assert "S" in meta.structs
+        # Best-effort resolution still substitutes the kind default.
+        assert meta.structs["S"].fields[0].type_name == "int"
+
+
+class TestUnterminatedStringMarksPartial:
+    """P2 review, round 2: a name offset in-bounds but with no NUL
+    terminator before the end of the string table is itself a truncation
+    signal (BTF specifies every string-table entry as NUL-terminated) --
+    the first round only caught the out-of-range-offset shape."""
+
+    def test_struct_name_missing_terminator_marks_partial(self) -> None:
+        b = BtfBuilder()
+        info = BTF_KIND_STRUCT << 24
+        # Manually build str_data with a trailing, unterminated name,
+        # bypassing BtfBuilder.add_string (which always NUL-terminates).
+        entry = struct.pack("<III", len(b._strings), info, 4)
+        b._type_entries.append(entry)
+        b._strings.extend(b"S")  # no trailing NUL
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is True
+
+    def test_well_terminated_name_is_not_flagged(self) -> None:
+        """Positive control: a properly NUL-terminated trailing name (the
+        normal BtfBuilder.add_string shape) must not trip this signal."""
+        b = BtfBuilder()
+        b.add_type("S", BTF_KIND_STRUCT, 0, 0)
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.extraction_partial is False

@@ -104,7 +104,12 @@ class _TypeResolver:
     """Resolves BTF type references to names and sizes."""
 
     def __init__(
-        self, types: list[BtfType], str_data: bytes, *, pointer_size: int = 8
+        self,
+        types: list[BtfType],
+        str_data: bytes,
+        *,
+        pointer_size: int = 8,
+        invalid_strings: list[bool] | None = None,
     ) -> None:
         self._types = types
         self._str = str_data
@@ -114,6 +119,15 @@ class _TypeResolver:
         # Track resolution in progress for cycle detection
         self._resolving_name: set[int] = set()
         self._resolving_size: set[int] = set()
+        # P2 review, fresh evidence: a type reached only through name()/
+        # size() resolution (e.g. a struct member's referenced scalar/
+        # pointer/qualifier type) has its own name_off read here via
+        # _str_at(), previously discarding the validity signal entirely --
+        # an out-of-range offset on such a type silently substituted a
+        # kind-default name (e.g. "int") with no completeness signal at
+        # all, invisible to every direct extractor's own invalid_strings
+        # accumulator since it never calls _str_at directly for this type.
+        self._invalid_strings = invalid_strings
 
     def _resolve_cached(
         self,
@@ -164,12 +178,9 @@ class _TypeResolver:
         return None
 
     def _str_at(self, offset: int) -> str:
-        # Type-name resolution already has its own fallback for an invalid
-        # reference (e.g. "<btf:N>" for a bad type_id below) -- this
-        # resolver's own validity signal is a separate, larger surface out
-        # of scope for the extraction-completeness fix (see
-        # btf_metadata._extract_structs and friends).
-        name, _valid = _read_string(self._str, offset)
+        name, valid = _read_string(self._str, offset)
+        if self._invalid_strings is not None and not valid:
+            self._invalid_strings.append(True)
         return name
 
     def _resolve_name(self, type_id: int) -> str:

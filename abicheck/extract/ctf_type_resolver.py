@@ -96,7 +96,14 @@ def _read_string(str_data: bytes, offset: int) -> tuple[str, bool]:
 class _TypeResolver:
     """Resolves CTF type references to names and sizes."""
 
-    def __init__(self, types: list[CtfType], str_data: bytes, version: int) -> None:
+    def __init__(
+        self,
+        types: list[CtfType],
+        str_data: bytes,
+        version: int,
+        *,
+        invalid_strings: list[bool] | None = None,
+    ) -> None:
         self._types = types
         self._str = str_data
         self._version = version
@@ -104,6 +111,8 @@ class _TypeResolver:
         self._size_cache: dict[int, int] = {}
         self._resolving_name: set[int] = set()
         self._resolving_size: set[int] = set()
+        # See the matching comment in btf_type_resolver._TypeResolver.
+        self._invalid_strings = invalid_strings
 
     def name(self, type_id: int) -> str:
         if type_id in self._name_cache:
@@ -137,11 +146,9 @@ class _TypeResolver:
         return None
 
     def _str_at(self, offset: int) -> str:
-        # Type-name resolution already has its own fallback for an invalid
-        # reference -- this resolver's own validity signal is a separate,
-        # larger surface out of scope for the extraction-completeness fix
-        # (see ctf_metadata._extract_structs and friends).
-        name, _valid = _read_string(self._str, offset)
+        name, valid = _read_string(self._str, offset)
+        if self._invalid_strings is not None and not valid:
+            self._invalid_strings.append(True)
         return name
 
     def _resolve_name_array(self, t: CtfType) -> str:
