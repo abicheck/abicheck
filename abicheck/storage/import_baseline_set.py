@@ -117,6 +117,12 @@ _METADATA_KEYS = (
     "freshness",
 )
 
+#: The `_METADATA_KEYS` this module's own producing reader
+#: (`load_baseline_manifest`) parses as a strict `int` (non-`bool`) or else
+#: `None`/unstated -- `manifest_version` is excluded here because it is
+#: required and already validated, separately, above.
+_STRICT_INT_METADATA_KEYS = frozenset({"snapshot_schema", "baseline_generation"})
+
 #: `abicheck.buildsource.baseline_set.SUPPORTED_MANIFEST_VERSIONS`, duplicated
 #: for the identical layering reason `import_bundle_facts.py`'s own
 #: duplicated constants give: `storage/` may not import `buildsource/` (a
@@ -161,12 +167,19 @@ def import_baseline_set(
     _mapping(manifest_document, "manifest_document")
     _mapping(snapshot_documents, "snapshot_documents")
     manifest_version = manifest_document.get("manifest_version")
-    # `bool` is an `int` subclass -- `True in {1}` is `True` -- so it must be
-    # excluded explicitly, or a manifest declaring `"manifest_version": true`
-    # would silently pass as version 1 (this package's own "never coerce a
-    # value a decision reads" convention, `storage/AGENTS.md` invariant 6).
-    if isinstance(manifest_version, bool) or manifest_version not in (
-        _SUPPORTED_MANIFEST_VERSIONS
+    # `bool`/`float` are never accepted, even when numerically equal to a
+    # supported version: `bool` is an `int` subclass (`True in {1}` is
+    # `True`), and `1.0 == 1` makes `1.0 in {1}` `True` too -- either would
+    # silently pass a value `load_baseline_manifest` itself parses as
+    # unstated (its own `isinstance(x, int) and not isinstance(x, bool)`
+    # gate) and therefore treats as unsupported (Codex review, fresh
+    # evidence: a first fix excluded `bool` but missed the identical float
+    # gap). This package's own "never coerce a value a decision reads"
+    # convention, `storage/AGENTS.md` invariant 6.
+    if (
+        not isinstance(manifest_version, int)
+        or isinstance(manifest_version, bool)
+        or manifest_version not in _SUPPORTED_MANIFEST_VERSIONS
     ):
         raise ValueError(
             f"manifest_document manifest_version {manifest_version!r} is not "
@@ -277,11 +290,26 @@ def import_baseline_set(
     # `generator`, all legitimately absent on a real manifest) as an
     # explicit `None`, so `export_baseline_set` would then re-export a
     # `null` key the original document never had (CodeRabbit review).
-    metadata_payload = {
-        key: manifest_document[key]
-        for key in _METADATA_KEYS
-        if key in manifest_document
-    }
+    metadata_payload: dict[str, Any] = {}
+    for key in _METADATA_KEYS:
+        if key not in manifest_document:
+            continue
+        value = manifest_document[key]
+        if key in _STRICT_INT_METADATA_KEYS and (
+            not isinstance(value, int) or isinstance(value, bool)
+        ):
+            # `load_baseline_manifest` itself parses a non-strict-int value
+            # here (a float, a bool, a string) as unstated (`None`), not as
+            # an error -- storing it verbatim would let `SectionDTO`'s own
+            # canonicalization silently rewrite it into a plausible-looking
+            # int (`3.0` -> `3`) that a later generation/schema check could
+            # then treat as a real, stated value the canonical reader never
+            # actually confirmed (Codex review, fresh evidence). Dropped
+            # from the payload the same way an absent key already is,
+            # rather than raising: this mirrors that reader's own tolerant
+            # "unstated" treatment, not a stricter one invented here.
+            continue
+        metadata_payload[key] = value
     metadata_dto = baseline_set_metadata_to_dto(metadata_payload)
     metadata_ref = ObjectRef(
         kind=BASELINE_SET_SECTION_KIND, digest=store.put(metadata_dto.to_dict())

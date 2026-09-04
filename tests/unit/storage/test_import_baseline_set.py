@@ -73,8 +73,14 @@ class TestImportBaselineSet:
                 store=InMemoryObjectStore(),
             )
 
-    @pytest.mark.parametrize("bad_version", [None, 0, 2, "1", True])
+    @pytest.mark.parametrize("bad_version", [None, 0, 2, "1", True, 1.0])
     def test_rejects_an_unsupported_manifest_version(self, bad_version: Any) -> None:
+        """`1.0` is included alongside the other malformed values: it is
+        numerically `== 1` (and hashes the same), so a bare `not in`
+        membership check would silently accept it even though
+        `load_baseline_manifest` itself parses a non-strict-int
+        `manifest_version` as unstated, not as version 1 (Codex review,
+        fresh evidence)."""
         doc = _manifest_document(manifest_version=bad_version)
         with pytest.raises(ValueError, match="manifest_version"):
             import_baseline_set(doc, _snapshot_documents(), store=InMemoryObjectStore())
@@ -205,6 +211,30 @@ class TestImportBaselineSet:
         assert "baseline_generation" not in metadata
         assert "generator" not in metadata
         assert metadata["project_ref"] == "refs/heads/main"
+
+    @pytest.mark.parametrize("key", ["snapshot_schema", "baseline_generation"])
+    def test_a_float_strict_int_metadata_value_is_dropped_not_normalized(
+        self, key: str
+    ) -> None:
+        """`SectionDTO` canonicalization would silently rewrite a float like
+        `3.0` into the int `3`, laundering "unstated" into a stated,
+        decision-bearing value. `load_baseline_manifest` itself treats a
+        non-strict-int `snapshot_schema`/`baseline_generation` as unstated,
+        so the import adapter must drop the field entirely rather than let
+        canonicalization coerce it (Codex review, fresh evidence)."""
+        doc = _manifest_document(**{key: 3.0})
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(doc, _snapshot_documents(), store=store)
+        metadata, _snapshots = export_baseline_set(manifest, store=store)
+        assert key not in metadata
+
+    @pytest.mark.parametrize("key", ["snapshot_schema", "baseline_generation"])
+    def test_a_bool_strict_int_metadata_value_is_dropped(self, key: str) -> None:
+        doc = _manifest_document(**{key: True})
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(doc, _snapshot_documents(), store=store)
+        metadata, _snapshots = export_baseline_set(manifest, store=store)
+        assert key not in metadata
 
     def test_export_rejects_an_unknown_variant_id(self) -> None:
         doc = _manifest_document()
