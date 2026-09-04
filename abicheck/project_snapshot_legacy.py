@@ -236,7 +236,7 @@ def read_legacy_snapshot_document(
     # `read_variant_artifact_pair`, which checks both directions and is
     # this package's own established integrity path for exactly this.
     artifact = read_artifact_ref(root, artifact_id)
-    _variant, artifact = read_variant_artifact_pair(
+    variant, artifact = read_variant_artifact_pair(
         root, artifact.variant_id, artifact_id
     )
     # `export_legacy_snapshot` only ever looks at the sections *present* in
@@ -253,7 +253,20 @@ def read_legacy_snapshot_document(
     # is expected and not itself a corruption signal -- multi-artifact
     # packages are documented above as out of this function's scope anyway.
     if len(summary.artifact_ids) == 1:
-        advertised = set(summary.versions.section_schema_versions)
+        # `variant.sections`/`summary.project_sections` are real, legitimate
+        # entries in `section_schema_versions` too (ADR-062 A1.4/A1.5's
+        # project/variant-level evidence -- an instantiation manifest, a
+        # `storage.import_bundle_facts`-sourced bundle-composition object,
+        # ...), but they describe the variant/project as a whole, never one
+        # `ArtifactRef`'s own `sections`. A single-artifact sub-package
+        # `materialize_release_variant_artifacts` cut from a larger package
+        # legitimately carries both kinds side by side -- excluded here so
+        # this artifact-only integrity check isn't misapplied to evidence it
+        # was never scoped to check in the first place (Codex review, fresh
+        # evidence: this exact shape made every stored-release comparison
+        # sourced from `storage.import_bundle_facts` read as corrupted).
+        non_artifact_kinds = set(variant.sections) | set(summary.project_sections)
+        advertised = set(summary.versions.section_schema_versions) - non_artifact_kinds
         actual = set(artifact.sections)
         missing_sections = advertised - actual
         if missing_sections:

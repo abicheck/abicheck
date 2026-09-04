@@ -836,3 +836,56 @@ class TestMaterializationPreservesBundleComposition:
             artifact, store=sub_store, source_schema_version=43
         )
         assert document["library"] in {"liba.so", "libb.so"}
+
+    def test_read_legacy_snapshot_document_does_not_misread_variant_sections_as_corrupt(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, seventh round: adding `variant.sections`/
+        `summary.project_sections` kinds to a materialized sub-package's own
+        `section_schema_versions` (the fix above) fed straight into
+        `read_legacy_snapshot_document`'s single-artifact integrity check,
+        which compares *every* advertised section kind against the one
+        artifact's own `.sections` -- a variant-level kind is never one of
+        those, so every stored comparison sourced from a
+        `storage.import_bundle_facts` package started raising `SnapshotError`
+        ("missing section(s)") instead of comparing, a regression introduced
+        by the composition-preservation fix itself. This is the actual path
+        `cli_compare_release.py`'s per-library fan-out reads each stored
+        library through."""
+        from abicheck.serialization import snapshot_to_dict
+        from abicheck.storage.import_bundle_facts import (
+            BUNDLE_FACTS_ARTIFACT_TYPE,
+            import_bundle_facts,
+        )
+        from abicheck.workflows.release_package import resolve_release_package_map
+
+        doc = {
+            "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
+            "schema_version": 2,
+            "variant_fingerprint": "default",
+            "per_library_snapshots": {
+                "liba.so": snapshot_to_dict(
+                    _snap("liba.so", "1.0", [_fn("foo", "_Z3foov")])
+                ),
+            },
+            "filesystem_aliases": {"liba.so": ["liba.so.1"]},
+            "library_filenames": {"liba.so": "liba.so.1.2.3"},
+            "manifest": {"provides": [{"symbol": "liba_init"}]},
+        }
+        pkg = tmp_path / "pkg"
+        store = DirectoryObjectStore(pkg)
+        manifest = import_bundle_facts(
+            doc, store=store, max_known_schema_version=43, variant_id="v1"
+        )
+        write_project_manifest(pkg, manifest)
+
+        resolved = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        sub_dir = next(iter(resolved.values()))
+
+        from abicheck.project_snapshot_legacy import read_legacy_snapshot_document
+
+        document = read_legacy_snapshot_document(sub_dir)
+        assert document["library"] == "liba.so"
+        assert [f["name"] for f in document["functions"]] == ["foo"]
