@@ -174,6 +174,37 @@ def _validated_library_filenames(raw: Any) -> dict[str, str]:
     return validated
 
 
+def _validated_manifest(raw: Any) -> Any:
+    """*raw*, checked against the one shape
+    `bundle_manifest.manifest_from_dict` requires at its own top level (a
+    mapping with a list-valued `"provides"` key) -- `None`/absent means "no
+    instantiation manifest was captured", tolerated the same way that
+    function tolerates it.
+
+    Deliberately does **not** replicate that function's own deeper,
+    per-entry validation (`manifest_entry_from_dict`'s field-by-field
+    checks) -- `bundle_manifest.py` is a flat-root module `storage/` may
+    not import (`storage/AGENTS.md`, "Permitted imports"), and hand-copying
+    its entry-level parsing here would itself become the "second,
+    independently-tuned encoding kept in sync by hand" this package's own
+    docstrings elsewhere reject (Codex review named the gap; the top-level
+    shape is what can be checked here without duplicating that owner's
+    logic). A `manifest` that passes this shallow check but fails
+    `manifest_from_dict`'s own per-entry rules still round-trips through
+    this adapter unchanged -- the same "not decoded, only partitioned"
+    contract `legacy_section_to_dto`'s own docstring states for every other
+    section here.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping) or not isinstance(raw.get("provides"), list):
+        raise ValueError(
+            "bundle_facts_document['manifest'] must be a mapping with a "
+            f"list-valued 'provides' key, not {raw!r}"
+        )
+    return raw
+
+
 def import_bundle_facts(
     bundle_facts_document: Mapping[str, Any],
     *,
@@ -323,7 +354,7 @@ def import_bundle_facts(
         variant_fingerprint = _DEFAULT_VARIANT_FINGERPRINT
     composition_payload = {
         "variant_fingerprint": variant_fingerprint,
-        "manifest": bundle_facts_document.get("manifest"),
+        "manifest": _validated_manifest(bundle_facts_document.get("manifest")),
         "filesystem_aliases": _validated_filesystem_aliases(
             bundle_facts_document.get("filesystem_aliases")
         ),

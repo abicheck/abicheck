@@ -42,7 +42,7 @@ def _bundle_document(**overrides: Any) -> dict[str, Any]:
         },
         "filesystem_aliases": {"liba.so": ["liba.so.1"]},
         "library_filenames": {"liba.so": "liba.so.1.2.3"},
-        "manifest": {"kind": "instantiation-manifest", "libraries": ["liba.so"]},
+        "manifest": {"provides": [{"symbol": "liba_init"}]},
     }
     doc.update(overrides)
     return doc
@@ -195,6 +195,26 @@ class TestImportBundleFacts:
     def test_rejects_a_non_string_library_filenames_value(self) -> None:
         doc = _bundle_document(library_filenames={"liba.so": 123})
         with pytest.raises(ValueError, match="library_filenames"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    def test_a_missing_manifest_is_preserved_as_none(self) -> None:
+        doc = _bundle_document(manifest=None)
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        roundtrip = export_bundle_facts(manifest, store=store)
+        assert roundtrip["manifest"] is None
+
+    @pytest.mark.parametrize(
+        "bad_manifest",
+        [[], "not-a-mapping", {"no_provides_key": True}, {"provides": {}}],
+    )
+    def test_rejects_a_malformed_manifest(self, bad_manifest: Any) -> None:
+        """The one shape `bundle_manifest.manifest_from_dict` requires at
+        its own top level -- a mapping with a list-valued `provides` key
+        -- is checked here too, without importing that flat-root module
+        (Codex review)."""
+        doc = _bundle_document(manifest=bad_manifest)
+        with pytest.raises(ValueError, match="manifest"):
             import_bundle_facts(doc, store=InMemoryObjectStore())
 
     def test_export_is_the_exact_inverse(self) -> None:
