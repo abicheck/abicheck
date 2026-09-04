@@ -400,7 +400,17 @@ def parse_tpi_stream(data: bytes) -> TpiStream:
 
     while pos + 4 <= end and current_ti < ti_end:
         (rec_len,) = struct.unpack_from("<H", data, pos)
-        if rec_len < 2 or pos + 2 + rec_len > len(data):
+        # P2 review, fresh evidence: bound the record by both the header's
+        # own declared type-data boundary (``end``) and the buffer's actual
+        # length. Checking only ``len(data)`` let a record whose declared
+        # ``rec_len`` crosses ``end`` still be accepted whenever the PDB
+        # stream carries trailing bytes past the type section (e.g. a
+        # hash/index substream appended after it) -- the parser would then
+        # consume those non-type-record bytes as if they were part of this
+        # record's own payload, potentially reaching ti_end and reporting
+        # ``truncated=False`` for a stream that never actually held that
+        # many well-formed records.
+        if rec_len < 2 or pos + 2 + rec_len > end or pos + 2 + rec_len > len(data):
             break
         (leaf,) = struct.unpack_from("<H", data, pos + 2)
         rec_data = data[pos + 4:pos + 2 + rec_len]

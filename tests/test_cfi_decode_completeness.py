@@ -156,3 +156,31 @@ class TestCfiSourceDecodeFailurePropagates:
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
         assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+
+    def test_eh_frame_decode_failure_with_real_fde_free_debug_frame_fallback(
+        self,
+    ) -> None:
+        """P1 review, fresh evidence (round 4): the reviewer's exact
+        reported shape end-to-end through ``_parse_frame_registers`` --
+        ``.eh_frame`` fails to decode (recorded via ``source_failed``) and
+        the ``.debug_frame`` fallback is present but carries no real FDE
+        (CIE-only). ``_get_cfi_source`` previously still returned that
+        unusable list as a non-``None`` source, making this function's own
+        ``cfi_src is None`` completeness check unreachable and silently
+        reporting ``complete=True`` despite the recorded EH-frame failure.
+        """
+        from elftools.common.exceptions import ELFParseError
+
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        mock_dwarf = MagicMock()
+        mock_dwarf.has_EH_CFI.return_value = True
+        mock_dwarf.EH_CFI_entries.side_effect = ELFParseError("corrupt eh_frame")
+        mock_dwarf.has_CFI.return_value = True
+        cie_only = MagicMock()
+        cie_only.__class__ = type("CIE", (), {})
+        mock_dwarf.CFI_entries.return_value = [cie_only]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
+        assert len(meta.frame_registers) == 0

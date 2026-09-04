@@ -126,6 +126,38 @@ class TestTpiStreamTruncated:
         assert len(tpi.records) == 1  # the one real record is still parsed
         assert tpi.truncated is True
 
+    def test_record_crossing_declared_type_boundary_is_truncated(self) -> None:
+        """P2 review, fresh evidence beyond the resolved record-length/
+        stream-bounds threads: a record whose declared ``rec_len`` fits
+        within the whole buffer (``len(data)``) but crosses the header's
+        own declared type-data boundary (``end``) must still be rejected.
+        A PDB TPI stream can carry trailing hash/index substream bytes past
+        its own type section -- checking only ``len(data)`` let those
+        bytes be consumed as if they belonged to this record's own
+        payload, which could let the loop reach ``ti_end`` and report
+        ``truncated=False`` for a type section that never actually held
+        that many well-formed records."""
+        ti_begin = 0x1000
+        ti_end = 0x1001
+        header_size = 56
+        rec_len = 20  # 2-byte leaf + 18-byte payload
+        rec_bytes = (
+            struct.pack("<H", rec_len)
+            + struct.pack("<H", LF_FIELDLIST)
+            + b"\x00" * (rec_len - 2)
+        )
+        type_bytes = 4  # header declares the type section ends well short of rec_bytes
+        trailing = (
+            b"\xaa" * 32
+        )  # simulates a hash/index substream past the type section
+        header = struct.pack(
+            "<IIIII", 20040203, header_size, ti_begin, ti_end, type_bytes
+        )
+        header += b"\x00" * (header_size - len(header))
+        tpi = parse_tpi_stream(header + rec_bytes + trailing)
+        assert len(tpi.records) == 0
+        assert tpi.truncated is True
+
     def test_fully_consumed_stream_is_not_truncated(self) -> None:
         """Positive control: a stream where every promised type index was
         actually parsed must not be flagged."""

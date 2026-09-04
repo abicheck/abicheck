@@ -868,7 +868,7 @@ def _has_fde(entries: Any) -> bool:
 def _get_cfi_source(dwarf: Any, *, source_failed: list[bool] | None = None) -> Any:
     """Return CFI entry iterator, preferring .eh_frame over .debug_frame.
 
-    P1 review, three rounds of fresh evidence against this same function:
+    P1 review, four rounds of fresh evidence against this same function:
 
     1. pyelftools' real ``DWARFInfo`` API is
        ``EH_CFI_entries()``/``CFI_entries()`` -- there is no
@@ -899,6 +899,17 @@ def _get_cfi_source(dwarf: Any, *, source_failed: list[bool] | None = None) -> A
        (never for a section that was legitimately never present), so
        ``_parse_frame_registers`` can downgrade completeness for this
        shape too.
+    4. The ``.debug_frame`` fallback still accepted whatever
+       ``CFI_entries()`` returned unconditionally, unlike the ``.eh_frame``
+       branch's own ``_has_fde()`` gate -- a malformed ``.eh_frame``
+       (recorded via ``source_failed``) falling back to a present but
+       real-FDE-empty ``.debug_frame`` (CIE-only, or genuinely no frame
+       data) returned that empty list as a non-``None`` source anyway,
+       which made ``_parse_frame_registers``'s own ``cfi_src is None``
+       failure check unreachable and erased the recorded EH-frame decode
+       failure. Now symmetric with the ``.eh_frame`` branch: only a
+       ``.debug_frame`` result with a real FDE is returned as a usable
+       source.
     """
     try:
         has_eh = dwarf.has_EH_CFI()
@@ -918,7 +929,9 @@ def _get_cfi_source(dwarf: Any, *, source_failed: list[bool] | None = None) -> A
         has_dbg = False
     if has_dbg:
         try:
-            return dwarf.CFI_entries()
+            entries = dwarf.CFI_entries()
+            if _has_fde(entries):
+                return entries
         except (AttributeError, AssertionError, ELFError):
             if source_failed is not None:
                 source_failed.append(True)

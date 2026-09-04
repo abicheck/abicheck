@@ -273,6 +273,34 @@ class TestGetCfiSource:
         assert result is None
         assert source_failed == [True, True]
 
+    def test_eh_frame_decode_failure_with_real_fde_free_debug_frame_returns_none(
+        self,
+    ) -> None:
+        """P1 review, fresh evidence (round 4): a malformed ``.eh_frame``
+        (real decode failure, recorded via ``source_failed``) falling back
+        to a present ``.debug_frame`` that itself carries no real FDE
+        (CIE-only, or genuinely empty) previously still returned that
+        unusable list as a non-``None`` source -- unlike the ``.eh_frame``
+        branch's own ``_has_fde()`` gate, the ``.debug_frame`` branch
+        accepted ``CFI_entries()``'s result unconditionally. That made
+        ``_parse_frame_registers``'s own ``cfi_src is None`` failure check
+        unreachable and erased the recorded EH-frame decode failure. Now
+        symmetric: only a ``.debug_frame`` result with a real FDE is
+        returned; a real-FDE-empty fallback still yields ``None``, and the
+        recorded ``source_failed`` entry survives to the caller."""
+        from elftools.common.exceptions import ELFParseError
+
+        dwarf = MagicMock()
+        dwarf.has_EH_CFI.return_value = True
+        dwarf.EH_CFI_entries.side_effect = ELFParseError("corrupt eh_frame")
+        dwarf.has_CFI.return_value = True
+        dwarf.CFI_entries.return_value = [_fake_entry("CIE"), _fake_entry("ZERO")]
+
+        source_failed: list[bool] = []
+        result = _get_cfi_source(dwarf, source_failed=source_failed)
+        assert result is None
+        assert source_failed == [True]
+
 
 # ── _extract_cfa_reg_from_fde ─────────────────────────────────────────────────
 

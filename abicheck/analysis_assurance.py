@@ -299,6 +299,29 @@ def _debug_evidence_receipt(snap: AbiSnapshot) -> dict[str, Any]:
         advanced_state = getattr(advanced, "evidence_state", None) or (
             "parsed" if advanced is not None and advanced.has_dwarf else "not_available"
         )
+    # P1 review, fresh evidence: has_dwarf=True with evidence_state left at
+    # its dataclass default ("not_available") is contradictory, and the
+    # ``or`` fallback above can never catch it -- a real DwarfMetadata/
+    # AdvancedDwarfMetadata instance's evidence_state is never falsy (the
+    # field itself defaults to the non-empty string "not_available", not
+    # None), so a legacy caller still constructing
+    # ``DwarfMetadata(has_dwarf=True)``/``AdvancedDwarfMetadata(has_dwarf=
+    # True)`` without the newer evidence_state kwarg silently reads back as
+    # "not_available" -- a state debug_parse_incomplete below treats as
+    # legitimately absent evidence, not incomplete, even though has_dwarf
+    # says data was actually found. Normalize the contradiction to
+    # "presence_only" (the cheapest real tier -- has_dwarf alone never
+    # proved a completed parse), mirroring the identical degrade already
+    # applied to a legacy pre-v44 serialized block in
+    # snapshot_platform_blocks.dwarf_from_dict/dwarf_advanced_from_dict.
+    if basic_state == "not_available" and basic is not None and basic.has_dwarf:
+        basic_state = "presence_only"
+    if (
+        advanced_state == "not_available"
+        and advanced is not None
+        and advanced.has_dwarf
+    ):
+        advanced_state = "presence_only"
     receipt: dict[str, Any] = {
         "source": source,
         "basic": basic_state,
