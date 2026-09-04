@@ -890,3 +890,64 @@ class TestUnifiedPassDowngradesOnIncompleteValueAbiTraits:
         assert adv.cu_failed == 0
         assert adv.evidence_state == "parsed"
         assert adv.value_abi_traits["_Z3barv"] == "ret:trivial"
+
+
+class TestUnifiedPassDowngradesOnMissingCfiSections:
+    """P2 review, fresh evidence (Codex): sibling of the above incomplete-
+    FDE-decode gap -- a binary with real DWARF DIEs but neither .eh_frame
+    nor .debug_frame present at all (independently stripped unwind
+    sections) previously reported evidence_state="parsed" on this unified
+    path too. Exercised through the real public entry point
+    (parse_dwarf_from_session), letting the actual _parse_frame_registers/
+    _get_cfi_source pipeline run rather than patching it out."""
+
+    def test_no_unwind_sections_at_all_marks_advanced_channel_partial(
+        self,
+    ) -> None:
+        from abicheck import dwarf_unified as du
+
+        struct_type = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "S", "DW_AT_byte_size": 8},
+            offset=10,
+        )
+        subprogram = _Die(
+            "DW_TAG_subprogram",
+            {
+                "DW_AT_external": _Attr(1),
+                "DW_AT_linkage_name": "_Z3barv",
+                "DW_AT_type": _Attr(10, "DW_FORM_ref_addr"),
+            },
+        )
+        root = _Die("DW_TAG_compile_unit", children=[subprogram])
+        cu = _CU(top_die=root, offset=0)
+        cu._die_map = {10: struct_type}
+
+        class _DwarfInfo:
+            def iter_CUs(self):
+                return [cu]
+
+            def has_EH_CFI(self):
+                return False
+
+            def has_CFI(self):
+                return False
+
+        sess = DwarfSession(
+            path=Path("libtest.so"),
+            _file=object(),  # type: ignore[arg-type]
+            elf=object(),
+            dwarf=_DwarfInfo(),
+            arch="x86_64",  # type: ignore[arg-type]
+        )
+        with (
+            patch("abicheck.dwarf_advanced._normalize_arch", return_value="x86_64"),
+            patch("abicheck.dwarf_advanced._build_addr_to_sym", return_value={}),
+        ):
+            meta, adv = du.parse_dwarf_from_session(sess)
+
+        assert adv.cu_failed == 0
+        assert adv.evidence_state == "partial"
+        assert adv.frame_registers == {}
+        # The value-ABI trait (unrelated to CFI) still resolves correctly.
+        assert adv.value_abi_traits["_Z3barv"] == "ret:trivial"

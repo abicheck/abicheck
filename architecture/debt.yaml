@@ -813,12 +813,12 @@
     },
     {
       "path": "abicheck/dwarf_advanced.py",
-      "baseline_lines": 1269,
+      "baseline_lines": 1284,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1249 -> 1263 (2026-09-04, P1 review, fresh evidence, Codex, PR #784): a malformed DW_AT_type on an exported function's return/parameter type -- caught deep inside the value-ABI-trait walk (resolve_type_die/_unwrap_qualifiers/_is_nontrivial_aggregate/_check_children_nontrivial/_type_unaligned_at/_aggregate_has_unaligned_member, each returning a placeholder rather than raising) -- previously left cu_failed untouched and evidence_state at \"parsed\", silently omitting that function's value_abi_traits/return_value_sizes/return_memory_classified entries with no completeness signal. Fixed by threading a keyword-only `incomplete: list[bool] | None = None` out-param through the entire value-ABI-trait call chain (mirrors the identical dwarf_metadata.py/dwarf_unified.py fix for the basic channel), folded into evidence_state alongside the existing cu_failed/skeleton_cus/cfi_complete checks in both parse_advanced_dwarf (this file's own standalone entry point) and dwarf_unified.parse_dwarf_from_session (the unified path dumper.py's real ELF dumps use). The growth is one new kwarg plus its propagation at each of ~10 call sites, each already the one place that owns its own resolution verdict -- not extractable to another module. Raised again 1263 -> 1269 (2026-09-04, CI correction): the prior line count was measured before a `ruff format` pass reformatted several of the newly-added multi-argument calls onto multiple lines; no further code changed.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1249 -> 1263 (2026-09-04, P1 review, fresh evidence, Codex, PR #784): a malformed DW_AT_type on an exported function's return/parameter type -- caught deep inside the value-ABI-trait walk (resolve_type_die/_unwrap_qualifiers/_is_nontrivial_aggregate/_check_children_nontrivial/_type_unaligned_at/_aggregate_has_unaligned_member, each returning a placeholder rather than raising) -- previously left cu_failed untouched and evidence_state at \"parsed\", silently omitting that function's value_abi_traits/return_value_sizes/return_memory_classified entries with no completeness signal. Fixed by threading a keyword-only `incomplete: list[bool] | None = None` out-param through the entire value-ABI-trait call chain (mirrors the identical dwarf_metadata.py/dwarf_unified.py fix for the basic channel), folded into evidence_state alongside the existing cu_failed/skeleton_cus/cfi_complete checks in both parse_advanced_dwarf (this file's own standalone entry point) and dwarf_unified.parse_dwarf_from_session (the unified path dumper.py's real ELF dumps use). The growth is one new kwarg plus its propagation at each of ~10 call sites, each already the one place that owns its own resolution verdict -- not extractable to another module. Raised again 1263 -> 1269 (2026-09-04, CI correction): the prior line count was measured before a `ruff format` pass reformatted several of the newly-added multi-argument calls onto multiple lines; no further code changed. Raised again 1269 -> 1284 (2026-09-04, P2 review, fresh evidence, Codex): _parse_frame_registers previously returned True (\"complete\") whenever no CFI source was present at all, deliberately treating total absence of unwind data as \"nothing to be incomplete about\" -- but both call sites only invoke this function when real DWARF DIEs already exist (cu_total > 0), so a binary with real debug info but independently-stripped .eh_frame/.debug_frame sections silently reported evidence_state=\"parsed\" with frame_registers/callee_saved_regs empty for every function (reproduced: a self-comparison of such a binary read analysis_assurance.status=\"complete\" and exited 0 under --require-complete-analysis). Fixed by returning False for this shape too, with the docstring updated to match. The growth is the added branch, its comment, and the docstring rewrite -- not extractable, since this is the one function that already owns this pass's own completion verdict.",
       "review_by": "2026-11-30"
     },
     {
@@ -1763,12 +1763,12 @@
     },
     {
       "path": "tests/test_dwarf_coverage_gaps.py",
-      "baseline_lines": 2326,
+      "baseline_lines": 2334,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 2326 -> 2334 (2026-09-04, P2 review, fresh evidence, Codex, PR #784): TestParseFrameRegisters::test_no_cfi_source's own docstring and assertion updated to match _parse_frame_registers' corrected behavior (a genuine total absence of unwind sections is now incomplete evidence, not complete) -- see the matching abicheck/dwarf_advanced.py debt entry for the production-side rationale.",
       "review_by": "2026-11-30"
     },
     {

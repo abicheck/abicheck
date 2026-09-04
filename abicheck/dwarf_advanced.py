@@ -1084,12 +1084,15 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
     accounting already decided -- "parsed" on an otherwise-clean binary,
     even though frame-register/callee-saved-register facts for the skipped
     FDE(s) were never actually extracted. Returns ``True`` when CFI
-    extraction completed without skipping anything (including the
-    legitimate "no CFI section at all" case -- absence of data is not a
-    parse failure), ``False`` whenever a per-FDE error was caught and
-    skipped, or the whole pass failed outright. Callers downgrade
-    ``evidence_state`` to ``"partial"`` on a ``False`` return, mirroring
-    the cu_failed/skeleton-CU downgrades they already apply.
+    extraction completed without skipping anything, ``False`` whenever a
+    per-FDE error was caught and skipped, the whole pass failed outright,
+    or -- P2 review, fresh evidence, round two -- neither ``.eh_frame`` nor
+    ``.debug_frame`` is present at all (both call sites only invoke this
+    function when real DWARF DIEs exist, so a total absence of unwind
+    sections means they were stripped independently of debug info, not
+    that there is nothing to extract). Callers downgrade ``evidence_state``
+    to ``"partial"`` on a ``False`` return, mirroring the cu_failed/
+    skeleton-CU downgrades they already apply.
     """
     try:
         arch_key = _normalize_arch(elf)
@@ -1097,11 +1100,23 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
         source_failed: list[bool] = []
         cfi_src = _get_cfi_source(dwarf, source_failed=source_failed)
         if cfi_src is None:
-            # P1 review, fresh evidence: "no source" and "a present source
-            # whose entries failed to decode" both reach here as None --
-            # source_failed distinguishes them, since only the latter is
-            # actually incomplete evidence.
-            return not source_failed
+            if source_failed:
+                # A present CFI section whose entries failed to decode --
+                # genuinely incomplete evidence.
+                return False
+            # P2 review, fresh evidence (Codex): neither .eh_frame nor
+            # .debug_frame is present at all. Both call sites gate this
+            # function on cu_total > 0 (real DWARF DIEs exist), so this
+            # shape is a binary whose unwind sections were stripped
+            # independently of its debug info -- frame_registers/
+            # callee_saved_regs then stay empty for every function, which
+            # previously read as a clean "complete" pass (a self-comparison
+            # of such a binary reported analysis_assurance.status="complete"
+            # and exited 0 under --require-complete-analysis). Fail closed:
+            # a total absence of unwind data is incomplete evidence for the
+            # calling-convention-drift analysis this pass exists to run,
+            # not "nothing to be incomplete about".
+            return False
 
         complete = True
         for entry in cfi_src:

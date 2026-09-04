@@ -1119,7 +1119,15 @@ class TestParseFrameRegisters:
     """_parse_frame_registers edge cases (lines 748-770)."""
 
     def test_no_cfi_source(self):
-        """Lines 752-753: no CFI source => return early."""
+        """P2 review, fresh evidence (Codex): a genuine absence of any CFI
+        source (neither .eh_frame nor .debug_frame) now reports incomplete
+        (False), not complete -- both call sites only invoke this function
+        when real DWARF DIEs exist, so a total absence of unwind data means
+        the sections were stripped independently of debug info, not that
+        there was nothing to extract. Previously this returned True,
+        letting a self-comparison of such a binary report
+        analysis_assurance.status="complete" and exit 0 under
+        --require-complete-analysis."""
         from abicheck.dwarf_advanced import (
             AdvancedDwarfMetadata,
             _parse_frame_registers,
@@ -1134,7 +1142,7 @@ class TestParseFrameRegisters:
         mock_dwarf.CFI_entries.return_value = None
 
         meta = AdvancedDwarfMetadata(has_dwarf=True)
-        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is False
         assert len(meta.frame_registers) == 0
 
     def test_fde_no_symbol(self):

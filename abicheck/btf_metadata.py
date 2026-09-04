@@ -636,6 +636,15 @@ def parse_btf_from_bytes(data: bytes, pointer_size: int = 8) -> BtfMetadata:
         # so the receipt must not silently claim "parsed" for a channel
         # whose type table was read incomplete.
         meta.extraction_partial = True
+    if header.version != BTF_VERSION:
+        # P2 review, fresh evidence (Codex): _parse_header() only warns on
+        # an unsupported version and keeps parsing with this parser's own
+        # (version-1-only) record layout -- a future/different-version blob
+        # can therefore be misdecoded (wrong field widths, misread type
+        # kinds) while never raising, so this receipt could otherwise read
+        # "parsed" despite the layout not actually being one this parser
+        # understands.
+        meta.extraction_partial = True
 
     try:
         meta.structs = _extract_structs(

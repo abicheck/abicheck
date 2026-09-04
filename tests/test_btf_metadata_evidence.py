@@ -287,3 +287,32 @@ class TestUnterminatedStringMarksPartial:
 
         meta = parse_btf_from_bytes(b.build())
         assert meta.extraction_partial is False
+
+
+class TestUnsupportedVersionMarksPartial:
+    """P2 review, fresh evidence (Codex): _parse_header() only warns on a
+    BTF version other than the sole one this parser's record layout
+    actually understands (BTF_VERSION == 1) and keeps parsing anyway -- a
+    future/different-version blob can therefore be misdecoded (wrong field
+    widths, misread type kinds) while never raising, so the receipt could
+    otherwise read "parsed" despite the layout not being one this parser
+    is known to handle correctly."""
+
+    @staticmethod
+    def _build_with_version(version: int) -> bytes:
+        b = BtfBuilder()
+        b.add_type("S", BTF_KIND_STRUCT, 0, 0)
+        blob = bytearray(b.build())
+        blob[2] = version  # header layout: magic(H) version(B) flags(B) ...
+        return bytes(blob)
+
+    def test_unsupported_version_marks_partial(self) -> None:
+        meta = parse_btf_from_bytes(self._build_with_version(2))
+        assert meta.has_btf is True
+        assert meta.extraction_partial is True
+
+    def test_supported_version_is_not_flagged(self) -> None:
+        """Positive control: the one version this parser actually supports
+        must not be flagged."""
+        meta = parse_btf_from_bytes(self._build_with_version(BTF_VERSION))
+        assert meta.extraction_partial is False
