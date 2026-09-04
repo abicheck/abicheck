@@ -108,8 +108,26 @@ def read_variant_composition_library_filenames(
     `native_identity` carries only the bundle key, which can differ from a
     live directory operand's own filename-derived key; `workflows.
     release_package._release_match_key` uses this to recover it.
+
+    `bundle_composition_from_dto` only asserts its own top-level payload is
+    a dict -- it does not validate `library_filenames`'s own shape, so a
+    hand-produced or malformed composition storing it as an iterable of
+    pairs (rather than a JSON object) would otherwise pass through
+    `dict(...)`'s own permissive construction unrejected, silently
+    normalizing it (with a duplicate key becoming last-wins) instead of
+    failing as malformed input `_release_match_key` then trusts for a real
+    matching decision (Codex review, fresh evidence).
     """
     composition = _read_variant_composition(root, variant_id)
     if composition is None:
         return {}
-    return dict(composition.get("library_filenames", {}))
+    raw = composition.get("library_filenames", {})
+    if not isinstance(raw, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in raw.items()
+    ):
+        raise ValueError(
+            f"{root}: variant {variant_id!r}'s bundle_composition "
+            "library_filenames must be an object of string -> string, got "
+            f"{raw!r}"
+        )
+    return dict(raw)

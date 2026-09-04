@@ -544,6 +544,43 @@ class TestMalformedCompositionShapeRaises:
             bundle._stored_library_identity(sub_dir, 0)
 
 
+class TestVariantCompositionRejectsNonMappingLibraryFilenames:
+    """Codex review, fresh evidence: `bundle_composition_from_dto` only
+    asserts its own top-level payload is a dict -- it does not validate
+    `library_filenames`'s own shape. A hand-produced or malformed
+    composition storing it as an iterable of pairs instead of a JSON
+    object previously passed through `dict(...)`'s permissive construction
+    unrejected (silently normalizing it, a duplicate key becoming
+    last-wins) instead of failing as malformed input -- `_release_match_key`
+    then trusts that mapping for a real matching decision."""
+
+    def test_non_mapping_library_filenames_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.storage.variant_composition import (
+            read_variant_composition_library_filenames,
+        )
+
+        libs = {
+            "liba.so": _snap("liba.so", "1.0", [_fn("foo", "_Z3foov")]),
+        }
+        facts = capture_bundle_facts(libs, variant_fingerprint="gcc13-avx2")
+        pkg = tmp_path / "pkg"
+        store = DirectoryObjectStore(pkg)
+        manifest = write_bundle_facts_package(facts, store=store, variant_id="v1")
+        write_project_manifest(pkg, manifest)
+
+        def _bad_shape(raw: object) -> dict[str, object]:
+            return {"library_filenames": [["liba.so", "liba.so.1"]]}
+
+        monkeypatch.setattr(
+            "abicheck.storage.variant_composition.bundle_composition_from_dto",
+            _bad_shape,
+        )
+        with pytest.raises(ValueError):
+            read_variant_composition_library_filenames(pkg, "v1")
+
+
 class TestWriteBundleFactsOutUsesMatchedReleaseKey:
     """Codex review, fresh evidence: a stored snapshot's logical library
     label (e.g. ``"provider"``) can differ from its real filename's own

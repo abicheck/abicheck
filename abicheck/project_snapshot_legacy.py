@@ -29,6 +29,8 @@ out, don't trim the file to fit.
 
 from __future__ import annotations
 
+import os
+import shutil
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -299,6 +301,8 @@ def _materialize_referenced_objects(
     dest_dir: Path,
     source_store: DirectoryObjectStore,
     refs: Iterable[ObjectRef],
+    *,
+    materialized_cache: dict[str, Path] | None = None,
 ) -> None:
     """Copy exactly the objects *refs* names -- not *root*'s entire
     `objects/` tree -- into a fresh `DirectoryObjectStore` rooted at
@@ -321,9 +325,43 @@ def _materialize_referenced_objects(
     tampered or substituted object fails there, not silently), and no
     directory-level symlink -- the one thing a malicious package's own
     `objects/` layout could otherwise influence -- is ever created.
+
+    *materialized_cache*, when given, is shared across every sub-package
+    this same `materialize_release_variant_artifacts()` call materializes:
+    a variant- or project-level section is identical for every artifact in
+    the variant (Codex review, fresh evidence -- a large shared composition
+    or manifest was otherwise re-read from *source_store* and re-written
+    once per artifact, an N-fold disk blow-up for a many-artifact package).
+    The *first* artifact to need a given digest still goes through the
+    verified `get()`/`put()` round trip above; every later artifact
+    hard-links that already-verified destination file instead of touching
+    *source_store* again, falling back to a real copy only if hard-linking
+    itself fails (e.g. `dest_dir` spans a different filesystem/device from
+    the cached path) -- never linking to anything in *source_store* itself,
+    so the "no directory-level symlink into the untrusted source" invariant
+    above is preserved; only two already-verified destination copies ever
+    share an inode.
     """
     dest_store = DirectoryObjectStore(dest_dir)
     for ref in refs:
+        cached_path = (
+            materialized_cache.get(ref.digest)
+            if materialized_cache is not None
+            else None
+        )
+        if cached_path is not None:
+            dest_path = (
+                dest_store._json_path(ref.digest)
+                if cached_path.name.endswith(".json.zst")
+                else dest_store._raw_path(ref.digest)
+            )
+            if not dest_path.exists():
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.link(cached_path, dest_path)
+                except OSError:
+                    shutil.copyfile(cached_path, dest_path)
+            continue
         materialized_digest = dest_store.put(source_store.get(ref.digest))
         if materialized_digest != ref.digest:
             # Can only happen if the source store's own content no longer
@@ -334,6 +372,11 @@ def _materialize_referenced_objects(
                 "after being read back from the source package -- the "
                 "source package's object store is corrupted or was "
                 "hand-edited"
+            )
+        if materialized_cache is not None:
+            json_path = dest_store._json_path(ref.digest)
+            materialized_cache[ref.digest] = (
+                json_path if json_path.exists() else dest_store._raw_path(ref.digest)
             )
 
 
@@ -432,6 +475,11 @@ def materialize_release_variant_artifacts(
     source_store = DirectoryObjectStore(root_path)
 
     result: dict[str, tuple[Path, ArtifactRef]] = {}
+    # Shared across every artifact below -- a variant-/project-level
+    # section's own object is identical for all of them, so only the first
+    # artifact that needs it pays the real get()/put() cost (see
+    # `_materialize_referenced_objects`'s own docstring).
+    materialized_cache: dict[str, Path] = {}
     for artifact_id in variant.artifact_ids:
         full_variant, artifact = read_variant_artifact_pair(
             root_path, variant_id, artifact_id
@@ -488,6 +536,7 @@ def materialize_release_variant_artifacts(
                 *full_variant.sections.values(),
                 *summary.project_sections.values(),
             ],
+            materialized_cache=materialized_cache,
         )
         sub_manifest = PackageManifest(
             versions=trimmed_versions,
