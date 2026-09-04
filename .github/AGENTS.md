@@ -95,8 +95,9 @@ not a required companion piece.
 ## Local equivalence (CLAUDE.md "M0-3")
 
 `ci.yml`'s always-required jobs (`ai-readiness` — which includes the
-ADR-061 architecture step — `fair-metadata`, `lint-and-types`, and the
-canonical `unit-tests` Linux/3.13 lane) are reproducible through
+ADR-061 architecture step — `fair-metadata`, `lint-and-types`, the
+canonical `unit-tests` Linux/3.13 lane, and `packaging`, reproduced by the
+`pr` profile's own `distribution-build` step) are reproducible through
 `python scripts/verify.py --profile pr` — `tests/test_verify_profiles.py`
 asserts the core `ci.yml` catalog stays in sync. **Don't add a new required
 check without adding the matching `Step` to `scripts/verify.py`'s catalog** —

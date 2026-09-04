@@ -1,8 +1,14 @@
 # AGENTS.md — `abicheck/` package
 
 This file scopes the repository-level `AGENTS.md` for production Python code.
-It is vendor-neutral and authoritative for this directory. Tool-specific files
-must point here rather than restating these rules.
+It is vendor-neutral and authoritative for this directory's *rules* (task
+routing, dependency direction, migration policy) — a tool-specific *adapter*
+file (one whose only job is pointing at the canonical source, e.g. this
+directory's own `CLAUDE.md`) must point here rather than restating those
+rules. This does not apply to a genuinely scoped subdirectory `CLAUDE.md`
+carrying its own per-area context (pipeline orientation, test pointers, and
+similar) — see root `CLAUDE.md`'s own distinction between an adapter and
+scoped context, which this directory's `CLAUDE.md` follows.
 
 ## Read order
 
@@ -26,8 +32,13 @@ The machine-readable boundary graph and no-growth debt ledger are
 ## Working with legacy large modules
 
 Files already above the architecture threshold (`architecture/debt.yaml`)
-may shrink but may not grow — that ledger, not this file, is the source of
-truth for which files are current debt.
+are debt, not a design precedent — that ledger, not this file, is the
+source of truth for which files are current debt. `scripts/check_architecture.py`
+enforces no-growth relative to each file's own recorded adoption baseline
+(never exceed it), not a stricter never-add-a-line rule against the PR's own
+base revision: a file that has already shrunk below its baseline may still
+grow back up to that baseline without tripping the gate. Treat the baseline
+as a ceiling to pay down, not a floor to hug.
 
 Do not react to a full file by moving arbitrary functions to a new
 `*_helpers.py`, `*_lib.py`, or one-function sibling. A valid extraction:
