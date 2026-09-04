@@ -55,6 +55,12 @@ from .elf_metadata import ElfMetadata
 if TYPE_CHECKING:
     from .diff_cpp_patterns import BundleMember
 
+# Manifest-matching cooperative checkpoint granularity (Codex review, PR H,
+# second round): frequent enough that a real --budget overrun is caught
+# well before it compounds, coarse enough that deadline.check()'s own
+# time.monotonic() read doesn't dominate a large index scan.
+_DEADLINE_CHECK_INTERVAL = 2000
+
 
 def _soname_skew_findings(
     old_members: list[BundleMember],
@@ -223,16 +229,27 @@ def _build_demangled_index(snapshot: BundleSnapshot) -> list[tuple[str, str]]:
     exporting only a non-default ``@version`` definition of the name
     cannot actually be linked against by an unversioned consumer, even
     though the bare name is technically present in ``.dynsym``.
+
+    Checkpoints ``deadline.check()`` every :data:`_DEADLINE_CHECK_INTERVAL`
+    symbols (Codex review, PR H, second round): a ~50k-symbol bundle
+    demangled in one call has no other cooperative checkpoint of its own,
+    so a small ``--budget`` could otherwise be overrun well before any
+    per-target checkpoint in :func:`_match_entry` is ever reached.
     """
+    from . import deadline
     from .demangle import demangle as _demangle
 
     index: list[tuple[str, str]] = []
+    seen = 0
     for lib_name, meta in snapshot.metadata.items():
         for sym in meta.symbols:
             if sym.visibility not in ("default", "protected"):
                 continue
             if not sym.is_default:
                 continue
+            seen += 1
+            if seen % _DEADLINE_CHECK_INTERVAL == 0:
+                deadline.check()
             index.append((_demangle(sym.name) or sym.name, lib_name))
     return index
 
@@ -264,12 +281,21 @@ def _match_target_against_index(
         providers = [p for p in snapshot.resolution.providers_for(target) if p.is_default]
         return ([target] if providers else []), providers
 
+    from . import deadline
+
     if index is None:
         index = _build_demangled_index(snapshot)
 
     matched: list[str] = []
     provider_set: set[str] = set()
-    for demangled, lib_name in index:
+    # Checkpointed every _DEADLINE_CHECK_INTERVAL entries (Codex review,
+    # PR H, second round): a single pattern/template target scanning a
+    # ~50k-entry index has no other cooperative checkpoint of its own --
+    # _match_entry's own per-target check only bounds the time *between*
+    # targets, not a single large scan.
+    for i, (demangled, lib_name) in enumerate(index):
+        if i % _DEADLINE_CHECK_INTERVAL == 0:
+            deadline.check()
         if lib_name in provider_set:
             # We already recorded this library as a provider — one
             # match per library is enough; skip the rest of its exports.

@@ -354,6 +354,42 @@ class TestMatchEntryDeadlineCheckpoint:
         assert (target, kind, matched) == ("foo", "symbol", ["foo"])
         assert [p.library for p in providers] == ["liba.so"]
 
+class TestIndexScanDeadlineCheckpoint:
+    """Codex review, PR H, second round: `_match_entry`'s own per-target
+    checkpoint only bounds time *between* targets -- a *single*
+    pattern/template target scanning one large index, or building one
+    large index in the first place, had no checkpoint of its own. Tests
+    `_build_demangled_index`/`_match_target_against_index` directly
+    (bypassing `_match_entry`'s outer checkpoint entirely) so only each
+    function's own inner-loop checkpoint can be what raises here."""
+
+    def test_build_demangled_index_checkpoints(self) -> None:
+        from abicheck import deadline
+        from abicheck.bundle_detector_heuristics import (
+            _DEADLINE_CHECK_INTERVAL,
+            _build_demangled_index,
+        )
+
+        exports = [f"sym_{i}" for i in range(_DEADLINE_CHECK_INTERVAL)]
+        new = _snapshot({"liba.so": _meta(soname="liba.so.1", exports=exports)})
+        with deadline.deadline_scope(-1):
+            with pytest.raises(deadline.DeadlineExceeded):
+                _build_demangled_index(new)
+
+    def test_match_target_against_index_checkpoints(self) -> None:
+        from abicheck import deadline
+        from abicheck.bundle_detector_heuristics import (
+            _match_target_against_index,
+        )
+
+        # index=None forces this call to build its own index, unbounded by
+        # the caller's own deadline scope -- must still raise before
+        # returning.
+        new = _snapshot({"liba.so": _meta(soname="liba.so.1", exports=["foo"])})
+        with deadline.deadline_scope(-1):
+            with pytest.raises(deadline.DeadlineExceeded):
+                _match_target_against_index("never_matches*", "pattern", new)
+
 
 class TestLoadManifestRequiresLibraryForRequiredProvider:
     """`load_manifest` rejects `optional_provider: false` with no
