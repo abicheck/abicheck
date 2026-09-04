@@ -262,6 +262,26 @@ class TestReadBundleFactsPackage:
         with pytest.raises(ValueError, match="DEFAULT_MAX_LIBRARY_COUNT"):
             read_bundle_facts_package(manifest, store=store)
 
+    def test_refuses_to_eagerly_reconstruct_past_the_decoded_size_budget(
+        self, monkeypatch: Any
+    ) -> None:
+        """A *few* individually-sized artifacts can amplify past the count
+        bound too -- charged against `DEFAULT_MAX_BUNDLE_DECODED_BYTES`,
+        the same aggregate ceiling the G40 bundle-facts archive enforces
+        (Codex review, fresh evidence)."""
+        import abicheck.bundle_facts_store as module
+
+        facts = capture_bundle_facts(
+            {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
+        )
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+
+        monkeypatch.setattr(module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 1)
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
+            read_bundle_facts_package(manifest, store=store)
+
 
 class TestBundleFactsPackageThroughDirectoryStore:
     """The full round trip through the real, filesystem-backed D6 layout --

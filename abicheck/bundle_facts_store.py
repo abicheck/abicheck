@@ -87,6 +87,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from .bundle_facts import (
+    DEFAULT_MAX_BUNDLE_DECODED_BYTES,
     DEFAULT_MAX_LIBRARY_COUNT,
     DEFAULT_VARIANT_FINGERPRINT,
     BundleFacts,
@@ -336,10 +337,7 @@ def read_bundle_facts_package(
     # escape hatch yet (that is Phase 2's A2.1). Bounding the artifact count
     # against the same `DEFAULT_MAX_LIBRARY_COUNT` the G40 bundle-facts
     # archive already enforces keeps a small package from amplifying into
-    # unbounded parsing/memory (Codex review); the aggregate-decoded-bytes
-    # half of that archive's own defense has no equivalent here yet, since
-    # `ObjectRef.size` is optional/informational and this module's own writer
-    # does not populate it.
+    # unbounded parsing/memory purely by artifact *count* (Codex review).
     if len(variant.artifact_ids) > DEFAULT_MAX_LIBRARY_COUNT:
         raise ValueError(
             f"variant {variant_id!r} names {len(variant.artifact_ids)} "
@@ -355,11 +353,36 @@ def read_bundle_facts_package(
     per_library_snapshots: dict[str, AbiSnapshot] = {}
     filesystem_aliases: dict[str, tuple[str, ...]] = {}
     library_filenames: dict[str, str] = {}
+    # A *few* individually large artifacts can amplify past the count bound
+    # above just as well as many small ones (Codex review, fresh evidence):
+    # `ObjectStore.get()` returns an already-decoded structure, not raw
+    # bytes, so this charges each artifact's own reassembled document size
+    # (measured via its JSON encoding, the same way `bundle_facts.py`'s own
+    # `bounded_encode_utf8` callers measure decoded size elsewhere) against
+    # `DEFAULT_MAX_BUNDLE_DECODED_BYTES` -- the identical aggregate ceiling
+    # the G40 bundle-facts archive already enforces. This is necessarily
+    # post-hoc, not pre-emptive: unlike G40's `read_blob(max_decoded_bytes=
+    # ...)`, `ObjectStore.get()` has no bounded-read parameter to abort a
+    # single oversized fetch mid-decode (that would be a real `ObjectStore`
+    # protocol change -- ADR-062 Phase 2's A2.1 scope, not this fix), so one
+    # single artifact's own sections can still exceed the budget before the
+    # check below has anything to compare against; every artifact *after*
+    # the one that first exceeds it is refused.
+    decoded_bytes_so_far = 0
     for artifact_id in variant.artifact_ids:
+        if decoded_bytes_so_far > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+            raise ValueError(
+                f"variant {variant_id!r}'s reconstructed artifacts exceed "
+                f"DEFAULT_MAX_BUNDLE_DECODED_BYTES "
+                f"({DEFAULT_MAX_BUNDLE_DECODED_BYTES} bytes) -- reached while "
+                f"reconstructing {artifact_id!r}; refusing to continue "
+                "reconstructing further members"
+            )
         artifact = artifacts_by_id[artifact_id]
         document = export_legacy_snapshot(
             artifact, store=store, source_schema_version=source_schema_version
         )
+        decoded_bytes_so_far += len(json.dumps(document).encode("utf-8"))
         per_library_snapshots[artifact_id] = snapshot_from_dict(document)
 
         filename = artifact.native_identity.get(_NATIVE_IDENTITY_FILENAME_KEY)
