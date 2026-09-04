@@ -21,7 +21,7 @@ from abicheck.diff_types_vtable import (
     _owned_virtual_signatures,
     _vtable_transition_is_evidenced,
 )
-from abicheck.model import Fact, FactStatus, Function, RecordType, Visibility
+from abicheck.model import Fact, Function, RecordType, Visibility
 
 NAME = "Abstract"
 
@@ -233,66 +233,72 @@ class TestExplicitFactStatusWouldNotSafelyGateThisGuard:
     """ADR-063 Track 4, 5B final closure: an early decline keyed off
     ``vtable_fact.status`` (``NOT_COLLECTED``/``FAILED``) was investigated and
     rejected for this guard specifically — these tests are the executable
-    half of that finding, not just the docstring's prose.
+    half of that finding. Full reasoning: ``diff_types_vtable.py``'s own
+    module docstring ("Track 4, 5B final closure" section), the canonical
+    writeup — not repeated here beyond the summary needed to read these
+    tests.
 
     ``_vtable_transition_is_evidenced`` already treats a ``NOT_COLLECTED``/
     ``FAILED`` ``vtable_fact`` identically to a confirmed-empty one via
-    ``resolved_fact_value``'s default collapse — the "both sides captured
-    something" branch already can't fire when either side's own list reads
-    empty for *any* of those three reasons, so a direct status read would be
-    redundant there. What it would NOT be redundant for is short-circuiting
-    the two independent fallback evidence streams below (the class's own
-    virtual functions from ``snapshot.functions``, and ``size_bits``/
-    ``virtual_bases_fact``) before they run — and both of those streams read
-    facts that have nothing to do with ``vtable_fact``'s own status, so an
-    explicit ``NOT_COLLECTED``/``FAILED`` tag on ``vtable_fact`` corroborates
-    nothing about whether *they* still hold real evidence. Gating on it
-    would trade this guard's fabrication guard for exactly the
-    under-detection lever the plan's own 5B "Known gap surfaced by review"
-    note already names for this sub-phase.
+    ``resolved_fact_value``'s default collapse, so a direct status read
+    would be redundant for the "both sides captured something" branch.
+    What it would NOT be redundant for is short-circuiting the two
+    independent fallback evidence streams below (the class's own virtual
+    functions from ``snapshot.functions``, and ``size_bits``/
+    ``virtual_bases_fact``) before they run — both read facts unrelated to
+    ``vtable_fact``'s own status, so gating on it would silence real,
+    independently-evidenced findings.
     """
 
-    def test_not_collected_vtable_fact_does_not_silence_the_own_functions_signal(
-        self,
-    ) -> None:
-        old = RecordType(
-            name=NAME,
-            kind="class",
-            size_bits=64,
-            vtable_fact=Fact.not_collected(),
-        )
-        new = RecordType(
-            name=NAME,
-            kind="class",
-            size_bits=64,
-            vtable_fact=Fact.not_collected(),
-        )
-        assert old.vtable_fact is not None
-        assert old.vtable_fact.status is FactStatus.NOT_COLLECTED
-        # A real signal from an entirely different evidence stream (the
-        # class's own retained virtual methods) must still be honored --
-        # an early decline on vtable_fact's own status would have thrown
-        # this away before this check even ran.
-        assert _vtable_transition_is_evidenced(NAME, old, new, {}, _virtual())
+    _BAD_FACTS = [Fact.not_collected(), Fact.failed("simulated producer error")]
+    _BAD_FACT_IDS = ["not_collected", "failed"]
 
-    def test_failed_vtable_fact_does_not_silence_the_size_delta_signal(self) -> None:
-        old = RecordType(
-            name=NAME,
-            kind="class",
-            size_bits=64,
-            vtable_fact=Fact.failed("simulated producer error"),
+    @pytest.mark.parametrize("bad_fact", _BAD_FACTS, ids=_BAD_FACT_IDS)
+    @pytest.mark.parametrize("bad_side", ["old", "new"])
+    def test_own_functions_fallback_survives_an_uncollected_vtable_fact(
+        self, bad_side: str, bad_fact: Fact[list[str]]
+    ) -> None:
+        """The exact mixed shape a real capture gap produces: one side
+        genuinely populated, the other carrying an explicit
+        ``NOT_COLLECTED``/``FAILED`` status rather than a confirmed-empty
+        ``PRESENT([])`` -- not the same status on both sides, which would
+        let a regression that only guards this specific mixed shape slip
+        through undetected (Codex review). The class's own retained
+        virtual-function stream must still settle it regardless of which
+        side carries the bad status."""
+        populated = RecordType(
+            name=NAME, kind="class", size_bits=64, vtable=[f"{NAME}::f()"]
         )
-        new = RecordType(
-            name=NAME,
-            kind="class",
-            size_bits=128,
-            vtable_fact=Fact.failed("simulated producer error"),
+        uncollected = RecordType(
+            name=NAME, kind="class", size_bits=64, vtable_fact=bad_fact
         )
-        assert old.vtable_fact is not None
-        assert old.vtable_fact.status is FactStatus.FAILED
-        # Same principle for the size-delta stream: a producer failure on
-        # vtable_fact specifically says nothing about size_bits, which is
-        # read straight off the record independent of any Fact wrapper.
+        assert uncollected.vtable_fact is not None
+        assert uncollected.vtable_fact.status is bad_fact.status
+        old, old_funcs = (
+            (uncollected, {}) if bad_side == "old" else (populated, _virtual())
+        )
+        new, new_funcs = (
+            (populated, _virtual()) if bad_side == "old" else (uncollected, {})
+        )
+        assert _vtable_transition_is_evidenced(NAME, old, new, old_funcs, new_funcs)
+
+    @pytest.mark.parametrize("bad_fact", _BAD_FACTS, ids=_BAD_FACT_IDS)
+    @pytest.mark.parametrize("bad_side", ["old", "new"])
+    def test_size_delta_fallback_survives_an_uncollected_vtable_fact(
+        self, bad_side: str, bad_fact: Fact[list[str]]
+    ) -> None:
+        """Same mixed populated/uncollected shape as above, but with no
+        owned-function evidence on either side (both empty), so only the
+        ``size_bits`` delta can settle it -- and must, regardless of which
+        side's ``vtable_fact`` carries the bad status."""
+        populated = RecordType(
+            name=NAME, kind="class", size_bits=64, vtable=[f"{NAME}::f()"]
+        )
+        uncollected = RecordType(
+            name=NAME, kind="class", size_bits=128, vtable_fact=bad_fact
+        )
+        old = uncollected if bad_side == "old" else populated
+        new = populated if bad_side == "old" else uncollected
         assert _vtable_transition_is_evidenced(NAME, old, new, {}, {})
 
     def test_the_both_sides_populated_branch_is_already_unreachable_when_uncollected(

@@ -710,58 +710,33 @@ sweep.
 
 **Track 4 — 5B final closure (2026-09-04): the `TYPE_VTABLE_CHANGED`
 cluster's own residual gap, investigated and formally declined, not left
-open.** The third PR's own consolidation (`_vtable_transition_is_evidenced`
-and its helper moved to `compare/vtable_evidence.py` as
-`vtable_transition_is_evidenced`, a shared leaf both `diff_types_vtable.py`
-and `diff_cxx_rules.virtual_method_addition` now call) landed separately,
-in a PR that fixed the real coupling bug (`virtual_method_addition`
-deferring to a sibling detector without checking it would actually fire)
-but moved the evidence heuristic itself verbatim — no `FactStatus` read was
-added. This closure re-examines, rather than assumes, whether that
-consolidation changes anything: it does not. Removing the import-cycle
-constraint that blocked `virtual_method_addition` from consulting this
-cluster's real verdict says nothing about what DWARF's own per-TU
-extraction can observe, and the reason a direct `vtable_fact.status` check
-can't replace this cluster's heuristic is exactly the same as before the
-move — DWARF reports `Fact.present([])`, genuinely `PRESENT`, for a class
-whose virtual methods live in a translation unit only the *other* side's
-debug info covers, so `FactStatus` alone cannot see that per-TU coverage
-gap at all.
-
-The narrower question the third PR's own note left open — a check scoped
-specifically to `NOT_COLLECTED`/`FAILED` (as opposed to lumping every
-falsy read together) — was investigated on its own merits this time,
-against the same "equal scrutiny against each existing guard's own FP/FN
-history" bar this cluster's other guards were held to, and is also
-declined: the one branch such a check could replace
-(`vtable_transition_is_evidenced`'s "both sides captured something"
-affirmative) already can't fire when either side is `NOT_COLLECTED`/
-`FAILED` — `resolved_fact_value`'s existing collapse already excludes
-them from that branch the same way it excludes a confirmed-empty
-`PRESENT([])` read, so a direct status check there is redundant, not a new
-capability. Where it would *not* be redundant is short-circuiting the two
-fallback evidence streams that currently run regardless (the class's own
-retained virtual functions from `snapshot.functions`, and the
-`size_bits`/`virtual_bases_fact` layout check) — both are independent
-projections of the debug info uncorrelated with `vtable_fact`'s own
-status, so gating on it would silence a real, independently-evidenced
-finding purely because an unrelated field on the same record carries a
-decline-worthy status. That is precisely the under-detection lever the
-"Known gap surfaced by review" paragraph immediately below already names
-for this sub-phase, applied to a second concrete case. `tests/
-test_vtable_evidence_guard.py::TestExplicitFactStatusWouldNotSafelyGateThisGuard`
-is the executable form of this finding (not prose alone, per this repo's
-own bug-class-regression-testing discipline): an explicit `NOT_COLLECTED`/
-`FAILED` `vtable_fact` still lets the owned-virtual-function and
-size-delta fallback streams fire, and separately confirms the "both sides
-populated" branch is already unreachable for either status.
+open.** The third PR's own consolidation (the evidence predicate moved to
+`compare/vtable_evidence.py` as `vtable_transition_is_evidenced`, a shared
+leaf both `diff_types_vtable.py` and `diff_cxx_rules.virtual_method_addition`
+now call) landed separately, fixing a real coupling bug but moving the
+heuristic itself verbatim — no `FactStatus` read was added. This closure
+re-examines, rather than assumes, whether that consolidation changes
+anything (it doesn't — the move says nothing about what DWARF's own per-TU
+extraction can observe), and separately investigates the narrower case the
+third PR's own note left open: a check scoped specifically to
+`NOT_COLLECTED`/`FAILED`. Both are declined. **The full reasoning for both
+— why the disjoint-case argument survives the consolidation unchanged, and
+why the narrower status-scoped check is redundant where it could apply and
+unsafe (an under-detection lever) where it isn't — is written up once, in
+`diff_types_vtable.py`'s own module docstring ("Track 4, 5B final closure"
+section), which is the canonical source; this note only records that the
+investigation happened and its outcome, not the argument itself.** The
+executable proof is `tests/test_vtable_evidence_guard.py::
+TestExplicitFactStatusWouldNotSafelyGateThisGuard`: an explicit
+`NOT_COLLECTED`/`FAILED` `vtable_fact` on one side, paired with a genuinely
+populated vtable on the other (the real mixed shape a capture gap
+produces), still lets the owned-virtual-function and size-delta fallback
+streams fire.
 
 This closes 5B's own removal gate for the `vtable` field family as a
 formal, investigated decline — the same disposition 2B's `entity:` alias
 promotion received (see that sub-phase's own note above) — rather than
-leaving it re-flagged as an open gap in a future audit. Both touched
-modules (`diff_types_vtable.py`, `compare/vtable_evidence.py`) carry this
-finding in their own docstrings, not only here. Reopening it needs
+leaving it re-flagged as an open gap in a future audit. Reopening it needs
 evidence this predicate's inputs do not carry today (a per-finding
 provider record naming which translation unit each side's debug info
 actually covered, or a polymorphism walk over both base chains), not a

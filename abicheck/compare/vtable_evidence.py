@@ -62,6 +62,17 @@ Docstrings quoting the FP-history and design rationale below are carried
 over unchanged from ``diff_types_vtable.py`` -- only the owner/namespace
 lookups became parameters; no behavior changed for ``diff_types_vtable``'s
 own existing callers.
+
+**ADR-063 Track 4, 5B final closure: whether a direct ``FactStatus``
+pre-check belongs here.** Investigated and declined -- see
+``diff_types_vtable.py``'s own module docstring (its "Track 4, 5B final
+closure" section) for the full reasoning, which is the canonical writeup
+for this finding rather than repeated here. In short: neither this
+predicate's move to a shared leaf module nor a narrower
+``NOT_COLLECTED``/``FAILED``-only check changes what its inputs can prove,
+since both of this function's own evidence streams below (owned virtual
+functions, ``size_bits``/``virtual_bases_fact``) are independent of
+``vtable_fact``'s own status and must keep running regardless of it.
 """
 
 from __future__ import annotations

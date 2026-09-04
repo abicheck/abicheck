@@ -13,7 +13,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   per-TU capture gap as genuinely `PRESENT`. A narrower `NOT_COLLECTED`/
   `FAILED`-only check was also investigated and declined: it would
   short-circuit two evidence streams independent of `vtable_fact`'s own
-  status. No behavior change; the finding is recorded in both modules'
-  docstrings, the plan, and the status ledger, with a new regression test
+  status. No behavior change; the full reasoning is recorded once,
+  canonically, in `diff_types_vtable.py`'s own module docstring, with
+  short pointers from `compare/vtable_evidence.py`, the plan, and the
+  status ledger, and a new regression test
   (`tests/test_vtable_evidence_guard.py::TestExplicitFactStatusWouldNotSafelyGateThisGuard`)
   proving the fallback streams still fire.

@@ -101,19 +101,15 @@ concepts:
       _vtable_transition_rests_on_unresolved_evidence, since moved to
       compare/vtable_evidence.vtable_transition_is_evidenced) — is closed
       as a formal, investigated decline (Track 4, 2026-09-04), not left
-      open: re-examined after the shared-predicate consolidation (a
-      separate, already-merged PR) and confirmed that move changes nothing
-      about what DWARF's own per-TU capture can observe — the guard's
-      known false positive (Fact.present([]), genuinely PRESENT, for a
-      class whose virtuals live in a TU only the other side's debug info
-      covers) is structurally invisible to FactStatus either way. A
-      narrower NOT_COLLECTED/FAILED-only check was also investigated and
-      declined: the one branch it could replace is already unreachable via
-      resolved_fact_value's existing collapse, and using it to short-
-      circuit the cluster's two independent fallback evidence streams
-      (owned-virtual-function diff, size/virtual-base delta) would trade
-      the fabrication guard for a real under-detection lever — proven via
-      tests/test_vtable_evidence_guard.py::
+      open. Full reasoning lives once, canonically, in
+      diff_types_vtable.py's own module docstring ("Track 4, 5B final
+      closure" section) and is not repeated here: in short, neither the
+      shared-predicate consolidation (a separate, already-merged PR) nor a
+      narrower NOT_COLLECTED/FAILED-only check changes the safety
+      analysis, since DWARF's own per-TU capture gap is structurally
+      invisible to FactStatus either way, and the narrower check would
+      trade the guard's fabrication protection for a real under-detection
+      lever. Proven via tests/test_vtable_evidence_guard.py::
       TestExplicitFactStatusWouldNotSafelyGateThisGuard. This closes the
       removal gate for every one of the five originally-named fields
       (bases/virtual_bases/vtable/vptr_offset_bits/is_va_list). Residual,
