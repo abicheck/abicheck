@@ -340,9 +340,9 @@ A `kind: policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/
 every library on a directory/package (release) `compare` — the gate half
 folds into the release fan-out's own resolved `GateOptions` object
 (ADR-064, landed 2026-09-02). `contract.unresolved` is still rejected on a
-release comparison, pending verification that lifting it is safe (see
-ADR-063 Track 4's 7B ledger entry,
-`docs/_meta/one-semantic-pipeline-status.yaml`).
+release comparison, pending verification that lifting it is safe (see the
+"7B's release-fan-out investigation landed" section of
+[the ADR-063 implementation plan](../contribute/plans/one-semantic-pipeline.md)).
 `scan --pack` also requires `--against`, since a pack's only application
 there is the baseline comparison. Each rejection above is a usage error
 rather than a silently ignored flag.
