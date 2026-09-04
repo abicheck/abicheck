@@ -434,6 +434,36 @@ class TestImportBundleFacts:
         with pytest.raises(ValueError, match="more than one artifact"):
             export_bundle_facts(doctored, store=store)
 
+    @pytest.mark.parametrize("bad_native_identity", [{}, {"library_name": ""}])
+    def test_export_rejects_an_artifact_with_no_library_name_evidence(
+        self, bad_native_identity: dict[str, str]
+    ) -> None:
+        """Falling back to `artifact_id` when `native_identity` carries no
+        `library_name` (an earlier version's behavior) would export an
+        opaque hash as a library name whenever the id happens to be one --
+        `import_bundle_facts` itself always sets this key, so its absence
+        means this manifest wasn't produced by it (CodeRabbit review)."""
+        doc = _bundle_document()
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        doctored_artifacts = tuple(
+            ArtifactRef(
+                artifact_id=artifact.artifact_id,
+                variant_id=artifact.variant_id,
+                kind=artifact.kind,
+                native_identity=bad_native_identity,
+                sections=artifact.sections,
+            )
+            for artifact in manifest.artifact_refs
+        )
+        doctored = PackageManifest(
+            versions=manifest.versions,
+            variant_refs=manifest.variant_refs,
+            artifact_refs=doctored_artifacts,
+        )
+        with pytest.raises(ValueError, match="library_name"):
+            export_bundle_facts(doctored, store=store)
+
     def test_export_rejects_a_variant_with_no_composition_section(self) -> None:
         from abicheck.storage.import_v1 import import_legacy_snapshot
         from abicheck.storage.package import VariantRef

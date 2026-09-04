@@ -126,6 +126,19 @@ class TestResolveRefIds:
     def test_an_empty_name_sequence_returns_an_empty_mapping(self) -> None:
         assert resolve_ref_ids([], opaque_prefix="lib") == {}
 
+    def test_rejects_an_unsafe_opaque_prefix(self) -> None:
+        """A caller-supplied `opaque_prefix` that is itself unsafe would
+        make `_opaque_ref_id`'s own output fail `safe_ref_id`, silently
+        breaking the "a name this function cannot make safe always has a
+        working opaque fallback" guarantee this function's own docstring
+        makes (CodeRabbit review)."""
+        with pytest.raises(ValueError, match="opaque_prefix"):
+            resolve_ref_ids(["a"], opaque_prefix="a/b")
+
+    def test_rejects_an_overlong_opaque_prefix(self) -> None:
+        with pytest.raises(ValueError, match="opaque_prefix"):
+            resolve_ref_ids(["a"], opaque_prefix="x" * 300)
+
     @pytest.mark.parametrize(
         "names", [["a", "a"], ["dup", "dup", "other"]], ids=["exact", "with-extra"]
     )

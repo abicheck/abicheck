@@ -261,9 +261,22 @@ def resolve_ref_ids(names: Sequence[str], *, opaque_prefix: str) -> dict[str, st
     gets an opaque id, with or without `libfoo.so` present -- both
     unconditionally, decided from each name alone.
 
-    Raises nothing itself -- a name this function cannot make safe always
-    has a working opaque fallback.
+    Raises `ValueError` if *opaque_prefix* itself is not safe to use in an
+    opaque id -- every other input always has a working opaque fallback,
+    but a caller-supplied prefix that is itself unsafe or too long would
+    make `_opaque_ref_id`'s own output fail `safe_ref_id` (or exceed the
+    filesystem component limit with the `.json` suffix), silently breaking
+    the fallback this function's whole design relies on (CodeRabbit
+    review). Checked once, against a representative full-length opaque id
+    (the digest is always 64 hex chars regardless of the input name), not
+    once per name.
     """
+    try:
+        safe_ref_id(_opaque_ref_id("", opaque_prefix), "opaque_prefix")
+    except ValueError as exc:
+        raise ValueError(
+            f"opaque_prefix {opaque_prefix!r} would produce an unsafe opaque id: {exc}"
+        ) from None
     result: dict[str, str] = {}
     for name in names:
         try:

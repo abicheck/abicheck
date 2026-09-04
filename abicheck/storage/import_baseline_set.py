@@ -480,8 +480,20 @@ def export_baseline_set(
         )
         # `artifact_id` itself may be an opaque `resolve_ref_ids`-generated
         # id, not the real library name -- `native_identity` is where
-        # `import_baseline_set` stashed the real one.
-        library = artifact.native_identity.get(_LIBRARY_NAME_KEY, artifact_id)
+        # `import_baseline_set` stashed the real one. Falling back to
+        # `artifact_id` here (as an earlier version did) would export an
+        # opaque hash as a library name whenever the id happens to be one
+        # -- `import_baseline_set` itself always sets this key, so its
+        # absence or emptiness means this manifest wasn't built by it (or
+        # was hand-edited), and there is no real library name to recover
+        # (CodeRabbit review).
+        library = artifact.native_identity.get(_LIBRARY_NAME_KEY, "")
+        if not library:
+            raise ValueError(
+                f"artifact {artifact_id!r} has no {_LIBRARY_NAME_KEY!r} "
+                "native_identity -- this manifest was not produced by "
+                "import_baseline_set, or was hand-edited"
+            )
         if library in snapshot_documents:
             # `import_baseline_set` itself can never produce this --
             # `resolve_ref_ids` is keyed by the manifest's own,
