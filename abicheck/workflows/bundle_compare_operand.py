@@ -433,6 +433,46 @@ ahead of the marker is far beyond what any plausible reordering of a real
 the marker first; the only realistic trigger is a third-party re-
 serialization, not this tool's own output), so this is accepted rather
 than chased further.
+
+**Residual, accepted gap (a stored BundleFacts document supplied through a
+FIFO/named pipe as OLD_INPUT, Codex review, round 18, fresh evidence):** the
+removed ``--old-bundle-facts`` flag always called
+:func:`~abicheck.serialization.load_bundle_facts` directly, which reads its
+input exactly once and is therefore safe against a single-producer FIFO (see
+``tests/test_bundle_archive.py::TestSniffBundleArchiveFormatNonRegularSource
+::test_end_to_end_load_through_a_fifo_with_format_auto``, unaffected by this
+change). :func:`looks_like_stored_bundle_facts` itself is equally FIFO-safe
+-- ``path.is_file()`` rejects a FIFO immediately, before any read is
+attempted (verified: this function returns ``False`` for a FIFO in native
+time, never blocks) -- but a ``False`` classification sends the operand
+through ``compare``'s *ordinary* live-input resolution
+(``abicheck.workflows.input_resolution.resolve_input``) instead, and that
+path was never FIFO-safe to begin with: verified directly (a background
+writer thread + a live 8s ``SIGALRM`` deadline) that ``resolve_input()``
+hangs indefinitely on FIFO input carrying a stored BundleFacts document --
+and identically for an *ordinary* ``AbiSnapshot`` JSON document supplied the
+same way, with zero relation to BundleFacts or this module. That hang is a
+pre-existing property of ``resolve_input()``'s own multi-probe, multiple-
+separate-``open()`` detection sequence (binary-magic sniff, then a
+independent text-format sniff, then the real snapshot load, each reopening
+*path* on its own) against a stream that can only be consumed once -- this
+module's own change does not create that hang, it only stops diverting one
+specific input shape (a FIFO-supplied stored BundleFacts document) around
+it. Closing this for real would mean either teaching ``resolve_input()``
+itself to spool a non-regular source once and reuse the spooled bytes
+across every probe (a general fix belonging to that module, well outside
+automatic *BundleFacts* operand classification), or having this module
+spool and fully parse a non-regular OLD_INPUT during classification and
+thread the already-parsed result through to
+``compare_bundle_facts.dispatch()`` instead of letting it reopen *path* a
+second time (a public-contract change to this module's ``bool``-returning
+classification and to the CLI dispatch layer that consumes it) -- either is
+a genuine, separately-scoped feature addition, not a narrow fix to this
+change. Accepted as a known limitation: no CLI-level test or documentation
+ever established FIFO-supplied `compare` operands (BundleFacts or
+otherwise) as a guaranteed capability before this PR, and the removed
+flag's own FIFO-safety was an incidental side effect of always calling
+:func:`load_bundle_facts` directly, not a deliberately maintained contract.
 """
 
 from __future__ import annotations

@@ -23,6 +23,7 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import os
 import tarfile
 import zipfile
 import zlib
@@ -709,6 +710,31 @@ class TestLooksLikeStoredBundleFacts:
 
     def test_missing_path_is_not_stored(self, tmp_path: Path) -> None:
         assert looks_like_stored_bundle_facts(tmp_path / "nonexistent") is False
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO requires POSIX")
+    def test_fifo_is_not_stored_and_never_blocks(self, tmp_path: Path) -> None:
+        """Codex review, PR #1042 (round 18): the classifier itself must
+        stay FIFO-safe even though a False verdict here sends the operand
+        through compare's ordinary (not FIFO-safe) live-input resolution
+        afterward -- see this module's own "Residual, accepted gap" for the
+        full account. `path.is_file()` rejects a FIFO before any read is
+        attempted, so this must return False in native time (no writer
+        needed at all -- a bare FIFO with nothing on the other end), never
+        block. Run with a bounded join() since a hang here can't otherwise
+        be distinguished from "still running", mirroring test_bundle_
+        archive.py's own identical pattern for this exact failure mode."""
+        import threading
+
+        fifo = tmp_path / "input.fifo"
+        os.mkfifo(fifo)
+        result: list[bool] = []
+        t = threading.Thread(
+            target=lambda: result.append(looks_like_stored_bundle_facts(fifo))
+        )
+        t.start()
+        t.join(timeout=10)
+        assert not t.is_alive(), "looks_like_stored_bundle_facts() blocked on a FIFO"
+        assert result == [False]
 
     def test_g40_archive_is_stored(self, tmp_path: Path) -> None:
         """Codex review, PR #1042: the G40 content-addressed zip archive
