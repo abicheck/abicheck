@@ -151,13 +151,26 @@ def _has_local_linkage_mangling(mangled: str) -> bool:
     return _mangled_name_is_local_linkage(mangled) or "_GLOBAL__N_" in mangled
 
 
+def _entity_id_is_extern_c(entity_id: EntityId | None) -> bool:
+    """See ``tu_merge._entity_id_is_extern_c``'s own docstring -- reused,
+    not reinvented, for the identical ``extract/`` may-not-import-
+    ``tu_merge`` reason the rest of this module's small helpers already
+    give."""
+    return entity_id is not None and entity_id.extra == ("extern_c",)
+
+
 def _is_locally_linked_function(fn: Function) -> bool:
     """See ``tu_merge._function_key``'s own docstring for the full
     reasoning behind each branch -- reused, not reinvented, including the
     ``entity_is_record_member`` gate closing that function's static-
     member-function sub-case (its sibling non-static-method collision
-    remains a separately-documented, still-open limitation)."""
-    if fn.mangled == fn.name:
+    remains a separately-documented, still-open limitation) and the
+    Darwin-leading-underscore fix (macOS CI, fresh evidence): ``fn.mangled
+    == fn.name`` is not proof of "no C++ mangling" on a Darwin target, so
+    ``fn.is_extern_c`` -- each header-AST backend's own Darwin-aware
+    determination -- is read directly instead, exactly mirroring
+    ``tu_merge._function_key``'s identical fix."""
+    if fn.mangled == fn.name or fn.is_extern_c:
         return fn.is_static and not entity_is_record_member(fn.entity_id)
     return _has_local_linkage_mangling(fn.mangled)
 
@@ -165,10 +178,14 @@ def _is_locally_linked_function(fn: Function) -> bool:
 def _is_locally_linked_variable(var: Variable) -> bool:
     """See ``tu_merge._variable_key``'s own docstring -- including the
     plain-C ``var.mangled == var.name`` fallback branch, closed by
-    ``Variable.is_static`` (PR #1024, Codex/CodeRabbit review), and the
+    ``Variable.is_static`` (PR #1024, Codex/CodeRabbit review), the
     ``entity_is_record_member`` gate closing that same function's
-    uninstantiated-template-static-data-member gap."""
-    if var.mangled == var.name:
+    uninstantiated-template-static-data-member gap, and the Darwin-
+    leading-underscore fix (macOS CI, fresh evidence) mirroring
+    ``tu_merge._variable_key``'s identical fix: :class:`Variable` carries
+    no ``is_extern_c`` field of its own, so :func:`_entity_id_is_extern_c`
+    reads the same Darwin-aware signal back off ``var.entity_id`` instead."""
+    if var.mangled == var.name or _entity_id_is_extern_c(var.entity_id):
         return var.is_static and not entity_is_record_member(var.entity_id)
     return _has_local_linkage_mangling(var.mangled)
 
