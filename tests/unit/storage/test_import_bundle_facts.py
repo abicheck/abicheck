@@ -465,6 +465,38 @@ class TestImportBundleFacts:
         with pytest.raises(ValueError, match="declarations"):
             export_bundle_facts(doctored, store=store)
 
+    def test_export_rejects_a_variant_section_carrying_an_unadvertised_kind(
+        self,
+    ) -> None:
+        """The identical risk one level up from the artifact case above: a
+        hand-edited package that keeps the variant's own recognized, still
+        validly-encoded `bundle_composition` section while dropping it from
+        the package-wide `section_schema_versions` map must be rejected
+        *before* that section is ever decoded -- unversioned contract
+        evidence (the variant fingerprint, the instantiation manifest) must
+        never reach a comparison even transiently (Codex review)."""
+        import dataclasses
+
+        from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
+
+        doc = _bundle_document()
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        assert (
+            BUNDLE_COMPOSITION_SECTION_KIND in manifest.versions.section_schema_versions
+        )
+        doctored_versions = dataclasses.replace(
+            manifest.versions,
+            section_schema_versions={
+                kind: version
+                for kind, version in manifest.versions.section_schema_versions.items()
+                if kind != BUNDLE_COMPOSITION_SECTION_KIND
+            },
+        )
+        doctored = dataclasses.replace(manifest, versions=doctored_versions)
+        with pytest.raises(ValueError, match=BUNDLE_COMPOSITION_SECTION_KIND):
+            export_bundle_facts(doctored, store=store)
+
     def test_export_rejects_an_artifact_with_no_library_name_evidence(
         self,
     ) -> None:

@@ -611,10 +611,12 @@ def export_bundle_facts(
     Raises `ValueError` if *variant_id* names no variant in *manifest*, if
     that variant carries no `BUNDLE_COMPOSITION_SECTION_KIND` section (never
     produced by anything but `import_bundle_facts` itself, so this means the
-    manifest was not built by it, or was hand-edited), if the stored
-    composition's `variant_fingerprint` is not a string, or if a stored
-    template instantiation names the same parameter more than once -- or
-    whatever *on_document* itself raises.
+    manifest was not built by it, or was hand-edited), if that section (or
+    any artifact's own section) is not advertised in this package's
+    `section_schema_versions`, if the stored composition's
+    `variant_fingerprint` is not a string, or if a stored template
+    instantiation names the same parameter more than once -- or whatever
+    *on_document* itself raises.
     """
     variant = next(
         (v for v in manifest.variant_refs if v.variant_id == variant_id), None
@@ -627,6 +629,28 @@ def export_bundle_facts(
             f"variant {variant_id!r} has no {BUNDLE_COMPOSITION_SECTION_KIND!r} "
             "section -- this manifest was not produced by import_bundle_facts"
         )
+    # A package this module writes advertises the *union* of every library's
+    # own section kinds, plus `BUNDLE_COMPOSITION_SECTION_KIND`, in
+    # `manifest.versions.section_schema_versions` (a header-only library
+    # legitimately has no "binary" section, one dumped at a shallower depth
+    # legitimately has no "debug" section) -- so one artifact carrying
+    # *fewer* kinds than the union is expected, not corruption. A kind the
+    # union never advertises at all is unambiguous, though: no legitimate
+    # write could have produced it, and `check_reader_compatibility` alone
+    # does not catch a hand-edited package that keeps a recognized section
+    # (on an artifact, or -- the identical risk one level up -- the
+    # variant's own `bundle_composition` section) while dropping it from
+    # the package-wide version map (Codex review, both directions). Checked
+    # before this section is ever decoded, not after: unversioned contract
+    # evidence (the variant fingerprint, the instantiation manifest) must
+    # never reach a comparison even transiently.
+    advertised_sections = set(manifest.versions.section_schema_versions)
+    if BUNDLE_COMPOSITION_SECTION_KIND not in advertised_sections:
+        raise ValueError(
+            f"variant {variant_id!r}'s {BUNDLE_COMPOSITION_SECTION_KIND!r} "
+            "section is not in this package's section_schema_versions -- "
+            "the package is corrupted or was hand-edited"
+        )
     composition_dto = SectionDTO.from_dict(store.get(composition_ref.digest))
     composition = bundle_composition_from_dto(composition_dto)
     if on_document is not None:
@@ -637,17 +661,6 @@ def export_bundle_facts(
 
     source_schema_version = manifest.versions.source_schema_version
     per_library_snapshots: dict[str, Any] = {}
-    # A package this module writes advertises the *union* of every library's
-    # own section kinds in `manifest.versions.section_schema_versions` (a
-    # header-only library legitimately has no "binary" section, one dumped
-    # at a shallower depth legitimately has no "debug" section) -- so one
-    # artifact carrying *fewer* kinds than the union is expected, not
-    # corruption. An artifact carrying a kind the union never advertises at
-    # all is unambiguous, though: no legitimate write could have produced
-    # it, and `check_reader_compatibility` alone does not catch a hand-
-    # edited package that keeps a recognized section on the artifact while
-    # dropping it from the package-wide version map (Codex review).
-    advertised_sections = set(manifest.versions.section_schema_versions)
     for artifact_id in variant.artifact_ids:
         artifact = next(
             a for a in manifest.artifact_refs if a.artifact_id == artifact_id

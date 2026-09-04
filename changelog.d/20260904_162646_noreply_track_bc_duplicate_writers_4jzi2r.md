@@ -27,4 +27,9 @@
   advertise (unversioned content could otherwise reach a comparison), and
   the `on_document` hook charges an artifact's recovered library name
   against the aggregate decoded-byte budget too, not only its snapshot
-  document.
+  document. The same unadvertised-section check now also covers the
+  variant's own `bundle_composition` section, checked before it is ever
+  decoded, so a hand-edited package cannot drop that section from
+  `section_schema_versions` while keeping it in `VariantRef.sections` to
+  smuggle an unversioned variant fingerprint or instantiation manifest
+  into a comparison.
