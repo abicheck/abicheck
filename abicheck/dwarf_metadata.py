@@ -67,6 +67,7 @@ from .dwarf_utils import (
     attr_str as _attr_str,
     decode_member_location as _decode_member_location,
     has_real_dwarf_info,
+    is_skeleton_cu as _is_skeleton_cu,
     resolve_die_ref as _resolve_ref,
 )
 
@@ -152,8 +153,18 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
     # (cu_total/cu_failed -> parsed/partial/failed) so every constructor of
     # this metadata type records its actual extraction outcome, not just
     # the unified single-pass one.
+    skeleton_cus = 0
     for CU in dwarf.iter_CUs():  # type: ignore[no-untyped-call]
         meta.cu_total += 1
+        if _is_skeleton_cu(CU):
+            # P2 review, fresh evidence: this standalone entry point (still
+            # public) had no split-DWARF (-gsplit-dwarf) detection at all --
+            # a skeleton CU "succeeds" at both iter_CUs() and the per-CU walk
+            # below while its real layout/CC DIEs live in an unconsumed
+            # .dwo/.dwp file, so the channel read back "parsed" with zero
+            # real facts extracted. Mirrors dwarf_unified.
+            # parse_dwarf_from_session's identical skeleton-CU downgrade.
+            skeleton_cus += 1
         try:
             _process_cu(CU, meta, type_cache)
         except Exception as exc:  # noqa: BLE001
@@ -166,8 +177,12 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
         # section exists, not that it holds anything. Mirrors
         # dwarf_unified.parse_dwarf_from_session's identical zero-CU check.
         meta.evidence_state = "failed"
-    elif meta.cu_failed:
-        meta.evidence_state = "failed" if meta.cu_failed == meta.cu_total else "partial"
+    elif meta.cu_failed or skeleton_cus:
+        meta.evidence_state = (
+            "failed"
+            if meta.cu_failed and meta.cu_failed == meta.cu_total
+            else "partial"
+        )
 
     return meta
 

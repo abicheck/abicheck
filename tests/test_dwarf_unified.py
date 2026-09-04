@@ -518,11 +518,8 @@ class TestSplitDwarfSkeletonDetection:
         assert _is_skeleton_cu(_FakeCU()) is True
 
     def test_is_skeleton_cu_detects_dwarf5_unit_type(self) -> None:
-        from abicheck.dwarf_unified import (
-            _DW_UT_SKELETON,
-            _DW_UT_SPLIT_COMPILE,
-            _is_skeleton_cu,
-        )
+        from abicheck.dwarf_unified import _is_skeleton_cu
+        from abicheck.dwarf_utils import _DW_UT_SKELETON, _DW_UT_SPLIT_COMPILE
 
         class _FakeCU:
             def __init__(self, unit_type: int) -> None:
@@ -616,6 +613,50 @@ class TestSplitDwarfSkeletonDetection:
         finally:
             sess.close()
         assert meta.evidence_state == "parsed"
+
+    def test_standalone_parsers_also_detect_split_dwarf(self, tmp_path: Path) -> None:
+        """P2 review, fresh evidence: the standalone entry points
+        (``dwarf_metadata.parse_dwarf_metadata``/``dwarf_advanced.
+        parse_advanced_dwarf``) had no split-DWARF detection at all, so a
+        ``-gsplit-dwarf`` library attached via either still-public function
+        read back ``evidence_state="parsed"`` despite the real DIEs living in
+        an unconsumed ``.dwo``. Both must now downgrade the same way the
+        unified pass already does."""
+        _require_tool("gcc")
+        src = tmp_path / "split2.c"
+        src.write_text("int cube(int x) { return x * x * x; }\n", encoding="utf-8")
+        so = tmp_path / "libsplit2.so"
+        r = subprocess.run(
+            [
+                "gcc",
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-gsplit-dwarf",
+                "-fvisibility=default",
+                "-o",
+                str(so),
+                str(src),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        if r.returncode != 0:
+            pytest.skip(f"-gsplit-dwarf compilation failed: {r.stderr[:200]}")
+        with open(so, "rb") as f:
+            if f.read(4) != b"\x7fELF":
+                pytest.skip("compiled binary is not ELF")
+
+        meta = parse_dwarf_metadata(so)
+        assert meta.cu_total >= 1
+        assert meta.evidence_state != "parsed"
+        assert meta.evidence_state in ("partial", "failed")
+
+        adv = parse_advanced_dwarf(so)
+        assert adv.cu_total >= 1
+        assert adv.evidence_state != "parsed"
+        assert adv.evidence_state in ("partial", "failed")
 
 
 class TestZeroCuDwarfIsNeverParsed:

@@ -17,6 +17,7 @@
 Used by dwarf_metadata.py, dwarf_advanced.py, and dwarf_unified.py to avoid
 duplicating low-level DIE attribute extraction logic.
 """
+
 # pylint: disable=invalid-name  # CU is the standard DWARF term (Compilation Unit)
 from __future__ import annotations
 
@@ -107,16 +108,19 @@ def resolve_die_ref(die: Any, attr_name: str, CU: Any) -> Any:
 
 #: Base set of DWARF tags to prune (skip subtrees).
 #: Each module extends this with its own additions (e.g. DW_TAG_subprogram).
-BASE_PRUNE_TAGS: frozenset[str] = frozenset({
-    "DW_TAG_inlined_subroutine",
-    "DW_TAG_lexical_block",
-    "DW_TAG_GNU_call_site",
-})
+BASE_PRUNE_TAGS: frozenset[str] = frozenset(
+    {
+        "DW_TAG_inlined_subroutine",
+        "DW_TAG_lexical_block",
+        "DW_TAG_GNU_call_site",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # Member location decoding
 # ---------------------------------------------------------------------------
+
 
 def _read_uleb128(items: list[object], i: int) -> tuple[int, int]:
     """Read a ULEB128-encoded value from a raw byte list starting at *i*.
@@ -230,7 +234,10 @@ def _eval_tuple_item(item: tuple[object, ...], stack: list[int]) -> None:
 
 
 def _eval_raw_int_item(
-    item: int, items: list[object], i: int, stack: list[int],
+    item: int,
+    items: list[object],
+    i: int,
+    stack: list[int],
 ) -> int:
     """Evaluate a single raw-integer item onto *stack*.
 
@@ -283,6 +290,7 @@ def decode_member_location(val: int | list[object] | None) -> int:
 # ---------------------------------------------------------------------------
 # DIE reference resolution
 # ---------------------------------------------------------------------------
+
 
 def resolve_type_die(die: Any, CU: Any) -> Any | None:
     """Resolve DW_AT_type reference on *die* to a target DIE, or None."""
@@ -393,3 +401,41 @@ def free_cu_die_cache(CU: Any) -> None:
     diemap = getattr(CU, "_diemap", None)
     if diemap is not None:
         diemap.clear()
+
+
+# DWARF5 CU unit_type values that name a split-DWARF skeleton/split unit
+# (DWARFv5 sec 7.5.1.1). Not present at all on DWARF<=4 headers -- those
+# rely solely on the DW_AT_GNU_dwo_name/DW_AT_dwo_name attribute check below.
+_DW_UT_SKELETON = 0x04
+_DW_UT_SPLIT_COMPILE = 0x05
+_SKELETON_DWO_ATTRS = ("DW_AT_GNU_dwo_name", "DW_AT_dwo_name")
+
+
+def is_skeleton_cu(CU: Any) -> bool:
+    """Whether *CU* is a split-DWARF skeleton (``-gsplit-dwarf``).
+
+    A skeleton CU's own top DIE carries only a handful of attributes
+    (``DW_AT_GNU_dwo_name``/``DW_AT_dwo_name`` naming the ``.dwo`` that holds
+    the real DIE tree) and essentially no children -- so a normal CU walk
+    over it "succeeds" while extracting almost nothing. Never raises: an
+    unreadable top DIE is not itself proof of a skeleton, just missing
+    evidence for one, so it is treated as "not a skeleton" here and left to
+    the ordinary per-CU exception handling in the caller.
+
+    Shared by all three DWARF entry points (``dwarf_unified.
+    parse_dwarf_from_session``, ``dwarf_metadata._parse``,
+    ``dwarf_advanced.parse_advanced_dwarf``) -- P2 review, fresh evidence:
+    the two standalone parsers previously had no skeleton-CU detection at
+    all, so a ``-gsplit-dwarf`` library attached via either still-public
+    entry point read back as ``evidence_state="parsed"`` with zero real
+    type/value-ABI facts extracted, unlike the unified pass which already
+    applied this check.
+    """
+    try:
+        unit_type = CU.header.get("unit_type")
+        if unit_type in (_DW_UT_SKELETON, _DW_UT_SPLIT_COMPILE):
+            return True
+        top = CU.get_top_DIE()
+        return any(attr in top.attributes for attr in _SKELETON_DWO_ATTRS)
+    except Exception:  # noqa: BLE001 - detection must never abort real parsing
+        return False

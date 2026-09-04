@@ -689,8 +689,8 @@ Every JSON report carries a top-level `report_schema_version` field
 > binaries are byte-identical (a possible mistaken input, not a real
 > "no ABI differences" result). Omitted when there is nothing to warn about.
 >
-> `analysis_assurance.debug_evidence` (`report_schema_version` 2.47,
-> `scan_schema_version` 1.22) is a per-side `{source, basic, advanced}`
+> `analysis_assurance.debug_evidence` (`report_schema_version` 2.50,
+> `scan_schema_version` 1.27) is a per-side `{source, basic, advanced}`
 > receipt of what the DWARF/PDB/BTF/CTF extraction for that side actually
 > achieved (`parsed`/`partial`/`presence_only`/`failed`/`not_supported`/
 > `not_available`) — distinct from the coarser `dwarf_context_status`

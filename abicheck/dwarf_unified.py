@@ -64,7 +64,12 @@ from .dwarf_advanced import (
     _process_cu_impl as _adv_process_cu,
 )
 from .dwarf_metadata import DwarfMetadata, _process_cu_impl as _meta_process_cu
-from .dwarf_utils import dwarf_low_memory_mode, free_cu_die_cache, has_real_dwarf_info
+from .dwarf_utils import (
+    dwarf_low_memory_mode,
+    free_cu_die_cache,
+    has_real_dwarf_info,
+    is_skeleton_cu as _is_skeleton_cu,
+)
 
 log = logging.getLogger(__name__)
 
@@ -258,35 +263,6 @@ def parse_dwarf_from_session(
             )
 
     return meta, adv
-
-
-# DWARF5 CU unit_type values that name a split-DWARF skeleton/split unit
-# (DWARFv5 sec 7.5.1.1). Not present at all on DWARF<=4 headers -- those
-# rely solely on the DW_AT_GNU_dwo_name/DW_AT_dwo_name attribute check below.
-_DW_UT_SKELETON = 0x04
-_DW_UT_SPLIT_COMPILE = 0x05
-_SKELETON_DWO_ATTRS = ("DW_AT_GNU_dwo_name", "DW_AT_dwo_name")
-
-
-def _is_skeleton_cu(CU: Any) -> bool:
-    """Whether *CU* is a split-DWARF skeleton (``-gsplit-dwarf``).
-
-    A skeleton CU's own top DIE carries only a handful of attributes
-    (``DW_AT_GNU_dwo_name``/``DW_AT_dwo_name`` naming the ``.dwo`` that holds
-    the real DIE tree) and essentially no children -- so a normal CU walk
-    over it "succeeds" while extracting almost nothing. Never raises: an
-    unreadable top DIE is not itself proof of a skeleton, just missing
-    evidence for one, so it is treated as "not a skeleton" here and left to
-    the ordinary per-CU exception handling in the caller.
-    """
-    try:
-        unit_type = CU.header.get("unit_type")
-        if unit_type in (_DW_UT_SKELETON, _DW_UT_SPLIT_COMPILE):
-            return True
-        top = CU.get_top_DIE()
-        return any(attr in top.attributes for attr in _SKELETON_DWO_ATTRS)
-    except Exception:  # noqa: BLE001 - detection must never abort real parsing
-        return False
 
 
 # ---------------------------------------------------------------------------

@@ -71,6 +71,7 @@ from .dwarf_utils import (
     attr_str as _attr_str,
     decode_member_location as _shared_decode_member_location,
     has_real_dwarf_info,
+    is_skeleton_cu as _is_skeleton_cu,
     resolve_die_ref as _resolve_die_ref,
     resolve_type_die as _resolve_type_die,
 )
@@ -174,8 +175,18 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
             # P2 review: mirror dwarf_unified's cu_total/cu_failed accounting
             # -- this standalone entry point is still public and previously
             # never recorded a skipped CU at all.
+            skeleton_cus = 0
             for CU in dwarf.iter_CUs():
                 meta.cu_total += 1
+                if _is_skeleton_cu(CU):
+                    # P2 review, fresh evidence: mirrors dwarf_unified.
+                    # parse_dwarf_from_session's identical skeleton-CU
+                    # downgrade -- this standalone entry point had no
+                    # split-DWARF (-gsplit-dwarf) detection at all, so a
+                    # skeleton CU (real DIEs live in an unconsumed .dwo/
+                    # .dwp file) "succeeded" here while extracting zero
+                    # real calling-convention/value-ABI facts.
+                    skeleton_cus += 1
                 try:
                     _process_cu(CU, meta)
                 except (ELFError, OSError, ValueError, KeyError) as exc:
@@ -187,9 +198,11 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
                 # empty/truncated .debug_info section iterates to zero
                 # CUs without raising.
                 meta.evidence_state = "failed"
-            elif meta.cu_failed:
+            elif meta.cu_failed or skeleton_cus:
                 meta.evidence_state = (
-                    "failed" if meta.cu_failed == meta.cu_total else "partial"
+                    "failed"
+                    if meta.cu_failed and meta.cu_failed == meta.cu_total
+                    else "partial"
                 )
             # Parse .eh_frame / .debug_frame CFA register convention (#117)
             _parse_frame_registers(elf, dwarf, meta)
