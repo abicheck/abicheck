@@ -347,9 +347,8 @@ class TestImportBaselineSet:
         with pytest.raises(ValueError, match="more than one artifact"):
             export_baseline_set(doctored, store=store)
 
-    @pytest.mark.parametrize("bad_native_identity", [{}, {"library_name": ""}])
     def test_export_rejects_an_artifact_with_no_library_name_evidence(
-        self, bad_native_identity: dict[str, str]
+        self,
     ) -> None:
         """The same defensive check as `import_bundle_facts.export_
         bundle_facts`'s own missing-library-name finding (CodeRabbit
@@ -363,7 +362,7 @@ class TestImportBaselineSet:
                 artifact_id=artifact.artifact_id,
                 variant_id=artifact.variant_id,
                 kind=artifact.kind,
-                native_identity=bad_native_identity,
+                native_identity={},
                 sections=artifact.sections,
             )
             for artifact in manifest.artifact_refs
@@ -375,6 +374,42 @@ class TestImportBaselineSet:
         )
         with pytest.raises(ValueError, match="library_name"):
             export_baseline_set(doctored, store=store)
+
+    def test_a_present_but_empty_library_name_is_not_rejected(self) -> None:
+        """Checked by key *presence*, not truthiness -- the identical fix
+        `import_bundle_facts.export_bundle_facts` needed for its own
+        `per_library_snapshots` empty-string-key case (Codex review, fresh
+        evidence). `import_baseline_set`'s own manifest validation never
+        produces this itself (it requires a non-empty `library`), but the
+        check must still be correct for a manifest built some other way."""
+        doc = _manifest_document(
+            artifacts=[
+                {
+                    "library": "liba.so",
+                    "artifact": "a",
+                    "snapshot": "liba.so/liba.so.abi.json",
+                }
+            ]
+        )
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(
+            doc, {"liba.so": _snapshot_documents()["liba.so"]}, store=store
+        )
+        (artifact,) = manifest.artifact_refs
+        doctored_artifact = ArtifactRef(
+            artifact_id=artifact.artifact_id,
+            variant_id=artifact.variant_id,
+            kind=artifact.kind,
+            native_identity={"library_name": ""},
+            sections=artifact.sections,
+        )
+        doctored = PackageManifest(
+            versions=manifest.versions,
+            variant_refs=manifest.variant_refs,
+            artifact_refs=(doctored_artifact,),
+        )
+        _metadata, snapshots = export_baseline_set(doctored, store=store)
+        assert set(snapshots) == {""}
 
     def test_export_rejects_a_variant_with_no_metadata_section(self) -> None:
         from abicheck.storage.import_v1 import import_legacy_snapshot

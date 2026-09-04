@@ -434,9 +434,8 @@ class TestImportBundleFacts:
         with pytest.raises(ValueError, match="more than one artifact"):
             export_bundle_facts(doctored, store=store)
 
-    @pytest.mark.parametrize("bad_native_identity", [{}, {"library_name": ""}])
     def test_export_rejects_an_artifact_with_no_library_name_evidence(
-        self, bad_native_identity: dict[str, str]
+        self,
     ) -> None:
         """Falling back to `artifact_id` when `native_identity` carries no
         `library_name` (an earlier version's behavior) would export an
@@ -451,7 +450,7 @@ class TestImportBundleFacts:
                 artifact_id=artifact.artifact_id,
                 variant_id=artifact.variant_id,
                 kind=artifact.kind,
-                native_identity=bad_native_identity,
+                native_identity={},
                 sections=artifact.sections,
             )
             for artifact in manifest.artifact_refs
@@ -463,6 +462,25 @@ class TestImportBundleFacts:
         )
         with pytest.raises(ValueError, match="library_name"):
             export_bundle_facts(doctored, store=store)
+
+    def test_an_empty_string_library_name_round_trips(self) -> None:
+        """The empty string is itself a valid `per_library_snapshots` key
+        -- the canonical `bundle_facts_from_dict` reader has no key-shape
+        validation for it at all -- so `import_bundle_facts` can produce a
+        real `native_identity[_LIBRARY_NAME_KEY] == ""`. Rejecting it by
+        truthiness (rather than by key presence) would make an
+        import-produced package unexportable (Codex review, fresh
+        evidence: this is the concrete counterexample to the previous
+        missing-library-name fix)."""
+        doc = _bundle_document(
+            per_library_snapshots={
+                "": snapshot_to_dict(AbiSnapshot(library="", version="1.0"))
+            }
+        )
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        roundtrip = export_bundle_facts(manifest, store=store)
+        assert set(roundtrip["per_library_snapshots"]) == {""}
 
     def test_export_rejects_a_variant_with_no_composition_section(self) -> None:
         from abicheck.storage.import_v1 import import_legacy_snapshot

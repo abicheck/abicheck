@@ -484,16 +484,22 @@ def export_baseline_set(
         # `artifact_id` here (as an earlier version did) would export an
         # opaque hash as a library name whenever the id happens to be one
         # -- `import_baseline_set` itself always sets this key, so its
-        # absence or emptiness means this manifest wasn't built by it (or
-        # was hand-edited), and there is no real library name to recover
-        # (CodeRabbit review).
-        library = artifact.native_identity.get(_LIBRARY_NAME_KEY, "")
-        if not library:
+        # absence means this manifest wasn't built by it (or was
+        # hand-edited), and there is no real library name to recover
+        # (CodeRabbit review). Checked by *presence*, not truthiness, for
+        # the identical reason `import_bundle_facts.export_bundle_facts`
+        # is (this adapter's own manifest_document validation already
+        # requires a non-empty `library`, so it can never itself produce
+        # an empty one -- but the check should still be correct for a
+        # manifest built some other way, per the "not decoded, only
+        # partitioned" contract's own symmetry, Codex review).
+        if _LIBRARY_NAME_KEY not in artifact.native_identity:
             raise ValueError(
                 f"artifact {artifact_id!r} has no {_LIBRARY_NAME_KEY!r} "
                 "native_identity -- this manifest was not produced by "
                 "import_baseline_set, or was hand-edited"
             )
+        library = artifact.native_identity[_LIBRARY_NAME_KEY]
         if library in snapshot_documents:
             # `import_baseline_set` itself can never produce this --
             # `resolve_ref_ids` is keyed by the manifest's own,

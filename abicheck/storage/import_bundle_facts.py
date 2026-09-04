@@ -577,16 +577,23 @@ def export_bundle_facts(
         # `artifact_id` here (as an earlier version did) would export an
         # opaque hash as a library name whenever the id happens to be one
         # -- `import_bundle_facts` itself always sets this key, so its
-        # absence or emptiness means this manifest wasn't built by it (or
-        # was hand-edited), and there is no real library name to recover
-        # (CodeRabbit review).
-        library_name = artifact.native_identity.get(_LIBRARY_NAME_KEY, "")
-        if not library_name:
+        # absence means this manifest wasn't built by it (or was
+        # hand-edited), and there is no real library name to recover
+        # (CodeRabbit review). Checked by *presence*, not truthiness: the
+        # empty string is itself a valid `per_library_snapshots` key the
+        # canonical `bundle_facts_from_dict` reader neither rejects nor
+        # special-cases (no key-shape validation exists for it at all),
+        # so `import_bundle_facts` itself can produce a real, legitimate
+        # `native_identity[_LIBRARY_NAME_KEY] == ""` -- rejecting it by
+        # truthiness would make an import-produced package unexportable
+        # (Codex review, fresh evidence).
+        if _LIBRARY_NAME_KEY not in artifact.native_identity:
             raise ValueError(
                 f"artifact {artifact_id!r} has no {_LIBRARY_NAME_KEY!r} "
                 "native_identity -- this manifest was not produced by "
                 "import_bundle_facts, or was hand-edited"
             )
+        library_name = artifact.native_identity[_LIBRARY_NAME_KEY]
         if library_name in per_library_snapshots:
             # `import_bundle_facts` itself can never produce this --
             # `resolve_ref_ids` is keyed by the original, already-unique
