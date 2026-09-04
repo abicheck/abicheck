@@ -174,9 +174,18 @@ def _opaque_ref_id(name: str, prefix: str) -> str:
     """A deterministic id derived from *name* guaranteed to pass
     `safe_ref_id` and never collide (up to sha256) with another name's own
     opaque id -- lowercase hex is already `safe_ref_id`-safe and
-    case/normalization-collision-free by construction."""
+    case/normalization-collision-free by construction.
+
+    Uses the *full* digest, not a truncated prefix of it: `resolve_ref_ids`
+    calls this once per name in the fallback set, and `PackageManifest`
+    itself rejects a package with two artifacts sharing one `artifact_id`
+    -- a truncated 64-bit digest (`digest[:16]` hex chars) would make that
+    an actually reachable, if unlikely, way for two distinct library names
+    to collide and get the whole import rejected, contradicting this
+    docstring's own "never collide (up to sha256)" claim (CodeRabbit
+    review)."""
     digest = hashlib.sha256(name.encode("utf-8", errors="surrogatepass")).hexdigest()
-    return f"{prefix}-{digest[:16]}"
+    return f"{prefix}-{digest}"
 
 
 def resolve_ref_ids(names: Sequence[str], *, opaque_prefix: str) -> dict[str, str]:

@@ -47,6 +47,17 @@ class TestResolveRefIds:
         result = resolve_ref_ids(["a/b"], opaque_prefix="baseline")
         assert result["a/b"].startswith("baseline-")
 
+    def test_opaque_ids_use_the_full_digest_not_a_truncated_prefix(self) -> None:
+        """`_opaque_ref_id` must carry the full sha256 hex digest (64
+        chars), not a truncated prefix of it -- a truncated digest would
+        make a hash collision between two distinct names an actually
+        reachable way to get `PackageManifest`'s own duplicate-`artifact_id`
+        rejection, contradicting the "never collide (up to sha256)"
+        guarantee that function claims (CodeRabbit review)."""
+        result = resolve_ref_ids(["a/b"], opaque_prefix="lib")
+        digest = result["a/b"].removeprefix("lib-")
+        assert len(digest) == 64
+
     def test_an_empty_name_sequence_returns_an_empty_mapping(self) -> None:
         assert resolve_ref_ids([], opaque_prefix="lib") == {}
 
