@@ -64,10 +64,17 @@ class TestImportBundleFacts:
         with pytest.raises(ValueError, match="per_library_snapshots"):
             import_bundle_facts(doc, store=InMemoryObjectStore())
 
-    def test_rejects_an_empty_per_library_snapshots(self) -> None:
+    def test_accepts_an_explicitly_present_empty_per_library_snapshots(self) -> None:
+        """A vacuous bundle (present but empty) is a real, valid
+        `BundleFacts` document -- `bundle_facts_from_dict` accepts it too;
+        only an *absent* key is malformed (Codex review)."""
         doc = _bundle_document(per_library_snapshots={})
-        with pytest.raises(ValueError, match="per_library_snapshots"):
-            import_bundle_facts(doc, store=InMemoryObjectStore())
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        assert manifest.artifact_refs == ()
+        assert manifest.variant_refs[0].artifact_ids == ()
+        roundtrip = export_bundle_facts(manifest, store=store)
+        assert roundtrip["per_library_snapshots"] == {}
 
     def test_produces_one_variant_and_one_artifact_per_library(self) -> None:
         doc = _bundle_document()
@@ -119,6 +126,18 @@ class TestImportBundleFacts:
         doc = _bundle_document()
         del doc["artifact_type"]
         del doc["schema_version"]
+        manifest = import_bundle_facts(doc, store=InMemoryObjectStore())
+        assert manifest.variant_refs[0].variant_id == "default"
+
+    def test_accepts_a_string_encoded_v1_schema_version(self) -> None:
+        """`bundle_facts_from_dict` normalizes `schema_version` via a bare
+        `int(...)` call, so a v1 document spelling it `"1"` (still exactly
+        what `int("1") == 1` accepts) must keep loading here too (Codex
+        review) -- this adapter claims to accept what that canonical reader
+        accepts, not a narrower set."""
+        doc = _bundle_document()
+        del doc["artifact_type"]
+        doc["schema_version"] = "1"
         manifest = import_bundle_facts(doc, store=InMemoryObjectStore())
         assert manifest.variant_refs[0].variant_id == "default"
 

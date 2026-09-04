@@ -207,23 +207,31 @@ def import_bundle_facts(
     function's own docstring for why this module cannot default or derive
     it itself.
 
-    Raises `ValueError` if `per_library_snapshots` is missing, empty, or not
-    a mapping, or if the per-library snapshots do not all declare the same
-    `schema_version` (see the module docstring's "one `source_schema_version`"
-    section).
+    Raises `ValueError` if `per_library_snapshots` is missing or not a
+    mapping (an explicitly present but *empty* mapping is accepted -- a
+    vacuous bundle is still a valid one), or if the per-library snapshots
+    do not all declare the same `schema_version` (see the module
+    docstring's "one `source_schema_version`" section).
     """
     _mapping(bundle_facts_document, "bundle_facts_document")
-    raw_container_schema_version = bundle_facts_document.get(
+    raw_container_schema_version_value = bundle_facts_document.get(
         "schema_version", _BUNDLE_FACTS_SCHEMA_VERSION
     )
-    if isinstance(raw_container_schema_version, bool) or not isinstance(
-        raw_container_schema_version, int
-    ):
+    # `int(...)`, not a strict `isinstance` gate: `bundle_facts_from_dict`
+    # itself normalizes via a bare `int(...)` call (so a document spelling
+    # this `"1"` -- still exactly what `int("1") == 1` accepts -- keeps
+    # loading; `tests/test_bundle_facts_artifact_type.py::
+    # test_missing_artifact_type_accepts_a_string_encoded_v1_version` pins
+    # this). This adapter must accept exactly what that canonical reader
+    # accepts, not a narrower set (Codex review) -- being stricter here
+    # would refuse a real, already-supported persisted document.
+    try:
+        raw_container_schema_version = int(raw_container_schema_version_value)
+    except (TypeError, ValueError):
         raise ValueError(
-            "bundle_facts_document schema_version must be an int, not "
-            f"{type(raw_container_schema_version).__name__} "
-            f"({raw_container_schema_version!r})"
-        )
+            "bundle_facts_document schema_version must be coercible to an "
+            f"int, got {raw_container_schema_version_value!r}"
+        ) from None
     if raw_container_schema_version > _BUNDLE_FACTS_SCHEMA_VERSION:
         raise IncompatibleSnapshotSchemaError(
             f"bundle_facts_document schema_version {raw_container_schema_version} "
@@ -259,10 +267,14 @@ def import_bundle_facts(
         )
     raw_snapshots = bundle_facts_document["per_library_snapshots"]
     _mapping(raw_snapshots, "bundle_facts_document['per_library_snapshots']")
-    if not raw_snapshots:
-        raise ValueError(
-            "bundle_facts_document['per_library_snapshots'] must not be empty"
-        )
+    # An explicitly *present*, empty mapping is a real, valid BundleFacts --
+    # the canonical `bundle_facts_from_dict` reader accepts it (a bundle
+    # with no libraries is not a contradiction, just a vacuous one), and a
+    # dedicated regression test pins that acceptance. Only the key's
+    # *absence* means malformed input, checked above -- Codex review, a
+    # second finding: an earlier version of this function rejected an
+    # empty-but-present mapping too, which this adapter's own claim to
+    # "accept what the canonical reader accepts" cannot allow.
 
     artifact_refs = []
     section_schema_versions: dict[str, int] = {}
@@ -293,7 +305,11 @@ def import_bundle_facts(
                 "of its member snapshots from one build, so this should "
                 "never occur outside a hand-edited or corrupted document"
             )
-    assert source_schema_version is not None  # non-empty loop guarantees this
+    if source_schema_version is None:
+        # A vacuous bundle (an empty, but present, `per_library_snapshots`)
+        # has no per-library snapshot to derive a schema version from --
+        # `StorageVersions`' own `0` "unstated" sentinel, not a guess.
+        source_schema_version = 0
 
     if "variant_fingerprint" in bundle_facts_document:
         variant_fingerprint = bundle_facts_document["variant_fingerprint"]
