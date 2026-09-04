@@ -27,7 +27,16 @@ selected workflow topologies. The implementation is intentionally layered so
 ELF/PE/Mach-O metadata, debug formats, header ASTs, policy, filtering, and report
 rendering can evolve independently.
 
-| Area | Primary modules | Role |
+The table below describes the pre-ADR-061 flat module layout and is now
+partly historical — some modules it names have already moved under a
+bounded package (e.g. `model.py` is now `abicheck/model/`). New and migrated
+code follows the bounded-package responsibilities and dependency direction
+in [ADR-061](adr/061-responsibility-package-architecture.md) — see the root
+`AGENTS.md`'s "Task routing and dependency direction" table for the current
+routing and `architecture/README.md` for the machine-readable boundary
+contract and its enforcement gate.
+
+| Area | Primary modules (pre-ADR-061 names; some have since moved) | Role |
 |---|---|---|
 | Data model | `model.py`, `checker_types.py`, `serialization.py`, `diff_serialization.py` | Snapshot/result dataclasses, schema-compatible round trips, compatibility loading. |
 | Input resolution | `service.py`, `dumper.py`, `dumper_castxml.py`, `build_context.py`, `debug_resolver.py` | Turn binaries, snapshots, headers, build dirs, and debug artifacts into `AbiSnapshot`s. |
