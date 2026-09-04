@@ -101,6 +101,68 @@ def _resolve_new_side_headers_includes(
     return headers, includes
 
 
+def resolve_dispatch_compile_context(
+    ctx: click.Context, kwargs: dict[str, Any], *, new_is_stored: bool
+) -> Any:
+    """Resolve ``dispatch()``'s ``compile_context`` argument, mutating
+    *kwargs* the same way ``compare_cmd`` itself used to before delegating
+    here -- split out purely to keep ``compare.py`` under its own
+    architecture cap, not for any independent reason.
+
+    When *new_is_stored* (CLI cleanup phase two, PR I's stored/stored
+    shape), this skips ``resolve_compile_context`` entirely and returns
+    ``None``: neither side does any header-frontend extraction, so there is
+    no compile context to resolve, and running it anyway would merge
+    ``.abicheck.yml``'s own ``compile.include_dirs`` into
+    ``kwargs["includes"]`` -- which the stored/stored NEW-side rejections
+    (``compare_bundle_facts_rejections.py``) would then wrongly refuse as
+    an *explicit* ``--include``, breaking every stored/stored invocation
+    run from an ordinary project directory that happens to declare a
+    compile: block (Codex review, PR #1060). ``kwargs["config"]`` is still
+    resolved either way, since the config-block rejection checks in that
+    same module (severity:/scope:/suppression:/... ) still apply to a
+    stored/stored comparison.
+    """
+    from ....cli_helpers_compare import discover_project_config
+
+    # Codex review: mirror run_compare's own cwd-upward cfg_path fallback
+    # (_resolve_compare_config) -- resolve_compile_context alone never
+    # auto-discovers without a --sources tree. Overwriting kwargs["config"]
+    # means dispatch()'s own config check (cli_options is kept out of that
+    # sibling module's own imports -- see its docstring) covers an
+    # auto-discovered .abicheck.yml too.
+    kwargs["config"] = kwargs.get("config") or discover_project_config()
+    if new_is_stored:
+        return None
+
+    from ....cli_options import resolve_compile_context
+
+    _headers, _includes = _resolve_new_side_headers_includes(kwargs)
+    header_backend = kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
+    compile_context, merged_includes = resolve_compile_context(
+        ctx,
+        sysroot=kwargs.get("sysroot"),
+        nostdinc=bool(kwargs.get("nostdinc", False)),
+        header_backend=header_backend,
+        includes=tuple(_includes),
+        build_config=kwargs["config"],
+        frontend_context=kwargs.get("frontend_context", "host"),
+        compiler_path=kwargs.get("compiler_path"),
+        compiler_prefix=kwargs.get("compiler_prefix"),
+        compiler_option_tokens=tuple(kwargs.get("compiler_option_tokens") or ()),
+    )
+    # Forward the *merged* include list (Codex review), not the raw kwargs
+    # resolve_compile_context was given -- when .abicheck.yml supplies
+    # compile.include_dirs, merged_includes is _includes extended with
+    # those config-derived roots, and the side-scoped new_includes_only
+    # override (already folded into _includes above) would otherwise make
+    # dispatch()'s own independent re-derivation from raw kwargs silently
+    # drop them.
+    kwargs["includes"] = tuple(merged_includes)
+    kwargs["new_includes_only"] = ()
+    return compile_context
+
+
 def _load_library_overrides(
     manifest_path: Path,
     *,

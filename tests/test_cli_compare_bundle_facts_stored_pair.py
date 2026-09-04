@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.bundle_facts import capture_bundle_facts
@@ -280,6 +281,24 @@ class TestStoredPairEarlyRejections:
         the routing test: reaching the "nothing was compared" failure, not
         a click.UsageError."""
         old_path, new_path = self._both_stored(tmp_path)
+
+        code, out = _invoke("compare", str(old_path), str(new_path))
+
+        assert code != 64
+        assert "nothing was compared" in out
+
+    def test_ambient_project_config_include_dirs_is_not_treated_as_explicit_include(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An ordinary project's own ``.abicheck.yml`` `compile:
+        include_dirs:` must not be folded into ``kwargs["includes"]`` and
+        then rejected as if the user had passed an explicit ``--include``
+        -- Codex review, PR #1060: resolve_compile_context's own config
+        merge ran unconditionally, so any project with a compile config
+        block could never run a stored/stored comparison at all."""
+        old_path, new_path = self._both_stored(tmp_path)
+        (tmp_path / ".abicheck.yml").write_text("compile:\n  include_dirs: [include]\n")
+        monkeypatch.chdir(tmp_path)
 
         code, out = _invoke("compare", str(old_path), str(new_path))
 

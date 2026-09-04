@@ -751,48 +751,18 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
 
     _bundle_operands = resolve_bundle_compare_dispatch(kwargs["old_input"], kwargs["new_input"])
     if _bundle_operands.old_is_stored:
-        from ....cli_helpers_compare import discover_project_config
-        from ....cli_options import resolve_compile_context
         from .compare_bundle_facts import (
-            _resolve_new_side_headers_includes,
             dispatch as dispatch_bundle_facts,
+            resolve_dispatch_compile_context,
         )
 
         # Codex review: mirrors run_compare's own explicit-vs-default --lang
         # detection -- otherwise indistinguishable from Click's own default.
         _lang_src = ctx.get_parameter_source("lang")
         kwargs["lang_explicit"] = _lang_src == click.core.ParameterSource.COMMANDLINE
-        _headers, _includes = _resolve_new_side_headers_includes(kwargs)
-        _header_backend = kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
-        # Codex review: mirror run_compare's own cwd-upward cfg_path fallback
-        # (_resolve_compare_config) -- resolve_compile_context alone never
-        # auto-discovers without a --sources tree. Overwriting kwargs
-        # ["config"] means dispatch()'s own config check (cli_options is
-        # kept out of that sibling module's own imports -- see its
-        # docstring) covers an auto-discovered .abicheck.yml too.
-        _cfg_path = kwargs.get("config") or discover_project_config()
-        kwargs["config"] = _cfg_path
-        _compile_context, _merged_includes = resolve_compile_context(
-            ctx,
-            sysroot=kwargs.get("sysroot"),
-            nostdinc=bool(kwargs.get("nostdinc", False)),
-            header_backend=_header_backend,
-            includes=tuple(_includes),
-            build_config=_cfg_path,
-            frontend_context=kwargs.get("frontend_context", "host"),
-            compiler_path=kwargs.get("compiler_path"),
-            compiler_prefix=kwargs.get("compiler_prefix"),
-            compiler_option_tokens=tuple(kwargs.get("compiler_option_tokens") or ()),
+        _compile_context = resolve_dispatch_compile_context(
+            ctx, kwargs, new_is_stored=_bundle_operands.new_is_stored
         )
-        # Forward the *merged* include list (Codex review), not the raw
-        # kwargs `resolve_compile_context` was given -- when `.abicheck.yml`
-        # supplies `compile.include_dirs`, `_merged_includes` is `_includes`
-        # extended with those config-derived roots, and the side-scoped
-        # `new_includes_only` override (already folded into `_includes`
-        # above) would otherwise make `dispatch()`'s own independent
-        # re-derivation from raw kwargs silently drop them.
-        kwargs["includes"] = tuple(_merged_includes)
-        kwargs["new_includes_only"] = ()
         dispatch_bundle_facts(compile_context=_compile_context, new_is_stored=_bundle_operands.new_is_stored, **kwargs)
         return
     kwargs.pop("max_json_object_nodes", None)
