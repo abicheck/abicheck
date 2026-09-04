@@ -1544,6 +1544,25 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "compare --bundle-cohort/--bundle-system-providers (CLI cleanup"
+        " phase two, PR J: bundle topology moved to .abicheck.yml's"
+        " bundle.cohorts:/bundle.system_providers:, since it's a stable,"
+        " reviewed-in-a-PR release property, not a per-run analysis input;"
+        " scan --artifact-set's --bundle-system-providers was retired the"
+        " same way)",
+        ("--bundle-cohort", "--bundle-system-providers"),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/plans/cli-cleanup-phase-two.md",
+                # Names the retired spelling once, in its own "formerly ..."
+                # historical-framing sentence, to point a reader coming from
+                # an old invocation at the `.abicheck.yml` replacement.
+                "use/multi-binary.md",
+            }
+        ),
+    ),
 )
 
 
