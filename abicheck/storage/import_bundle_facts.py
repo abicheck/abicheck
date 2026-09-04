@@ -66,6 +66,7 @@ provenance.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from ..errors import IncompatibleSnapshotSchemaError
@@ -94,6 +95,7 @@ __all__ = [
     "BUNDLE_FACTS_ARTIFACT_TYPE",
     "export_bundle_facts",
     "import_bundle_facts",
+    "read_variant_composition_manifest_payload",
 ]
 
 #: Self-describing document-type marker, duplicated here rather than
@@ -635,4 +637,45 @@ def export_bundle_facts(
         "filesystem_aliases": composition.get("filesystem_aliases", {}),
         "library_filenames": composition.get("library_filenames", {}),
         "manifest": exported_manifest,
+    }
+
+
+def read_variant_composition_manifest_payload(
+    root: str | Path, variant_id: str
+) -> dict[str, Any] | None:
+    """`export_bundle_facts`'s own manifest half, without needing that
+    function's full multi-artifact `PackageManifest` -- a single-artifact
+    materialized sub-package (`project_snapshot_legacy.materialize_
+    release_variant_artifacts`'s own output) never has one, only its own
+    preserved `VariantRef`.
+
+    Returns the same `bundle_manifest.manifest_from_dict()`-shaped payload
+    `export_bundle_facts` builds (via the identical `_manifest_entry_for_
+    export` translation), or `None` -- never raises -- for anything that
+    isn't a readable package carrying a `BUNDLE_COMPOSITION_SECTION_KIND`
+    section for *variant_id*, or that carries one with no manifest
+    recorded. Deliberately returns a plain dict rather than an
+    `InstantiationManifest`: `storage/` may not import `bundle_manifest`
+    (this module's own docstring); the caller decodes it.
+    """
+    from ..project_snapshot_store import DirectoryObjectStore, read_variant_ref
+
+    try:
+        variant = read_variant_ref(root, variant_id)
+        composition_ref = variant.sections.get(BUNDLE_COMPOSITION_SECTION_KIND)
+        if composition_ref is None:
+            return None
+        raw = DirectoryObjectStore(root).get(composition_ref.digest)
+        composition = bundle_composition_from_dto(SectionDTO.from_dict(raw))
+    except Exception:
+        return None
+
+    raw_manifest = composition.get("manifest")
+    if raw_manifest is None:
+        return None
+    return {
+        **raw_manifest,
+        "provides": [
+            _manifest_entry_for_export(entry) for entry in raw_manifest["provides"]
+        ],
     }

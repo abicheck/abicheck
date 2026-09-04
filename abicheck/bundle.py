@@ -114,6 +114,8 @@ from .elf_metadata import ElfMetadata, parse_elf_metadata
 
 if TYPE_CHECKING:
     from .policy_file import PolicyFile
+    from .project_snapshot_store import ManifestSummary
+    from .storage.package import ArtifactRef
 
 log = logging.getLogger(__name__)
 
@@ -408,7 +410,67 @@ def _stored_library_identity(path: Path) -> tuple[Path | None, tuple[str, ...]]:
         except Exception as exc:
             log.debug("bundle: malformed filesystem_aliases for %s: %s", path, exc)
             aliases = ()
+
+    if real_filename is None and not aliases:
+        # `bundle_facts_store.py`'s own per-artifact writer (above) is one of
+        # two independent native_identity writers (see this function's own
+        # docstring) -- `storage.import_bundle_facts.import_bundle_facts`
+        # (the other) never stamps `library_filename`/`filesystem_aliases`
+        # on the artifact itself; it records them once, variant-wide, in the
+        # preserved `BUNDLE_COMPOSITION_SECTION_KIND` section instead (Codex
+        # review, fresh evidence: a package built that way silently lost
+        # this evidence here even though it was never actually missing).
+        real_filename, aliases = _composition_library_identity(path, summary, artifact)
     return real_filename, aliases
+
+
+def _composition_library_identity(
+    path: Path, summary: ManifestSummary, artifact: ArtifactRef
+) -> tuple[Path | None, tuple[str, ...]]:
+    """`_stored_library_identity`'s fallback for a package written by
+    `storage.import_bundle_facts.import_bundle_facts`: real filename/
+    aliases live in the sub-package's own preserved variant-wide
+    `BUNDLE_COMPOSITION_SECTION_KIND` section (`bundle_composition_from_dto`'s
+    `library_filenames`/`filesystem_aliases` maps), keyed by the same
+    library name `import_bundle_facts` also stashed on this artifact's own
+    `native_identity["library_name"]` -- not by the caller's own bundle key,
+    which may differ (`workflows.release_package._release_match_key`'s own
+    docstring). Best-effort, like its caller: `(None, ())` for anything
+    that doesn't parse this way."""
+    from .project_snapshot_store import DirectoryObjectStore, read_variant_ref
+    from .storage.dto import (
+        BUNDLE_COMPOSITION_SECTION_KIND,
+        SectionDTO,
+        bundle_composition_from_dto,
+    )
+
+    library_name = artifact.native_identity.get("library_name")
+    if not library_name or len(summary.variant_ids) != 1:
+        return None, ()
+    try:
+        variant = read_variant_ref(path, summary.variant_ids[0])
+        composition_ref = variant.sections.get(BUNDLE_COMPOSITION_SECTION_KIND)
+        if composition_ref is None:
+            return None, ()
+        raw = DirectoryObjectStore(path).get(composition_ref.digest)
+        composition = bundle_composition_from_dto(SectionDTO.from_dict(raw))
+    except Exception as exc:
+        log.debug("bundle: no bundle_composition evidence for %s: %s", path, exc)
+        return None, ()
+
+    filename = composition.get("library_filenames", {}).get(library_name)
+    real_filename = Path(filename) if filename else None
+    aliases = tuple(composition.get("filesystem_aliases", {}).get(library_name, ()))
+    return real_filename, aliases
+
+
+def stored_capture_identity(path: Path) -> tuple[str | None, tuple[str, ...]]:
+    """`bundle_facts.capture_bundle_facts`'s own resolver for a
+    `library_paths` entry that is a stored sub-package directory rather
+    than a real file: `_stored_library_identity`'s filename, as a plain
+    string (or `None`)."""
+    real_filename, aliases = _stored_library_identity(path)
+    return (real_filename.name if real_filename is not None else None), aliases
 
 
 def build_bundle_snapshot_from_metadata(

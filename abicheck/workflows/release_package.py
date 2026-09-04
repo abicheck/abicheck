@@ -261,20 +261,20 @@ def _display_dirname(key: str, artifact_id: str) -> str:
 
 def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
     """*pkg_map* (a `resolve_release_package_map` result), restricted to
-    members whose materialized `ArtifactRef.kind` is `"elf"` --
-    `--dso-only`'s stored-side counterpart to `is_elf_shared_object`
-    filtering a live directory's discovered files (Codex review, fresh
-    evidence: `--dso-only` was only ever applied to the live-discovery
-    branch, so a stored non-ELF snapshot -- header-only, Python-visible,
-    ... -- or a stored executable artifact still reached the comparison
-    even when explicitly excluded).
+    members whose materialized `ArtifactRef.kind` is `"elf"` *and* whose
+    stored `ElfMetadata.is_pie` is not set -- `--dso-only`'s stored-side
+    counterpart to `package._is_elf_shared_object` filtering a live
+    directory's discovered files (Codex review, fresh evidence: checking
+    `kind` alone still admitted a stored PIE/application ELF executable,
+    since `import_v1` derives `"elf"` for both a DSO and an executable --
+    the live path additionally rejects those via `is_pie`).
 
-    Best-effort per member: a sub-package whose own kind cannot be
-    determined (a read failure this function itself does not expect, since
-    every member here was already successfully materialized) is *excluded*,
-    not included -- `--dso-only`'s whole contract is "only compare what is
-    confirmed to be a DSO", so uncertainty must not silently widen it.
+    Best-effort per member: a sub-package whose own kind or ELF metadata
+    cannot be determined is *excluded*, not included -- `--dso-only`'s
+    whole contract is "only compare what is confirmed to be a DSO", so
+    uncertainty must not silently widen it.
     """
+    from ..bundle import _stored_elf_metadata
     from ..project_snapshot_store import read_artifact_ref, read_manifest_summary
 
     filtered: dict[str, Path] = {}
@@ -282,10 +282,12 @@ def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
         try:
             summary = read_manifest_summary(sub_dir)
             (artifact_id,) = summary.artifact_ids
-            kind = read_artifact_ref(sub_dir, artifact_id).kind
+            if read_artifact_ref(sub_dir, artifact_id).kind != "elf":
+                continue
         except Exception:
             continue
-        if kind == "elf":
+        elf = _stored_elf_metadata(sub_dir)
+        if elf is not None and not elf.is_pie:
             filtered[key] = sub_dir
     return filtered
 

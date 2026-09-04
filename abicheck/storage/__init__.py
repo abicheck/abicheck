@@ -113,6 +113,7 @@ from .import_bundle_facts import (
     BUNDLE_FACTS_ARTIFACT_TYPE,
     export_bundle_facts,
     import_bundle_facts,
+    read_variant_composition_manifest_payload,
 )
 from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .legacy_sections import (
@@ -234,6 +235,7 @@ __all__ = [
     "provenance_from_dto",
     "provenance_to_dto",
     "raw_digest",
+    "read_variant_composition_manifest_payload",
     "semantic_digest",
     "semantic_ir_from_dto",
     "semantic_ir_to_dto",

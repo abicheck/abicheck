@@ -718,16 +718,22 @@ def read_embedded_instantiation_manifest(
     `materialize_release_variant_artifacts` already preserves the section on
     disk, but nothing read it back).
 
+    Falls back to a package written by `storage.import_bundle_facts`
+    instead -- whose own captured manifest, if any, lives per-variant in
+    the `BUNDLE_COMPOSITION_SECTION_KIND` composition payload rather than
+    this project-level section (Codex review, fresh evidence: this
+    fallback previously read only the project-level section, so a stored
+    side sourced from that writer still lost its own manifest-drift
+    evidence here even after the composition section itself was preserved
+    through materialization).
+
     Returns `None` -- never raises -- for anything that isn't a readable
-    package carrying this section: no `manifest.json`, a corrupted/
-    hand-edited `project_sections` entry, or a package that simply never had
-    an instantiation manifest to begin with (e.g. one written by
-    `storage.import_bundle_facts`, whose own captured manifest -- if any --
-    lives inside its `BUNDLE_COMPOSITION_SECTION_KIND` composition payload
-    instead, a different shape this function does not attempt to translate;
-    a real gap, not silently claimed to be covered).
+    package carrying either kind of evidence: no `manifest.json`, a
+    corrupted/hand-edited section, or a package that simply never had an
+    instantiation manifest to begin with.
     """
     from .project_snapshot_store import DirectoryObjectStore, read_project_manifest
+    from .storage.import_bundle_facts import read_variant_composition_manifest_payload
 
     root_path = Path(root)
     try:
@@ -735,10 +741,24 @@ def read_embedded_instantiation_manifest(
     except Exception:
         return None
     manifest_ref = manifest.project_sections.get(INSTANTIATION_MANIFEST_SECTION_KIND)
-    if manifest_ref is None or manifest_ref.kind != INSTANTIATION_MANIFEST_SECTION_KIND:
-        return None
-    try:
-        raw = DirectoryObjectStore(root_path).get(manifest_ref.digest)
-        return manifest_from_dict(_manifest_document_from_storage(raw))
-    except Exception:
-        return None
+    project_level = (
+        manifest_ref is not None
+        and manifest_ref.kind == INSTANTIATION_MANIFEST_SECTION_KIND
+    )
+    if project_level:
+        assert manifest_ref is not None
+        try:
+            raw = DirectoryObjectStore(root_path).get(manifest_ref.digest)
+            return manifest_from_dict(_manifest_document_from_storage(raw))
+        except Exception:
+            return None
+    for variant in manifest.variant_refs:
+        payload = read_variant_composition_manifest_payload(
+            root_path, variant.variant_id
+        )
+        if payload is not None:
+            try:
+                return manifest_from_dict(payload)
+            except Exception:
+                return None
+    return None
