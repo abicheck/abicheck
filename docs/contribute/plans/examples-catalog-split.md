@@ -65,10 +65,10 @@ unaffected. Each of the 197 entries carries:
 | Field | Meaning |
 |---|---|
 | `entity` | `rule` or `scenario` |
-| `scenario_kind` | (scenarios only) `case-study`, `project-topology`, or `capability` — never `audit`; audit-ness doesn't determine `entity` (`operation` carries it instead, below) — the G20 rule cases (143-146) are `entity: rule` with `operation: audit`, but the G20 capability scenarios (147-151) are `entity: scenario` and *also* carry `operation: audit`. An earlier revision of this table listed `audit` as a fourth `scenario_kind` value, but the generator never emits it that way; corrected here after an external review caught the doc/implementation mismatch. |
+| `scenario_kind` | (scenarios only) `case-study`, `project-topology`, or `capability` — never `audit`; audit-ness doesn't determine `entity` (`operation` carries it instead, below) — the G20 rule cases (143-146, 181) are `entity: rule` with `operation: audit`, but the G20 capability scenarios (147-151) are `entity: scenario` and *also* carry `operation: audit`. An earlier revision of this table listed `audit` as a fourth `scenario_kind` value, but the generator never emits it that way; corrected here after an external review caught the doc/implementation mismatch. |
 | `operation` | `compare` (an old/new comparison — the default) or `audit` (a single-release scan, `ground_truth.json`'s own `mode: "audit"`) — orthogonal to `entity`/`scenario_kind` |
 | `ecosystem` | `generic`, `onetbb`, `sycl`, `onemkl`, or `linux-kernel` |
-| `topics` | derived from `expected_kinds` via the existing `abicheck/model/change_catalog/{symbols,types,platform,build,source}.py` split (AGENTS.md's own "Adding a new ChangeKind" categorization) — reused rather than re-invented; `controls` for a `NO_CHANGE` case with no kinds to derive from; `audit` added for the four G20 audit rules |
+| `topics` | derived from `expected_kinds` via the existing `abicheck/model/change_catalog/{symbols,types,platform,build,source}.py` split (AGENTS.md's own "Adding a new ChangeKind" categorization) — reused rather than re-invented; `controls` for a `NO_CHANGE` case with no kinds to derive from; `audit` added for every `mode: "audit"` case (10 total: the 5 rule-entity G20 audit cases 143-146/181, and the 5 scenario-entity G20 audit cases 147-151) |
 | `languages` | derived from which source-file extensions the case's own fixtures ship |
 | `scope` | `single-library` or `multi-library` (the five bundle cases) |
 | `artifact_shape` | `compiled-pair`, `snapshot-pair`, `snapshot-audit`, `stub-pair`, `btf-pair`, `kabi-pair`, `fixture-pair`, or `bundle` — derived from ground_truth.json's own `fixtures:`/`mode:` fields when a case declares them (authoritative over any file-scan heuristic; `snapshot-audit` is a single-release G20 scan, `snapshot-pair` an old/new comparison), else from what the case directory actually ships |
@@ -308,10 +308,16 @@ filter keyed on `examples/**` (`Examples Validation`, docs generation, heavy
 parity selection, release gates) needs a matching `catalog/**` filter;
 `.github/workflows/mutation.yml`'s `also_copy` (which copies `examples`
 into the mutation sandbox because tests read fixture/ground-truth data from
-it) needs `catalog` added; and `gen_examples_docs.py`'s hard-coded `Source
+it) needs `catalog` added; `gen_examples_docs.py`'s hard-coded `Source
 files: examples/<case>/` / `Source: examples/<case>/README.md` path
 templates need to resolve through the catalog manifest/resolver instead of
-a literal prefix.
+a literal prefix; and `tests/test_probe_examples.py`'s
+`PROBES_DIR = Path(__file__).parent.parent / "examples" / "probes"` needs
+to move to `catalog/probes/` alongside the directory itself (found by a
+Codex review on the PR that added this diagram) — unlike the
+`ground_truth.json` readers Phase 3 already gave a real `example_catalog`
+resolver to point at, there is no probes-directory equivalent yet, so this
+one is genuinely Phase 4's to introduce, not fixable ahead of the move.
 
 ## Taxonomy visibility on the public docs site
 

@@ -42,11 +42,11 @@ from typing import NamedTuple
 from abicheck.source_smoke import SourceSmokeSpec, run_source_smoke
 
 REPO_DIR = Path(__file__).parent.parent
-EXAMPLES_DIR = REPO_DIR / "examples"
-GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
 sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
+EXAMPLES_DIR = example_catalog.EXAMPLES_DIR  # monkeypatch seam: test_validate_examples_unit.py
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 ARTIFACT_VARIANTS = (
     "debug-headers",
     "release-headers",

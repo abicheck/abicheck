@@ -67,7 +67,7 @@ are orthogonal to implementation language and independent of the physical
                      "audit" (a single-release scan, ground_truth.json's own
                      `mode: "audit"`). Orthogonal to `entity`/`scenario_kind`:
                      an audit case may be either entity -- the G20 rule
-                     cases (143-146) stay entity="rule", but the G20
+                     cases (143-146, 181) stay entity="rule", but the G20
                      capability scenarios (147-151) are entity=
                      "scenario" and also carry mode="audit" -- so "which
                      release-evaluation operation does this case exercise"

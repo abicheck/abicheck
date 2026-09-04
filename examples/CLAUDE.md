@@ -144,8 +144,8 @@ top of this directory. **If a per-case README disagrees with
 language: `entity` (`rule` vs. `scenario`), `scenario_kind` (for a
 scenario: `case-study`/`project-topology`/`capability` — never `audit`;
 audit-ness doesn't determine `entity`, `operation` carries it instead,
-below — a case can be `entity: rule` with `operation: audit` (case143-146)
-or `entity: scenario` with `operation: audit` (case147-151)), `operation`
+below — a case can be `entity: rule` with `operation: audit` (case143-146,
+case181) or `entity: scenario` with `operation: audit` (case147-151)), `operation`
 (`compare` vs. `audit`), `ecosystem`, `topics`,
 `languages`, `scope`, `artifact_shape`, `validation_owner`,
 `related_rules`, and `rule_slug`/`variant_of`/`relation_type`/
