@@ -124,40 +124,104 @@ class TestBuildAddrToSym:
         assert out[0x3000] == "weak_ok"
 
 
+def _fake_entry(class_name: str) -> MagicMock:
+    """A CFI-entry-shaped stand-in whose ``__class__.__name__`` matches
+    pyelftools' real ``CIE``/``FDE``/``ZERO`` entry classes -- ``_has_fde``
+    (and the real caller loop) both dispatch on that name, not isinstance."""
+    entry = MagicMock()
+    entry.__class__ = type(class_name, (), {})
+    return entry
+
+
 class TestGetCfiSource:
-    """P1 review, fresh evidence: pyelftools' real ``DWARFInfo`` API is
-    ``EH_CFI_entries()``/``CFI_entries()`` (no ``get_`` prefix) --
-    ``_get_cfi_source`` previously called nonexistent ``get_``-prefixed
-    names, silently caught by its own ``except AttributeError``, so CFI
-    extraction never actually ran against any real binary. These tests
-    use ``spec=DWARFInfo`` (rather than a bare ``MagicMock()``, which
-    auto-creates *any* attribute and so could not have caught this
-    mismatch) precisely so a future rename of either side reintroduces a
-    hard test failure instead of a silently-always-empty extraction.
+    """P1 review, two rounds of fresh evidence against this same function:
+
+    1. pyelftools' real ``DWARFInfo`` API is ``EH_CFI_entries()``/
+       ``CFI_entries()`` (no ``get_`` prefix) -- ``_get_cfi_source``
+       previously called nonexistent ``get_``-prefixed names, silently
+       caught by its own ``except AttributeError``, so CFI extraction never
+       actually ran against any real binary. These tests use
+       ``spec=DWARFInfo`` (rather than a bare ``MagicMock()``, which
+       auto-creates *any* attribute and so could not have caught this
+       mismatch) precisely so a future rename of either side reintroduces a
+       hard test failure instead of a silently-always-empty extraction.
+    2. Calling the real methods exposed two more real absent/empty-section
+       semantics the naive ``if src is not None: return src`` could not
+       handle: an ``.eh_frame`` section that exists but carries no real FDE
+       (only CIE/ZERO entries -- what ``-fno-asynchronous-unwind-tables``
+       can still leave behind) must fall back to ``.debug_frame`` instead
+       of being accepted as-is, and pyelftools raises ``AssertionError``
+       (not ``AttributeError``) when the underlying section is absent
+       entirely.
     """
 
-    def test_prefers_eh_frame(self) -> None:
+    def test_prefers_eh_frame_when_it_has_a_real_fde(self) -> None:
         from elftools.dwarf.dwarfinfo import DWARFInfo
 
         dwarf = MagicMock(spec=DWARFInfo)
-        eh_entries = [object()]
+        dwarf.has_EH_CFI.return_value = True
+        eh_entries = [_fake_entry("CIE"), _fake_entry("FDE")]
         dwarf.EH_CFI_entries.return_value = eh_entries
         assert _get_cfi_source(dwarf) is eh_entries
+        dwarf.CFI_entries.assert_not_called()
 
-    def test_fallbacks_to_debug_frame(self) -> None:
+    def test_fallbacks_to_debug_frame_when_eh_frame_absent(self) -> None:
         from elftools.dwarf.dwarfinfo import DWARFInfo
 
         dwarf = MagicMock(spec=DWARFInfo)
-        dbg_entries = [object(), object()]
-        dwarf.EH_CFI_entries.return_value = None
+        dwarf.has_EH_CFI.return_value = False
+        dwarf.has_CFI.return_value = True
+        dbg_entries = [_fake_entry("CIE"), _fake_entry("FDE")]
+        dwarf.CFI_entries.return_value = dbg_entries
+        assert _get_cfi_source(dwarf) is dbg_entries
+        dwarf.EH_CFI_entries.assert_not_called()
+
+    def test_fallbacks_to_debug_frame_when_eh_frame_has_no_real_fde(
+        self,
+    ) -> None:
+        """The exact reported shape: ``.eh_frame`` present but only a
+        CIE/ZERO-terminator entry (no real FDE) -- must not be accepted,
+        must fall through to ``.debug_frame``."""
+        from elftools.dwarf.dwarfinfo import DWARFInfo
+
+        dwarf = MagicMock(spec=DWARFInfo)
+        dwarf.has_EH_CFI.return_value = True
+        dwarf.EH_CFI_entries.return_value = [_fake_entry("ZERO")]
+        dwarf.has_CFI.return_value = True
+        dbg_entries = [_fake_entry("CIE"), _fake_entry("FDE")]
+        dwarf.CFI_entries.return_value = dbg_entries
+        assert _get_cfi_source(dwarf) is dbg_entries
+
+    def test_eh_frame_assertion_error_falls_back_without_raising(self) -> None:
+        """pyelftools' real ``EH_CFI_entries()`` asserts the section is
+        present rather than raising a catchable-by-name exception; this
+        must not propagate (violating the "never raises" contract) and
+        must still allow falling back to ``.debug_frame``."""
+        from elftools.dwarf.dwarfinfo import DWARFInfo
+
+        dwarf = MagicMock(spec=DWARFInfo)
+        dwarf.has_EH_CFI.return_value = True
+        dwarf.EH_CFI_entries.side_effect = AssertionError(
+            "self.eh_frame_sec is not None"
+        )
+        dwarf.has_CFI.return_value = True
+        dbg_entries = [_fake_entry("CIE"), _fake_entry("FDE")]
         dwarf.CFI_entries.return_value = dbg_entries
         assert _get_cfi_source(dwarf) is dbg_entries
 
     def test_returns_none_on_missing_both(self) -> None:
         dwarf = MagicMock()
-        dwarf.EH_CFI_entries.side_effect = AttributeError("no eh")
-        dwarf.CFI_entries.side_effect = AttributeError("no dbg")
+        dwarf.has_EH_CFI.side_effect = AttributeError("no eh")
+        dwarf.has_CFI.side_effect = AttributeError("no dbg")
         assert _get_cfi_source(dwarf) is None
+
+    def test_returns_none_when_neither_section_present(self) -> None:
+        dwarf = MagicMock()
+        dwarf.has_EH_CFI.return_value = False
+        dwarf.has_CFI.return_value = False
+        assert _get_cfi_source(dwarf) is None
+        dwarf.EH_CFI_entries.assert_not_called()
+        dwarf.CFI_entries.assert_not_called()
 
 
 # ── _extract_cfa_reg_from_fde ─────────────────────────────────────────────────

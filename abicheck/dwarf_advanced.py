@@ -856,28 +856,60 @@ def _build_addr_to_sym(elf: Any) -> dict[int, str]:
     return addr_to_sym
 
 
+def _has_fde(entries: Any) -> bool:
+    """Whether a CFI entry list contains at least one real FDE (as opposed
+    to only CIE/ZERO terminator entries -- what an ``.eh_frame`` section
+    with no actual frame data still yields)."""
+    if not entries:
+        return False
+    return any(e.__class__.__name__ == "FDE" for e in entries)
+
+
 def _get_cfi_source(dwarf: Any) -> Any:
     """Return CFI entry iterator, preferring .eh_frame over .debug_frame.
 
-    P1 review, fresh evidence: pyelftools' real ``DWARFInfo`` API is
-    ``EH_CFI_entries()``/``CFI_entries()`` -- there is no ``get_``-prefixed
-    spelling. The previous ``get_EH_CFI_entries()``/``get_CFI_entries()``
-    calls always raised ``AttributeError``, silently caught below, so this
-    function unconditionally returned ``None`` and every FDE-backed
-    detector family (frame-register convention, callee-saved fingerprint)
-    was never evaluated against any real binary despite the advanced
-    channel reporting ``parsed``.
+    P1 review, fresh evidence (two rounds against this same function):
+
+    1. pyelftools' real ``DWARFInfo`` API is
+       ``EH_CFI_entries()``/``CFI_entries()`` -- there is no
+       ``get_``-prefixed spelling. The previous ``get_EH_CFI_entries()``/
+       ``get_CFI_entries()`` calls always raised ``AttributeError``,
+       silently caught below, so this function unconditionally returned
+       ``None`` and every FDE-backed detector family (frame-register
+       convention, callee-saved fingerprint) was never evaluated against
+       any real binary despite the advanced channel reporting ``parsed``.
+    2. Calling the *real* method names exposed two more real
+       absent/empty-section semantics an unconditional
+       ``if src is not None: return src`` could not handle: pyelftools
+       raises ``AssertionError`` (not ``AttributeError``/``ELFError``) when
+       the underlying section is entirely absent (``EH_CFI_entries()``
+       asserts ``self.eh_frame_sec is not None``) -- which would have
+       violated ``parse_advanced_dwarf()``'s "never raises" contract -- and
+       an *empty*-of-real-data ``.eh_frame`` section (e.g. a binary built
+       with ``-fno-asynchronous-unwind-tables``, which GCC can still emit a
+       CIE/ZERO-only ``.eh_frame`` for) returns a non-``None``,
+       no-real-FDE list that the old code accepted immediately, never
+       falling back to a ``.debug_frame`` section that does carry real
+       FDEs. Fixed by checking section presence via ``has_EH_CFI()``/
+       ``has_CFI()`` before calling either entries accessor (also guarding
+       against ``AssertionError`` defensively, for an older pyelftools that
+       lacks the ``has_*`` methods), and only accepting the ``.eh_frame``
+       result when it actually contains an FDE -- otherwise falling
+       through to ``.debug_frame``.
     """
     try:
-        src = dwarf.EH_CFI_entries()
-        if src is not None:
-            return src
-    except (AttributeError, ELFError):
+        if dwarf.has_EH_CFI():
+            entries = dwarf.EH_CFI_entries()
+            if _has_fde(entries):
+                return entries
+    except (AttributeError, AssertionError, ELFError):
         pass
     try:
-        return dwarf.CFI_entries()
-    except (AttributeError, ELFError):
-        return None
+        if dwarf.has_CFI():
+            return dwarf.CFI_entries()
+    except (AttributeError, AssertionError, ELFError):
+        pass
+    return None
 
 
 def _extract_cfa_reg_from_fde(
