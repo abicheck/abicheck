@@ -132,12 +132,13 @@ PR #1042, three rounds):**
    reordered document with a large member (e.g. a populated
    ``per_library_snapshots``) ahead of ``artifact_type`` could push the
    marker past a small fixed prefix even though point 4's scan would have
-   recognized it at any position *within* that prefix. Answered by asking
-   ``bounded_decoded_prefix`` for a much larger window
+   recognized it at any position *within* that prefix. Originally answered
+   by asking ``bounded_decoded_prefix`` for a much larger window
    (:data:`_MARKER_SCAN_BYTES`, 1 MiB -- matching ``snapshot_io``'s own
-   escalating-retry ceiling) instead of its 4 KiB sniff default, generous
-   enough for any realistic reordered document while remaining one bounded
-   read.
+   escalating-retry ceiling) *unconditionally* instead of its 4 KiB sniff
+   default -- superseded by point 9 below, which requests that large
+   window only when a smaller one first proves inconclusive, after that
+   unconditional version turned out to have its own failure mode.
 6. **The candidate key token must be *decoded*, not compared by its raw
    spelling (Codex review, round 5, fresh evidence).** A conforming JSON
    producer may escape the key (``"artifact\\u005ftype"`` for
@@ -189,6 +190,41 @@ PR #1042, three rounds):**
    :func:`_path_is_a_real_zip_container`, ``zipfile.is_zipfile()`` on
    *path* itself (not a bounded prefix -- the central directory it needs
    may be well past :data:`_MARKER_SCAN_BYTES` into a real, larger wheel).
+9. **Requesting the large window directly (point 5's original fix) can
+   itself fail to decode for a valid but pathologically-encoded compressed
+   document (Codex review, round 8, fresh evidence).** ``gzip``/``zstd``
+   support concatenated members, and a stream with unusually high
+   per-member overhead (many tiny members) can need far more *compressed*
+   input to produce :data:`_MARKER_SCAN_BYTES` of *decoded* output than
+   ``bounded_decoded_prefix``'s own raw-read escalation cap allows --
+   failing outright even when the marker sits in the first few hundred
+   decoded bytes, exactly where it normally does.
+   ``load_bundle_facts()`` reads such a document fine (Python's ``gzip``
+   handles concatenated members transparently); this classifier must not
+   fail where the loader wouldn't. Answered by trying a much smaller
+   decoded window first (:data:`_SMALL_MARKER_SCAN_BYTES`, matching
+   ``snapshot_io``'s own sniff default) -- a target low enough that even a
+   badly-overhead-heavy stream reliably decodes -- and escalating to
+   :data:`_MARKER_SCAN_BYTES` only when :func:`_root_level_artifact_type`
+   reports that small probe as genuinely inconclusive (truncated before
+   the root object closed), never merely because the marker wasn't found;
+   see :func:`_marker_lookup_at_window` and that function's own return
+   contract.
+10. **``zipfile.is_zipfile()`` (point 8) reads *path*'s raw bytes, which for
+   a genuinely gzip/zstd-compressed ``BundleFacts`` document are the
+   *compressed* envelope, not JSON (Codex review, round 8, fresh
+   evidence).** ``storage/bundle_archive.py`` already documents this exact
+   risk for its own, structurally similar zip-tail probe: a gzip
+   ``FEXTRA`` sub-field is attacker- (or, per that module's own comment,
+   even innocuously-) controlled bytes that can coincidentally land an
+   ``EOCD``-shaped sequence at the file's tail, which has nothing to do
+   with whether the file is really a zip container. Answered the same way
+   that sibling module already does: skip the zip-container check entirely
+   whenever :func:`abicheck.snapshot_io.detect_snapshot_compression`
+   reports the candidate as already gzip/zstd-compressed -- a real wheel
+   (point 8's own scenario) is never itself gzip/zstd-wrapped at the outer
+   container level, so this carries no false-negative risk on the case
+   point 8 exists to catch.
 
 **Residual, accepted gap (same shape as the pre-marker-v1 gap above):** a
 reordered document whose marker falls beyond :data:`_MARKER_SCAN_BYTES` of
@@ -259,6 +295,17 @@ _ARTIFACT_TYPE_KEY = "artifact_type"
 #: escalating-retry ceiling.
 _MARKER_SCAN_BYTES = 1024 * 1024
 
+#: The *first*-phase decoded-prefix size :func:`looks_like_stored_bundle_
+#: facts` tries, before ever falling back to :data:`_MARKER_SCAN_BYTES`
+#: (Codex review, round 8, fresh evidence -- see that function's own
+#: docstring for the two-phase probe this constant drives). Mirrors
+#: ``snapshot_io``'s own private ``_SNIFF_BYTES`` default (4 KiB) rather
+#: than importing it directly (that name is private to its own module);
+#: kept as a literal local constant instead so this module doesn't reach
+#: into another module's implementation detail for a value it can just as
+#: well own itself.
+_SMALL_MARKER_SCAN_BYTES = 4096
+
 
 def _decode_json_string_token(token: bytes) -> str | None:
     """Decode a raw, still-quoted-and-escaped JSON string *token* (as
@@ -283,11 +330,20 @@ def _decode_json_string_token(token: bytes) -> str | None:
     return decoded if isinstance(decoded, str) else None
 
 
-def _root_level_artifact_type(prefix: bytes) -> bytes | None:
+def _root_level_artifact_type(prefix: bytes) -> tuple[bytes | None, bool]:
     """Scan a bounded, possibly-truncated JSON byte prefix for the root
-    object's own ``"artifact_type"`` member and return its raw (still
-    JSON-string-escaped) value, or ``None`` if no such *direct* member is
-    found before either the root container closes or the prefix runs out.
+    object's own ``"artifact_type"`` member. Returns ``(value, definitive)``:
+    *value* is the marker's raw (still JSON-string-escaped) value, or
+    ``None`` if no such *direct* member was found; *definitive* is ``True``
+    when that answer cannot change no matter how much more of the document
+    a caller might decode (the marker was found; the root object closed
+    within *prefix* without one; or *prefix* was proven not to be a JSON
+    object at all), and ``False`` only when the scan ran out of *prefix*
+    before the root object closed -- a genuinely truncated view, where a
+    larger *prefix* could still change the answer (used by
+    :func:`looks_like_stored_bundle_facts` to decide whether re-scanning a
+    larger decoded window is worth the extra decode cost -- Codex review,
+    round 8, fresh evidence).
 
     Depth-aware (a nested ``artifact_type`` at any deeper level is never
     matched -- this module's own docstring, point 3) and order-independent
@@ -330,7 +386,9 @@ def _root_level_artifact_type(prefix: bytes) -> bytes | None:
     """
     stripped = prefix.lstrip(b" \t\r\n")
     if not stripped.startswith(b"{"):
-        return None
+        # Not even the shape of a JSON object -- no amount of additional
+        # decoded content changes that.
+        return None, True
     depth = 0
     just_saw_colon = False
     pending_key_is_marker = False
@@ -343,8 +401,9 @@ def _root_level_artifact_type(prefix: bytes) -> bytes | None:
                 # whitespace -- not a real JSON document (any legal
                 # encoding, minified or pretty-printed, separates tokens
                 # with whitespace only), so stop trusting anything this
-                # scan has matched so far.
-                return None
+                # scan has matched so far. Definitive: the violating byte's
+                # position doesn't move with a larger prefix.
+                return None, True
         expected_pos = m.end()
         tok = m.group(0)
         if tok in (b"{", b"["):
@@ -358,8 +417,8 @@ def _root_level_artifact_type(prefix: bytes) -> bytes | None:
             pending_key_is_marker = False
             if depth <= 0:
                 # The root container closed within the visible prefix --
-                # every direct member has already been seen.
-                break
+                # every direct member has already been seen, definitively.
+                return None, True
             continue
         if tok == b":":
             just_saw_colon = True
@@ -383,14 +442,19 @@ def _root_level_artifact_type(prefix: bytes) -> bytes | None:
         # Codex review, fresh evidence on an earlier draft of this scan).
         if just_saw_colon:
             if pending_key_is_marker:
-                return tok
+                return tok, True
             just_saw_colon = False
             pending_key_is_marker = False
         else:
             pending_key_is_marker = (
                 depth == 1 and _decode_json_string_token(tok) == _ARTIFACT_TYPE_KEY
             )
-    return None
+    # Ran out of prefix before the root object closed or the marker was
+    # found -- genuinely inconclusive, not "absent" (Codex review, round 8:
+    # requesting a large prefix directly can itself fail to decode for a
+    # legitimate but pathologically-encoded compressed document, where a
+    # smaller prefix -- tried first by the caller -- reliably would have).
+    return None, False
 
 
 def _decoded_prefix_is_a_real_tar_stream(prefix: bytes) -> bool:
@@ -491,6 +555,41 @@ def _looks_like_stored_bundle_facts_archive(path: Path) -> bool:
     return manifest.get("artifact_type") == BUNDLE_ARCHIVE_ARTIFACT_TYPE
 
 
+def _marker_lookup_at_window(path: Path, n: int) -> tuple[bool | None, bool]:
+    """One probe of :func:`looks_like_stored_bundle_facts`'s marker check
+    at decoded-prefix size *n*. Returns ``(is_stored, definitive)``:
+    *is_stored* is ``True``/``False`` once decided, or ``None`` while still
+    inconclusive; *definitive* mirrors :func:`_root_level_artifact_type`'s
+    own meaning -- ``False`` only when a larger *n* might still change the
+    answer (a genuinely truncated decode), never on a confirmed match.
+    """
+    from ..snapshot_io import bounded_decoded_prefix
+
+    prefix = bounded_decoded_prefix(path, n)
+    if prefix is None:
+        # Cannot decode any prefix of this size at all -- not "needs a
+        # bigger window" (bounded_decoded_prefix already escalates its own
+        # raw read internally before giving up), so this is definitive.
+        return False, True
+    if _decoded_prefix_is_a_real_tar_stream(prefix):
+        # A genuine tar stream can never be a real BundleFacts document
+        # (see _decoded_prefix_is_a_real_tar_stream's own docstring) --
+        # ruled out before the marker scan even runs, so a tar member
+        # deliberately named to look like the marker is never trusted.
+        return False, True
+    value, definitive = _root_level_artifact_type(prefix)
+    if value is None:
+        return (False if definitive else None), definitive
+    # *value* is still a raw JSON string token (quotes and any backslash
+    # escapes intact) -- decode it the same way json.loads() would rather
+    # than comparing escaped bytes to an unescaped constant, so a
+    # (technically valid, if unnecessary) escaped spelling still matches.
+    from ..bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
+
+    decoded_value = _decode_json_string_token(value)
+    return decoded_value == BUNDLE_FACTS_ARTIFACT_TYPE, True
+
+
 def looks_like_stored_bundle_facts(path: Path) -> bool:
     """Cheap, safe classification of *path* as a stored
     :class:`~abicheck.bundle_facts.BundleFacts` document -- either shape
@@ -519,35 +618,50 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
         return False
     if _looks_like_stored_bundle_facts_archive(path):
         return True
-    if _path_is_a_real_zip_container(path):
+    from ..snapshot_io import SnapshotCompression, detect_snapshot_compression
+
+    if detect_snapshot_compression(path) is SnapshotCompression.NONE and (
+        _path_is_a_real_zip_container(path)
+    ):
         # Already ruled out being the one legitimate zip-shaped encoding
         # (the G40 archive, just above) -- any other zip container reaching
         # here (a wheel, possibly with a crafted preamble) is never a real
-        # BundleFacts document. Checked before decoding a prefix at all,
-        # since this check needs the true end of the file, not a bounded
-        # window of it (see _path_is_a_real_zip_container's own docstring).
+        # BundleFacts document. Checked only for an *uncompressed* candidate
+        # (Codex review, round 8, fresh evidence): zipfile.is_zipfile()
+        # scans path's raw bytes for an EOCD signature, but a gzip/zstd-
+        # compressed BundleFacts document's raw bytes are its *compressed*
+        # envelope, not JSON -- a crafted (or, per storage/bundle_archive.py's
+        # own long-standing precedent for this exact risk, even an
+        # innocuous) gzip FEXTRA sub-field can coincidentally land an
+        # EOCD-shaped byte sequence at the file's tail, which is a
+        # *decompression* concern this check has no business evaluating.
+        # Skipping it here mirrors sniff_bundle_archive_format's own
+        # `_JSON_ENVELOPE_MAGIC_PREFIXES` short-circuit for the identical
+        # reason. Checked before decoding a prefix at all, since this check
+        # needs the true end of the file, not a bounded window of it (see
+        # _path_is_a_real_zip_container's own docstring).
         return False
-    from ..bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
-    from ..snapshot_io import bounded_decoded_prefix
-
-    prefix = bounded_decoded_prefix(path, _MARKER_SCAN_BYTES)
-    if prefix is None:
-        return False
-    if _decoded_prefix_is_a_real_tar_stream(prefix):
-        # A genuine tar stream can never be a real BundleFacts document
-        # (see _decoded_prefix_is_a_real_tar_stream's own docstring) --
-        # ruled out before the marker scan even runs, so a tar member
-        # deliberately named to look like the marker is never trusted.
-        return False
-    value = _root_level_artifact_type(prefix)
-    if value is None:
-        return False
-    # *value* is still a raw JSON string token (quotes and any backslash
-    # escapes intact) -- decode it the same way json.loads() would rather
-    # than comparing escaped bytes to an unescaped constant, so a
-    # (technically valid, if unnecessary) escaped spelling still matches.
-    decoded_value = _decode_json_string_token(value)
-    return decoded_value == BUNDLE_FACTS_ARTIFACT_TYPE
+    # Two-phase probe (Codex review, round 8, fresh evidence): try a small
+    # decoded window first, escalating to _MARKER_SCAN_BYTES only when that
+    # small probe was genuinely inconclusive (truncated before the root
+    # object closed), never merely because the marker wasn't found in it.
+    # Requesting the large window directly (as an earlier round did)
+    # created its own failure mode: for a valid but pathologically-encoded
+    # compressed document (many tiny concatenated gzip members, each
+    # carrying real per-member overhead), decoding the first
+    # _MARKER_SCAN_BYTES of *output* can require more *compressed* input
+    # than bounded_decoded_prefix's own internal raw-read escalation cap
+    # allows, failing outright even though the marker sits in the first
+    # few hundred bytes -- a small probe's much lower output target avoids
+    # that failure mode entirely for the overwhelmingly common case (the
+    # marker near the front), and only pays the larger decode when it is
+    # actually warranted (this module's own docstring, point 5's reordered-
+    # document scenario).
+    is_stored, definitive = _marker_lookup_at_window(path, _SMALL_MARKER_SCAN_BYTES)
+    if definitive:
+        return bool(is_stored)
+    is_stored, _definitive = _marker_lookup_at_window(path, _MARKER_SCAN_BYTES)
+    return bool(is_stored)
 
 
 @dataclass(frozen=True)

@@ -20,11 +20,14 @@ cleanup phase two, PR I): the classifier that replaced the removed
 
 from __future__ import annotations
 
+import gzip
 import io
 import json
 import tarfile
 import zipfile
 from pathlib import Path
+
+import pytest
 
 from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.serialization import save_bundle_facts
@@ -179,6 +182,89 @@ class TestLooksLikeStoredBundleFacts:
         with zipfile.ZipFile(whl_path) as zf:
             assert "fake_package/__init__.py" in zf.namelist()
         assert looks_like_stored_bundle_facts(whl_path) is False
+
+    def test_gzip_with_many_tiny_members_and_a_leading_marker_is_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 8): a valid, load_bundle_facts()-
+        readable gzip stream with unusually high per-member overhead (many
+        tiny concatenated members) can need far more *compressed* input to
+        produce _MARKER_SCAN_BYTES of *decoded* output than bounded_decoded_
+        prefix's own raw-read escalation cap allows -- even though the
+        marker sits in the first few hundred decoded bytes, exactly where
+        it normally does. Requesting the large window directly (an earlier
+        round's fix) would fail outright here; the two-phase probe (small
+        window first) must not."""
+        payload = _MARKER_JSON.encode()
+        tiny_member = gzip.compress(b"0" * 10)
+        buf = io.BytesIO()
+        buf.write(gzip.compress(payload))
+        raw_so_far = len(buf.getvalue())
+        # Enough repeated tiny members that the *raw* stream exceeds the
+        # classifier's own 1 MiB decoded-window request by itself, so a
+        # direct large-window decode attempt truncates mid-member.
+        needed = (1024 * 1024 - raw_so_far) // len(tiny_member) + 2000
+        buf.write(tiny_member * needed)
+        raw = buf.getvalue()
+        assert len(raw) > 1024 * 1024  # premise: exceeds the large window
+        p = tmp_path / "many_members.json.gz"
+        p.write_bytes(raw)
+        # Premise check: a direct large-window decode of this exact stream
+        # really does fail outright (proves the fixture reproduces the
+        # finding, not just that the classifier happens to already cope).
+        with pytest.raises(Exception):
+            gzip.GzipFile(fileobj=io.BytesIO(raw[: 1024 * 1024])).read(1024 * 1024)
+        assert looks_like_stored_bundle_facts(p) is True
+
+    def test_gzip_fextra_forging_a_zip_eocd_is_still_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 8): zipfile.is_zipfile() reads
+        path's raw bytes, which for a genuinely gzip-compressed BundleFacts
+        document are the *compressed* envelope, not JSON -- a gzip FEXTRA
+        sub-field is arbitrary, decoder-ignored bytes that can coincidentally
+        (or, as here, deliberately) land an EOCD-shaped sequence at the
+        file's tail, satisfying is_zipfile() despite the file being a real,
+        independently-decodable gzip stream with nothing zip-like about its
+        actual content. storage/bundle_archive.py documents and defends
+        against this exact construction for its own, structurally similar
+        tail probe; this classifier's zip check must skip a recognized
+        compression envelope the same way."""
+        import struct
+        import zlib
+
+        def _gzip_with_eocd_in_extra_field(payload: bytes) -> bytes:
+            co = zlib.compressobj(9, zlib.DEFLATED, -15)
+            compressed = co.compress(payload) + co.flush()
+            trailer = struct.pack(
+                "<I", zlib.crc32(payload) & 0xFFFFFFFF
+            ) + struct.pack("<I", len(payload) & 0xFFFFFFFF)
+            tail_after_header = compressed + trailer
+            header_prefix = (
+                b"\x1f\x8b\x08"
+                + bytes([0x04])  # FLG = FEXTRA
+                + struct.pack("<I", 0)  # MTIME
+                + b"\x02\xff"  # XFL, OS
+            )
+            si = b"AB"
+            comment_len = len(tail_after_header)
+            eocd = struct.pack(
+                "<IHHHHIIH", 0x06054B50, 0, 0, 0, 0, 0, 0, comment_len
+            )
+            subfield = si + struct.pack("<H", len(eocd)) + eocd
+            return (
+                header_prefix
+                + struct.pack("<H", len(subfield))
+                + subfield
+                + tail_after_header
+            )
+
+        data = _gzip_with_eocd_in_extra_field(_MARKER_JSON.encode())
+        # Premise check: the crafted bytes really do fool a raw zip probe.
+        assert zipfile.is_zipfile(io.BytesIO(data)) is True
+        p = tmp_path / "crafted.json.gz"
+        p.write_bytes(data)
+        assert looks_like_stored_bundle_facts(p) is True
 
     def test_escaped_marker_key_still_classifies_as_stored(
         self, tmp_path: Path
