@@ -83,11 +83,11 @@ def pack_option(f: F) -> F:
         "this build resolves but does not yet apply is rejected rather "
         "than silently recorded. On a directory/package (release) "
         "comparison, a 'kind: policy'/'kind: contract'/'kind: gate' pack's "
-        "policy.overrides/surface.internal_namespaces/gate.exit_code_scheme/"
-        "gate.severity.<category> all apply to every library uniformly "
-        "(folded into the release's own resolved GateOptions), but "
-        "contract.unresolved is rejected, with or without --contract "
-        "(pending verification that lifting it is safe). On `scan` "
+        "policy.overrides/surface.internal_namespaces/contract.unresolved/"
+        "gate.exit_code_scheme/gate.severity.<category> all apply to every "
+        "library uniformly (folded into the release's own resolved "
+        "GateOptions); contract.unresolved still needs --contract on that "
+        "release comparison, same as everywhere else. On `scan` "
         "this requires --against (a pack's only application there is "
         "the baseline comparison), and a 'kind: gate' pack's gate.exit_"
         "code_scheme/gate.severity.<category> apply to the baseline "
@@ -156,7 +156,7 @@ def contract_options(f: F) -> F:
         "still reporting every failure. The coverage floor itself applies "
         "to a directory/package (release) comparison too -- each library's "
         "own floor is max()-folded into the release's exit code the same "
-        "way -- but a pack-supplied contract.unresolved is rejected on a "
-        "release comparison specifically (see --pack's own help).",
+        "way, and a pack-supplied contract.unresolved applies there too "
+        "(see --pack's own help).",
     )(f)
     return f
