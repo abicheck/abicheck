@@ -640,6 +640,13 @@ def _render_artifact_set_text(result: Any) -> str:
     ]
     for member in result.per_artifact:
         lines.append(f"  {member.artifact}: {member.result.verdict}")
+        # Codex review, PR #1062: without this, "see per_artifact for why"
+        # above pointed at a reason the text renderer never printed.
+        member_message = (member.result.report or {}).get(
+            "evidence_contract_error_message"
+        )
+        if member_message:
+            lines.append(f"    reason: {member_message}")
         lines.extend(_render_member_findings_lines(member.result))
     lines.append("")
     if result.bundle_incomplete:

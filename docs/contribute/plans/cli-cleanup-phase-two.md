@@ -4060,6 +4060,31 @@ second top-level spelling of the same fact.
 > own Status line and `docs/contribute/adr/index.md`'s row were updated the
 > same day.
 
+> **Update (2026-09-04, post-merge review): two Codex-review findings on the
+> landing PR (#1062), both real, both fixed.** (1) An `--artifact-set`
+> member's own `_EvidenceContractError` message was discarded at the
+> exception boundary (`service_scan.py`'s two catch sites), so despite the
+> exit-`7`/text-renderer work above, neither the JSON `per_artifact` entries
+> nor the text report actually said *why* a member aborted — only the bare
+> verdict. Fixed by threading the message through
+> `workflows/scan_abort_result.scan_abort_result_fields` into
+> `report["evidence_contract_error_message"]`, rendered per member in
+> `cli_scan.py`'s `--artifact-set` text output. (2) Root `AGENTS.md`'s Exit
+> codes section and `pack_application.py` module-map narrative, plus
+> `abicheck/buildsource/CLAUDE.md`'s config-key list, still named
+> `--exit-code-scheme`/`exit_code_scheme:` as live surface after the flag
+> was deleted — invisible to `check_docs_contract.py`'s retired-surfaces
+> sweep, which scans only `docs/`, not agent-instruction files. Content
+> fixed in this pass; **genuinely still open**: generalizing the
+> retired-surfaces sweep itself to cover `AGENTS.md`/`CLAUDE.md` files
+> repo-wide, so this class of drift (an agent's own canonical instructions
+> going stale after a surface removal) is caught mechanically next time
+> instead of only by review. Not attempted here — the existing sweep's
+> `docs/`-only scope was deliberate (a manual page inside the historical
+> ADR/plans/archive trees is exempted from several of its checks, a
+> distinction agent-instruction files don't cleanly map onto), so extending
+> it needs its own design pass rather than a same-PR patch.
+
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
 `--exit-code-scheme auto|legacy|severity` is not a spelling choice; it selects

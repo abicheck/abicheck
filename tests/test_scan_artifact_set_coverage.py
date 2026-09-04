@@ -191,6 +191,65 @@ class TestArtifactSetRepeatableOptionBranches:
         assert result.exit_code == 7, result.output
         assert "EVIDENCE_CONTRACT_ERROR" in result.output
 
+    def test_text_format_names_each_members_own_reason(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1062: the exit-7 stderr message this axis
+        prints (both here and in `action/run.sh`) tells the reader to look
+        at "the JSON/text report's per_artifact entries for which member
+        and why" -- but before this fix, `_run_scan_one_member`'s own
+        `_EvidenceContractError` catch discarded `exc.message` outright, so
+        `--format text` (the Action's documented default) never actually
+        printed a reason, only the bare EVIDENCE_CONTRACT_ERROR verdict per
+        member. Asserts the real reason text (which of ADR-037 D5's two raise
+        sites fired) appears per member, not just the verdict.
+        """
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--depth", "source",
+            ],
+        )
+        assert result.exit_code == 7, result.output
+        # Both members hit the same pinned-depth-with-no-source-evidence
+        # raise site here, so the reason line appears twice -- once per
+        # member -- not merely somewhere in the output.
+        assert result.output.count("reason: pinned depth 'source'") == 2, (
+            result.output
+        )
+        assert "needs source evidence" in result.output
+
+    def test_json_format_carries_each_members_own_reason(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """The JSON sibling of the text-format test above: each
+        `per_artifact` entry's own `report.evidence_contract_error_message`
+        carries the real reason, not just `verdict`."""
+        import json
+
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        out = tmp_path / "report.json"
+        result = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--depth", "source", "--format", "json", "-o", str(out),
+            ],
+        )
+        assert result.exit_code == 7, result.output
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert len(data["per_artifact"]) == 2
+        for member in data["per_artifact"]:
+            assert member["verdict"] == "EVIDENCE_CONTRACT_ERROR"
+            reason = member["report"]["evidence_contract_error_message"]
+            assert "needs source evidence" in reason
+
     def test_dry_run_blocks_on_an_inert_build_config_with_no_query(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:

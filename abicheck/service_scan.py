@@ -842,8 +842,10 @@ class ScanResult:
         }
 
     @staticmethod
-    def _from_abort(axis: ScanAbortAxis, p: dict[str, object] | None) -> ScanResult:
-        return ScanResult(**scan_abort_result_fields(axis, prior_decision=p))
+    def _from_abort(
+        axis: ScanAbortAxis, p: dict[str, object] | None, *, msg: str | None = None
+    ) -> ScanResult:
+        return ScanResult(**scan_abort_result_fields(axis, prior_decision=p, msg=msg))
 
 
 @dataclass(frozen=True)
@@ -1470,10 +1472,8 @@ def run_scan(req: ScanRequest) -> ScanResult:
     except _BudgetOverflow as exc:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
         return ScanResult._from_abort("budget_overflow", exc.prior_decision)
-    except _EvidenceContractError:
-        # A pinned depth that can't collect its evidence (auto-strict, ADR-037 D5):
-        # the programmatic API honors the same contract as the CLI (pinned_explicit).
-        return ScanResult._from_abort("evidence_contract_error", None)
+    except _EvidenceContractError as exc:  # auto-strict, ADR-037 D5
+        return ScanResult._from_abort("evidence_contract_error", None, msg=exc.message)
     finally:
         # Remove the inferred cmake build dir(s) once all build-dir-dependent phases
         # have run/aborted. Best-effort: a removal/unlock error never masks the outcome.
@@ -1652,8 +1652,8 @@ def _run_scan_one_member(
         )
     except _BudgetOverflow as exc:
         return ScanResult._from_abort("budget_overflow", exc.prior_decision)
-    except _EvidenceContractError:
-        return ScanResult._from_abort("evidence_contract_error", None)
+    except _EvidenceContractError as exc:
+        return ScanResult._from_abort("evidence_contract_error", None, msg=exc.message)
     finally:
         drain_build_dir_cleanups(build_dir_cleanups)
 
