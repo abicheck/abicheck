@@ -60,6 +60,7 @@ from elftools.elf.elffile import ELFFile
 from .dwarf_advanced import (
     AdvancedDwarfMetadata,
     _normalize_arch,
+    _parse_frame_registers,
     _process_cu_impl as _adv_process_cu,
 )
 from .dwarf_metadata import DwarfMetadata, _process_cu_impl as _meta_process_cu
@@ -204,6 +205,30 @@ def parse_dwarf_from_session(
             log.warning("parse_dwarf: adv CU skipped in %s: %s", session.path, exc)
         if low_memory:
             free_cu_die_cache(CU)
+
+    # P1 review: _parse_frame_registers (the sole producer of
+    # frame_registers/callee_saved_regs) was previously called only by the
+    # standalone dwarf_advanced.parse_advanced_dwarf() entry point, never by
+    # this unified single-pass path -- which is what dumper.py's real ELF
+    # dumps actually use. A normal comparison's advanced channel could
+    # therefore report "parsed" while frame_register_changed/callee-saved
+    # facts were never evaluated at all. Run it here too, over the same
+    # already-open session. Its own docstring promises "never raises", but
+    # its except clause is narrower than that promise (only ELFError/
+    # OSError/ValueError) -- wrapped defensively here rather than widened
+    # there, since that module is a shared file this fix should not risk
+    # editing concurrently. Skipped entirely for a zero-CU parse: nothing
+    # to correlate frame data against, and a test double standing in for a
+    # truncated/empty .debug_info section carries no real ELF/DWARFInfo.
+    if meta.cu_total:
+        try:
+            _parse_frame_registers(session.elf, session.dwarf, adv)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "parse_dwarf: frame-register extraction failed in %s: %s",
+                session.path,
+                exc,
+            )
 
     if skeleton_cus:
         log.warning(
