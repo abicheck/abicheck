@@ -123,6 +123,18 @@ _METADATA_KEYS = (
 #: required and already validated, separately, above.
 _STRICT_INT_METADATA_KEYS = frozenset({"snapshot_schema", "baseline_generation"})
 
+#: The `_METADATA_KEYS` `load_baseline_manifest` itself always coerces to a
+#: `str` (`str(data.get(key) or "")`) rather than storing the raw JSON
+#: value verbatim. A non-string, truthy value here (e.g. a JSON number)
+#: must be stored as that same coerced string, not passed through
+#: unvalidated: `SectionDTO` canonicalization can silently reinterpret a
+#: raw non-string value in a way that changes what string the canonical
+#: reader would have produced from it (e.g. `1.0` canonicalizes to the int
+#: `1`, so a later `str(1)` reads `"1"` where the canonical reader itself
+#: would have read `str(1.0 or "")` == `"1.0"`) -- Codex review, fresh
+#: evidence beyond the two `_STRICT_INT_METADATA_KEYS` fields.
+_STRING_METADATA_KEYS = frozenset({"project_ref", "profile"})
+
 #: `abicheck.buildsource.baseline_set.SUPPORTED_MANIFEST_VERSIONS`, duplicated
 #: for the identical layering reason `import_bundle_facts.py`'s own
 #: duplicated constants give: `storage/` may not import `buildsource/` (a
@@ -309,6 +321,14 @@ def import_baseline_set(
             # rather than raising: this mirrors that reader's own tolerant
             # "unstated" treatment, not a stricter one invented here.
             continue
+        if key in _STRING_METADATA_KEYS and not isinstance(value, str):
+            # Coerced the identical way `load_baseline_manifest` itself
+            # coerces it (`str(value or "")`), not stored as the raw
+            # non-string value -- see `_STRING_METADATA_KEYS`'s own
+            # docstring for why storing it unvalidated would let storage
+            # canonicalization change what string the canonical reader
+            # would have produced.
+            value = str(value) if value else ""
         metadata_payload[key] = value
     metadata_dto = baseline_set_metadata_to_dto(metadata_payload)
     metadata_ref = ObjectRef(

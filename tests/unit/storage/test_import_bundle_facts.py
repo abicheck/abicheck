@@ -197,12 +197,16 @@ class TestImportBundleFacts:
         roundtrip = export_bundle_facts(manifest, store=store)
         assert roundtrip["filesystem_aliases"] == {}
 
-    @pytest.mark.parametrize("bad_value", [[], "", 0])
+    @pytest.mark.parametrize("bad_value", [[], "", 0, None])
     def test_rejects_a_non_mapping_filesystem_aliases(self, bad_value: Any) -> None:
-        """A falsey-but-present non-mapping is malformed input, not an
-        empty collection -- `or {}` would otherwise make it
-        indistinguishable from a producer that genuinely captured no
-        aliases (Codex review)."""
+        """A falsey-but-present non-mapping -- `None` included -- is
+        malformed input, not an empty collection: `... or {}` would
+        otherwise make an explicit `null` indistinguishable from a
+        producer that genuinely captured no aliases, and
+        `validated_alias_map` itself rejects a present `None` the same way
+        it rejects `[]`/`""`/`0` (Codex review, fresh evidence: an earlier
+        fix covered the non-`None` falsey values but still let `raw is
+        None` mean "absent" for a present-and-null key too)."""
         doc = _bundle_document(filesystem_aliases=bad_value)
         with pytest.raises(ValueError, match="filesystem_aliases"):
             import_bundle_facts(doc, store=InMemoryObjectStore())
@@ -219,8 +223,10 @@ class TestImportBundleFacts:
         with pytest.raises(ValueError, match="filesystem_aliases"):
             import_bundle_facts(doc, store=InMemoryObjectStore())
 
-    @pytest.mark.parametrize("bad_value", [[], "", 0])
+    @pytest.mark.parametrize("bad_value", [[], "", 0, None])
     def test_rejects_a_non_mapping_library_filenames(self, bad_value: Any) -> None:
+        """Same `None`-is-not-absence distinction as
+        `test_rejects_a_non_mapping_filesystem_aliases` (Codex review)."""
         doc = _bundle_document(library_filenames=bad_value)
         with pytest.raises(ValueError, match="library_filenames"):
             import_bundle_facts(doc, store=InMemoryObjectStore())
@@ -247,6 +253,28 @@ class TestImportBundleFacts:
         -- is checked here too, without importing that flat-root module
         (Codex review)."""
         doc = _bundle_document(manifest=bad_manifest)
+        with pytest.raises(ValueError, match="manifest"):
+            import_bundle_facts(doc, store=InMemoryObjectStore())
+
+    @pytest.mark.parametrize(
+        "bad_entry",
+        [
+            None,
+            {},
+            {"symbol": "a", "pattern": "b"},
+            {"symbol": "a", "optional_provider": "yes"},
+            {"template": "t"},
+            {"template": "t", "instantiations": []},
+            {"template": "t", "instantiations": ["not-a-mapping"]},
+        ],
+    )
+    def test_rejects_a_malformed_manifest_provides_entry(self, bad_entry: Any) -> None:
+        """`manifest_from_dict`'s own per-entry rules
+        (`_validate_manifest_entry_shape`/`_parse_template_instantiations`)
+        are checked here too, not just the outer `manifest` container's
+        top-level shape (Codex review, fresh evidence beyond the earlier
+        `test_rejects_a_malformed_manifest` finding)."""
+        doc = _bundle_document(manifest={"provides": [bad_entry]})
         with pytest.raises(ValueError, match="manifest"):
             import_bundle_facts(doc, store=InMemoryObjectStore())
 

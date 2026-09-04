@@ -126,17 +126,31 @@ _BUNDLE_FACTS_SCHEMA_VERSION = 2
 _DEFAULT_VARIANT_FINGERPRINT = "default"
 
 
+#: Sentinel distinguishing "key absent from the document" from "key present
+#: with an explicit `None`/`null` value" -- `bundle_facts_from_dict`'s own
+#: `validated_alias_map`/`validated_filename_map` reject a present `None`
+#: (it fails their `isinstance(raw, dict)` check) while `.get(key, {})`
+#: only ever defaults a truly *absent* key. Passing `None` through
+#: unconditionally for both cases would silently launder an explicit-null
+#: document -- one the canonical reader rejects -- into a valid empty
+#: mapping (Codex review, fresh evidence beyond the non-mapping-value
+#: finding this same pair of functions already fixed).
+_ABSENT = object()
+
+
 def _validated_filesystem_aliases(raw: Any) -> dict[str, list[str]]:
     """`bundle_facts_serialization.bundle_facts_to_dict()`'s own
     `filesystem_aliases` shape (`{library: [alias, ...]}`), validated rather
-    than defaulted through: `None`/absent means "no aliases captured" (a
-    real, common case — `capture_bundle_facts` only populates this when
-    given real on-disk paths), but any other falsey-but-present non-mapping
-    (`[]`, `""`, `0`) is malformed input, not an empty collection, and must
-    not be silently normalized to one via `... or {}` (Codex review) --
-    that would make a producer's genuine "no aliases" indistinguishable
-    from a corrupted document."""
-    if raw is None:
+    than defaulted through: *absent* (`raw is _ABSENT`) means "no aliases
+    captured" (a real, common case — `capture_bundle_facts` only populates
+    this when given real on-disk paths), but any other falsey-but-present
+    non-mapping (`None`, `[]`, `""`, `0`) is malformed input, not an empty
+    collection, and must not be silently normalized to one via `... or {}`
+    (Codex review) -- that would make a producer's genuine "no aliases"
+    indistinguishable from a corrupted or explicitly-null document, the
+    same distinction `validated_alias_map` itself draws by rejecting a
+    non-`dict` (`None` included) outright."""
+    if raw is _ABSENT:
         return {}
     if not isinstance(raw, Mapping):
         raise ValueError(
@@ -165,7 +179,7 @@ def _validated_library_filenames(raw: Any) -> dict[str, str]:
     """`bundle_facts_to_dict()`'s own `library_filenames` shape
     (`{library: filename}`), validated the same way
     `_validated_filesystem_aliases` is, for the identical reason."""
-    if raw is None:
+    if raw is _ABSENT:
         return {}
     if not isinstance(raw, Mapping):
         raise ValueError(
@@ -183,26 +197,66 @@ def _validated_library_filenames(raw: Any) -> dict[str, str]:
     return validated
 
 
-def _validated_manifest(raw: Any) -> Any:
-    """*raw*, checked against the one shape
-    `bundle_manifest.manifest_from_dict` requires at its own top level (a
-    mapping with a list-valued `"provides"` key) -- `None`/absent means "no
-    instantiation manifest was captured", tolerated the same way that
-    function tolerates it.
+def _validated_manifest_entry(raw: Any) -> None:
+    """One `bundle_facts_document['manifest']['provides']` entry, checked
+    against the same structural rules `bundle_manifest
+    ._validate_manifest_entry_shape`/`_parse_manifest_entry`/
+    `_parse_template_instantiations` enforce -- duplicated here for the
+    identical layering reason `_validated_manifest`'s own docstring gives
+    (`bundle_manifest.py` is a flat-root module `storage/` may not import).
+    Unlike that owner's functions, this only *validates* the raw shape; it
+    never decodes to a `ManifestEntry` -- the same "not decoded, only
+    partitioned" contract every other section here follows (Codex review:
+    an earlier version of this module validated only the outer `manifest`
+    container and let a malformed `provides` entry, e.g. `null` or `{}`,
+    round-trip unchecked)."""
+    if not isinstance(raw, Mapping):
+        raise ValueError(
+            "bundle_facts_document['manifest']['provides'] entry must be a "
+            f"mapping, not {type(raw).__name__} ({raw!r})"
+        )
+    shape_keys = [k for k in ("symbol", "pattern", "template") if k in raw]
+    if len(shape_keys) != 1:
+        raise ValueError(
+            "bundle_facts_document['manifest']['provides'] entry must have "
+            f"exactly one of 'symbol', 'pattern', or 'template': {raw!r}"
+        )
+    if "optional_provider" in raw and not isinstance(raw["optional_provider"], bool):
+        raise ValueError(
+            "bundle_facts_document['manifest']['provides'] entry's "
+            "'optional_provider' must be a boolean, not "
+            f"{raw['optional_provider']!r}"
+        )
+    if shape_keys[0] == "template":
+        instantiations = raw.get("instantiations", [])
+        if not isinstance(instantiations, list) or not instantiations:
+            raise ValueError(
+                "bundle_facts_document['manifest']['provides'] template "
+                f"entry needs a non-empty 'instantiations' list: {raw!r}"
+            )
+        if not all(isinstance(inst, Mapping) for inst in instantiations):
+            raise ValueError(
+                "bundle_facts_document['manifest']['provides'] template "
+                f"entry's 'instantiations' must be a list of mappings: "
+                f"{raw!r}"
+            )
 
-    Deliberately does **not** replicate that function's own deeper,
-    per-entry validation (`manifest_entry_from_dict`'s field-by-field
-    checks) -- `bundle_manifest.py` is a flat-root module `storage/` may
-    not import (`storage/AGENTS.md`, "Permitted imports"), and hand-copying
-    its entry-level parsing here would itself become the "second,
-    independently-tuned encoding kept in sync by hand" this package's own
-    docstrings elsewhere reject (Codex review named the gap; the top-level
-    shape is what can be checked here without duplicating that owner's
-    logic). A `manifest` that passes this shallow check but fails
-    `manifest_from_dict`'s own per-entry rules still round-trips through
-    this adapter unchanged -- the same "not decoded, only partitioned"
-    contract `legacy_section_to_dto`'s own docstring states for every other
-    section here.
+
+def _validated_manifest(raw: Any) -> Any:
+    """*raw*, checked against the shape
+    `bundle_manifest.manifest_from_dict` requires -- a mapping with a
+    list-valued `"provides"` key, each entry itself validated via
+    `_validated_manifest_entry` -- `None`/absent means "no instantiation
+    manifest was captured", tolerated the same way that function tolerates
+    it.
+
+    A `manifest` that passes this check but still fails
+    `manifest_from_dict`'s own decode (e.g. a `library` field of a type
+    that function's own `str(...)` coercion happens to tolerate anyway)
+    still round-trips through this adapter unchanged -- the same "not
+    decoded, only partitioned" contract `legacy_section_to_dto`'s own
+    docstring states for every other section here; only structural
+    rejections `manifest_from_dict` actually raises on are replicated.
     """
     if raw is None:
         return None
@@ -211,6 +265,8 @@ def _validated_manifest(raw: Any) -> Any:
             "bundle_facts_document['manifest'] must be a mapping with a "
             f"list-valued 'provides' key, not {raw!r}"
         )
+    for entry in raw["provides"]:
+        _validated_manifest_entry(entry)
     return raw
 
 
@@ -386,10 +442,10 @@ def import_bundle_facts(
         "variant_fingerprint": variant_fingerprint,
         "manifest": _validated_manifest(bundle_facts_document.get("manifest")),
         "filesystem_aliases": _validated_filesystem_aliases(
-            bundle_facts_document.get("filesystem_aliases")
+            bundle_facts_document.get("filesystem_aliases", _ABSENT)
         ),
         "library_filenames": _validated_library_filenames(
-            bundle_facts_document.get("library_filenames")
+            bundle_facts_document.get("library_filenames", _ABSENT)
         ),
     }
     composition_dto = bundle_composition_to_dto(composition_payload)

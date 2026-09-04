@@ -236,6 +236,33 @@ class TestImportBaselineSet:
         metadata, _snapshots = export_baseline_set(manifest, store=store)
         assert key not in metadata
 
+    @pytest.mark.parametrize("key", ["project_ref", "profile"])
+    def test_a_non_string_string_metadata_value_is_coerced_like_the_canonical_reader(
+        self, key: str
+    ) -> None:
+        """`load_baseline_manifest` itself coerces `project_ref`/`profile`
+        via `str(value or "")` -- a raw non-string value (e.g. the float
+        `1.0`) must be stored as that exact coerced string, not passed
+        through unvalidated: `SectionDTO` canonicalization would otherwise
+        silently rewrite `1.0` to the int `1`, so a later `str(1)` reads
+        `"1"` where the canonical reader itself would have read `"1.0"`
+        (Codex review, fresh evidence)."""
+        doc = _manifest_document(**{key: 1.0})
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(doc, _snapshot_documents(), store=store)
+        metadata, _snapshots = export_baseline_set(manifest, store=store)
+        assert metadata[key] == "1.0"
+
+    @pytest.mark.parametrize("key", ["project_ref", "profile"])
+    def test_a_falsey_non_string_string_metadata_value_becomes_empty_string(
+        self, key: str
+    ) -> None:
+        doc = _manifest_document(**{key: 0})
+        store = InMemoryObjectStore()
+        manifest = import_baseline_set(doc, _snapshot_documents(), store=store)
+        metadata, _snapshots = export_baseline_set(manifest, store=store)
+        assert metadata[key] == ""
+
     def test_export_rejects_an_unknown_variant_id(self) -> None:
         doc = _manifest_document()
         store = InMemoryObjectStore()
