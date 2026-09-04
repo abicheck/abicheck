@@ -216,6 +216,18 @@ class TestStoredPairEarlyRejections:
         assert code == 64
         assert "--include-private-dso" in out
 
+    def test_dso_only_is_rejected(self, tmp_path: Path) -> None:
+        """A persisted BundleFacts document carries no per-library
+        executable/library distinction to filter by, unlike the live
+        release fan-out's own old/new map filtering for this flag (Codex
+        review, PR #1060, round 7)."""
+        old_path, new_path = self._both_stored(tmp_path)
+
+        code, out = _invoke("compare", str(old_path), str(new_path), "--dso-only")
+
+        assert code == 64
+        assert "--dso-only" in out
+
     def test_keep_extracted_is_rejected(self, tmp_path: Path) -> None:
         old_path, new_path = self._both_stored(tmp_path)
 

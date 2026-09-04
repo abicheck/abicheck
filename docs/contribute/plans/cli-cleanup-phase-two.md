@@ -5101,18 +5101,27 @@ PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
                                        standing stance. **Stored/stored
                                        execution engine landed
                                        2026-09-04:**
-                                       bundle_side_input.
+                                       workflows.bundle_stored_pair_compare.
                                        compare_stored_bundle_facts_pair()
                                        diffs two already-persisted
                                        BundleFacts documents directly --
-                                       matched-key intersection, then one
-                                       service.compare_snapshots() call per
-                                       matched library (no binaries read, no
-                                       header AST parsed on either side),
+                                       matched-key intersection, an
+                                       enforce_requested_depth() floor check
+                                       plus a project_snapshot_to_depth()
+                                       ceiling per matched library for an
+                                       explicit --depth, then one
+                                       workflows.compare_policy.
+                                       compare_snapshots() call per matched
+                                       library (no binaries read, no header
+                                       AST parsed on either side),
                                        delegating the bundle-level call to
                                        the same bundle_facts.
                                        compare_bundle_from_facts() every
-                                       other operand shape already shares.
+                                       other operand shape already shares
+                                       (now also passed both sides'
+                                       depth-projected signature-evidence
+                                       maps, via a new old_signature_
+                                       evidence parameter on that function).
                                        compare_bundle_facts.py's dispatch()
                                        selects between the two stored-
                                        OLD_INPUT drivers on the new

@@ -29,8 +29,8 @@ here, at the CLI boundary.
 
 **Three of the four operand shapes now have a real execution engine**
 (``bundle_side_input.compare_release_against_bundle_facts`` for stored/live,
-``bundle_side_input.compare_stored_bundle_facts_pair`` for stored/stored,
-plain ``run_compare``/the live release fan-out for live/live -- see
+``workflows.bundle_stored_pair_compare.compare_stored_bundle_facts_pair`` for
+stored/stored, plain ``run_compare``/the live release fan-out for live/live -- see
 ``compare_bundle_facts.py``'s own ``dispatch()`` for how the two stored-
 OLD_INPUT drivers are selected). **Live/stored (a live OLD_INPUT compared
 against a stored NEW_INPUT) is the one shape still rejected outright** --

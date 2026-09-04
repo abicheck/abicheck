@@ -585,6 +585,22 @@ def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) 
             "and NEW_INPUT are stored BundleFacts documents: neither side "
             "discovers shared libraries from a live directory/package."
         )
+    if kwargs.get("dso_only"):
+        # Codex review, PR #1060, round 7: the live release fan-out
+        # (cli_compare_release.py's _prepare_compare_release_inputs)
+        # explicitly filters both old/new library maps to skip executables
+        # for this flag -- a persisted BundleFacts document carries no
+        # per-library "was this an executable, not a real .so" fact at all
+        # (capture_bundle_facts() only ever stores what
+        # bundle_snapshot_from_facts() can reconstruct from an AbiSnapshot),
+        # so there is no channel to apply the same selection here. Reject
+        # rather than silently compare every intersecting entry including
+        # ones a live --dso-only run would have skipped.
+        raise click.UsageError(
+            "--dso-only is not supported when both OLD_INPUT and NEW_INPUT "
+            "are stored BundleFacts documents: a persisted document carries "
+            "no per-library executable/library distinction to filter by."
+        )
     if kwargs.get("keep_extracted"):
         raise click.UsageError(
             "--keep-extracted is not supported when both OLD_INPUT and "
@@ -606,14 +622,16 @@ def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) 
         )
     # --depth binary/headers are genuinely supported for stored/stored
     # (Codex review, PR #1060, fresh evidence): compare_stored_bundle_
-    # facts_pair() projects both sides via policy.depth_projection.
-    # project_pair_to_depth() before diffing, the same primitive every
-    # other resolved-snapshot comparison path in this codebase already
-    # calls -- an earlier version of this check rejected --depth binary
-    # outright on the mistaken premise that no such projection primitive
-    # existed. --depth build/source are still rejected, unconditionally,
-    # above: this driver has no channel to *collect* L3-L5 evidence on
-    # either side, only to project already-resolved evidence down.
+    # facts_pair() enforces the requested depth as a floor
+    # (enforce_requested_depth) and then projects both sides via policy.
+    # depth_projection.project_snapshot_to_depth() as a ceiling before
+    # diffing, the same primitives every other resolved-snapshot
+    # comparison path in this codebase already pairs -- an earlier version
+    # of this check rejected --depth binary outright on the mistaken
+    # premise that no such projection primitive existed. --depth build/
+    # source are still rejected, unconditionally, above: this driver has
+    # no channel to *collect* L3-L5 evidence on either side, only to
+    # enforce and project already-resolved evidence.
     # Codex review, fresh evidence: compare_cmd builds a real CompileContext
     # from these before calling dispatch() (resolve_compile_context), but
     # this stored/stored branch never consumes compile_context at all --
