@@ -52,6 +52,7 @@ from .storage.bundle_facts_validation import (
     validate_bundle_archive_artifact_type,
     validated_alias_map,
     validated_filename_map,
+    validated_variant_fingerprint,
 )
 
 if TYPE_CHECKING:
@@ -786,9 +787,7 @@ def read_bundle_facts_archive(
             instantiation_manifest = manifest_from_dict(_load_blob_json(raw_manifest, "manifest_blob"))
         return BundleFacts(
             schema_version=bundle_facts_schema_version,
-            variant_fingerprint=str(
-                manifest.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
-            ),
+            variant_fingerprint=validated_variant_fingerprint(manifest.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)),
             per_library_snapshots=per_library_snapshots,
             manifest=instantiation_manifest,
             filesystem_aliases=validated_alias_map(

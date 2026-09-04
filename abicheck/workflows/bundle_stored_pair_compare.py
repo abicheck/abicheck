@@ -156,6 +156,7 @@ def compare_stored_bundle_facts_pair(
     ``enforce_requested_depth``'s/``project_snapshot_to_depth``'s own
     documented contracts.
     """
+    from ..analysis_assurance import compute_analysis_assurance
     from ..bundle_facts import bundle_snapshot_from_facts, compare_bundle_from_facts
     from ..bundle_manifest import load_manifest
     from ..policy.depth_projection import project_snapshot_to_depth
@@ -254,6 +255,24 @@ def compare_stored_bundle_facts_pair(
             policy=policy,
             policy_file=policy_file,
         )
+        if depth is not None:
+            # Codex review, PR #1060, round 10: service_compare_pipeline.
+            # resolve_compare_request() stamps DiffResult.requested_depth
+            # and recomputes analysis_assurance (depth_satisfied included)
+            # after its own floor/ceiling pair -- this driver enforced and
+            # projected depth (immediately above) but never did either, so
+            # every stored/stored --depth run persisted analysis_assurance.
+            # requested_depth/depth_satisfied as null despite the evidence
+            # contract this driver actually enforced. compute_analysis_
+            # assurance is pure/cheap (reads fields already on diff/the
+            # projected snapshots, no re-extraction) -- safe to call once
+            # more per matched library here, the same "safe to call
+            # unconditionally, again later once enriched" contract that
+            # function's own docstring states.
+            diff.requested_depth = depth
+            diff.analysis_assurance = compute_analysis_assurance(
+                diff, projected_old_snapshots[key], projected_new_snapshots[key]
+            )
         per_library_results.append(diff)
 
     # Codex review, PR #1060: compare_bundle_from_facts()'s own precedence

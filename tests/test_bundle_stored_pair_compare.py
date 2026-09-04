@@ -376,6 +376,35 @@ class TestCompareStoredBundleFactsPair:
         assert {c[1] for c in calls} == {"binary"}
         assert {c[0].library for c in calls} == {"libcore.so"}
 
+    def test_explicit_depth_is_stamped_onto_each_per_library_result(
+        self, tmp_path: Path
+    ) -> None:
+        """An explicit ``depth`` must reach each per-library ``DiffResult``'s
+        own ``requested_depth``/``analysis_assurance.depth_satisfied`` --
+        ``service_compare_pipeline.resolve_compare_request()`` stamps both
+        after its own floor/ceiling pair, and this driver enforces and
+        projects depth the identical way but previously never stamped
+        either, so every stored/stored ``--depth`` run persisted them as
+        ``None`` despite the evidence contract this driver actually
+        enforced (Codex review, PR #1060, round 10). ``None`` (the default,
+        no explicit depth) must leave both unset, matching every other
+        comparison path's identical "no request, nothing to stamp"
+        contract."""
+        old_path = self._facts_path(
+            tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
+        )
+        new_path = self._facts_path(
+            tmp_path, "new.bundlefacts.json", "new", Visibility.HIDDEN
+        )
+
+        unrequested = compare_stored_bundle_facts_pair(old_path, new_path)
+        assert unrequested.per_library[0].requested_depth is None
+        assert unrequested.per_library[0].analysis_assurance.depth_satisfied is None
+
+        result = compare_stored_bundle_facts_pair(old_path, new_path, depth="binary")
+        assert result.per_library[0].requested_depth == "binary"
+        assert result.per_library[0].analysis_assurance.depth_satisfied is True
+
     def test_depth_headers_strips_build_mode_before_diffing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

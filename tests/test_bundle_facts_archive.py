@@ -861,3 +861,30 @@ class TestBundleFactsArchiveArtifactTypeDiscriminator:
         # not the preserved 1 the in-memory facts object claimed.
         reloaded = load_bundle_facts(out, format="archive")
         assert reloaded.schema_version == BUNDLE_FACTS_SCHEMA_VERSION
+
+    def test_load_rejects_a_non_string_variant_fingerprint(
+        self, tmp_path: Path
+    ) -> None:
+        """The archive manifest's own ``variant_fingerprint`` field must go
+        through the same ``validated_variant_fingerprint()`` check the
+        plain-JSON loader uses, not a bare ``str(...)`` coercion -- a
+        malformed ``variant_fingerprint: 1`` and a genuine
+        ``variant_fingerprint: "1"`` must not both load as the identical
+        string ``"1"`` (Codex review, PR #1060, round 10)."""
+        from abicheck.bundle_facts import BUNDLE_FACTS_SCHEMA_VERSION
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "bad-fingerprint.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            writer.write_manifest(
+                {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": BUNDLE_FACTS_SCHEMA_VERSION,
+                    "variant_fingerprint": 1,
+                    "library_blobs": {},
+                }
+            )
+
+        with pytest.raises(ValueError, match="variant_fingerprint"):
+            load_bundle_facts(out, format="archive")
