@@ -434,6 +434,37 @@ class TestImportBundleFacts:
         with pytest.raises(ValueError, match="more than one artifact"):
             export_bundle_facts(doctored, store=store)
 
+    def test_export_rejects_an_artifact_carrying_an_unadvertised_section(
+        self,
+    ) -> None:
+        """A hand-edited package that keeps a recognized, validly-encoded
+        section (here: `declarations`) on an artifact while dropping it from
+        the package-wide `section_schema_versions` map must be rejected --
+        `check_reader_compatibility()` alone does not catch this, and
+        without this check the section's own real, still-decodable content
+        would otherwise reach the reconstructed `BundleFacts` unversioned
+        (Codex review). Uses a real, valid section digest (not corrupted
+        content) so the *only* thing that can catch this is the
+        artifact-vs-manifest cross-check under test, not an incidental
+        decode failure."""
+        import dataclasses
+
+        doc = _bundle_document()
+        store = InMemoryObjectStore()
+        manifest = import_bundle_facts(doc, store=store)
+        assert "declarations" in manifest.versions.section_schema_versions
+        doctored_versions = dataclasses.replace(
+            manifest.versions,
+            section_schema_versions={
+                kind: version
+                for kind, version in manifest.versions.section_schema_versions.items()
+                if kind != "declarations"
+            },
+        )
+        doctored = dataclasses.replace(manifest, versions=doctored_versions)
+        with pytest.raises(ValueError, match="declarations"):
+            export_bundle_facts(doctored, store=store)
+
     def test_export_rejects_an_artifact_with_no_library_name_evidence(
         self,
     ) -> None:

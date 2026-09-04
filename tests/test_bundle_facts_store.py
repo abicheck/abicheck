@@ -299,6 +299,52 @@ class TestReadBundleFactsPackage:
         with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
             read_bundle_facts_package(manifest, store=store)
 
+    def test_charges_the_recovered_library_name_against_the_decoded_size_budget(
+        self, monkeypatch: Any
+    ) -> None:
+        """The recovered library name becomes a `per_library_snapshots` key
+        in the document this reconstructs -- an arbitrarily large name must
+        be charged against the budget too, not retained for free just
+        because it lives in `native_identity` rather than the exported
+        snapshot document itself (Codex review). The library name here is
+        the `per_library_snapshots` *dict key*, deliberately distinct from
+        the (small) `AbiSnapshot.library` field, so only the fix under test
+        -- not the snapshot document's own size -- can catch this."""
+        import json
+
+        import abicheck.bundle_facts_store as module
+        from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
+        from abicheck.storage.import_v1 import export_legacy_snapshot
+
+        long_name = "liba" + "x" * 10_000 + ".so"
+        facts = capture_bundle_facts({long_name: _snapshot("liba.so")})
+        store = InMemoryObjectStore()
+        manifest = write_bundle_facts_package(facts, store=store)
+
+        artifact_document = export_legacy_snapshot(
+            manifest.artifact_refs[0],
+            store=store,
+            source_schema_version=manifest.versions.source_schema_version,
+        )
+        artifact_bytes = len(json.dumps(artifact_document).encode("utf-8"))
+        composition_ref = manifest.variant_refs[0].sections[
+            BUNDLE_COMPOSITION_SECTION_KIND
+        ]
+        composition_bytes = len(
+            json.dumps(store.get(composition_ref.digest)).encode("utf-8")
+        )
+        # Large enough for the small snapshot document plus the small
+        # bundle-composition section, too small once the recovered (large)
+        # library name is also charged.
+        monkeypatch.setattr(
+            module,
+            "DEFAULT_MAX_BUNDLE_DECODED_BYTES",
+            artifact_bytes + composition_bytes + 256,
+        )
+
+        with pytest.raises(ValueError, match="DEFAULT_MAX_BUNDLE_DECODED_BYTES"):
+            read_bundle_facts_package(manifest, store=store)
+
     def test_refuses_to_eagerly_reconstruct_past_the_alias_node_budget(
         self, monkeypatch: Any
     ) -> None:

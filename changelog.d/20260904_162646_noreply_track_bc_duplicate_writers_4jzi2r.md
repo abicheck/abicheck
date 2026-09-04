@@ -21,4 +21,10 @@
   parameter more than once, instead of silently coercing/collapsing either
   — content that reaches it without going through `import_bundle_facts`'s
   own validation (a hand-assembled or corrupted package) is untrusted the
-  same way any other stored section content is.
+  same way any other stored section content is. `export_bundle_facts` also
+  now rejects an artifact whose own `sections` carries a kind the
+  package-wide `StorageVersions.section_schema_versions` does not
+  advertise (unversioned content could otherwise reach a comparison), and
+  the `on_document` hook charges an artifact's recovered library name
+  against the aggregate decoded-byte budget too, not only its snapshot
+  document.

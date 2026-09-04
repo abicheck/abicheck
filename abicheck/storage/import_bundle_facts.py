@@ -592,15 +592,21 @@ def export_bundle_facts(
     `bundle_composition_from_dto`, and both are reassembled into one
     `bundle_facts_serialization.bundle_facts_from_dict()`-shaped document.
 
-    *on_document*, when given, is called once per reconstructed document --
-    the bundle-composition section first, then each artifact's own exported
-    snapshot document, in `variant.artifact_ids` order -- with that document
-    and a short description of what it is. This module has no size/count
-    budget of its own (see its own module docstring); a caller wanting to
-    bound aggregate decoded size *as* each piece is reconstructed, rather
-    than only after every member of a possibly-untrusted `manifest` has
-    already been retained in memory, raises from this callback to abort
-    before the next document is fetched.
+    *on_document*, when given, is called once per reconstructed piece --
+    the bundle-composition section first, then each artifact -- with a
+    short description of what it is. This module has no size/count budget
+    of its own (see its own module docstring); a caller wanting to bound
+    aggregate decoded size *as* each piece is reconstructed, rather than
+    only after every member of a possibly-untrusted `manifest` has already
+    been retained in memory, raises from this callback to abort before the
+    next piece is fetched. For the bundle-composition section, the callback
+    receives that section's own decoded payload. For an artifact, it
+    receives `{"library_name": <the recovered library name>,
+    "snapshot": <the exported snapshot document>}` rather than the bare
+    snapshot document -- the recovered library name becomes a
+    `per_library_snapshots` key in the document this function returns, so a
+    caller charging only the bare snapshot would never account for an
+    arbitrarily large library name (Codex review).
 
     Raises `ValueError` if *variant_id* names no variant in *manifest*, if
     that variant carries no `BUNDLE_COMPOSITION_SECTION_KIND` section (never
@@ -631,10 +637,28 @@ def export_bundle_facts(
 
     source_schema_version = manifest.versions.source_schema_version
     per_library_snapshots: dict[str, Any] = {}
+    # A package this module writes advertises the *union* of every library's
+    # own section kinds in `manifest.versions.section_schema_versions` (a
+    # header-only library legitimately has no "binary" section, one dumped
+    # at a shallower depth legitimately has no "debug" section) -- so one
+    # artifact carrying *fewer* kinds than the union is expected, not
+    # corruption. An artifact carrying a kind the union never advertises at
+    # all is unambiguous, though: no legitimate write could have produced
+    # it, and `check_reader_compatibility` alone does not catch a hand-
+    # edited package that keeps a recognized section on the artifact while
+    # dropping it from the package-wide version map (Codex review).
+    advertised_sections = set(manifest.versions.section_schema_versions)
     for artifact_id in variant.artifact_ids:
         artifact = next(
             a for a in manifest.artifact_refs if a.artifact_id == artifact_id
         )
+        extra_sections = set(artifact.sections) - advertised_sections
+        if extra_sections:
+            raise ValueError(
+                f"artifact {artifact_id!r} has section(s) {sorted(extra_sections)} "
+                "that this package's section_schema_versions does not "
+                "advertise -- the package is corrupted or was hand-edited"
+            )
         # `artifact_id` itself may be an opaque `resolve_ref_ids`-generated
         # id, not the real library name -- `native_identity` is where
         # `import_bundle_facts` stashed the real one. Falling back to
@@ -679,7 +703,7 @@ def export_bundle_facts(
         )
         if on_document is not None:
             on_document(
-                snapshot_document,
+                {"library_name": library_name, "snapshot": snapshot_document},
                 f"artifact {artifact_id!r} (library {library_name!r})",
             )
         per_library_snapshots[library_name] = snapshot_document
