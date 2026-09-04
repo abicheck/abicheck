@@ -380,6 +380,61 @@ class TestMultiSourceCfiCoverage:
         eh_fde.get_decoded.assert_called()
 
 
+class TestEveryExportedAliasReceivesCfiFacts:
+    """P1 review, fresh evidence (Codex): multiple exported names can
+    legitimately share one address (a strong/weak symbol pair, or several
+    public entry points the linker folded onto identical code).
+    ``_parse_frame_registers`` previously resolved only ONE symbol name
+    per address (``_build_addr_to_sym``'s own first-seen-wins mapping),
+    attached this FDE's facts to that one name, then marked the *address*
+    covered -- so every OTHER exported alias at that same address silently
+    never received its own ``frame_registers``/``callee_saved_regs`` entry
+    at all, indistinguishable from "this function has no CFI facts",
+    while the pass still reported itself complete."""
+
+    def test_all_aliases_at_one_address_receive_facts(self) -> None:
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        alias_a = _sym("alias_a", 0x1000)
+        alias_b = _sym("alias_b", 0x1000)
+        dyn.iter_symbols.return_value = [alias_a, alias_b]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        fde = _fde_for(0x1000, cfa_reg=7)
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [fde]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        # Both aliases -- not just whichever one a first-seen-wins address
+        # map happened to keep -- must carry the decoded CFA-register fact.
+        assert set(meta.frame_registers) == {"alias_a", "alias_b"}
+        assert meta.frame_registers["alias_a"] == meta.frame_registers["alias_b"]
+
+    def test_single_symbol_at_an_address_is_unaffected(self) -> None:
+        """Positive control: the ordinary one-name-per-address case must
+        behave exactly as before -- proving the fix didn't disturb it."""
+        mock_elf = MagicMock()
+        mock_elf.get_machine_arch.return_value = "x64"
+        dyn = MagicMock()
+        sym = _sym("solo_fn", 0x1000)
+        dyn.iter_symbols.return_value = [sym]
+        mock_elf.get_section_by_name.side_effect = lambda name: (
+            dyn if name == ".dynsym" else None
+        )
+
+        fde = _fde_for(0x1000, cfa_reg=7)
+        mock_dwarf = MagicMock()
+        mock_dwarf.EH_CFI_entries.return_value = [fde]
+
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        assert _parse_frame_registers(mock_elf, mock_dwarf, meta) is True
+        assert set(meta.frame_registers) == {"solo_fn"}
+
+
 class TestNonCodeEntrySymbolArchExcludedFromCoverage:
     """P1 review, fresh evidence (Codex): on big-endian PPC64 ELFv1, an
     exported STT_FUNC symbol's ``st_value`` points to its ``.opd`` function

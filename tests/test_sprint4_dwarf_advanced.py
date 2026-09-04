@@ -118,7 +118,7 @@ class TestParseAdvancedDwarfEvidenceState:
             patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
             patch("abicheck.dwarf_advanced.has_real_dwarf_info", return_value=True),
             patch("abicheck.dwarf_advanced._normalize_arch", return_value="x86_64"),
-            patch("abicheck.dwarf_advanced._build_addr_to_sym", return_value={}),
+            patch("abicheck.dwarf_advanced._build_addr_to_syms", return_value={}),
         ):
             meta = parse_advanced_dwarf(Path(__file__))
 

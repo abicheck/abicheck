@@ -697,6 +697,22 @@ def parse_btf_from_bytes(data: bytes, pointer_size: int = 8) -> BtfMetadata:
     # scalar type) reads its own name_off via the resolver's private
     # _str_at(), which no direct extractor's own accumulator observes.
     invalid_strings: list[bool] = []
+    # P2 review, fresh evidence (Codex): the BTF string section's own
+    # offset 0 is reserved -- per include/uapi/linux/btf.h it must always
+    # be a single NUL byte, the empty-string sentinel every "anonymous"
+    # name_off=0 relies on. read_null_terminated_string() only flags an
+    # out-of-bounds offset or a missing terminator, so a string section
+    # that never actually stored that sentinel byte (e.g. corrupted/
+    # truncated at the very front, or a hand-crafted blob) reads whatever
+    # bytes happen to sit at offset 0 as a plausible, valid-looking name
+    # instead of the empty string every offset-0 reference is supposed to
+    # mean -- fabricating or renaming a struct/enum/func/typedef with no
+    # completeness signal at all. A missing/malformed sentinel makes every
+    # name_off in this blob suspect, not just the ones that happen to
+    # collide with offset 0, so this is flagged once for the whole string
+    # section rather than per-reference.
+    if not str_data or str_data[0:1] != b"\x00":
+        invalid_strings.append(True)
     resolver = _TypeResolver(
         types, str_data, pointer_size=pointer_size, invalid_strings=invalid_strings
     )

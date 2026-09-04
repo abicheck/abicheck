@@ -598,6 +598,81 @@ class TestToDwarfMetadata:
         assert meta.to_dwarf_metadata().evidence_state == "partial"
 
 
+class TestBtfStringTableSentinel:
+    """P2 review, fresh evidence (Codex): offset 0 in the BTF string
+    section is reserved by include/uapi/linux/btf.h -- it must always be
+    a single NUL byte, the empty-string sentinel every anonymous
+    (name_off=0) reference relies on. read_null_terminated_string() only
+    flags an out-of-bounds offset or a missing terminator, so a string
+    section that never actually stored that sentinel byte reads whatever
+    bytes sit at offset 0 as a plausible-looking real name instead of the
+    empty string it's supposed to mean -- fabricating or renaming a type
+    while the parse still reports itself complete."""
+
+    @staticmethod
+    def _raw_btf(type_data: bytes, str_data: bytes) -> bytes:
+        """Hand-assemble a BTF blob, bypassing BtfBuilder's own guaranteed-
+        correct leading-NUL string section, to construct a deliberately
+        corrupt one."""
+        hdr_len = 24
+        header = struct.pack(
+            "<HBBIIIII",
+            BTF_MAGIC,
+            BTF_VERSION,
+            0,
+            hdr_len,
+            0,
+            len(type_data),
+            len(type_data),
+            len(str_data),
+        )
+        return header + type_data + str_data
+
+    def test_missing_leading_nul_marks_partial(self) -> None:
+        """Reproduces the exact fabricated-name scenario from the finding:
+        a struct with name_off=0 against a string section that starts
+        with a real character instead of NUL is accepted as a named
+        struct "S" -- offset 0 is supposed to mean anonymous."""
+        name_off = 0
+        entry = struct.pack("<III", name_off, BTF_KIND_STRUCT << 24, 0)
+        data = self._raw_btf(entry, b"S\x00")
+
+        meta = parse_btf_from_bytes(data)
+        assert meta.has_btf is True
+        # The corrupted string table still lets a name be read at offset
+        # 0 (proving the fabrication actually happens, not just that
+        # parsing failed outright) -- fixing *that* misread is a separate,
+        # larger change (this module has no way to know what the real
+        # empty-string convention would have produced); this fix's whole
+        # job is making sure it can no longer claim to be trustworthy.
+        assert "S" in meta.structs
+        assert meta.extraction_partial is True
+        assert meta.to_dwarf_metadata().evidence_state == "partial"
+
+    def test_empty_string_section_marks_partial(self) -> None:
+        """Sibling corruption shape: no string section at all (not even
+        the mandatory sentinel byte)."""
+        entry = struct.pack("<III", 0, BTF_KIND_STRUCT << 24, 0)
+        data = self._raw_btf(entry, b"")
+
+        meta = parse_btf_from_bytes(data)
+        assert meta.has_btf is True
+        assert meta.extraction_partial is True
+
+    def test_wellformed_leading_nul_is_not_flagged(self) -> None:
+        """Positive control: a string section that begins with the
+        mandatory NUL sentinel (BtfBuilder's own real output) must not be
+        flagged -- proving the fix doesn't disturb the ordinary,
+        well-formed parse path."""
+        b = BtfBuilder()
+        int_enc = struct.pack("<I", 32)
+        b.add_type("int", BTF_KIND_INT, 0, 4, extra=int_enc)
+
+        meta = parse_btf_from_bytes(b.build())
+        assert meta.has_btf is True
+        assert meta.extraction_partial is False
+
+
 # ---------------------------------------------------------------------------
 # Error handling / graceful degradation
 # ---------------------------------------------------------------------------

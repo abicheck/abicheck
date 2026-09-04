@@ -943,7 +943,7 @@ class TestUnifiedPassDowngradesOnMissingCfiSections:
         )
         with (
             patch("abicheck.dwarf_advanced._normalize_arch", return_value="x86_64"),
-            patch("abicheck.dwarf_advanced._build_addr_to_sym", return_value={}),
+            patch("abicheck.dwarf_advanced._build_addr_to_syms", return_value={}),
         ):
             meta, adv = du.parse_dwarf_from_session(sess)
 
@@ -992,7 +992,7 @@ class TestUnifiedPassDowngradesOnIncompletePackedTypedef:
         )
         with (
             patch("abicheck.dwarf_advanced._normalize_arch", return_value="x86_64"),
-            patch("abicheck.dwarf_advanced._build_addr_to_sym", return_value={}),
+            patch("abicheck.dwarf_advanced._build_addr_to_syms", return_value={}),
             patch(
                 "abicheck.dwarf_advanced._resolve_die_ref",
                 side_effect=RuntimeError("bad ref"),

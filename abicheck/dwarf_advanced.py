@@ -992,6 +992,41 @@ def _build_addr_to_sym(elf: Any) -> dict[int, str]:
     return addr_to_sym
 
 
+def _build_addr_to_syms(elf: Any) -> dict[int, list[str]]:
+    """Every exported (STB_GLOBAL/STB_WEAK) symbol name at each address.
+
+    Sibling of ``_build_addr_to_sym`` above, returning every alias rather
+    than only the first-seen one. P1 review, fresh evidence (Codex):
+    multiple exported names can legitimately share one address (a strong/
+    weak symbol pair, or several public entry points the linker folded
+    onto identical code) -- ``_parse_frame_registers`` used to attach a
+    CFI/frame-register fact to whichever single name ``_build_addr_to_sym``
+    happened to keep, while marking the *address* covered regardless, so
+    every other alias silently never received its own ``frame_registers``/
+    ``callee_saved_regs`` entry at all -- indistinguishable from "this
+    function has no CFI facts recorded", with no completeness signal, and
+    a later version splitting one alias onto differently-generated code
+    (differing CFI) could go undetected purely because that alias was
+    never one of the names this pass actually recorded facts for.
+    """
+    addr_to_syms: dict[int, list[str]] = {}
+    seen: set[tuple[int, str]] = set()
+    for section_name in (".dynsym", ".symtab"):
+        sect = elf.get_section_by_name(section_name)
+        if sect is None:
+            continue
+        for sym in sect.iter_symbols():
+            st_value = sym.entry.st_value
+            bind = sym.entry.st_info.bind
+            if bind in ("STB_GLOBAL", "STB_WEAK") and st_value > 0:
+                key = (st_value, sym.name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                addr_to_syms.setdefault(st_value, []).append(sym.name)
+    return addr_to_syms
+
+
 def _build_exported_func_addrs(elf: Any) -> set[int]:
     """Addresses of exported (STB_GLOBAL/STB_WEAK) *function* symbols only.
 
@@ -1252,7 +1287,7 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
     """
     try:
         arch_key = _normalize_arch(elf)
-        addr_to_sym = _build_addr_to_sym(elf)
+        addr_to_syms = _build_addr_to_syms(elf)
         # P2 review, fresh evidence (Codex): the coverage set this pass is
         # actually accountable for -- exported *functions* specifically
         # (addr_to_sym also matches exported data symbols, which never
@@ -1323,21 +1358,27 @@ def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) ->
                     uncovered_funcs.discard(pc_begin)
                     if pc_begin in seen_funcs:
                         continue
-                    sym_name = addr_to_sym.get(pc_begin, "")
-                    if not sym_name:
+                    sym_names = addr_to_syms.get(pc_begin, [])
+                    if not sym_names:
                         continue
                     decode_failed: list[bool] = []
                     reg = _extract_cfa_reg_from_fde(
                         entry, arch_key, decode_failed=decode_failed
                     )
-                    if reg is not None:
-                        meta.frame_registers[sym_name] = reg
                     # Extract callee-saved register fingerprint from prologue
                     saved = _extract_callee_saved_regs(
                         entry, arch_key, decode_failed=decode_failed
                     )
-                    if saved is not None:
-                        meta.callee_saved_regs[sym_name] = saved
+                    # P1 review, fresh evidence (Codex): attach this FDE's
+                    # facts to every exported alias at pc_begin, not just
+                    # one -- address coverage (uncovered_funcs, above) must
+                    # mean every alias actually received its own facts,
+                    # not merely that *a* name did.
+                    for sym_name in sym_names:
+                        if reg is not None:
+                            meta.frame_registers[sym_name] = reg
+                        if saved is not None:
+                            meta.callee_saved_regs[sym_name] = saved
                     if decode_failed:
                         # P1 review, fresh evidence: both helpers above catch and
                         # swallow their own decode errors (so callers of them
