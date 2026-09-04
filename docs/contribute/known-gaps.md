@@ -6101,11 +6101,15 @@ looked like the obvious fix and wasn't.
   machinery, plus real validation tests) is a substantial, separate
   deliverable — not a narrow addition to a field-and-classifier PR — and
   because `BundleFacts`' own shape is still scheduled to change again
-  shortly: PR I's own `BundleCompareRequest` unification (blocked on PR
-  G2's `GateOptions`, which doesn't exist yet) may still touch this
-  container's fields before the format truly stabilizes, and authoring a
-  schema now only to revise it again for that landing would be wasted
-  work on the exact same axis. Tracked here rather than deferred silently;
+  shortly: PR I's own `BundleCompareRequest` unification may still touch
+  this container's fields before the format truly stabilizes, and
+  authoring a schema now only to revise it again for that landing would
+  be wasted work on the exact same axis. **Correction (2026-09-04,
+  Codex review, PR #1050): `GateOptions` itself is no longer a blocker
+  here** — ADR-064's own dedicated slice landed it 2026-09-02
+  (`abicheck/policy/release_gate_options.py`); PR I's own
+  `BundleCompareRequest` unification simply hasn't landed yet, for
+  reasons unrelated to `GateOptions`. Tracked here rather than deferred silently;
   the schema-authoring work belongs with (or immediately after) whichever
   PR actually stabilizes `BundleFacts`' shape at its current
   `BUNDLE_FACTS_SCHEMA_VERSION` (`abicheck/bundle_facts.py`) -- the
