@@ -560,22 +560,22 @@ def classify_compare_pair(
     # successfully-resolved `CompareRequest.depth` still read
     # `requested_depth=None`/`depth_satisfied=None` and could report
     # `status="complete"` even though a depth was genuinely requested.
-    # `request.depth` is `None` only when the caller never set it, mirroring
-    # the CLI's identical `if depth is not None` guard. Recomputes
-    # `analysis_assurance` the same way `checker.compare()` itself does
-    # (`old_pack`/`new_pack` from each snapshot's own *embedded*
+    # Recomputes `analysis_assurance` the same way `checker.compare()` itself
+    # does (`old_pack`/`new_pack` from each snapshot's own *embedded*
     # `build_source`, since `InputSpec.sources`/`build_info` are embedded
     # into `old`/`new` before `resolve_compare_request` ever returns), so
     # `layer_coverage`/`requested_depth` are reflected too.
     #
-    # P0.4 follow-up (P2 review): every consumer of the depth *value*
-    # normalizes case before using it (`enforce_requested_depth`, line 194's
-    # `.lower() == "binary"` check), so a valid request like
-    # `depth="HEADERS"` reached this assignment with its original casing
-    # preserved -- breaking every downstream reader expecting the lowercase
-    # `EVIDENCE_DEPTH_VALUES` spelling. Stamp the same lowercased form the
-    # rest of this module already normalizes to, not the raw request string.
-    if request.depth is not None:
+    # One Semantic Pipeline plan, sub-phase 4B's first real consumer: reads
+    # the already-lower-cased value off `pair.resolved_execution_context`
+    # (built from the same `AnalysisPlan` this function already resolves for
+    # its pre-flight check) instead of re-normalizing `request.depth` a
+    # second time -- the two were always identical, so this retires a
+    # duplicate normalization. Falls back to the direct computation for a
+    # caller whose hand-built `ResolvedComparePair` carries no context.
+    if pair.resolved_execution_context is not None:
+        result.requested_depth = pair.resolved_execution_context.requested_depth
+    elif request.depth is not None:
         result.requested_depth = request.depth.lower()
     from .analysis_assurance import compute_analysis_assurance
 
