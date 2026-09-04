@@ -322,6 +322,27 @@ other half of why an escape hatch was not added back in a different shape).
    returns ``None`` -- a decode failure is a strictly worse data point
    than an actual (if inconclusive) scan, never a better one, so it must
    never be allowed to override an earlier probe's real finding.
+16. **A prefix truncated in the middle of a long, otherwise-legal JSON
+   string was misreported as a definitive structural violation, not an
+   inconclusive truncation (Codex review, round 13, fresh evidence).**
+   When the scanned window ends mid-string, the token scan's own
+   *complete*-string pattern can't match at all (there is no closing
+   quote left to find), so ``re.finditer`` would skip the opening quote
+   as unmatched and resume scanning *inside* the string's own raw
+   characters -- where a coincidental digit run, ``true``/``false``/
+   ``null`` spelling, or literal structural character (realistic in a
+   template string, a constant's spelling, or free-form text before the
+   marker) could match a scalar or structural token in its own right,
+   which point 6's own whitespace-only gap check would then very likely
+   reject as a stray non-whitespace byte -- misreporting a genuinely
+   valid document, simply truncated by the bounded-read window, as
+   definitively invalid. Answered by adding a dedicated token-regex
+   alternative that matches an unterminated string running all the way to
+   the scanned prefix's own end as a single token
+   (:data:`_JSON_STRUCTURE_TOKEN_RE`'s own updated docstring has the full
+   account) -- no sub-content inside it is ever separately tokenized, so
+   no spurious gap violation is possible, and the scan's own end-of-loop
+   fallback correctly reports the answer as inconclusive instead.
 
 **Residual, accepted gap (zip/gzip nesting, not chased further):** a gzip
 stream's ``FEXTRA`` header sub-field (or, structurally analogously, a zstd

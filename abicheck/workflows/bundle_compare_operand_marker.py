@@ -46,19 +46,46 @@ from pathlib import Path
 #: one token, escapes included, so a structural character inside a string
 #: value is never mistaken for real JSON structure -- the same "string
 #: alternative tried first" discipline ``storage.json_budget``'s own
-#: container-token regex already establishes), one of the six structural
-#: characters that matter for depth/key-value tracking, or a bare
-#: number/``true``/``false``/``null`` scalar (matching ``storage.
-#: json_budget``'s own number pattern -- loose, not a strict JSON-number
-#: grammar, since validating syntax is ``json.loads()``'s job, not this
-#: scan's). Scalars are tokenized -- even though the scan never treats one
-#: as a key or value candidate -- purely so :func:`_root_level_artifact_type`
-#: can require *every* byte between one recognized token and the next to be
+#: container-token regex already establishes), an unterminated string that
+#: runs to the literal end of the scanned prefix (Codex review, round 13,
+#: fresh evidence -- see below), one of the six structural characters that
+#: matter for depth/key-value tracking, or a bare number/``true``/
+#: ``false``/``null`` scalar (matching ``storage.json_budget``'s own
+#: number pattern -- loose, not a strict JSON-number grammar, since
+#: validating syntax is ``json.loads()``'s job, not this scan's). Scalars
+#: are tokenized -- even though the scan never treats one as a key or
+#: value candidate -- purely so :func:`root_level_artifact_type` can
+#: require *every* byte between one recognized token and the next to be
 #: JSON whitespace (Codex review, round 6, fresh evidence -- see that
 #: function's own docstring for why "any byte re.finditer doesn't match is
 #: just skipped" is not safe to leave unchecked).
+#:
+#: **The unterminated-string alternative closes a gap that same
+#: discipline opened (Codex review, round 13, fresh evidence).** When the
+#: scanned prefix ends in the middle of a long string value (a genuine,
+#: valid JSON document simply truncated by the bounded-read window, not
+#: malformed content), the *complete*-string alternative can't match at
+#: all -- there is no closing quote left in the buffer -- so without this
+#: alternative, ``re.finditer`` would skip the opening quote as unmatched
+#: and resume scanning *inside* the string's own raw characters, where a
+#: coincidental digit run, ``true``/``false``/``null`` spelling, or
+#: literal structural character (all realistic in a template string, a
+#: constant's spelling, or free-form text) could match a scalar or
+#: structural token in its own right. The whitespace-only gap check would
+#: then very likely reject the *surrounding* string content as a stray
+#: non-whitespace byte, misreporting a truncated-but-otherwise-valid
+#: document as definitively invalid (Codex review, round 6's own
+#: docstring: "any byte ``re.finditer`` doesn't match is just skipped" was
+#: exactly the assumption this case violates). Matching the unterminated
+#: string as a single token all the way to the prefix's own end instead
+#: means no sub-content inside it is ever separately tokenized, so no
+#: spurious gap violation is possible; the caller's own end-of-loop
+#: fallback (this scan simply runs out of tokens with nothing more to
+#: examine) then correctly reports the answer as inconclusive
+#: (``definitive=False``) rather than a false structural violation.
 _JSON_STRUCTURE_TOKEN_RE = re.compile(
-    rb'"(?:[^"\\]|\\.)*"|[{}\[\]:,]|-?\d[\d.eE+-]*|true|false|null', re.DOTALL
+    rb'"(?:[^"\\]|\\.)*"|"(?:[^"\\]|\\.)*\Z|[{}\[\]:,]|-?\d[\d.eE+-]*|true|false|null',
+    re.DOTALL,
 )
 
 #: JSON's own whitespace set (RFC 8259 -- space, tab, CR, LF). The *only*
@@ -182,6 +209,13 @@ def root_level_artifact_type(prefix: bytes) -> tuple[bytes | None, bool]:
     document alike) never produces in the first place -- it closes the gap
     without reintroducing a suffix-only package veto (point 2's own
     rejected fix).
+
+    A prefix that ends in the middle of a long, otherwise-legal JSON
+    string is genuinely inconclusive, not a structural violation (Codex
+    review, round 13, fresh evidence) -- see :data:`_JSON_STRUCTURE_TOKEN_
+    RE`'s own docstring for the full account of why the previous paragraph's
+    whitespace-only gap check would otherwise misreport this exact case as
+    definitively invalid.
     """
     stripped = prefix.lstrip(b" \t\r\n")
     if not stripped.startswith(b"{"):

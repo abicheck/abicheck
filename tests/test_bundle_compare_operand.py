@@ -446,6 +446,31 @@ class TestLooksLikeStoredBundleFacts:
             gzip.GzipFile(fileobj=io.BytesIO(raw[: 1024 * 1024])).read(1024 * 1024)
         assert looks_like_stored_bundle_facts(p) is True
 
+    def test_marker_after_a_string_truncated_by_the_small_probe_is_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 13): a long string value before
+        the marker, truncated by the small probe's own decoded-prefix
+        window right in the middle of the string, must not be
+        misclassified as a structural violation -- it's a genuinely
+        valid document, simply cut short by the bounded read."""
+        long_string = "abc123 def456 ghi789 " * 300
+        payload = json.dumps(
+            {
+                "padding_field": long_string,
+                "artifact_type": "abicheck.bundle-facts",
+                "schema_version": 2,
+                "per_library_snapshots": {},
+            }
+        )
+        p = tmp_path / "truncated_string.json"
+        p.write_text(payload)
+        # Premise check: the small probe's own window really does land
+        # inside the long string, not at a token boundary.
+        assert len(payload.encode()[:4096]) == 4096
+        assert payload.encode()[4095:4096] not in (b" ", b'"')
+        assert looks_like_stored_bundle_facts(p) is True
+
     def test_gzip_fextra_forging_a_zip_eocd_is_still_stored(
         self, tmp_path: Path
     ) -> None:
