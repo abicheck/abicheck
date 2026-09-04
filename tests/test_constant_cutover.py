@@ -34,7 +34,12 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.compare.constants import constant_index_pair, diff_constants
 from abicheck.model import AbiSnapshot
 from abicheck.model.fact import Fact
-from abicheck.model.identity import EntityKind, Namespace, entity_id_for_constant
+from abicheck.model.identity import (
+    Anonymous,
+    EntityKind,
+    Namespace,
+    entity_id_for_constant,
+)
 from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.model.semantic_ir_index import SemanticIRIndex
@@ -147,7 +152,10 @@ class TestDetectorBehavior:
             _ir_backed({"moved": "2", "same": "1"}),
         )
         by_kind = {c.kind: c for c in changes}
-        assert set(by_kind) == {ChangeKind.CONSTANT_REMOVED, ChangeKind.CONSTANT_CHANGED}
+        assert set(by_kind) == {
+            ChangeKind.CONSTANT_REMOVED,
+            ChangeKind.CONSTANT_CHANGED,
+        }
         assert by_kind[ChangeKind.CONSTANT_REMOVED].symbol == "gone"
         assert by_kind[ChangeKind.CONSTANT_CHANGED].old_value == "1"
         assert by_kind[ChangeKind.CONSTANT_CHANGED].new_value == "2"
@@ -190,6 +198,59 @@ class TestDetectorBehavior:
         assert _run(unsupported, unsupported) == []
         assert _run(unsupported, _ir_backed({"X": "1"})) == []
         assert _run(_ir_backed({"X": "1"}), unsupported) == []
+
+    def test_a_newly_added_unsupported_fact_is_skipped_not_reported(self) -> None:
+        """The addition-side counterpart of the above: a constant that only
+        exists on the *new* side and carries an unsupported fact must be
+        skipped by the second loop's own ``new_val is None`` guard, not
+        just the first loop's. Distinct code path from
+        ``test_unsupported_fact_yields_no_comparable_value``'s cases, none
+        of which exercise a name absent from ``old_values`` entirely."""
+        unsupported = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(entity_id_for_constant((), "X")): CanonicalEntity(
+                        canonical_spelling=Fact.unsupported("not comparable")
+                    )
+                }
+            )
+        )
+        assert _run(_ir_backed({}), unsupported) == []
+
+    def test_an_unrenderable_scope_segment_is_skipped_by_every_projection(
+        self,
+    ) -> None:
+        """An entity whose scope contains an ``Anonymous`` segment has no
+        faithful flat spelling (``render_display_name`` returns ``None``,
+        see ``semantic_ir_legacy_adapter.py``'s own docstring) -- exercised
+        directly against all three projections that skip it: ``_values``
+        (via ``diff_constants``), ``_constant_names_and_values``, and
+        ``_constant_identities_by_name`` (both via ``constant_index_pair``'s
+        fidelity gate)."""
+        unrenderable_id = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        unrenderable = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(unrenderable_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        assert _run(unrenderable, unrenderable) == []
+        (change,) = _run(unrenderable, _ir_backed({"X": "1"}))
+        assert change.kind is ChangeKind.CONSTANT_ADDED
+
+        old = _snap(constants={}, semantic_ir=unrenderable.ir)
+        new = _snap(constants={}, semantic_ir=unrenderable.ir)
+        old_index, new_index = constant_index_pair(
+            old, new, old_constants={}, new_constants={}
+        )
+        # A fidelity gate that read the anonymous entity's non-name would
+        # disagree with the legacy adapter's own (empty) projection and
+        # fall back; reading nothing for it agrees, so the real IR is used.
+        assert isinstance(old_index, SemanticIRIndex)
+        assert isinstance(new_index, SemanticIRIndex)
 
 
 # -- end to end, through the real detector entry point ---------------------
