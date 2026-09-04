@@ -448,10 +448,12 @@ def resolve_release_pack_application(
     ``contract_evaluation`` is false, the way :func:`~abicheck.
     pack_application.check_resolved_config_applies_packs`'s own
     ``CONTRACT_EVALUATION_ONLY_FIELDS`` check does for the single-pair path.
-    :func:`record_release_resolved_config` (this module) already builds and
-    merges a per-library ``PersistedContractContext`` that field's consumer
-    could read, so the rejection is not about missing plumbing; whether it
-    is still needed is unverified, not lifted here on static reasoning
+    ``service.run_compare`` already creates a per-library
+    ``PersistedContractContext`` that field's consumer could read, and
+    :func:`record_release_resolved_config` (this module) already merges the
+    pack's resolved config into it, so the rejection is not about missing
+    plumbing; whether it is still needed is unverified, not lifted here on
+    static reasoning
     alone. Full trace and review history: the same ledger entry above.
 
     Raises what the canonical resolver and the pack loader raise (a D7
