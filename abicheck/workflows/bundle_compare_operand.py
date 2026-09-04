@@ -123,7 +123,7 @@ PR #1042, three rounds):**
    to recognize. A plain regex cannot express "this key, this depth,
    anywhere among the siblings" (regex has no notion of nesting), so
    points 3 and 4 together are answered by a small, bounded, depth-
-   tracking token scan (:func:`_root_level_artifact_type`) instead of a
+   tracking token scan (:func:`root_level_artifact_type`) instead of a
    single pattern -- still no full JSON parse, still bounded to the same
    prefix ``bounded_decoded_prefix`` already reads, still no container-
    node budget concern (the input size is already capped).
@@ -134,7 +134,7 @@ PR #1042, three rounds):**
    marker past a small fixed prefix even though point 4's scan would have
    recognized it at any position *within* that prefix. Originally answered
    by asking ``bounded_decoded_prefix`` for a much larger window
-   (:data:`_MARKER_SCAN_BYTES`, 1 MiB -- matching ``snapshot_io``'s own
+   (:data:`MARKER_SCAN_BYTES`, 1 MiB -- matching ``snapshot_io``'s own
    escalating-retry ceiling) *unconditionally* instead of its 4 KiB sniff
    default -- superseded by point 9 below, which requests that large
    window only when a smaller one first proves inconclusive, after that
@@ -147,7 +147,7 @@ PR #1042, three rounds):**
    collapses the escape either way. Comparing the raw token bytes against
    the literal spelling ``b'"artifact_type"'`` would reject that
    (technically valid, if unnecessary) escaped key. Answered by
-   :func:`_decode_json_string_token`, the same ``json.loads``-based
+   :func:`decode_json_string_token`, the same ``json.loads``-based
    decoding the marker's *value* already went through from the start --
    now shared by both halves of the check instead of only the value half.
 7. **A byte sequence that is a genuine, complete, self-closing JSON object
@@ -167,7 +167,7 @@ PR #1042, three rounds):**
    of exactly the shape being checked for -- the only distinguishing
    signal is structural, at the whole-file level, which token scanning
    never looks at. Answered by checking the decoded prefix against
-   ``tarfile.is_tarfile()`` (:func:`_decoded_prefix_is_a_real_tar_stream`)
+   ``tarfile.is_tarfile()`` (:func:`decoded_prefix_is_a_real_tar_stream`)
    before the marker scan runs at all -- a genuine tar stream is
    structurally verifiable (checksummed header) and a real JSON document's
    bytes can never accidentally satisfy that check, so this closes the gap
@@ -187,25 +187,25 @@ PR #1042, three rounds):**
    marker scan on that preamble -- the same class of gap as point 7, not
    closable by a leading-magic check since zip's own magic isn't
    necessarily at the front. Answered by
-   :func:`_path_is_a_real_zip_container`, ``zipfile.is_zipfile()`` on
+   :func:`path_is_a_real_zip_container`, ``zipfile.is_zipfile()`` on
    *path* itself (not a bounded prefix -- the central directory it needs
-   may be well past :data:`_MARKER_SCAN_BYTES` into a real, larger wheel).
+   may be well past :data:`MARKER_SCAN_BYTES` into a real, larger wheel).
 9. **Requesting the large window directly (point 5's original fix) can
    itself fail to decode for a valid but pathologically-encoded compressed
    document (Codex review, round 8, fresh evidence).** ``gzip``/``zstd``
    support concatenated members, and a stream with unusually high
    per-member overhead (many tiny members) can need far more *compressed*
-   input to produce :data:`_MARKER_SCAN_BYTES` of *decoded* output than
+   input to produce :data:`MARKER_SCAN_BYTES` of *decoded* output than
    ``bounded_decoded_prefix``'s own raw-read escalation cap allows --
    failing outright even when the marker sits in the first few hundred
    decoded bytes, exactly where it normally does.
    ``load_bundle_facts()`` reads such a document fine (Python's ``gzip``
    handles concatenated members transparently); this classifier must not
    fail where the loader wouldn't. Answered by trying a much smaller
-   decoded window first (:data:`_SMALL_MARKER_SCAN_BYTES`, matching
+   decoded window first (:data:`SMALL_MARKER_SCAN_BYTES`, matching
    ``snapshot_io``'s own sniff default) -- a target low enough that even a
    badly-overhead-heavy stream reliably decodes -- and escalating to
-   :data:`_MARKER_SCAN_BYTES` only when :func:`_root_level_artifact_type`
+   :data:`MARKER_SCAN_BYTES` only when :func:`root_level_artifact_type`
    reports that small probe as genuinely inconclusive (truncated before
    the root object closed), never merely because the marker wasn't found;
    see :func:`_marker_lookup_at_window` and that function's own return
@@ -239,20 +239,49 @@ PR #1042, three rounds):**
    reading the zip's own trailing bytes as a bogus second gzip member).
    The real distinguishing signal was never "does the raw file start with
    a compression magic" -- it is whether the zip *has any real members* at
-   all: round 8's coincidental ``FEXTRA``-embedded EOCD always describes
-   zero (``total_entries``/``cd_size``/``cd_offset`` all zero -- there is
-   no reason to embed a whole fake central directory just to satisfy this
-   check), while a real wheel necessarily has one or more. Answered by
-   dropping the compression-based gate entirely and instead checking
-   ``ZipFile(path).namelist()`` for at least one real entry
-   (:func:`_path_is_a_real_zip_container`'s own updated contract) --
-   applies unconditionally, regardless of what compression (if any)
-   precedes the real zip content, and correctly lets round 8's
-   zero-member coincidence through while still catching round 9's
-   genuine, member-bearing archive.
+   all. Answered (at the time) by dropping the compression-based gate
+   entirely and instead checking ``ZipFile(path).namelist()`` for at least
+   one entry -- point 12 below is the refinement that answer itself
+   needed, once "namelist() reports a name" turned out not to mean "a real
+   member exists" either.
+12. **A ``namelist()`` entry is still not proof of a real zip member
+   (Codex review, round 10, fresh evidence).** Point 11's own claim that
+   "there is no reason to embed a whole fake central directory just to
+   satisfy this check" was wrong: ``FEXTRA`` has no practical size limit
+   that would stop it (a full central-directory record is ~46 bytes plus a
+   filename, comfortably inside ``FEXTRA``'s own 65535-byte ceiling), and
+   a crafted one satisfies both ``is_zipfile()`` *and* ``namelist()`` with
+   zero real zip content anywhere -- ``ZipFile.__init__`` only ever reads
+   the *central directory* to build ``namelist()``/``infolist()``, never
+   validating that a real local file header actually exists at each
+   entry's declared offset (that validation happens lazily, only when a
+   member is actually opened). Answered by opening (not reading -- this
+   stays a cheap, bounded check regardless of a real member's content
+   size) at least one declared member and requiring that to succeed: a
+   genuine wheel's first member has a real local file header by
+   construction, while a central-directory-only forgery has none anywhere
+   in the byte stream and fails immediately with ``BadZipFile`` (see
+   :func:`path_is_a_real_zip_container`'s own updated docstring for the
+   full account).
+13. **The scanner returned on the *first* root-level ``artifact_type``
+   member, but a document with a duplicate root key decodes to its
+   *last* occurrence (Codex review, round 10, fresh evidence).** Legal
+   (if discouraged) JSON syntax, and ``json.loads()`` -- and therefore
+   ``load_bundle_facts()`` -- resolves a duplicate key by simple
+   last-assignment-wins dict construction. Returning immediately on the
+   first match (as every earlier round's version of this scanner did)
+   could disagree with that: a document like ``{"artifact_type":"other",
+   "artifact_type":"abicheck.bundle-facts",...}`` decodes as real,
+   accepted stored facts, but the scanner would have reported the first
+   occurrence's value (``"other"``) and rejected it. Answered by
+   *recording* rather than returning a matching value and continuing the
+   scan, so the value in hand when the root object actually closes is
+   whichever occurrence a real decoder would have kept -- this repo's own
+   writer never emits a duplicate key at all, so the common case (a
+   single occurrence) is unaffected either way.
 
 **Residual, accepted gap (same shape as the pre-marker-v1 gap above):** a
-reordered document whose marker falls beyond :data:`_MARKER_SCAN_BYTES` of
+reordered document whose marker falls beyond :data:`MARKER_SCAN_BYTES` of
 decoded content is still misclassified as an ordinary snapshot -- a fixed
 window can shrink this gap but, by construction, cannot close it for an
 unbounded document without abandoning the "bounded read, no full parse"
@@ -266,330 +295,17 @@ than chased further.
 
 from __future__ import annotations
 
-import io
-import json as _json
-import re
-import tarfile
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-#: Tokenizes a (possibly truncated) JSON byte prefix for
-#: :func:`_root_level_artifact_type`: a whole string literal (consumed as
-#: one token, escapes included, so a structural character inside a string
-#: value is never mistaken for real JSON structure -- the same "string
-#: alternative tried first" discipline ``storage.json_budget``'s own
-#: container-token regex already establishes), one of the six structural
-#: characters that matter for depth/key-value tracking, or a bare
-#: number/``true``/``false``/``null`` scalar (matching ``storage.
-#: json_budget``'s own number pattern -- loose, not a strict JSON-number
-#: grammar, since validating syntax is ``json.loads()``'s job, not this
-#: scan's). Scalars are tokenized -- even though the scan never treats one
-#: as a key or value candidate -- purely so :func:`_root_level_artifact_type`
-#: can require *every* byte between one recognized token and the next to be
-#: JSON whitespace (Codex review, round 6, fresh evidence -- see that
-#: function's own docstring for why "any byte re.finditer doesn't match is
-#: just skipped" is not safe to leave unchecked).
-_JSON_STRUCTURE_TOKEN_RE = re.compile(
-    rb'"(?:[^"\\]|\\.)*"|[{}\[\]:,]|-?\d[\d.eE+-]*|true|false|null', re.DOTALL
+from .bundle_compare_operand_marker import (
+    MARKER_SCAN_BYTES,
+    SMALL_MARKER_SCAN_BYTES,
+    decode_json_string_token,
+    decoded_prefix_is_a_real_tar_stream,
+    path_is_a_real_zip_container,
+    root_level_artifact_type,
 )
-
-#: JSON's own whitespace set (RFC 8259 -- space, tab, CR, LF). The *only*
-#: bytes :func:`_root_level_artifact_type` permits between two recognized
-#: tokens once scanning is underway.
-_JSON_WHITESPACE_RE = re.compile(rb"[ \t\r\n]*")
-
-#: The root marker key, as JSON actually compares it -- decoded, not the
-#: raw token spelling. See :func:`_decode_json_string_token`.
-_ARTIFACT_TYPE_KEY = "artifact_type"
-
-#: How much decoded prefix :func:`looks_like_stored_bundle_facts` asks
-#: :func:`abicheck.snapshot_io.bounded_decoded_prefix` for -- deliberately
-#: far above that function's own ``_SNIFF_BYTES`` (4 KiB) default (Codex
-#: review, PR #1042, round 4, fresh evidence): the order-independent scan
-#: (point 4 below) only helps if the marker actually falls inside the
-#: window it decodes. A reordered document with a large ``per_library_
-#: snapshots`` member ahead of ``artifact_type`` -- unlikely from this
-#: repo's own writer, which always emits the marker first, but not ruled
-#: out for a document re-serialized by another conforming tool -- could
-#: place the marker well past 4 KiB. Matches ``snapshot_io``'s own
-#: ``_BOUNDED_PREFIX_MAX_RAW_BYTES`` ceiling (1 MiB): generous enough for
-#: any realistic reordered document while staying a single bounded read,
-#: not a full decompression -- the same "cheap but not exact" trade-off
-#: ``bounded_decoded_prefix`` itself already makes explicit for its own
-#: escalating-retry ceiling.
-_MARKER_SCAN_BYTES = 1024 * 1024
-
-#: The *first*-phase decoded-prefix size :func:`looks_like_stored_bundle_
-#: facts` tries, before ever falling back to :data:`_MARKER_SCAN_BYTES`
-#: (Codex review, round 8, fresh evidence -- see that function's own
-#: docstring for the two-phase probe this constant drives). Mirrors
-#: ``snapshot_io``'s own private ``_SNIFF_BYTES`` default (4 KiB) rather
-#: than importing it directly (that name is private to its own module);
-#: kept as a literal local constant instead so this module doesn't reach
-#: into another module's implementation detail for a value it can just as
-#: well own itself.
-_SMALL_MARKER_SCAN_BYTES = 4096
-
-
-def _decode_json_string_token(token: bytes) -> str | None:
-    """Decode a raw, still-quoted-and-escaped JSON string *token* (as
-    matched by :data:`_JSON_STRUCTURE_TOKEN_RE`) into its real string
-    value, or ``None`` if it isn't valid JSON string syntax after all
-    (the token regex accepts any ``\\.`` escape pair, including one
-    ``json.loads`` itself would reject, e.g. ``\\q`` -- rejecting rather
-    than raising keeps this scan's own "never raises" contract). Used for
-    *both* a candidate key and the marker's value, so an escaped spelling
-    of either (``"artifact\\u005ftype"`` for the key,
-    ``"abicheck.bundle\\u002dfacts"`` for the value) is compared the same
-    way ``json.loads()`` itself would compare it -- a raw-byte comparison
-    against the token's literal spelling would silently reject a
-    (technically valid, if unnecessary) escaped key or value that
-    ``load_bundle_facts()`` accepts fine (Codex review, round 5, fresh
-    evidence, for the key half; the value half was already decoded this
-    way from the start)."""
-    try:
-        decoded = _json.loads(token)
-    except ValueError:
-        return None
-    return decoded if isinstance(decoded, str) else None
-
-
-def _root_level_artifact_type(prefix: bytes) -> tuple[bytes | None, bool]:
-    """Scan a bounded, possibly-truncated JSON byte prefix for the root
-    object's own ``"artifact_type"`` member. Returns ``(value, definitive)``:
-    *value* is the marker's raw (still JSON-string-escaped) value, or
-    ``None`` if no such *direct* member was found; *definitive* is ``True``
-    when that answer cannot change no matter how much more of the document
-    a caller might decode (the marker was found; the root object closed
-    within *prefix* without one; or *prefix* was proven not to be a JSON
-    object at all), and ``False`` only when the scan ran out of *prefix*
-    before the root object closed -- a genuinely truncated view, where a
-    larger *prefix* could still change the answer (used by
-    :func:`looks_like_stored_bundle_facts` to decide whether re-scanning a
-    larger decoded window is worth the extra decode cost -- Codex review,
-    round 8, fresh evidence).
-
-    Depth-aware (a nested ``artifact_type`` at any deeper level is never
-    matched -- this module's own docstring, point 3) and order-independent
-    *within the root object* (the marker need not be the first member --
-    point 4), unlike a single regex, which can express neither. Still
-    anchored to *prefix* actually beginning with a JSON object (only
-    whitespace may precede the opening ``{``) -- without that check,
-    scanning for tokens anywhere in an unanchored byte string means the
-    *first* ``{`` this scan would ever see is whichever one appears
-    earliest, which for a real, non-JSON binary blob (a compressed
-    archive's own framing bytes, say) can easily be a nested member's own
-    object rather than a real document root at all (Codex review, fresh
-    evidence: an earlier draft without this check reintroduced point 2's
-    nested-package-member false positive by trading root-anchoring away
-    for order-independence, instead of keeping both). Bounded to *prefix*'s
-    own length -- a marker appearing only past the read window is a real,
-    accepted "cannot classify from this little" limitation of a
-    bounded-prefix design, the same shape as :func:`abicheck.snapshot_io.
-    bounded_decoded_prefix`'s own "corrupt or unrecognized -> None"
-    contract; never raises, never assumes truncation means absence
-    (returning ``None`` here means "not found in the visible window", the
-    caller does not distinguish that from a genuine absence -- both simply
-    fail to classify as stored bundle facts).
-
-    Requires every byte between one recognized token and the next to be
-    JSON whitespace, not merely "whatever ``re.finditer`` happened to skip
-    over" (Codex review, round 6, fresh evidence). Without this, a crafted
-    non-JSON byte stream carrying the marker's token *sequence* embedded in
-    otherwise-arbitrary bytes -- e.g. a ``.tar.gz`` release package whose
-    first tar member is deliberately named ``{"artifact_type":"abicheck.
-    bundle-facts"}`` -- would still satisfy this scan: a tar header starts
-    with the member name, so those exact header bytes read as a root JSON
-    object to a scan that only checks token *order*, not that the bytes
-    *between* tokens are legal JSON separators. Rejecting any stray
-    (non-whitespace) byte between tokens is what a real JSON document (a
-    from-`json.dumps` or pretty-printed encoding of a real ``BundleFacts``
-    document alike) never produces in the first place -- it closes the gap
-    without reintroducing a suffix-only package veto (point 2's own
-    rejected fix).
-    """
-    stripped = prefix.lstrip(b" \t\r\n")
-    if not stripped.startswith(b"{"):
-        # Not even the shape of a JSON object -- no amount of additional
-        # decoded content changes that.
-        return None, True
-    depth = 0
-    just_saw_colon = False
-    pending_key_is_marker = False
-    expected_pos = 0
-    for m in _JSON_STRUCTURE_TOKEN_RE.finditer(stripped):
-        if m.start() != expected_pos:
-            gap = stripped[expected_pos : m.start()]
-            if not _JSON_WHITESPACE_RE.fullmatch(gap):
-                # A byte between two recognized tokens that isn't JSON
-                # whitespace -- not a real JSON document (any legal
-                # encoding, minified or pretty-printed, separates tokens
-                # with whitespace only), so stop trusting anything this
-                # scan has matched so far. Definitive: the violating byte's
-                # position doesn't move with a larger prefix.
-                return None, True
-        expected_pos = m.end()
-        tok = m.group(0)
-        if tok in (b"{", b"["):
-            depth += 1
-            just_saw_colon = False
-            pending_key_is_marker = False
-            continue
-        if tok in (b"}", b"]"):
-            depth -= 1
-            just_saw_colon = False
-            pending_key_is_marker = False
-            if depth <= 0:
-                # The root container closed within the visible prefix --
-                # every direct member has already been seen, definitively.
-                return None, True
-            continue
-        if tok == b":":
-            just_saw_colon = True
-            continue
-        if tok == b",":
-            just_saw_colon = False
-            pending_key_is_marker = False
-            continue
-        if not tok.startswith(b'"'):
-            # A bare number/true/false/null scalar -- always a value
-            # (JSON has no unquoted key syntax), so it can never complete
-            # the marker (whose value is a JSON string) and never starts a
-            # pending key.
-            just_saw_colon = False
-            pending_key_is_marker = False
-            continue
-        # A string literal -- a value if it immediately follows ':', a key
-        # otherwise (JSON's own key/value alternation, tracked explicitly
-        # rather than assumed from position, so "artifact_type" appearing
-        # as some *other* field's value is never mistaken for a key --
-        # Codex review, fresh evidence on an earlier draft of this scan).
-        if just_saw_colon:
-            if pending_key_is_marker:
-                return tok, True
-            just_saw_colon = False
-            pending_key_is_marker = False
-        else:
-            pending_key_is_marker = (
-                depth == 1 and _decode_json_string_token(tok) == _ARTIFACT_TYPE_KEY
-            )
-    # Ran out of prefix before the root object closed or the marker was
-    # found -- genuinely inconclusive, not "absent" (Codex review, round 8:
-    # requesting a large prefix directly can itself fail to decode for a
-    # legitimate but pathologically-encoded compressed document, where a
-    # smaller prefix -- tried first by the caller -- reliably would have).
-    return None, False
-
-
-def _decoded_prefix_is_a_real_tar_stream(prefix: bytes) -> bool:
-    """``True`` when *prefix* is the start of a genuine tar stream (Codex
-    review, PR #1042, round 6, fresh evidence).
-
-    Every *other* archive format this module rules out by fixed magic
-    (deb/rpm/conda, and the G40/wheel zip container -- see this function's
-    own sibling, :func:`_path_is_a_real_zip_container`, for why zip needs
-    its own dedicated, whole-file check rather than a magic-byte veto)
-    cannot begin with ``{`` at all -- but a tar stream's very first bytes *are*
-    its first member's ``name`` field, attacker- or tool-controlled content
-    with no leading magic at all. A ``.tar``/``.tar.gz``/``.tar.bz2``/
-    ``.tar.xz`` release
-    package whose first member is deliberately named a complete, valid,
-    self-closing JSON object (e.g. ``{"artifact_type":"abicheck.bundle-
-    facts"}``) satisfies every check :func:`_root_level_artifact_type` can
-    make from content alone -- there is no gap, no reordering, nothing
-    syntactically wrong with those exact bytes as a JSON prefix, because
-    they *are* a complete, valid encoding of exactly the shape being
-    checked for. The only way to tell it apart from a real ``BundleFacts``
-    document is a signal ``_root_level_artifact_type`` cannot see at all:
-    that the *whole file* is independently, structurally a tar archive.
-    ``tarfile.is_tarfile()`` checks exactly that (the first 512-byte header
-    block's own checksum, well within :data:`_MARKER_SCAN_BYTES`), and
-    never accepts real JSON text as a tar header -- so this has no
-    collision risk with a genuine stored-facts document the way an
-    ``is_package()`` *filename*-suffix veto did (point 2, reverted): this
-    checks the decoded content structurally, not the path's suffix.
-    """
-    try:
-        return tarfile.is_tarfile(io.BytesIO(prefix))
-    except Exception:
-        # is_tarfile() is documented to raise on some malformed inputs
-        # rather than only ever returning False -- never let a corrupt or
-        # truncated candidate turn a classification helper into a crash.
-        return False
-
-
-def _path_is_a_real_zip_container(path: Path) -> bool:
-    """``True`` when *path* is a genuine zip container carrying at least
-    one real member -- a wheel, the G40 archive, or any other zip-based
-    format -- *anywhere* in the file, not just at byte 0 (Codex review,
-    PR #1042, round 7, fresh evidence; the *member-count* refinement is
-    round 9's, see below).
-
-    The ZIP format's central directory sits at the *end* of the file and is
-    what a real zip reader (Python's own ``zipfile``, the ``WheelExtractor``
-    this repo already uses) actually trusts; the format explicitly permits
-    arbitrary bytes *before* the first local file header (this is how a
-    self-extracting archive or an executable-prefixed zip works). A real
-    ``.whl`` prepended with a hand-crafted ``{"artifact_type":"abicheck.
-    bundle-facts"}`` preamble is still a perfectly valid zip to every real
-    zip reader, and -- since :func:`_looks_like_stored_bundle_facts_archive`
-    only recognizes the G40 archive by its *own* magic at byte 0, this
-    prepended file fails that check and falls through here -- would satisfy
-    :func:`_root_level_artifact_type`'s own scan on the raw (uncompressed,
-    so undecoded-prefix-equals-raw-file) leading bytes exactly the way
-    round 6's crafted tar member name did. Checked against *path* itself
-    (unlike the tar check, this cannot be answered from a bounded prefix
-    alone -- the central directory it needs may be well past
-    :data:`_MARKER_SCAN_BYTES` into a real, larger wheel), which
-    ``zipfile.is_zipfile()`` already does correctly regardless of file
-    size: it seeks from the end of the file to locate the end-of-central-
-    directory record, the same way a real zip reader does, rather than
-    reading forward from byte 0.
-
-    **Requires at least one real central-directory entry, not merely a
-    structurally plausible EOCD (Codex review, round 9, fresh evidence).**
-    Round 8 taught the reverse lesson about ``zipfile.is_zipfile()``: a
-    coincidental EOCD-shaped byte sequence (a crafted gzip ``FEXTRA``
-    sub-field) can satisfy it for a file with no real zip content at all,
-    which is why ``looks_like_stored_bundle_facts`` no longer trusts a bare
-    ``is_zipfile()`` verdict as sufficient reason to *reject* an otherwise
-    valid gzip/zstd-compressed ``BundleFacts`` document either -- but round
-    9 showed the same coin has another face: a genuine, structurally valid
-    zip (a real wheel, with real members) can *itself* be prefixed with a
-    complete, independently-decodable gzip/zstd stream as its own permitted
-    "arbitrary preamble," where that preamble decodes to JSON carrying the
-    marker. A bare ``detect_snapshot_compression() != NONE`` skip (round
-    8's own fix) would then wrongly treat this as "already gzip, never
-    zip-shaped" and let the marker scan run and misclassify a real wheel as
-    stored facts. The actual distinguishing signal between round 8's
-    coincidence and round 9's genuine archive is not "does the raw file
-    start with a compression magic" but whether the zip *has any real
-    entries*: round 8's crafted EOCD always describes zero
-    (``total_entries``/``cd_size``/``cd_offset`` all zero -- there is no
-    legitimate reason to embed a whole fake central directory inside a
-    gzip ``FEXTRA`` sub-field just to satisfy this check, and neither
-    ``FEXTRA``'s own format nor practical size limits make that
-    attractive), while a real wheel necessarily has one or more real
-    members (that is what makes it a wheel at all). Checking
-    ``ZipFile(path).namelist()`` for at least one entry -- not just
-    ``is_zipfile()`` -- makes this veto apply exactly when it should:
-    always, on real zip content, regardless of whatever compressed
-    preamble might precede it, and never on a compressed document whose
-    only zip-shaped feature is a coincidental, empty-EOCD collision deep
-    inside its own header.
-    """
-    try:
-        if not zipfile.is_zipfile(path):
-            return False
-        with zipfile.ZipFile(path) as zf:
-            return bool(zf.namelist())
-    except Exception:
-        # zipfile.is_zipfile()/ZipFile() are documented to raise on some
-        # malformed inputs rather than only ever returning False/empty --
-        # never let a corrupt or truncated candidate turn a classification
-        # helper into a crash.
-        return False
 
 
 def _looks_like_stored_bundle_facts_archive(path: Path) -> bool:
@@ -622,7 +338,7 @@ def _marker_lookup_at_window(path: Path, n: int) -> tuple[bool | None, bool]:
     """One probe of :func:`looks_like_stored_bundle_facts`'s marker check
     at decoded-prefix size *n*. Returns ``(is_stored, definitive)``:
     *is_stored* is ``True``/``False`` once decided, or ``None`` while still
-    inconclusive; *definitive* mirrors :func:`_root_level_artifact_type`'s
+    inconclusive; *definitive* mirrors :func:`root_level_artifact_type`'s
     own meaning -- ``False`` only when a larger *n* might still change the
     answer (a genuinely truncated decode), never on a confirmed match.
     """
@@ -634,13 +350,13 @@ def _marker_lookup_at_window(path: Path, n: int) -> tuple[bool | None, bool]:
         # bigger window" (bounded_decoded_prefix already escalates its own
         # raw read internally before giving up), so this is definitive.
         return False, True
-    if _decoded_prefix_is_a_real_tar_stream(prefix):
+    if decoded_prefix_is_a_real_tar_stream(prefix):
         # A genuine tar stream can never be a real BundleFacts document
-        # (see _decoded_prefix_is_a_real_tar_stream's own docstring) --
+        # (see decoded_prefix_is_a_real_tar_stream's own docstring) --
         # ruled out before the marker scan even runs, so a tar member
         # deliberately named to look like the marker is never trusted.
         return False, True
-    value, definitive = _root_level_artifact_type(prefix)
+    value, definitive = root_level_artifact_type(prefix)
     if value is None:
         return (False if definitive else None), definitive
     # *value* is still a raw JSON string token (quotes and any backslash
@@ -649,7 +365,7 @@ def _marker_lookup_at_window(path: Path, n: int) -> tuple[bool | None, bool]:
     # (technically valid, if unnecessary) escaped spelling still matches.
     from ..bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
 
-    decoded_value = _decode_json_string_token(value)
+    decoded_value = decode_json_string_token(value)
     return decoded_value == BUNDLE_FACTS_ARTIFACT_TYPE, True
 
 
@@ -668,8 +384,8 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
     package-like filename suffix. Tar- and zip-based archives (wheels
     included) are the exceptions, each ruled out by structural *content*
     rather than filename (points 7-8,
-    :func:`_decoded_prefix_is_a_real_tar_stream` and
-    :func:`_path_is_a_real_zip_container`) -- filename-blind checks, so
+    :func:`decoded_prefix_is_a_real_tar_stream` and
+    :func:`path_is_a_real_zip_container`) -- filename-blind checks, so
     neither carries point 2's false-negative risk. Never raises, never
     fully decompresses or JSON-parses a
     plain-JSON candidate -- see this module's own docstring for why. A
@@ -681,7 +397,7 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
         return False
     if _looks_like_stored_bundle_facts_archive(path):
         return True
-    if _path_is_a_real_zip_container(path):
+    if path_is_a_real_zip_container(path):
         # Already ruled out being the one legitimate zip-shaped encoding
         # (the G40 archive, just above) -- any other zip container with
         # real members reaching here (a wheel, possibly with a crafted or
@@ -698,17 +414,17 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
         # zero-member EOCD collision without needing any such gate at all.
         # Checked before decoding a prefix at all, since this check needs
         # the true end of the file, not a bounded window of it (see
-        # _path_is_a_real_zip_container's own docstring).
+        # path_is_a_real_zip_container's own docstring).
         return False
     # Two-phase probe (Codex review, round 8, fresh evidence): try a small
-    # decoded window first, escalating to _MARKER_SCAN_BYTES only when that
+    # decoded window first, escalating to MARKER_SCAN_BYTES only when that
     # small probe was genuinely inconclusive (truncated before the root
     # object closed), never merely because the marker wasn't found in it.
     # Requesting the large window directly (as an earlier round did)
     # created its own failure mode: for a valid but pathologically-encoded
     # compressed document (many tiny concatenated gzip members, each
     # carrying real per-member overhead), decoding the first
-    # _MARKER_SCAN_BYTES of *output* can require more *compressed* input
+    # MARKER_SCAN_BYTES of *output* can require more *compressed* input
     # than bounded_decoded_prefix's own internal raw-read escalation cap
     # allows, failing outright even though the marker sits in the first
     # few hundred bytes -- a small probe's much lower output target avoids
@@ -716,10 +432,10 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
     # marker near the front), and only pays the larger decode when it is
     # actually warranted (this module's own docstring, point 5's reordered-
     # document scenario).
-    is_stored, definitive = _marker_lookup_at_window(path, _SMALL_MARKER_SCAN_BYTES)
+    is_stored, definitive = _marker_lookup_at_window(path, SMALL_MARKER_SCAN_BYTES)
     if definitive:
         return bool(is_stored)
-    is_stored, _definitive = _marker_lookup_at_window(path, _MARKER_SCAN_BYTES)
+    is_stored, _definitive = _marker_lookup_at_window(path, MARKER_SCAN_BYTES)
     return bool(is_stored)
 
 

@@ -221,6 +221,124 @@ class TestLooksLikeStoredBundleFacts:
         assert raw[:2] == b"\x1f\x8b"
         assert looks_like_stored_bundle_facts(whl_path) is False
 
+    def test_gzip_fextra_forging_a_central_directory_is_still_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 10): a fake central-directory
+        record plus EOCD, both fully self-consistent and entirely
+        embedded within a gzip FEXTRA sub-field, satisfies zipfile.
+        is_zipfile() *and* ZipFile.namelist() (a nonempty entry) with zero
+        real zip content anywhere -- ZipFile.__init__ only ever reads the
+        central directory, never validating that a real local file header
+        backs each entry. The fixture is still a genuine, independently-
+        decodable gzip stream carrying the real marker."""
+        import struct
+        import zlib
+
+        def _gzip_with_forged_central_directory(payload: bytes) -> bytes:
+            co = zlib.compressobj(9, zlib.DEFLATED, -15)
+            compressed = co.compress(payload) + co.flush()
+            trailer = struct.pack("<I", zlib.crc32(payload) & 0xFFFFFFFF) + struct.pack(
+                "<I", len(payload) & 0xFFFFFFFF
+            )
+            tail_after_header = compressed + trailer
+            fname = b"fake.txt"
+            cd_entry = (
+                struct.pack(
+                    "<IHHHHHHIIIHHHHHII",
+                    0x02014B50,
+                    20,
+                    20,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    len(fname),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+                + fname
+            )
+            cd_size = len(cd_entry)
+            header_prefix = (
+                b"\x1f\x8b\x08"
+                + bytes([0x04])  # FLG = FEXTRA
+                + struct.pack("<I", 0)  # MTIME
+                + b"\x02\xff"  # XFL, OS
+            )
+            si = b"AB"
+            data_start = len(header_prefix) + 2 + len(si) + 2
+            eocd = struct.pack(
+                "<IHHHHIIH",
+                0x06054B50,
+                0,
+                0,
+                1,
+                1,
+                cd_size,
+                data_start,
+                len(tail_after_header),
+            )
+            subfield_data = cd_entry + eocd
+            subfield = si + struct.pack("<H", len(subfield_data)) + subfield_data
+            return (
+                header_prefix
+                + struct.pack("<H", len(subfield))
+                + subfield
+                + tail_after_header
+            )
+
+        data = _gzip_with_forged_central_directory(_MARKER_JSON.encode())
+        # Premise check: the crafted bytes fool a raw zip probe, including
+        # reporting a nonempty namelist -- but the "member" isn't real.
+        assert zipfile.is_zipfile(io.BytesIO(data)) is True
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            assert zf.namelist() == ["fake.txt"]
+            with pytest.raises(zipfile.BadZipFile):
+                zf.read("fake.txt")
+        p = tmp_path / "crafted.json.gz"
+        p.write_bytes(data)
+        assert looks_like_stored_bundle_facts(p) is True
+
+    def test_duplicate_root_marker_key_uses_the_last_value(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 10): JSON permits a duplicate
+        root key, and json.loads() (and therefore load_bundle_facts())
+        resolves it to the *last* occurrence, the same way a Python dict
+        literal would. The scanner must not report the first occurrence's
+        value instead."""
+        p = tmp_path / "duplicate_key.json"
+        p.write_text(
+            '{"artifact_type": "other", "artifact_type": '
+            '"abicheck.bundle-facts", "schema_version": 2, '
+            '"per_library_snapshots": {}}'
+        )
+        # Premise check: json.loads() really does keep the last value.
+        assert json.loads(p.read_text())["artifact_type"] == "abicheck.bundle-facts"
+        assert looks_like_stored_bundle_facts(p) is True
+
+    def test_duplicate_root_marker_key_other_value_last_is_not_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """The inverse of the case above: when the *last* occurrence is
+        not the real marker value, the document must not classify as
+        stored, even though an earlier occurrence was."""
+        p = tmp_path / "duplicate_key_other_last.json"
+        p.write_text(
+            '{"artifact_type": "abicheck.bundle-facts", "artifact_type": '
+            '"other", "schema_version": 2, "per_library_snapshots": {}}'
+        )
+        assert json.loads(p.read_text())["artifact_type"] == "other"
+        assert looks_like_stored_bundle_facts(p) is False
+
     def test_gzip_with_many_tiny_members_and_a_leading_marker_is_stored(
         self, tmp_path: Path
     ) -> None:
