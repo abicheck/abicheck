@@ -490,3 +490,50 @@ class TestReconstructionFactStatus:
         )
         types = {"P": rec}
         assert _is_polymorphic("P", types, {}, vtable_facts_reliable=False) is None
+
+    def test_confirmed_abstract_proves_polymorphic(self):
+        # Codex review, fresh evidence, fourth round: a confirmed
+        # is_abstract=True is unconditional proof of polymorphism -- an
+        # abstract class has at least one pure virtual function, and a
+        # pure virtual function is still a virtual function.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+            is_abstract=True,
+            is_abstract_fact=Fact.present(True),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is True
+
+    def test_confirmed_not_abstract_does_not_prove_polymorphic(self):
+        # A confirmed is_abstract=False says nothing about polymorphism
+        # either way -- a perfectly ordinary concrete polymorphic class
+        # reads is_abstract=False too.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+            is_abstract=False,
+            is_abstract_fact=Fact.present(False),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}) is None
+
+    def test_confirmed_abstract_is_not_gated_on_vtable_facts_reliable(self):
+        # is_abstract_fact carries no known unreliable-producer history tied
+        # to vtable_facts_reliable (no storage.fact_backfill rule exists for
+        # it), so this positive-evidence path fires even when that flag is
+        # False -- same treatment virtual_bases_fact already gets.
+        rec = RecordType(
+            name="P",
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+            is_abstract=True,
+            is_abstract_fact=Fact.present(True),
+        )
+        types = {"P": rec}
+        assert _is_polymorphic("P", types, {}, vtable_facts_reliable=False) is True

@@ -155,6 +155,18 @@ def _is_polymorphic(
     is a scalar, not a list, so its own ``PARTIAL`` reading carries no
     "uncovered remainder" risk, and the direct-clang header-AST backend
     never emits anything but ``PARTIAL`` for it.
+
+    A confirmed ``is_abstract=True`` is a fifth, equally unconditional
+    positive-evidence path (Codex review, fresh evidence, fourth round): a
+    C++ abstract class has at least one pure virtual function (its own, or
+    an unoverridden one inherited from a base), and a pure virtual function
+    is still a *virtual* function -- so abstractness alone proves
+    polymorphism regardless of ``vtable_fact``'s status. Unlike
+    ``vptr_offset_bits_fact``, ``is_abstract_fact`` carries no known
+    unreliable-producer history tied to ``vtable_facts_reliable`` (no
+    ``storage.fact_backfill`` rule exists for it at all), so this check is
+    not gated on that flag -- the same treatment ``virtual_bases_fact``
+    already gets above, for the identical reason.
     """
     if name in memo:
         return memo[name]
@@ -171,7 +183,8 @@ def _is_polymorphic(
         and vptr_fact.is_present
         and vptr_fact.value is not None
     )
-    if vtable or virtual_bases or own_vptr_confirmed_present:
+    own_confirmed_abstract = fact_confirmed_true(rec.is_abstract_fact)
+    if vtable or virtual_bases or own_vptr_confirmed_present or own_confirmed_abstract:
         memo[name] = True
         return True
     vtable_fact = rec.vtable_fact
