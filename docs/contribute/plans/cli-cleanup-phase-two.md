@@ -127,11 +127,11 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > OLD_INPUT automatically, delete --old-bundle-facts`) merged into `main`
 > at `23c7808`, base `48152645` (#1052). `--old-bundle-facts` is gone,
 > `workflows/bundle_compare_operand.py`/`bundle_compare_operand_marker.py`
-> do the classification (hardened across many adversarial review rounds —
-> #1042's own description said 11, but `bundle_compare_operand.py`'s own
-> docstring on current `main` already documents fixes through round 19, so
-> don't hard-code a count here; see that module's docstring for the current
-> total), `compare_bundle_operand_dispatch.py` wires it
+> do the classification (hardened across many adversarial review rounds,
+> each with its own fix and regression test — the module's own docstring
+> keeps accumulating new rounds after #1042 merged, so this note
+> deliberately names no count at all; see that module's docstring for the
+> current total), `compare_bundle_operand_dispatch.py` wires it
 > into `compare_cmd`. **The full `BundleCompareRequest` unification is
 > still explicitly out of scope of #1042 and remains this row's open
 > item** — live/stored and stored/stored still have no execution engine,
@@ -189,17 +189,24 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > signal gap), PR H (artifact-set provider-ownership semantics — not
 > started), PR I's full `BundleCompareRequest` unification (classification
 > + flag deletion done; the unification itself not started), and PR J
-> (bundle topology out of CLI flags — not started). **Correction (Codex
-> review of this PR, second round, fresh evidence): PR C is fully done,
-> full stop.** An earlier revision of this checkpoint claimed PR C still
-> had an open config-discovery tail, reproducing a bullet under
-> "Re-verified, unchanged, still open" that had itself gone stale — that
-> gap was closed on `main` by `12492deb` (2026-09-01), confirmed against
-> `abicheck/workflows/plan.py:216-354` and
-> `docs/contribute/known-gaps.md`'s own "Phase 4 is now complete" line.
-> Both the Ordering block's PR C row and the "Re-verified" bullet are
-> corrected in place — see either for the account. PR A/B/C/D/E/F and PR
-> 1/1b/2 are done.
+> (bundle topology out of CLI flags — not started). **PR C's status took
+> two rounds of correction on this very PR (Codex review) to state
+> precisely — recorded here so a future pass doesn't re-litigate it.**
+> Binary-format migration (ELF + PE/Mach-O) is done. Config-discovery
+> dry-run/execution parity is done for `scan` (both the auto-discovery and
+> explicit-`--config` cases — `ScanRequest` carries `build_config` as a
+> real field) and done for `dump`/`compare`'s auto-discovery case
+> (`12492deb`, 2026-09-01), but **`dump`/`compare` have no `build_config`
+> field on `InputSpec` at all**, so an explicit `--config` naming a file
+> auto-discovery wouldn't itself find is invisible to their own
+> `--dry-run` pre-flight even though real execution honors it — a real,
+> narrower open residual, not covered by `12492deb` or by
+> `one-semantic-pipeline.md`'s "Phase 4 is now complete" line (that line
+> is about the parameters the four pre-flight call sites already have, not
+> about `dump`/`compare` gaining a request-level seam they don't have).
+> See PR C's own row and the "Re-verified, unchanged, still open" bullet
+> below for the full account. PR A/B/D/E/F and PR 1/1b/2 are done; PR C is
+> done except for that one residual.
 
 ## Problem
 
@@ -4907,28 +4914,40 @@ the agreement so a future pass does not re-derive them as new:
   migration — every persisted identity carrier (flat entities, source-graph
   nodes, surface-graph nodes, consumer-graph nodes, proof-path references,
   impact ids), not one regex per graph format.
-- **Configuration discovery (PR C's tail) — closed, corrected here
-  2026-09-04.** This bullet previously read "still happens too late": a
-  `.abicheck.yml`-only `build: targets:` could be discovered only during
-  real execution, so `dump --dry-run` / `compare --dry-run` / `scan
-  --dry-run` could answer "valid" for a request the real run then
-  rejected. That gap was closed on `main` by `12492deb` (2026-09-01,
-  before this correction was written — the staleness was in this plan, not
-  in the code): `workflows.plan.bazel_target_scoping_failure`/
-  `scan_bazel_scoping_failure` gained `sources`/`build_config` parameters
-  and fall back to an auto-discovered (or explicit) `.abicheck.yml`'s
-  `build.targets:` when the request's own `build_targets` is empty,
-  mirroring `embed_build_source`'s own precedence exactly.
-  `dump`/`compare --dry-run` close for free through the shared
-  `AnalysisPlanner` chokepoint; all four of `scan`'s pre-flight call sites
-  were updated the same way (the fourth, `service_scan.run_scan_set`, in a
-  follow-up split of `service_scan.py` — see
-  `docs/contribute/known-gaps.md`'s account for the full history,
-  including one further, since-fixed layout-check gap at `--depth
-  headers`). See `docs/contribute/plans/one-semantic-pipeline.md`'s Phase
-  4 "Landed" notes: **"Phase 4 is now complete: all four pre-flight call
-  sites forward `sources=`/`build_config=`."** PR C's row above is
-  corrected to match — no open tail remains.
+- **Configuration discovery (PR C's tail) — partially closed, and this
+  bullet has now been wrong in both directions; corrected precisely
+  2026-09-04, third pass.** This bullet originally read "still happens too
+  late": a `.abicheck.yml`-only `build: targets:` could be discovered only
+  during real execution, so a dry-run could answer "valid" for a request
+  the real run then rejected. `12492deb` (2026-09-01) closed the
+  **auto-discovery** half of this for all three commands:
+  `workflows.plan.bazel_target_scoping_failure`/`scan_bazel_scoping_failure`
+  gained `sources`/`build_config` parameters and fall back to whatever an
+  auto-discovered `.abicheck.yml` at *sources* declares under
+  `build.targets:` when the request's own `build_targets` is empty. **What
+  is not closed, per `docs/contribute/known-gaps.md`'s own account and
+  confirmed against current `main`'s `workflows/plan.py`/`api_types.py`:**
+  `dump`/`compare` have no `build_config` field on `InputSpec` at the
+  request level at all, so their own dry-run check
+  (`_check_bazel_target_scoping`, `plan.py`) forwards only `sources=`, not
+  `build_config=` — an *explicit* `--config /outside/search/path.yml`
+  naming a config `discover_build_config(sources)` wouldn't itself find is
+  invisible to `dump --dry-run`/`compare --dry-run`'s pre-flight even
+  though real execution (`frontends/cli/commands/dump.py`, which forwards
+  the CLI's own `build_config` to `execute_and_write_dump_cli_run`) honors
+  it and can reject the same request. `scan`'s own three (of four)
+  updated pre-flight call sites are unaffected — `ScanRequest` already
+  carries `build_config` as a real field, so scan's explicit-config case
+  closed alongside its auto-discovery case. **Net: closed for `scan`
+  (both halves); closed for `dump`/`compare`'s auto-discovery case only —
+  their explicit-`--config` case is a real, narrower, still-open residual
+  of PR C's own tail**, not closed by `12492deb` and not present in
+  `docs/contribute/plans/one-semantic-pipeline.md`'s "Phase 4 is now
+  complete" line the way this bullet previously implied (that line is
+  about the four pre-flight call sites forwarding the parameters they
+  have, not about `dump`/`compare` gaining the request-level seam they
+  don't have). PR C's row above reflects this precisely rather than either
+  "fully open" or "fully done".
 - **The ADR-061 move is directionally right and carries one visible debt.**
   #972 put the new command in `frontends/cli/commands/` instead of a new flat
   `cli_compare_bundle_facts.py`, which is exactly ADR-061's direction — but
@@ -5068,13 +5087,13 @@ PR B  effective configuration parity  — packs resolved once into one
                                        deliberately reassigned to PR G2,
                                        see PR B's own section for why
 PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
-      (DONE — binary-format migration  ResolvedDumpRequest → DumpResult, one
-       and config-discovery dry-run    resolver for dump CLI/Python/Action
-       parity both landed)             *and* scan_engine's candidate
-                                       resolution, JSON dry-run rendered
-                                       from that object. The real ELF `dump`
-                                       run now executes through
-                                       execute_dump_request (scan's
+      (binary-format migration DONE;   ResolvedDumpRequest → DumpResult, one
+       config-discovery dry-run parity resolver for dump CLI/Python/Action
+       DONE for scan, DONE for         *and* scan_engine's candidate
+       dump/compare's auto-discovery   resolution, JSON dry-run rendered
+       case only — explicit --config   from that object. The real ELF `dump`
+       still a real, narrower open     run now executes through
+       residual for dump/compare)      execute_dump_request (scan's
                                        candidate resolution already did),
                                        and PE/Mach-O followed via #980 (see
                                        the 2026-09-04 checkpoint above):
@@ -5088,20 +5107,26 @@ PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
                                        unit tests) — verified only via
                                        mock-based CLI/unit tests, no real
                                        PE/Mach-O toolchain was available to
-                                       verify against a real binary. The
-                                       config-discovery dry-run/execution
-                                       parity gap (a `.abicheck.yml`-only
-                                       `build: targets:` invisible to
-                                       `--dry-run`) closed separately via
-                                       `12492deb` (2026-09-01) — see the
-                                       "Re-verified, unchanged, still open"
-                                       bullet's own corrected entry below
-                                       for the account (this row previously
-                                       carried a stale "config-discovery
-                                       tail still open" claim, itself
-                                       reproducing that bullet's own
-                                       staleness — corrected 2026-09-04,
-                                       second Codex round on #1059)
+                                       verify against a real binary.
+                                       Config-discovery dry-run/execution
+                                       parity: `12492deb` (2026-09-01)
+                                       closed the auto-discovery case for
+                                       all of `scan`, `dump`, and `compare`,
+                                       and closed `scan`'s explicit
+                                       `--config` case too (`ScanRequest`
+                                       carries `build_config` as a real
+                                       field). `dump`/`compare` have no
+                                       `build_config` field on `InputSpec`
+                                       at all, so their own explicit
+                                       `--config` case is not forwarded to
+                                       the pre-flight check and remains a
+                                       real, narrower open residual — see
+                                       the "Re-verified, unchanged, still
+                                       open" bullet's own corrected entry
+                                       below for the full account (this row
+                                       has been wrong in both directions
+                                       across two prior corrections on
+                                       #1059; this is the precise version)
 PR D  build-context completeness      = PR 3B — matched compile-unit
       (DONE)                           selection, forced includes, provenance
                                        tests
