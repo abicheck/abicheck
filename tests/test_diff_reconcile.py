@@ -24,11 +24,23 @@ side*, a pruned field whose *declaration* changed is kept, and a real break
 
 from __future__ import annotations
 
-from abicheck.checker import Verdict, compare
-from abicheck.checker_policy import ChangeKind
-from abicheck.diff_reconcile import RECONCILE_REASON, reconcile_build_context
-from abicheck.header_conditionals import scan_conditional_fields
-from abicheck.model import (
+import sys
+from pathlib import Path
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+from abicheck.checker import Verdict, compare  # noqa: E402
+from abicheck.checker_policy import ChangeKind  # noqa: E402
+from abicheck.diff_reconcile import (  # noqa: E402
+    RECONCILE_REASON,
+    reconcile_build_context,
+)
+from abicheck.header_conditionals import scan_conditional_fields  # noqa: E402
+from abicheck.model import (  # noqa: E402
     AbiSnapshot,
     Function,
     RecordType,
@@ -36,7 +48,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
-from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from abicheck.serialization import snapshot_from_dict, snapshot_to_dict  # noqa: E402
 
 GUARD = "CONFIG_KEEP_LEGACY"
 
@@ -598,13 +610,7 @@ def test_registry_and_defines_survive_serialization():
 
 
 def _case164_dir():
-    from pathlib import Path
-
-    return (
-        Path(__file__).resolve().parent.parent
-        / "examples"
-        / "case164_preproc_conditional_field"
-    )
+    return example_catalog.case_dir("case164_preproc_conditional_field")
 
 
 def test_case164_fixtures_reconcile():

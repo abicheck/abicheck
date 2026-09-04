@@ -13,15 +13,26 @@ Non-``test_`` module (a helper, not a suite) so the test collector ignores it.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from abicheck.buildsource.crosscheck import CrosscheckConfig, run_crosschecks
-from abicheck.buildsource.poi import PointsOfInterest, build_points_of_interest
-from abicheck.model import AbiSnapshot
-from abicheck.serialization import load_snapshot
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
 
-_EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+from abicheck.buildsource.crosscheck import (  # noqa: E402
+    CrosscheckConfig,
+    run_crosschecks,
+)
+from abicheck.buildsource.poi import (  # noqa: E402
+    PointsOfInterest,
+    build_points_of_interest,
+)
+from abicheck.model import AbiSnapshot  # noqa: E402
+from abicheck.serialization import load_snapshot  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -37,7 +48,7 @@ def load_case_snapshot(
     case_name: str, filename: str = "snapshot.abi.json"
 ) -> AbiSnapshot:
     """Load a committed snapshot fixture from ``examples/<case_name>/``."""
-    path = _EXAMPLES / case_name / filename
+    path = example_catalog.case_dir(case_name) / filename
     if not path.is_file():
         raise FileNotFoundError(f"missing G20 fixture: {path}")
     return load_snapshot(path)

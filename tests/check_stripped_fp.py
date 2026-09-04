@@ -27,8 +27,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-REPO_DIR = Path(__file__).parent.parent
-GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
+REPO_DIR = Path(__file__).resolve().parent.parent
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 
 # Verdicts the ground truth may declare as "not a real ABI break".
 # COMPATIBLE_WITH_RISK is included: the runtime-model-flip cases (case130–133)
@@ -58,7 +64,7 @@ def _case_is_cpp(case: str) -> bool:
     good-bad/libfoo naming conventions test_example_autodiscovery.py's layout
     detectors use, without needing to import that module here.
     """
-    case_dir = REPO_DIR / "examples" / case
+    case_dir = example_catalog.case_dir(case)
     if not case_dir.is_dir():
         return False
     return any(case_dir.rglob("*.cpp")) or any(case_dir.rglob("*.hpp"))

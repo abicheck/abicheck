@@ -27,20 +27,26 @@ evidence. Compiler-free, mirrors ``tests/test_environment_drift.py``'s
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.serialization import snapshot_from_dict
-from abicheck.suppression import SuppressionList
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
 
-_EXAMPLES = Path(__file__).parent.parent / "examples"
-_GT = json.loads((_EXAMPLES / "ground_truth.json").read_text())["verdicts"]
+from abicheck.checker import ChangeKind, Verdict, compare  # noqa: E402
+from abicheck.serialization import snapshot_from_dict  # noqa: E402
+from abicheck.suppression import SuppressionList  # noqa: E402
+
+_GT = example_catalog.load_ground_truth()["verdicts"]
 
 
 def _snapshots(case_name: str):
-    case_dir = _EXAMPLES / case_name
+    case_dir = example_catalog.case_dir(case_name)
     old = snapshot_from_dict(json.loads((case_dir / "old.abi.json").read_text()))
     new = snapshot_from_dict(json.loads((case_dir / "new.abi.json").read_text()))
     return old, new
@@ -69,7 +75,7 @@ class TestCase192CallGraphBreakSurvivesSuppression:
         # scenario where the tag is actually read.
         old, new = snapshots
         suppression = SuppressionList.load(
-            _EXAMPLES / self.CASE / "suppress-refused.yaml"
+            example_catalog.case_dir(self.CASE) / "suppress-refused.yaml"
         )
         result = compare(old, new, suppression=suppression)
         removed = next(
@@ -84,7 +90,7 @@ class TestCase192CallGraphBreakSurvivesSuppression:
     def test_broad_suppression_refused_without_override(self, snapshots) -> None:
         old, new = snapshots
         suppression = SuppressionList.load(
-            _EXAMPLES / self.CASE / "suppress-refused.yaml"
+            example_catalog.case_dir(self.CASE) / "suppress-refused.yaml"
         )
         result = compare(old, new, suppression=suppression)
         assert result.verdict == Verdict.BREAKING
@@ -101,7 +107,7 @@ class TestCase192CallGraphBreakSurvivesSuppression:
     ) -> None:
         old, new = snapshots
         suppression = SuppressionList.load(
-            _EXAMPLES / self.CASE / "suppress-acknowledged.yaml"
+            example_catalog.case_dir(self.CASE) / "suppress-acknowledged.yaml"
         )
         result = compare(old, new, suppression=suppression)
         assert result.verdict == Verdict.NO_CHANGE
@@ -153,7 +159,7 @@ class TestCase193OrdinaryExportedFnCallNotReachable:
 
     def test_broad_suppression_applies_cleanly_no_diagnostic(self, snapshots) -> None:
         old, new = snapshots
-        suppression = SuppressionList.load(_EXAMPLES / self.CASE / "suppress.yaml")
+        suppression = SuppressionList.load(example_catalog.case_dir(self.CASE) / "suppress.yaml")
         result = compare(old, new, suppression=suppression)
         assert result.verdict == Verdict.NO_CHANGE
         assert result.changes == []

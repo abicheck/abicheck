@@ -37,13 +37,13 @@ from collections.abc import Iterable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-EXAMPLES = ROOT / "examples"
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import example_catalog  # noqa: E402
 from fixture_sync import sync_fixtures  # noqa: E402
 
 from abicheck.buildsource.pack import BuildSourcePack  # noqa: E402
@@ -287,7 +287,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     # generators (see fixture_sync.py); this script owns only the fixtures.
     return sync_fixtures(
         FIXTURES,
-        examples_dir=EXAMPLES,
+        case_dir=example_catalog.case_dir,
         root=ROOT,
         to_dict=snapshot_to_dict,
         check=args.check,

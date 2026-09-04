@@ -26,18 +26,24 @@ case's expected verdict and kinds.
 
 from __future__ import annotations
 
-import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from abicheck.checker import compare
-from abicheck.checker_policy import Verdict
-from abicheck.model import AbiSnapshot
-from abicheck.python_api import surface_from_stub_file
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
 
-_EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
-_GROUND_TRUTH = json.loads((_EXAMPLES / "ground_truth.json").read_text())["verdicts"]
+from abicheck.checker import compare  # noqa: E402
+from abicheck.checker_policy import Verdict  # noqa: E402
+from abicheck.model import AbiSnapshot  # noqa: E402
+from abicheck.python_api import surface_from_stub_file  # noqa: E402
+
+_EXAMPLES = example_catalog.EXAMPLES_DIR
+_GROUND_TRUTH = example_catalog.load_ground_truth()["verdicts"]
 
 _STUB_PAIR_CASES = sorted(
     name for name, gt in _GROUND_TRUTH.items() if gt.get("stub_pair")
@@ -60,7 +66,7 @@ def test_at_least_one_stub_pair_case() -> None:
 
 @pytest.mark.parametrize("case_name", _STUB_PAIR_CASES)
 def test_stub_pair_case_matches_ground_truth(case_name: str) -> None:
-    case_dir = _EXAMPLES / case_name
+    case_dir = example_catalog.case_dir(case_name)
     assert (case_dir / "v1.pyi").is_file() and (case_dir / "v2.pyi").is_file()
 
     gt = _GROUND_TRUTH[case_name]

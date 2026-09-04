@@ -30,7 +30,7 @@ def _identity(obj: object) -> object:
 def _sync(tmp_path: Path, fixtures: dict, *, check: bool) -> int:
     return fixture_sync.sync_fixtures(
         fixtures,
-        examples_dir=tmp_path / "examples",
+        case_dir=lambda name: tmp_path / "examples" / name,
         root=tmp_path,
         to_dict=_identity,
         check=check,

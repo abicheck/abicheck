@@ -30,22 +30,29 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from abicheck.buildsource.build_diff import diff_build_evidence
-from abicheck.buildsource.build_evidence import BuildEvidence
-from abicheck.buildsource.source_abi import SourceAbiSurface
-from abicheck.buildsource.source_diff import diff_source_abi
-from abicheck.buildsource.source_graph import (
+_REPO = Path(__file__).resolve().parent.parent
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(_REPO / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO / "scripts"))
+import example_catalog  # noqa: E402
+
+from abicheck.buildsource.build_diff import diff_build_evidence  # noqa: E402
+from abicheck.buildsource.build_evidence import BuildEvidence  # noqa: E402
+from abicheck.buildsource.source_abi import SourceAbiSurface  # noqa: E402
+from abicheck.buildsource.source_diff import diff_source_abi  # noqa: E402
+from abicheck.buildsource.source_graph import (  # noqa: E402
     SourceGraphSummary,
     diff_source_graph_findings,
 )
 
-_REPO = Path(__file__).resolve().parent.parent
-_EXAMPLES = _REPO / "examples"
-_GT = json.loads((_EXAMPLES / "ground_truth.json").read_text())["verdicts"]
+_EXAMPLES = example_catalog.EXAMPLES_DIR
+_GT = example_catalog.load_ground_truth()["verdicts"]
 
 #: The L3/L4/L5 corpus: cases shipping an old.json/new.json fixture pair.
 _CASES = sorted(
@@ -56,7 +63,9 @@ _CASES = sorted(
 
 
 def _load(case_name: str, side: str) -> dict:
-    return json.loads((_EXAMPLES / case_name / f"{side}.json").read_text())
+    return json.loads(
+        (example_catalog.case_dir(case_name) / f"{side}.json").read_text()
+    )
 
 
 def _emitted_kinds(case_name: str) -> list[str]:
@@ -101,7 +110,7 @@ def test_case_emits_expected_kinds(case_name: str) -> None:
 @pytest.mark.parametrize("case_name", _CASES)
 def test_case_fixtures_exist(case_name: str) -> None:
     for side in ("old", "new"):
-        path = _EXAMPLES / case_name / f"{side}.json"
+        path = example_catalog.case_dir(case_name) / f"{side}.json"
         assert path.is_file(), f"{case_name}: missing committed fixture {path.name}"
 
 

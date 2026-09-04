@@ -38,7 +38,6 @@ so extending this lane to those platforms is tracked under G1 separately.
 """
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 import sys
@@ -46,8 +45,14 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.checker import compare
-from abicheck.dumper import dump
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+_REPO_DIR = Path(__file__).resolve().parent.parent
+if str(_REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import example_catalog  # noqa: E402
+
+from abicheck.checker import compare  # noqa: E402
+from abicheck.dumper import dump  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux",
@@ -55,8 +60,7 @@ pytestmark = pytest.mark.skipif(
     "macOS (.dSYM) / Windows (PDB) are tracked separately under G1",
 )
 
-EXAMPLES = Path(__file__).parent.parent / "examples"
-_GT = json.loads((EXAMPLES / "ground_truth.json").read_text())["verdicts"]
+_GT = example_catalog.load_ground_truth()["verdicts"]
 
 # Empirically verified to reach the ground-truth verdict from a
 # castxml-free (compiler + DWARF only) dump on the Linux baseline. Keep
@@ -136,7 +140,7 @@ def _compile(src: Path, out: Path) -> None:
 def test_subset_entries_are_well_formed() -> None:
     """Every listed case must exist, carry a verdict, and need no castxml."""
     for name in CASTXML_FREE_CASES:
-        assert (EXAMPLES / name).is_dir(), f"missing example dir: {name}"
+        assert example_catalog.case_dir(name).is_dir(), f"missing example dir: {name}"
         entry = _GT.get(name)
         assert entry is not None, f"{name}: no ground_truth entry"
         assert entry.get("expected") is not None, f"{name}: null verdict"
@@ -156,7 +160,7 @@ def test_castxml_free_verdict_matches_ground_truth(
     entry = _GT[case_name]
     expected = entry["expected"]
     scope = bool(entry.get("scope_public_headers", False))
-    case_dir = EXAMPLES / case_name
+    case_dir = example_catalog.case_dir(case_name)
     v1_src, v2_src = _sources(case_dir)
 
     v1_lib = tmp_path / "libv1.so"

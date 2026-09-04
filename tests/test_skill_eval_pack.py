@@ -38,6 +38,11 @@ REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts"
 PACK = REPO / "agent-evals" / "skills" / "skill-eval-pack.json"
 
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+import example_catalog  # noqa: E402
+
 
 def _load_script(name: str) -> Any:
     """Import a `scripts/` module by path — they are not an importable package."""
@@ -110,9 +115,7 @@ def test_category_a_expectations_are_resolved_into_the_pack(
 ) -> None:
     """Resolved, not restated: the catalog stays the one fact owner and the
     pack carries its answer, so a consumer needs neither."""
-    catalog = json.loads(
-        (REPO / "examples" / "ground_truth.json").read_text(encoding="utf-8")
-    )
+    catalog = example_catalog.load_ground_truth()
     for scenario_id, entry in pack["scenarios"].items():
         if entry["category"] != "A":
             continue
@@ -227,8 +230,12 @@ def test_scenario_digest_covers_the_fixture_not_just_the_record(
 
     Runs against a temporary examples root rather than creating a case under
     the real one: a crashed run would otherwise leave a case directory behind
-    that `examples-ground-truth` then fails on."""
-    monkeypatch.setattr(gen, "EXAMPLES", tmp_path)
+    that `examples-ground-truth` then fails on. Injects a case-dir resolver
+    (Phase 3, docs/contribute/plans/examples-catalog-split.md) rather than
+    monkeypatching a flat `EXAMPLES` root -- `_scenario_digest`/
+    `_fixture_paths` route production resolution through
+    `example_catalog.case_dir` by default, so this is the same seam
+    `test_fixture_sync.py` injects for `fixture_sync.sync_fixtures`."""
     monkeypatch.setattr(gen, "ROOT", tmp_path.parent)
     scenario = {
         "id": "x",
@@ -239,13 +246,14 @@ def test_scenario_digest_covers_the_fixture_not_just_the_record(
     }
     catalog = {"verdicts": {"case-x": {"expected": "BREAKING"}}}
     case_dir = tmp_path / "case-x"
+    resolver = lambda name: tmp_path / name  # noqa: E731
 
-    before = gen._scenario_digest(scenario, catalog)
+    before = gen._scenario_digest(scenario, catalog, case_dir=resolver)
     case_dir.mkdir()
     (case_dir / "old.h").write_text("int f(int);\n", encoding="utf-8")
-    with_fixture = gen._scenario_digest(scenario, catalog)
+    with_fixture = gen._scenario_digest(scenario, catalog, case_dir=resolver)
     (case_dir / "old.h").write_text("int f(long);\n", encoding="utf-8")
-    edited_in_place = gen._scenario_digest(scenario, catalog)
+    edited_in_place = gen._scenario_digest(scenario, catalog, case_dir=resolver)
 
     assert before != with_fixture
     assert with_fixture != edited_in_place
@@ -262,9 +270,7 @@ def test_scenario_digest_covers_the_ground_truth_entry() -> None:
         "status": "ready",
         "case": "case01_symbol_removal",
     }
-    catalog = json.loads(
-        (REPO / "examples" / "ground_truth.json").read_text(encoding="utf-8")
-    )
+    catalog = example_catalog.load_ground_truth()
     original = gen._scenario_digest(scenario, catalog)
 
     mutated = json.loads(json.dumps(catalog))

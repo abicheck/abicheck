@@ -14,20 +14,25 @@ lanes (``integration``/``libabigail``/``abicc`` markers).
 from __future__ import annotations
 
 import importlib.util
-import json
+import sys
 from pathlib import Path
 from typing import Any
 
 _REPO = Path(__file__).resolve().parent.parent
+
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+if str(_REPO / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPO / "scripts"))
+import example_catalog  # noqa: E402
+
 _GBR_PATH = _REPO / "scripts" / "generate_benchmark_report.py"
-_GT_PATH = _REPO / "examples" / "ground_truth.json"
 
 _spec = importlib.util.spec_from_file_location("generate_benchmark_report", _GBR_PATH)
 assert _spec and _spec.loader
 gbr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gbr)
 
-_GT_VERDICTS = json.loads(_GT_PATH.read_text(encoding="utf-8"))["verdicts"]
+_GT_VERDICTS = example_catalog.load_ground_truth()["verdicts"]
 _GT_CASE_COUNT = len(_GT_VERDICTS)
 _GT_CASE_NAMES = sorted(_GT_VERDICTS)
 
