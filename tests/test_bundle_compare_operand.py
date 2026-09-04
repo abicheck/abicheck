@@ -78,6 +78,39 @@ class TestLooksLikeStoredBundleFacts:
         )
         assert looks_like_stored_bundle_facts(p) is True
 
+    def test_reordered_marker_after_large_content_still_classifies_as_stored(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1042 (round 4): the order-independent scan
+        (test_reordered_root_keys_still_classify_as_stored above) only
+        helps if the marker actually falls inside the decoded window --
+        a document with a sizeable per_library_snapshots member placed
+        *before* artifact_type could push the marker past a small fixed
+        prefix. Build a document whose per_library_snapshots content
+        alone is well beyond the plain-marker-scan default (4 KiB) but
+        still comfortably inside the enlarged scan window
+        (_MARKER_SCAN_BYTES) this fix adds, with artifact_type as the
+        last root key."""
+        padding_library = {
+            f"function_{i}": {"symbol": f"_Z{i}foo", "return_type": "int"}
+            for i in range(400)
+        }
+        p = tmp_path / "reordered_large.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "per_library_snapshots": {
+                        f"lib{i}.so": padding_library for i in range(15)
+                    },
+                    "variant_fingerprint": "default",
+                    "artifact_type": "abicheck.bundle-facts",
+                }
+            )
+        )
+        assert p.stat().st_size > 8192
+        assert looks_like_stored_bundle_facts(p) is True
+
     def test_artifact_type_as_a_sibling_value_does_not_confuse_the_scan(
         self, tmp_path: Path
     ) -> None:

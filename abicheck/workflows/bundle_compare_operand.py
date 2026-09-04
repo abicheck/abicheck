@@ -127,6 +127,29 @@ PR #1042, three rounds):**
    single pattern -- still no full JSON parse, still bounded to the same
    prefix ``bounded_decoded_prefix`` already reads, still no container-
    node budget concern (the input size is already capped).
+5. **Order-independence (point 4) only helps if the marker actually falls
+   inside the decoded window (Codex review, round 4, fresh evidence).** A
+   reordered document with a large member (e.g. a populated
+   ``per_library_snapshots``) ahead of ``artifact_type`` could push the
+   marker past a small fixed prefix even though point 4's scan would have
+   recognized it at any position *within* that prefix. Answered by asking
+   ``bounded_decoded_prefix`` for a much larger window
+   (:data:`_MARKER_SCAN_BYTES`, 1 MiB -- matching ``snapshot_io``'s own
+   escalating-retry ceiling) instead of its 4 KiB sniff default, generous
+   enough for any realistic reordered document while remaining one bounded
+   read.
+
+**Residual, accepted gap (same shape as the pre-marker-v1 gap above):** a
+reordered document whose marker falls beyond :data:`_MARKER_SCAN_BYTES` of
+decoded content is still misclassified as an ordinary snapshot -- a fixed
+window can shrink this gap but, by construction, cannot close it for an
+unbounded document without abandoning the "bounded read, no full parse"
+discipline this whole module exists to keep. 1 MiB of *decoded* prefix
+ahead of the marker is far beyond what any plausible reordering of a real
+``--bundle-facts-out`` document produces (the writer itself always emits
+the marker first; the only realistic trigger is a third-party re-
+serialization, not this tool's own output), so this is accepted rather
+than chased further.
 """
 
 from __future__ import annotations
@@ -147,6 +170,23 @@ from pathlib import Path
 #: ``re.finditer`` simply skips over bytes no alternative matches, which is
 #: exactly "ignore" for a token kind this scan doesn't care about.
 _JSON_STRUCTURE_TOKEN_RE = re.compile(rb'"(?:[^"\\]|\\.)*"|[{}\[\]:,]', re.DOTALL)
+
+#: How much decoded prefix :func:`looks_like_stored_bundle_facts` asks
+#: :func:`abicheck.snapshot_io.bounded_decoded_prefix` for -- deliberately
+#: far above that function's own ``_SNIFF_BYTES`` (4 KiB) default (Codex
+#: review, PR #1042, round 4, fresh evidence): the order-independent scan
+#: (point 4 below) only helps if the marker actually falls inside the
+#: window it decodes. A reordered document with a large ``per_library_
+#: snapshots`` member ahead of ``artifact_type`` -- unlikely from this
+#: repo's own writer, which always emits the marker first, but not ruled
+#: out for a document re-serialized by another conforming tool -- could
+#: place the marker well past 4 KiB. Matches ``snapshot_io``'s own
+#: ``_BOUNDED_PREFIX_MAX_RAW_BYTES`` ceiling (1 MiB): generous enough for
+#: any realistic reordered document while staying a single bounded read,
+#: not a full decompression -- the same "cheap but not exact" trade-off
+#: ``bounded_decoded_prefix`` itself already makes explicit for its own
+#: escalating-retry ceiling.
+_MARKER_SCAN_BYTES = 1024 * 1024
 
 
 def _root_level_artifact_type(prefix: bytes) -> bytes | None:
@@ -273,7 +313,7 @@ def looks_like_stored_bundle_facts(path: Path) -> bool:
     from ..bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
     from ..snapshot_io import bounded_decoded_prefix
 
-    prefix = bounded_decoded_prefix(path)
+    prefix = bounded_decoded_prefix(path, _MARKER_SCAN_BYTES)
     if prefix is None:
         return False
     value = _root_level_artifact_type(prefix)
