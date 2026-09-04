@@ -1,6 +1,6 @@
 # Examples/catalog split — taxonomy first, no directory move yet
 
-**Effort:** XL (six phases) · **Status:** Phase 1 implemented; Phase 2 complete (every `rule`-entity case carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded, and every one of the 30 `scenario`-entity cases now carries `related_rules`); Phase 3 complete (every path resolver in the codebase now routes through `example_catalog.case_dir`); Phase 6 implemented; Phase 5 in progress; Phase 4 not started. See the table below for per-phase detail.
+**Effort:** XL (six phases) · **Status:** Phase 1 implemented (now also distinguishing `operation` from `scenario_kind`); Phase 2 complete (every `rule`-entity case carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded — now split into 3 duplicates and 4 genuine variants via `relation_type`/`relation_axis`, see "What Phase 2 implements" below — and every one of the 30 `scenario`-entity cases now carries `related_rules`); Phase 3 complete (every path resolver in the codebase now routes through `example_catalog.case_dir`); Phase 6 implemented (now reporting duplicate/variant families separately); Phase 5 in progress; Phase 4 **redesigned, not started** — an external review found the original four-subtree target model unsound before any move landed; see "Corrected Phase 4 target model" below for the replacement flat `catalog/cases/` model. See the table below for per-phase detail.
 
 ## Problem
 
@@ -65,7 +65,8 @@ unaffected. Each of the 197 entries carries:
 | Field | Meaning |
 |---|---|
 | `entity` | `rule` or `scenario` |
-| `scenario_kind` | (scenarios only) `case-study`, `project-topology`, `capability`, or `audit` |
+| `scenario_kind` | (scenarios only) `case-study`, `project-topology`, or `capability` — never `audit`; an audit case stays `entity: rule` (`operation` carries audit-ness instead, below). An earlier revision of this table listed `audit` as a fourth `scenario_kind` value, but the generator never emits it that way and no real audit *scenario* family exists yet — corrected here after an external review caught the doc/implementation mismatch. |
+| `operation` | `compare` (an old/new comparison — the default) or `audit` (a single-release scan, `ground_truth.json`'s own `mode: "audit"`) — orthogonal to `entity`/`scenario_kind` |
 | `ecosystem` | `generic`, `onetbb`, `sycl`, `onemkl`, or `linux-kernel` |
 | `topics` | derived from `expected_kinds` via the existing `abicheck/model/change_catalog/{symbols,types,platform,build,source}.py` split (AGENTS.md's own "Adding a new ChangeKind" categorization) — reused rather than re-invented; `controls` for a `NO_CHANGE` case with no kinds to derive from; `audit` added for the four G20 audit rules |
 | `languages` | derived from which source-file extensions the case's own fixtures ship |
@@ -73,7 +74,8 @@ unaffected. Each of the 197 entries carries:
 | `artifact_shape` | `compiled-pair`, `snapshot-pair`, `snapshot-audit`, `stub-pair`, `btf-pair`, `kabi-pair`, `fixture-pair`, or `bundle` — derived from ground_truth.json's own `fixtures:`/`mode:` fields when a case declares them (authoritative over any file-scan heuristic; `snapshot-audit` is a single-release G20 scan, `snapshot-pair` an old/new comparison), else from what the case directory actually ships |
 | `validation_owner` | which runner family exercises the case (mirrors `examples/CLAUDE.md`'s "owner families" list) |
 | `related_rules` | rule slugs a scenario composes — populated for every scenario case (see "What Phase 2 implements" below for how each was derived) |
-| `rule_slug` / `variant_of` | every `rule`-entity case's canonical family name and, for a confirmed duplicate, the case it's a variant of — see "What Phase 2 implements" below |
+| `rule_slug` / `variant_of` | every `rule`-entity case's canonical family name and, for a confirmed duplicate or variant, the case it relates to — see "What Phase 2 implements" below |
+| `relation_type` / `relation_axis` | set only when `variant_of` is set: `relation_type` is `"duplicate"` (no meaningful distinguishing condition — the same demonstration restated) or `"variant"` (a genuine robustness demonstration under a different condition); `relation_axis` names that condition (`language`, `public-surface`, `symbol-versioning`, `specialization`, ...) and is set only for a `"variant"`. Added after an external review found the original single `variant_of` link conflated three exact duplicates with four genuine variants, inflating the catalog's demonstrated-robustness count — see `docs/contribute/catalog-coverage.md`'s Rule coverage section, which now reports the two separately. |
 
 Entity/scenario_kind/ecosystem classification for the scenario families
 (bundles, G20 audit, oneTBB/SYCL/oneMKL/Linux-kernel case studies) is by
@@ -96,22 +98,30 @@ with no known duplicate gets one mechanically derived from its own case name
 → `param-type-change`) — so "does this rule have a canonical name" never
 depends on whether a sibling duplicate happens to have been found yet.
 
-**Seven pairs were confirmed as genuine duplicates**, found by clustering
+**Seven pairs were confirmed as sharing one rule**, found by clustering
 every `rule`-entity case on its exact `expected_kinds` set (13 clusters, 37
 candidate cases) and reading each cluster's actual README content — not
-just the shared `ChangeKind` — to separate a true duplicate from a case that
-merely shares a `ChangeKind` while demonstrating a different mechanism or
-reaching a different verdict:
+just the shared `ChangeKind` — to separate a true duplicate/variant from a
+case that merely shares a `ChangeKind` while demonstrating a different
+mechanism or reaching a different verdict. A second read (prompted by an
+external review of this plan) then split those seven further, into **3
+exact duplicates** (no meaningful distinguishing condition — the same
+demonstration restated) and **4 genuine variants** (a real robustness
+demonstration under a named condition, recorded as `relation_axis`):
+collapsing that distinction, as the original single "Variant" column below
+did, counted a duplicate restatement as robustness coverage it doesn't
+actually add — `docs/contribute/catalog-coverage.md`'s Rule coverage
+section now reports the two counts separately for this reason.
 
-| Rule | Canonical | Variant |
-|---|---|---|
-| `exported-function-removed` | case01_symbol_removal | case12_function_removed |
-| `enum-member-value-changed` | case08_enum_value_change | case20_enum_member_value_changed (public-surface scoping) |
-| `embedded-type-size-increased` | case07_struct_layout | case14_cpp_class_size (C++ variant) |
-| `inline-function-outlined` | case16_inline_to_non_inline | case47_inline_to_outlined (confirmed by diffing the two READMEs byte-for-byte, not just matching `expected_kinds`) |
-| `executable-stack-flag-changed` | case49_executable_stack | case136_executable_stack_removed (identical transition and library source, despite the README framing it as a separate "fix direction" case) |
-| `symbol-version-node-removed` | case65_symbol_version_removed | case139_symbol_version_node_removed (adds the "symbol name persists, folded into a different node" nuance) |
-| `public-api-gains-internal-dependency` | case160_public_api_internal_dep_added | case190_public_inline_function_references_internal_constant (narrows to the inline-function case) |
+| Rule | Canonical | Relation | Other case |
+|---|---|---|---|
+| `exported-function-removed` | case01_symbol_removal | duplicate | case12_function_removed |
+| `enum-member-value-changed` | case08_enum_value_change | variant (public-surface) | case20_enum_member_value_changed |
+| `embedded-type-size-increased` | case07_struct_layout | variant (language) | case14_cpp_class_size |
+| `inline-function-outlined` | case16_inline_to_non_inline | duplicate | case47_inline_to_outlined (confirmed by diffing the two READMEs byte-for-byte, not just matching `expected_kinds`) |
+| `executable-stack-flag-changed` | case49_executable_stack | duplicate | case136_executable_stack_removed (identical transition and library source, despite the README framing it as a separate "fix direction" case) |
+| `symbol-version-node-removed` | case65_symbol_version_removed | variant (symbol-versioning) | case139_symbol_version_node_removed (adds the "symbol name persists, folded into a different node" nuance) |
+| `public-api-gains-internal-dependency` | case160_public_api_internal_dep_added | variant (specialization) | case190_public_inline_function_references_internal_constant (narrows to the inline-function case) |
 
 Each variant case's README gained a short "Related rule" cross-reference to
 its canonical case (e.g. `examples/case12_function_removed/README.md`,
@@ -196,13 +206,107 @@ A fourth Codex review round found two more instances of `check_ai_readiness.py`'
 The same review also caught one genuine, fixable oversight of the same repo-wide-sweep kind as the earlier rounds: `tests/test_benchmark_smoke.py::test_pinned_suite_matches_historical_74_cases` scanned `EXAMPLES_DIR.iterdir()` to build its case-name list, but (unlike the four audits above) never needed independence from `ground_truth.json` at all — it only wants the canonical set of known case names to filter by regex, which is exactly what `example_catalog.all_case_ids()` already provides. Fixed by reusing the `example_catalog` instance `benchmark_comparison.py` (the module this test dynamically loads) already imports at module load, rather than importing a second copy. Verified: `ruff check` clean, the fixed test passes, `check_ai_readiness.py` 0 errors/137 warnings unchanged.
 
 A fifth Codex review round pointed at `.github/workflows/test-action.yml` (three separate jobs), `test-baseline-rotation.yml`, and `test-baseline-publish-e2e.yml`, all of which `cd examples/case01_symbol_removal` and/or pass `examples/case01_symbol_removal/{libv1.so,libv2.so,v1.h,v2.h,myapp}` as literal Action `with:` inputs to exercise the composite GitHub Action end-to-end. Confirmed accurate (`case01_symbol_removal` is the only case ID any workflow YAML references, always this exact shape) and confirmed **explicitly out of scope for Phase 3**, not a missed consumer: these are YAML CI workflow steps, not Python — there is no `example_catalog` for a shell `cd`/GitHub Actions `with:` value to import, and no resolver-injection pattern applies to a language that isn't Python. Templating these paths through a generated seam (e.g. a Python one-liner each step shells out to first) would be new, workflow-authoring-domain infrastructure that doesn't exist for any workflow today, cannot be validated locally the way every Python-level fix in this PR was (workflow YAML changes only prove out by actually running in CI), and wouldn't spare Phase 4 anyway: these steps also hard-code `v1.c`/`v2.c`/`v1.h`/`v2.h` filenames and a `cd` into the case's own directory, assumptions tied to this specific fixture's layout that a path resolver alone doesn't abstract away. This is real, appropriately-scoped **Phase 4 follow-up work** — update these three workflows' `case01_symbol_removal` paths (and equivalent literal paths in any other workflow a future case-path grep turns up) once the directory move lands — not a Phase 3 gap. No code change; this paragraph is the tracking record so it isn't silently forgotten. | — | Make every path resolver in the codebase (`benchmark_comparison.py`, `gen_examples_docs.py`, `check_ai_readiness.py`, the various validators) go through a declarative `catalog.resolve(case_id)` rather than a hard-coded `EXAMPLES_DIR / case_name`, so Phase 4 doesn't require touching every consumer at once. |
-| 4 | Not started | Phase 3 | The physical directory split (`catalog/rules/`, `catalog/patterns/`, `catalog/case-studies/`, `catalog/capabilities/`), with redirects for existing doc URLs. Also owns: updating the four named "bidirectional directory-sync audit" discovery steps (Phase 3's row above) to walk N taxonomy subtrees instead of one flat root, and updating `case01_symbol_removal`'s literal path in `.github/workflows/test-action.yml`/`test-baseline-rotation.yml`/`test-baseline-publish-e2e.yml` (also Phase 3's row) to wherever that case lands. |
+| 4 | **Redesigned, not started** — the original four-subtree target model below was found unsound by an external review before any directory moved (see "Corrected Phase 4 target model" below for the full argument and the replacement model) — physical work is now blocked on this redesign, not merely "not started" | Phase 3 | ~~The physical directory split (`catalog/rules/`, `catalog/patterns/`, `catalog/case-studies/`, `catalog/capabilities/`)~~ — superseded, see below. Also owns: updating the four named "bidirectional directory-sync audit" discovery steps (Phase 3's row above) to walk the corrected target layout instead of one flat root, and updating `case01_symbol_removal`'s literal path in `.github/workflows/test-action.yml`/`test-baseline-rotation.yml`/`test-baseline-publish-e2e.yml` (also Phase 3's row) to wherever that case lands, plus every other operational dependency the redesign section below names (CMake discovery, CI path filters, mutation `also_copy`, generated-doc path templates). |
 | 5 | In progress — `examples/workflows/compare-release/` added (1 of 8): a real, verified `gcc` + `abicheck compare` walkthrough, independent of the `caseNN_*` calibration catalog (see `examples/CLAUDE.md`'s `workflows/` section). Remaining: audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions. | — | Rebuild `examples/` as a small, curated, task-oriented set (compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions). Independent of Phase 4 — the curated set and the calibration catalog are different trees regardless of which one physically moves first. |
 | 6 | Implemented — `scripts/gen_catalog_coverage_report.py` generates `docs/contribute/catalog-coverage.md`, reporting rule/variant/scenario/ecosystem/workflow coverage independently. Workflow coverage is derived from `examples/workflows/`'s real subdirectory count (1 so far, tracking Phase 5's own progress) rather than a static placeholder, so the two phases' status can't go stale against each other. Report-only: no existing gate's case count changed. | — | Split benchmark/coverage reporting into separate rule, variant, scenario, ecosystem, and workflow dimensions instead of one flat case count, per this plan's "stop reporting all cases as semantically equal" motivation above. Depends on Phase 2's `related_rules`/`rule_slug` data (done) but not on Phases 3-5. |
 
 Each phase is its own PR against this plan, not a single follow-up commit —
 Phase 4 in particular touches every consumer that currently assumes
 `examples/caseNN_*` and needs its own validated, reviewable diff.
+
+## Corrected Phase 4 target model
+
+An external review of this plan (conducted before any Phase 4 directory
+move landed) found the original four-subtree target model —
+`catalog/rules/`, `catalog/patterns/`, `catalog/case-studies/`,
+`catalog/capabilities/` — unsound for three independent reasons, each
+sufficient on its own to block starting the move as originally specified:
+
+1. **No destination for every case.** The taxonomy this plan's own Phase 1
+   built recognizes only `entity: rule | scenario` and
+   `scenario_kind: case-study | project-topology | capability`. There is no
+   `pattern` entity or `design-pattern` scenario kind, even though the
+   original model proposed a `catalog/patterns/` directory nothing routes
+   to; conversely there are five `project-topology` scenarios (the bundle
+   cases) with no `catalog/project-topologies/` destination in the original
+   model. The router could not answer "where does this case move?" for
+   either group.
+2. **A bootstrap cycle.** A `case_dir()` resolver that reads taxonomy
+   fields to pick a destination subtree needs the taxonomy to find a case;
+   the taxonomy generator (`gen_catalog_taxonomy.py`) needs `case_dir()` to
+   inspect each case's own files (`_languages`, `_artifact_shape`) to
+   *build* that taxonomy. A new case, or a stale taxonomy after an edit,
+   would be unfindable until regenerated, and regeneration couldn't inspect
+   the case until it was found.
+3. **Filesystem instability.** Rule/pattern, ecosystem case study,
+   language, evidence level, and project topology are independent
+   dimensions — a case can legitimately be a C++ oneTBB case study that's
+   also a rule variant, an L4-only case, and a public/private-boundary
+   pattern, all at once. Only one dimension can own a case's filesystem
+   path; whichever is picked, a later reclassification along a *different*
+   dimension forces another directory move, breaking links, CI paths,
+   generated artifacts, and external references a second time.
+
+**Replacement model**: a flat physical split into exactly two top-level
+trees, with every other dimension (rule, variant, pattern, scenario kind,
+ecosystem, language, evidence level) staying in `ground_truth.json`'s
+`taxonomy` block and expressed only as *generated views* — indexes and
+doc pages — never as directory ownership:
+
+```text
+examples/
+├── README.md
+├── compare-release/          # Phase 5's curated, task-oriented workflows
+├── audit-release/
+├── compare-project/
+├── source-aware-analysis/
+├── python-api/
+├── github-actions/
+└── suppressions/
+
+catalog/
+├── README.md
+├── ground_truth.json         # verdicts + taxonomy, unchanged shape
+├── CMakeLists.txt
+├── probes/
+└── cases/
+    ├── case01_symbol_removal/
+    ├── case02_param_type_change/
+    └── ...                   # every caseNN_* fixture, one flat namespace
+```
+
+This keeps the two audiences this plan's "Problem" section names physically
+separate (`examples/` = curated user workflows, `catalog/cases/` =
+calibration/compatibility knowledge) without encoding a multidimensional
+taxonomy into a directory tree that can only stably represent one
+dimension at a time. It also removes the bootstrap cycle above: `case_dir()`
+under this model is `catalog/cases/<case_id>/` unconditionally, computable
+with no taxonomy lookup at all — `gen_catalog_taxonomy.py` can call it
+freely while building the very taxonomy a smarter resolver would otherwise
+have needed to consult first.
+
+A rule-family, pattern, ecosystem, or evidence-level "page" (e.g. a
+`docs/reference/catalog/patterns/leaked-internal-types.md` grouping
+case74/75/76/77) becomes a generated document assembled from the taxonomy —
+the same relationship `gen_catalog_coverage_report.py` (Phase 6) already has
+to the taxonomy, generalized to per-family/per-pattern pages instead of one
+aggregate report — never a fixture-ownership directory a case has to live
+under.
+
+**Operational surfaces a real move must still update**, beyond the
+consumers Phase 3's own row already tracks (found during this same review;
+recorded here so Phase 4's implementation PR doesn't have to rediscover
+them): `examples/CMakeLists.txt`'s `file(GLOB _case_dirs ... case*)` only
+discovers case directories immediately below `examples/` and needs to move
+to `catalog/CMakeLists.txt` globbing under `catalog/cases/`; every CI path
+filter keyed on `examples/**` (`Examples Validation`, docs generation, heavy
+parity selection, release gates) needs a matching `catalog/**` filter;
+`.github/workflows/mutation.yml`'s `also_copy` (which copies `examples`
+into the mutation sandbox because tests read fixture/ground-truth data from
+it) needs `catalog` added; and `gen_examples_docs.py`'s hard-coded `Source
+files: examples/<case>/` / `Source: examples/<case>/README.md` path
+templates need to resolve through the catalog manifest/resolver instead of
+a literal prefix.
 
 ## Files & surfaces
 
