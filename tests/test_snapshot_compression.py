@@ -25,6 +25,7 @@ import gzip
 import hashlib
 import json
 import os
+import threading
 
 import pytest
 from _production_scale_snapshot import (
@@ -1050,24 +1051,87 @@ def test_write_through_character_device_does_not_replace_it(tmp_path):
     assert stat_mod.S_ISCHR(dev_null.stat().st_mode)  # still a char device
 
 
+def _write_through_fifo(fifo_path, write_fn) -> bytes:
+    """Run *write_fn* (a zero-arg callable that writes through *fifo_path*)
+    while a background thread concurrently drains the FIFO's read end, and
+    return everything the reader collected.
+
+    **Replaces a real, observed macOS CI hang** (Codex review, fresh
+    evidence): the previous version of this helper's two callers opened
+    the read end non-blocking *before* the write, on the theory that a
+    FIFO's write-side ``open()`` only ever blocks waiting for a reader to
+    connect -- true, but the two callers' write was of already-serialized
+    snapshot bytes that were never actually drained afterward. That
+    assumption -- "the write always fits in the pipe's kernel buffer, so
+    nothing needs to read concurrently" -- is not portable: a platform's
+    FIFO buffer capacity is not part of any portability guarantee this
+    project can rely on (observed materially smaller on macOS runners than
+    on the Linux runners this suite was originally written against), and a
+    write that exceeds it blocks in the kernel until *something* reads,
+    which nothing here ever did. Both callers hung for the full
+    pytest-timeout budget on every macOS CI run once this was reached,
+    consistently and reproducibly -- not a flake.
+
+    A concurrently-draining reader thread is the standard, capacity-
+    independent way to exercise a pipe/FIFO write and is correct
+    regardless of the platform's actual buffer size, so it replaces the
+    non-blocking-open trick entirely rather than patching around one
+    observed size: the reader thread's own blocking ``open()`` is what
+    satisfies "a reader is present" for the writer's blocking open to
+    proceed, and its blocking ``read()`` loop drains the pipe as fast as
+    the writer fills it, so the writer's ``write()`` calls can never block
+    on a full buffer either. The reader thread's own ``open()``/``read()``
+    call chain returns once the writer closes its end (EOF) -- ``.join()``
+    is still given a bound so a genuine future regression fails this test
+    promptly with a clear stack instead of silently eating the whole
+    600s pytest-timeout budget again.
+    """
+    collected = bytearray()
+
+    def _drain() -> None:
+        # This blocking open() -- exactly like the writer's own -- blocks
+        # until the *other* side connects; there is deliberately no
+        # cross-thread handshake before it. FIFO open() is itself the
+        # rendezvous (POSIX: a blocking read-side open() waits for a
+        # writer and vice versa), so starting this thread and then
+        # immediately calling write_fn() below is sufficient for both
+        # sides to meet -- an explicit "reader is ready" event would
+        # instead *deadlock*, since this open() call does not return
+        # until the writer side (called only after such an event) shows
+        # up.
+        with open(fifo_path, "rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                collected.extend(chunk)
+
+    reader = threading.Thread(target=_drain, daemon=True)
+    reader.start()
+    try:
+        write_fn()
+    finally:
+        reader.join(timeout=30)
+    assert not reader.is_alive(), "FIFO reader thread never observed EOF"
+    return bytes(collected)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX FIFOs only")
 def test_write_through_fifo_does_not_replace_it(tmp_path):
     """Same regression as the character-device test above, for a named
-    pipe. A FIFO's write-end open() blocks until a reader has opened the
-    read end -- opening the read end non-blocking *first* (the standard
-    POSIX trick) lets the write-side open proceed without a concurrent
-    reader thread."""
+    pipe -- see :func:`_write_through_fifo` for why the write runs
+    alongside a concurrently-draining reader thread rather than assuming
+    the write fits in the pipe's kernel buffer unread."""
     import stat as stat_mod
 
     fifo_path = tmp_path / "pipe.abicheck.json"
     os.mkfifo(fifo_path)
-    read_fd = os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)
-    try:
-        snap = _sample_snapshot()
-        write_snapshot(snap, fifo_path, compression="none")  # must not raise
-        assert stat_mod.S_ISFIFO(fifo_path.stat().st_mode)  # still a FIFO
-    finally:
-        os.close(read_fd)
+    snap = _sample_snapshot()
+    _write_through_fifo(
+        fifo_path,
+        lambda: write_snapshot(snap, fifo_path, compression="none"),
+    )  # must not raise
+    assert stat_mod.S_ISFIFO(fifo_path.stat().st_mode)  # still a FIFO
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX FIFOs only")
@@ -1086,7 +1150,10 @@ def test_write_through_a_symlink_to_a_fifo_does_not_need_realpath(
     Reproduce the failure mode directly: monkeypatch os.path.realpath to
     return a path that cannot be stat()-ed at all, and confirm
     write_snapshot through a symlink-to-FIFO still succeeds -- proving the
-    non-regular detection no longer depends on realpath() succeeding."""
+    non-regular detection no longer depends on realpath() succeeding. See
+    :func:`_write_through_fifo` for why the write runs alongside a
+    concurrently-draining reader thread rather than assuming the write
+    fits in the pipe's kernel buffer unread."""
     import stat as stat_mod
 
     fifo_path = tmp_path / "real_pipe"
@@ -1099,14 +1166,13 @@ def test_write_through_a_symlink_to_a_fifo_does_not_need_realpath(
 
     monkeypatch.setattr(os.path, "realpath", _broken_realpath)
 
-    read_fd = os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)
-    try:
-        snap = _sample_snapshot()
-        write_snapshot(snap, link_path, compression="none")  # must not raise
-        assert stat_mod.S_ISFIFO(fifo_path.stat().st_mode)  # still a FIFO
-        assert stat_mod.S_ISLNK(link_path.lstat().st_mode)  # symlink intact
-    finally:
-        os.close(read_fd)
+    snap = _sample_snapshot()
+    _write_through_fifo(
+        fifo_path,
+        lambda: write_snapshot(snap, link_path, compression="none"),
+    )  # must not raise
+    assert stat_mod.S_ISFIFO(fifo_path.stat().st_mode)  # still a FIFO
+    assert stat_mod.S_ISLNK(link_path.lstat().st_mode)  # symlink intact
 
 
 def test_non_absence_stat_failure_on_destination_propagates(tmp_path, monkeypatch):
