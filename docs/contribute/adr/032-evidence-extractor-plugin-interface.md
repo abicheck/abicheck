@@ -11,11 +11,15 @@ alongside the `EvidencePack`→`BuildSourcePack` rename, ADR-028 amendment).
 `collect`'s `--extractor-manifest` / `--allow-build-query` /
 `--collection-mode` flags. [ADR-043](043-cli-pre-1.0-surface-reset.md)'s D4
 deleted the `collect` command (replaced by `dump --sources`/`--build-info`),
-and of those three only `--allow-build-query` still exists as CLI surface —
-the D1-D10 model itself is unaffected, since D4 kept the underlying Python
-functions and only removed their Click registrations, but a manifest or
-collection-mode is no longer selectable from the command line. **Amended
-2026-06-12** (ADR-028 source-tree model) — see Amendment below.
+and of those three `--allow-build-query` survived (as a deprecated no-op) a
+while longer as CLI surface on `dump` itself — the D1-D10 model itself is
+unaffected, since D4 kept the underlying Python functions and only removed
+their Click registrations, but a manifest or collection-mode is no longer
+selectable from the command line. **Amended 2026-06-12** (ADR-028
+source-tree model) — see Amendment below. **CLI cleanup H1 note:** the
+`--allow-build-query` no-op flag was itself removed outright (no CLI
+surface names it any more); a trusted `build.query` is authorized purely by
+an explicit `--config`.
 **Scope note (see ADR-038):** the D1–D10 model here governs *executing*
 extractors — adapters and external CLI tools that run under the D5 action
 ceiling. It predates and does not cover the `abicheck_inputs/` pack family

@@ -30,13 +30,10 @@ A per-project ``.abicheck.yml`` ``build:`` block can name the build system and a
 *query* command that emits a compile DB without performing a full build; running
 that query is gated by an explicit, operator-supplied ``--config`` alone
 (ADR-032 D5 ``query_build_system`` action ceiling — read by default, trusted
-query opt-in, full build never). ``--allow-build-query`` is a deprecated
-no-op kept only for backward compatibility — it neither grants nor restricts
-this permission (see :func:`collect_inline_pack`'s ``allow_build_query``
-docstring). The separate abicheck-authored *inferred* cmake/bazel/make query
-(:func:`_resolve_compile_db`) runs whenever ``--sources`` needs L3 regardless
-of any flag — pointing abicheck at a source tree is itself the request to
-analyse it.
+query opt-in, full build never). The separate abicheck-authored *inferred*
+cmake/bazel/make query (:func:`_resolve_compile_db`) runs whenever
+``--sources`` needs L3 regardless of any flag — pointing abicheck at a
+source tree is itself the request to analyse it.
 
 Everything here is best-effort (ADR-028 D3): a missing tool or unreadable input
 degrades L3/L4/L5 to partial/not-collected coverage and never aborts the dump —
@@ -154,7 +151,6 @@ def collect_inline_pack(
     sources: Path | None,
     build_info: Path | None,
     build_config: BuildConfig | None = None,
-    allow_build_query: bool = False,
     build_config_trusted_for_query: bool = True,
     compile_db_explicit: bool = False,
     allow_inferred_build_query: bool = True,
@@ -187,9 +183,7 @@ def collect_inline_pack(
     are not trusted for subprocess execution. (The abicheck-authored *inferred*
     cmake/bazel query is separate — it runs whenever ``--sources`` needs L3, since
     pointing abicheck at a source tree is itself the request to analyse it; see
-    :func:`_resolve_compile_db`.) ``allow_build_query`` is accepted only for
-    backward compatibility and is ignored — ``--allow-build-query`` is a
-    deprecated no-op.
+    :func:`_resolve_compile_db`.)
 
     ``layers`` selects which layers to collect (ADR-033 D2 CI modes): the
     ``build`` mode passes ``("L3",)`` to capture build context only, skipping the
@@ -411,8 +405,7 @@ def _resolve_compile_db(
     # build.query (ADR-032 D5 query_build_system): a tree-supplied command that
     # EMITS a compile DB / exports without a full build. Runs only when the config
     # came from an explicit operator-supplied path (build_config_trusted_for_query);
-    # an auto-discovered .abicheck.yml is never trusted to execute. No
-    # --allow-build-query flag is involved any more (it is a deprecated no-op).
+    # an auto-discovered .abicheck.yml is never trusted to execute.
     if cfg.query:
         if not build_config_trusted_for_query:
             extractors.append(
@@ -1325,9 +1318,10 @@ def build_inline_coverage(
         )
     else:
         # A3: a build query that was attempted but failed (or was blocked because
-        # --allow-build-query was not set) yielded no L3 facts. Surface that as a
-        # `partial` row with the reason instead of a silent `not_collected`, so
-        # the coverage/capability report tells the user exactly what to fix.
+        # the config wasn't trusted for execution) yielded no L3 facts. Surface
+        # that as a `partial` row with the reason instead of a silent
+        # `not_collected`, so the coverage/capability report tells the user
+        # exactly what to fix.
         bq = next(
             (
                 e

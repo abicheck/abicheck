@@ -154,7 +154,9 @@ def require_action(
     raise ActionNotPermittedError(
         f"extractor{who} requested action {action.value!r}, which is not permitted "
         f"for this run (allowed: {', '.join(sorted(a.value for a in allowed)) or 'inspect only'}). "
-        f"Enable it explicitly (e.g. --allow-build-query for {CollectionAction.QUERY_BUILD_SYSTEM.value})."
+        f"Include it in this run's permitted action set (the caller's own "
+        f"``run_permitted``/``allowed_actions`` passed to resolve_allowed_actions) "
+        f"to enable it, or pick a lighter extractor that doesn't need it."
     )
 
 

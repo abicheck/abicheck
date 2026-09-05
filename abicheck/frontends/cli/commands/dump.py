@@ -56,7 +56,6 @@ from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli
 from ....cli_options import (
     build_source_dump_options,
     compile_context_options,
-    header_graph_options,
     include_dependencies_option,
     lang_option,
     snapshot_compression_option,
@@ -230,7 +229,6 @@ def _resolve_and_check_dump_debug_format(
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
 @build_source_dump_options  # --build-info / --sources (embed inline)
-@header_graph_options  # hidden deprecated no-op shim (shared with `compare`)
 @compile_context_options()  # --ast-frontend + cross-toolchain (shared with `scan`)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              include_dependencies: bool,
@@ -250,11 +248,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              verbose: bool,
              git_tag: str | None, build_id: str | None, no_git: bool,
              build_info: Path | None = None, sources: Path | None = None,
-             build_config: Path | None = None, allow_build_query: bool = False,
+             build_config: Path | None = None,
              build_targets: tuple[str, ...] = (),
              depth: str | None = None,
-             header_graph_deprecated: bool = False,
-             header_graph_includes_deprecated: bool = False,
              frontend_context: str = "host",
              # --gcc-options removed as a CLI flag (CLI audit PR 5/5); this
              # defaulted-None parameter stays only so the internal composition
@@ -284,12 +280,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         resolve_dump_request_for_cli,
     )
     from ....cli_dump_request import build_dump_request
-    from ....cli_options import warn_deprecated_header_graph_flags
     from ....dry_run import emit_dry_run, reject_dry_run_with_output
-
-    warn_deprecated_header_graph_flags(
-        header_graph_deprecated, header_graph_includes_deprecated
-    )
 
     reject_dry_run_with_output(dry_run, output)
     if output is None and snapshot_compression not in ("auto", "none"):
@@ -642,7 +633,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 err=True,
             )
         from ....cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
+        dump_source_only(sources, build_info, version, output, build_config, git_tag, build_id, no_git, collect_mode, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
         return
 
     effective_compile_db = compile_db_path
@@ -741,7 +732,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         write_snapshot_output=_write_snapshot_output_fn,
         git_tag=git_tag, build_id=build_id, no_git=no_git,
         output=output, build_info=build_info, sources=sources,
-        allow_build_query=allow_build_query,
         collect_mode=_resolved.collect_mode,
         build_targets=build_targets,
         header_backend=_resolved.header_backend,

@@ -1635,7 +1635,6 @@ def test_dump_collect_mode_off_embeds_nothing(tmp_path):
         version="1.0",
         output=out,
         build_config=None,
-        allow_build_query=False,
         git_tag=None,
         build_id=None,
         no_git=True,
@@ -2150,13 +2149,13 @@ def test_embed_build_info_compile_db_inline(tmp_path):
 
 
 def test_embed_build_info_preserves_preexisting_header_only_graph(tmp_path):
-    """A `dump --header-graph` pass attaches a header-only L5 pack to
-    `snap.build_source` before `embed_build_source` runs (mirrors
-    `service._attach_header_graph`, called ahead of `write_snapshot_output`).
-    Combining `--header-graph` with `--build-info` under the L3-only
-    `collect_mode="build"` (no L4/L5 attempted at all) must not silently drop
-    that graph just because this embed step's own merged pack carries no L5 of
-    its own (Codex review)."""
+    """A `dump` pass's always-on L2 header-only-graph attach populates a
+    header-only L5 pack on `snap.build_source` before `embed_build_source`
+    runs (mirrors `service._attach_header_graph`, called ahead of
+    `write_snapshot_output`). Combining that with `--build-info` under the
+    L3-only `collect_mode="build"` (no L4/L5 attempted at all) must not
+    silently drop that graph just because this embed step's own merged pack
+    carries no L5 of its own (Codex review)."""
     from pathlib import Path
 
     from abicheck.buildsource.model import (
@@ -2372,7 +2371,6 @@ def test_auto_discovered_build_query_is_not_executed(tmp_path):
         snap,
         None,
         tree,
-        allow_build_query=True,
         clang_bin="definitely-not-a-real-clang",
     )
 
@@ -2686,7 +2684,6 @@ def test_build_query_failure_is_recorded(tmp_path, monkeypatch):
         sources=tree,
         build_info=None,
         build_config=cfg,
-        allow_build_query=True,
     )
     # The command produced no DB; the pack survives only to carry the failed-query
     # diagnostic (A3) so a later compare can surface it, never aborting.
@@ -4155,7 +4152,8 @@ def test_a3_diagnostic_only_pack_survives_embed_combine(tmp_path):
         "build:\n  query: some-build-query --emit\n", encoding="utf-8"
     )
     snap = AbiSnapshot(library="libfoo.so", version="1")
-    # allow_build_query defaults False → query skipped, no facts collected.
+    # No --config given → the auto-discovered .abicheck.yml is untrusted for
+    # execution, so its query is skipped, no facts collected.
     embed_build_source(snap, None, tree)
     assert snap.build_source is not None
     l3 = snap.build_source.manifest.coverage_for("L3_build")

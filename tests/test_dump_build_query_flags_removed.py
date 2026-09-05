@@ -13,14 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``dump --build-query`` / ``--build-compile-db`` are removed (PR 3C / PR F).
+"""``dump --build-query`` / ``--build-compile-db`` / ``--allow-build-query``
+are removed (PR 3C / PR F / CLI cleanup H1).
 
 Split out of ``tests/test_dry_run_build_query_contract.py`` rather than added
 to it, following that file's own earlier split into
 ``test_dry_run_build_query_flow2_packs.py``: the contract module is tracked in
 ``architecture/debt.yaml`` as no-growth, and this is a distinct subject anyway
 -- that module tests what the dry-run *reports* about a configured query, this
-one tests that two CLI spellings no longer exist and that nothing on the
+one tests that these CLI spellings no longer exist and that nothing on the
 command line can authorize executing one.
 """
 
@@ -35,9 +36,10 @@ from abicheck.cli import main
 
 
 class TestBuildQueryFlagsRemoved:
-    """PR 3C's removal itself: ``dump --build-query`` / ``--build-compile-db``
-    are gone, and an explicit ``--config`` is the *only* thing that can
-    authorize executing ``build.query``.
+    """PR 3C's removal / CLI cleanup H1: ``dump --build-query`` /
+    ``--build-compile-db`` / ``--allow-build-query`` are gone, and an
+    explicit ``--config`` is the *only* thing that can authorize executing
+    ``build.query``.
 
     The two assertions are deliberately separate concerns. The first is the
     plan's stated merge criterion for every removal in this phase -- the old
@@ -48,7 +50,10 @@ class TestBuildQueryFlagsRemoved:
     bare ``--build-query`` on the command line was a second, independent way
     to mark an arbitrary command trusted to execute. With the flag gone the
     gate has exactly one term, and there is no CLI-only route to execution at
-    all (ADR-032 D5, prerequisites 1 and 2).
+    all (ADR-032 D5, prerequisites 1 and 2). ``--allow-build-query`` was
+    never part of that gate at all (a long-standing deprecated no-op) --
+    removing it outright, rather than leaving the hidden shim in place, is
+    H1's own mechanical cleanup.
     """
 
     @pytest.mark.parametrize(
@@ -72,6 +77,22 @@ class TestBuildQueryFlagsRemoved:
         assert "No such option" in result.output
         assert flag in result.output
 
+    def test_allow_build_query_flag_is_a_usage_error(self, tmp_path: Path) -> None:
+        """``--allow-build-query`` (a hidden, deprecated no-op) is now gone
+        outright rather than silently accepted (CLI cleanup H1)."""
+        header = tmp_path / "api.h"
+        header.write_text("int foo(int x);\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "--allow-build-query",
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "No such option" in result.output
+        assert "--allow-build-query" in result.output
+
     def test_no_cli_route_can_authorize_an_auto_discovered_query(
         self, tmp_path: Path
     ) -> None:
@@ -92,7 +113,6 @@ class TestBuildQueryFlagsRemoved:
             [],
             ["--build-target", "//:lib"],
             ["--compile-db-filter", "*.cpp"],
-            ["--allow-build-query"],
             ["--depth", "build"],
             ["--depth", "source"],
         ]

@@ -356,10 +356,11 @@ inputs:
   build-config:
     description: >
       Path to a trusted .abicheck.yml. For scan mode, supplying this
-      together with an explicitly pinned depth (not allow-build-query) is
-      what permits its build.query (compile-DB generation) command to
-      run — see allow-build-query below; a plain scan with no depth pinned
-      does not auto-run it. Used by scan and dump modes, and by compare
+      together with an explicitly pinned depth is what permits its
+      build.query (compile-DB generation) command to run; a plain scan with
+      no depth pinned does not auto-run it. For dump mode, supplying this
+      alone is enough — an explicit --config is itself the operator's
+      consent to run its build.query. Used by scan and dump modes, and by compare
       mode (--config). Also the only way to configure the cross-library
       bundle-analysis layer's system-provider allow-list extension and
       co-versioned cohort declarations: .abicheck.yml's `bundle:` block
@@ -374,16 +375,15 @@ inputs:
     required: false
   allow-build-query:
     description: >
-      Dump-mode-only opt-in for the external extractor manifest
-      (--dump-manifest)'s own build-system query action; a real gate there,
-      not a no-op. For scan mode this input is ignored (CLI audit PR 5/5) —
-      scan's own build.query auto-runs whenever build-config is given
-      together with an explicitly pinned --depth, with no separate opt-in
-      needed. abicheck also always runs its own inferred,
-      abicheck-authored cmake/bazel/make compile-DB query whenever a sources
-      input needs build context, independent of this input: pointing
-      abicheck at a source tree is itself the request to analyse it. Used by
-      dump mode only.
+      Deprecated and ignored. The `--allow-build-query` dump flag it used to
+      forward was already a no-op and has since been removed outright (CLI
+      cleanup H1); this input is kept registered only so an existing
+      workflow that still sets it doesn't get an unknown-input warning.
+      abicheck always runs its own inferred, abicheck-authored
+      cmake/bazel/make compile-DB query whenever a sources input needs build
+      context: pointing abicheck at a source tree is itself the request to
+      analyse it. A trusted, operator-supplied build.query (`build-config`)
+      needs no opt-in either — see `build-config` above.
     required: false
     default: 'false'
   depth:

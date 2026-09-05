@@ -18,9 +18,10 @@ case187/188/189/191, and reproduces the ``public_api_internal_dependency_added``
 finding each case's README documents.
 
 G29 Phase A: the graph is now always attempted whenever headers are parsed —
-no ``--header-graph`` flag is passed below any more (the flag still exists as
-a hidden, deprecated no-op shim; see ``test_cli_coverage_extra.py`` /
-``test_compare_dispatch.py`` for shim-specific coverage).
+no ``--header-graph`` flag is passed below any more (that hidden, deprecated
+no-op shim has since been removed outright, CLI cleanup H1; see
+``test_cli_coverage_extra.py`` / ``test_compare_dispatch.py`` for coverage of
+the removal).
 
 These four cases ship real ``v1``/``v2`` sources (not hand-built graph
 fixtures): a real field/base/parameter-type change to an internal type is

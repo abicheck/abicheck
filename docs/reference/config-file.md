@@ -63,8 +63,9 @@ discovery entry point below draws from.
 > **Note:** an auto-discovered (untrusted) `.abicheck.yml` never causes a build
 > command in `build.query` to run — it is skipped with a diagnostic. A
 > `build.query` runs **only** when the config is supplied **explicitly** with
-> `--config` (which marks it trusted for subprocess execution).
-> `--allow-build-query` is a deprecated no-op and is **not** required.
+> `--config` (which marks it trusted for subprocess execution). No separate
+> opt-in flag is needed or exists any more (the old `--allow-build-query` was
+> always a no-op, and has since been removed outright).
 
 ### Strict loading (ADR-043)
 
@@ -140,8 +141,8 @@ Drives inline build/source collection: an advisory build-system hint
 (`system:`, default `auto`), a build-query command (`query:`) to produce a
 compile DB, and/or an explicit `compile_db:` path or glob. `query` runs
 **only** when the config is passed explicitly with `--config` (trusted) —
-never from an auto-discovered config; `--allow-build-query` is a deprecated
-no-op. See [Producing source facts](../use/producing-source-facts.md) and
+never from an auto-discovered config; no separate opt-in flag exists. See
+[Producing source facts](../use/producing-source-facts.md) and
 [Build & source data](../learn/build-source-data.md).
 
 ---

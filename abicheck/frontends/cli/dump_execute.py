@@ -149,23 +149,15 @@ def execute_dump_cli_run(
     -- matching ``scan``'s own candidate resolution, which passes the
     identical value for the identical reason.
 
-    *allow_build_query* -- the caller passes ``True`` unconditionally here,
-    NOT ``dump_cmd``'s own ``allow_build_query`` local (Codex review, a third
-    regression). That local is the deprecated, always-``False`` no-op
-    ``--allow-build-query`` flag (``cli_options.py``: "Kept as a no-op for
-    backward compatibility"), never a real trust signal for this call.
-    Forwarding it verbatim into ``_gated_build_query_inputs`` -- a Tier-2
-    gate written for a programmatic API caller who must opt in -- nulled an
-    explicit ``--config`` for this execution step alone, contradicting that
-    flag's own documented CLI contract ("build.query runs only from an
-    explicit --config") and regressing ``perform_elf_dump``, which forwarded
-    it unchanged with no such gate. ``dump``'s CLI is itself the trust
-    boundary an explicit ``--config`` already crossed by being typed here at
-    all -- unlike ``scan``'s config-file-sourced ``build.query``, which needs
-    its own ``resolve_effective_allow_query`` "level-implies-query" decision
-    (ADR-037 D4) precisely because it is not operator-typed. (Before PR 3C
-    this paragraph also named ``--build-query``, the second authorizer; that
-    flag is removed, so an explicit ``--config`` is the only one left.)
+    *allow_build_query* -- the caller passes ``True`` unconditionally here.
+    ``dump``'s CLI is itself the trust boundary an explicit ``--config``
+    already crossed by being typed here at all -- unlike ``scan``'s
+    config-file-sourced ``build.query``, which needs its own
+    ``resolve_effective_allow_query`` "level-implies-query" decision
+    (ADR-037 D4) precisely because it is not operator-typed. (The CLI used
+    to also carry its own always-``False`` ``--allow-build-query``/
+    ``--build-query`` no-op flags; both are gone now -- an explicit
+    ``--config`` is the only authorizer left.)
 
     Raises:
         click.UsageError: If *exec_resolved* (or the input it resolves) is
@@ -220,7 +212,6 @@ def execute_and_write_dump_cli_run(
     output: Path | None,
     build_info: Path | None,
     sources: Path | None,
-    allow_build_query: bool,
     collect_mode: str | None,
     build_targets: tuple[str, ...],
     header_backend: str,
@@ -251,13 +242,6 @@ def execute_and_write_dump_cli_run(
     family (``cli_resolve``/``cli_buildsource``, ...) that supplies both --
     see this module's own docstring for why a *new* member of that already-
     accepted import cycle needs a maintainer decision, not a routine split.
-
-    ``allow_build_query`` here is the CLI's own ``--allow-build-query``
-    local (the deprecated no-op flag), forwarded to ``write_snapshot_output``
-    exactly as ``perform_elf_dump``/``handle_non_elf_dump`` both did --
-    distinct from the unconditional ``True`` this function passes to
-    :func:`execute_dump_cli_run`'s own ``allow_build_query`` (see that
-    function's own docstring for why those two must differ).
     """
     snap = execute_dump_cli_run(
         exec_resolved,
@@ -277,7 +261,6 @@ def execute_and_write_dump_cli_run(
         build_info,
         sources,
         build_config,
-        allow_build_query,
         collect_mode,
         build_targets=build_targets,
         extractor=header_backend,

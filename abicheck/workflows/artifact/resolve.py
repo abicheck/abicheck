@@ -247,11 +247,11 @@ def _gated_build_query_inputs(
     include paths/defines/dialect for supplying data that was never a
     permission question in the first place.
 
-    Relying on ``seed_includes_and_fold_compile_context``'s/
-    ``collect_inline_pack``'s own identically-named ``allow_build_query``
-    parameter would be wrong here -- it is a documented, deprecated no-op
-    (``buildsource/inline.py``'s ``collect_inline_pack`` docstring). This
-    function is the one place that decision is actually enforced.
+    This function is the one place that decision is actually enforced --
+    ``collect_inline_pack`` itself has no ``allow_build_query`` parameter of
+    its own (the ``--allow-build-query`` CLI flag it once fed was a
+    deprecated no-op and has since been removed entirely; see
+    ``buildsource/inline.py``'s own docstring).
 
     *build_config_locally_trusted* (PR 3A, scan resolver convergence; Codex
     review -- a real regression, not a hypothetical): ``build_config``'s own
@@ -515,12 +515,12 @@ def _seeded_includes_and_compile_context(
     seed and the L3-L5 embed). *build_compile_db* is deliberately **not**
     gated — see that helper's own docstring for why a bare data path/glob
     naming an existing compile database is not the same risk as a trusted
-    command. This function's own real trust decision does not rest on
-    ``collect_inline_pack``'s identically-named parameter, which is a
-    documented, deprecated no-op (``buildsource/inline.py``'s own
-    ``collect_inline_pack`` docstring: "``allow_build_query`` is accepted
-    only for backward compatibility and is ignored"). Threading
-    *build_config*/*build_query* through without this local gate would let
+    command. This function's own real trust decision does not rest on any
+    parameter of ``collect_inline_pack`` itself -- that function has no
+    ``allow_build_query`` of its own to rest on (the ``--allow-build-query``
+    CLI flag it once fed was a deprecated no-op and has since been removed
+    entirely). Threading *build_config*/*build_query* through without this
+    local gate would let
     any caller of this Tier-2 primitive execute an operator-supplied
     ``build.query`` command merely by supplying a path, with no separate
     consent step — exactly the "surprise a library caller cannot see coming"
