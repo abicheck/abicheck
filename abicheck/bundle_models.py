@@ -700,6 +700,15 @@ class BundleDiffResult:
     #: is an operational error, so a consumer floors the exit on it under
     #: either ``--on-incomplete-scope`` policy. Empty for every other path.
     extraction_failures: dict[str, str] = field(default_factory=dict)
+    #: ADR-050 D2 x ADR-065 (Codex review): matched members whose two
+    #: snapshots were not extracted under a comparable profile/scope
+    #: contract, keyed by member -> ``(kind, message)`` with *kind* one of
+    #: ``profile_mismatch``/``scope_mismatch`` -- the stored drivers'
+    #: counterpart of the fan-out's per-library ``not_comparable`` verdict,
+    #: recorded per member (`failed` on the scope record) so a sibling's
+    #: completed comparison survives; a consumer exits 16 on it, ranked
+    #: above ``ERROR``, exactly as the fan-out does. Empty otherwise.
+    not_comparable_members: dict[str, tuple[str, str]] = field(default_factory=dict)
 
     @property
     def bundle_verdict(self) -> Verdict:

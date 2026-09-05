@@ -36,7 +36,12 @@
   as an `abicheck.comparison_scope` suite (skipped cases under `warn`,
   errors under `block` or when no comparison completed). An artifact this build cannot analyze is
   recorded `unsupported` (an incompleteness signal) rather than an `ERROR`
-  floored to exit `4`, in the stored/live driver too. Bundle-level
+  floored to exit `4`, in the stored/live driver too. The stored/stored
+  and stored/live drivers record a matched pair whose extraction contracts
+  disagree (ADR-050 D2) per member — `failed` on the completeness axis,
+  `not_comparable_members` in the JSON document, exit `16` — keeping the
+  siblings' comparisons, and a zero-pair stored comparison renders its
+  scope section and exits `1` instead of failing as a usage error. Bundle-level
   (cross-library) analysis sees matched members and *proven*
   removals/additions only: an unchecked member is absent from the bundle
   graph, never a `BUNDLE_LIBRARY_REMOVED` provider, so a partial local

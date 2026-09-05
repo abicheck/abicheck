@@ -83,7 +83,6 @@ import click
 
 from ....report.comparison_scope import ComparisonScopeTerms
 from .compare_bundle_facts_scope import (
-    has_unchecked_matched_members,
     json_scope_fields,
     markdown_scope_lines,
     scope_terms_for,
@@ -344,8 +343,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         # diff of both sides' already-persisted per-library AbiSnapshots).
         # --max-json-object-nodes applies to *both* sides' load here (one
         # unscoped flag), unlike the stored/live branch below.
-        from ....errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
-        from .compare_bundle_facts_rejections import exit_bundle_facts_not_comparable
+        from ....errors import SnapshotError
 
         try:
             result = compare_stored_bundle_facts_pair(
@@ -365,8 +363,6 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         # comments explain each of these four exception types).
         except (SnapshotError, TypeError, ValueError, OSError) as exc:
             raise click.ClickException(str(exc)) from exc
-        except (ProfileMismatchError, ScopeMismatchError) as exc:  # round 12/14
-            exit_bundle_facts_not_comparable(exc, fmt=fmt, output=kwargs.get("output"))
     else:
         # Codex review: NEW_INPUT is documented ("a live release directory/
         # package") to accept a package archive (wheel/deb/rpm/tar), but
@@ -383,9 +379,8 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
             _discover_include_roots,
             _extract_if_package,
         )
-        from ....errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
+        from ....errors import SnapshotError
         from ....workflows.extraction import detect_extractor, is_package
-        from .compare_bundle_facts_rejections import exit_bundle_facts_not_comparable
 
         _temp_dir_paths: list[str] = []
 
@@ -531,8 +526,6 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 # click.Path(exists=True) argument, not dir_okay=False -- turns out
                 # to be a directory or otherwise unreadable file.
                 raise click.ClickException(str(exc)) from exc
-            except (ProfileMismatchError, ScopeMismatchError) as exc:  # round 12/14
-                exit_bundle_facts_not_comparable(exc, fmt=fmt, output=kwargs.get("output"))
         finally:
             # Mirrors the live release fan-out's own --keep-extracted handling
             # (_cleanup_temp_dirs): remove the package-extraction tempdir unless
@@ -548,9 +541,9 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 )
 
     scope_terms = scope_terms_for(result, kwargs)
-    if not result.per_library and not has_unchecked_matched_members(result):
-        # Nothing matched -> usage error, not NO_CHANGE (Codex); a matched-but-
-        # degraded member (ADR-065 D8) instead flows through the completeness axis.
+    if not result.per_library and result.scope_record is None:
+        # No pair and no record to say so -> usage error (Codex). With a record
+        # a zero-pair run renders like the fan-out's: D7 exits 1 (round 30).
         _new_desc = (
             f"{new_dir}'s stored per_library_snapshots" if new_is_stored else str(new_dir)
         )
@@ -560,6 +553,8 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
             "was compared. Check that NEW_INPUT and OLD_FACTS reference "
             "the same release."
         )
+    if not result.per_library and fmt != "json":
+        click.echo("Warning: no library pair was compared -- no comparison completed (ADR-065 D7).", err=True)
 
     # Codex review, fresh evidence: route both writes through the shared
     # CLI-safe writer every other output/--write path uses -- a direct
@@ -709,8 +704,11 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
 
 
 def _reported_verdict(result: Any) -> str:
-    """The fan-out's ``"ERROR"`` sentinel when a NEW member failed extraction
-    this run (ADR-065 D1; exit 4, read by the aggregate loader), else the verdict."""
+    """The fan-out's ``"not_comparable"`` (ADR-050 D2; exit 16, ranked above
+    ``ERROR``) when a matched pair's contracts disagreed, else its ``"ERROR"``
+    when a NEW member failed extraction (ADR-065 D1; exit 4), else the verdict."""
+    if result.not_comparable_members:
+        return "not_comparable"
     return "ERROR" if result.extraction_failures else result.verdict.value
 
 
@@ -754,7 +752,7 @@ def _render_json(
         "verdict": _reported_verdict(result),
         "per_library_verdict": result.per_library_verdict.value,
         "bundle_verdict": result.bundle_verdict.value,
-        **json_scope_fields(terms, run_outcome, result.extraction_failures),
+        **json_scope_fields(terms, run_outcome, result),
         "libraries": libraries,
         "bundle_findings": [
             {
@@ -770,7 +768,6 @@ def _render_json(
             for f in result.bundle_findings
         ],
         "analysis_errors": list(result.analysis_errors),
-        "extraction_failures": dict(result.extraction_failures),
     }
     return json.dumps(summary, indent=2)
 

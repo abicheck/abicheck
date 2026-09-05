@@ -47,8 +47,10 @@ if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..policy_file import PolicyFile
     from .suppression import SuppressionList
+from ..errors import ProfileMismatchError, ScopeMismatchError
 from .release_scope import (
     build_stored_baseline_scope_record,
+    mismatch_kind,
     out_of_scope_provider_names,
     restrict_bundle_facts,
     scope_manifest_to_members,
@@ -258,6 +260,7 @@ def compare_stored_bundle_facts_pair(
         for key in matched_keys
         if key in old_facts.degraded_members or key in new_facts.degraded_members
     }
+    not_comparable: dict[str, tuple[str, str]] = {}
     for key in matched_keys:
         if key in degraded_keys:
             continue
@@ -278,13 +281,20 @@ def compare_stored_bundle_facts_pair(
         enforce_requested_depth(
             depth, ((f"old:{key}", raw_old), (f"new:{key}", raw_new))
         )
-        diff = compare_snapshots(
-            projected_old_snapshots[key],
-            projected_new_snapshots[key],
-            suppress,
-            policy=policy,
-            policy_file=policy_file,
-        )
+        # ADR-050 D2 per member (Codex review, thirtieth round): a pair
+        # whose extraction contracts disagree is `not_comparable` on the
+        # record; the sibling comparisons survive, as in the fan-out.
+        try:
+            diff = compare_snapshots(
+                projected_old_snapshots[key],
+                projected_new_snapshots[key],
+                suppress,
+                policy=policy,
+                policy_file=policy_file,
+            )
+        except (ProfileMismatchError, ScopeMismatchError) as exc:
+            not_comparable[key] = (mismatch_kind(exc), str(exc))
+            continue
         if depth is not None:
             # Codex review, PR #1060, round 10: service_compare_pipeline.
             # resolve_compare_request() stamps DiffResult.requested_depth
@@ -328,7 +338,12 @@ def compare_stored_bundle_facts_pair(
     scope_record = build_stored_baseline_scope_record(
         old_facts.per_library_snapshots,
         new_facts.per_library_snapshots,
-        compared=[key for key in matched_keys if key not in degraded_keys],
+        compared=[
+            key
+            for key in matched_keys
+            if key not in degraded_keys and key not in not_comparable
+        ],
+        not_comparable={k: msg for k, (_kind, msg) in not_comparable.items()},
         degraded={
             key: (
                 old_facts.degraded_members[key]
@@ -387,7 +402,12 @@ def compare_stored_bundle_facts_pair(
         new_signature_evidence=dict(projected_new_snapshots),
     )
     result.analysis_errors.extend(degraded_notes)
+    result.analysis_errors.extend(
+        f"{key}: not comparable ({msg}); per-library comparison skipped (ADR-050 D2)"
+        for key, (_kind, msg) in sorted(not_comparable.items())
+    )
     if manifest_note is not None:
         result.analysis_errors.append(manifest_note)
     result.scope_record = scope_record
+    result.not_comparable_members = dict(not_comparable)
     return result

@@ -619,7 +619,15 @@ axis; a stored `ProjectSnapshot` package carries the same marker, and the
 directory/package `compare` fan-out skips a marked member on either side and
 reports it with verdict `failed`. Such a document declares `schema_version: 3` (a clean document keeps
 `2`), so an older abicheck rejects it instead of comparing the stand-in as
-real evidence.
+real evidence. The stored/stored and stored/live drivers also record a
+matched pair whose extraction contracts disagree (ADR-050 D2) per member,
+as the fan-out does: that member is `failed` on the completeness axis with
+a `not comparable` reason, listed under `not_comparable_members` in the
+JSON document, its siblings' comparisons are kept, and the run exits `16`
+with `run_outcome.operational: not_comparable`. A stored pair with no
+library in common renders its `comparison_scope` (proven removals and
+additions included, under asserted inventories) and exits `1` through the
+no-comparison rule rather than failing as a usage error.
 
 ## Comparing against a stored bundle baseline (G38 Phase 2)
 

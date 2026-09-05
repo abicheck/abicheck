@@ -81,6 +81,7 @@ __all__ = [
     "StrandedLibraryResolution",
     "build_release_scope_record",
     "build_stored_baseline_scope_record",
+    "mismatch_kind",
     "bundle_analysis_members",
     "out_of_scope_provider_names",
     "release_global_ran",
@@ -398,6 +399,18 @@ def build_release_scope_record(
     )
 
 
+def mismatch_kind(exc: Exception) -> str:
+    """ADR-050 D2's two refusal kinds, spelled as the fan-out spells them:
+    ``profile_mismatch`` for a ``ProfileMismatchError``, else ``scope_mismatch``."""
+    from ..errors import ProfileMismatchError
+
+    return (
+        "profile_mismatch"
+        if isinstance(exc, ProfileMismatchError)
+        else "scope_mismatch"
+    )
+
+
 def _stored_facts_inventory(complete: bool, provenance: str) -> SideInventory:
     """One stored-facts side: ``PROVEN`` iff its capture asserted completeness."""
     if complete:
@@ -420,6 +433,7 @@ def build_stored_baseline_scope_record(
     new_complete: bool = False,
     old_failed: Mapping[str, str] | None = None,
     new_failed: Mapping[str, str] | None = None,
+    not_comparable: Mapping[str, str] | None = None,
 ) -> ScopeAcquisitionRecord:
     """The record for a stored-baseline driver (`bundle_side_input` /
     `bundle_stored_pair_compare`), through the same builder the live
@@ -448,12 +462,17 @@ def build_stored_baseline_scope_record(
     dropped with the member by `restrict_bundle_facts` instead of reaching
     `bundle_snapshot_from_facts`, which refuses it (Codex review,
     twenty-ninth round; the fan-out's own rule since the twenty-seventh).
+    *not_comparable* maps a matched key whose two snapshots' extraction
+    contracts disagree (ADR-050 D2's ``ProfileMismatchError``/
+    ``ScopeMismatchError``) to the reason: the fan-out's own per-library
+    ``not_comparable`` verdict, `failed` on the record (thirtieth round).
     """
     old_map = {k: Path(k) for k in old_keys}
     new_map = {k: Path(k) for k in new_keys}
     matched = sorted(set(old_map) & set(new_map))
     unsupported = dict(unsupported or {})
     failed = dict(failed or {})
+    not_comparable = dict(not_comparable or {})
     compared_set = set(compared)
     results: list[Mapping[str, object]] = []
     for k in matched:
@@ -461,6 +480,10 @@ def build_stored_baseline_scope_record(
             results.append({"library": k, "verdict": "ERROR", "error": degraded[k]})
         elif k in failed:
             results.append({"library": k, "verdict": "ERROR", "error": failed[k]})
+        elif k in not_comparable:
+            results.append(
+                {"library": k, "verdict": "not_comparable", "reason": not_comparable[k]}
+            )
         elif k in unsupported:
             results.append(
                 {"library": k, "verdict": "unsupported", "reason": unsupported[k]}

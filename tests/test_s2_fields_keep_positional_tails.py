@@ -33,7 +33,7 @@ _S2_EXIT_FIELDS = (
     "incomplete_scope_contribution",
     "no_comparison_completed_contribution",
 )
-_S2_BUNDLE_FIELDS = ("scope_record", "extraction_failures")
+_S2_BUNDLE_FIELDS = ("scope_record", "extraction_failures", "not_comparable_members")
 _S2_TARGET_FIELDS = ("scope_completeness_exit", "scope_completeness_incomplete")
 
 
@@ -43,7 +43,7 @@ def _names(cls: type) -> list[str]:
 
 def test_the_s2_fields_are_the_tail_of_each_type() -> None:
     assert _names(ExitDecision)[-2:] == list(_S2_EXIT_FIELDS)
-    assert _names(BundleDiffResult)[-2:] == list(_S2_BUNDLE_FIELDS)
+    assert _names(BundleDiffResult)[-3:] == list(_S2_BUNDLE_FIELDS)
     assert _names(TargetReport)[-2:] == list(_S2_TARGET_FIELDS)
 
 
@@ -70,6 +70,7 @@ def test_bundle_result_seventh_positional_argument_is_still_the_policy_file() ->
     assert result.policy_file is policy_file
     assert result.scope_record is None
     assert result.extraction_failures == {}
+    assert result.not_comparable_members == {}
 
 
 def test_target_report_last_pre_s2_positional_argument_is_still_the_digest() -> None:

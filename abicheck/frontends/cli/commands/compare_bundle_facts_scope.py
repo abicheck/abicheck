@@ -28,7 +28,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ....model.scope_acquisition import UNCHECKED_STATES
 from ....report.comparison_scope import (
     ComparisonScopeTerms,
     comparison_scope_terms,
@@ -38,7 +37,6 @@ from ....report.not_comparable import OperationalStatus
 from ....workflows.gate import resolve_scope_decision
 
 __all__ = [
-    "has_unchecked_matched_members",
     "json_scope_fields",
     "markdown_scope_lines",
     "scope_terms_for",
@@ -57,25 +55,10 @@ def scope_terms_for(result: Any, kwargs: Mapping[str, Any]) -> ComparisonScopeTe
     )
 
 
-def has_unchecked_matched_members(result: Any) -> bool:
-    """Whether the record names a *matched* member that never reached a
-    completed comparison -- `failed` (a degraded capture) or `unsupported`
-    (an artifact this build cannot analyze; Codex review) -- the case where
-    an empty `per_library` is D7's "no comparison completed", not the
-    "nothing matched" usage error."""
-    record = getattr(result, "scope_record", None)
-    if record is None:
-        return False
-    return any(
-        m.old_present and m.new_present and m.state in UNCHECKED_STATES
-        for m in record.members
-    )
-
-
 def json_scope_fields(
     terms: ComparisonScopeTerms,
     run_outcome: dict[str, Any],
-    extraction_failures: Mapping[str, str] | None = None,
+    result: Any,
 ) -> dict[str, Any]:
     """`run_outcome` with its `scope` axis set -- and, when the selected
     scope completed no comparison at all (D7), its `operational` axis set to
@@ -83,22 +66,37 @@ def json_scope_fields(
     `run_outcome_dict_for_release` gives that contribution -- plus the
     `comparison_scope` section (absent when the driver built no record).
 
-    *extraction_failures* (ADR-065 D1, Codex review) are the matched
-    members whose NEW artifact failed extraction in *this* run: an
+    *result*'s ``extraction_failures`` (ADR-065 D1, Codex review) are the
+    matched members whose NEW artifact failed extraction in *this* run: an
     operational `extraction_error` whatever the completeness policy
     accepted (the native fan-out's per-library `ERROR`). It outranks D7's
     `no_comparison_completed` exactly as `run_outcome_dict_for_release`
     ranks the two contributions: when every member failed extraction the
     run exits 4 *because* extraction failed, and the operational axis must
     name that cause rather than let the exit read as a break (Codex
-    review, twenty-first round); D7 stays recorded in the section."""
+    review, twenty-first round); D7 stays recorded in the section.
+    *not_comparable* (ADR-050 D2, thirtieth round) outranks both: the
+    fan-out's own `not_comparable` rank sits above `ERROR`, and the run
+    exits 16 *because* a matched pair was not comparable."""
     run_outcome["scope"] = terms.completeness.value
     if terms.decision.no_comparison_completed_exit_contribution == 1:
         run_outcome["operational"] = OperationalStatus.NO_COMPARISON_COMPLETED.value
         run_outcome["compatibility"] = None
+    extraction_failures = dict(getattr(result, "extraction_failures", {}) or {})
+    not_comparable = dict(getattr(result, "not_comparable_members", {}) or {})
     if extraction_failures:
         run_outcome["operational"] = OperationalStatus.EXTRACTION_ERROR.value
-    fields: dict[str, Any] = {"run_outcome": run_outcome}
+    if not_comparable:
+        run_outcome["operational"] = OperationalStatus.NOT_COMPARABLE.value
+        run_outcome["compatibility"] = None
+    fields: dict[str, Any] = {
+        "run_outcome": run_outcome,
+        "extraction_failures": extraction_failures,
+        "not_comparable_members": {
+            k: {"kind": kind, "message": msg}
+            for k, (kind, msg) in not_comparable.items()
+        },
+    }
     if terms.section is not None:
         fields["comparison_scope"] = terms.section
     return fields

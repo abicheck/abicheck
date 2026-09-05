@@ -408,6 +408,8 @@ def compare_release_against_bundle_facts(
     from .bundle_models import BundleSignatureEvidence
     from .errors import (
         IncompatibleSnapshotSchemaError,
+        ProfileMismatchError,
+        ScopeMismatchError,
         SnapshotError,
         UnsupportedArtifactError,
     )
@@ -417,6 +419,7 @@ def compare_release_against_bundle_facts(
         validate_matched_library_overrides,
     )
     from .workflows.extraction import build_match_map
+    from .workflows.release_scope import mismatch_kind
 
     old_facts = load_bundle_facts(old_facts_path, max_json_object_nodes=max_json_object_nodes)
 
@@ -475,6 +478,7 @@ def compare_release_against_bundle_facts(
     # exception that escapes before the record exists and discards every
     # sibling's completed comparison (Codex review).
     failed: dict[str, str] = {}
+    not_comparable: dict[str, tuple[str, str]] = {}
     for key, old_snapshot in old_facts.per_library_snapshots.items():
         new_path = new_map.get(key)
         if new_path is None or key in degraded:
@@ -506,10 +510,19 @@ def compare_release_against_bundle_facts(
         except (SnapshotError, OSError, ValueError) as exc:
             failed[key] = str(exc)
             continue
+        # ADR-050 D2 per member (Codex review, thirtieth round): a pair
+        # whose extraction contracts disagree is `not_comparable` on the
+        # record, and the key counts as compared only once the diff ran --
+        # the fan-out's own per-library rule, never an escape that discards
+        # every sibling's completed comparison.
+        try:
+            diff = service.compare_snapshots(
+                old_snapshot, new_snapshot, suppress, policy=policy, policy_file=policy_file
+            )
+        except (ProfileMismatchError, ScopeMismatchError) as exc:
+            not_comparable[key] = (mismatch_kind(exc), str(exc))
+            continue
         compared.append(key)
-        diff = service.compare_snapshots(
-            old_snapshot, new_snapshot, suppress, policy=policy, policy_file=policy_file
-        )
         per_library_results.append(diff)
         new_signature_evidence[key] = BundleSignatureEvidence.from_snapshot(new_snapshot)
 
@@ -537,6 +550,7 @@ def compare_release_against_bundle_facts(
         new_single_artifact=not new_dir.is_dir(),
         unsupported=unsupported,
         failed=failed,
+        not_comparable={k: msg for k, (_kind, msg) in not_comparable.items()},
         old_complete=old_facts.inventory_complete,
         # An OLD-only degraded member is `failed` on OLD, never `not_supplied`
         # (Codex review, twenty-ninth round).
@@ -591,8 +605,13 @@ def compare_release_against_bundle_facts(
         "comparison skipped (ADR-065 D1)"
         for key, reason in sorted(failed.items())
     )
+    result.analysis_errors.extend(
+        f"{key}: not comparable ({msg}); per-library comparison skipped (ADR-050 D2)"
+        for key, (_kind, msg) in sorted(not_comparable.items())
+    )
     if manifest_note is not None:
         result.analysis_errors.append(manifest_note)
     result.scope_record = scope_record
     result.extraction_failures = dict(failed)
+    result.not_comparable_members = dict(not_comparable)
     return result
