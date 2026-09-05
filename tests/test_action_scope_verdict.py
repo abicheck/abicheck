@@ -121,6 +121,28 @@ class TestCompareMapsTheCompletenessExit:
         assert "libb.so" in outputs["_summary"]
         assert "require-complete-analysis" not in outputs["_summary"]
 
+    @pytest.mark.parametrize(
+        ("incomplete_scope", "no_comparison"), [(1, 0), (0, 1)], ids=["block", "none"]
+    )
+    def test_a_stored_baseline_report_without_an_exit_block_is_scope_incomplete(
+        self, tmp_path: Path, incomplete_scope: int, no_comparison: int
+    ) -> None:
+        """The stored-baseline dispatch (`compare_bundle_facts.py`) emits no
+        root `exit` block; its `comparison_scope` section carries the same
+        contributions, and the Action must read them from there rather than
+        publishing SEVERITY_ERROR (Codex review)."""
+        report = _release_report(
+            incomplete_scope=incomplete_scope,
+            no_comparison=no_comparison,
+            unchecked=["libb.so"],
+        )
+        del report["exit"]
+        outputs = _compare_outputs(tmp_path, report)
+        assert outputs["verdict"] == "SCOPE_INCOMPLETE", outputs
+        assert outputs["_exit"] == 1, outputs
+        assert "SCOPE_INCOMPLETE" in outputs["_summary"]
+        assert "SEVERITY_ERROR" not in outputs["_stdout"]
+
     def test_no_comparison_completed_fails_the_step(self, tmp_path: Path) -> None:
         report = _release_report(
             incomplete_scope=0, no_comparison=1, unchecked=["liba.so"]

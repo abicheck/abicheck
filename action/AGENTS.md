@@ -224,7 +224,9 @@ stays as recorded in `.github/AGENTS.md`.
 `_scope_gated()` mirrors `_coverage_gated()` exactly (report contribution
 first -- `_report_query ... scope_contribution`, the max of the release
 `exit` block's `incomplete_scope_contribution`/`no_comparison_completed_
-contribution`, printing *nothing* when the report carries neither key, so
+contribution`, else the stored-baseline dispatch's `comparison_scope`
+section's own `*_exit_contribution` pair (that report shape has no root
+`exit` block), printing *nothing* when the report carries neither, so
 a scope-less document -- an older abicheck, a scalar report, or the
 `{}`-shaped placeholder the PR-comment re-run leaves in `PR_JSON` when the
 primary run wrote no report -- is "cannot tell", not "did not fire" -- then

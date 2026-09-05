@@ -2379,16 +2379,30 @@ elif query == "scope_contribution":
     # axis as "did not fire" (a macOS CI lane caught exactly that: the
     # final gate consulted a `{}` PR_JSON and dropped the scope error the
     # dispatch above had already announced).
+    # The stored-baseline dispatch (`compare_bundle_facts.py`) emits no
+    # root `exit` block; its `comparison_scope` section carries the same two
+    # contributions under the `*_exit_contribution` names, so that is the
+    # second source (Codex review) before "cannot tell".
     ex = _either("exit", {})
     ex = ex if isinstance(ex, dict) else {}
-    _keys = ("incomplete_scope_contribution", "no_comparison_completed_contribution")
-    if not any(k in ex for k in _keys):
+    cs = report.get("comparison_scope")
+    cs = cs if isinstance(cs, dict) else {}
+    _root = ("incomplete_scope_contribution", "no_comparison_completed_contribution")
+    _section = (
+        "incomplete_scope_exit_contribution",
+        "no_comparison_completed_exit_contribution",
+    )
+    if any(k in ex for k in _root):
+        src, keys = ex, _root
+    elif any(k in cs for k in _section):
+        src, keys = cs, _section
+    else:
         raise SystemExit(1)
 
     def _zero_or_one(value):
         return 1 if value == 1 else 0
 
-    print(max(_zero_or_one(ex.get(k)) for k in _keys))
+    print(max(_zero_or_one(src.get(k)) for k in keys))
 elif query == "scope_where":
     # What went unchecked, from the release report's `comparison_scope`
     # block -- the actionable half, the same way `coverage_where` names the

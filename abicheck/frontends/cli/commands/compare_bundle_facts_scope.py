@@ -28,15 +28,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ....model.scope_acquisition import AcquisitionState
+from ....model.scope_acquisition import UNCHECKED_STATES
 from ....report.comparison_scope import (
     ComparisonScopeTerms,
     comparison_scope_terms,
     render_comparison_scope_markdown,
 )
+from ....report.not_comparable import OperationalStatus
 
 __all__ = [
-    "has_failed_members",
+    "has_unchecked_matched_members",
     "json_scope_fields",
     "markdown_scope_lines",
     "scope_terms_for",
@@ -51,20 +52,33 @@ def scope_terms_for(result: Any, kwargs: Mapping[str, Any]) -> ComparisonScopeTe
     )
 
 
-def has_failed_members(result: Any) -> bool:
-    """Whether the record names a selected member that failed (a degraded
-    capture) -- the case where an empty `per_library` is D7's "no comparison
-    completed", not the "nothing matched" usage error."""
+def has_unchecked_matched_members(result: Any) -> bool:
+    """Whether the record names a *matched* member that never reached a
+    completed comparison -- `failed` (a degraded capture) or `unsupported`
+    (an artifact this build cannot analyze; Codex review) -- the case where
+    an empty `per_library` is D7's "no comparison completed", not the
+    "nothing matched" usage error."""
     record = getattr(result, "scope_record", None)
-    return record is not None and bool(record.members_in(AcquisitionState.FAILED))
+    if record is None:
+        return False
+    return any(
+        m.old_present and m.new_present and m.state in UNCHECKED_STATES
+        for m in record.members
+    )
 
 
 def json_scope_fields(
     terms: ComparisonScopeTerms, run_outcome: dict[str, Any]
 ) -> dict[str, Any]:
-    """`run_outcome` with its `scope` axis set, plus the `comparison_scope`
-    section (absent when the driver built no record)."""
+    """`run_outcome` with its `scope` axis set -- and, when the selected
+    scope completed no comparison at all (D7), its `operational` axis set to
+    `no_comparison_completed`, the same reading the release fan-out's own
+    `run_outcome_dict_for_release` gives that contribution -- plus the
+    `comparison_scope` section (absent when the driver built no record)."""
     run_outcome["scope"] = terms.completeness.value
+    if terms.no_comparison_completed_exit_contribution == 1:
+        run_outcome["operational"] = OperationalStatus.NO_COMPARISON_COMPLETED.value
+        run_outcome["compatibility"] = None
     fields: dict[str, Any] = {"run_outcome": run_outcome}
     if terms.section is not None:
         fields["comparison_scope"] = terms.section

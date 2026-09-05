@@ -312,6 +312,38 @@ class TestStoredLiveUnsupportedMember:
             "libbad.so" in m and "unsupported" in m for m in result.analysis_errors
         )
 
+    def test_every_member_unsupported_is_no_comparison_completed_on_the_cli(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Stored OLD, live NEW, every matched NEW artifact unsupported: the
+        dispatcher's "nothing matched" usage error must not fire -- the
+        members *did* match -- and the report carries the `unsupported`
+        members and D7's `no_comparison_completed` outcome (Codex review)."""
+        import abicheck.package as package
+        import abicheck.service as service
+
+        monkeypatch.setattr(
+            package,
+            "discover_shared_libraries",
+            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
+        )
+
+        def _resolve(path: Path, **kwargs: object) -> AbiSnapshot:
+            raise UnsupportedArtifactError("Unsupported binary format: wasm")
+
+        monkeypatch.setattr(service, "resolve_input", _resolve)
+        libs = {"libbad.so": _lib("libbad.so")}
+        old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
+        new_dir = tmp_path / "new"
+        _write(new_dir, "libbad.so.json", libs["libbad.so"])
+        code, doc = _invoke_json("compare", str(old), str(new_dir))
+        assert code == 1
+        assert doc["run_outcome"]["operational"] == "no_comparison_completed"
+        assert doc["run_outcome"]["scope"] == "incomplete"
+        assert doc["comparison_scope"]["no_comparison_completed"] is True
+        assert doc["comparison_scope"]["unchecked"] == ["libbad.so"]
+        assert doc["comparison_scope"]["counts"]["unsupported"] == 1
+
     def test_builder_records_unsupported_between_degraded_and_compared(self) -> None:
         record = build_stored_baseline_scope_record(
             ["a", "b", "c", "d"],

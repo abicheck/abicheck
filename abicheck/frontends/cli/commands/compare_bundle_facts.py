@@ -83,7 +83,7 @@ import click
 
 from ....report.comparison_scope import ComparisonScopeTerms
 from .compare_bundle_facts_scope import (
-    has_failed_members,
+    has_unchecked_matched_members,
     json_scope_fields,
     markdown_scope_lines,
     scope_terms_for,
@@ -548,7 +548,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 )
 
     scope_terms = scope_terms_for(result, kwargs)
-    if not result.per_library and not has_failed_members(result):
+    if not result.per_library and not has_unchecked_matched_members(result):
         # Nothing matched -> usage error, not NO_CHANGE (Codex); a matched-but-
         # degraded member (ADR-065 D8) instead flows through the completeness axis.
         _new_desc = (
