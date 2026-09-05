@@ -425,6 +425,22 @@ class TestIndexScanDeadlineCheckpoint:
             with pytest.raises(deadline.DeadlineExceeded):
                 _build_demangled_index(new)
 
+    def test_build_demangled_index_checkpoints_before_first_symbol(self) -> None:
+        # Codex review, fresh evidence, PR H third round: the old code
+        # incremented `seen` *before* the modulo check, so the first
+        # checkpoint only fired at the Nth eligible symbol -- an
+        # already-expired budget went undetected (and up to N-1 symbols
+        # got demangled) whenever the index had fewer than
+        # _DEADLINE_CHECK_INTERVAL symbols. A single export is enough to
+        # prove the entry checkpoint fires before any work is done.
+        from abicheck import deadline
+        from abicheck.bundle_detector_heuristics import _build_demangled_index
+
+        new = _snapshot({"liba.so": _meta(soname="liba.so.1", exports=["foo"])})
+        with deadline.deadline_scope(-1):
+            with pytest.raises(deadline.DeadlineExceeded):
+                _build_demangled_index(new)
+
     def test_match_target_against_index_checkpoints(self) -> None:
         from abicheck import deadline
         from abicheck.bundle_detector_heuristics import (

@@ -243,7 +243,16 @@ def _build_demangled_index(snapshot: BundleSnapshot) -> list[tuple[str, str]]:
     symbols (Codex review, PR H, second round): a ~50k-symbol bundle
     demangled in one call has no other cooperative checkpoint of its own,
     so a small ``--budget`` could otherwise be overrun well before any
-    per-target checkpoint in :func:`_match_entry` is ever reached.
+    per-target checkpoint in :func:`_match_entry` is ever reached. Checked
+    *before* each batch's first ``demangle()`` call, including the very
+    first eligible symbol (Codex review, fresh evidence, PR H third round):
+    counting symbols first and checking only when the running total hit an
+    exact multiple of the interval meant an already-expired budget (or one
+    that expires early in a large index) went undetected for up to
+    ``_DEADLINE_CHECK_INTERVAL - 1`` uncached, potentially slow
+    (``c++filt``-shelling) demangles before the first check ever fired --
+    mirrors :func:`_match_target_against_index`'s own ``enumerate(...)``
+    checkpoint, which already checks at index 0.
     """
     from . import deadline
     from .demangle import demangle as _demangle
@@ -256,9 +265,9 @@ def _build_demangled_index(snapshot: BundleSnapshot) -> list[tuple[str, str]]:
                 continue
             if not sym.is_default:
                 continue
-            seen += 1
             if seen % _DEADLINE_CHECK_INTERVAL == 0:
                 deadline.check()
+            seen += 1
             index.append((_demangle(sym.name) or sym.name, lib_name))
     return index
 

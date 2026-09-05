@@ -73,3 +73,9 @@
   `deadline.check()`, so a large pattern/template manifest can no longer
   overrun a small `--budget` well past the point `run_scan_set` would
   otherwise report the overflow.
+- `_build_demangled_index`'s own periodic checkpoint now fires before the
+  first eligible symbol too, not only every `_DEADLINE_CHECK_INTERVAL`
+  symbols thereafter -- counting symbols before checking meant an
+  already-expired budget went undetected (and every symbol got demangled
+  anyway) whenever the index had fewer symbols than the interval, or while
+  processing the first batch of a larger one.
