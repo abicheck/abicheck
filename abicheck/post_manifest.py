@@ -38,10 +38,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .model.export_index import (
+    build_raw_export_index,
     build_raw_export_index_from_elf,
     build_raw_export_index_from_macho,
     build_raw_export_index_from_pe,
     callable_export_names,
+    callable_visible_export_names,
     macho_callable_names,
     named_pe_exports,
 )
@@ -340,6 +342,14 @@ def _snapshot_contract_symbols(snap: Any) -> set[str]:
     info, so its entries are kept, matching the validation path's limitation.)
     Walking the export tables as well as ``functions`` covers a symbol-only
     (no-debug) snapshot.
+
+    ADR-063 T7: the export-table half sources its raw entries from
+    ``model.export_index.build_raw_export_index`` rather than re-reading
+    ``snap.elf``/``snap.pe``/``snap.macho`` directly, dispatching to the
+    matching named projection per platform (ELF:
+    ``callable_visible_export_names`` — the non-default-version-alias and
+    hidden/internal-visibility exclusions this function has always applied;
+    PE: ``named_pe_exports``; Mach-O: ``macho_callable_names``).
     """
     out: set[str] = set()
 
@@ -357,22 +367,17 @@ def _snapshot_contract_symbols(snap: Any) -> set[str]:
             continue  # hidden/internal/protected: not a public export
         for attr in ("mangled", "name"):
             _add(getattr(f, attr, "") or "")
-    for s in getattr(getattr(snap, "elf", None), "symbols", None) or ():
-        st = getattr(s, "sym_type", None)
-        if st is None or st.name not in _CALLABLE_SYM_TYPE_NAMES:
-            continue
-        if getattr(s, "visibility", "default") in ("hidden", "internal"):
-            continue  # STV_HIDDEN/INTERNAL: not dynamically linkable
-        if not getattr(s, "is_default", True):
-            continue  # non-default version alias (pp_old@POST_1): does not
-            # satisfy an unversioned client link, so it is not "present" — matches
-            # _exported_symbol_names, so a default->non-default demotion recovers.
-        _add(getattr(s, "name", "") or "")
-    for s in getattr(getattr(snap, "macho", None), "exports", None) or ():
-        if not getattr(s, "is_data", False):
-            _add(getattr(s, "name", "") or "")
-    for s in getattr(getattr(snap, "pe", None), "exports", None) or ():
-        _add(getattr(s, "name", "") or "")
+    index = build_raw_export_index(snap)
+    if index is not None:
+        if index.platform == "elf":
+            for name in callable_visible_export_names(index, _CALLABLE_SYM_TYPE_NAMES):
+                _add(name)
+        elif index.platform == "pe":
+            for name in named_pe_exports(index):
+                _add(name)
+        elif index.platform == "macho":
+            for name in macho_callable_names(index):
+                _add(name)
     return out
 
 

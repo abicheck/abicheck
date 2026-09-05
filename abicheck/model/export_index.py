@@ -15,18 +15,20 @@
 
 """ADR-063 T7 — one canonical raw export index, with named projections.
 
-Before this module, at least six call sites each kept their own copy of "read
-a snapshot's/binary's platform export table" (``policy.depth_projection.
+Before this module, at least eight call sites each kept their own copy of
+"read a snapshot's/binary's platform export table" (``policy.depth_projection.
 _exported_symbol_names``, ``buildsource.crosscheck_base._exported_symbol_names``
 /``_linked_export_symbols``, ``buildsource.snapshot_exports.
-exported_symbols_from_snapshot``, ``post_manifest._exported_symbol_names``,
-``diff_unnamed_types._exported_symbol_names``, ``buildsource.poi._exported_names``)
-— each re-reading ``snap.elf``/``snap.pe``/``snap.macho`` (or a raw
+exported_symbols_from_snapshot``, ``post_manifest._exported_symbol_names``/
+``_snapshot_contract_symbols``, ``diff_unnamed_types._exported_symbol_names``,
+``buildsource.poi._exported_names``, ``python_ext._iter_exported_names``) —
+each re-reading ``snap.elf``/``snap.pe``/``snap.macho`` (or a raw
 ``ElfMetadata``) itself and each drifting slightly from the others on real
 distinctions: whether a non-default ELF version alias counts, whether a
 Mach-O name gets its leading underscore stripped once or left alone, whether
-an ELF symbol's callable-vs-data type matters, and whether "no platform table
-at all" is distinguished from "a table that parsed to zero entries."
+an ELF symbol's callable-vs-data type matters, whether ELF hidden/internal
+linkage visibility excludes a symbol, and whether "no platform table at all"
+is distinguished from "a table that parsed to zero entries."
 
 The fix is not one universal set-of-strings helper — that would erase exactly
 the distinctions each call site individually earned (Codex review comments
@@ -72,6 +74,7 @@ __all__ = [
     "build_raw_export_index_from_macho",
     "build_raw_export_index_from_pe",
     "callable_export_names",
+    "callable_visible_export_names",
     "default_versioned_names",
     "export_names_or_modeled_fallback",
     "linked_export_names",
@@ -100,6 +103,10 @@ class RawExportEntry:
     distinction in their export directories. ``is_data`` is populated for
     Mach-O only (``True`` for a ``__DATA``-segment/global-variable export) —
     ``None`` for ELF/PE, which use ``sym_type``/no such facet at all instead.
+    ``visibility`` carries the ELF ``ST_VISIBILITY`` spelling
+    (``"default"``/``"hidden"``/``"protected"``/``"internal"``, matching
+    ``ElfSymbol.visibility``) — ``None`` for PE/Mach-O, which expose no
+    equivalent per-symbol linkage-visibility facet at this raw layer.
     """
 
     name: str
@@ -107,6 +114,7 @@ class RawExportEntry:
     ordinal: int | None = None
     sym_type: str | None = None
     is_data: bool | None = None
+    visibility: str | None = None
 
 
 @dataclass(frozen=True)
@@ -131,6 +139,7 @@ def build_raw_export_index_from_elf(elf_meta: ElfMetadata) -> RawExportIndex:
                 name=s.name,
                 is_default=s.is_default,
                 sym_type=s.sym_type.name,
+                visibility=s.visibility,
             )
             for s in elf_meta.symbols
         ),
@@ -285,6 +294,36 @@ def callable_export_names(
         e.name
         for e in index.entries
         if e.name and e.is_default and e.sym_type in callable_sym_types
+    )
+
+
+def callable_visible_export_names(
+    index: RawExportIndex, callable_sym_types: frozenset[str]
+) -> frozenset[str]:
+    """:func:`callable_export_names`, additionally excluding hidden/internal ELF
+    linkage visibility.
+
+    A ``STV_HIDDEN``/``STV_INTERNAL`` symbol still carries a callable-typed,
+    default-versioned ``ElfSymbol`` entry, but a client can no longer link to
+    it — so a caller distinguishing "still present" from "no longer
+    dynamically linkable" (e.g. POST contract-recovery scoping, where a
+    wrapper made hidden must recover as a real removal, not read as still
+    exported) needs this stricter view. Like :func:`callable_export_names`,
+    this is an ELF-specific projection: a PE/Mach-O entry's ``sym_type`` is
+    always ``None`` (never a member of *callable_sym_types*), so calling this
+    on a non-ELF index always answers the empty set rather than "no
+    visibility filter applies" — callers dispatch by ``index.platform``
+    instead (``named_pe_exports``/``macho_callable_names`` for the other two
+    platforms; see ``post_manifest._snapshot_contract_symbols`` for the
+    pattern). Formerly that function's own ELF branch.
+    """
+    return frozenset(
+        e.name
+        for e in index.entries
+        if e.name
+        and e.is_default
+        and e.sym_type in callable_sym_types
+        and e.visibility not in ("hidden", "internal")
     )
 
 

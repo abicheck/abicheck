@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """ADR-063 T7 — the canonical raw export index and its named projections.
 
-Each projection function here states the exact contract one of the five
-retired sibling implementations used to hand-roll on its own
+Each projection function here states the exact contract one of the retired
+sibling implementations used to hand-roll on its own
 (``policy.depth_projection``, ``buildsource.crosscheck_base``,
-``buildsource.snapshot_exports``, ``post_manifest``,
-``diff_unnamed_types``) — these are the primitive-level property/contract
-tests the root ``AGENTS.md`` calls for on a new shared merge/projection
-primitive, decoupled from any one caller's own test module.
+``buildsource.snapshot_exports``, ``post_manifest``, ``diff_unnamed_types``,
+``buildsource.poi``, ``python_ext``) — these are the primitive-level
+property/contract tests the root ``AGENTS.md`` calls for on a new shared
+merge/projection primitive, decoupled from any one caller's own test module.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from abicheck.model.export_index import (
     build_raw_export_index_from_macho,
     build_raw_export_index_from_pe,
     callable_export_names,
+    callable_visible_export_names,
     default_versioned_names,
     export_names_or_modeled_fallback,
     linked_export_names,
@@ -51,7 +52,9 @@ class TestBuildRawExportIndex:
         assert index is not None
         assert index.platform == "elf"
         assert index.entries == (
-            RawExportEntry(name="_Z3foov", is_default=True, sym_type="FUNC"),
+            RawExportEntry(
+                name="_Z3foov", is_default=True, sym_type="FUNC", visibility="default"
+            ),
         )
 
     def test_confirmed_empty_table_is_not_none(self) -> None:
@@ -221,6 +224,48 @@ class TestCallableExportNames:
             callable_export_names(index, frozenset({"FUNC", "IFUNC", "NOTYPE"}))
             == set()
         )
+
+
+class TestCallableVisibleExportNames:
+    def test_hidden_visibility_excluded(self) -> None:
+        from abicheck.model.elf_facts import SymbolType
+
+        index = build_raw_export_index_from_elf(
+            ElfMetadata(
+                symbols=[
+                    ElfSymbol(
+                        name="pp_foo", sym_type=SymbolType.FUNC, visibility="default"
+                    ),
+                    ElfSymbol(
+                        name="pp_hidden", sym_type=SymbolType.FUNC, visibility="hidden"
+                    ),
+                    ElfSymbol(
+                        name="pp_internal",
+                        sym_type=SymbolType.FUNC,
+                        visibility="internal",
+                    ),
+                ]
+            )
+        )
+        assert callable_visible_export_names(
+            index, frozenset({"FUNC", "IFUNC", "NOTYPE"})
+        ) == {"pp_foo"}
+
+    def test_protected_visibility_still_linkable(self) -> None:
+        from abicheck.model.elf_facts import SymbolType
+
+        index = build_raw_export_index_from_elf(
+            ElfMetadata(
+                symbols=[
+                    ElfSymbol(
+                        name="pp_foo", sym_type=SymbolType.FUNC, visibility="protected"
+                    )
+                ]
+            )
+        )
+        assert callable_visible_export_names(
+            index, frozenset({"FUNC", "IFUNC", "NOTYPE"})
+        ) == {"pp_foo"}
 
 
 class TestAllExportNames:
