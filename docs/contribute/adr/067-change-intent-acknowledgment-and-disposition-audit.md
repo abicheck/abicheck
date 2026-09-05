@@ -169,10 +169,20 @@ audit trail; the plan owns that protocol's shape.
   additively.
 - `DetectorRegistry` learns a `not_evaluated` result distinct from an empty
   one; headline counts stop reading disabled detectors as zero.
-- `allow_public_break` stays; its documented meaning becomes "acknowledged
-  break, still reported and still counted", which is a behavior change to
-  the release recommendation for runs that use it (today: silently "no
-  bump"). Sequenced with a migration note.
+- `allow_public_break` stays **a suppression control**, not an
+  acknowledgment: it is precisely the gate that lets a *broad*
+  namespace/source-location rule suppress a public-reachable break
+  (`Suppression._passes_public_break_gate`), and D5 says a broad rule is a
+  suppression. Its disposition is `suppressed`, counted and rule-attributed
+  in the audit like any other suppression, with its `reason` recorded as a
+  waiver. The release recommendation reads the audit rather than the
+  post-suppression `changes` list, so a suppressed major-class break is
+  surfaced as "accepted by waiver, not compatible" instead of today's
+  silent "no bump" — a behavior change for runs using the flag, sequenced
+  with a migration note. A project that wants a bounded *acknowledgment*
+  writes an acknowledgment record (D5); an existing narrow
+  `allow_public_break` rule that already names one exact finding may be
+  migrated to one explicitly by the S3 migration, never implicitly.
 - The finding-identity workstream (ADR-063 Phase 2B) gains a concrete
   consumer: an acknowledgment key that must be unique per run and stable
   across backends.

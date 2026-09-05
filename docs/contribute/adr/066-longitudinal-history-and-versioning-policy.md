@@ -77,13 +77,21 @@ and source location (`abicheck/extract/manifest_semantic_ir.py`), so a
 rebased or relocated but otherwise unchanged source tree would yield a new
 key and read as removal-plus-reintroduction. The correspondence step
 matches occurrences across entries on a normalized, persistent occurrence
-key built only from identity-bearing, change-stable material (the
-`EntityId`, TU-relative and root-relative paths, declaration anchors) —
-never from mutable semantic payload such as `CanonicalEntity.
-canonical_spelling`, a signature, an underlying type, or a constant value,
-since those change exactly when a `changed` event should be emitted and
-would otherwise read as removal-plus-reintroduction; payload is compared
-only after correspondence is established. It reports an ambiguous match as
+key built only from change-stable material: an **identity projection** of
+`EntityId` (kind, scope path, name — deliberately omitting `EntityId.extra`,
+which for a function carries the mangled name or the normalized signature
+discriminator, `abicheck/model/identity.py`'s `entity_id_for_function`, and
+so changes with a parameter change), plus TU-relative and root-relative
+paths and declaration anchors. Never mutable semantic payload —
+`CanonicalEntity.canonical_spelling`, a signature, a mangled name, an
+underlying type, a constant value — since those change exactly when a
+`changed` event should be emitted and would otherwise read as
+removal-plus-reintroduction; payload is compared only after
+correspondence is established. Overloads, which the projection no longer
+separates, are disambiguated inside the correspondence step by their
+signature discriminators: a one-to-one signature match is continuity, a
+changed signature with a unique remaining candidate is a `changed` event
+on that overload, and anything else is a *possible correspondence*. It reports an ambiguous match as
 a *possible correspondence*, and never asserts continuity it cannot prove.
 Defining that key is S1's first deliverable, gated by the rebased-path
 test below. Distinct overloads, occurrences, ABI aliases, and template

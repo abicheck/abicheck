@@ -108,8 +108,13 @@ whose expected members all resolved, or an explicit user statement that
 the new side is complete). The rule is symmetric: a new-only member becomes
 an *addition* finding only when the **old** side's inventory is proven
 complete, since a partial old input cannot prove the member was absent from
-the old release. In a partial or selected run, an unmatched member on
-either side is `out_of_scope` and contributes nothing to the verdict. The
+the old release. `out_of_scope` is reserved for members the run did **not
+select**: in a partial or selected run an unselected baseline member is
+`out_of_scope` and contributes nothing to the verdict, whereas a *selected,
+expected* member whose counterpart was not produced or whose extraction
+failed keeps its `expected_not_produced` or `failed` acquisition state and
+flows into D6's incompleteness outcome or D8's operational error — it is
+never demoted to `out_of_scope`, and never promoted to a removal. The
 existing `BUNDLE_LIBRARY_REMOVED`/`_ADDED` kinds and
 `--fail-on-removed-library` keep their meaning and become consumers of the
 proven-complete state of the relevant side rather than of a raw set
