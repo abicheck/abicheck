@@ -43,6 +43,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parents[2]
@@ -89,18 +90,41 @@ def _as_text(captured: str | bytes | None) -> str:
     return captured
 
 
-def _run(
-    argv: list[str] | tuple[str, ...], cwd: Path, timeout: int
-) -> subprocess.CompletedProcess[str]:
+@dataclass(frozen=True)
+class RunResult:
+    """One command's outcome, distinguishing *how* it ended from its code.
+
+    A plain `CompletedProcess` cannot: once a timeout or a failed launch is
+    mapped to a synthetic exit code, it is indistinguishable from a command
+    that genuinely exited that way -- so a step with `allow_failure: true`,
+    or one expecting 124, would record a hang as a pass. `aborted` keeps that
+    distinction, and steps that carry it fail regardless of expectation.
+    """
+
+    returncode: int
+    stdout: str
+    stderr: str
+    #: Set when the process never ran to completion (timeout, launch failure).
+    #: Such a step can never satisfy an expectation, whatever it declares.
+    aborted: str | None = None
+
+
+def _run(argv: list[str] | tuple[str, ...], cwd: Path, timeout: int) -> RunResult:
     """Run one documented command with no shell involved.
 
     `workflow_examples` rejects any `run:` line carrying a shell
     metacharacter, so `shlex.split` reproduces exactly what a reader typing
     that line into their terminal would get -- without granting a committed
     manifest the injection surface `shell=True` would.
+
+    Neither a hang nor a missing executable may escape as an exception: that
+    aborts the runner before the summary or the `--json` receipt is produced,
+    so the CI job's always-uploaded results directory would be empty exactly
+    when the diagnostics matter most.
     """
+    command = " ".join(argv)
     try:
-        return subprocess.run(
+        proc = subprocess.run(
             list(argv),
             cwd=cwd,
             capture_output=True,
@@ -109,18 +133,24 @@ def _run(
             env={**os.environ, "PYTHONPATH": str(REPO_DIR)},
         )
     except subprocess.TimeoutExpired as exc:
-        # A hang must be a recorded failure, not an exception that aborts the
-        # runner: propagating it skips the summary and the --json receipt
-        # entirely, so the CI job's always-uploaded results directory would be
-        # empty exactly when a workflow hung and the diagnostics matter most.
         # 124 is the conventional timeout exit code.
-        return subprocess.CompletedProcess(
-            args=list(argv),
+        return RunResult(
             returncode=124,
             stdout=_as_text(exc.stdout),
-            stderr=_as_text(exc.stderr)
-            + f"\n[timed out after {timeout}s: {' '.join(argv)}]\n",
+            stderr=_as_text(exc.stderr) + f"\n[timed out after {timeout}s]\n",
+            aborted=f"timed out after {timeout}s",
         )
+    except OSError as exc:
+        # A missing or misspelled executable -- including one a manifest
+        # forgot to declare in `requires`, which is why this cannot be
+        # assumed away by the skip logic.
+        return RunResult(
+            returncode=127,
+            stdout="",
+            stderr=f"[could not run {command!r}: {exc}]\n",
+            aborted=f"could not launch: {exc}",
+        )
+    return RunResult(returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 
 
 def _check_json(payload: object, expected: dict[str, object]) -> list[str]:
@@ -241,7 +271,14 @@ def run_workflow(
                 "seconds": round(time.monotonic() - started, 3),
             }
             step_failures: list[str] = []
-            if step.exit_code is not None and proc.returncode != step.exit_code:
+            if proc.aborted:
+                # Unconditional: a command that never ran to completion cannot
+                # satisfy any expectation, and mapping it to a synthetic exit
+                # code would otherwise let `allow_failure: true` -- or a step
+                # that happens to expect 124 -- record a hang as a pass.
+                record["aborted"] = proc.aborted
+                step_failures.append(f"did not complete ({proc.aborted})")
+            elif step.exit_code is not None and proc.returncode != step.exit_code:
                 step_failures.append(
                     f"exit code {proc.returncode}, expected {step.exit_code}"
                 )
@@ -264,6 +301,11 @@ def run_workflow(
                 json_proc = _run(json_argv, scratch, timeout)
                 record["json_command"] = json_command
                 record["json_exit_code"] = json_proc.returncode
+                if json_proc.aborted:
+                    record["json_aborted"] = json_proc.aborted
+                    step_failures.append(
+                        f"{json_command}: did not complete ({json_proc.aborted})"
+                    )
                 step_failures.extend(
                     check_json_variant(
                         step,

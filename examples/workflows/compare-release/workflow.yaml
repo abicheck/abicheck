@@ -21,6 +21,10 @@ requires:
   # and what lets a CI lane that just installed CastXML turn that skip back
   # into a failure with `--require compare-release`.
   - castxml
+  # The tool under test. Declaring it is not ceremony: without it a host
+  # without abicheck on PATH reports a launch failure per step instead of an
+  # honest skip.
+  - abicheck
 steps:
   - name: build-v1
     run: gcc -shared -fPIC -g v1/mathutils.c -o libmathutils_v1.so

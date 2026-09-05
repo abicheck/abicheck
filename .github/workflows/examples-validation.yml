@@ -12,7 +12,12 @@ on:
       - "scripts/check_examples_validation_status_sync.py"
       - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
-      - ".github/actions/install-system-deps/action.yml"
+      # Every composite action this workflow's jobs use -- install-system-deps,
+      # setup-castxml, cache-ast-dumps -- matching ci.yml's own
+      # `.github/actions/**` infrastructure trigger. The narrower per-action
+      # path this replaced named only one of the three, so a change to the
+      # CastXML pin could merge without scheduling the jobs that depend on it.
+      - ".github/actions/**"
   pull_request:
     branches: [main]
     paths:
@@ -24,7 +29,12 @@ on:
       - "scripts/check_examples_validation_status_sync.py"
       - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
-      - ".github/actions/install-system-deps/action.yml"
+      # Every composite action this workflow's jobs use -- install-system-deps,
+      # setup-castxml, cache-ast-dumps -- matching ci.yml's own
+      # `.github/actions/**` infrastructure trigger. The narrower per-action
+      # path this replaced named only one of the three, so a change to the
+      # CastXML pin could merge without scheduling the jobs that depend on it.
+      - ".github/actions/**"
   workflow_dispatch:
 
 concurrency:

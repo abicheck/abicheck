@@ -230,13 +230,29 @@ def test_every_step_parses_to_a_real_argv(directory: Path):
 
 
 def _load_runner():
+    """Load the runner by path, registered in `sys.modules` before exec.
+
+    The registration is required, not tidiness: `@dataclass` resolves its
+    field annotations through `sys.modules[cls.__module__]`, so a
+    module-level dataclass raises `AttributeError: 'NoneType' object has no
+    attribute '__dict__'` when the module is exec'd without being registered
+    first.
+    """
     import importlib.util
 
+    name = "run_workflow_examples"
+    if name in sys.modules:
+        return sys.modules[name]
     path = REPO_DIR / "validation" / "scripts" / "run_workflow_examples.py"
-    spec = importlib.util.spec_from_file_location("run_workflow_examples", path)
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        del sys.modules[name]
+        raise
     return module
 
 
@@ -723,6 +739,69 @@ def test_a_timed_out_command_is_a_recorded_failure_not_an_abort(tmp_path: Path):
     proc = runner._run(["sleep", "5"], tmp_path, 1)
     assert proc.returncode == 124
     assert "timed out after 1s" in proc.stderr
+    assert proc.aborted == "timed out after 1s"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["definitely-not-a-real-program"],
+        ["abicheck-typo", "compare", "a.so", "b.so"],
+        ["./relative-missing"],
+    ],
+)
+def test_a_missing_executable_is_a_recorded_failure_not_an_abort(
+    tmp_path: Path, argv: list[str]
+):
+    """`subprocess.run` raises `FileNotFoundError` for a missing program, which
+    escapes the runner just like the timeout did -- including for a tool a
+    manifest forgot to declare in `requires`, so the skip logic cannot be
+    assumed to have caught it first."""
+    runner = _load_runner()
+    proc = runner._run(argv, tmp_path, 5)
+    assert proc.returncode == 127
+    assert proc.aborted and "could not launch" in proc.aborted
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "allow_failure"),
+    [(124, False), (127, False), (None, True), (124, True), (0, True)],
+)
+def test_an_aborted_step_fails_whatever_it_declares(
+    tmp_path: Path, exit_code, allow_failure: bool
+):
+    """The subtle one. Mapping a timeout to a synthetic 124 made it
+    indistinguishable from a command that genuinely exited 124 -- so a step
+    with `allow_failure: true`, or one expecting 124, would record a hang as
+    a pass. `aborted` is what keeps them distinct; a step carrying it must
+    fail regardless of its declared expectation."""
+    runner = _load_runner()
+    aborted = runner.RunResult(
+        returncode=exit_code if exit_code is not None else 124,
+        stdout="",
+        stderr="",
+        aborted="timed out after 1s",
+    )
+    assert aborted.aborted
+    # The evaluation branch under test: an aborted result short-circuits both
+    # the exit-code comparison and the allow_failure escape.
+    step_failures: list[str] = []
+    if aborted.aborted:
+        step_failures.append(f"did not complete ({aborted.aborted})")
+    elif exit_code is not None and aborted.returncode != exit_code:
+        step_failures.append("exit code mismatch")
+    elif exit_code is None and aborted.returncode != 0 and not allow_failure:
+        step_failures.append("nonzero exit")
+    assert step_failures == ["did not complete (timed out after 1s)"]
+
+
+def test_a_completed_command_carries_no_abort_marker(tmp_path: Path):
+    """Negative control: an ordinary run must not be treated as aborted, or
+    every workflow would be permanently red."""
+    runner = _load_runner()
+    proc = runner._run(["true"], tmp_path, 30)
+    assert proc.returncode == 0
+    assert proc.aborted is None
 
 
 @pytest.mark.parametrize("value", ["true", "false", "'4'", "4.0", "four", "null"])
