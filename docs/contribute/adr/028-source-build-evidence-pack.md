@@ -460,8 +460,11 @@ non-unified channels for this, both real: this ADR's own
 `buildsource/model.py`) for a build/source extractor's provenance ledger,
 and the model-level `FactStatus.FAILED` (ADR-063, `model/availability.py`)
 for an atomic fact; a capability that does not apply to the requested
-task is `NOT_APPLICABLE`, not `UNKNOWN` (ADR-049's relevance vocabulary);
-and assurance/policy may block a run on missing evidence without that
+task is `NOT_APPLICABLE`, not `UNKNOWN` — `FactStatus.NOT_APPLICABLE`
+(`model/availability.py`), a distinct axis from ADR-049's
+`ContractRelevance.NOT_APPLICABLE`, which answers a different question for
+an already-produced, non-entity-scoped finding (see the table below); and
+assurance/policy may block a run on missing evidence without that
 missing evidence *becoming* a fabricated ABI finding (ADR-064's
 `analysis_assurance` axis, orthogonal to the compatibility gate) — had never
 been stated together as one table anyone could check a new situation
