@@ -132,9 +132,14 @@ cached-comparison reuse under complete keys.
 
 ### C. Policy-disposition audit and change acknowledgment — ADR-067
 
-**Existing.** One suppression application point
-(`abicheck/checker.py`, `_filter_suppressed_changes`), one selector grammar
-(`abicheck/policy/selectors.py`), `Suppression` fields (`reason`, `label`,
+**Existing.** One selector grammar (`abicheck/policy/selectors.py`) but
+**four suppression application points** that S1 must enumerate and either
+converge or cover individually — `post_processing.ApplySuppression.apply()`
+(the main change list), `checker._filter_suppressed_changes()` and
+`checker._filter_pattern_synthetic()` (separately produced changes), and
+`appcompat.py`'s consumer-overlay pass over `missing_symbols` — since a
+ledger fed from one helper alone would omit most ordinary suppressions and
+break raw/effective reconciliation; `Suppression` fields (`reason`, `label`,
 `expires`, `reachability`, `allow_public_break`, `finding_id`),
 `DiffResult.suppressed_changes`, `SuppressionAudit`; `Change.reclassified_by`;
 the `scope` (out-of-surface) block; `redundant_count`; contract coverage
@@ -150,9 +155,13 @@ degrades the release recommendation silently); a unique-per-run,
 backend-stable acknowledgment key; the suppression file path in the
 report; base/head policy-delta analysis.
 
-**Slices.** S1 (audit, first): raw-versus-effective counts and rule
-provenance on native `compare`, every projection, with a
-100-suppressed-removals fixture; `not_evaluated` in `DetectorRegistry`.
+**Slices.** S1 (audit, first): inventory the four application points
+above and route each through one ledger-recording primitive (converging
+them where the call shapes allow, covering each explicitly where they do
+not) so the raw-versus-effective totals reconcile by construction; then
+raw-versus-effective counts and rule provenance on native `compare`, every
+projection, with a 100-suppressed-removals fixture; `not_evaluated` in
+`DetectorRegistry`.
 S2: bundle/consumer/aggregate parity; reclassification, scoping, and
 disabled-upstream coverage. S3: acknowledgment records (YAML, same
 loader), the additions review gate (`allow` default), shared record ids

@@ -15,9 +15,11 @@ technical sign-off pending review of this document.
 
 ## Context
 
-Suppression already has one application point
-(`abicheck/checker.py`, `_filter_suppressed_changes`), one selector
-grammar shared with reclassification (`abicheck/policy/selectors.py`,
+Suppression has one selector grammar but **four application points** —
+`post_processing.ApplySuppression.apply()` over the main change list,
+`checker._filter_suppressed_changes()` and `checker._filter_pattern_synthetic()`
+over separately produced changes, and `appcompat.py`'s consumer-overlay
+pass — sharing one selector grammar with reclassification (`abicheck/policy/selectors.py`,
 `SelectorSet`, ADR-063 Phase 9), per-rule `reason`/`label`/`expires`/
 `reachability`/`allow_public_break`/`finding_id` fields, an in-memory
 ledger (`DiffResult.suppressed_changes`), and a `SuppressionAudit` of
@@ -174,12 +176,19 @@ audit trail; the plan owns that protocol's shape.
   namespace/source-location rule suppress a public-reachable break
   (`Suppression._passes_public_break_gate`), and D5 says a broad rule is a
   suppression. Its disposition is `suppressed`, counted and rule-attributed
-  in the audit like any other suppression, with its `reason` recorded as a
-  waiver. The release recommendation reads the audit rather than the
-  post-suppression `changes` list, so a suppressed major-class break is
-  surfaced as "accepted by waiver, not compatible" instead of today's
-  silent "no bump" — a behavior change for runs using the flag, sequenced
-  with a migration note. A project that wants a bounded *acknowledgment*
+  in the audit like any other suppression, with the supplied `reason`
+  preserved verbatim. The flag itself only bypasses the public-break gate;
+  it does **not** say whether the author meant an intentional waiver or a
+  claimed detector false positive, so the audit never infers `waiver` from
+  it. A new optional `intent:` field on a suppression rule (`waiver` |
+  `false_positive`) records that distinction explicitly; a rule without it
+  is reported as `intent: unspecified`, which is the migration default for
+  every existing rule and changes nothing about matching. The release
+  recommendation reads the audit rather than the post-suppression
+  `changes` list, so a suppressed major-class break is surfaced as
+  "suppressed (intent: waiver / false_positive / unspecified), not
+  compatible" instead of today's silent "no bump" — a behavior change for
+  runs using the flag, sequenced with a migration note. A project that wants a bounded *acknowledgment*
   writes an acknowledgment record (D5); an existing narrow
   `allow_public_break` rule that already names one exact finding may be
   migrated to one explicitly by the S3 migration, never implicitly.
