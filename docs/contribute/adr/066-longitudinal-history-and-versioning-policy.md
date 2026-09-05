@@ -69,10 +69,21 @@ storage activity, never an approval.
 ### D2 — Lifecycle events are per occurrence, per scope, and honest about gaps
 
 Events (`first_observed`, `changed`, `deprecated`, `removed`, `reintroduced`)
-are keyed by the existing entity/occurrence identity. Distinct overloads,
-occurrences, ABI aliases, and template instances are never merged because
-display names match; a rename with uncertain identity is a *possible
-correspondence*, not continuity. Events are scoped to the variant/profile
+are keyed by the existing entity identity (`EntityId`), with occurrence
+disambiguation carried through an explicit **cross-release correspondence
+step** rather than by using today's `OccurrenceId` directly: the
+multi-TU normalizer builds an occurrence's disambiguator from the TU name
+and source location (`abicheck/extract/manifest_semantic_ir.py`), so a
+rebased or relocated but otherwise unchanged source tree would yield a new
+key and read as removal-plus-reintroduction. The correspondence step
+matches occurrences across entries on a normalized, persistent occurrence
+key (TU-relative and root-relative paths, declaration anchors, and the
+entity's own canonical spelling), reports an ambiguous match as a
+*possible correspondence*, and never asserts continuity it cannot prove.
+Defining that key is S1's first deliverable, gated by the rebased-path
+test below. Distinct overloads, occurrences, ABI aliases, and template
+instances are never merged because display names match; a rename with
+uncertain identity is a *possible correspondence*, not continuity. Events are scoped to the variant/profile
 and contract they were observed under — one platform's addition is not a
 release-wide addition.
 
@@ -94,8 +105,14 @@ scheme) and each conclusion keeps the evidence it rests on.
 ### D4 — Versioning policy is a small, separable model
 
 The project's versioning policy is resolved by the existing configuration
-owner (ADR-049 D7's precedence: explicit request, run profile, project
-config, built-in default) and consists of independent controls:
+owner, ADR-049 D7's complete precedence as `abicheck/
+compatibility_evaluation_resolver.py` implements it: explicit CLI/API
+request > legacy alias > run recipe > run profile > project config >
+built-in default. Versioning controls are *semantic* fields, not execution
+fields, so the run-profile tier is **not eligible** for them (the resolver
+rejects a run-profile candidate for any field that has not opted in as an
+execution field); a run recipe may supply them. The policy consists of
+independent controls:
 
 | Control | Meaning | Examples |
 |---|---|---|

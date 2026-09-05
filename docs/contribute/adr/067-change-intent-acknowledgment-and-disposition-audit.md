@@ -66,14 +66,20 @@ generalizes G38 Phase 14's fix for public-surface scoping).
 
 ### D2 — One change, one terminal disposition, many matches
 
-Each atomic detected change carries exactly one terminal disposition for
-counting: `gating`, `suppressed`, `reclassified`, `acknowledged`,
-`out_of_contract`, `unresolved_relevance`, `deduplicated`, or
-`display_filtered`. It may additionally record every rule that matched,
-the winning rule and why it won (precedence), and every consumer it
-affects. Derived impact findings and grouped presentation rows never
-inflate the raw totals. Totals reconcile across scalar, bundle, aggregate,
-and compact reports — an executable invariant.
+Each atomic detected change carries exactly one terminal **policy**
+disposition for counting: `gating`, `suppressed`, `reclassified`,
+`acknowledged`, `out_of_contract`, `unresolved_relevance`, or
+`deduplicated`. It may additionally record every rule that matched, the
+winning rule and why it won (precedence), and every consumer it affects.
+Presentation is a separate, per-view attribute — `shown`, `collapsed`, or
+`filtered` by `--show-only`, a report mode, or truncation — recorded
+alongside the disposition, never in place of it: a change that is
+`suppressed` and then omitted from a filtered view keeps its `suppressed`
+disposition and still counts in that view's suppression total (which is
+what D3 requires). Derived impact findings and grouped presentation rows
+never inflate the raw totals. Totals reconcile across scalar, bundle,
+aggregate, and compact reports, and across every presentation state — an
+executable invariant.
 
 These stay distinct and are named as such in the audit: technical
 compatibility (the verdict class); policy acceptance (the gate); an
