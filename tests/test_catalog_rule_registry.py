@@ -228,3 +228,25 @@ def test_variants_carry_their_axis_and_duplicates_do_not(taxonomy, registry):
             assert axis, f"{case_id} is a variant with no relation_axis"
         for case_id in fam.duplicate_cases:
             assert taxonomy[case_id].get("relation_axis") is None, case_id
+
+
+def test_readiness_gate_derives_the_same_demonstrated_count(taxonomy, registry):
+    """`check_ai_readiness.py` re-derives the demonstrated-rule count from the
+    taxonomy in pure stdlib, because it runs before `pip install` and the
+    registry loader needs PyYAML. Two derivations of one number is exactly
+    the drift this registry exists to prevent, so they are checked against
+    each other here -- the one place that can import both."""
+    stdlib_derivation = len(
+        {
+            entry["rule_slug"]
+            for entry in taxonomy.values()
+            if entry.get("rule_slug") and not entry.get("variant_of")
+        }
+    )
+    families = catalog_rule_registry.build_families(taxonomy, registry)
+    from_registry = sum(
+        1
+        for fam in families.values()
+        if fam.status == catalog_rule_registry.STATUS_DEMONSTRATED
+    )
+    assert stdlib_derivation == from_registry

@@ -764,10 +764,28 @@ def check_doc_count_sync(f: Findings) -> None:
 
     gt_path = EXAMPLES / "ground_truth.json"
     try:
-        verdicts = json.loads(_read(gt_path))["verdicts"]
+        ground_truth = json.loads(_read(gt_path))
+        verdicts = ground_truth["verdicts"]
     except Exception:
         return
     n_catalog = len(verdicts)
+
+    # Distinct rules with at least one canonical (non-variant, non-duplicate)
+    # rule-entity case -- the "demonstrated" half of the rule registry's own
+    # count (scripts/catalog_rule_registry.py). Re-derived from the taxonomy
+    # here rather than imported, because this module is pure-stdlib by
+    # contract (it is the first CI step, before `pip install`) and the
+    # registry loader needs PyYAML. The two derivations are checked against
+    # each other by tests/test_catalog_rule_registry.py, which has no such
+    # constraint.
+    taxonomy = ground_truth.get("taxonomy") or {}
+    n_demonstrated_rules = len(
+        {
+            entry["rule_slug"]
+            for entry in taxonomy.values()
+            if entry.get("rule_slug") and not entry.get("variant_of")
+        }
+    )
 
     # (file, human label, expected value, regex capturing the documented number)
     #
@@ -814,6 +832,12 @@ def check_doc_count_sync(f: Findings) -> None:
             "catalog size (validation target)",
             n_catalog,
             r"the full \*\*(\d+)-case catalog\*\*",
+        ),
+        (
+            ROOT / "README.md",
+            "demonstrated compatibility rules",
+            n_demonstrated_rules,
+            r"\*\*(\d+) demonstrated compatibility rules\*\*",
         ),
         (
             DOCS / "start" / "first-check.md",
