@@ -362,29 +362,42 @@ concepts:
 
       **Track T3 landed (2026-09-05), same day:** the gate closes exactly
       as this note specified. `typedef_index_pair`/`constant_index_pair`
-      now build no legacy index at all when both sides carry a real
-      SemanticIR -- they read it directly, with nothing left to adjudicate
-      against. A current-format snapshot's IR disagreeing, by identity,
-      with its own `typedef_entity_ids`/`constant_entity_ids` sidecar is no
-      longer a case this selector can even reach: it is caught earlier, at
-      snapshot construction (`AbiSnapshot.__post_init__` calling
+      now decide EACH SIDE independently (not both-or-neither -- a Codex
+      review round on the landing PR found the first both-or-neither cut
+      would have discarded a side's real SemanticIR in favor of a legacy
+      reconstruction of it whenever the *other* side lacked one, which is
+      safe only by the accident of today's producers always keeping their
+      flat collections and SemanticIR in sync; a hand-built or
+      future-producer snapshot violating that would have fabricated a
+      removal). A side with a real SemanticIR builds no legacy index at all
+      for itself and reads it directly; a side with none reads through the
+      legacy adapter's projection of its own flat collection. The two
+      shapes are matched by rendered alias name, not by EntityId, so mixing
+      an IR-backed side with a legacy-adapted one is safe. A current-format
+      snapshot's IR disagreeing, by identity, with its own
+      `typedef_entity_ids`/`constant_entity_ids` sidecar is no longer a
+      case this selector can even reach: it is caught earlier, at snapshot
+      construction (`AbiSnapshot.__post_init__` calling
       `model.semantic_ir_legacy_adapter.assert_typedef_ir_consistent`/
       `assert_constant_ir_consistent`), which raises
       `errors.SemanticIrAuthorityError` -- an explicit consistency failure,
-      not a silent fallback. The name/value equality half of the old gate
-      (an IR's own rendered names/values reproducing the legacy alias
-      map's) is deliberately NOT preserved as a comparison-time or
-      construction-time check: requiring it would make a populated legacy
-      collection an accidental prerequisite of SemanticIR-only construction
-      -- exactly the outcome authority transfer exists to end. Only the
-      identity half survives, because it is the one piece checking two
-      representations the *same producer* wrote for the *same* declaration,
-      not a value comparison against a collection this migration is meant
-      to make optional. A snapshot with no real IR on either side
-      (DWARF-only, a producer with no typedef/constant identity, a pre-v38
-      reload) still reads through the legacy adapter on both sides --
-      unchanged, and correctly so: there is no real producer output there
-      for an IR to be authoritative over.
+      not a silent fallback, and also re-run explicitly after
+      `serialization.snapshot_from_dict` decodes a stored SemanticIR onto
+      an already-constructed snapshot (a second Codex-review finding: that
+      assignment bypasses `__post_init__` entirely). The name/value
+      equality half of the old gate (an IR's own rendered names/values
+      reproducing the legacy alias map's) is deliberately NOT preserved as
+      a comparison-time or construction-time check: requiring it would make
+      a populated legacy collection an accidental prerequisite of
+      SemanticIR-only construction -- exactly the outcome authority
+      transfer exists to end. Only the identity half survives, because it
+      is the one piece checking two representations the *same producer*
+      wrote for the *same* declaration, not a value comparison against a
+      collection this migration is meant to make optional. A side with no
+      real IR (DWARF-only, a producer with no typedef/constant identity, a
+      pre-v38 reload) still reads through the legacy adapter for that side
+      alone -- unchanged, and correctly so: there is no real producer
+      output there for an IR to be authoritative over.
   public_surface:
     primitive: complete
     producers: complete

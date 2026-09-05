@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from hypothesis import given, strategies as st
 
-from abicheck.compare.typedefs import typedef_index_pair
+from abicheck.compare.typedefs import diff_typedefs, typedef_index_pair
 from abicheck.model import AbiSnapshot
 from abicheck.model.fact import Fact
 from abicheck.model.identity import (
@@ -300,10 +300,15 @@ class TestTypedefIndexPair:
             for eid_ in index.entities_of_kind(EntityKind.TYPEDEF):
                 assert producer_entity_id(eid_) is not None
 
-    def test_one_faithful_side_and_one_unfaithful_side_never_mix(self) -> None:
-        """Both-or-neither. Pairing an IR-backed old side with an adapted new
-        side compares two differently-derived key spaces, which fabricates a
-        removal out of a projection difference."""
+    def test_each_side_is_decided_independently_not_both_or_neither(self) -> None:
+        """ADR-063 Track T3 (Codex review, PR #1078): a side with a real IR
+        uses it directly even when the *other* side has none at all -- the
+        old both-or-neither rule would have discarded the old side's real
+        IR in favor of a legacy reconstruction of it, purely because the new
+        side had nothing to be authoritative over. See
+        ``compare.typedefs.typedef_index_pair``'s own docstring for why
+        mixing is safe: both index shapes are matched by rendered alias
+        name, not by ``EntityId``."""
         eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
         old = _snap(semantic_ir=_typedef_ir({eid: "int"}))
         new = _snap()  # no SemanticIR at all
@@ -311,11 +316,45 @@ class TestTypedefIndexPair:
         old_index, new_index = typedef_index_pair(
             old, new, old_typedefs=maps, new_typedefs=maps
         )
-        # Both adapted: the adapter marks its identities synthetic, the real
-        # IR path does not -- so this is a direct check of which side ran.
-        for index in (old_index, new_index):
-            for eid_ in index.entities_of_kind(EntityKind.TYPEDEF):
-                assert producer_entity_id(eid_) is None
+        # The real IR ran for old (a genuine producer identity survives);
+        # the adapter ran for new (no IR to prefer, so its identity is
+        # synthetic) -- each side decided on its own merits.
+        for eid_ in old_index.entities_of_kind(EntityKind.TYPEDEF):
+            assert producer_entity_id(eid_) is not None
+        for eid_ in new_index.entities_of_kind(EntityKind.TYPEDEF):
+            assert producer_entity_id(eid_) is None
+
+    def test_the_ir_side_is_not_starved_by_an_incomplete_legacy_map_on_the_other_side(
+        self,
+    ) -> None:
+        """The concrete regression this independence closes (Codex review,
+        PR #1078): a stored pre-v38 baseline (no ``SemanticIR``, real flat
+        ``typedefs``) compared against a snapshot that carries a real IR but
+        whose own flat legacy map (as resolved by this comparison) is
+        incomplete relative to it. Under the old both-or-neither rule, the
+        IR-carrying side would have been discarded in favor of that
+        incomplete legacy map, fabricating a removal for a typedef the real
+        IR still has. Deciding per side means the IR-carrying side is never
+        starved this way."""
+        eid = entity_id_for_typedef((), "Alias")
+        old = _snap(typedefs={"Alias": "int"}, ast_producer="")
+        # `new` carries a real IR with "Alias" still present, but this
+        # comparison's own resolved legacy map for it is empty -- exactly
+        # what `_typedef_diff_maps` would compute for a snapshot whose flat
+        # typedefs/typedefs_qualified were never populated even though its
+        # SemanticIR was.
+        new = _snap(semantic_ir=_typedef_ir({eid: "int"}))
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs={"Alias": "int"}, new_typedefs={}
+        )
+        changes = diff_typedefs(
+            old_index,
+            new_index,
+            exclude_stdlib_namespaces=False,
+            suppress_removed=False,
+            is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
+        )
+        assert changes == []
 
     def test_an_unrenderable_anonymous_scope_is_used_but_invisible_to_aliasing(
         self,

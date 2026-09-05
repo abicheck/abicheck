@@ -220,6 +220,16 @@ def diff_constants(
     return changes
 
 
+def _constant_side_index(
+    snapshot: AbiSnapshot, constants: dict[str, str]
+) -> SemanticIRIndex:
+    """One side's index -- mirrors ``compare.typedefs._typedef_side_index``
+    exactly; see that function's own docstring."""
+    if snapshot.semantic_ir is not None:
+        return SemanticIRIndex(snapshot.semantic_ir)
+    return SemanticIRIndex(legacy_constant_ir(snapshot, constants))
+
+
 def constant_index_pair(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -227,21 +237,21 @@ def constant_index_pair(
     old_constants: dict[str, str],
     new_constants: dict[str, str],
 ) -> tuple[SemanticIRIndex, SemanticIRIndex]:
-    """The constant cohort's index pair: ``SemanticIR`` is the sole source
-    whenever both sides carry one (ADR-063 Track T3, "typedef/constant
-    authority cutover").
+    """The constant cohort's index pair: each side's real ``SemanticIR``
+    whenever it has one (ADR-063 Track T3, "typedef/constant authority
+    cutover").
 
     Mirrors ``compare.typedefs.typedef_index_pair`` exactly, substituting
     the constant collections, ``EntityKind.CONSTANT``, and
     :func:`~abicheck.model.semantic_ir_legacy_adapter.assert_constant_ir_consistent`
     as the construction-time identity check -- see that function's own
-    docstring for the full before/after reasoning. Nothing about the shape
-    differs between the two families -- only which legacy collections and
-    which entity kind are being projected.
+    docstring for the full before/after reasoning, including why each side
+    is decided independently rather than both-or-neither (Codex review,
+    PR #1078). Nothing about the shape differs between the two families --
+    only which legacy collections and which entity kind are being
+    projected.
     """
-    if old.semantic_ir is not None and new.semantic_ir is not None:
-        return SemanticIRIndex(old.semantic_ir), SemanticIRIndex(new.semantic_ir)
     return (
-        SemanticIRIndex(legacy_constant_ir(old, old_constants)),
-        SemanticIRIndex(legacy_constant_ir(new, new_constants)),
+        _constant_side_index(old, old_constants),
+        _constant_side_index(new, new_constants),
     )

@@ -280,6 +280,18 @@ def diff_typedefs(
     return changes
 
 
+def _typedef_side_index(
+    snapshot: AbiSnapshot, typedefs: dict[str, str]
+) -> SemanticIRIndex:
+    """One side's index: its real ``SemanticIR`` when it has one, or the
+    legacy adapter's projection of *its own* flat typedef collection
+    otherwise. See :func:`typedef_index_pair` for why this is decided
+    per side rather than jointly."""
+    if snapshot.semantic_ir is not None:
+        return SemanticIRIndex(snapshot.semantic_ir)
+    return SemanticIRIndex(legacy_typedef_ir(snapshot, typedefs))
+
+
 def typedef_index_pair(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -287,10 +299,9 @@ def typedef_index_pair(
     old_typedefs: dict[str, str],
     new_typedefs: dict[str, str],
 ) -> tuple[SemanticIRIndex, SemanticIRIndex]:
-    """The typedef cohort's index pair: ``SemanticIR`` is the sole source
-    whenever both sides carry one (ADR-063 Track T3, "typedef/constant
-    authority cutover" -- superseding the fidelity gate this function used
-    to run).
+    """The typedef cohort's index pair: each side's real ``SemanticIR``
+    whenever it has one (ADR-063 Track T3, "typedef/constant authority
+    cutover" -- superseding the fidelity gate this function used to run).
 
     **Before T3:** this function built *both* an IR-backed and a
     legacy-projected index on every comparison, and used the IR only when
@@ -301,31 +312,45 @@ def typedef_index_pair(
     authority transfer: an IR that disagreed with the legacy projection was
     never actually trusted, only ever silently routed around.
 
-    **After T3:** when both sides carry a real ``SemanticIR``, it is read
-    directly -- no second index is built, and there is nothing left to
-    adjudicate against. A snapshot whose ``SemanticIR`` disagrees, by
+    **After T3:** each side is decided independently -- :func:`_typedef_
+    side_index` reads that side's own real ``SemanticIR`` directly when it
+    has one, falling back to the legacy adapter's projection of *that same
+    side's own* flat collection only when it has none. No second index is
+    ever built for a side that already has a real one, and there is nothing
+    left to adjudicate: a snapshot whose ``SemanticIR`` disagrees, by
     identity, with its own ``typedef_entity_ids`` sidecar can no longer
-    reach this function at all: that disagreement is now caught earlier, at
+    reach this function at all -- that disagreement is caught earlier, at
     snapshot construction (``AbiSnapshot.__post_init__`` ->
     ``model.semantic_ir_legacy_adapter.assert_typedef_ir_consistent``),
     which raises :class:`~abicheck.errors.SemanticIrAuthorityError` rather
     than leaving this selector to quietly fall back.
 
-    A snapshot with **no** real ``SemanticIR`` on either side (DWARF-only, a
-    producer that has not implemented typedef identity, or a snapshot
-    serialized before schema v38) is not a disagreement to adjudicate --
-    there is no real producer output here for the IR to be authoritative
-    over, which is exactly what
-    :func:`~abicheck.model.semantic_ir_legacy_adapter.legacy_typedef_ir`
-    exists for. Both-or-neither still matters for the same reason it did
-    under the old gate: pairing a real IR on one side with a
-    sidecar-reconstructed projection on the other would compare two
-    differently-derived key spaces, fabricating a change out of a
-    projection difference rather than a real ABI one.
+    **Deliberately not both-or-neither** (Codex review, PR #1078): an
+    earlier version of this cutover gated on *both* sides carrying a real
+    IR, falling back to the legacy adapter for *both* sides otherwise --
+    reasoning, by analogy with the old fidelity gate, that mixing an
+    IR-backed side with an adapted one would compare "two
+    differently-derived key spaces". That reasoning does not actually hold
+    here: :func:`diff_typedefs` matches by *rendered alias name* (a plain
+    string), not by ``EntityId``, so a real-IR-backed index and a
+    legacy-adapted one are directly comparable through that shared key
+    space regardless of which side is which -- and each is already the most
+    faithful representation available for its own side. The both-or-neither
+    version actively discarded evidence: comparing a live dump (real
+    ``SemanticIR``, from a producer that always populates the flat
+    collections identically) against a pre-v38 stored baseline (no
+    ``SemanticIR`` at all) forced the live side through its *own* legacy
+    adapter too, which is harmless only because that side's flat collection
+    happens to agree with its own IR today. A hand-built or future-producer
+    snapshot carrying real typedef ``SemanticIR`` occurrences with no
+    matching flat collection populated at all is not a hypothetical this
+    module should rely on never occurring: under the old both-or-neither
+    rule it would have silently read as "this side has zero typedefs",
+    fabricating a removal for every typedef the flat collection never
+    carried. Deciding per side removes that failure mode entirely, since a
+    side's own real ``SemanticIR`` is now always preferred over any
+    reconstruction of it, on either side, independently.
     """
-    if old.semantic_ir is not None and new.semantic_ir is not None:
-        return SemanticIRIndex(old.semantic_ir), SemanticIRIndex(new.semantic_ir)
-    return (
-        SemanticIRIndex(legacy_typedef_ir(old, old_typedefs)),
-        SemanticIRIndex(legacy_typedef_ir(new, new_typedefs)),
+    return _typedef_side_index(old, old_typedefs), _typedef_side_index(
+        new, new_typedefs
     )
