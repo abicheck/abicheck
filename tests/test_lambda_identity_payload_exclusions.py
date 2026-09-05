@@ -350,16 +350,24 @@ class TestFactProducerFieldIsRecognizedAndExcluded:
         assert renumbered.qualified_name_fact.producer == marker_producer
 
     def test_collect_strings_excludes_producer_too(self) -> None:
+        """Uses ``qualified_name_fact``, not ``source_header_fact`` --
+        CodeRabbit review: ``source_header``'s whole ``_fact`` sibling is
+        already skipped as a unit (``_legacy_sibling_is_payload_excluded``),
+        so a producer placed there would pass even if ``"producer"`` were
+        removed from ``_PAYLOAD_FIELD_EXCLUSIONS`` entirely -- a tautological
+        test. ``qualified_name_fact`` is not whole-field-excluded (only its
+        own ``value`` gets special handling), so this walk genuinely reaches
+        ``Fact.producer`` and this pin actually depends on the exclusion."""
         from abicheck.model import Fact, FactStatus, RecordType
 
         rec = RecordType(
             name="X",
             kind="class",
             size_bits=8,
-            source_header="/tmp/api.h",
-            source_header_fact=Fact(
+            qualified_name="X",
+            qualified_name_fact=Fact(
                 status=FactStatus.PRESENT,
-                value="/tmp/api.h",
+                value="X",
                 diagnostics=(),
                 producer=_closure("x.h", 7, 1),
             ),

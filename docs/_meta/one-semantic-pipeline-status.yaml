@@ -197,6 +197,13 @@ concepts:
       method" from "I established the complete set of virtual methods."
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 4 /
       track T9.
+      **2026-09-05 T9 first-slice correction (supersedes the "still
+      reachable"/"still open" claims above about the PDB-driven fabrication
+      specifically):** that path is now closed. See this concept's own
+      `investigated_declined` entry below for what closed it and what
+      remains open (the DWARF per-TU completeness gap and the seven
+      case-(a) fields are unaffected by this correction -- those remain
+      exactly as open as stated above).
     investigated_declined:
       - item: >-
           FactStatus gating for the vtable/TYPE_VTABLE_CHANGED cluster
