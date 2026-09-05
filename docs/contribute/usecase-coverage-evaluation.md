@@ -89,7 +89,7 @@ A real invocation is a point in this space:
 | Header-only / inline-only | `planned` | castxml can't emit concept bodies / ctor mangled names (G4; cases 78/105/106/111 dormant) |
 | Kernel / eBPF (BTF/CTF) | `complete` | **G6 closed**: BTF + CTF struct-change run through `compare`; committed `case121` BTF blobs + bare-blob CLI ingestion + `gcc -gbtf` integration fixture |
 | SYCL / accelerator (PI/UR) | `complete` | **G6 closed**: PI *and* UR adapter entrypoint-drop driven through `compare` + reports |
-| Static libraries (`.a`/`.lib`) | `by_design_excluded` | **G8 decided (option A)**: non-goal; CLI rejects archives with guidance |
+| Static libraries (`.a`/`.lib`) | `by_design_excluded` | **G8 decided (option A, shipped)**: unsupported input today; CLI rejects archives with guidance. `vision.md`'s amended framing treats this as a current limitation open to a bounded future investigation, not a permanent exclusion — see [g8](plans/g8-static-libraries.md) |
 | FFI consumers (Rust/Go/Python) | `by_design_excluded` | C ABI covered; other languages a stated non-goal |
 
 ---

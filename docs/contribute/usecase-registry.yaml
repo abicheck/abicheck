@@ -19,7 +19,13 @@
 #   partial             works, but with documented caveats/gaps
 #   modeled             code/parsers exist but NOT validated end-to-end in CI
 #   planned             not implemented; has a tracked plan (gap + next_steps)
-#   by_design_excluded  deliberate non-goal (see docs/contribute/goals.md)
+#   by_design_excluded  today's decided, shipped stance is to exclude this
+#                       case (see docs/contribute/goals.md); this records a
+#                       current decision, not necessarily a claim that no
+#                       future reconsideration is possible — an entry's own
+#                       `note` states whether it is a permanent exclusion or
+#                       a decision that remains open to a future bounded
+#                       investigation (see UC-ARCH-static-lib for the latter)
 #
 # axis legend: change_class | archetype | platform | workflow | reporting | toolchain
 
