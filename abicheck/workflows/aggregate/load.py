@@ -112,14 +112,14 @@ class _LoadedReport:
     #: report's own ``analysis_assurance_exit_contribution``; ``0`` for a run
     #: without ``--require-complete-analysis``.
     analysis_assurance_exit: int = 0
+    #: Phase 0 item 6: the report's own ``effective_config_digest``, never
+    #: recomputed; ``None`` when it carries none (fail-open like the above).
+    effective_config_digest: str | None = None
     #: ADR-065's scope-completeness contribution (``scope_axis``); ``0`` for
     #: every scalar comparison and every complete release.
     scope_completeness_exit: int = 0
     #: Whether the report recorded an incomplete scope, gating or accepted.
     scope_completeness_incomplete: bool = False
-    #: Phase 0 item 6: the report's own ``effective_config_digest``, never
-    #: recomputed; ``None`` when it carries none (fail-open like the above).
-    effective_config_digest: str | None = None
 
 
 def _malformed_gate_report(

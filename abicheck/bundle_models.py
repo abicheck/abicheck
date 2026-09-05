@@ -673,7 +673,18 @@ class BundleDiffResult:
     #: coverage ledger (mirroring `contract_coverage_ledger.py`) would add
     #: beyond this.
     analysis_errors: list[str] = field(default_factory=list)
-    #: ADR-065 S2: the acquisition record a stored-baseline driver
+    #: Optional :class:`~abicheck.policy_file.PolicyFile`, applied on top of
+    #: *policy* when scoring ``bundle_verdict`` -- previously bundle-level
+    #: findings were always scored under the bare *policy* name alone, even
+    #: when a caller supplied a policy file whose overrides/reclassify rules
+    #: it wanted applied everywhere (Codex review, fresh evidence: a
+    #: `policy_file` selecting `plugin_abi`-style downgrades for per-library
+    #: findings had no effect on `BUNDLE_*` findings). ``None`` (the
+    #: default): behavior is unchanged from before this field existed.
+    policy_file: PolicyFile | None = None
+    #: ADR-065 S2 (declared after the pre-existing ``policy_file`` tail, so a
+    #: positional caller of this published result type keeps binding it --
+    #: Codex review): the acquisition record a stored-baseline driver
     #: (`bundle_side_input`/`workflows.bundle_stored_pair_compare`) builds
     #: for its members -- a degraded (D8) member is `failed` here, so the
     #: dispatcher's completeness axis gates on it instead of reading a
@@ -689,15 +700,6 @@ class BundleDiffResult:
     #: is an operational error, so a consumer floors the exit on it under
     #: either ``--on-incomplete-scope`` policy. Empty for every other path.
     extraction_failures: dict[str, str] = field(default_factory=dict)
-    #: Optional :class:`~abicheck.policy_file.PolicyFile`, applied on top of
-    #: *policy* when scoring ``bundle_verdict`` -- previously bundle-level
-    #: findings were always scored under the bare *policy* name alone, even
-    #: when a caller supplied a policy file whose overrides/reclassify rules
-    #: it wanted applied everywhere (Codex review, fresh evidence: a
-    #: `policy_file` selecting `plugin_abi`-style downgrades for per-library
-    #: findings had no effect on `BUNDLE_*` findings). ``None`` (the
-    #: default): behavior is unchanged from before this field existed.
-    policy_file: PolicyFile | None = None
 
     @property
     def bundle_verdict(self) -> Verdict:

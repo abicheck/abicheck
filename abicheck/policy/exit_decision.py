@@ -298,18 +298,6 @@ class ExitDecision:
     #: `resolve_release_exit_decision`. See :class:`ExitReason.
     #: OPERATIONAL_ERROR` and this class's own docstring above.
     operational_error_contribution: int = 0
-    #: A directory/package release comparison only (ADR-065 D6). ``0``/``1``,
-    #: a fold participant shaped exactly like ``contract_coverage_
-    #: contribution`` -- see :class:`ExitReason.INCOMPLETE_SCOPE`. ``0`` for
-    #: every caller but `resolve_release_exit_decision`, and ``0`` under the
-    #: default ``warn`` completeness policy even when the scope is
-    #: incomplete (the report's ``run_outcome.scope`` carries that fact).
-    incomplete_scope_contribution: int = 0
-    #: A directory/package release comparison only (ADR-065 D7). ``0``/``1``,
-    #: a fold participant -- see :class:`ExitReason.NO_COMPARISON_
-    #: COMPLETED`. ``0`` for every caller but `resolve_release_exit_decision`.
-    no_comparison_completed_contribution: int = 0
-
     #: `scan` only. Nonzero (always equal to `code`) exactly when
     #: :func:`resolve_scan_exit_decision` returned this decision because
     #: `_EvidenceContractError` fired. `0` for every decision built any
@@ -336,6 +324,19 @@ class ExitDecision:
     #: consulted and lost (it wasn't set) -- both are genuinely "did not
     #: determine this outcome," which `0` correctly states either way.
     removed_required_library_contribution: int = 0
+    #: A directory/package release comparison only (ADR-065 D6). ``0``/``1``,
+    #: a fold participant shaped exactly like ``contract_coverage_
+    #: contribution`` -- see :class:`ExitReason.INCOMPLETE_SCOPE`. ``0`` for
+    #: every caller but `resolve_release_exit_decision`, and ``0`` under the
+    #: default ``warn`` completeness policy even when the scope is
+    #: incomplete (the report's ``run_outcome.scope`` carries that fact).
+    #: Declared after every pre-existing field (Codex review): a positional
+    #: caller of this public constructor keeps binding the older tail.
+    incomplete_scope_contribution: int = 0
+    #: A directory/package release comparison only (ADR-065 D7). ``0``/``1``,
+    #: a fold participant -- see :class:`ExitReason.NO_COMPARISON_
+    #: COMPLETED`. ``0`` for every caller but `resolve_release_exit_decision`.
+    no_comparison_completed_contribution: int = 0
 
     def to_dict(self) -> dict[str, object]:
         """JSON-serializable form, for the report's ``exit`` block.

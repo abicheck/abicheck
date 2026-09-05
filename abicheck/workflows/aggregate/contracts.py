@@ -400,14 +400,6 @@ class TargetReport:
     #: orthogonal exit-floor axis. Declared last for the same
     #: positional-construction-safety reason as that field.
     analysis_assurance_exit: int = 0
-    #: ADR-065's scope-completeness contribution (``0``/``1``), the third
-    #: orthogonal exit-floor axis (aggregate schema 1.8); same
-    #: positional-safety reason for its position.
-    scope_completeness_exit: int = 0
-    #: Whether the report recorded an incomplete scope at all -- true even
-    #: when ``--on-incomplete-scope warn`` zeroed the contribution above.
-    #: Reported, never folded into an exit code (the contract-coverage rule).
-    scope_completeness_incomplete: bool = False
     #: Phase 0 item 6 of docs/contribute/plans/duplication-and-convergence-
     #: assessment.md: this target's own already-computed
     #: ``effective_config_digest``, read straight off its report by
@@ -415,6 +407,15 @@ class TargetReport:
     #: unavailable target or a report that carried none. Declared last for
     #: the same positional-construction-safety reason as the fields above.
     effective_config_digest: str | None = None
+    #: ADR-065's scope-completeness contribution (``0``/``1``), the third
+    #: orthogonal exit-floor axis (aggregate schema 1.8); declared
+    #: after ``effective_config_digest`` so an existing positional caller of
+    #: this compatibility-path type keeps binding the digest (Codex review).
+    scope_completeness_exit: int = 0
+    #: Whether the report recorded an incomplete scope at all -- true even
+    #: when ``--on-incomplete-scope warn`` zeroed the contribution above.
+    #: Reported, never folded into an exit code (the contract-coverage rule).
+    scope_completeness_incomplete: bool = False
 
     @property
     def analyzed(self) -> bool:
