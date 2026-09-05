@@ -48,8 +48,11 @@ trusted. That gap is not one this AST scan can close on its own (whether a
 legacy projection "wins" is a runtime data question, not a static one); it
 was closed instead by deleting the dual-index construction and adjudication
 itself (ADR-063 Track T3, "typedef/constant authority cutover") —
-`typedef_index_pair`/`constant_index_pair` now read the real `SemanticIR`
-directly whenever both sides carry one, with no second index built to
+`typedef_index_pair`/`constant_index_pair` now decide each side
+independently, reading the real `SemanticIR` directly whenever *that side*
+carries one (never both-or-neither, since a Codex review round found that
+rule would starve an IR-carrying side of its own real evidence purely
+because the other side lacked any), with no second index built to
 compare it against, and a disagreement between a real `SemanticIR` and its
 own legacy sidecar identity (`AbiSnapshot.typedef_entity_ids`/
 `constant_entity_ids`) is now caught earlier, at snapshot construction

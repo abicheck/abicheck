@@ -43,10 +43,13 @@ in no source spelling, so any string produced for them would be an
 invention, and two distinct such declarations would render alike. Before
 ADR-063 Track T3, ``compare.typedefs.typedef_index_pair`` turned that
 ``None`` (and any other divergence from the legacy projection) into a
-fallback to this adapter; since T3, both sides' real ``SemanticIR`` is used
-directly whenever both carry one, and an entity that renders ``None`` is
-simply invisible to a detector's own alias/name projection (it has no flat
-spelling to key a finding under, on either backing). This module's own
+fallback to this adapter; since T3, each side's real ``SemanticIR`` is used
+directly whenever *that side* carries one -- decided independently per side,
+not both-or-neither (a second Codex review round found the both-or-neither
+cut would discard a side's real evidence purely because the other side
+lacked any) -- and an entity that renders ``None`` is simply invisible to a
+detector's own alias/name projection (it has no flat spelling to key a
+finding under, on either backing). This module's own
 identity primitives (:func:`producer_entity_id`, and the two Track T3
 consistency checks below) are what a real ``SemanticIR`` is now checked
 against instead: not a competing legacy projection, but the same
@@ -118,6 +121,7 @@ __all__ = [
     "producer_occurrence_disambiguator",
     "render_display_name",
     "render_display_name_or_leaf",
+    "semantic_ir_covers_kind",
 ]
 
 #: ``EntityId.extra`` marker for an identity this adapter derived from a
@@ -239,6 +243,32 @@ def producer_occurrence_disambiguator(occurrence_id: OccurrenceId) -> str | None
     trust requirement, so gating it the same way only threw away real
     evidence for no safety benefit."""
     return occurrence_id.disambiguator or None
+
+
+def semantic_ir_covers_kind(semantic_ir: SemanticIR, kind: EntityKind) -> bool:
+    """Whether *semantic_ir* resolves at least one occurrence of *kind*
+    (Codex review, PR #1078, nineteenth round).
+
+    ``compare.typedefs._typedef_side_index``/``compare.constants.
+    _constant_side_index`` used to trust a snapshot's ``SemanticIR``
+    wholesale for a cohort the moment it was non-``None``, with no per-kind
+    check -- but a real snapshot can carry a ``SemanticIR`` whose identity-
+    resolution slice for one kind (always populating that kind's flat
+    sidecar, per ADR-063 Phase 2) predates its *normalization* slice for the
+    same kind (populating matching ``SemanticIR`` occurrences): a real,
+    historical v38-v41 window this module's own load-boundary check already
+    accepts as legitimate (see :func:`_assert_sidecar_identity_consistent`'s
+    own ``by_rendered`` gate). Trusting such a ``SemanticIR`` wholesale for
+    that kind silently blinds comparison to every constant/typedef the
+    snapshot's own flat collection still has real evidence for -- a false
+    "nothing here" rather than a real absence. A side index selector should
+    call this before trusting ``semantic_ir`` for one cohort, falling back
+    to the legacy adapter's projection of that side's own flat collection
+    when it answers ``False``."""
+    return any(
+        occurrence_id.entity_id.kind is kind
+        for occurrence_id in semantic_ir.occurrences
+    )
 
 
 def _synthetic_entity_id(kind: EntityKind, display_name: str) -> EntityId:

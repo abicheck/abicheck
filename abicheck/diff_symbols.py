@@ -1852,11 +1852,11 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     SemanticIRIndex` and is forbidden by ``scripts/semantic_ir_cutover.py``
     from touching a legacy constant collection at all.
 
-    ``constant_index_pair`` hands back the ``SemanticIR``-backed index when
-    its own rendered names/values/identities exactly reproduce
-    ``old.constants``/``new.constants`` on both sides, and the legacy
-    adapter otherwise -- so this is a real read of the IR wherever the IR is
-    faithful, and bit-for-bit the previous behavior everywhere else.
+    ``constant_index_pair`` decides each side of the comparison
+    independently (ADR-063 Track T3): a side with a real ``SemanticIR``
+    reads it directly, with no legacy index built or adjudicated against for
+    that side, and a side with none reads through the legacy adapter's
+    projection of its own flat ``constants`` collection.
 
     Known limitation, not attempted here: a versioned inline namespace can
     make the same constant reachable under two qualified spellings

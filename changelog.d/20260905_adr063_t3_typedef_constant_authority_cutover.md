@@ -400,3 +400,47 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   reference" rule), but `disambiguator` is a purely internal dedup
   discriminator, never an external identity reference -- gating it the same
   way only threw away real evidence for no safety benefit.
+
+- **The bare-alias typedef projection no longer collides two distinct
+  entities with blank disambiguators.** The eighteenth round's own fix
+  carried a bare-projected occurrence's *source* disambiguator forward, but
+  two genuinely distinct qualified entities (`a::Alias`, `b::Alias`) with no
+  real disambiguator at all -- the overwhelming common case -- still
+  produced two `Change`s with `entity_id=None` (synthetic) and
+  `disambiguator=None` alike, colliding right back together in
+  `_dedup_exact` (Codex review, PR #1078, nineteenth round). Each
+  bare-projected occurrence's own per-alias ordinal (already used to keep
+  its synthetic `EntityId.scope` distinct) is now folded into its
+  `disambiguator` unconditionally -- collision-safe on its own, and still
+  carrying real ODR-duplicate evidence through (as `"<ordinal>:<source
+  disambiguator>"`) when the source has one.
+- **A pre-normalization historical snapshot's real constant removal is no
+  longer silently missed.** The seventeenth round's own relaxation of the
+  sidecar-consistency check lets a v38-v41 snapshot load when its
+  `constant_entity_ids` sidecar is populated but `SemanticIR` carries zero
+  constant occurrences at all (a real, legitimate window between the
+  identity-resolution and constant-normalization slices) -- but
+  `_constant_side_index` still trusted any non-`None` `semantic_ir`
+  wholesale, so such a snapshot's real flat `constants` evidence was
+  silently discarded and a genuine removal went undetected (Codex review,
+  PR #1078, nineteenth round). Both `_constant_side_index` and
+  `_typedef_side_index` (symmetric gap, fixed for consistency) now trust
+  `semantic_ir` for a cohort only when it resolves at least one occurrence
+  of that kind (the new `model.semantic_ir_legacy_adapter.
+  semantic_ir_covers_kind`), falling back to the legacy adapter's
+  projection of that side's own flat collection otherwise.
+- **Two mixed-occurrence constant collisions and several stale docstrings
+  fixed on CodeRabbit review.** `diff_constants`'s mixed-group pairing now
+  prefers a removed/added pair whose values are both resolved when one
+  exists, instead of always taking position 0 -- an unresolved-marker
+  occurrence in the first slot used to demote a genuinely comparable pair to
+  no recoverable value text and out of the fingerprint-reliability gate's
+  own reach. Two regression tests (`test_a_stable_identitys_own_base_
+  change_is_not_masked_by_a_new_arrival`/its constant sibling) used a named
+  `Namespace` scope for their "stable" identity, which rendered under a
+  different alias than the colliding "added" one entirely -- so neither
+  test actually exercised the colliding-group path its own docstring
+  claimed to cover; both now use an empty scope so the two collide as
+  intended. `diff_symbols.py`, `model/semantic_ir_legacy_adapter.py`, and
+  `scripts/semantic_ir_cutover.py` each had a stale "both sides" framing of
+  the old (pre-per-side-independence) selector behavior, corrected.

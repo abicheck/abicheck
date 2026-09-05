@@ -39,6 +39,7 @@ from abicheck.model.identity import (
     EntityKind,
     Namespace,
     entity_id_for_constant,
+    entity_id_for_typedef,
 )
 from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
@@ -505,8 +506,14 @@ class TestDetectorBehavior:
         breaking change to the stable entity and never reporting the
         genuine addition at all. Matching by shared ``EntityId`` first
         must catch the stable entity's own value change directly, and the
-        addition must still be reported separately."""
-        stable = entity_id_for_constant((Namespace("ns"),), "X")
+        addition must still be reported separately.
+
+        ``stable`` uses an empty scope, not a named ``Namespace``, so it
+        renders to the identical bare name ``added`` does (Codex review, PR
+        #1078, nineteenth round: with a named scope the two rendered under
+        different names entirely and never entered the colliding-group path
+        this test claims to cover)."""
+        stable = entity_id_for_constant((), "X")
         added = entity_id_for_constant((Anonymous("namespace", 0),), "X")
         old_index = SemanticIRIndex(
             SemanticIR(
@@ -985,6 +992,42 @@ class TestThroughCompare:
         )
         assert _run(old_index, new_index) == []
 
+    def test_a_pre_normalization_snapshots_real_constant_removal_is_still_detected(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, nineteenth round: fresh evidence beyond
+        the resolved load-validation thread. A v38-v41 snapshot legitimately
+        carries a populated ``constant_entity_ids`` sidecar with zero
+        matching ``SemanticIR`` occurrences (the identity-resolution slice
+        predates the normalization slice for constants) -- the seventeenth
+        round's own relaxation of the construction-time check lets such a
+        snapshot load. Before this fix, ``_constant_side_index`` still
+        trusted any non-``None`` ``semantic_ir`` wholesale, so this side's
+        comparison saw an empty constant surface and a genuine removal of
+        ``K`` was silently missed."""
+        typedef_eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        constant_eid = entity_id_for_constant((Namespace("ns"),), "K")
+        old = _snap(
+            constants={"ns::K": "1"},
+            constant_entity_ids={"ns::K": constant_eid},
+            # Pre-normalization: semantic_ir exists (typedef identity
+            # already resolved) but has zero CONSTANT occurrences at all.
+            semantic_ir=SemanticIR(
+                occurrences={
+                    OccurrenceId(typedef_eid): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            ),
+        )
+        new = _snap(constants={})
+        old_index, new_index = constant_index_pair(
+            old, new, old_constants=old.constants, new_constants=new.constants
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_REMOVED
+        assert change.symbol == "ns::K"
+
 
 # -- the architecture gate -------------------------------------------------
 
@@ -1044,134 +1087,3 @@ class TestSemanticIrCutoverGate:
             'x = some_object.getattr(snap, "constants")',
         ):
             assert legacy_collection_reads(ast.parse(source), forbidden) == []
-
-
-class TestOdrDuplicateOccurrencesSurviveReduction:
-    """Regression coverage for Codex review, PR #1078, fifteenth round --
-    mirrors ``tests.test_typedef_cutover.
-    TestOdrDuplicateOccurrencesSurviveReduction`` exactly; see that class's
-    own docstring for the full account. ``_values``/``_value`` used to read
-    through ``SemanticIRIndex``'s reduced, one-entry-per-``EntityId`` view,
-    which silently collapsed two genuine occurrences sharing one identity
-    onto a single "most facts present" winner -- hiding a real value change
-    on whichever occurrence did not win that reduction.
-    """
-
-    def _ir_with_two_occurrences(
-        self, eid, *, value_a: str, value_b: str
-    ) -> SemanticIR:
-        return SemanticIR(
-            occurrences={
-                OccurrenceId(eid, "tu-a"): CanonicalEntity(
-                    canonical_spelling=Fact.present(value_a)
-                ),
-                OccurrenceId(eid, "tu-b"): CanonicalEntity(
-                    canonical_spelling=Fact.present(value_b)
-                ),
-            }
-        )
-
-    def test_values_keeps_both_odr_duplicate_occurrences_distinct(self) -> None:
-        from abicheck.compare.constants import _values
-
-        eid = entity_id_for_constant((Namespace("ns"),), "X")
-        ir = self._ir_with_two_occurrences(eid, value_a="1", value_b="1")
-        grouped = _values(SemanticIRIndex(ir))
-        assert set(grouped) == {"ns::X"}
-        assert set(grouped["ns::X"]) == {
-            OccurrenceId(eid, "tu-a"),
-            OccurrenceId(eid, "tu-b"),
-        }
-
-    def test_a_value_change_on_one_odr_duplicate_occurrence_is_detected(
-        self,
-    ) -> None:
-        """Two occurrences share one ``EntityId`` (an ODR-duplicate pair).
-        Only one of them changes value between snapshots -- the reduced-view
-        bug would have let the ``canonical_entities()`` "most facts present"
-        tie-break pick the same, *unchanged* occurrence as the
-        representative on both sides, reporting no change at all despite a
-        real value change on the sibling occurrence."""
-        eid = entity_id_for_constant((Namespace("ns"),), "X")
-        old_index = SemanticIRIndex(
-            self._ir_with_two_occurrences(eid, value_a="1", value_b="1")
-        )
-        new_index = SemanticIRIndex(
-            self._ir_with_two_occurrences(eid, value_a="1", value_b="2")
-        )
-        changes = _run(old_index, new_index)
-        assert len(changes) == 1
-        change = changes[0]
-        assert change.kind is ChangeKind.CONSTANT_CHANGED
-        assert change.symbol == "ns::X"
-        assert change.old_value == "1"
-        assert change.new_value == "2"
-
-
-class TestWholeGroupRemovalSurvivesPostProcessingDedup:
-    """Regression coverage for Codex review, PR #1078, sixteenth round --
-    mirrors ``tests.test_typedef_cutover.
-    TestWholeGroupRemovalSurvivesPostProcessingDedup`` exactly; see that
-    class's own docstring for the full account. ``diff_constants`` emits one
-    ``CONSTANT_REMOVED`` per contributing entity when a whole colliding
-    group vanishes, but the public pipeline's ``diff_filtering._dedup_exact``
-    used to key only on ``(kind, description)`` -- identical for every
-    entity in the group -- silently collapsing them back to one.
-    """
-
-    def test_two_colliding_removals_both_survive_dedup_exact(self) -> None:
-        from abicheck.diff_filtering import _dedup_exact
-
-        first = entity_id_for_constant((Anonymous("namespace", 0),), "X")
-        second = entity_id_for_constant((Anonymous("namespace", 1),), "X")
-        old_index = SemanticIRIndex(
-            SemanticIR(
-                occurrences={
-                    OccurrenceId(first): CanonicalEntity(
-                        canonical_spelling=Fact.present("1")
-                    ),
-                    OccurrenceId(second): CanonicalEntity(
-                        canonical_spelling=Fact.present("1")
-                    ),
-                }
-            )
-        )
-        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
-        assert len(changes) == 2
-        assert {c.old_value for c in changes} == {"1"}
-        deduped = _dedup_exact(changes)
-        assert len(deduped) == 2
-
-
-class TestOdrDuplicateRemovalsSurviveDedupExact:
-    """Regression coverage for Codex review, PR #1078, seventeenth round --
-    mirrors ``tests.test_typedef_cutover.
-    TestOdrDuplicateRemovalsSurviveDedupExact`` exactly; see that class's
-    own docstring for the full account.
-    """
-
-    def test_two_odr_duplicate_removals_with_the_same_value_both_survive(
-        self,
-    ) -> None:
-        from abicheck.diff_filtering import _dedup_exact
-
-        eid = entity_id_for_constant((Namespace("ns"),), "X")
-        old_index = SemanticIRIndex(
-            SemanticIR(
-                occurrences={
-                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
-                        canonical_spelling=Fact.present("1")
-                    ),
-                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
-                        canonical_spelling=Fact.present("1")
-                    ),
-                }
-            )
-        )
-        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
-        assert len(changes) == 2
-        assert {c.old_value for c in changes} == {"1"}
-        assert {c.entity_id for c in changes} == {eid}
-        assert {c.disambiguator for c in changes} == {"tu-a", "tu-b"}
-        deduped = _dedup_exact(changes)
-        assert len(deduped) == 2

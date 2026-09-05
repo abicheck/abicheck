@@ -59,6 +59,7 @@ from ..model.semantic_ir_legacy_adapter import (
     producer_entity_id,
     producer_occurrence_disambiguator,
     render_display_name_or_leaf,
+    semantic_ir_covers_kind,
 )
 
 if TYPE_CHECKING:
@@ -546,8 +547,35 @@ def diff_constants(
         # appears -- previously reported only one `CONSTANT_CHANGED` and
         # silently lost the independently provable `CONSTANT_ADDED`).
         if removed_occurrences and added_occurrences:
-            removed_value, removed_id = removed_occurrences.pop(0)
-            added_value, added_id = added_occurrences.pop(0)
+            # Prefers a pair with resolved value evidence on both sides
+            # (Codex review, PR #1078, nineteenth round) over always taking
+            # position 0: an unresolved occurrence (`_UNRESOLVED_MARKER`)
+            # can occupy the first slot on either side, which would demote
+            # a genuinely comparable removed/added pair sitting right next
+            # to it -- both to no recoverable value text (`old`/`new`
+            # rendering as `repr(None)`) and out of
+            # `is_fingerprint_comparison_unreliable`'s own reach (it
+            # requires both values to be non-`None`). Falls back to
+            # position 0 when no resolved pair exists, unchanged from
+            # before.
+            removed_pos = next(
+                (
+                    i
+                    for i, (value, _) in enumerate(removed_occurrences)
+                    if value != _UNRESOLVED_MARKER
+                ),
+                0,
+            )
+            added_pos = next(
+                (
+                    i
+                    for i, (value, _) in enumerate(added_occurrences)
+                    if value != _UNRESOLVED_MARKER
+                ),
+                0,
+            )
+            removed_value, removed_id = removed_occurrences.pop(removed_pos)
+            added_value, added_id = added_occurrences.pop(added_pos)
             old_val = _unresolved_to_none(removed_value)
             new_val = _unresolved_to_none(added_value)
             unreliable = (
@@ -631,8 +659,12 @@ def _constant_side_index(
     snapshot: AbiSnapshot, constants: dict[str, str]
 ) -> SemanticIRIndex:
     """One side's index -- mirrors ``compare.typedefs._typedef_side_index``
-    exactly; see that function's own docstring."""
-    if snapshot.semantic_ir is not None:
+    exactly; see that function's own docstring, including the
+    :func:`~abicheck.model.semantic_ir_legacy_adapter.semantic_ir_covers_kind`
+    gate (Codex review, PR #1078, nineteenth round)."""
+    if snapshot.semantic_ir is not None and semantic_ir_covers_kind(
+        snapshot.semantic_ir, EntityKind.CONSTANT
+    ):
         return SemanticIRIndex(snapshot.semantic_ir)
     return SemanticIRIndex(legacy_constant_ir(snapshot, constants))
 

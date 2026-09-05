@@ -806,6 +806,33 @@ concepts:
       purely internal dedup discriminator, never an external identity
       reference the way `entity_id` is.
 
+      **A nineteenth round found three further gaps.** First, the
+      eighteenth round's own bare-alias-projection fix carried a source
+      occurrence's real disambiguator forward, but two genuinely distinct
+      qualified entities with no real disambiguator at all -- the common
+      case -- still produced two `Change`s with both `entity_id` and
+      `disambiguator` unset, colliding right back together. Each
+      bare-projected occurrence's own per-alias ordinal (already used for
+      synthetic-`EntityId` scope uniqueness) is now folded into its
+      `disambiguator` unconditionally, collision-safe on its own and still
+      carrying real ODR-duplicate evidence through when the source has one.
+      Second, the seventeenth round's own sidecar-consistency relaxation
+      lets a v38-v41 snapshot load with a populated sidecar for a kind but
+      zero matching `SemanticIR` occurrences (the legitimate window between
+      identity-resolution and normalization for that kind) -- but the
+      constant and typedef side-index selectors still trusted any non-`None`
+      `semantic_ir` wholesale for that cohort, silently discarding such a
+      snapshot's real flat evidence and missing a genuine removal. Both
+      selectors now trust `semantic_ir` for a cohort only once it resolves
+      at least one occurrence of that kind (the new
+      `model.semantic_ir_legacy_adapter.semantic_ir_covers_kind`), falling
+      back to the legacy adapter's projection otherwise. Third, on
+      CodeRabbit review: `diff_constants`'s mixed-group pairing always took
+      position 0 from each side's occurrence list, which could pair an
+      unresolved-marker occurrence ahead of a resolved one even when a
+      resolved pair existed -- now prefers a pair whose values are both
+      resolved when one exists.
+
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.
     investigated_declined:

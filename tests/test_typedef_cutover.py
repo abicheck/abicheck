@@ -269,8 +269,15 @@ class TestDetectorBehavior:
         old ``int`` against the new entity's ``int``, reporting a clean
         comparison (a pure addition, untracked) -- silently masking the
         stable entity's own real, breaking base-type change. Matching by
-        shared ``EntityId`` first must catch it directly."""
-        stable = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        shared ``EntityId`` first must catch it directly.
+
+        ``stable`` uses an empty scope, not a named ``Namespace``, so it
+        renders to the identical bare alias ``added`` does (Codex review, PR
+        #1078, nineteenth round: with a named scope, `render_display_name_
+        or_leaf` keeps it, so the two rendered under different aliases
+        entirely and never entered the colliding-group path this test
+        claims to cover -- it passed for a reason unrelated to the fix)."""
+        stable = entity_id_for_typedef((), "Alias")
         added = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
         old_index = SemanticIRIndex(
             SemanticIR(

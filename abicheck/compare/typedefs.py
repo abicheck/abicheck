@@ -65,6 +65,7 @@ from ..model.semantic_ir_legacy_adapter import (
     producer_entity_id,
     producer_occurrence_disambiguator,
     render_display_name_or_leaf,
+    semantic_ir_covers_kind,
 )
 
 if TYPE_CHECKING:
@@ -477,11 +478,25 @@ def diff_typedefs(
 def _typedef_side_index(
     snapshot: AbiSnapshot, typedefs: dict[str, str]
 ) -> SemanticIRIndex:
-    """One side's index: its real ``SemanticIR`` when it has one, or the
-    legacy adapter's projection of *its own* flat typedef collection
-    otherwise. See :func:`typedef_index_pair` for why this is decided
-    per side rather than jointly."""
-    if snapshot.semantic_ir is not None:
+    """One side's index: its real ``SemanticIR`` when it actually resolves a
+    typedef occurrence, or the legacy adapter's projection of *its own* flat
+    typedef collection otherwise. See :func:`typedef_index_pair` for why
+    this is decided per side rather than jointly.
+
+    Gated through :func:`~abicheck.model.semantic_ir_legacy_adapter.
+    semantic_ir_covers_kind`, not just "is ``semantic_ir`` non-``None``"
+    (Codex review, PR #1078, nineteenth round -- found for the constant
+    cohort's own selector, but the identical per-kind gap applies here for
+    symmetry: a hand-built or future-producer snapshot could carry a real
+    ``SemanticIR`` with typedef identity resolved but not yet normalized
+    into occurrences, the same v38-v41-shaped window this module's own
+    load-boundary check already treats as legitimate for constants). A
+    ``SemanticIR`` with zero typedef occurrences at all would otherwise be
+    trusted wholesale, silently blinding comparison to every typedef the
+    snapshot's own flat collection still has real evidence for."""
+    if snapshot.semantic_ir is not None and semantic_ir_covers_kind(
+        snapshot.semantic_ir, EntityKind.TYPEDEF
+    ):
         return SemanticIRIndex(snapshot.semantic_ir)
     return SemanticIRIndex(legacy_typedef_ir(snapshot, typedefs))
 
@@ -577,20 +592,30 @@ def _bare_typedef_side_index(
             leaf_name=bare_alias,
             extra=SYNTHETIC_IDENTITY_EXTRA,
         )
-        # Carries the *source* occurrence's own disambiguator forward
-        # (Codex review, PR #1078, eighteenth round) -- the synthetic
-        # `bare_id` above only fabricates a distinguishing *scope* for the
-        # bare-alias collision; it says nothing about whether the original
-        # occurrence's own ODR/multi-TU disambiguator evidence is real.
-        # Dropping it here (an earlier version left the disambiguator empty)
-        # meant two same-valued ODR-duplicate occurrences projected through
-        # this bare-key path collapsed right back together in
-        # `diff_filtering._dedup_exact`, which this whole projection exists
-        # to feed correctly.
-        occurrences[OccurrenceId(bare_id, occurrence_id.disambiguator)] = (
-            CanonicalEntity(
-                canonical_spelling=Fact.present(_underlying(ir_index, occurrence_id))
-            )
+        # Stamps a collision-safe discriminator, not just the *source*
+        # occurrence's own disambiguator (Codex review, PR #1078, eighteenth
+        # and nineteenth rounds). The eighteenth round carried
+        # `occurrence_id.disambiguator` forward alone, which closes the
+        # ODR/multi-TU case (two occurrences sharing one `EntityId`, a real
+        # disambiguator distinguishing them) but not the plainer one a
+        # nineteenth-round finding named: two *distinct* qualified entities
+        # (`a::Alias`, `b::Alias`) whose own disambiguators are both blank
+        # (the overwhelming common case) still produce two `Change`s with
+        # `entity_id=None` (synthetic) and `disambiguator=None` alike, which
+        # collide right back together in `_dedup_exact`. `ordinal` is
+        # already guaranteed unique per entity processed for one bare_alias
+        # -- it exists precisely to keep `bare_id.scope` distinct -- so
+        # combining it with the source disambiguator (when one is real)
+        # closes both cases with one value: always collision-safe via the
+        # ordinal, and still carrying genuine ODR-duplicate evidence
+        # through when it exists.
+        disambiguator = (
+            f"{ordinal}:{occurrence_id.disambiguator}"
+            if occurrence_id.disambiguator
+            else str(ordinal)
+        )
+        occurrences[OccurrenceId(bare_id, disambiguator)] = CanonicalEntity(
+            canonical_spelling=Fact.present(_underlying(ir_index, occurrence_id))
         )
     # A bare alias this side's own *typedefs* map carries but the real IR
     # doesn't cover at all still needs representation -- delegate to the
