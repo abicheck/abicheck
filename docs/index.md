@@ -1,6 +1,6 @@
 # abicheck
 
-**abicheck** helps library and package maintainers understand and validate how their API/ABI evolves. Point it at two builds of a library (plus their headers) and it tells you what changed — additions, removals, modifications, dependency and deployment-requirement changes — whether existing binaries will keep working, which declared contract is affected (and which known consumers, when you supply consumer binaries or use-case manifests), and what the supplied evidence could not establish. ABI/API compatibility analysis is the foundation; the [vision](contribute/vision.md) records where the tool is going from there.
+**abicheck** helps library and package maintainers understand and validate how their API/ABI evolves. Point it at two builds of a library (plus their headers) and it tells you what changed — additions, removals, modifications, dependency and deployment-requirement changes — whether existing binaries will keep working, which declared contract is affected (with `--contract`) and which known consumers (when you supply consumer binaries or use-case manifests), and what the supplied evidence could not establish. ABI/API compatibility analysis is the foundation; the [vision](contribute/vision.md) records where the tool is going from there.
 
 It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it's a drop-in replacement for `abi-compliance-checker`.
 
@@ -37,7 +37,7 @@ One semantic model serves every scope below; picking one never makes the others 
 | Two builds of one library (binaries, snapshots, or one of each), optionally with headers | [Getting Started](start/getting-started.md), then [CLI Usage](use/cli-usage.md) — no package metadata, debug info, or consumer artifacts required |
 | Two releases of a multi-library product or package | [Multi-Binary & Release Comparison](use/multi-binary.md) and [Choose Your Workflow](start/choose-your-workflow.md) |
 | One local build to check against a multi-profile baseline | [Aggregate Reports](use/aggregate-reports.md) for the per-profile story today; explicit selected-member matching against a multi-variant baseline is *planned* (ADR-065) |
-| A CI pipeline to gate | [GitHub Action](use/github-action.md) or [CI Gating](use/ci-gating.md) — same semantics through the CLI and Python API |
+| A CI pipeline to gate | [GitHub Action](use/github-action.md) or [CI Gating](use/ci-gating.md) — equivalent *resolved* requests decide the same way through the Action, CLI, and Python API (the Action and CLI also fold in `.abicheck.yml`, `--profile`, and `--pack`; see [Python API](use/python-api.md) for the parity table) |
 | Sources, build data, or known consumer binaries for deeper assurance | [Scan Levels](use/scan-levels.md), [Application Compatibility](use/appcompat.md); a prebuilt-consumer lifecycle beyond a single supplied application is *planned* |
 
 ## How the documentation is organized
