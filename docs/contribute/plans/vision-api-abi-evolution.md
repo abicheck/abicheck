@@ -273,6 +273,27 @@ scope/selection section; the raw-versus-effective row in compact views;
 grouped additions/removals/modifications with inspectable old/new
 declarations; component/dependency impact; lifecycle timelines (needs B).
 
+**Report invariants (the facts every view must carry; a renderer never
+infers them — `abicheck/report/AGENTS.md` points here):**
+
+- Compatible additions are visible changes: a compatible run still
+  itemizes what was added; "0 breaking" is not "nothing happened".
+- Raw versus effective totals: every view — compact, review digest,
+  one-line, PR comment included — carries the detected total, the effective
+  (gating) total, and the per-disposition counts with rule provenance.
+  Collapsing detail is fine; dropping these counts is not.
+- Qualified uncertainty: unavailable, unsupported, not applicable, not
+  requested, and failed evidence render as distinct states; a disabled
+  detector reads as *not evaluated*, never as zero findings.
+- Global versus consumer results: a known consumer's impact enriches the
+  report beside the global contract status, never replaces it, and one raw
+  change is counted once however many consumers it affects.
+- Scope and selection are stated: which members/variants were selected,
+  out of scope, or expected but missing, and why.
+- Rendering never changes a gate: report profiles, modes, and `--show-only`
+  reorder or hide detail; they cannot alter a verdict, disposition, exit
+  code, or coverage contribution.
+
 **Slices.** S1 surface-delta and raw/effective/audit summary on existing
 reports using C-S1's fields. S2 scope/completeness (A), consumer (D), and
 versioning (B) blocks as the upstream typed fields land. S3 history and

@@ -6,7 +6,7 @@ This package owns deciding relevance, suppression, classification,
 severity, and gate (exit-code) effect for an already-identified change. It
 answers "does this change matter, and how much" — never "are these two
 declarations the same entity" (that is `compare/`) and never "how is it
-reported" (that is `report/`).
+reported" (that is `report/`). This layer's product invariant (the local consequence of root `AGENTS.md`'s "Product decisions and change routing") is stated once in `abicheck/AGENTS.md` "Product invariants by layer"; it is not restated here.
 
 Most of that behavior still lives in flat root modules that
 `architecture/modules.yaml` lists as this layer's `legacy_paths`. Those stay
@@ -147,14 +147,3 @@ or a CLI flag directly is in the wrong layer.
   moved module's full public surface explicitly (not `import *`), so
   `abicheck.<name>.<attr>` attribute access keeps working identically to
   before the move, not only `from abicheck.<name> import <attr>`.
-
-## Product invariant (local consequence)
-
-Policy makes **explicit dispositions** over an already-recorded change set
-and never erases the facts it disposes of: a suppression, reclassification,
-scope exclusion, acknowledgment, or gate decision carries its rule, origin,
-and reason, and the raw change (with its evidence status) survives for the
-audit. Versioning model, enforcement strictness, and acknowledgment change
-*acceptance*, never technical compatibility. Root `AGENTS.md` "Product
-decisions and change routing" states the rule; ADR-065/066/067 and
-`docs/contribute/plans/vision-api-abi-evolution.md` own the gaps.

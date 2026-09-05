@@ -4,7 +4,7 @@
 
 This package owns immutable report documents, report schemas, grouping, and
 pure output projections. A renderer consumes completed workflow facts and
-returns text/structured data without changing compatibility decisions.
+returns text/structured data without changing compatibility decisions. This layer's product invariant (the local consequence of root `AGENTS.md`'s "Product decisions and change routing") is stated once in `abicheck/AGENTS.md` "Product invariants by layer"; it is not restated here. The detailed report-facing invariants (visible additions, raw-versus-effective totals in every view, qualified uncertainty, global-versus-consumer results, stated scope) live in workstream G of `docs/contribute/plans/vision-api-abi-evolution.md`.
 
 ## Permitted imports
 
@@ -113,38 +113,6 @@ import-cycle-growth violation).
 Report unit tests migrate to `tests/unit/report/`; stable format contracts
 stay in `tests/golden/reports/`. Existing aggregate report assertions remain
 in `tests/test_aggregate*.py` until their production projection migrates.
-
-## Product-facing report invariants
-
-Local consequences of root `AGENTS.md`'s "Product decisions and change
-routing" section (the vision's reporting rules). Each names the fact the
-document must *carry*; a view that lacks the fact is a document gap to fix
-at the owner, never something a renderer infers:
-
-- **Compatible additions are visible changes.** A compatible run still
-  itemizes what was added; "0 breaking" is not "nothing happened".
-- **Raw versus effective totals.** Every view — compact, review digest,
-  one-line, PR comment included — carries the detected total, the
-  effective (gating) total, and the per-disposition counts with rule
-  provenance. Collapsing detail is fine; dropping these counts is not.
-- **Qualified uncertainty.** Unavailable, unsupported, not applicable, not
-  requested, and failed evidence render as distinct states; a disabled
-  detector reads as *not evaluated*, never as zero findings.
-- **Global versus consumer results.** A known consumer's impact enriches
-  the report next to the global contract status; it never replaces or
-  overwrites it, and one raw change is counted once however many consumers
-  it affects.
-- **Scope and selection are stated.** Which members/variants were selected,
-  which were out of scope, which were expected but missing, and why.
-- **Rendering never changes a gate.** Report profiles, modes, and
-  `--show-only` reorder or hide detail; they cannot alter a verdict,
-  disposition, exit code, or coverage contribution (already enforced by the
-  import guards above — keep it that way for any new view).
-
-Where the current renderers fall short (e.g. the one-line format carries
-no suppression totals today), the gap is recorded in
-`docs/contribute/plans/vision-api-abi-evolution.md`, not silently patched
-renderer-side.
 
 ## Prohibited responsibilities
 

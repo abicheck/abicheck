@@ -5,7 +5,7 @@
 This package owns reading binary, debug, header, build, and source evidence
 into the facts `abicheck.model` defines, per ADR-061 D1. It answers "what
 does this input actually contain" — never whether a fact matters, whether
-two facts differ, how a comparison is decided, or how a result is rendered.
+two facts differ, how a comparison is decided, or how a result is rendered. This layer's product invariant (the local consequence of root `AGENTS.md`'s "Product decisions and change routing") is stated once in `abicheck/AGENTS.md` "Product invariants by layer"; it is not restated here.
 
 The package is new and mostly empty: it is the target owner for a large set
 of still-flat modules (`elf_metadata.py`, `dwarf_metadata.py`,
@@ -148,14 +148,3 @@ an explicit keyword-only parameter rather than importing it back through
 - **A migrated module must never import back through its old flat facade**
   (`abicheck.dumper`, `abicheck.service`, `abicheck.cli`) — that reintroduces
   exactly the reverse coupling this package exists to remove.
-
-## Product invariant (local consequence)
-
-Extraction **retains facts with provenance and status**. Not requested,
-unavailable on this input, unsupported by this backend, not applicable, and
-collected-then-failed are distinct `FactStatus` outcomes; a failed
-collection never returns `PRESENT` with an empty value, so a downstream
-detector cannot read a failure as an empty surface. Optional evidence
-(DWARF, build data, sources) is consumed when present and never becomes a
-prerequisite. Root `AGENTS.md` "Product decisions and change routing"
-states the rule; ADR-063 Phase 5's fact registry is the mechanism.

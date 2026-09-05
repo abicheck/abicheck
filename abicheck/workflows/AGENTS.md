@@ -4,7 +4,7 @@
 
 This package owns operation orchestration: sequencing extraction, comparison,
 policy evaluation, resource lifetimes, and typed request/plan/result flows. It
-is the composition ring between domain packages and frontends.
+is the composition ring between domain packages and frontends. This layer's product invariant (the local consequence of root `AGENTS.md`'s "Product decisions and change routing") is stated once in `abicheck/AGENTS.md` "Product invariants by layer"; it is not restated here.
 
 ## Permitted imports
 
@@ -148,16 +148,3 @@ before the canonical PR profile.
 Root `abicheck.service` and command modules are compatibility/front-end
 surfaces, not workflow dependencies. A supported old import may delegate to a
 workflow object, but the workflow must not import back through that facade.
-
-## Product invariant (local consequence)
-
-A workflow resolves the **user task and comparison scope** before it
-executes anything: which members or variants were selected, which were
-expected for this run and with what provenance, what was actually
-acquired, and what is out of scope. *Unselected*, *expected but not
-produced*, *failed*, and *deliberately retired* are four different states
-that reach the typed result as such; a run that completed zero valid
-comparisons is reported as no comparison, never as a clean pass. One
-resolution serves scalar, package, and matrix cardinalities. Root
-`AGENTS.md` "Product decisions and change routing" states the rule;
-ADR-065 and `docs/contribute/plans/vision-api-abi-evolution.md` own the gaps.
