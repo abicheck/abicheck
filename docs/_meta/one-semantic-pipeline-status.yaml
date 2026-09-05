@@ -931,6 +931,19 @@ concepts:
       a group of one keeps the bare, unfallen-back disambiguator exactly as
       before the twentieth round.
 
+      **A twenty-third round found that `diff_types._has_type_evidence`
+      never learned about `SemanticIR`.** It only checked the legacy flat
+      `types`/`enums`/`typedefs` collections, but `compare.typedefs`' own
+      per-side-independence design (this Track) can legitimately trust a
+      real `SemanticIR` for typedef comparison even when a snapshot's flat
+      `typedefs` map is empty -- exactly the "hand-built or future-producer
+      snapshot" case that module's own docstring already calls "not
+      hypothetical." Such a `SemanticIR`-only snapshot has real type
+      evidence, but `_has_type_evidence` read it as none at all, tripping
+      `_removals_are_unconfirmed`'s stripped-binary heuristic and silently
+      reclassifying a genuine typedef removal as unconfirmed. Fixed by also
+      recognizing `SemanticIR` type/enum/typedef occurrences as evidence.
+
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.
     investigated_declined:

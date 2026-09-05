@@ -235,6 +235,53 @@ def test_stripped_new_side_does_not_fabricate_type_removals():
     assert not any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in result.changes)
 
 
+def test_semantic_ir_only_typedef_evidence_still_confirms_a_real_removal():
+    """The stripped-side guard must not misfire when the new side's only type
+    evidence lives in a real ``SemanticIR`` rather than the legacy flat
+    ``typedefs`` map (Codex review, PR #1078, twenty-third round).
+
+    ``compare.typedefs``' per-side-independence design (ADR-063 Track T3) can
+    legitimately trust a real ``SemanticIR`` for typedef comparison even when
+    the snapshot's own flat ``typedefs`` map is empty. Before this fix,
+    ``diff_types._has_type_evidence`` only checked the flat map, so such a
+    snapshot read as "no type evidence at all" -- exactly
+    ``_removals_are_unconfirmed``'s stripped-binary signature -- and silently
+    reclassified a genuine typedef removal as unconfirmed, even though the new
+    side actually has real (IR-only) type evidence and genuinely dropped one
+    of the old side's two typedefs.
+    """
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model.fact import Fact
+    from abicheck.model.identity import entity_id_for_typedef
+    from abicheck.model.occurrence import OccurrenceId
+    from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
+
+    old = _elf_snapshot(functions=[_exported_func("use_alias")])
+    old.typedefs = {"A": "int", "B": "long"}
+
+    # new: same exported function, flat `typedefs` map empty, but a real
+    # SemanticIR resolves `A` (only) -- `B` was genuinely removed.
+    new = _elf_snapshot(functions=[_exported_func("use_alias")])
+    new.dwarf = None
+    new.semantic_ir = SemanticIR(
+        occurrences={
+            OccurrenceId(entity_id_for_typedef((), "A")): CanonicalEntity(
+                canonical_spelling=Fact.present("int")
+            )
+        }
+    )
+
+    result = compare(old, new)
+    assert any(
+        c.kind == ChangeKind.TYPEDEF_REMOVED and c.symbol == "B"
+        for c in result.changes
+    ), (
+        "a typedef genuinely absent from the new side's real SemanticIR must "
+        f"still be reported as removed; changes: "
+        f"{[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
 def test_real_removal_still_reported_when_symbols_also_dropped():
     """The stripped-side guard must NOT hide a genuine class removal: when the
     removed type's exported methods are also gone, symbol retention is low and

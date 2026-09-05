@@ -535,3 +535,14 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   `_group_safe_disambiguator` only falls back when the group genuinely has
   more than one entity; an ordinary finding keeps hashing exactly as
   before (Codex review).
+- **A genuine typedef/type/enum removal on a `SemanticIR`-only side no
+  longer gets misclassified as an unconfirmed, stripped-binary removal.**
+  `diff_types._has_type_evidence` only checked the legacy flat
+  `types`/`enums`/`typedefs` collections, but `compare.typedefs`'
+  per-side-independence design can legitimately trust a real `SemanticIR`
+  for typedef comparison even when a snapshot's own flat `typedefs` map is
+  empty. Such a snapshot has real type evidence this function must
+  recognize -- otherwise `_removals_are_unconfirmed`'s stripped-binary
+  heuristic silently suppressed a real removal purely because the legacy
+  sidecar wasn't populated. `_has_type_evidence` now also recognizes
+  `SemanticIR` type/enum/typedef occurrences (Codex review).
