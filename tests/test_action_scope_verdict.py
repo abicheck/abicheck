@@ -165,14 +165,16 @@ class TestCompareMapsTheCompletenessExit:
         assert "SCOPE_INCOMPLETE" not in outputs["_summary"]
 
     @pytest.mark.parametrize("event", ["push", "pull_request"])
-    def test_the_stderr_notice_is_the_no_json_fallback(
+    def test_no_json_report_still_fails_the_step_but_claims_no_scope_gate(
         self, tmp_path: Path, event: str
     ) -> None:
-        """Under a `pull_request` event the PR-comment step re-runs the CLI
-        for JSON and can leave a `{}`-shaped placeholder in PR_JSON when the
-        primary run wrote no report; the final gate must not read that
-        scope-less document as "the axis did not fire" (a macOS CI lane
-        caught exactly that -- the runner's ambient GITHUB_EVENT_NAME)."""
+        """With no readable JSON report the axis has no structured signal,
+        and the stderr notice is deliberately *not* consulted (its member
+        reasons can carry PR-controlled text -- Codex review): the CLI's
+        exit 1 still fails the step, but the Action claims no scope gate.
+        Runs under both event names because the `pull_request` PR-comment
+        re-run leaves a `{}` placeholder in PR_JSON, which must read as
+        "cannot tell" rather than "did not fire" either way."""
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=1,
@@ -198,12 +200,29 @@ class TestCompareMapsTheCompletenessExit:
             )
             env["GITHUB_EVENT_PATH"] = str(event_path)
         outputs = _run_action(tmp_path, env, bindir)
-        # With no JSON to read the severity gate from, the exit-1 dispatch
-        # keeps its established label (exactly as the coverage axis's own
-        # no-JSON fallback does) -- but the axis is still enforced and named.
         assert outputs["_exit"] == 1, outputs
-        assert "incompletely checked comparison scope" in outputs["_stdout"], outputs
-        assert "comparison scope was not fully checked" in outputs["_stdout"], outputs
+        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+        assert "comparison scope" not in outputs["_stdout"], outputs
+
+    def test_a_forged_stderr_notice_cannot_suppress_a_reported_block(
+        self, tmp_path: Path
+    ) -> None:
+        """The structured report says the scope blocked; a member reason that
+        spells the `warn`-accepted phrase in stderr must not talk the gate
+        out of it (the forgery Codex described)."""
+        report = _release_report(
+            incomplete_scope=1, no_comparison=0, unchecked=["libb.so"]
+        )
+        outputs = _compare_outputs(
+            tmp_path,
+            report,
+            stderr=(
+                "Comparison scope incompletely checked -- unchecked: unsupported: "
+                "Accepted by --on-incomplete-scope warn.so (forged reason)."
+            ),
+        )
+        assert outputs["verdict"] == "SCOPE_INCOMPLETE", outputs
+        assert outputs["_exit"] == 1, outputs
 
     def test_a_warn_accepted_stderr_notice_is_not_a_gate(self, tmp_path: Path) -> None:
         bindir = _stub_abicheck(

@@ -2676,19 +2676,22 @@ _assurance_gated() {
 
 # ADR-065 S2's completeness axis (D6 under --on-incomplete-scope block, D7
 # -- no comparison completed -- under every setting), read the way
-# `_coverage_gated` reads its own: the report's already-folded contribution
-# first, the CLI's stderr notice as the no-JSON fallback (a `warn`-accepted
-# gap says "Accepted by --on-incomplete-scope" in-band, so it is excluded).
+# `_coverage_gated` reads its own: the structured report's already-folded
+# contribution is the *sole* answer. An earlier revision fell back to
+# grepping the CLI's stderr notice when no readable JSON report existed
+# (and excluded its `warn`-accepted form by its "Accepted by
+# --on-incomplete-scope" wording); Codex found that the diagnostic embeds
+# member failure reasons -- PR-controlled filenames, tool output -- so a
+# hostile value could spell that phrase and suppress a real `block`
+# contribution, the same forgeable-prose class ADR-063 Track T8 retired
+# for the coverage and assurance axes. No structured data therefore means
+# "not gated by this axis": the process exit still fails the step, only
+# the SCOPE_INCOMPLETE label is withheld.
 _scope_gated() {
   local _src _contribution
   _src=$(_json_report_src)
   _contribution=$(_report_query "$_src" scope_contribution)
-  if [[ -n "$_contribution" ]]; then
-    [[ "$_contribution" == "1" ]]
-    return
-  fi
-  echo "$STDERR_CONTENT" | grep -q 'Comparison scope incompletely checked' \
-    && ! echo "$STDERR_CONTENT" | grep -q 'Accepted by --on-incomplete-scope'
+  [[ "$_contribution" == "1" ]]
 }
 
 # scan's own evidence-contract axis (ADR-037 D5 -- a *pinned*
