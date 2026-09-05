@@ -1,5 +1,5 @@
 name: 'abicheck — ABI Compatibility Checker'
-description: 'Check ABI/API compatibility of C/C++ binaries, packages, and releases in CI: what changed, what breaks, and what the evidence could not establish.'
+description: 'ABI/API compatibility of C/C++ binaries, packages, and releases in CI: what changed, what breaks, what was not checked.'
 
 branding:
   icon: 'shield'

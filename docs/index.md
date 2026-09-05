@@ -1,6 +1,6 @@
 # abicheck
 
-**abicheck** helps library and package maintainers understand and validate how their API/ABI evolves. Point it at two builds of a library (plus their headers) and it tells you what changed — additions, removals, modifications, dependency and deployment-requirement changes — whether existing binaries will keep working, which declared contract and known consumers are affected, and what the supplied evidence could not establish. ABI/API compatibility analysis is the foundation; the [vision](contribute/vision.md) records where the tool is going from there.
+**abicheck** helps library and package maintainers understand and validate how their API/ABI evolves. Point it at two builds of a library (plus their headers) and it tells you what changed — additions, removals, modifications, dependency and deployment-requirement changes — whether existing binaries will keep working, which declared contract is affected (and which known consumers, when you supply consumer binaries or use-case manifests), and what the supplied evidence could not establish. ABI/API compatibility analysis is the foundation; the [vision](contribute/vision.md) records where the tool is going from there.
 
 It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it's a drop-in replacement for `abi-compliance-checker`.
 
