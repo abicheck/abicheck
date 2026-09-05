@@ -577,6 +577,98 @@ class TestDetectorBehavior:
         )
         assert changes == []
 
+    def test_a_mixed_group_reports_both_the_change_and_the_residual_addition(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, tenth round: a stable-identity `X=1`
+        becomes `X=2` while a *different*, newly-added anonymous-scope
+        `X=3` also appears in the same colliding group -- `removed={1}`,
+        `added={2, 3}`. Pairing off one removed value with one added value
+        as a single ``CONSTANT_CHANGED`` story must not silently drop the
+        independently provable ``CONSTANT_ADDED`` for the leftover value."""
+        stable_old = entity_id_for_constant((), "X")
+        stable_new = entity_id_for_constant((), "X")
+        added_new = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                    OccurrenceId(added_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("3")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        by_kind = {c.kind: c for c in changes}
+        assert set(by_kind) == {ChangeKind.CONSTANT_CHANGED, ChangeKind.CONSTANT_ADDED}
+        assert by_kind[ChangeKind.CONSTANT_CHANGED].old_value == "1"
+        # Which of "2"/"3" becomes the CHANGED's representative pairing and
+        # which becomes the residual ADDED is an implementation-internal
+        # (set-iteration-order) detail -- what must hold is that both
+        # values are accounted for somewhere, and neither is dropped.
+        assert {
+            by_kind[ChangeKind.CONSTANT_CHANGED].new_value,
+            by_kind[ChangeKind.CONSTANT_ADDED].new_value,
+        } == {"2", "3"}
+
+    def test_a_mixed_group_reports_both_the_change_and_the_residual_removal(
+        self,
+    ) -> None:
+        """The mirror image: `removed={1, 4}`, `added={2}` -- one pairing
+        consumes `1`/`2` as a ``CONSTANT_CHANGED``, leaving `4` as an
+        independently provable ``CONSTANT_REMOVED``."""
+        stable_old = entity_id_for_constant((), "X")
+        removed_old = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        stable_new = entity_id_for_constant((), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(removed_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("4")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    )
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        by_kind = {c.kind: c for c in changes}
+        assert set(by_kind) == {
+            ChangeKind.CONSTANT_CHANGED,
+            ChangeKind.CONSTANT_REMOVED,
+        }
+        assert by_kind[ChangeKind.CONSTANT_CHANGED].new_value == "2"
+        # Which of "1"/"4" becomes the CHANGED's representative pairing and
+        # which becomes the residual REMOVED is an implementation-internal
+        # (set-iteration-order) detail -- what must hold is that both
+        # values are accounted for somewhere, and neither is dropped.
+        assert {
+            by_kind[ChangeKind.CONSTANT_CHANGED].old_value,
+            by_kind[ChangeKind.CONSTANT_REMOVED].old_value,
+        } == {"1", "4"}
+
 
 # -- end to end, through the real detector entry point ---------------------
 

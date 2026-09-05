@@ -49,6 +49,7 @@ about a typedef.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import TYPE_CHECKING, Protocol
 
 from ..diff_helpers import make_change, typedef_side_trusts_qualified
@@ -280,31 +281,68 @@ def diff_typedefs(
                 )
             )
             continue
-        old_values = sorted(_underlying(old_index, i) for i in old_ids)
-        new_values = sorted(_underlying(new_index, i) for i in new_ids)
-        if old_values == new_values:
+        old_multiset: Counter[str] = Counter(_underlying(old_index, i) for i in old_ids)
+        new_multiset: Counter[str] = Counter(_underlying(new_index, i) for i in new_ids)
+        if old_multiset == new_multiset:
             continue
-        new_type = _underlying(new_index, new_ids[0])
-        if len(old_ids) > 1 or len(new_ids) > 1:
-            # Ambiguous group: report one value present only on the old
-            # side and one present only on the new side, rather than an
-            # arbitrary representative pair that might coincidentally
-            # agree even though the multiset as a whole differs.
-            old_type = next((v for v in old_values if v not in new_values), old_type)
-            new_type = next((v for v in new_values if v not in old_values), new_type)
-        changes.append(
-            make_change(
-                ChangeKind.TYPEDEF_BASE_CHANGED,
-                symbol=bare_alias,
-                name=bare_alias,
-                old_value=old_type,
-                new_value=new_type,
-                entity_id=eid,
-                description=(
-                    f"Typedef base type changed: {bare_alias}{qualified_suffix}"
-                ),
+        # `Counter` subtraction, not sorted-list equality (Codex review, PR
+        # #1078, tenth round): a colliding group that grew or shrank by a
+        # value *already present* in the group (e.g. a second
+        # anonymous-namespace ``Alias=int`` alongside an existing
+        # ``Alias=int``) has sorted lists of different length, which the
+        # previous representative-pick logic could still read as a value
+        # *change* -- reporting ``TYPEDEF_BASE_CHANGED`` (breaking) for what
+        # is either a pure, untracked-and-compatible addition (typedef
+        # additions have no ``ChangeKind`` at all -- see this alias's own
+        # `new_ids is None`/`new_alias_keys` handling above, which never
+        # visits a new-only alias either) or a pure removal.
+        # `removed`/`added` (only positive-count entries survive
+        # subtraction) answer "net removed" and "net added" directly:
+        removed_values = set(old_multiset - new_multiset)
+        added_values = set(new_multiset - old_multiset)
+        if removed_values and added_values:
+            # A genuine one-to-one substitution: consumes exactly one
+            # value from each side, leaving any further residual counts to
+            # the loops below rather than folding them into this one
+            # ``TYPEDEF_BASE_CHANGED`` (Codex review, PR #1078, tenth
+            # round's constant-family sibling finding -- a mixed
+            # removed-and-added group can carry more than one independent
+            # piece of evidence).
+            old_type = next(iter(removed_values))
+            new_type = next(iter(added_values))
+            removed_values.discard(old_type)
+            added_values.discard(new_type)
+            changes.append(
+                make_change(
+                    ChangeKind.TYPEDEF_BASE_CHANGED,
+                    symbol=bare_alias,
+                    name=bare_alias,
+                    old_value=old_type,
+                    new_value=new_type,
+                    entity_id=eid,
+                    description=(
+                        f"Typedef base type changed: {bare_alias}{qualified_suffix}"
+                    ),
+                )
             )
-        )
+        for leftover_old in removed_values:
+            # A pure removal within a colliding group: the alias itself
+            # still exists on the new side (via another colliding member),
+            # but this specific value no longer does.
+            changes.append(
+                make_change(
+                    ChangeKind.TYPEDEF_REMOVED,
+                    symbol=bare_alias,
+                    name=bare_alias,
+                    old_value=leftover_old,
+                    entity_id=eid,
+                    description=f"Typedef removed: {bare_alias}{qualified_suffix}",
+                )
+            )
+        # `added_values`' own leftovers are a pure addition -- deliberately
+        # unreported, the same as a brand-new alias in `new_aliases` that
+        # never appears in `old_aliases` at all: typedef additions carry no
+        # `ChangeKind` and are always compatible.
     return changes
 
 

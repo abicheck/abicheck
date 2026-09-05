@@ -366,48 +366,61 @@ def diff_constants(
         )
         if old_multiset == new_multiset:
             continue
-        removed = old_multiset - new_multiset
-        added = new_multiset - old_multiset
-        if removed and not added:
-            old_val = _unresolved_to_none(next(iter(removed)))
+        removed_values = set(old_multiset - new_multiset)
+        added_values = set(new_multiset - old_multiset)
+        # A mixed group (both a net removal and a net addition) carries more
+        # than one independent piece of evidence -- pairing off exactly one
+        # removed value with one added value as a single "value changed"
+        # story, then reporting whatever is *left over* in either set as its
+        # own `CONSTANT_REMOVED`/`CONSTANT_ADDED`, rather than collapsing
+        # every mixed `Counter` difference into one `CONSTANT_CHANGED` that
+        # silently drops the rest (Codex review, PR #1078, tenth round: e.g.
+        # a stable-identity `X=1` becoming `X=2` while a *different*,
+        # newly-added anonymous-scope `X=3` also appears -- `removed={1}`,
+        # `added={2, 3}` -- previously reported only one `CONSTANT_CHANGED`
+        # and silently lost the independently provable `CONSTANT_ADDED`).
+        if removed_values and added_values:
+            removed_key = next(iter(removed_values))
+            added_key = next(iter(added_values))
+            old_val = _unresolved_to_none(removed_key)
+            new_val = _unresolved_to_none(added_key)
+            removed_values.discard(removed_key)
+            added_values.discard(added_key)
+            unreliable = (
+                old_val is not None
+                and new_val is not None
+                and is_fingerprint_comparison_unreliable(old_val, new_val)
+            )
+            if not unreliable:
+                changes.append(
+                    make_change(
+                        ChangeKind.CONSTANT_CHANGED,
+                        symbol=name,
+                        name=name,
+                        old=repr(old_val),
+                        new=repr(new_val),
+                        old_value=old_val,
+                        new_value=new_val,
+                        entity_id=eid,
+                    )
+                )
+        for leftover_old in removed_values:
             changes.append(
                 make_change(
                     ChangeKind.CONSTANT_REMOVED,
                     symbol=name,
                     name=name,
-                    old_value=old_val,
+                    old_value=_unresolved_to_none(leftover_old),
                     entity_id=eid,
                 )
             )
-        elif added and not removed:
-            new_val = _unresolved_to_none(next(iter(added)))
+        for leftover_new in added_values:
             changes.append(
                 make_change(
                     ChangeKind.CONSTANT_ADDED,
                     symbol=name,
                     name=name,
-                    new_value=new_val,
-                    entity_id=eid,
-                )
-            )
-        else:
-            old_val = _unresolved_to_none(next(iter(removed)))
-            new_val = _unresolved_to_none(next(iter(added)))
-            if (
-                old_val is not None
-                and new_val is not None
-                and is_fingerprint_comparison_unreliable(old_val, new_val)
-            ):
-                continue
-            changes.append(
-                make_change(
-                    ChangeKind.CONSTANT_CHANGED,
-                    symbol=name,
-                    name=name,
-                    old=repr(old_val),
-                    new=repr(new_val),
-                    old_value=old_val,
-                    new_value=new_val,
+                    new_value=_unresolved_to_none(leftover_new),
                     entity_id=eid,
                 )
             )

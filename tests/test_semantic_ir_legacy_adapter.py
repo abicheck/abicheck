@@ -649,6 +649,33 @@ class TestConstructionTimeConsistency:
         )
         assert snap.semantic_ir is not None
 
+    def test_a_sidecar_entry_with_no_matching_ir_occurrence_is_a_hard_failure(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, tenth round: the sidecar names a
+        declaration (``"ns::Other"``) that ``SemanticIR`` has no occurrence
+        for at all -- not merely a mismatched id for a name both sides
+        resolve, but a disagreement on whether the declaration exists in
+        the first place. Since ``SemanticIR`` is the sole comparison-time
+        source for this cohort, a comparison would never see this
+        declaration at all, silently masking a real removal against any
+        other snapshot that also lacks it -- so this must fail loudly at
+        construction, the same as a mismatched id does."""
+        import pytest
+
+        from abicheck.errors import SemanticIrAuthorityError
+
+        ir_eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        other_eid = entity_id_for_typedef((Namespace("ns"),), "Other")
+        with pytest.raises(SemanticIrAuthorityError):
+            _snap(
+                semantic_ir=_typedef_ir({ir_eid: "int"}),
+                typedef_entity_ids={
+                    "ns::Alias": ir_eid,
+                    "ns::Other": other_eid,
+                },
+            )
+
     def test_the_constant_family_gets_the_identical_check(self) -> None:
         import pytest
 

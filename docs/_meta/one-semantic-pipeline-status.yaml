@@ -499,6 +499,37 @@ concepts:
       sentinel), so there is no per-occurrence fallback ambiguity to
       misattribute and no unresolved-value cardinality question distinct
       from an ordinary value multiset.
+
+      **A tenth round found the sixth round's typedef collision fix never
+      received the ninth round's own `Counter`-based correction, plus one
+      further gap in the ninth round's own mixed-group handling, plus one
+      direction the sidecar-identity check still didn't cover.**
+      `diff_typedefs` compared its colliding group by sorted-list equality
+      still, sharing the identical blind spot `diff_constants` had before
+      the ninth round: a group that grew or shrank by a value already
+      present (a duplicate `Alias=int`) read as `TYPEDEF_BASE_CHANGED`
+      with an identical `old_value`/`new_value` instead of a pure,
+      untracked-and-compatible addition or a `TYPEDEF_REMOVED`. Fixed by
+      the identical `Counter` multiset-subtraction rewrite, adapted for
+      typedefs having no `ADDED` `ChangeKind` at all (a pure addition's
+      leftover is simply never reported, mirroring how a brand-new alias
+      absent from the old side is already never visited). Separately,
+      `diff_constants`'s own mixed-group case (both a net removal and a
+      net addition present at once) picked one representative pair from
+      each side and emitted a single `CONSTANT_CHANGED`, silently dropping
+      whichever removed/added value didn't get picked -- fixed by pairing
+      off exactly one removed value with one added value as that one
+      `CONSTANT_CHANGED`, then reporting every other leftover distinct
+      value in either set as its own `CONSTANT_ADDED`/`CONSTANT_REMOVED`.
+      Finally, `_assert_sidecar_identity_consistent` only checked a
+      `SemanticIR` occurrence's rendered name against the sidecar when
+      present -- a sidecar entry naming a declaration `SemanticIR` has no
+      occurrence for at all passed construction silently, even though such
+      a declaration would never reach a comparison at all (the sole
+      comparison-time source omits it entirely). The check now also
+      iterates the sidecar's own keys, raising
+      `errors.SemanticIrAuthorityError` for any name with no corresponding
+      `SemanticIR` occurrence.
   public_surface:
     primitive: complete
     producers: complete

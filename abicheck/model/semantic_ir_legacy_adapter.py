@@ -352,6 +352,17 @@ def _assert_sidecar_identity_consistent(
     the sidecar's recorded id, rather than picking one arbitrary member to
     compare against and risking a false failure purely from which member
     that happened to be.
+
+    **Checked in both directions** (Codex review, PR #1078, tenth round):
+    a sidecar entry naming a rendered name with *no* corresponding
+    ``SemanticIR`` occurrence at all is exactly as much a producer
+    disagreement as a mismatched id for a name both representations
+    resolve -- the two identity representations still disagree on whether
+    the declaration exists, and a comparison reading only through
+    ``SemanticIR`` (this cohort's sole comparison-time source since T3)
+    would see nothing for it, silently masking a real removal against any
+    other snapshot that also lacks it. The one-way check above catches a
+    *wrong* id; this direction catches a *missing* one.
     """
     index = SemanticIRIndex(snapshot.semantic_ir) if snapshot.semantic_ir else None
     if index is None:
@@ -373,6 +384,19 @@ def _assert_sidecar_identity_consistent(
                 "the sole comparison-time source for this cohort, so this "
                 "can no longer be silently resolved by falling back to a "
                 "legacy projection)"
+            )
+    for rendered, sidecar_id in sidecar.items():
+        if rendered not in by_rendered:
+            raise SemanticIrAuthorityError(
+                f"{family} {rendered!r}: the snapshot's own "
+                f"{family}_entity_ids sidecar records entity_id "
+                f"{sidecar_id!r} for this name, but SemanticIR has no "
+                "occurrence rendering to it at all -- the producer's two "
+                "identity representations disagree on whether this "
+                "declaration exists (ADR-063 Track T3: SemanticIR is the "
+                "sole comparison-time source for this cohort, so a "
+                "declaration the sidecar names but SemanticIR omits would "
+                "silently vanish from comparison)"
             )
 
 

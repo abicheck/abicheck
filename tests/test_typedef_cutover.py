@@ -233,6 +233,80 @@ class TestDetectorBehavior:
         assert change.old_value == "long"
         assert change.new_value == "char"
 
+    def test_a_duplicate_value_added_to_a_colliding_group_is_not_a_base_change(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, tenth round: the new side adds a second
+        anonymous-namespace ``Alias=int`` alongside an existing
+        ``Alias=int`` -- the group grows from one occurrence to two, both
+        sharing the identical underlying type. A sorted-list
+        multiset-equality check cannot tell this apart from a genuine value
+        substitution that happens to leave a coincidentally-equal
+        representative pair, and used to report ``TYPEDEF_BASE_CHANGED``
+        (breaking) with ``old_value == new_value == "int"`` for what is a
+        purely compatible, and for typedefs entirely *untracked*, addition
+        -- typedef additions carry no ``ChangeKind`` at all."""
+        old_id = entity_id_for_typedef((), "Alias")
+        new_first = entity_id_for_typedef((), "Alias")
+        new_second = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_first): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(new_second): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        assert _run(old_index, new_index) == []
+
+    def test_a_duplicate_value_removed_from_a_colliding_group_is_a_removal(
+        self,
+    ) -> None:
+        """The mirror image: the group shrinks from two occurrences (both
+        ``int``) to one, and must be classified ``TYPEDEF_REMOVED``, not
+        ``TYPEDEF_BASE_CHANGED``."""
+        old_first = entity_id_for_typedef((), "Alias")
+        old_second = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        new_id = entity_id_for_typedef((), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_first): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(old_second): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.TYPEDEF_REMOVED
+        assert change.symbol == "Alias"
+        assert change.old_value == "int"
+
     def test_removal_change_and_no_op(self) -> None:
         changes = _run(
             _ir_backed({"gone": "int", "moved": "int", "same": "int"}),

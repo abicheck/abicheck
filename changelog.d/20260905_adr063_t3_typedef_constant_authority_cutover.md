@@ -180,3 +180,37 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   sides for reasons unrelated to either occurrence's own value); the
   collision path no longer consults it at all, representing an unresolved
   occurrence with an internal sentinel instead.
+- **A typedef collision's own addition/removal is no longer misclassified
+  as a base-type change, and a mixed constant collision no longer drops an
+  independently provable addition or removal.** `compare.typedefs.
+  diff_typedefs` now uses the identical `collections.Counter`
+  multiset-subtraction approach `diff_constants` adopted in the previous
+  fragment entry (Codex review, PR #1078, tenth round): a colliding group
+  that grows or shrinks by a value already present elsewhere in the group
+  (e.g. a second anonymous-namespace `Alias=int` alongside an existing
+  `Alias=int`) is now correctly read as a pure, untracked-and-compatible
+  addition (typedef additions carry no `ChangeKind` at all) or a
+  `TYPEDEF_REMOVED`, never a `TYPEDEF_BASE_CHANGED` with an identical
+  `old_value`/`new_value`. Separately, `diff_constants`'s own mixed-group
+  handling (both a net removal and a net addition present at once, e.g. a
+  stable `X=1` becoming `X=2` while a different, newly-added
+  anonymous-scope `X=3` also appears) used to pick one representative pair
+  from each side and emit a single `CONSTANT_CHANGED`, silently dropping
+  the independently provable `CONSTANT_ADDED`/`CONSTANT_REMOVED` for
+  whatever didn't get picked — it now pairs off exactly one removed value
+  with one added value as that one `CONSTANT_CHANGED` story, then reports
+  every remaining distinct value in either set as its own
+  `CONSTANT_ADDED`/`CONSTANT_REMOVED`.
+- **The Track T3 sidecar-identity consistency check is now bidirectional.**
+  `_assert_sidecar_identity_consistent` only ever checked that a
+  `SemanticIR` occurrence's rendered name, when present in the sidecar,
+  agreed with the sidecar's recorded id — a sidecar entry naming a
+  declaration `SemanticIR` has *no* occurrence for at all passed
+  construction silently (Codex review, PR #1078, tenth round). Since
+  `SemanticIR` is the sole comparison-time source for this cohort, such a
+  declaration would never actually reach a comparison, potentially masking
+  a real removal against another snapshot that also lacks it. The check
+  now also iterates the sidecar's own keys and raises
+  `SemanticIrAuthorityError` for any name with no corresponding
+  `SemanticIR` occurrence, closing the reverse direction the original
+  one-way check left open.
