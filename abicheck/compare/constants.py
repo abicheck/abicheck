@@ -102,21 +102,12 @@ def _unresolved_to_none(value: str) -> str | None:
 
 def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
     """*occurrence_id*'s own producer disambiguator when set, else a
-    fallback derived from its own (real, non-synthetic) entity id (Codex
-    review, PR #1078, twentieth round).
-
-    Two colliding, entity-distinct occurrences with no real source
-    disambiguator -- the common case for two anonymous-scope entities --
-    would otherwise both carry ``disambiguator=None`` and collide on
-    ``finding_identity.report_finding_id`` even though ``diff_filtering.
-    _dedup_exact`` already tells them apart via ``entity_id.key``. Folding
-    ``entity_id`` in here rather than directly into ``report_finding_id``
-    carries none of that function's backward-compatibility risk:
-    ``Change.disambiguator`` is a field this PR introduces (eighteenth
-    round), so every value this helper can produce is new, not a rehash of
-    an already-shipped id (see ``report_finding_id``'s own docstring for
-    the full account of why folding ``entity_id`` in there directly was
-    tried and reverted)."""
+    fallback derived from its own real (non-synthetic) entity id (Codex
+    review, PR #1078, twentieth round) -- closes a collision between two
+    entity-distinct occurrences that both lack a source disambiguator (the
+    common anonymous-scope case) without touching ``report_finding_id``
+    itself: see that function's docstring for why folding ``entity_id`` in
+    there directly was tried and reverted."""
     disambiguator = producer_occurrence_disambiguator(occurrence_id)
     if disambiguator:
         return disambiguator
@@ -124,47 +115,56 @@ def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
     return None if entity_id is None else str(entity_id.key)
 
 
+#: One residual: ``(occurrence_id, synthetic_disambiguator)``. The id is the
+#: real, attributable identity, or ``None`` when attribution would be
+#: dishonest; the synthetic value is set only alongside a ``None`` id, to
+#: keep otherwise-identical ambiguous residuals from collapsing downstream
+#: -- it carries no identity claim (Codex review, PR #1078, 21st round).
+_Residual = tuple["OccurrenceId | None", "str | None"]
+
+
 def _residual_entity_id(occurrence_id: OccurrenceId | None) -> EntityId | None:
-    """*occurrence_id*'s producer entity id, or ``None`` when *occurrence_id*
-    itself is ``None`` (an ambiguous residual, see :func:`_attribute_residuals`)."""
-    return (
-        None if occurrence_id is None else producer_entity_id(occurrence_id.entity_id)
-    )
+    """*occurrence_id*'s entity id, or ``None`` for an ambiguous residual
+    (see :func:`_attribute_residuals`)."""
+    if occurrence_id is None:
+        return None
+    return producer_entity_id(occurrence_id.entity_id)
 
 
-def _residual_disambiguator(occurrence_id: OccurrenceId | None) -> str | None:
-    """*occurrence_id*'s collision-safe disambiguator, or ``None`` when
-    *occurrence_id* itself is ``None``."""
-    return (
-        None if occurrence_id is None else _collision_safe_disambiguator(occurrence_id)
-    )
+def _residual_disambiguator(
+    occurrence_id: OccurrenceId | None, synthetic: str | None = None
+) -> str | None:
+    """*occurrence_id*'s collision-safe disambiguator, else *synthetic*
+    (claims no identity, only keeps residuals from collapsing in dedup)."""
+    if occurrence_id is not None:
+        return _collision_safe_disambiguator(occurrence_id)
+    return synthetic
 
 
 def _attribute_residuals(
     ids_for_value: list[OccurrenceId], excess: int
-) -> list[OccurrenceId | None]:
+) -> list[_Residual]:
     """The *excess* occurrences of one value bucket to report as
-    removed/added residuals, each attributed to a real identity only when
-    attribution is unambiguous (Codex review, PR #1078, twentieth round).
+    removed/added residuals, attributed to a real identity only when
+    unambiguous (Codex review, PR #1078, twentieth round).
 
-    When the *entire* bucket vanishes from one side (``excess ==
-    len(ids_for_value)``), every occurrence in it really did stop appearing
-    with this value -- each one's own identity is genuine evidence, even
-    though which physical declaration became what is still unknown.  When
-    only *some* of the bucket's occurrences are excess (``excess <
-    len(ids_for_value)``), which specific occurrence(s) the excess
-    represents is unrecoverable from a bare value match alone: the
-    unstable/anonymous identities in ``ids_for_value`` are interchangeable
-    given only "N occurrences share this value", so presenting an arbitrary
-    list prefix (previously ``ids_for_value[:excess]``) as if it were
-    observed attribution could stamp a still-*present* declaration's
-    ``entity_id`` onto a finding claiming it vanished. Reporting the
-    residual without a specific identity in that case is the honest
-    reading of the same evidence.
+    When the *entire* bucket vanishes (``excess == len(ids_for_value)``),
+    every occurrence in it really did stop appearing with this value --
+    each one's identity is genuine evidence. When only *some* are excess,
+    which specific occurrence(s) is unrecoverable from a bare value match:
+    the unstable/anonymous identities are interchangeable given only "N
+    share this value", so an arbitrary list prefix (the old behavior)
+    could stamp a still-*present* declaration's identity onto a finding
+    claiming it vanished. No identity is attributed in that case.
+
+    Each ambiguous residual still gets its own synthetic disambiguator
+    (twenty-first round): shrinking four equal-valued occurrences to one is
+    *three* independent removals, and a shared ``entity_id=None``/
+    ``disambiguator=None`` would collapse them to one via ``_dedup_exact``.
     """
     if excess == len(ids_for_value):
-        return list(ids_for_value)
-    return [None] * excess
+        return [(i, None) for i in ids_for_value]
+    return [(None, f"ambiguous:{i}") for i in range(excess)]
 
 
 def _values(index: SemanticIRIndex) -> dict[str, list[OccurrenceId]]:
@@ -515,17 +515,11 @@ def diff_constants(
         }
         # Iterated in `old_ids`'s own order, not `shared_id_set`'s (Codex
         # review, PR #1078, twentieth round): a `set` has no defined
-        # iteration order, so when more than one stable shared entity in
-        # one colliding group each independently emits a `CONSTANT_CHANGED`,
-        # their relative order in the report varied with `PYTHONHASHSEED`
-        # for two runs over byte-identical input -- nothing downstream
-        # re-sorts findings to correct for it. `old_ids` and `new_ids` name
-        # the same shared identity in the same relative position on both
-        # sides (`_values()` groups each side in encounter order and a
-        # shared id's position doesn't move relative to its own side's
-        # other entries just because a differently-ordered side changed),
-        # so ordering by `old_ids` is deterministic and arbitrary-only in
-        # the same sense the collection's own encounter order already is.
+        # iteration order, so multiple stable shared entities in one group
+        # emitted their `CONSTANT_CHANGED`s in a `PYTHONHASHSEED`-dependent
+        # order. `old_ids` names each shared identity in the same relative
+        # position it already holds on its own side, so ordering by it is
+        # deterministic.
         shared_ids = [i for i in old_ids if i in shared_id_set]
         for shared_id in shared_ids:
             old_val = _value(old_index, shared_id)
@@ -605,19 +599,21 @@ def diff_constants(
             new_by_value.setdefault(
                 v if v is not None else _UNRESOLVED_MARKER, []
             ).append(i)
-        removed_occurrences: list[tuple[str, OccurrenceId | None]] = []
+        removed_occurrences: list[tuple[str, OccurrenceId | None, str | None]] = []
         for value, ids_for_value in old_by_value.items():
             excess = len(ids_for_value) - len(new_by_value.get(value, ()))
             if excess > 0:
                 removed_occurrences.extend(
-                    (value, i) for i in _attribute_residuals(ids_for_value, excess)
+                    (value, i, synth)
+                    for i, synth in _attribute_residuals(ids_for_value, excess)
                 )
-        added_occurrences: list[tuple[str, OccurrenceId | None]] = []
+        added_occurrences: list[tuple[str, OccurrenceId | None, str | None]] = []
         for value, ids_for_value in new_by_value.items():
             excess = len(ids_for_value) - len(old_by_value.get(value, ()))
             if excess > 0:
                 added_occurrences.extend(
-                    (value, i) for i in _attribute_residuals(ids_for_value, excess)
+                    (value, i, synth)
+                    for i, synth in _attribute_residuals(ids_for_value, excess)
                 )
         if not removed_occurrences and not added_occurrences:
             continue
@@ -633,16 +629,12 @@ def diff_constants(
         # silently lost the independently provable `CONSTANT_ADDED`).
         # Every removed/added pair still available after the shared-identity
         # pass is an independent substitution story, not just the first one
-        # (Codex review, PR #1078, twentieth round): pairing only once and
-        # letting every further residual fall through to the leftover loops
-        # below reported `X=[1,2]` -> `X=[3,4]` (equal cardinality, two
-        # substitutions) as one `CONSTANT_CHANGED` plus a fabricated
-        # `CONSTANT_REMOVED`/`CONSTANT_ADDED` pair, instead of two
-        # `CONSTANT_CHANGED`s. Pairing off as many removed/added occurrences
-        # as both sides have in common is the direct generalization of the
-        # tenth round's own one-pair fix -- exactly the excess beyond
-        # `min(len(removed), len(added))` is real leftover evidence, and no
-        # less.
+        # (Codex review, PR #1078, twentieth round): pairing only once left
+        # every further pair to fall through as a fabricated
+        # `CONSTANT_REMOVED`/`CONSTANT_ADDED` instead of another
+        # `CONSTANT_CHANGED`. This loop is the direct generalization of the
+        # tenth round's own one-pair fix -- the excess beyond
+        # `min(len(removed), len(added))` is the real leftover evidence.
         while removed_occurrences and added_occurrences:
             # Prefers a pair with resolved value evidence on both sides
             # (Codex review, PR #1078, nineteenth round) over always taking
@@ -659,7 +651,7 @@ def diff_constants(
             removed_pos = next(
                 (
                     i
-                    for i, (value, _) in enumerate(removed_occurrences)
+                    for i, (value, _, _) in enumerate(removed_occurrences)
                     if value != _UNRESOLVED_MARKER
                 ),
                 0,
@@ -667,13 +659,15 @@ def diff_constants(
             added_pos = next(
                 (
                     i
-                    for i, (value, _) in enumerate(added_occurrences)
+                    for i, (value, _, _) in enumerate(added_occurrences)
                     if value != _UNRESOLVED_MARKER
                 ),
                 0,
             )
-            removed_value, removed_id = removed_occurrences.pop(removed_pos)
-            added_value, added_id = added_occurrences.pop(added_pos)
+            removed_value, removed_id, removed_synth = removed_occurrences.pop(
+                removed_pos
+            )
+            added_value, added_id, added_synth = added_occurrences.pop(added_pos)
             old_val = _unresolved_to_none(removed_value)
             new_val = _unresolved_to_none(added_value)
             unreliable = (
@@ -694,13 +688,17 @@ def diff_constants(
                         entity_id=_residual_entity_id(removed_id)
                         or _residual_entity_id(added_id),
                         disambiguator=(
-                            _residual_disambiguator(removed_id)
+                            _residual_disambiguator(removed_id, removed_synth)
                             if _residual_entity_id(removed_id) is not None
-                            else _residual_disambiguator(added_id)
+                            else _residual_disambiguator(added_id, added_synth)
                         ),
                     )
                 )
-        for leftover_old_value, leftover_old_id in removed_occurrences:
+        for (
+            leftover_old_value,
+            leftover_old_id,
+            leftover_old_synth,
+        ) in removed_occurrences:
             changes.append(
                 make_change(
                     ChangeKind.CONSTANT_REMOVED,
@@ -708,10 +706,16 @@ def diff_constants(
                     name=name,
                     old_value=_unresolved_to_none(leftover_old_value),
                     entity_id=_residual_entity_id(leftover_old_id),
-                    disambiguator=_residual_disambiguator(leftover_old_id),
+                    disambiguator=_residual_disambiguator(
+                        leftover_old_id, leftover_old_synth
+                    ),
                 )
             )
-        for leftover_new_value, leftover_new_id in added_occurrences:
+        for (
+            leftover_new_value,
+            leftover_new_id,
+            leftover_new_synth,
+        ) in added_occurrences:
             changes.append(
                 make_change(
                     ChangeKind.CONSTANT_ADDED,
@@ -719,7 +723,9 @@ def diff_constants(
                     name=name,
                     new_value=_unresolved_to_none(leftover_new_value),
                     entity_id=_residual_entity_id(leftover_new_id),
-                    disambiguator=_residual_disambiguator(leftover_new_id),
+                    disambiguator=_residual_disambiguator(
+                        leftover_new_id, leftover_new_synth
+                    ),
                 )
             )
 

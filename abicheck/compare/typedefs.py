@@ -171,10 +171,9 @@ def _underlying(index: SemanticIRIndex, occurrence_id: OccurrenceId) -> str:
 
 
 def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
-    """*occurrence_id*'s own producer disambiguator when set, else a
-    fallback derived from its own (real, non-synthetic) entity id -- mirrors
-    ``compare.constants._collision_safe_disambiguator`` exactly; see that
-    function's own docstring (Codex review, PR #1078, twentieth round)."""
+    """Mirrors ``compare.constants._collision_safe_disambiguator`` exactly;
+    see that function's own docstring (Codex review, PR #1078, twentieth
+    round)."""
     disambiguator = producer_occurrence_disambiguator(occurrence_id)
     if disambiguator:
         return disambiguator
@@ -182,33 +181,37 @@ def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
     return None if entity_id is None else str(entity_id.key)
 
 
+#: Mirrors ``compare.constants._Residual`` exactly.
+_Residual = tuple["OccurrenceId | None", "str | None"]
+
+
 def _residual_entity_id(occurrence_id: OccurrenceId | None) -> EntityId | None:
-    """*occurrence_id*'s producer entity id, or ``None`` when *occurrence_id*
-    itself is ``None`` (an ambiguous residual, see :func:`_attribute_residuals`)."""
-    return (
-        None if occurrence_id is None else producer_entity_id(occurrence_id.entity_id)
-    )
+    """*occurrence_id*'s entity id, or ``None`` for an ambiguous residual
+    (see :func:`_attribute_residuals`)."""
+    if occurrence_id is None:
+        return None
+    return producer_entity_id(occurrence_id.entity_id)
 
 
-def _residual_disambiguator(occurrence_id: OccurrenceId | None) -> str | None:
-    """*occurrence_id*'s collision-safe disambiguator, or ``None`` when
-    *occurrence_id* itself is ``None``."""
-    return (
-        None if occurrence_id is None else _collision_safe_disambiguator(occurrence_id)
-    )
+def _residual_disambiguator(
+    occurrence_id: OccurrenceId | None, synthetic: str | None = None
+) -> str | None:
+    """Mirrors ``compare.constants._residual_disambiguator`` exactly (Codex
+    review, PR #1078, twenty-first round)."""
+    if occurrence_id is not None:
+        return _collision_safe_disambiguator(occurrence_id)
+    return synthetic
 
 
 def _attribute_residuals(
     ids_for_value: list[OccurrenceId], excess: int
-) -> list[OccurrenceId | None]:
-    """The *excess* occurrences of one value bucket to report as
-    removed/added residuals, each attributed to a real identity only when
-    attribution is unambiguous -- mirrors ``compare.constants.
-    _attribute_residuals`` exactly; see that function's own docstring
-    (Codex review, PR #1078, twentieth round)."""
+) -> list[_Residual]:
+    """Mirrors ``compare.constants._attribute_residuals`` exactly; see that
+    function's own docstring (Codex review, PR #1078, twentieth/twenty-first
+    rounds)."""
     if excess == len(ids_for_value):
-        return list(ids_for_value)
-    return [None] * excess
+        return [(i, None) for i in ids_for_value]
+    return [(None, f"ambiguous:{i}") for i in range(excess)]
 
 
 def _aliases(index: SemanticIRIndex) -> dict[str, list[OccurrenceId]]:
@@ -464,19 +467,21 @@ def diff_typedefs(
             if i in shared_id_set:
                 continue
             new_by_value.setdefault(_underlying(new_index, i), []).append(i)
-        removed_occurrences: list[tuple[str, OccurrenceId | None]] = []
+        removed_occurrences: list[tuple[str, OccurrenceId | None, str | None]] = []
         for value, ids_for_value in old_by_value.items():
             excess = len(ids_for_value) - len(new_by_value.get(value, ()))
             if excess > 0:
                 removed_occurrences.extend(
-                    (value, i) for i in _attribute_residuals(ids_for_value, excess)
+                    (value, i, synth)
+                    for i, synth in _attribute_residuals(ids_for_value, excess)
                 )
-        added_occurrences: list[tuple[str, OccurrenceId | None]] = []
+        added_occurrences: list[tuple[str, OccurrenceId | None, str | None]] = []
         for value, ids_for_value in new_by_value.items():
             excess = len(ids_for_value) - len(old_by_value.get(value, ()))
             if excess > 0:
                 added_occurrences.extend(
-                    (value, i) for i in _attribute_residuals(ids_for_value, excess)
+                    (value, i, synth)
+                    for i, synth in _attribute_residuals(ids_for_value, excess)
                 )
         if not removed_occurrences and not added_occurrences:
             continue
@@ -493,8 +498,8 @@ def diff_typedefs(
         # one-pair fix -- exactly the excess beyond `min(len(removed),
         # len(added))` is real leftover evidence, and no less.
         while removed_occurrences and added_occurrences:
-            old_type, old_id = removed_occurrences.pop(0)
-            new_type, new_id = added_occurrences.pop(0)
+            old_type, old_id, old_synth = removed_occurrences.pop(0)
+            new_type, new_id, new_synth = added_occurrences.pop(0)
             changes.append(
                 make_change(
                     ChangeKind.TYPEDEF_BASE_CHANGED,
@@ -505,16 +510,20 @@ def diff_typedefs(
                     entity_id=_residual_entity_id(old_id)
                     or _residual_entity_id(new_id),
                     disambiguator=(
-                        _residual_disambiguator(old_id)
+                        _residual_disambiguator(old_id, old_synth)
                         if _residual_entity_id(old_id) is not None
-                        else _residual_disambiguator(new_id)
+                        else _residual_disambiguator(new_id, new_synth)
                     ),
                     description=(
                         f"Typedef base type changed: {bare_alias}{qualified_suffix}"
                     ),
                 )
             )
-        for leftover_old_value, leftover_old_id in removed_occurrences:
+        for (
+            leftover_old_value,
+            leftover_old_id,
+            leftover_old_synth,
+        ) in removed_occurrences:
             # A pure removal within a colliding group: the alias itself
             # still exists on the new side (via another colliding member),
             # but this specific occurrence no longer does.
@@ -525,7 +534,9 @@ def diff_typedefs(
                     name=bare_alias,
                     old_value=leftover_old_value,
                     entity_id=_residual_entity_id(leftover_old_id),
-                    disambiguator=_residual_disambiguator(leftover_old_id),
+                    disambiguator=_residual_disambiguator(
+                        leftover_old_id, leftover_old_synth
+                    ),
                     description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                 )
             )

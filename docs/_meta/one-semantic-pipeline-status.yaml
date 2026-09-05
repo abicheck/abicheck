@@ -893,6 +893,30 @@ concepts:
       `CONSTANT_CHANGED` -- was investigated and declined; see
       `investigated_declined` below.
 
+      **A twenty-first round found two further gaps in code the twentieth
+      round's own fixes had just introduced.** First, more than one
+      ambiguous residual within one colliding value bucket (e.g. four
+      equal-valued, entity-unstable occurrences shrinking to one -- three
+      independent removals, not one repeated three times) each carried
+      `entity_id=None`/`disambiguator=None` alike, so they were
+      byte-identical and collapsed to one via `_dedup_exact`, silently
+      losing two of the three real removals. Each ambiguous residual now
+      gets its own synthetic, non-identity-claiming disambiguator
+      (`"ambiguous:<i>"`), so multiplicity survives dedup without
+      attributing any real identity. Second: `_dedup_exact`'s
+      `entity_id`/`disambiguator` key components (seventeenth round) were
+      applied to every `ChangeKind`, but `entity_id` predates this PR and
+      is already asymmetrically populated between evidence tiers for other
+      kinds -- `diff_types.py`'s AST-based `FIELD_RENAMED` sets a real
+      `entity_id`, but `diff_platform.py`'s DWARF-layout-based
+      `FIELD_RENAMED` for the identical rename does not, so the unscoped
+      key stopped that pair from collapsing across evidence tiers the way
+      it always had, reintroducing a duplicate the pre-sixteenth-round key
+      never produced. Scoped via a new `_OCCURRENCE_AWARE_KINDS` constant
+      naming exactly the typedef/constant kinds that can legitimately emit
+      more than one finding for an identical (kind, description, symbol,
+      old_value, new_value) tuple.
+
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.
     investigated_declined:

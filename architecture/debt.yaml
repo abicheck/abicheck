@@ -633,12 +633,12 @@
     },
     {
       "path": "abicheck/diff_filtering.py",
-      "baseline_lines": 1793,
+      "baseline_lines": 1818,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1785 -> 1793 (ADR-063 Track T3, Codex review, PR #1078, sixteenth/seventeenth rounds): `_dedup_exact`'s key was too weak -- (kind, description) alone silently collapsed distinct, independently-provable occurrence-level findings (compare.typedefs/compare.constants's own colliding-group removals/additions) sharing identical description text. Strengthened to also include symbol, old_value/new_value (via the existing compare.dedup_key.hashable_value), entity_id, and disambiguator (Change's own new field, carrying OccurrenceId.disambiguator -- entity_id alone cannot distinguish two genuine ODR/multi-TU occurrences sharing one identity).",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1785 -> 1793 (ADR-063 Track T3, Codex review, PR #1078, sixteenth/seventeenth rounds): `_dedup_exact`'s key was too weak -- (kind, description) alone silently collapsed distinct, independently-provable occurrence-level findings (compare.typedefs/compare.constants's own colliding-group removals/additions) sharing identical description text. Strengthened to also include symbol, old_value/new_value (via the existing compare.dedup_key.hashable_value), entity_id, and disambiguator (Change's own new field, carrying OccurrenceId.disambiguator -- entity_id alone cannot distinguish two genuine ODR/multi-TU occurrences sharing one identity). Raised 1793 -> 1818 (Codex review, PR #1078, twenty-first round): the seventeenth round's entity_id/disambiguator key components are now scoped to a new _OCCURRENCE_AWARE_KINDS constant (the typedef/constant kinds that can actually emit more than one finding for an identical (kind, description, symbol, old_value, new_value) tuple) rather than applied to every kind -- diff_types.py's AST-based FIELD_RENAMED sets a real entity_id, but diff_platform.py's DWARF-layout-based FIELD_RENAMED for the identical rename does not, and the unscoped key stopped that pair from collapsing across evidence tiers the way it always had, reintroducing a duplicate. A prior review round on this same PR flagged the growth-via-baseline-bump pattern itself as a P1 concern and proposed moving this logic into compare/ instead; declined (see the PR's own review thread) since _dedup_exact is a cross-detector, all-families post-processing pass with no natural home in a per-family package -- this bump documents a narrowly-scoped correctness fix, not indiscriminate accretion.",
       "review_by": "2026-11-30"
     },
     {

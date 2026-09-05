@@ -503,3 +503,24 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   page at the same depth correctly uses `../vision.md`. This broke the
   `mkdocs build --strict` CI gate on every commit of this PR (and on
   `main`) since the link was introduced.
+- **Multiple ambiguous residuals within one colliding value bucket no
+  longer collapse to a single finding.** When more than one occurrence
+  becomes an ambiguous residual (e.g. four equal-valued, entity-unstable
+  occurrences shrinking to one -- three independent removals, not one
+  repeated three times), each carried `entity_id=None`/`disambiguator=None`
+  alike, making them byte-identical and collapsing to one via
+  `diff_filtering._dedup_exact`. Each ambiguous residual now gets its own
+  synthetic, non-identity-claiming disambiguator (`"ambiguous:<i>"`) so
+  multiplicity survives dedup, without attributing any real identity to it
+  (Codex review).
+- **`_dedup_exact`'s `entity_id`/`disambiguator` discriminators are now
+  scoped to the typedef/constant kinds that actually need them.** Unlike
+  `disambiguator` (a field this PR introduces), `entity_id` predates it and
+  is already asymmetrically populated between evidence tiers for other
+  kinds -- `diff_types.py`'s AST-based `FIELD_RENAMED` sets a real
+  `entity_id`, but `diff_platform.py`'s DWARF-layout-based `FIELD_RENAMED`
+  for the identical rename does not. Applying the discriminator
+  unconditionally stopped that pair from collapsing across evidence tiers
+  the way it always had, reintroducing a duplicate the pre-sixteenth-round
+  key never produced. Scoped via a new `_OCCURRENCE_AWARE_KINDS` constant
+  (Codex review).

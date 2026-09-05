@@ -141,3 +141,54 @@ class TestDedupExactDistinguishesOccurrenceDisambiguators:
         ]
         result = _dedup_exact(changes)
         assert len(result) == 1
+
+
+class TestEntityIdKeyingScopedToOccurrenceAwareKinds:
+    """Regression coverage for Codex review, PR #1078, twenty-first round:
+    `entity_id`/`disambiguator` predate this PR and are already
+    asymmetrically populated between evidence tiers for kinds outside
+    `compare.typedefs`/`compare.constants` -- e.g. `diff_types.py`'s
+    AST-based ``FIELD_RENAMED`` sets a real `entity_id`, but
+    `diff_platform.py`'s DWARF-layout-based ``FIELD_RENAMED`` for the
+    identical rename does not. Folding `entity_id` into every kind's key
+    (rather than scoping it to `_OCCURRENCE_AWARE_KINDS`) would have
+    stopped this pair from collapsing across evidence tiers the way it
+    always has, reintroducing a duplicate the pre-sixteenth-round key
+    never produced.
+    """
+
+    def _field_renamed(self, *, entity_id=None) -> Change:
+        return Change(
+            kind=ChangeKind.FIELD_RENAMED,
+            symbol="Foo",
+            description="Field renamed: old -> new",
+            old_value="old",
+            new_value="new",
+            entity_id=entity_id,
+        )
+
+    def test_an_ast_finding_with_entity_id_still_collapses_a_dwarf_duplicate_without_one(
+        self,
+    ) -> None:
+        eid = entity_id_for_typedef((Namespace("a"),), "Foo")
+        changes = [
+            self._field_renamed(entity_id=eid),  # AST-based, real entity_id
+            self._field_renamed(entity_id=None),  # DWARF-based, no entity_id
+        ]
+        result = _dedup_exact(changes)
+        assert len(result) == 1
+
+    def test_two_typedef_removed_occurrences_are_unaffected_by_the_scoping(
+        self,
+    ) -> None:
+        """`_OCCURRENCE_AWARE_KINDS` itself is unaffected by this scoping --
+        confirms the twenty-first round's fix doesn't quietly regress the
+        sixteenth/seventeenth rounds' own coverage above."""
+        eid_a = entity_id_for_typedef((Namespace("a"),), "Alias")
+        eid_b = entity_id_for_typedef((Namespace("b"),), "Alias")
+        changes = [
+            _removed(symbol="Alias", old_value="int", entity_id=eid_a),
+            _removed(symbol="Alias", old_value="int", entity_id=eid_b),
+        ]
+        result = _dedup_exact(changes)
+        assert len(result) == 2

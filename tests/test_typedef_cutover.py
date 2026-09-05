@@ -1030,8 +1030,12 @@ class TestAmbiguousResidualsGetNoAttributedIdentity:
         change = changes[0]
         assert change.kind is ChangeKind.TYPEDEF_REMOVED
         assert change.old_value == "int"
+        # No real identity is attributed -- but a synthetic,
+        # non-identity-claiming disambiguator is still assigned (Codex
+        # review, PR #1078, twenty-first round; see its constant sibling's
+        # own docstring for the full account).
         assert change.entity_id is None
-        assert change.disambiguator is None
+        assert change.disambiguator == "ambiguous:0"
 
     def test_a_whole_bucket_removal_keeps_its_real_identity(self) -> None:
         old_a = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
@@ -1054,3 +1058,46 @@ class TestAmbiguousResidualsGetNoAttributedIdentity:
         assert all(c.kind is ChangeKind.TYPEDEF_REMOVED for c in changes)
         assert all(c.entity_id is not None for c in changes)
         assert {c.entity_id for c in changes} == {old_a, old_b}
+
+
+class TestPartialRemovalsPreserveMultiplicityAcrossDedup:
+    """Regression coverage for Codex review, PR #1078, twenty-first round --
+    mirrors ``tests.test_constant_cutover_dedup.
+    TestPartialRemovalsPreserveMultiplicityAcrossDedup`` exactly; see that
+    class's own docstring for the full account."""
+
+    def test_three_ambiguous_removals_all_survive_dedup_exact(self) -> None:
+        from abicheck.diff_filtering import _dedup_exact
+
+        old_ids = [
+            entity_id_for_typedef((Anonymous("namespace", i),), "Alias")
+            for i in range(4)
+        ]
+        new_id = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                    for eid in old_ids
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 3
+        assert all(c.kind is ChangeKind.TYPEDEF_REMOVED for c in changes)
+        assert all(c.entity_id is None for c in changes)
+        assert len({c.disambiguator for c in changes}) == 3
+        deduped = _dedup_exact(changes)
+        assert len(deduped) == 3
+        assert len({report_finding_id(c) for c in changes}) == 3

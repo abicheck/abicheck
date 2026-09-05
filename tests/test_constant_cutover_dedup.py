@@ -280,8 +280,14 @@ class TestAmbiguousResidualsGetNoAttributedIdentity:
         change = changes[0]
         assert change.kind is ChangeKind.CONSTANT_REMOVED
         assert change.old_value == "1"
+        # No real identity is attributed -- but a synthetic,
+        # non-identity-claiming disambiguator is still assigned, so a
+        # *second* ambiguous residual in the same value bucket wouldn't
+        # silently collapse into this one via `_dedup_exact` (Codex review,
+        # PR #1078, twenty-first round; see `TestPartialRemovalsPreserve
+        # MultiplicityAcrossDedup` below).
         assert change.entity_id is None
-        assert change.disambiguator is None
+        assert change.disambiguator == "ambiguous:0"
 
     def test_a_whole_bucket_removal_keeps_its_real_identity(self) -> None:
         # Old: two anonymous X=1 occurrences. New: none of value 1 at all --
@@ -314,3 +320,57 @@ class TestAmbiguousResidualsGetNoAttributedIdentity:
         assert all(c.kind is ChangeKind.CONSTANT_REMOVED for c in changes)
         assert all(c.entity_id is not None for c in changes)
         assert {c.entity_id for c in changes} == {old_a, old_b}
+
+
+class TestPartialRemovalsPreserveMultiplicityAcrossDedup:
+    """Regression coverage for Codex review, PR #1078, twenty-first round:
+    when more than one occurrence of a value bucket is ambiguously
+    residual (e.g. four equal-valued, entity-unstable occurrences
+    shrinking to one -- three independent removals, not one repeated
+    three times), each used to get `entity_id=None`/`disambiguator=None`
+    alike, making them byte-identical and collapsing to one via
+    `diff_filtering._dedup_exact` -- silently losing two of the three real
+    removals. Each ambiguous residual now gets its own synthetic,
+    non-identity-claiming disambiguator so multiplicity survives dedup.
+    """
+
+    def test_three_ambiguous_removals_all_survive_dedup_exact(self) -> None:
+        from abicheck.diff_filtering import _dedup_exact
+
+        old_ids = [
+            entity_id_for_constant((Anonymous("namespace", i),), "X") for i in range(4)
+        ]
+        new_id = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                    for eid in old_ids
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        changes = diff_constants(
+            old_index,
+            new_index,
+            is_fingerprint_comparison_unreliable=lambda o, n: False,
+            old_constants={},
+            new_constants={},
+        )
+        assert len(changes) == 3
+        assert all(c.kind is ChangeKind.CONSTANT_REMOVED for c in changes)
+        assert all(c.entity_id is None for c in changes)
+        assert len({c.disambiguator for c in changes}) == 3
+        deduped = _dedup_exact(changes)
+        assert len(deduped) == 3
+        assert len({report_finding_id(c) for c in changes}) == 3
