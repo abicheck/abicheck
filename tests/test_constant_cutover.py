@@ -1106,3 +1106,38 @@ class TestOdrDuplicateOccurrencesSurviveReduction:
         assert change.symbol == "ns::X"
         assert change.old_value == "1"
         assert change.new_value == "2"
+
+
+class TestWholeGroupRemovalSurvivesPostProcessingDedup:
+    """Regression coverage for Codex review, PR #1078, sixteenth round --
+    mirrors ``tests.test_typedef_cutover.
+    TestWholeGroupRemovalSurvivesPostProcessingDedup`` exactly; see that
+    class's own docstring for the full account. ``diff_constants`` emits one
+    ``CONSTANT_REMOVED`` per contributing entity when a whole colliding
+    group vanishes, but the public pipeline's ``diff_filtering._dedup_exact``
+    used to key only on ``(kind, description)`` -- identical for every
+    entity in the group -- silently collapsing them back to one.
+    """
+
+    def test_two_colliding_removals_both_survive_dedup_exact(self) -> None:
+        from abicheck.diff_filtering import _dedup_exact
+
+        first = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        second = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 2
+        assert {c.old_value for c in changes} == {"1"}
+        deduped = _dedup_exact(changes)
+        assert len(deduped) == 2

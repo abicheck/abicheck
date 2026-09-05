@@ -319,3 +319,25 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   `OccurrenceId`, so two same-identity occurrences are just another
   instance of the alias-collision multiset comparison these detectors
   already handle correctly.
+
+- **A colliding group's own occurrence-level removals/additions no longer
+  collapse back down to one after post-processing.** `compare.typedefs.
+  diff_typedefs`/`compare.constants.diff_constants` correctly emit one
+  finding per contributing entity when a whole colliding group vanishes or
+  newly appears (twelfth round), but `diff_filtering._dedup_exact` -- the
+  first pass of the public `checker.compare()` pipeline's own
+  post-processing -- keyed only on `(kind, description)` (Codex review, PR
+  #1078, sixteenth round). Two entities in the same colliding group render
+  identical description text by construction, so this pass silently
+  collapsed two genuinely distinct, independently-provable findings back
+  down to one before a caller ever saw them -- `tests/test_diff_layout.py`'s
+  own `test_second_type_still_compared_when_first_shares_its_bare_name` had
+  already named the identical risk for a bare-name-keyed `RecordType`
+  detector as a known, then-unaddressed concern. `_dedup_exact`'s key now
+  also includes `symbol`, `old_value`/`new_value` (via the existing
+  `compare.dedup_key.hashable_value`, since those slots are not guaranteed
+  to be hashable scalars), and `entity_id` (the compare-time `EntityId`'s
+  own `.key`, when a producer set one) -- a producer that never sets
+  `entity_id` degrades to exactly the previous key plus the two now-included
+  value fields, so this is additive rather than a behavior change for any
+  detector that predates entity identity.

@@ -644,6 +644,25 @@ concepts:
       `OccurrenceId` -- a same-identity pair is just another instance of
       the alias-collision multiset comparison the twelfth-through-
       fourteenth rounds already handle correctly.
+
+      **A sixteenth round found the occurrence-level findings themselves
+      did not survive the public pipeline's own post-processing.**
+      `diff_typedefs`/`diff_constants` correctly emit one finding per
+      contributing entity when a whole colliding group vanishes or newly
+      appears (twelfth round), but `diff_filtering._dedup_exact` -- the
+      first pass `checker.compare()` runs over every detector's output --
+      keyed only on `(kind, description)`. Two entities in one colliding
+      group render identical description text by construction, so this
+      pass silently collapsed the independently-provable findings back
+      down to one before a caller ever saw them (`test_diff_layout.py` had
+      already named the identical risk for a bare-name-keyed `RecordType`
+      detector as a known, then-unaddressed concern). Fixed generically,
+      not just for this cohort: the key now also includes `symbol`,
+      `old_value`/`new_value` (via the existing `compare.dedup_key.
+      hashable_value`, since those slots are not guaranteed hashable
+      scalars), and `entity_id` (the compare-time `EntityId`'s own `.key`,
+      when a producer set one) -- additive for a producer that predates
+      entity identity, since two `None`s still compare equal.
   public_surface:
     primitive: complete
     producers: complete

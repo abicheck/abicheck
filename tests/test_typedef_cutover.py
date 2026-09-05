@@ -787,3 +787,46 @@ class TestOdrDuplicateOccurrencesSurviveReduction:
         assert change.symbol == "Alias"
         assert change.old_value == "int"
         assert change.new_value == "long"
+
+
+class TestWholeGroupRemovalSurvivesPostProcessingDedup:
+    """Regression coverage for Codex review, PR #1078, sixteenth round:
+    ``diff_typedefs`` emits one ``TYPEDEF_REMOVED`` per contributing entity
+    when a whole colliding group vanishes (twelfth round), but the public
+    ``checker.compare()`` pipeline's own post-processing used to run
+    ``diff_filtering._dedup_exact`` keyed only on ``(kind, description)`` --
+    identical text for every entity in a colliding group by construction --
+    silently collapsing these independently-provable removals back down to
+    one before a caller ever saw them. This is checked at the seam between
+    the two modules directly, not only within ``diff_typedefs`` in
+    isolation, since a test calling ``diff_typedefs`` alone cannot see this
+    downstream loss.
+    """
+
+    def test_two_colliding_removals_both_survive_dedup_exact(self) -> None:
+        from abicheck.diff_filtering import _dedup_exact
+
+        first = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        second = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 2
+        # Same value on both sides of the collision -- the case the old
+        # (kind, description) key alone could not distinguish even with
+        # this PR's own `entity_id` improvement, since these are also the
+        # findings' own identical `symbol`/`old_value`; only `entity_id`
+        # tells them apart.
+        assert {c.old_value for c in changes} == {"int"}
+        deduped = _dedup_exact(changes)
+        assert len(deduped) == 2

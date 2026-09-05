@@ -21,6 +21,7 @@ from collections import deque
 
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
+from .compare.dedup_key import hashable_value
 from .compare.opaque_types import (
     find_by_value_types,
     find_opaque_types,
@@ -1336,11 +1337,34 @@ def _filter_reserved_field_renames(changes: list[Change]) -> list[Change]:
 
 
 def _dedup_exact(changes: list[Change]) -> list[Change]:
-    """Pass 1: collapse entries with the same (kind, description)."""
+    """Pass 1: collapse entries with the same (kind, description, symbol,
+    old_value, new_value, entity_id).
+
+    **Not just (kind, description)** (Codex review, PR #1078, sixteenth
+    round): `compare.typedefs`/`compare.constants`'s occurrence-level
+    collision handling deliberately emits one finding per contributing
+    entity for a whole colliding group's removal/addition, and two such
+    entities sharing a rendered alias produce byte-identical `description`
+    text by construction -- the old key silently collapsed two distinct,
+    independently-provable findings into one (`test_diff_layout.py`'s
+    `test_second_type_still_compared_when_first_shares_its_bare_name` names
+    the identical, then-unaddressed risk for bare-name-keyed `RecordType`
+    findings). `old_value`/`new_value` go through `hashable_value` since
+    they are not always hashable scalars (`diff_python.py` stores lists);
+    `entity_id` uses the compare-time `EntityId`'s own `.key` when a
+    producer set one (`None` for a producer that doesn't, which degrades
+    this key to exactly the previous one plus the two value fields)."""
     result: list[Change] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[object, ...]] = set()
     for c in changes:
-        key = (c.kind.value, c.description)
+        key = (
+            c.kind.value,
+            c.description,
+            c.symbol,
+            hashable_value(c.old_value),
+            hashable_value(c.new_value),
+            c.entity_id.key if c.entity_id is not None else None,
+        )
         if key in seen:
             continue
         seen.add(key)
