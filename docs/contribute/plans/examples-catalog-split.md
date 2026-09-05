@@ -3,7 +3,10 @@
 **Effort:** XL (six phases) · **Status:** All six phases have landed in some
 form; Phase 5 (curated workflow examples) is the one still in progress, 1 of
 8 planned workflows. Phase 1 implemented (now also distinguishing
-`operation` from `scenario_kind`); Phase 2 complete (every `rule`-entity
+`operation` from `scenario_kind`, and — per "What is left" item 6, now
+closed — classifying every case declaratively via
+`catalog/catalog_classification.yaml` rather than hard-coded case-number
+sets); Phase 2 complete (every `rule`-entity
 case carries a `rule_slug`, seven confirmed duplicate/variant pairs found
 and recorded — now split into 2 duplicates and 5 genuine variants via
 `relation_type`/`relation_axis`, see "What Phase 2 implements" below — and
@@ -94,10 +97,11 @@ unaffected. Each of the 197 entries carries:
 | `rule_slug` / `variant_of` | every `rule`-entity case's canonical family name and, for a confirmed duplicate or variant, the case it relates to — see "What Phase 2 implements" below |
 | `relation_type` / `relation_axis` | set only when `variant_of` is set: `relation_type` is `"duplicate"` (no meaningful distinguishing condition — the same demonstration restated) or `"variant"` (a genuine robustness demonstration under a different condition); `relation_axis` names that condition (`language`, `public-surface`, `symbol-versioning`, `specialization`, ...) and is set only for a `"variant"`. Added after an external review found the original single `variant_of` link conflated two exact duplicates with five genuine variants, inflating the catalog's demonstrated-robustness count — see `docs/contribute/catalog-coverage.md`'s Rule coverage section, which now reports the two separately. |
 
-Entity/scenario_kind/ecosystem classification for the scenario families
-(bundles, G20 audit, oneTBB/SYCL/oneMKL/Linux-kernel case studies) is by
-explicit case-number lookup table in the generator, not a heuristic — every
-other case defaults to `entity: rule`, `ecosystem: generic`.
+Entity/scenario_kind/ecosystem classification for every case is by explicit,
+declarative entry in `catalog/catalog_classification.yaml` (see "What is
+left" item 6, now closed, below) — never a heuristic, and never a silent
+default: a case with no entry there fails `gen_catalog_taxonomy.py` outright
+rather than falling back to `entity: rule`, `ecosystem: generic`.
 
 Run `python scripts/gen_catalog_taxonomy.py` to regenerate; `--check` gates
 drift the same way every other `gen_*.py` generator in this repo does.
@@ -537,14 +541,25 @@ in it is open.
    `tests/test_example_shards.py`, so it is wider than it looks — Phase 4's
    move relocated the file to `catalog/ground_truth.json` but did not split
    `taxonomy` out of it.
-6. **Making the generator's semantic classification declarative.**
-   `gen_catalog_taxonomy.py` still classifies scenarios by hard-coded case
-   *number* sets (`BUNDLE_SCENARIOS`, `CAPABILITY_SCENARIOS`, the four
-   ecosystem sets). A new oneTBB, SYCL, bundle or capability case is
-   silently classified as a generic rule unless someone remembers to edit
-   the generator. Mechanically-derived fields (languages, artifact shape)
-   should stay generated; the semantic ones belong in the manifest item 5
-   introduces.
+6. **Making the generator's semantic classification declarative — done.**
+   `gen_catalog_taxonomy.py` used to classify scenarios by six hard-coded
+   case-*number* sets (`BUNDLE_SCENARIOS`, `CAPABILITY_SCENARIOS`, and one
+   set per ecosystem), with every case not in one of them silently
+   classified as a generic rule. `catalog/catalog_classification.yaml`
+   (loaded by `scripts/catalog_classification.py`) now holds that
+   classification declaratively, one entry per case, under `scenarios`
+   (`scenario_kind`/`ecosystem`) or `rules`. `validate_classification()`
+   enforces both directions the same way `catalog_rule_registry.
+   validate_registry()` already does for rule slugs: every case in
+   `ground_truth.json["verdicts"]` must have exactly one entry, and every
+   entry must name a real case — a case with no entry now fails
+   `gen_catalog_taxonomy.py` outright instead of silently defaulting.
+   Mechanically-derived fields (languages, artifact shape) stayed generated,
+   unchanged; only the semantic classification (`entity`/`scenario_kind`/
+   `ecosystem`) moved to the manifest. This landed independently of item 5
+   below (which is about splitting `taxonomy` itself out of
+   `ground_truth.json`, a separate, wider change) — `catalog_classification.
+   yaml` is its own small manifest, not part of `ground_truth.json`.
 
 ## Out of scope
 

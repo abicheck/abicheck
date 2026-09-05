@@ -135,6 +135,13 @@ case181) or `entity: scenario` with `operation: audit` (case147-151)), `operatio
 `related_rules`, and `rule_slug`/`variant_of`/`relation_type`/
 `relation_axis`.
 
+`entity`/`scenario_kind`/`ecosystem` are declarative, not derived from a
+heuristic: [`catalog_classification.yaml`](catalog_classification.yaml)
+carries one explicit entry per case (`scripts/catalog_classification.py`
+loads and validates it), and a case missing from it fails
+`gen_catalog_taxonomy.py` outright rather than silently defaulting to
+`entity: rule`, `ecosystem: generic`.
+
 **Every rule slug — a `rule_slug` or a `related_rules` entry — must resolve
 to an entry in [`catalog_rules.yaml`](catalog_rules.yaml)**, the canonical
 rule registry: one hand-authored title and definition per rule, all 177 of
@@ -205,12 +212,15 @@ consumer that counts cases.
 1. Pick the next free `caseNN` number.
 2. Write `v1/`, `v2/`, `app.c|cpp`, and a README under `cases/caseNN_<name>/`.
 3. Add the expected verdict to `ground_truth.json`.
-4. Run `python scripts/gen_catalog_taxonomy.py`. If it reports an unknown
-   rule slug, add the rule to `catalog_rules.yaml` with a title and a
-   one-sentence definition (or fix the spelling). If the case is a
-   scenario, an ecosystem case study, a bundle, or a capability
-   demonstration, add its number to the matching set in that generator —
-   every other case defaults to a generic rule, silently.
+4. Add an entry for the new case to `catalog_classification.yaml`, under
+   `rules` (a plain rule case) or `scenarios` (an ecosystem case study,
+   bundle, or capability demonstration, with its `scenario_kind`/
+   `ecosystem`). This is required, not optional: `gen_catalog_taxonomy.py`
+   fails outright on a case missing from that manifest rather than
+   defaulting it to a generic rule. Then run
+   `python scripts/gen_catalog_taxonomy.py`. If it reports an unknown rule
+   slug, add the rule to `catalog_rules.yaml` with a title and a
+   one-sentence definition (or fix the spelling).
 5. Run `python scripts/gen_examples_docs.py` and commit the regenerated
    `docs/reference/examples/caseNN_*.md` **and** the refreshed `catalog/README.md`
    (its headline/distribution/case-index regions are generated from

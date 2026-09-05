@@ -95,6 +95,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # identical sibling-import guard for the identical reason.
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+import catalog_classification  # noqa: E402
 import catalog_rule_registry  # noqa: E402
 import example_catalog  # noqa: E402
 
@@ -102,17 +103,12 @@ EXAMPLES = example_catalog.CASES_DIR
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 
 # ---------------------------------------------------------------------------
-# Explicit case-number groupings from the examples-catalog-split design doc.
-# Keyed by case *number* (an int), not slug, so a future rename doesn't
-# invalidate this table.
+# Per-case entity/scenario_kind/ecosystem classification is declarative --
+# see catalog/catalog_classification.yaml and catalog_classification.py's
+# module docstring for why this replaced six hard-coded case-number sets.
+# `build_taxonomy()` loads it once and threads it through as `classification`
+# rather than each helper below re-reading the file.
 # ---------------------------------------------------------------------------
-
-BUNDLE_SCENARIOS = {84, 90, 91, 92, 93}
-CAPABILITY_SCENARIOS = {147, 148, 149, 150, 151, 191, 192, 193, 194, 195, 196, 197}
-ONETBB_CASE_STUDIES = {78, 94, 107, 108, 109, 110, 111}
-SYCL_CASE_STUDIES = {82, 126}
-ONEMKL_CASE_STUDIES = {112}
-LINUX_KERNEL_CASE_STUDIES = {121, 175, 176}
 
 # Scenarios' related_rules -- hand-curated per the design doc's own worked
 # examples, extended to every scenario case in this pass (the design doc's
@@ -376,13 +372,6 @@ RULE_FAMILIES: dict[str, tuple[str, str | None, str | None]] = {
 _CASE_NUM_RE = re.compile(r"^case(\d+)")
 
 
-def _case_number(case_name: str) -> int:
-    m = _CASE_NUM_RE.match(case_name)
-    if not m:
-        raise ValueError(f"can't parse case number from {case_name!r}")
-    return int(m.group(1))
-
-
 def _default_rule_slug(case_name: str) -> str:
     """A rule case not listed in RULE_FAMILIES still gets a canonical
     `rule_slug` -- mechanically derived from its own case name (the part
@@ -455,7 +444,7 @@ def _languages(case_dir: Path, has_committed_fixtures: bool) -> list[str]:
 
 
 def _artifact_shape(
-    case_dir: Path, case_num: int, fixtures: list[str], mode: str | None
+    case_dir: Path, is_bundle: bool, fixtures: list[str], mode: str | None
 ) -> str:
     """Derive the fixture shape. `fixtures` (ground_truth.json's own
     `fixtures:` list, when the case declares one) is authoritative over any
@@ -466,7 +455,7 @@ def _artifact_shape(
     `old.json`/`new.json` build/source-graph fixtures) without hard-coding
     each one.
     """
-    if case_num in BUNDLE_SCENARIOS:
+    if is_bundle:
         return "bundle"
     if fixtures:
         if any(f.endswith(".abi.json") for f in fixtures):
@@ -525,40 +514,27 @@ def _validation_owner(artifact_shape: str, mode: str | None) -> str:
     return "compiler-pair"
 
 
-def _entity_and_scenario_kind(case_num: int) -> tuple[str, str | None]:
-    if case_num in BUNDLE_SCENARIOS:
-        return "scenario", "project-topology"
-    if case_num in CAPABILITY_SCENARIOS:
-        return "scenario", "capability"
-    if (
-        case_num in ONETBB_CASE_STUDIES
-        or case_num in SYCL_CASE_STUDIES
-        or case_num in ONEMKL_CASE_STUDIES
-        or case_num in LINUX_KERNEL_CASE_STUDIES
-    ):
-        return "scenario", "case-study"
+def _entity_and_scenario_kind(
+    classification: catalog_classification.CaseClassification,
+) -> tuple[str, str | None]:
     # A mode=="audit" case (e.g. 143-146) stays entity == "rule":
     # `scenario_kind` is only ever set for entity == "scenario" (contract
     # asserted by build_taxonomy's own invariant check below); audit-ness
     # is instead carried by the "audit" topics entry these cases already
     # get.
-    return "rule", None
+    return classification.entity, classification.scenario_kind
 
 
-def _ecosystem(case_num: int) -> str:
-    if case_num in ONETBB_CASE_STUDIES:
-        return "onetbb"
-    if case_num in SYCL_CASE_STUDIES:
-        return "sycl"
-    if case_num in ONEMKL_CASE_STUDIES:
-        return "onemkl"
-    if case_num in LINUX_KERNEL_CASE_STUDIES:
-        return "linux-kernel"
-    return "generic"
+def _ecosystem(classification: catalog_classification.CaseClassification) -> str:
+    return classification.ecosystem
 
 
-def _scope(case_num: int) -> str:
-    return "multi-library" if case_num in BUNDLE_SCENARIOS else "single-library"
+def _scope(classification: catalog_classification.CaseClassification) -> str:
+    return (
+        "multi-library"
+        if classification.scenario_kind == "project-topology"
+        else "single-library"
+    )
 
 
 def _operation(mode: str | None) -> str:
@@ -572,11 +548,22 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
     verdicts: dict[str, dict[str, object]] = gt["verdicts"]  # type: ignore[assignment]
     kind_to_topic = _kind_to_topic()
 
+    classification = catalog_classification.load_classification()
+    classification_errors = catalog_classification.validate_classification(
+        classification, verdicts.keys()
+    )
+    if classification_errors:
+        raise ValueError(
+            f"{catalog_classification.CLASSIFICATION_PATH} disagrees with "
+            "ground_truth.json['verdicts']:\n"
+            + "\n".join(f"  - {m}" for m in classification_errors)
+        )
+
     taxonomy: dict[str, dict[str, object]] = {}
     for case_name, entry in verdicts.items():
-        case_num = _case_number(case_name)
         case_dir = example_catalog.case_dir(case_name)
-        entity, scenario_kind = _entity_and_scenario_kind(case_num)
+        case_classification = classification[case_name]
+        entity, scenario_kind = _entity_and_scenario_kind(case_classification)
 
         mode = entry.get("mode")
         fixtures = entry.get("fixtures") or []
@@ -594,7 +581,9 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             # "controls" is its own topic (design doc section 5/8).
             topics = ["controls"]
 
-        artifact_shape = _artifact_shape(case_dir, case_num, fixtures, mode)
+        artifact_shape = _artifact_shape(
+            case_dir, scenario_kind == "project-topology", fixtures, mode
+        )
         if case_name in RULE_FAMILIES:
             rule_slug, variant_of, relation_axis = RULE_FAMILIES[case_name]
         elif entity == "rule":
@@ -630,12 +619,12 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             "entity": entity,
             "scenario_kind": scenario_kind,
             "operation": _operation(mode),
-            "ecosystem": _ecosystem(case_num),
+            "ecosystem": _ecosystem(case_classification),
             "topics": topics,
             "languages": _languages(case_dir, bool(fixtures))
             if case_dir.is_dir()
             else [],
-            "scope": _scope(case_num),
+            "scope": _scope(case_classification),
             "artifact_shape": artifact_shape,
             "validation_owner": _validation_owner(artifact_shape, mode),
             "related_rules": RELATED_RULES.get(case_name, []),
