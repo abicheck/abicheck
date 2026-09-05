@@ -80,6 +80,15 @@ def _tree_signature(root: Path) -> dict[str, str]:
     }
 
 
+def _as_text(captured: str | bytes | None) -> str:
+    """Partial output from a timed-out process, as text."""
+    if captured is None:
+        return ""
+    if isinstance(captured, bytes):
+        return captured.decode(errors="replace")
+    return captured
+
+
 def _run(
     argv: list[str] | tuple[str, ...], cwd: Path, timeout: int
 ) -> subprocess.CompletedProcess[str]:
@@ -90,14 +99,28 @@ def _run(
     that line into their terminal would get -- without granting a committed
     manifest the injection surface `shell=True` would.
     """
-    return subprocess.run(
-        list(argv),
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env={**os.environ, "PYTHONPATH": str(REPO_DIR)},
-    )
+    try:
+        return subprocess.run(
+            list(argv),
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env={**os.environ, "PYTHONPATH": str(REPO_DIR)},
+        )
+    except subprocess.TimeoutExpired as exc:
+        # A hang must be a recorded failure, not an exception that aborts the
+        # runner: propagating it skips the summary and the --json receipt
+        # entirely, so the CI job's always-uploaded results directory would be
+        # empty exactly when a workflow hung and the diagnostics matter most.
+        # 124 is the conventional timeout exit code.
+        return subprocess.CompletedProcess(
+            args=list(argv),
+            returncode=124,
+            stdout=_as_text(exc.stdout),
+            stderr=_as_text(exc.stderr)
+            + f"\n[timed out after {timeout}s: {' '.join(argv)}]\n",
+        )
 
 
 def _check_json(payload: object, expected: dict[str, object]) -> list[str]:

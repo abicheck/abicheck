@@ -218,6 +218,14 @@ def load(directory: Path) -> Workflow:
             raise ManifestError(
                 f"{manifest}: step {name!r}: unknown expect key(s) {unknown}"
             )
+        allow_failure = entry.get("allow_failure", False)
+        if not isinstance(allow_failure, bool):
+            raise ManifestError(
+                f"{manifest}: step {name!r}: `allow_failure` must be a YAML "
+                f'boolean, got {allow_failure!r}. A quoted "false" is a '
+                "non-empty string, which bool() reads as True -- so a failing "
+                "step would be recorded as passing."
+            )
         expect_json = entry.get("expect_json") or {}
         json_variant = _string_list(
             entry.get("json_variant"), f"{manifest}: step {name!r}: `json_variant`"
@@ -243,7 +251,7 @@ def load(directory: Path) -> Workflow:
                 ),
                 json_variant=json_variant,
                 expect_json=dict(expect_json),
-                allow_failure=bool(entry.get("allow_failure", False)),
+                allow_failure=allow_failure,
             )
         )
 

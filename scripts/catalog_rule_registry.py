@@ -201,6 +201,50 @@ def validate_registry(
             errors.append(f"rule slug {slug!r} has an empty title")
         if not definition.definition:
             errors.append(f"rule slug {slug!r} has an empty definition")
+
+    errors.extend(validate_relations(taxonomy))
+    return errors
+
+
+def validate_relations(taxonomy: dict[str, dict]) -> list[str]:
+    """Check that every `variant_of` points somewhere coherent.
+
+    A slug being defined and used says nothing about whether a relation is
+    sound: a `variant_of` naming a case in a *different* rule family would
+    make `build_families()` group the variant under its declared slug while
+    its generated page links to an unrelated case -- contradictory catalog
+    and coverage data that no link checker can see, because both pages
+    exist.
+
+    `tests/test_catalog_taxonomy.py::test_variant_of_names_a_real_case`
+    already pins these three properties in the fast lane. They are repeated
+    here because `gen_catalog_taxonomy.py` calls this function *before
+    writing*, so a bad relation fails at generation rather than being
+    committed to disk first and caught a test run later.
+    """
+    errors: list[str] = []
+    for case_id, entry in sorted(taxonomy.items()):
+        target = entry.get("variant_of")
+        if not target:
+            continue
+        if target not in taxonomy:
+            errors.append(
+                f"{case_id}: variant_of names {target!r}, which is not a case"
+            )
+            continue
+        target_entry = taxonomy[target]
+        if target_entry.get("rule_slug") != entry.get("rule_slug"):
+            errors.append(
+                f"{case_id}: variant_of names {target!r}, but they disagree on "
+                f"rule_slug ({entry.get('rule_slug')!r} vs "
+                f"{target_entry.get('rule_slug')!r}) -- a variant must belong to "
+                "the family it points at"
+            )
+        if target_entry.get("variant_of"):
+            errors.append(
+                f"{case_id}: variant_of names {target!r}, which is itself a "
+                "variant -- a family's canonical case must be canonical"
+            )
     return errors
 
 

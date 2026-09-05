@@ -672,3 +672,54 @@ def test_the_tree_signature_notices_added_and_removed_files(tmp_path: Path):
     assert runner._tree_signature(tmp_path) != original
     (tmp_path / "b.c").unlink()
     assert runner._tree_signature(tmp_path) == original
+
+
+@pytest.mark.parametrize(
+    "value", ["'false'", "'true'", "'no'", "0", "1", "yes-please", "null"]
+)
+def test_a_non_boolean_allow_failure_is_rejected(tmp_path: Path, value: str):
+    """`bool("false")` is True, so a quoted scalar would let a failing step be
+    recorded as passing -- the one field where a silent misread flips a red
+    workflow green."""
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text("# demo\n", encoding="utf-8")
+    (directory / "workflow.yaml").write_text(
+        "id: demo\n"
+        "task: Does it work?\n"
+        "platforms: [linux]\n"
+        f"steps: [{{name: a, run: 'true', allow_failure: {value}}}]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(workflow_examples.ManifestError, match="must be a YAML boolean"):
+        workflow_examples.load(directory)
+
+
+@pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
+def test_a_real_boolean_allow_failure_is_accepted(
+    tmp_path: Path, value: str, expected: bool
+):
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text(
+        "# demo\n\n```bash\ntrue\n```\n", encoding="utf-8"
+    )
+    (directory / "workflow.yaml").write_text(
+        "id: demo\n"
+        "task: Does it work?\n"
+        "platforms: [linux]\n"
+        f"steps: [{{name: a, run: 'true', allow_failure: {value}}}]\n",
+        encoding="utf-8",
+    )
+    assert workflow_examples.load(directory).steps[0].allow_failure is expected
+
+
+def test_a_timed_out_command_is_a_recorded_failure_not_an_abort(tmp_path: Path):
+    """A hang must reach the summary and the JSON receipt. Propagating
+    `TimeoutExpired` aborts the runner before either is produced, leaving the
+    CI job's always-uploaded results directory empty exactly when a workflow
+    hung and the diagnostics matter most."""
+    runner = _load_runner()
+    proc = runner._run(["sleep", "5"], tmp_path, 1)
+    assert proc.returncode == 124
+    assert "timed out after 1s" in proc.stderr

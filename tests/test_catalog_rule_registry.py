@@ -250,3 +250,58 @@ def test_readiness_gate_derives_the_same_demonstrated_count(taxonomy, registry):
         if fam.status == catalog_rule_registry.STATUS_DEMONSTRATED
     )
     assert stdlib_derivation == from_registry
+
+
+# --------------------------------------------------------------------------
+# Relation integrity. A slug being defined and used says nothing about
+# whether a `variant_of` points somewhere coherent: a variant naming a case
+# in a different family would be grouped under its declared slug while its
+# page links to an unrelated case -- contradictory data no link checker sees,
+# because both pages exist. Enforced here as well as in the taxonomy tests
+# because `gen_catalog_taxonomy.py` calls this *before writing*.
+# --------------------------------------------------------------------------
+
+
+def test_committed_relations_are_coherent(taxonomy):
+    assert catalog_rule_registry.validate_relations(taxonomy) == []
+
+
+def test_a_variant_of_naming_a_different_family_is_rejected(taxonomy):
+    """Generated over every (variant, unrelated-canonical) pair, not one
+    hand-picked example."""
+    variants = [c for c, e in taxonomy.items() if e.get("variant_of")]
+    assert variants
+    canonicals = sorted(
+        c for c, e in taxonomy.items() if e.get("rule_slug") and not e.get("variant_of")
+    )
+    for case_id in variants:
+        own_slug = taxonomy[case_id]["rule_slug"]
+        others = [c for c in canonicals if taxonomy[c]["rule_slug"] != own_slug]
+        for target in others[:5]:
+            mutated = copy.deepcopy(taxonomy)
+            mutated[case_id]["variant_of"] = target
+            errors = catalog_rule_registry.validate_relations(mutated)
+            assert any("disagree on rule_slug" in e for e in errors), (
+                f"{case_id} -> {target} (different family) was not reported"
+            )
+
+
+def test_a_variant_of_naming_another_variant_is_rejected(taxonomy):
+    variants = [c for c, e in taxonomy.items() if e.get("variant_of")]
+    for case_id in variants:
+        for target in variants:
+            if target == case_id:
+                continue
+            mutated = copy.deepcopy(taxonomy)
+            mutated[case_id]["variant_of"] = target
+            errors = catalog_rule_registry.validate_relations(mutated)
+            assert errors, f"{case_id} -> {target} (a variant) was not reported"
+
+
+def test_a_variant_of_naming_no_case_is_rejected(taxonomy):
+    for case_id in [c for c, e in taxonomy.items() if e.get("variant_of")]:
+        mutated = copy.deepcopy(taxonomy)
+        mutated[case_id]["variant_of"] = "case999_does_not_exist"
+        assert any(
+            "not a case" in e for e in catalog_rule_registry.validate_relations(mutated)
+        )
