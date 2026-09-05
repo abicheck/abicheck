@@ -123,12 +123,29 @@ carries values a PR author can influence. If the boundary needs a fact,
 give it a field in the structured report.
 
 The consequence to know when reading a failure report: a run whose report
-is genuinely unreadable (`format: text`/`markdown`/`sarif` with no JSON
-sidecar, a crash, an `extra-args --write` that suppressed the sidecar) gets
-the plain exit-code-derived verdict — no `SEVERITY_ERROR`/
-`COVERAGE_INCOMPLETE`/`ANALYSIS_INCOMPLETE` label and no escalation, since
-no structured evidence stated one. That is deliberate: absence of data is
-not evidence an axis fired.
+is genuinely unreadable (a crash, or an `extra-args --write` that
+suppressed the internal sidecar) gets the plain exit-code-derived verdict —
+no `SEVERITY_ERROR`/`COVERAGE_INCOMPLETE`/`ANALYSIS_INCOMPLETE` label and no
+escalation, since no structured evidence stated one. That is deliberate:
+absence of data is not evidence an axis fired.
+
+**This is why `compare`'s and `scan`'s own `--write json=$PR_JSON` sidecar
+injection is unconditional** (not gated on `pr-comment`, since Track T8):
+`_severity_gate_categories`/`_coverage_gated`/`_assurance_gated` all read
+that same JSON, and ADR-049's contract-coverage/analysis-assurance floors
+and the severity-category gate below are *unconditional* checks that no
+`fail-on-*` flag disables — they must not go blind just because a run's
+nominal `format:` is `text`/`markdown` or `pr-comment: false` was set. A
+prior revision of this sidecar injection was gated on `pr-comment` for
+`scan`, on the reasoning that its only consumer was the sticky PR comment;
+a Codex review (P1) on the PR that landed Track T8 found this false — with
+`format: text` (scan's default) and `pr-comment: false`, a coincident ABI
+break (which outranks those axes in the CLI's own max-fold) combined with
+`fail-on-breaking: false` left no JSON anywhere, silently disabling floors
+the AGENTS.md text right here already documented as unconditional. Don't
+re-gate that injection on anything but the effective format and whether
+the user's own `extra-args` already requested a `--write` — see the
+injection's own comment in both mode branches for the exact conditions.
 
 `fail-on-breaking`/`fail-on-api-break` and friends are **step policy on top
 of** the published verdict. They decide whether the step fails; they never

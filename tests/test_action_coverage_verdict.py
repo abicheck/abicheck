@@ -564,20 +564,20 @@ class TestCompareTellsTheTwoAxesApart:
         """`potential_breaking=error` gates at exit 2, which carries the
         API_BREAK label -- so the summary must say the severity policy is what
         failed the step, or it reads as though fail-on-api-break was ignored.
-        """
-        bindir = self._text_report_stub(
-            tmp_path,
-            "Baseline comparison\n"
-            "  severity gate: exit 2 \u2014 blocking: potential_breaking\n\n"
-            "Verdict: COMPATIBLE_WITH_RISK\n",
-            2,
+
+        `_severity_gate_categories` is JSON-only since ADR-063 Track T8, so
+        this needs a real JSON report; a rendered-text stub can no longer
+        name the blocking category at all (see the sibling classes above)."""
+        bindir = _stub_abicheck(
+            tmp_path, exit_code=2, report=_report(coverage=0, severity_exit=2)
         )
         outputs = _run_action(
             tmp_path,
             {
                 "INPUT_MODE": "scan",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "text",
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
             },
             bindir,
         )

@@ -616,86 +616,9 @@ class TestEffectiveFormat:
         assert self._value("text", "--not-a-format-flag") == "text"
 
 
-_TEXT_REPORT_CONTENT_MARKER = "_text_report_content() {"
-
-
-def _text_report_content_source() -> str:
-    """``_text_report_content`` is self-contained (no calls into any other
-    run.sh helper), so it is extracted directly by its own markers rather
-    than through ``_helpers_region()`` -- it is defined well after the
-    "Build the abicheck command" cutoff that function stops at."""
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_TEXT_REPORT_CONTENT_MARKER)
-    end = text.index("\n}\n", start) + len("\n}\n")
-    return text[start:end]
-
-
-def _run_text_report_content(env: dict[str, str]) -> str:
-    assignments = " ".join(f"{k}={v!r}" for k, v in env.items())
-    return _run_value(
-        f"{_text_report_content_source()}\n{assignments} _text_report_content"
-    )
-
-
-@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
-class TestTextReportContentEffectiveFormat:
-    """Codex review, PR #998, fresh evidence: `_text_report_content` is the
-    text-report counterpart of `_STDOUT_JSON_FILE`/`_json_report_src` and had
-    the identical effective-format-override defect -- it gated on the
-    nominal `$FORMAT` instead of `$_EFFECTIVE_FORMAT`, so a `format: json`
-    step whose own `extra-args` overrode to `--format text` (with
-    `output-file` set) wrote real text to `$OUTPUT_FILE` that this function
-    never read, silently losing the severity-gate line and publishing the
-    generic `ERROR` instead of `SEVERITY_ERROR`.
-
-    Its remaining caller is `_severity_gate_categories`, which names the
-    blocking categories in an explanatory note; `_severity_gate_exit`'s own
-    text derivation was retired by ADR-063 Track T8, so no *verdict* or gate
-    exit is decided through this function any more.
-    """
-
-    def test_reads_output_file_when_effective_format_overrides_away_from_json(
-        self, tmp_path
-    ) -> None:
-        output_file = tmp_path / "report.txt"
-        output_file.write_text("severity gate: exit 1 -- blocking: addition\n")
-        out = _run_text_report_content(
-            {
-                "FORMAT": "json",
-                "_EFFECTIVE_FORMAT": "text",
-                "OUTPUT_FILE": str(output_file),
-                "ABICHECK_OUTPUT": "",
-            }
-        )
-        assert "severity gate: exit 1" in out
-
-    def test_reads_stdout_when_effective_format_overrides_to_json(self) -> None:
-        # The reverse direction: nominal text/an output-file present, but the
-        # effective format is json -- the file must NOT be read as if it
-        # were the text report (it holds JSON), stdout is the real source.
-        out = _run_text_report_content(
-            {
-                "FORMAT": "text",
-                "_EFFECTIVE_FORMAT": "json",
-                "OUTPUT_FILE": "/nonexistent/should-not-be-read.txt",
-                "ABICHECK_OUTPUT": '{"severity": {"blocking_categories": []}}',
-            }
-        )
-        assert out == '{"severity": {"blocking_categories": []}}'
-
-    def test_falls_back_to_nominal_format_when_effective_format_unset(
-        self, tmp_path
-    ) -> None:
-        # Isolated callers that never assign `$_EFFECTIVE_FORMAT` (matching
-        # today's real script before this invocation's command-assembly
-        # section runs) must keep behaving exactly as before this fix.
-        output_file = tmp_path / "report.txt"
-        output_file.write_text("severity gate: exit 1 -- blocking: quality_issues\n")
-        out = _run_text_report_content(
-            {
-                "FORMAT": "text",
-                "OUTPUT_FILE": str(output_file),
-                "ABICHECK_OUTPUT": "",
-            }
-        )
-        assert "severity gate: exit 1" in out
+# `_text_report_content` (and its `TestTextReportContentEffectiveFormat`
+# tests) was retired by ADR-063 Track T8: it existed solely to feed
+# `_severity_gate_categories`'/`_severity_gate_exit`'s rendered-text
+# fallbacks, both of which the track removed as prose reconstruction of a
+# real gate decision. With no caller left, the function itself was deleted
+# rather than kept dead.

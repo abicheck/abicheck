@@ -1794,7 +1794,23 @@ elif [[ "$MODE" == "scan" ]]; then
     #
     # Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT`, for the same
     # reason as compare mode's own injection above.
-    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" && "${INPUT_PR_COMMENT:-true}" == "true" \
+    #
+    # NOT gated on `pr-comment` (ADR-063 Track T8, Codex review, P1, fresh
+    # evidence): an earlier revision only injected this sidecar when
+    # `pr-comment: true`, on the reasoning that it exists solely to feed the
+    # sticky PR comment. But `_coverage_gated`/`_assurance_gated`/
+    # `_severity_gate_categories` read the identical sidecar to answer
+    # ADR-049's unconditional contract-coverage/analysis-assurance floors and
+    # the severity-category gate below -- none of which has anything to do
+    # with whether a PR comment gets posted. With `pr-comment: false` and the
+    # documented `format: text` default, a coincident ABI break (which
+    # outranks those axes in the CLI's own max-fold) and `fail-on-breaking:
+    # false` used to leave this run with no JSON anywhere, so those
+    # unconditional floors read no structured evidence and silently did not
+    # fire -- exactly the class of "no valid result" this sidecar exists to
+    # prevent, not a real absence of a report. Compare mode's own injection
+    # above has never had this gate.
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" \
        && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
@@ -2495,48 +2511,20 @@ _severity_gate_exit() {
   _report_query "$_src" severity_exit
 }
 
-# The text report, wherever this invocation put it. `format: text` with an
-# `output-file` writes the report to that file and leaves stdout empty, so a
-# stdout-only search still published ERROR for a severity-policy result
-# (Codex review) -- the same defect as the JSON-only search before it, one
-# level down.
-#
-# Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT` -- same
-# effective-format-override class as `_STDOUT_JSON_FILE`/`_json_report_src`
-# (see `_effective_format`'s own docstring): a `format: json` step whose own
-# `extra-args` overrides to `--format text` really does write text to
-# `$OUTPUT_FILE`, and this check used to still read `$ABICHECK_OUTPUT`
-# instead (empty, since `-o` was used), losing the severity-gate line
-# entirely (Codex review, fresh evidence, PR #998). Falls back to
-# `${FORMAT:-}` when `$_EFFECTIVE_FORMAT` is unset, same as the other two
-# sites, so any isolated-snippet test exercising this function alone keeps
-# behaving exactly as before this fix.
-_text_report_content() {
-  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
-    cat "${OUTPUT_FILE}"
-  else
-    printf '%s' "${ABICHECK_OUTPUT:-}"
-  fi
-}
-
-# The categories the published gate blames, from JSON when there is one and
-# otherwise from the text gate line. Used by the scan final gate to tell a
+# The categories the published gate blames, read from the JSON report's own
+# `severity.blocking_categories`. Used by the scan final gate to tell a
 # severity-configured block (which the user asked to be an error) from a
-# promoted cross-check (which keeps following fail-on-api-break).
+# promoted cross-check (which keeps following fail-on-api-break) -- a real
+# gate decision (see the unconditional FINAL_EXIT check below), not merely a
+# display detail, so it must never be reconstructed from rendered prose
+# (ADR-063 Track T8). With no readable JSON this answers empty; the scan
+# mode's own PR_JSON sidecar injection (unconditional as of Track T8, not
+# gated on `pr-comment`) is what keeps JSON available for the mainline
+# `scan --against` path this gate applies to.
 _severity_gate_categories() {
-  local _src _answer
+  local _src
   _src=$(_json_report_src)
-  _answer=$(_report_query "$_src" blocking_categories)
-  if [[ -n "$_answer" ]]; then
-    echo "$_answer"
-    return
-  fi
-  # Not anchored on the em-dash the renderer happens to use: the exit-code
-  # reader above does not require it either, and a separator that only one of
-  # the two greps depends on is a difference waiting to bite under a
-  # different locale or renderer tweak.
-  sed -n 's/.*severity gate: exit [0-9][0-9]*[^:]*blocking: *\(.*\)$/\1/p' \
-    <<<"$(_text_report_content)" | head -1
+  _report_query "$_src" blocking_categories
 }
 
 
@@ -3106,13 +3094,12 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # setup above already asks the same abicheck invocation to write via
         # --write, so it's already populated
         # by this point without a second run (Codex review). Falls back to
-        # the generic message when no report is readable.
-        # Through `_severity_gate_categories`, which falls back to the text
-        # report's own gate line. A scan on the default `format: text` has no
-        # JSON at all, so a JSON-only lookup printed the bare "severity-level
-        # issue" message the comment above says this exists to avoid -- the
-        # same JSON-only assumption that had to be fixed in the verdict
-        # mapping and then again in its text fallback.
+        # the generic message when no report is readable. `_severity_gate_
+        # categories` is JSON-only (ADR-063 Track T8) -- scan's own PR_JSON
+        # sidecar injection is unconditional as of that same track (not
+        # gated on `pr-comment`), which is what keeps this readable on the
+        # default `format: text` invocation this comment used to have to
+        # special-case a text fallback for.
         _blocking_categories=$(_severity_gate_categories)
         if [[ -n "$_blocking_categories" ]]; then
           echo "> **Verdict: SEVERITY_ERROR** ⚠️ — Blocked by severity policy: \`$_blocking_categories\` configured as \`error\`. This is a policy gate, not necessarily an ABI/API break — see the report below for each finding's actual compatibility."
