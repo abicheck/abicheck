@@ -41,7 +41,9 @@
   is now recorded as `not_evaluated` with the gate's reason rather than as
   `changes_count: 0`, so "did not run" and "ran, found nothing" are no longer
   the same report. The `dwarf` detector's own "neither side has debug info"
-  early return moved onto that gate.
+  early return moved onto that gate. `not_evaluated` is a reporting
+  distinction only: it never changes a verdict, an exit code, or the run's
+  reported analysis confidence.
 
 ### Fixed
 

@@ -75,6 +75,7 @@ nav:
       - Severity Configuration: use/severity.md
       - Policy Profiles: use/policies.md
       - Suppressions: use/suppressions.md
+      - Disposition Audit: use/disposition-audit.md
     - Specialised Checks:
       - Packages & Multi-Library Products:
         - Debian Symbols Files: use/debian-symbols.md

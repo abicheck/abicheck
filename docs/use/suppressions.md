@@ -360,13 +360,11 @@ This ensures that:
 ## What the report says about a suppressed finding
 
 A suppression never removes a finding from the run's own accounting. Every
-report projection carries a **disposition audit** (report schema 2.50): the
-*detected* total (every change the detectors found, before any rule applied),
-the *effective* (gating) total, and the count in each terminal disposition —
-`gating`, `non_gating`, `suppressed`, `out_of_contract`,
-`unresolved_relevance`, `deduplicated`. The counts sum to the detected total,
-so "100 removals detected, 100 suppressed by rule X" stays visible on a
-passing run:
+report projection carries a **disposition audit** (report schema 2.50)
+reconciling the *detected* total with the *effective* (gating) one, so "100
+removals detected, 100 suppressed by rule X" stays visible on a passing run —
+see [The Disposition Audit](disposition-audit.md) for the model and the full
+set of dispositions:
 
 ```console
 $ abicheck compare old.so new.so --suppress suppressions.yaml --profile quick
