@@ -162,6 +162,20 @@ class TestCompareDoesNotInjectALosingWrite:
         )
         assert "--write" not in argv, argv
 
+    def test_an_effective_dry_run_via_extra_args_suppresses_the_injection(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, P2, fresh evidence: `INPUT_DRY_RUN` is a dedicated
+        # input, so an effective dry run reached only through `extra-args
+        # --dry-run` still takes this command-assembly's non-dry-run branch
+        # and used to inject `--write json=$PR_JSON` alongside it -- a
+        # combination the CLI itself rejects (`--dry-run cannot be combined
+        # with --write`), turning what should be a clean dry-run preview
+        # into a usage error.
+        argv = _compare_argv(tmp_path, {"INPUT_EXTRA_ARGS": "--dry-run"})
+        assert "--write" not in argv, argv
+        assert "--dry-run" in argv, argv
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestCompareInjectsWriteForReleaseStyleOperandToo:

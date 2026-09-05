@@ -141,3 +141,18 @@ class TestScanInjectsWriteByEffectiveFormat:
         assert argv.count("--write") == 1, argv
         assert "mine.json" in argv
         assert "abicheck-pr-json" not in argv, argv
+
+    def test_an_effective_dry_run_via_extra_args_suppresses_the_injection(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, P2, fresh evidence: `INPUT_DRY_RUN` is a dedicated
+        # input, so an effective dry run reached only through `extra-args
+        # --dry-run` still took this command-assembly's non-dry-run branch
+        # and injected `--write json=$PR_JSON` alongside it -- a combination
+        # the CLI itself rejects, turning a clean dry-run preview into a
+        # usage error. Sharpened by ADR-063 Track T8's own fix making this
+        # injection unconditional on `pr-comment`, which widened exactly
+        # this gap's exposure.
+        argv = _scan_argv(tmp_path, {"INPUT_EXTRA_ARGS": "--dry-run"})
+        assert "--write" not in argv, argv
+        assert "--dry-run" in argv, argv

@@ -363,6 +363,28 @@ _extra_args_has_write_flag() {
   return 1
 }
 
+# Same shape as `_extra_args_has_write_flag` above, for the sibling defect
+# (Codex review, P2, fresh evidence): `INPUT_DRY_RUN` is a dedicated Action
+# input, but an *effective* dry run reached only through `extra-args
+# --dry-run` leaves `INPUT_DRY_RUN` false, so the compare/scan command
+# assembly still takes its non-dry-run branch and forwards `-o
+# "$OUTPUT_FILE"`/injects `--write json=$PR_JSON` -- both of which the CLI
+# itself rejects alongside a real `--dry-run` (`dry_run.
+# reject_dry_run_with_output`/`frontends.cli.options.secondary_output.
+# reject_incoherent_secondary_output`), turning what should be a clean
+# dry-run preview into a usage error (exit 64). Checked before the PR_JSON
+# sidecar injection in both modes, the same way `_extra_args_has_write_flag`
+# already is.
+_extra_args_has_dry_run_flag() {
+  local _arg
+  # shellcheck disable=SC2086  # word-splitting is the point; see above.
+  set -- ${INPUT_EXTRA_ARGS:-}
+  for _arg in "$@"; do
+    [[ "$_arg" == "--dry-run" ]] && return 0
+  done
+  return 1
+}
+
 # Extract a user-supplied `--write json=PATH`/`--write=json=PATH` path from
 # extra-args, printing it (and nothing else) when found. Empty output means
 # "no such flag" -- callers treat that as "cannot tell", same as every other
@@ -1330,7 +1352,14 @@ elif [[ "$MODE" == "compare" ]]; then
     # does run without JSON output, and skipping this injection because the
     # *nominal* format looked already-JSON left such a run with no JSON
     # report anywhere (Codex review, PR #998, fresh evidence).
-    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] && ! _extra_args_has_write_flag; then
+    #
+    # Also skipped on an *effective* dry run reached only through
+    # `extra-args --dry-run` (`INPUT_DRY_RUN` itself false, so this `else`
+    # branch still ran) -- see `_extra_args_has_dry_run_flag`'s own
+    # docstring for why injecting `--write` there is a CLI usage error, not
+    # merely redundant.
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] \
+       && ! _extra_args_has_write_flag && ! _extra_args_has_dry_run_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
@@ -1810,8 +1839,13 @@ elif [[ "$MODE" == "scan" ]]; then
     # fire -- exactly the class of "no valid result" this sidecar exists to
     # prevent, not a real absence of a report. Compare mode's own injection
     # above has never had this gate.
+    #
+    # Also skipped on an *effective* dry run reached only through
+    # `extra-args --dry-run` (Codex review, P2, fresh evidence) -- see
+    # `_extra_args_has_dry_run_flag`'s own docstring.
     if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" \
-       && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag; then
+       && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag \
+       && ! _extra_args_has_dry_run_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
