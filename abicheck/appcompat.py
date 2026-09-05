@@ -37,9 +37,8 @@ from .model import AbiSnapshot, Visibility
 from .policy.disposition_close import (
     close_consumer_scope,
     ledger_for,
-    record_kept_change,
+    record_consumer_overlay,
 )
-from .policy.disposition_ledger import record_suppressed_change
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -1509,12 +1508,7 @@ def scope_diff_to_app(
         # fields just set above.
         overlay_change.impact_assessment = assess_change(overlay_change)
         if suppression is None:
-            record_kept_change(
-                overlay_ledger,
-                overlay_change,
-                diff,
-                application_point="consumer_overlay",
-            )
+            record_consumer_overlay(overlay_ledger, overlay_change, diff)
             breaking_for_app.append(overlay_change)
             continue
         # evaluate() (not the cheaper is_suppressed) so a broad rule whose
@@ -1541,11 +1535,11 @@ def scope_diff_to_app(
             # so it records through the identical primitive the library-diff
             # points use -- one record type, one query surface (D2), with the
             # consumer overlay named as its own application point.
-            record_suppressed_change(
+            record_consumer_overlay(
                 overlay_ledger,
                 overlay_change,
+                diff,
                 rule=outcome.matched_rule,
-                application_point="consumer_overlay",
                 suppression=suppression,
             )
             suppressed_missing.add(sym)
@@ -1556,12 +1550,7 @@ def scope_diff_to_app(
         # matching rule change the *detected* total rather than move the
         # finding between dispositions -- exactly the conservation the audit
         # exists to make checkable.
-        record_kept_change(
-            overlay_ledger,
-            overlay_change,
-            diff,
-            application_point="consumer_overlay",
-        )
+        record_consumer_overlay(overlay_ledger, overlay_change, diff)
         breaking_for_app.append(overlay_change)
         # outcome.withheld_unknown_rule is never set here: overlay_change is
         # always constructed with reachability_state=PROVEN_REACHABLE above

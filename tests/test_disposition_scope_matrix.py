@@ -110,7 +110,16 @@ def _oracle(
        non-evaluated record is untouched — severity says how severe a finding
        is, never whether the consumer this run gates on uses it at all.
     """
+    if initial is Disposition.DEDUPLICATED:
+        # Marked when the consumer does not use it -- so a later pass that
+        # restores the row into `result.changes` cannot pull it into a gate
+        # this run never scored it in -- but never *relabelled*, since
+        # "folded into another finding" stays the true reason.
+        return initial, not in_scope
     if initial not in _EVALUATED:
+        # A suppressed or contract-excluded finding needs no mark: no gate
+        # re-answers it under any scheme, so there is nothing to protect it
+        # from.
         return initial, False
     if not in_scope:
         return Disposition.NON_GATING, True

@@ -58,6 +58,17 @@ from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
 # ---------------------------------------------------------------------------
 
 
+def _sweep_result():
+    """An empty real `DiffResult`, for the gate context alone."""
+    from abicheck.checker import compare
+    from abicheck.model import AbiSnapshot
+
+    return compare(
+        AbiSnapshot(library="libmatrix", version="1.0"),
+        AbiSnapshot(library="libmatrix", version="2.0"),
+    )
+
+
 def _sweep_case(bucket, relevance, promote, scoped, severity, restore):
     """Build one cell of the sweep: a single finding, driven through the real
     recording, closing, scoping and gate-projection path."""
@@ -198,3 +209,130 @@ def test_the_whole_state_space_holds_four_invariants(
             "a suppressed finding policy never scored must not reach the "
             "release recommendation as a waived break"
         )
+
+
+def test_one_export_named_twice_is_one_detection() -> None:
+    """The overlay path runs once per `--used-by` consumer and builds a fresh
+    object each time, so the ledger's identity key alone can disagree with
+    the scoped view's finding-id key.
+
+    Two *different* consumers needing the same export are genuinely two
+    observations — each overlay names its own consumer, so both the report
+    and the audit show two, and they agree. The case that did not agree is
+    the same consumer reaching the path twice (a repeated `--used-by`
+    operand, or one app resolved through two library aliases): the
+    orchestrator's `relevant_changes_by_id` collapses those to one entry
+    while the identity-keyed ledger counted two, making the raw total move
+    with *how the run was invoked* rather than with what was observed.
+    """
+    from abicheck.policy.disposition_close import record_consumer_overlay
+
+    result = _sweep_result()
+    ledger = DispositionLedger()
+    # The very shape the overlay path produces, built three times over -- as
+    # a repeated consumer operand does.
+    consumers = [
+        Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="shared_export",
+            description="Consumer 'app' requires symbol 'shared_export'",
+        )
+        for _ in range(3)
+    ]
+    for overlay in consumers:
+        record_consumer_overlay(ledger, overlay, result)
+
+    assert ledger.detected_total == 1, "one missing export, one observation"
+    assert conservation_holds(ledger)
+    # …and every one of the three objects still resolves to that record, so a
+    # consumer-scoped report can join on whichever it holds.
+    assert {id(ledger.record_for(c)) for c in consumers} == {
+        id(ledger.record_for(consumers[0]))
+    }
+
+    # A different export is a second detection -- and so is the *same* export
+    # required by a genuinely different consumer, whose overlay names it and
+    # which the scoped view therefore also shows separately. The key is the
+    # report's own finding id, so the audit and the report cannot disagree
+    # about which of these is one finding and which is two.
+    for other in (
+        Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="other_export",
+            description="Consumer 'app' requires symbol 'other_export'",
+        ),
+        Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="shared_export",
+            description="Consumer 'other_app' requires symbol 'shared_export'",
+        ),
+    ):
+        record_consumer_overlay(ledger, other, result)
+    assert ledger.detected_total == 3
+
+
+def test_the_first_consumers_rule_provenance_is_the_one_kept() -> None:
+    """Deduping must not silently re-record: the disposition and rule the
+    *first* producer resolved are the ones that applied to the run."""
+    from abicheck.policy.disposition_close import record_consumer_overlay
+    from abicheck.suppression import Suppression, SuppressionList
+
+    result = _sweep_result()
+    ledger = DispositionLedger()
+    rule = Suppression(symbol_pattern=".*", reason="first consumer's rule")
+    first, second = (
+        Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="shared_export",
+            description="Consumer 'app' requires symbol 'shared_export'",
+        )
+        for _ in range(2)
+    )
+    record_consumer_overlay(
+        ledger, first, result, rule=rule, suppression=SuppressionList([rule])
+    )
+    record_consumer_overlay(ledger, second, result)
+
+    assert ledger.detected_total == 1
+    record = ledger.record_for(second)
+    assert record.disposition is Disposition.SUPPRESSED
+    assert record.rule is not None
+    assert record.rule.reason == "first consumer's rule"
+
+
+def test_a_restored_row_inside_the_consumer_scope_rejoins_the_gate() -> None:
+    """The scoped-gate sibling of the restored-row rule.
+
+    `scope.show_redundant` restores a redundant finding into `result.changes`
+    *before* `--used-by`/`--required-symbol` scoping runs, so the scoped
+    severity gate does score it — but a guard that refused to re-answer
+    anything a scope had touched left it `deduplicated`, reporting
+    `effective_total: 0` beside a scoped exit 4. `scope_decided` marks *which
+    gate* decides a record, never that the record is frozen: only a genuinely
+    scope-*excluded* row is untouchable.
+    """
+    from abicheck.checker_types import DiffResult
+    from abicheck.policy.disposition_close import finalize_ledger
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+
+    strict = SeverityConfig(abi_breaking=SeverityLevel.ERROR)
+    for in_scope in (True, False):
+        result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+        restored = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="f", description="redundant"
+        )
+        result.redundant_changes = [restored]
+        result.redundant_count = 1
+        ledger = finalize_ledger(DispositionLedger(), result)
+        assert ledger.record_for(restored).disposition is Disposition.DEDUPLICATED
+
+        # …then `show_redundant` restores it, and the scope rules on it.
+        result.changes = [restored]
+        close_consumer_scope(ledger, result, gating=[restored] if in_scope else [])
+        gated = ledger.with_gate(result, strict)
+        assert gated.effective_total == int(in_scope), (
+            "in scope: the scoped severity gate scores the restored row, so "
+            "the audit must count it; out of scope: it must not, whatever "
+            "severity says about its kind"
+        )
+        assert conservation_holds(gated)

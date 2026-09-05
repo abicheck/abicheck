@@ -184,10 +184,19 @@ class DispositionLedger:
         #: consumer can ask "which rule disposed of *this* change" without a
         #: second, lossy (kind, symbol) join.
         self._seen_ids: dict[int, int] = {}
+        #: ``dedupe_key -> index``, for a producer that legitimately builds
+        #: *distinct objects* for one observation. `compare --used-by` runs
+        #: `scope_diff_to_app` once per consumer, and two consumers requiring
+        #: the same missing export each synthesize their own equal-but-not-
+        #: identical overlay; identity keying alone recorded two detections
+        #: for the one missing symbol the scoped report shows.
+        self._seen_keys: dict[str, int] = {}
         # Keeps every recorded change alive for the ledger's lifetime, so the
         # identity keys above cannot be recycled by the allocator while the
         # ledger is still being appended to.
         self._anchors: list[object] = []
+        #: Aliased changes (see ``dedupe_key``): kept alive, never zipped.
+        self._aliases: list[object] = []
 
     # -- recording -----------------------------------------------------
 
@@ -201,6 +210,7 @@ class DispositionLedger:
         from_gate: bool = False,
         gate_excluded: bool | None = None,
         scope_decided: bool = False,
+        dedupe_key: str | None = None,
     ) -> None:
         """Record *change*'s single terminal *disposition*.
 
@@ -238,6 +248,20 @@ class DispositionLedger:
         key = id(change)
         if key in self._seen_ids:
             return
+        if dedupe_key is not None:
+            if dedupe_key in self._seen_keys:
+                # The same observation, produced again by a second consumer.
+                # Not recorded twice, and not *re*-recorded either: the first
+                # producer's disposition and rule provenance are the ones
+                # that applied.
+                self._seen_ids[key] = self._seen_keys[dedupe_key]
+                # Held alive separately: `_anchors` is index-aligned with
+                # `_records` (every pass zips them), and an alias adds no
+                # record. It still needs an owner, or its id could be
+                # recycled onto an unrelated object and read as a hit.
+                self._aliases.append(change)
+                return
+            self._seen_keys[dedupe_key] = len(self._records)
         self._seen_ids[key] = len(self._records)
         self._anchors.append(change)
         kind = getattr(change, "kind", None)
@@ -262,6 +286,7 @@ class DispositionLedger:
         rule: Suppression | None,
         application_point: str,
         source_file: str | None = None,
+        dedupe_key: str | None = None,
     ) -> None:
         """The one primitive every suppression application point routes through.
 
@@ -276,6 +301,7 @@ class DispositionLedger:
             Disposition.SUPPRESSED,
             application_point=application_point,
             rule=rule_provenance(rule, source_file=source_file),
+            dedupe_key=dedupe_key,
         )
 
     # -- querying ------------------------------------------------------
@@ -343,7 +369,9 @@ class DispositionLedger:
         severity_input = {id(c) for c in getattr(result, "changes", None) or ()}
         gated = DispositionLedger()
         gated._anchors = list(self._anchors)
+        gated._aliases = list(self._aliases)
         gated._seen_ids = dict(self._seen_ids)
+        gated._seen_keys = dict(self._seen_keys)
         gated._records = [
             self._regated(record, change, result, severity_config, gate, severity_input)
             for record, change in zip(self._records, self._anchors)
@@ -365,14 +393,27 @@ class DispositionLedger:
             return record
         if record.scope_decided:
             # A scoped run gates on the consumer's own relevant set, so
-            # `result.changes` membership says nothing about it either way --
-            # but the scoped gate does apply the severity configuration to
-            # what it scores, so an included record is still re-answered by
-            # kind. Only the exclusion itself is untouchable.
-            if record.gate_excluded or record.disposition not in (
-                Disposition.GATING,
-                Disposition.NON_GATING,
+            # `result.changes` membership does not *exclude* anything here --
+            # but the scoped gate still applies the severity configuration to
+            # what it scores, so an included record is re-answered by kind.
+            # Only the exclusion itself is untouchable: `gate_excluded` means
+            # the consumer does not use this finding, which no severity
+            # setting overrides.
+            if record.gate_excluded:
+                return record
+            restored = (
+                severity_config is not None and id(change) in severity_input
+            )
+            if (
+                record.disposition
+                not in (Disposition.GATING, Disposition.NON_GATING)
+                and not restored
             ):
+                # A deduplicated row the scoped gate does not score keeps
+                # saying why it is out. One `show_redundant` restored into
+                # `result.changes` *is* scored, so it is re-answered like any
+                # other included row -- `scope_decided` marks which gate
+                # decides, never that a row is frozen.
                 return record
             return replace(
                 record,
@@ -601,17 +642,21 @@ class DispositionLedger:
             # so the mark has to come first (found by an exhaustive sweep of
             # the module's own state space, not by a report).
             self._records[index] = record = replace(record, scope_decided=True)
-            if record.disposition not in (
-                Disposition.GATING,
-                Disposition.NON_GATING,
-            ):
+            if id(change) in scoped:
                 continue
-            if id(change) not in scoped:
+            if record.disposition in (Disposition.GATING, Disposition.NON_GATING):
                 self._records[index] = replace(
                     record,
                     disposition=Disposition.NON_GATING,
                     gate_excluded=True,
                 )
+            elif record.disposition is Disposition.DEDUPLICATED:
+                # Marked but not relabelled: the consumer does not use this
+                # finding, so no later pass may pull it into the gate -- and
+                # `show_redundant` restoring it into `result.changes` is
+                # exactly such a pass. It keeps saying `deduplicated`, which
+                # is still the true reason it is not a finding of its own.
+                self._records[index] = replace(record, gate_excluded=True)
 
     def record_for(self, change: object) -> DispositionRecord | None:
         """The record for *change*, or ``None`` if it was never recorded."""
@@ -677,6 +722,7 @@ def record_suppressed_change(
     rule: Suppression | None,
     application_point: str,
     suppression: object | None = None,
+    dedupe_key: str | None = None,
 ) -> None:
     """The single call every suppression application point makes.
 
@@ -696,6 +742,7 @@ def record_suppressed_change(
         rule=rule,
         application_point=application_point,
         source_file=_source_file_for(suppression, rule),
+        dedupe_key=dedupe_key,
     )
 
 

@@ -44,6 +44,7 @@ from .disposition_ledger import (
     DispositionLedger,
     _GateContext,
     _kept_disposition,
+    record_suppressed_change,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -56,6 +57,7 @@ def record_kept_change(
     result: DiffResult,
     *,
     application_point: str,
+    dedupe_key: str | None = None,
 ) -> None:
     """Record a change that a caller *kept*, with its real gate disposition.
 
@@ -73,6 +75,7 @@ def record_kept_change(
         _kept_disposition(change, result),
         application_point=application_point,
         from_gate=True,
+        dedupe_key=dedupe_key,
     )
 
 
@@ -88,6 +91,52 @@ def _is_policy_overlay(change: object) -> bool:
     """Is *change* a policy-generated diagnostic rather than an observation?"""
     kind = getattr(change, "kind", None)
     return getattr(kind, "value", kind) in _POLICY_OVERLAY_KINDS
+
+
+def record_consumer_overlay(
+    ledger: DispositionLedger | None,
+    change: Change,
+    result: DiffResult,
+    *,
+    rule: object | None = None,
+    suppression: object | None = None,
+) -> None:
+    """Record one ``--used-by`` consumer overlay, deduped across consumers.
+
+    ``appcompat.scope_diff_to_app`` runs once per consumer, and two consumers
+    needing the same missing export each synthesize their own
+    equal-but-not-identical overlay for the *one* observation. The
+    orchestrator dedupes its scoped view by finding id; the ledger is
+    identity-keyed, so without the same key it recorded two detections for
+    what the report shows as one (ADR-067 D1 -- the raw total counts
+    observations, and a second consumer asking about the same export is not a
+    second observation).
+
+    Both branches record, since adding a rule must move a finding between
+    dispositions rather than change how many were detected; *rule* is the
+    ``SuppressionOutcome.matched_rule`` that fired, or ``None`` for a kept
+    overlay.
+    """
+    from ..finding_identity import report_finding_id
+
+    key = report_finding_id(change)
+    if rule is None and suppression is None:
+        record_kept_change(
+            ledger,
+            change,
+            result,
+            application_point="consumer_overlay",
+            dedupe_key=key,
+        )
+        return
+    record_suppressed_change(
+        ledger,
+        change,
+        rule=rule,  # type: ignore[arg-type]
+        application_point="consumer_overlay",
+        suppression=suppression,
+        dedupe_key=key,
+    )
 
 
 def _record_bucket(
