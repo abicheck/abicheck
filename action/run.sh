@@ -481,19 +481,30 @@ _extra_args_has_dry_run_flag() {
 # recovers that path so `_json_report_src` can read it directly, instead of
 # either rejecting the combination outright or (worse) silently doing
 # nothing.
+#
+# `--write` is a scalar (non-`multiple=True`) Click option: a repeated
+# `--write` resolves to the *last* occurrence, whatever its format, not the
+# first `json=...` one found (Codex review, P2, PR #1071) -- so this keeps
+# scanning the whole `extra-args` list and only remembers the most recent
+# match, clearing it again if a later `--write` isn't `json=...` (matching
+# Click's real resolved value, which could just as well be a non-JSON
+# format last).
 _extra_args_write_json_path() {
-  local _name _value
+  local _name _value _found=""
   while IFS=$'\t' read -r _name _value; do
     if [[ "$_name" == "--write" ]]; then
       case "$_value" in
         json=*)
-          printf '%s' "${_value#json=}"
-          return 0
+          _found="${_value#json=}"
+          ;;
+        *)
+          _found=""
           ;;
       esac
     fi
   done <<<"$(_extra_args_options)"
-  return 1
+  [[ -n "$_found" ]] || return 1
+  printf '%s' "$_found"
 }
 
 # The real `--format` value `abicheck` runs with, accounting for `extra-args`

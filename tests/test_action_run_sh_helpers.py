@@ -707,6 +707,57 @@ class TestEffectiveFormat:
         assert self._value("markdown", "--output out.md --format json") == "json"
 
 
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestExtraArgsWriteJsonPath:
+    """``--write`` is a scalar Click option: a repeated occurrence resolves
+    to the *last* one, whatever its format -- not the first ``json=...``
+    match found (Codex review, P2, PR #1071). `_extra_args_write_json_path`
+    must track the last occurrence the same way `_effective_format` already
+    does for `--format`, including "un-discovering" a previously-seen JSON
+    path when a later, non-JSON `--write` wins instead.
+    """
+
+    def _value(self, extra_args: str) -> str:
+        return _run_value(
+            f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_write_json_path"
+        )
+
+    def test_absent_extra_args(self) -> None:
+        assert self._value("") == ""
+
+    def test_single_write_json(self) -> None:
+        assert self._value("--write json=out.json") == "out.json"
+
+    def test_last_write_json_occurrence_wins(self) -> None:
+        # Click's own resolved value here is "second.json", not the first
+        # match -- an early `return 0` on the first hit disagreed with that.
+        assert (
+            self._value("--write json=first.json --write json=second.json")
+            == "second.json"
+        )
+
+    def test_a_later_non_json_write_overrides_an_earlier_json_one(self) -> None:
+        # Click keeps only the last `--write`, regardless of format -- if
+        # that last one isn't `json=...`, there is no JSON path to recover
+        # at all, even though an earlier occurrence was one.
+        assert self._value("--write json=out.json --write text=out.txt") == ""
+
+    def test_a_later_json_write_overrides_an_earlier_non_json_one(self) -> None:
+        assert self._value("--write text=out.txt --write json=out.json") == "out.json"
+
+    def test_unrelated_extra_args(self) -> None:
+        assert self._value("--verbose --gate-api-break") == ""
+
+    def test_equals_form(self) -> None:
+        assert self._value("--write=json=out.json") == "out.json"
+
+    def test_write_consumed_as_an_output_option_value_is_not_a_flag(self) -> None:
+        # Same tokenizer, same class of bug as the sibling helpers: `--output
+        # --write` means "write a file literally named --write", not a real
+        # `--write` flag.
+        assert self._value("--output --write") == ""
+
+
 # `_text_report_content` (and its `TestTextReportContentEffectiveFormat`
 # tests) was retired by ADR-063 Track T8: it existed solely to feed
 # `_severity_gate_categories`'/`_severity_gate_exit`'s rendered-text
