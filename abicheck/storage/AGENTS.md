@@ -148,3 +148,14 @@ know what an `AbiSnapshot`'s fields mean — it stores and retrieves bytes a
 caller already produced, addressed by content hash. A caller needing this
 package to interpret its own payload is a sign the interpretation belongs in
 the calling layer, not here.
+
+## Product invariant (local consequence)
+
+Storage **preserves identity and history**: occurrence-preserving entity
+identity, content digests, release/variant coordinates, evidence coverage,
+and tool/schema versions are what let a later run reference a stored
+snapshot (a baseline, a history entry, a consumer's provider baseline)
+rather than copy or re-derive it. A degraded or partial capture must be
+marked as such in the stored document, never persisted as if it were
+complete. Root `AGENTS.md` "Product decisions and change routing" states
+the rule; ADR-062 and ADR-066 own the design.

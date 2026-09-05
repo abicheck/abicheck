@@ -1,8 +1,35 @@
 # Project Goals
 
-> **Context:** `abi-compliance-checker` (ABICC) is no longer actively maintained.
-> `libabigail` is maintained by Red Hat but focuses on DWARF-only binary analysis.
-> `abicheck` is a modern Python alternative — drop-in compatible with ABICC first, then better.
+The product direction is owned by the repository-root
+[`vision.md`](vision.md) (rendered here verbatim): abicheck helps library and
+package maintainers understand and validate API/ABI evolution, grounded in
+compatibility analysis. This page has two jobs that the vision deliberately
+does not take on: it names the **enduring goals** that direction implies, and
+it keeps the **historical milestones** — the ABICC-parity programme this
+project started from — as history. Concrete, in-progress work lives in the
+[implementation plans](plans/index.md) and the
+[use-case registry](usecase-registry.yaml), never here.
+
+## Enduring goals
+
+| Goal | What it means in practice | Where the work is tracked |
+|---|---|---|
+| Trusted compatibility verdicts | Binary breaks, source-only breaks, and deployment risks stay separate, with evidence coverage stated and no manufactured findings | [Verdicts](../learn/verdicts.md), [Evidence & Detectability](../learn/evidence-and-detectability.md), ADR-009/042/064 |
+| Visible surface evolution | Additions, removals, and modifications are all first-class, and what policy hid stays auditable | [ADR-067](adr/067-change-intent-acknowledgment-and-disposition-audit.md), [vision workstream plan](plans/vision-api-abi-evolution.md) |
+| Scope-sensitive analysis | One model for one or many components; package and release contracts apply only when selected; partial matrices are never read as removals | [ADR-065](adr/065-comparison-scope-selection-and-completeness.md) |
+| Honest evidence | Missing, failed, unsupported, not applicable, and not requested are distinct; weaker evidence narrows conclusions | ADR-028/049/050/063, [plan](plans/vision-api-abi-evolution.md) |
+| Project-defined versioning and history | Versioning policy and strictness decide acceptance, never facts; longitudinal tracking over immutable snapshots | [ADR-066](adr/066-longitudinal-history-and-versioning-policy.md) |
+| CI-first delivery | GitHub Action first, identical semantics through the CLI and typed Python API | ADR-017/047/055, [GitHub Action](../use/github-action.md) |
+| Honest platform and domain scope | Linux/C/C++ first with SYCL inside C++; Windows/macOS with stated capability; CPython/scientific Python as the next optional provider domain; header-only as intended scope | [Platforms](../reference/platforms.md), [SciPy roadmap](scipy-scientific-python-roadmap.md), G4/G45 |
+
+## Historical milestones
+
+> **Context, as it stood when the project started:** `abi-compliance-checker`
+> (ABICC) is no longer actively maintained. `libabigail` is maintained by
+> Red Hat but focuses on DWARF-only binary analysis. `abicheck` began as a
+> modern Python alternative — drop-in compatible with ABICC first, then
+> better. The six goals below were that programme; their "Done" notes are
+> kept as history and are not the whole vision.
 
 ---
 
@@ -135,10 +162,18 @@ Public documentation at <https://abicheck.github.io/abicheck/>:
   `import` — this is a native-ABI-adjacent contract check, not general Rust/Go/
   Java source analysis, and ADR-034 (managed-runtime/non-C frontends) remains a
   proposal for anything broader.
-- Static / import library archives (`.a`, `.lib`) — abicheck compares single
-  linkable images (shared libraries and objects), not `ar` member archives. A
-  static library has no runtime ABI surface (no SONAME, no dynamic symbol
-  table); link-time API checking over archive members is a deliberate non-goal.
-  Extract members (`ar x lib.a`) and compare the resulting objects, or the
-  shared library built from them, instead. See
+- Static / import library archives (`.a`, `.lib`) — **currently unsupported
+  input**, not a permanent exclusion. abicheck compares single linkable
+  images (shared libraries and objects), not `ar` member archives; a static
+  library has no runtime ABI surface (no SONAME, no dynamic symbol table),
+  and handing one to `dump`/`compare` produces a clear error rather than a
+  misleading result (the G8 decision). Extract members (`ar x lib.a`) and
+  compare the resulting objects, or the shared library built from them,
+  instead. The [vision](vision.md) records a bounded, lower-priority
+  investigation into which archive questions can honestly be answered
+  (relinking precompiled objects versus a full rebuild, thin archives, LTO
+  members, import libraries versus static libraries) — tracked in the
+  [vision workstream plan](plans/vision-api-abi-evolution.md); nothing
+  about archive acceptance changes until that investigation reaches a
+  separately scoped decision. See
   [limitations](../learn/limitations.md#static-import-library-archives-a-lib).

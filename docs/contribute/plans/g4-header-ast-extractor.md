@@ -1,3 +1,20 @@
+> **Replan note (2026-09-05).** This plan predates the ADR-061 responsibility
+> packages, ADR-063's one semantic pipeline, and the shipped clang L2
+> backend selected by `--ast-frontend`. Its sketches of a flat
+> `dumper_libclang.py`, writes to the former `model.py`, and an additional
+> `--header-ast` selector are **historical and must not be executed
+> verbatim**: new extraction code lands under `abicheck/extract/`, the
+> frontend selector that exists is `--ast-frontend`, and a wholesale
+> libclang migration is not presumed. The header-only *product* requirement
+> (compare old/new public headers through the normal pipeline without
+> manufacturing a binary) is now sequenced as workstream F of the
+> [vision workstream plan](vision-api-abi-evolution.md), building on
+> [G45](g45-header-only-targets-and-build-output-emit-helper.md)'s
+> assessment; the deeper macro/inline/template evidence this plan
+> describes is that workstream's S2, taken only where demonstrably missing.
+> The registry entry `UC-ARCH-header-only` keeps this plan as its `plan:`
+> link until that workstream lands its first slice.
+
 # G4 — libclang header-AST extractor (header-only / inline-only frontier)
 
 **Registry:** `UC-ARCH-header-only` (`planned`)

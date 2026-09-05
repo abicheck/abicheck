@@ -147,3 +147,14 @@ or a CLI flag directly is in the wrong layer.
   moved module's full public surface explicitly (not `import *`), so
   `abicheck.<name>.<attr>` attribute access keeps working identically to
   before the move, not only `from abicheck.<name> import <attr>`.
+
+## Product invariant (local consequence)
+
+Policy makes **explicit dispositions** over an already-recorded change set
+and never erases the facts it disposes of: a suppression, reclassification,
+scope exclusion, acknowledgment, or gate decision carries its rule, origin,
+and reason, and the raw change (with its evidence status) survives for the
+audit. Versioning model, enforcement strictness, and acknowledgment change
+*acceptance*, never technical compatibility. Root `AGENTS.md` "Product
+decisions and change routing" states the rule; ADR-065/066/067 and
+`docs/contribute/plans/vision-api-abi-evolution.md` own the gaps.

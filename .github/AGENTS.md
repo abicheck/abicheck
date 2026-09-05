@@ -126,3 +126,31 @@ never be surprised by a required CI job it had no way to reproduce.
 opening PRs/issues against this repo — keep them free of anything that reads
 as an instruction to an AI reviewer (this repo receives real automated
 review traffic).
+
+## Product invariants for CI integration
+
+Local consequences of root `AGENTS.md`'s "Product decisions and change
+routing" section for anything that runs abicheck from a workflow:
+
+- **Shared semantics.** The Action, the reusable workflows, and a bare CLI
+  or Python API call resolve the same input to the same decision; a
+  workflow may add convenience (baseline resolution, PR comments, SARIF
+  upload), never a second gate algorithm.
+- **Partial scope is normal.** A matrix cell or a local run checks its own
+  selected target/profile against the matching baseline member; other
+  variants are out of scope, and an expected-but-missing artifact is an
+  incompleteness signal (warn by default, block by configuration), never a
+  fabricated removal.
+- **Trusted baseline selection.** A baseline is chosen by identity and
+  coordinates (`channel × target × profile`, digests), never by a moving
+  "latest" without recording the exact resolved artifact.
+- **Prebuilt consumers are inputs, not builds.** A consumer artifact
+  supplied to a check is used as-is for static inspection; rebuilding or
+  executing it is a separately designed, explicitly opted-in validation
+  mode (ADR-060 remains deferred).
+- **Structured outcomes only.** New decision semantics travel through the
+  typed report/`ExitDecision` fields and Action outputs; never scrape log
+  text to derive a verdict or a gate.
+
+This section does not change the repository's own merge policy above,
+which stays as recorded.

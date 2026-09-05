@@ -1,8 +1,11 @@
 # Backlog
 
 Near-term hardening items that are scoped but not yet implemented. This list
-is deliberately small and concrete — strategic / architectural ideas live in
-[Goals](goals.md), not here.
+is deliberately small and concrete — the product direction lives in the
+[vision](vision.md), the enduring goals it implies in [Goals](goals.md), and
+the vision-driven workstreams (comparison scope, policy audit, history,
+consumers, evidence adequacy, header-only, reporting) in the
+[vision workstream plan](plans/vision-api-abi-evolution.md), not here.
 
 ## MSVC + PDB end-to-end CI
 

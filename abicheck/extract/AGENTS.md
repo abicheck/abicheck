@@ -148,3 +148,14 @@ an explicit keyword-only parameter rather than importing it back through
 - **A migrated module must never import back through its old flat facade**
   (`abicheck.dumper`, `abicheck.service`, `abicheck.cli`) — that reintroduces
   exactly the reverse coupling this package exists to remove.
+
+## Product invariant (local consequence)
+
+Extraction **retains facts with provenance and status**. Not requested,
+unavailable on this input, unsupported by this backend, not applicable, and
+collected-then-failed are distinct `FactStatus` outcomes; a failed
+collection never returns `PRESENT` with an empty value, so a downstream
+detector cannot read a failure as an empty surface. Optional evidence
+(DWARF, build data, sources) is consumed when present and never becomes a
+prerequisite. Root `AGENTS.md` "Product decisions and change routing"
+states the rule; ADR-063 Phase 5's fact registry is the mechanism.
