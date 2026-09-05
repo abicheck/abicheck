@@ -152,12 +152,19 @@ comparisons, each with its own selection record, never merged evidence.
 
 ### D6 — Completeness is a run outcome with a default of warn
 
-An expected member that was not produced or not supplied is an
-**incompleteness** signal on the run: a warning by default, configurable to
-block through the existing outcome/exit machinery (a new axis on
-`RunOutcome`/`ExitDecision` beside compatibility, assurance, operational,
-and coverage — ADR-064's precedence, extended, not a second gate scheme).
-It never becomes an ABI finding. A **retired support promise** is
+Every **selected, expected** member that did not reach a completed
+comparison is an **incompleteness** signal on the run, whatever the
+reason: `expected_not_produced`, `not_supplied`, `unsupported` (an
+artifact this build cannot analyze), `failed` (which is *also* an
+operational error, D8), or an `ambiguous` selection (D3). The signal is a
+warning by default, configurable to block through the existing
+outcome/exit machinery (a new axis on `RunOutcome`/`ExitDecision` beside
+compatibility, assurance, operational, and coverage — ADR-064's
+precedence, extended, not a second gate scheme), and it is raised
+independently of how many *other* selected members compared cleanly: a
+matrix with one clean pair and one unsupported or ambiguous selected
+member is an incompletely checked scope, never a clean pass. It never
+becomes an ABI finding. A **retired support promise** is
 configured separately (a contract-policy field), so a project can say
 "macOS is no longer supported" and have that evaluated as a contract
 change, while a missing macOS job stays an incomplete run.
@@ -250,6 +257,11 @@ the replaced set-difference and canonical-fallback paths.
   pair with a complete old inventory does.
 - A declared matrix with a failed expected member yields incompleteness
   (warn by default, block when configured) and no invented API deletion.
+- A mixed matrix — one selected member compared cleanly, another selected
+  member `unsupported` (or ambiguously matched) — reports the clean pair's
+  findings *and* an incomplete-scope outcome; under `block` it is not a
+  clean pass, and under `warn` the report still states the unchecked
+  member.
 - A run with zero valid comparisons reports `no comparison completed`
   under every completeness policy.
 - Replacing unavailable evidence with empty evidence fails a test.
