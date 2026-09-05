@@ -45,12 +45,11 @@ def _is_schema_valid_run_outcome(data: object) -> bool:
     object (``compare_report.schema.json``) -- every required key present
     *and* holding a value of the type/enum the schema declares, not merely
     that :meth:`~abicheck.policy.outcome.RunOutcome.from_dict` parses it
-    (Codex review, two rounds on two different callers): that reader is
-    deliberately lenient for its OTHER callers (which read an already-
-    genuine block back) -- ``compatibility``/``lifecycle`` degrade silently
-    instead of failing, and it never looks at ``schema_version``/``assurance``.
-    So ``schema_version: null``, ``compatibility: {}``, and ``lifecycle:
-    "bogus"`` all survived, at both the top-level ``run_outcome`` read
+    (Codex review, two rounds on two callers): that reader is deliberately
+    lenient for its OTHER callers (reading an already-genuine block back):
+    ``compatibility``/``lifecycle`` degrade silently, and it never reads
+    ``schema_version``/``assurance``. So ``schema_version: null``,
+    ``compatibility: {}``, and ``lifecycle: "bogus"`` survived, at both the top-level ``run_outcome`` read
     (:func:`_run_outcome_gate_and_operational`) and the scoped exemption's
     ``full_run_outcome`` read (:func:`_has_valid_full_run_outcome`) --
     shared here so neither can independently drift from the schema.
