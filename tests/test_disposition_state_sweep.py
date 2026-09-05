@@ -336,3 +336,81 @@ def test_a_restored_row_inside_the_consumer_scope_rejoins_the_gate() -> None:
             "severity says about its kind"
         )
         assert conservation_holds(gated)
+
+
+def test_a_scoped_alias_resolves_to_its_canonical_record() -> None:
+    """Membership must be resolved the same way on both sides of the ledger.
+
+    The overlay path's `dedupe_key` collapses several equal-but-not-identical
+    objects of one observation onto a single record, keeping the *first* as
+    the anchor. The orchestrator's `relevant_changes_by_id` keeps whichever
+    alias it saw *last* for its gating union. Comparing anchor identity
+    against that union read the record as out of scope and demoted it to
+    `non_gating` — while the scoped gate could still fail on the alias the
+    union actually holds, so the audit said `effective_total: 0` beside a
+    real scoped failure.
+
+    Stated for every alias position, not just the reported last-wins one: any
+    of them naming the finding must put the record in scope.
+    """
+    from abicheck.policy.disposition_close import record_consumer_overlay
+
+    for union_position in (0, 1, 2):
+        result = _sweep_result()
+        ledger = DispositionLedger()
+        aliases = [
+            Change(
+                kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+                symbol="shared_export",
+                description="Consumer 'app' requires symbol 'shared_export'",
+            )
+            for _ in range(3)
+        ]
+        for alias in aliases:
+            record_consumer_overlay(ledger, alias, result)
+        assert ledger.detected_total == 1
+
+        # The union holds exactly one of them — the orchestrator keeps the
+        # last it saw, but the rule cannot depend on which.
+        close_consumer_scope(ledger, result, gating=[aliases[union_position]])
+        record = ledger.record_for(aliases[0])
+        assert record.disposition is Disposition.GATING, (
+            f"alias {union_position} names this finding in the scoped gating "
+            "union, so its record is in scope"
+        )
+        assert record.gate_excluded is False
+        assert ledger.effective_total == 1
+        assert conservation_holds(ledger)
+
+
+def test_an_alias_absent_from_the_union_is_still_excluded() -> None:
+    """The negative control: resolving aliases must not make everything
+    in-scope. A finding no alias of which appears in the union is excluded,
+    exactly as before."""
+    from abicheck.policy.disposition_close import record_consumer_overlay
+
+    result = _sweep_result()
+    ledger = DispositionLedger()
+    used = Change(
+        kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+        symbol="used",
+        description="Consumer 'app' requires symbol 'used'",
+    )
+    unused_aliases = [
+        Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="unused",
+            description="Consumer 'app' requires symbol 'unused'",
+        )
+        for _ in range(2)
+    ]
+    for overlay in (used, *unused_aliases):
+        record_consumer_overlay(ledger, overlay, result)
+    assert ledger.detected_total == 2
+
+    close_consumer_scope(ledger, result, gating=[used])
+    assert ledger.record_for(used).disposition is Disposition.GATING
+    excluded = ledger.record_for(unused_aliases[1])
+    assert excluded.disposition is Disposition.NON_GATING
+    assert excluded.gate_excluded is True
+    assert ledger.effective_total == 1

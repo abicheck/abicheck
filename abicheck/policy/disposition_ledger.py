@@ -401,12 +401,9 @@ class DispositionLedger:
             # setting overrides.
             if record.gate_excluded:
                 return record
-            restored = (
-                severity_config is not None and id(change) in severity_input
-            )
+            restored = severity_config is not None and id(change) in severity_input
             if (
-                record.disposition
-                not in (Disposition.GATING, Disposition.NON_GATING)
+                record.disposition not in (Disposition.GATING, Disposition.NON_GATING)
                 and not restored
             ):
                 # A deduplicated row the scoped gate does not score keeps
@@ -623,8 +620,15 @@ class DispositionLedger:
         recording what the run actually gated on, not a projection rendering
         it.
         """
-        scoped = {id(c) for c in in_scope}
-        for index, (record, change) in enumerate(zip(self._records, self._anchors)):
+        # Record indices, not raw object ids: `dedupe_key` collapses several
+        # equal-but-not-identical objects of one observation onto one record
+        # (keeping the first as the anchor), while the orchestrator's
+        # `relevant_changes_by_id` keeps whichever alias it saw last. Asking
+        # by anchor identity then read the record as out of scope and demoted
+        # it, though the scoped gate can still fail on the alias the union
+        # holds. Both sides resolve membership through the same alias map.
+        scoped = self.indices_for(in_scope)
+        for index, (record, _change) in enumerate(zip(self._records, self._anchors)):
             # Both evaluated dispositions, not just ``gating``: a finding that
             # is *already* non-gating (a compatible addition, say) still has
             # to be marked excluded, or a later severity setting that promotes
@@ -642,7 +646,7 @@ class DispositionLedger:
             # so the mark has to come first (found by an exhaustive sweep of
             # the module's own state space, not by a report).
             self._records[index] = record = replace(record, scope_decided=True)
-            if id(change) in scoped:
+            if index in scoped:
                 continue
             if record.disposition in (Disposition.GATING, Disposition.NON_GATING):
                 self._records[index] = replace(
@@ -657,6 +661,20 @@ class DispositionLedger:
                 # exactly such a pass. It keeps saying `deduplicated`, which
                 # is still the true reason it is not a finding of its own.
                 self._records[index] = replace(record, gate_excluded=True)
+
+    def index_for(self, change: object) -> int | None:
+        """The index of *change*'s record, resolving an alias to its anchor.
+
+        The one place object identity becomes a record: ``dedupe_key`` maps
+        every alias of one observation onto the same index, so a caller
+        holding *any* of them asks the same question.
+        """
+        return self._seen_ids.get(id(change))
+
+    def indices_for(self, changes: Iterable[object]) -> set[int]:
+        """:meth:`index_for` over a collection, skipping unrecorded changes."""
+        resolved = (self.index_for(c) for c in changes)
+        return {index for index in resolved if index is not None}
 
     def record_for(self, change: object) -> DispositionRecord | None:
         """The record for *change*, or ``None`` if it was never recorded."""

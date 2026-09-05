@@ -309,7 +309,12 @@ def close_consumer_scope(
     """
     if ledger is None:
         return
+    # Alias-resolved, for the same reason `apply_scope` resolves: a late
+    # finding and the union entry for it can be two objects of one
+    # observation, and asking by raw identity would read the finding as out
+    # of scope while the scoped gate fails on the alias the union holds.
     gating_ids = {id(c) for c in gating}
+    gating_indices = ledger.indices_for(gating)
     gate = _GateContext.of(result)
     for change in also_detected:
         # Through the same per-finding gate resolution every other kept
@@ -330,7 +335,10 @@ def close_consumer_scope(
         # evaluated-and-harmless finding.
         disposition = _kept_disposition(change, result, None, gate)
         evaluated = disposition in (Disposition.GATING, Disposition.NON_GATING)
-        excluded = evaluated and id(change) not in gating_ids
+        excluded = evaluated and not (
+            id(change) in gating_ids
+            or (ledger.index_for(change) or -1) in gating_indices
+        )
         ledger.record(
             change,
             Disposition.NON_GATING if excluded else disposition,
