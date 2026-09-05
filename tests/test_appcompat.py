@@ -1329,11 +1329,18 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat._detect_app_format", return_value=None),
         ]
 
-    def test_compatible_no_changes(self, tmp_path):
-        app = tmp_path / "app"
-        old_lib = tmp_path / "old.so"
-        new_lib = tmp_path / "new.so"
+    def test_unrecognised_binary_format_raises(self, tmp_path):
+        """check_appcompat resolves each side's format itself (T5) ahead of
+        run_dump -- an unresolvable format must raise, not reach run_dump
+        with binary_fmt=None."""
+        from abicheck.errors import ValidationError
 
+        with patch("abicheck.service.detect_binary_format", return_value=None), \
+             pytest.raises(ValidationError, match="Unrecognised binary format"):
+            check_appcompat(tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so")
+
+    def test_compatible_no_changes(self, tmp_path):
+        app, old_lib, new_lib = tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so"
         app_reqs = AppRequirements(
             undefined_symbols={"foo_init", "foo_process"},
         )
@@ -1383,10 +1390,7 @@ class TestCheckAppcompat:
         whose wrapper defaults `include_dependencies` to True -- suppressing
         the streaming pruner the way this call used to do manually (Codex
         review, PR #840, bdSMk) -- so it must not override that default."""
-        app = tmp_path / "app"
-        old_lib = tmp_path / "old.so"
-        new_lib = tmp_path / "new.so"
-
+        app, old_lib, new_lib = tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so"
         app_reqs = AppRequirements(undefined_symbols=set())
         diff = DiffResult(old_version="1", new_version="2", library="libfoo")
 
@@ -1439,10 +1443,7 @@ class TestCheckAppcompat:
         assert new_call.kwargs["public_include_search_dirs"] == [new_inc]
 
     def test_missing_symbols_breaking(self, tmp_path):
-        app = tmp_path / "app"
-        old_lib = tmp_path / "old.so"
-        new_lib = tmp_path / "new.so"
-
+        app, old_lib, new_lib = tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so"
         app_reqs = AppRequirements(
             undefined_symbols={"foo_init", "foo_gone"},
         )
@@ -1603,10 +1604,7 @@ class TestCheckAppcompat:
     def test_lang_c(self, tmp_path):
         """lang='c' is forwarded to run_dump() unchanged; run_dump derives
         the "cc" castxml frontend from it (`_dump_elf`'s own check)."""
-        app = tmp_path / "app"
-        old_lib = tmp_path / "old.so"
-        new_lib = tmp_path / "new.so"
-
+        app, old_lib, new_lib = tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so"
         app_reqs = AppRequirements(undefined_symbols=set())
         diff = DiffResult(old_version="1", new_version="2", library="libfoo")
         new_exports: set[str] = set()

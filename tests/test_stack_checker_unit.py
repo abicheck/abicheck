@@ -377,6 +377,25 @@ class TestDiffStacks:
 
 
 class TestRunAbiDiff:
+    def test_unrecognised_binary_format_returns_none(self, monkeypatch, tmp_path):
+        """T5 direct-bypass migration: an unrecognised binary format (from
+        `service.detect_binary_format`) reaches `service.run_dump` as
+        `binary_fmt=None`, which raises `UnsupportedArtifactError` -- caught
+        by this function's own generic except-Exception fallback, same as
+        any other dump failure."""
+        from abicheck.stack_checker import _run_abi_diff
+
+        old_lib = tmp_path / "old.so"
+        new_lib = tmp_path / "new.so"
+        old_lib.write_bytes(b"old")
+        new_lib.write_bytes(b"new")
+
+        monkeypatch.setattr(
+            "abicheck.service.detect_binary_format", lambda _path: None
+        )
+
+        assert _run_abi_diff(old_lib, new_lib, "libfoo.so") is None
+
     def test_reraises_profile_mismatch_instead_of_swallowing(self, monkeypatch, tmp_path):
         """ADR-050 D2: a genuine comparability-gate mismatch from compare()
         must propagate, not be swallowed into the generic except-Exception
