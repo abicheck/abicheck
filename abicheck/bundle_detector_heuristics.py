@@ -55,6 +55,12 @@ from .elf_metadata import ElfMetadata
 if TYPE_CHECKING:
     from .diff_cpp_patterns import BundleMember
 
+# Manifest-matching cooperative checkpoint granularity (Codex review, PR H,
+# second round): frequent enough that a real --budget overrun is caught
+# well before it compounds, coarse enough that deadline.check()'s own
+# time.monotonic() read doesn't dominate a large index scan.
+_DEADLINE_CHECK_INTERVAL = 2000
+
 
 def _soname_skew_findings(
     old_members: list[BundleMember],
@@ -222,14 +228,46 @@ def _build_demangled_index(snapshot: BundleSnapshot) -> list[tuple[str, str]]:
     Demangling uses :func:`abicheck.demangle.demangle`; when the
     demangler is unavailable, the mangled name is recorded so
     ``extern "C"`` symbols still match.
+
+    Only ``is_default`` symbols are indexed (Codex review, security P1,
+    PR H): a manifest entry always matches by bare/unversioned name (see
+    :func:`_match_target_against_index`'s ``symbol`` branch, which keys
+    :attr:`~abicheck.bundle_models.ResolutionGraph.provides` the identical
+    way), and the dynamic linker can only satisfy an unversioned reference
+    against a default (``@@version`` or unversioned) definition -- a DSO
+    exporting only a non-default ``@version`` definition of the name
+    cannot actually be linked against by an unversioned consumer, even
+    though the bare name is technically present in ``.dynsym``.
+
+    Checkpoints ``deadline.check()`` every :data:`_DEADLINE_CHECK_INTERVAL`
+    symbols (Codex review, PR H, second round): a ~50k-symbol bundle
+    demangled in one call has no other cooperative checkpoint of its own,
+    so a small ``--budget`` could otherwise be overrun well before any
+    per-target checkpoint in :func:`_match_entry` is ever reached. Checked
+    *before* each batch's first ``demangle()`` call, including the very
+    first eligible symbol (Codex review, fresh evidence, PR H third round):
+    counting symbols first and checking only when the running total hit an
+    exact multiple of the interval meant an already-expired budget (or one
+    that expires early in a large index) went undetected for up to
+    ``_DEADLINE_CHECK_INTERVAL - 1`` uncached, potentially slow
+    (``c++filt``-shelling) demangles before the first check ever fired --
+    mirrors :func:`_match_target_against_index`'s own ``enumerate(...)``
+    checkpoint, which already checks at index 0.
     """
+    from . import deadline
     from .demangle import demangle as _demangle
 
     index: list[tuple[str, str]] = []
+    seen = 0
     for lib_name, meta in snapshot.metadata.items():
         for sym in meta.symbols:
             if sym.visibility not in ("default", "protected"):
                 continue
+            if not sym.is_default:
+                continue
+            if seen % _DEADLINE_CHECK_INTERVAL == 0:
+                deadline.check()
+            seen += 1
             index.append((_demangle(sym.name) or sym.name, lib_name))
     return index
 
@@ -254,15 +292,28 @@ def _match_target_against_index(
     import fnmatch
 
     if kind == "symbol":
-        providers = snapshot.resolution.providers_for(target)
+        # Only a *default* definition satisfies a manifest's own
+        # unversioned/bare-name promise (Codex review, security P1, PR H)
+        # -- see _build_demangled_index()'s identical guard for the
+        # pattern/template branch below and its docstring for why.
+        providers = [p for p in snapshot.resolution.providers_for(target) if p.is_default]
         return ([target] if providers else []), providers
+
+    from . import deadline
 
     if index is None:
         index = _build_demangled_index(snapshot)
 
     matched: list[str] = []
     provider_set: set[str] = set()
-    for demangled, lib_name in index:
+    # Checkpointed every _DEADLINE_CHECK_INTERVAL entries (Codex review,
+    # PR H, second round): a single pattern/template target scanning a
+    # ~50k-entry index has no other cooperative checkpoint of its own --
+    # _match_entry's own per-target check only bounds the time *between*
+    # targets, not a single large scan.
+    for i, (demangled, lib_name) in enumerate(index):
+        if i % _DEADLINE_CHECK_INTERVAL == 0:
+            deadline.check()
         if lib_name in provider_set:
             # We already recorded this library as a provider — one
             # match per library is enough; skip the rest of its exports.
@@ -309,14 +360,111 @@ def _match_entry(
     :func:`_build_demangled_index` and pass it in to amortise the
     O(symbols) demangle pass across all targets.
     """
+    from . import deadline
+
     needs_index = any(kind != "symbol" for _, kind in _entry_targets(entry))
     if index is None and needs_index:
         index = _build_demangled_index(snapshot)
     out: list[tuple[str, str, list[str], list[ProviderEntry]]] = []
     for target, kind in _entry_targets(entry):
+        # Cooperative checkpoint (Codex review, PR H): a large pattern/
+        # template manifest can spend arbitrarily long here scanning the
+        # full demangled index per target -- deadline_scope() alone
+        # doesn't interrupt pure Python work, so without this a small
+        # --budget could be exceeded well before run_scan_set's own
+        # elapsed-time check (after audit_bundle returns) ever sees it.
+        deadline.check()
         matched, providers = _match_target_against_index(target, kind, snapshot, index)
         out.append((target, kind, matched, providers))
     return out
+
+
+def _manifest_ownership_findings(
+    snapshot: BundleSnapshot,
+    manifest: InstantiationManifest,
+    *,
+    kind: ChangeKind,
+    scope_desc: str,
+    index: list[tuple[str, str]] | None = None,
+) -> list[BundleFinding]:
+    """Check whether *manifest*'s ownership promises hold against *snapshot*.
+
+    The one-sided "does this contract hold right now" half shared by
+    :func:`_detect_manifest_drift` (``compare --manifest``, two-sided: this
+    is its "missing in new"/"wrong provider" pass) and
+    :func:`abicheck.bundle_detectors._detect_manifest_ownership`
+    (``scan --artifact-set --manifest``, audit-mode: no old side, so this
+    *is* the whole check). *kind* and *scope_desc* let each caller emit its
+    own :class:`~abicheck.checker_policy.ChangeKind` and wording
+    (``"the new bundle"`` vs. ``"this artifact set"``) over the identical
+    matching logic, so the two callers cannot silently diverge on what
+    "wrong provider" means.
+
+    Decomposes template entries into one virtual target per instantiation
+    so each instantiation is checked independently. For each target:
+      - If no exported symbol matches → *kind*.
+      - If matched but at the wrong provider (when ``optional_provider=False``)
+        → *kind* (contract names the expected library).
+
+    Symbols in *snapshot* but not in the manifest are not flagged here
+    (out-of-manifest exports are not necessarily promised).
+    """
+    findings: list[BundleFinding] = []
+    if index is None:
+        index = _build_demangled_index(snapshot)
+
+    for entry in manifest.entries:
+        for target, kind_word, matched, providers in _match_entry(
+            entry, snapshot, index
+        ):
+            if not matched:
+                findings.append(
+                    BundleFinding(
+                        kind=kind,
+                        symbol=target,
+                        description=(
+                            f"Manifest promises {kind_word} {target!r} but no "
+                            f"exported symbol in {scope_desc} matches it."
+                        ),
+                        provider_library=entry.library,
+                    ),
+                )
+                continue
+            if not entry.optional_provider and entry.library is not None:
+                expected_library: str = entry.library
+
+                def _matches(prov: ProviderEntry, _lib: str = expected_library) -> bool:
+                    if prov.library == _lib:
+                        return True
+                    meta = snapshot.metadata.get(prov.library)
+                    if meta is not None and meta.soname == _lib:
+                        return True
+                    # The manifest may name the literal on-disk filename
+                    # (e.g. "libfoo.so.1.2.3") rather than either the
+                    # discovery key or the DT_SONAME -- ResolutionGraph's
+                    # own soname_to_name reverse map already indexes every
+                    # symlink/hard-link alias basename discovered for each
+                    # provider (see _compute_resolution_graph), so reuse it
+                    # here instead of a second, narrower alias lookup
+                    # (Codex review, fresh evidence, PR H).
+                    return snapshot.resolution.soname_to_name.get(_lib) == prov.library
+
+                if not any(_matches(p) for p in providers):
+                    got = ", ".join(sorted(p.library for p in providers))
+                    findings.append(
+                        BundleFinding(
+                            kind=kind,
+                            symbol=target,
+                            description=(
+                                f"Manifest requires {kind_word} {target!r} to "
+                                f"be provided by {entry.library}, but "
+                                f"{scope_desc} provides it via {got} instead."
+                            ),
+                            provider_library=entry.library,
+                            new_value=got,
+                        ),
+                    )
+    return findings
 
 
 def _detect_manifest_drift(
@@ -326,66 +474,25 @@ def _detect_manifest_drift(
 ) -> list[BundleFinding]:
     """Enforce a release manifest against the new bundle.
 
-    Decomposes template entries into one virtual target per
-    instantiation so each instantiation is checked independently.
-    Per-snapshot demangle indexes are built once and reused across
-    every manifest entry — manifest enforcement scales O(symbols +
-    Σtargets) rather than O(symbols × Σtargets).
-
-    For each target:
-      - If no exported symbol matches → ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED``.
-      - If matched but at the wrong provider (when ``optional_provider=False``)
-        → ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED`` (contract names the lib).
-
-    Symbols in the new bundle but not in the manifest are not flagged
-    here (out-of-manifest exports are not necessarily promised).
+    Per-snapshot demangle indexes are built once and reused across every
+    manifest entry — manifest enforcement scales O(symbols + Σtargets)
+    rather than O(symbols × Σtargets). The "missing in new"/"wrong
+    provider" half is :func:`_manifest_ownership_findings`; this function
+    adds the two-sided "newly promised" pass that only makes sense with an
+    old side to diff against.
     """
-    findings: list[BundleFinding] = []
     # Build the per-snapshot demangle indexes once; both the
     # "missing in new" and "newly promised" passes reuse them.
     new_index = _build_demangled_index(new)
     old_index = _build_demangled_index(old)
 
-    for entry in manifest.entries:
-        for target, kind, matched, providers in _match_entry(entry, new, new_index):
-            if not matched:
-                findings.append(
-                    BundleFinding(
-                        kind=ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED,
-                        symbol=target,
-                        description=(
-                            f"Manifest promises {kind} {target!r} but no "
-                            f"exported symbol in the new bundle matches it."
-                        ),
-                        provider_library=entry.library,
-                    ),
-                )
-                continue
-            if not entry.optional_provider and entry.library is not None:
-
-                def _matches(
-                    prov: ProviderEntry, _entry: ManifestEntry = entry
-                ) -> bool:
-                    if prov.library == _entry.library:
-                        return True
-                    meta = new.metadata.get(prov.library)
-                    return meta is not None and meta.soname == _entry.library
-
-                if not any(_matches(p) for p in providers):
-                    got = ", ".join(sorted(p.library for p in providers))
-                    findings.append(
-                        BundleFinding(
-                            kind=ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED,
-                            symbol=target,
-                            description=(
-                                f"Manifest requires {kind} {target!r} to be "
-                                f"provided by {entry.library}, but it is "
-                                f"provided by {got} instead."
-                            ),
-                            provider_library=entry.library,
-                            new_value=got,
-                        ),
-                    )
+    findings = _manifest_ownership_findings(
+        new,
+        manifest,
+        kind=ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED,
+        scope_desc="the new bundle",
+        index=new_index,
+    )
 
     # Newly-promised targets — matched in new bundle but not in old.
     for entry in manifest.entries:

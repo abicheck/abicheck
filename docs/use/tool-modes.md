@@ -82,7 +82,7 @@ See [Architecture](../learn/architecture.md) for the full per-layer breakdown.
 
 abicheck is a superset of the external modes for most categories — see the
 [quick-reference table](#tool-comparison-quick-reference) below and the
-[397-kind Change Kind Reference](../reference/change-kinds.md). Below
+[399-kind Change Kind Reference](../reference/change-kinds.md). Below
 highlights what a single external tool misses:
 
 - ✅ `noexcept`, `const`/`static` qualifier, and access-level changes (header AST)

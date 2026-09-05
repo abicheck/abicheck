@@ -45,6 +45,8 @@ from here directly.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .bundle_detector_heuristics import (
     DEFAULT_SYSTEM_SYMBOLS,
     _import_is_external,
@@ -67,6 +69,9 @@ from .bundle_soname import soname_matches_providers
 from .checker_policy import ChangeKind, Verdict, policy_kind_sets
 from .checker_types import DiffResult
 from .elf_metadata import ElfSymbol, SymbolBinding
+
+if TYPE_CHECKING:
+    from .bundle_manifest import InstantiationManifest
 
 
 def _detect_library_structural_changes(
@@ -363,6 +368,134 @@ def _detect_unresolved_intra_dependency(
                 ),
             )
     return findings
+
+
+# Linker/runtime-synthesized per-object symbols present, under their own
+# independent definition, in virtually every ELF shared object (crt/glibc
+# start files, the toolchain's implicit array markers). Each library gets
+# its own copy from its own crt object -- this is normal ELF plumbing, not
+# an ownership collision -- so _detect_duplicate_providers excludes them
+# rather than flagging one on every multi-library artifact set.
+_LINKER_SYNTHESIZED_SYMBOLS: frozenset[str] = frozenset(
+    {
+        "_edata",
+        "_end",
+        "__bss_start",
+        "__bss_start__",
+        "_end__",
+        "_init",
+        "_fini",
+        "_start",
+        "_DYNAMIC",
+        "_GLOBAL_OFFSET_TABLE_",
+        "__dso_handle",
+        "_IO_stdin_used",
+        "__data_start",
+        "data_start",
+        "__environ",
+        "environ",
+        "__gmon_start__",
+        "__TMC_END__",
+        "__preinit_array_start",
+        "__preinit_array_end",
+        "__init_array_start",
+        "__init_array_end",
+        "__fini_array_start",
+        "__fini_array_end",
+        "__JCR_LIST__",
+        "__JCR_END__",
+    }
+)
+
+
+def _detect_duplicate_providers(new: BundleSnapshot) -> list[BundleFinding]:
+    """Audit-mode: flag a symbol exported as a *strong, default* definition
+    by 2+ members of one ``--artifact-set``.
+
+    ADR-056 D2 (PR H): a single-side sibling of :func:`_detect_provider_changed`
+    -- that needs an old side (removed-here/added-there) an audit doesn't
+    have. What an audit *can* see: two libraries both defining the same
+    symbol as their own strong (``STB_GLOBAL``), default-bound export means
+    an unversioned reference resolves to whichever the dynamic linker's
+    load-order rules pick first, not a declared contract. Only
+    ``is_default`` providers count (mirrors ``ProviderEntry.is_default``).
+
+    **Only strong providers count** (Codex review, fresh evidence): a
+    weak/``STB_GNU_UNIQUE`` copy is ordinary C++ vague linkage (an inline
+    function/template instantiation COMDAT every DSO that uses it emits
+    identically), deduplicated by the dynamic linker at load time -- not
+    two libraries disputing ownership.
+
+    Deliberately conservative on false positives: linker/runtime-
+    synthesized per-object symbols (:data:`_LINKER_SYNTHESIZED_SYMBOLS`)
+    and libstdc++-shaped names (:func:`~abicheck.bundle_detector_heuristics.
+    _looks_system_symbol`) are excluded -- either would fire on nearly
+    every real multi-library set for no ownership reason at all.
+
+    **Known, deliberately-deferred gap:** no L4 symbol reconciliation
+    (same gap as :func:`~abicheck.bundle.artifact_set_member_exports`, see
+    ``docs/contribute/known-gaps.md``) -- two raw exports spelling one
+    declaration under different mangling variants could misread as two
+    single-provider symbols rather than one duplicate, or vice versa.
+    Closing it needs each member's own L4 mapping threaded into the bundle
+    layer, a materially larger change left for a follow-up.
+    """
+    findings: list[BundleFinding] = []
+    for symbol, providers in sorted(new.resolution.provides.items()):
+        if symbol in _LINKER_SYNTHESIZED_SYMBOLS or _looks_system_symbol(symbol):
+            continue
+        default_libs = sorted(
+            {
+                p.library
+                for p in providers
+                if p.is_default and p.binding == SymbolBinding.GLOBAL
+            }
+        )
+        if len(default_libs) < 2:
+            continue
+        findings.append(
+            BundleFinding(
+                kind=ChangeKind.BUNDLE_DUPLICATE_PROVIDER,
+                symbol=symbol,
+                description=(
+                    f"{symbol} is exported as a strong (non-weak) default "
+                    f"definition by {len(default_libs)} libraries in this "
+                    f"artifact set ({', '.join(default_libs)}); which one a "
+                    "consumer resolves against depends on load order / "
+                    "symbol interposition, not a declared contract."
+                ),
+                affected_libraries=default_libs,
+            ),
+        )
+    return findings
+
+
+def _detect_manifest_ownership(
+    new: BundleSnapshot,
+    manifest: InstantiationManifest,
+) -> list[BundleFinding]:
+    """Audit-mode (no old side) sibling of ``compare --manifest``'s
+    ownership check (:func:`~abicheck.bundle_detector_heuristics.
+    _detect_manifest_drift`).
+
+    ADR-056 D2 (PR H): no old side, so no "newly promised" half (that pass
+    is inherently a diff) -- only whether the promise holds *right now*.
+    Delegates to :func:`~abicheck.bundle_detector_heuristics.
+    _manifest_ownership_findings`, the identical "missing"/"wrong provider"
+    logic ``compare --manifest`` uses, so the two entry points can't
+    diverge on what "wrong provider" means. Emits
+    ``BUNDLE_MANIFEST_ENTRY_UNSATISFIED`` -- distinct from
+    ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED``, which implies a
+    diff-confirmed regression this audit cannot claim.
+    """
+    from .bundle_detector_heuristics import _manifest_ownership_findings
+
+    return _manifest_ownership_findings(
+        new,
+        manifest,
+        kind=ChangeKind.BUNDLE_MANIFEST_ENTRY_UNSATISFIED,
+        scope_desc="this artifact set",
+    )
 
 
 def _detect_intra_dep_signature_changed(

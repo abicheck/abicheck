@@ -249,7 +249,67 @@ def load_manifest(path: Path) -> InstantiationManifest:
     data = _load_manifest_data(path)
     provides = cast("list[dict[str, object]]", data["provides"])
     entries = [_parse_manifest_entry(path, raw) for raw in provides]
+    _validate_manifest_entries(path, entries)
     return InstantiationManifest(entries=tuple(entries))
+
+
+def _validate_manifest_entries(source: Path | str, entries: list[ManifestEntry]) -> None:
+    """Validate structural invariants of already-constructed :class:`ManifestEntry`
+    objects, independent of how they were built.
+
+    Three invariants, all things :func:`_parse_manifest_entry`'s raw-dict
+    parsing already guarantees for a freshly-loaded YAML/JSON manifest
+    (:func:`_validate_manifest_entry_shape`, :func:`_parse_template_instantiations`)
+    but that nothing enforces for a :class:`ManifestEntry` built directly by a
+    Python caller (Codex review, fresh evidence, PR H follow-up: a bare
+    ``ManifestEntry()`` -- zero of symbol/pattern/template set -- silently
+    expands to zero match targets in :func:`~abicheck.bundle_detector_
+    heuristics._entry_targets`, so the scan reports no unsatisfied entry at
+    all; two selectors set at once silently drops one promise the same way):
+
+    - exactly one of ``symbol``/``pattern``/``template`` is set;
+    - a ``template`` entry has a non-empty ``instantiations``;
+    - ``optional_provider: false`` names a ``library`` -- every wrong-
+      provider check downstream (``_manifest_ownership_findings``) is
+      itself gated on ``entry.library is not None``, so a required-provider
+      entry with no library would otherwise silently behave exactly like
+      the always-permissive ``optional_provider: true`` default.
+
+    Deliberately **not** part of :func:`_parse_manifest_entry` itself: that
+    parser is also reused by :func:`manifest_entry_from_dict` to round-trip
+    an already-persisted ``BundleFacts`` manifest, and rejecting a
+    previously-valid persisted representation there would break backward
+    compatibility with facts written before these checks existed (the
+    shape/instantiations invariants are already enforced earlier in that
+    same call, from the raw dict -- only the library-required check is
+    genuinely new validation for that path, and this function raises the
+    identical error whether reached from a raw dict or a direct
+    ``ManifestEntry(...)`` construction). This validation applies only to
+    freshly-authored manifest input: :func:`load_manifest` (file loading)
+    and, for the typed-API path a direct ``ScanRequest(bundle_manifest=...)``
+    construction can otherwise bypass entirely,
+    :func:`abicheck.service_scan.run_scan_set` (both call this function
+    directly rather than each re-implementing the checks).
+    """
+    for entry in entries:
+        shape_count = sum(
+            1 for v in (entry.symbol, entry.pattern, entry.template) if v is not None
+        )
+        if shape_count != 1:
+            raise ValueError(
+                f"manifest {source}: entry must have exactly one of 'symbol', "
+                f"'pattern', or 'template' set: {entry!r}",
+            )
+        if entry.template is not None and not entry.instantiations:
+            raise ValueError(
+                f"manifest {source}: template entry needs a non-empty "
+                f"'instantiations': {entry!r}",
+            )
+        if not entry.optional_provider and entry.library is None:
+            raise ValueError(
+                f"manifest {source}: 'optional_provider: false' requires a "
+                f"'library' naming the expected provider: {entry!r}",
+            )
 
 
 def manifest_entry_to_dict(entry: ManifestEntry) -> dict[str, object]:

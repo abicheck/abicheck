@@ -410,6 +410,7 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 |---|:--:|---|---|
 | `--help` | no | `False` | Show common options and exit. Use --help-all to see the remaining advanced options. |
 | `--help-all` | no | `False` | Show every option, including advanced/less-common ones. |
+| `--manifest` | no | — | ABI ownership manifest (YAML/JSON, same format as compare --manifest, ADR-023) asserting which library in the set is the expected provider of a symbol/pattern/template instantiation. Checked against this one declared set (no old side to diff): an unmatched entry, or a non-optional entry (optional\_provider: false) matched by a library other than its declared provider, is bundle\_manifest\_entry\_unsatisfied. Only meaningful with --artifact-set. |
 | `--artifact-set` | no | — | Audit a *set* of libraries with no old side, as one artifact (ADR-056): a directory (every discoverable shared library in it), or a repeatable explicit path, one --artifact-set per member. Mutually exclusive with the positional ARTIFACT and with --against (audit-only — no old-side comparison for a set). |
 | `--header`, `-H` | no | — | Public header file or directory (repeatable). Applies to the current ARTIFACT by default; scope to the --against side with an 'old=' prefix (e.g. --header old=old/include, --header new=new/include). |
 | `--include`, `-I` | no | — | Additional include directory for header parsing (repeatable). Same old=/new= side-aware scoping as --header. |

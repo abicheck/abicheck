@@ -448,7 +448,7 @@ class TestRunScanSetBundleAuditDeadline:
             findings = []
             verdict = Verdict.COMPATIBLE
 
-        def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
+        def _fake_audit_bundle(libraries, *, bundle_system_providers=(), manifest=None):
             # Simulate a pathologically slow resolution-graph build that
             # blows through the budget while audit_bundle is running.
             clock["t"] += 1000.0
@@ -485,7 +485,7 @@ class TestRunScanSetBundleAuditDeadline:
         def _fake_discover(paths, *, explicit):
             return {"liba.so": snap_a, "libb.so": snap_b}
 
-        def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
+        def _fake_audit_bundle(libraries, *, bundle_system_providers=(), manifest=None):
             raise deadline.DeadlineExceeded(-1.0)
 
         monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
@@ -679,7 +679,7 @@ class TestRunScanSetAmbiguousSoname:
         def _fake_discover(paths, *, explicit):
             return {"liba.so": snap_a, "libb.so": snap_b}
 
-        def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
+        def _fake_audit_bundle(libraries, *, bundle_system_providers=(), manifest=None):
             raise ArtifactSetError("ambiguous duplicate SONAME provider(s)")
 
         monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
@@ -819,7 +819,7 @@ class TestRunScanSetBundleSnapshotCompleteness:
             findings = []
             verdict = Verdict.COMPATIBLE_WITH_RISK
 
-        def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
+        def _fake_audit_bundle(libraries, *, bundle_system_providers=(), manifest=None):
             return _FakeAudit()
 
         monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
@@ -860,7 +860,7 @@ class TestRunScanSetBundleSnapshotCompleteness:
             findings = []
             verdict = Verdict.COMPATIBLE_WITH_RISK
 
-        def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
+        def _fake_audit_bundle(libraries, *, bundle_system_providers=(), manifest=None):
             return _FakeAudit()
 
         def _fake_run_one_member(

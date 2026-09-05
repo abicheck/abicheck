@@ -84,6 +84,52 @@ class TestArtifactSetRepeatableOptionBranches:
         assert "projected total:" in result.output
         assert "Dry run only" in result.output
 
+    def test_dry_run_reflects_manifest_ownership_check(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # PR H follow-up (Codex review, fresh evidence): --dry-run must
+        # name the manifest ownership check when --manifest is given (and
+        # say plainly when it isn't) -- the preview was previously
+        # indistinguishable either way, hiding both the requested contract
+        # and the always-on duplicate-provider check from the operator.
+        import abicheck.service_scan as service_scan_mod
+
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        monkeypatch.setattr(
+            service_scan_mod,
+            "run_scan_set",
+            lambda req: (_ for _ in ()).throw(
+                AssertionError("--dry-run must not run the real scan")
+            ),
+        )
+
+        without_manifest = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--dry-run",
+            ],
+        )
+        assert without_manifest.exit_code == 0, without_manifest.output
+        assert "duplicate-provider ownership ambiguity" in without_manifest.output
+        assert "--manifest: not given" in without_manifest.output
+
+        manifest_path = tmp_path / "manifest.yaml"
+        manifest_path.write_text(
+            "provides:\n  - symbol: shared_util\n    library: liba.so\n"
+        )
+        with_manifest = runner.invoke(
+            main,
+            [
+                "scan", "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--manifest", str(manifest_path), "--dry-run",
+            ],
+        )
+        assert with_manifest.exit_code == 0, with_manifest.output
+        assert "1 expected-provider entry will be checked" in with_manifest.output
+
     def test_dry_run_fails_the_same_way_as_a_real_run_on_bad_risk_rules(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:

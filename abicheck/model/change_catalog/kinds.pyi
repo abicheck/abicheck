@@ -215,6 +215,8 @@ class ChangeKind(str, Enum):
     BUNDLE_UNRESOLVED_INTRA_DEPENDENCY = 'bundle_unresolved_intra_dependency'
     BUNDLE_VARIANT_COVERAGE_REGRESSED = 'bundle_variant_coverage_regressed'
     BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED = 'bundle_intra_dep_signature_unverified'
+    BUNDLE_DUPLICATE_PROVIDER = 'bundle_duplicate_provider'
+    BUNDLE_MANIFEST_ENTRY_UNSATISFIED = 'bundle_manifest_entry_unsatisfied'
     CTOR_EXPLICIT_ADDED = 'ctor_explicit_added'
     CTOR_EXPLICIT_REMOVED = 'ctor_explicit_removed'
     CTOR_OVERLOAD_AMBIGUITY_RISK = 'ctor_overload_ambiguity_risk'
