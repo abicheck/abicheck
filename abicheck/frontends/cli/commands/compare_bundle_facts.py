@@ -700,15 +700,18 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
             _safe_write_output(output_dir / f"{safe_name}.json", to_json(diff))
 
     _exit_compare_release(
-        # ADR-065 D1 (Codex review): a NEW member whose extraction failed in
-        # this run is the native fan-out's per-library `ERROR`, floored at
-        # exit 4 under either --on-incomplete-scope policy.
-        "ERROR" if result.extraction_failures else result.verdict.value,
+        _reported_verdict(result),
         fail_on_removed=False,
         removed_keys=[],
         incomplete_scope_exit_contribution=scope_terms.incomplete_scope_exit_contribution,
         no_comparison_completed_exit_contribution=scope_terms.no_comparison_completed_exit_contribution,
     )
+
+
+def _reported_verdict(result: Any) -> str:
+    """The fan-out's ``"ERROR"`` sentinel when a NEW member failed extraction
+    this run (ADR-065 D1; exit 4, read by the aggregate loader), else the verdict."""
+    return "ERROR" if result.extraction_failures else result.verdict.value
 
 
 def _render(
@@ -748,7 +751,7 @@ def _render_json(
         # keyed on `new_dir`.
         "new_dir": str(new_dir),
         "new_is_stored": new_is_stored,
-        "verdict": result.verdict.value,
+        "verdict": _reported_verdict(result),
         "per_library_verdict": result.per_library_verdict.value,
         "bundle_verdict": result.bundle_verdict.value,
         **json_scope_fields(terms, run_outcome, result.extraction_failures),
@@ -784,7 +787,7 @@ def _render_markdown(
         "",
         f"- OLD (stored facts): `{old_facts_path}`",
         f"- NEW ({new_label}): `{new_dir}`",
-        f"- **Verdict:** `{result.verdict.value}`",
+        f"- **Verdict:** `{_reported_verdict(result)}`",
         f"- Per-library verdict: `{result.per_library_verdict.value}`",
         f"- Bundle verdict: `{result.bundle_verdict.value}`",
         "",

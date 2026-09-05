@@ -948,6 +948,12 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         assert code == 4, doc
         assert doc["run_outcome"]["operational"] == "extraction_error"
         assert doc["run_outcome"]["scope"] == "incomplete"
+        # The top-level verdict is the fan-out's operational sentinel, so a
+        # consumer keyed on it (the aggregate loader, the Action's fallback)
+        # keeps exit 4; the real compared result stays on its own axes.
+        assert doc["verdict"] == "ERROR"
+        assert doc["per_library_verdict"] == "NO_CHANGE"
+        assert doc["run_outcome"]["compatibility"] == "NO_CHANGE"
         assert list(doc["libraries"]) == ["libok.so"]
         assert list(doc["extraction_failures"]) == ["libbad.so"]
         assert doc["comparison_scope"]["unchecked"] == ["libbad.so"]
@@ -1018,3 +1024,10 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         )
         assert doc["run_outcome"]["operational"] == "extraction_error"
         assert doc["extraction_failures"] == {"libbad.so": "boom"}
+        assert clean["verdict"] == "NO_CHANGE" and doc["verdict"] == "ERROR"
+        from abicheck.frontends.cli.commands.compare_bundle_facts import (
+            _render_markdown,
+        )
+
+        md = _render_markdown(result, old_facts_path=tmp_path, new_dir=tmp_path)
+        assert "- **Verdict:** `ERROR`" in md

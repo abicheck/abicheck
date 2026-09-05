@@ -538,3 +538,53 @@ class TestIncompleteScopePolicyIsInTheDigest:
         )
         fields = json.loads(single.read_text())["effective_config_fields"]
         assert fields["gate.on_incomplete_scope"] == ""
+
+
+class TestExtractionErrorSurvivesAggregation:
+    def test_a_stored_live_extraction_failure_aggregates_to_four(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review, twenty-third round: a stored/live run whose NEW
+        member failed extraction beside a clean sibling exits 4 through the
+        `ERROR` sentinel; aggregating its report must keep that 4 rather than
+        normalize the operational failure down to 1."""
+        from click.testing import CliRunner
+        from test_release_scope_bundle import _lib
+        from test_release_scope_completeness import _facts_file, _write
+
+        import abicheck.package as package
+        from abicheck.cli import main
+
+        monkeypatch.setattr(
+            package,
+            "discover_shared_libraries",
+            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
+        )
+        libs = {
+            "libok.so": _lib("libok.so", exports=("ok_fn",)),
+            "libbad.so": _lib("libbad.so", exports=("bad_fn",)),
+        }
+        old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
+        new_dir = tmp_path / "new"
+        _write(new_dir, "libok.so.json", libs["libok.so"])
+        (new_dir / "libbad.so.json").write_bytes(b"{not json")
+        reports = tmp_path / "reports"
+        reports.mkdir()
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new_dir),
+                "--format",
+                "json",
+                "-o",
+                str(reports / f"abi-report-{LINUX}.json"),
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        doc = json.loads((reports / f"abi-report-{LINUX}.json").read_text())
+        assert doc["verdict"] == "ERROR"
+        assert doc["run_outcome"]["operational"] == "extraction_error"
+        agg = aggregate_reports_dir(reports, expected=_expect(LINUX))
+        assert agg.exit_code() == 4
