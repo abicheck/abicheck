@@ -23,6 +23,7 @@ Architecture review: Problem C — explicit pipeline replaces imperative chain.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Protocol
 
 from .policy.disposition_ledger import Disposition, record_suppressed_change
@@ -691,24 +692,37 @@ def _build_suppression_unknown_reachability_change(
     )
 
 
-def _record_grouped_child(
-    change: Change,
+def _record_collapsed_findings(
+    changes: Iterable[Change],
     ctx: PipelineContext,
     *,
-    application_point: str = "grouped_into_parent_finding",
+    application_point: str,
 ) -> None:
-    """Record a finding folded into another one as ``deduplicated``.
+    """Record findings this pipeline folded away as ``deduplicated``.
 
-    Not ``suppressed``: no user rule acted on it. The distinction is
-    load-bearing rather than cosmetic -- ``semver.recommend_release`` reads
-    the ledger's suppressed-and-gating records to say "a major-class break was
-    waived", and a grouped child is not a waiver.
+    **The rule this exists to enforce:** several steps park a change in
+    ``ctx.suppressed`` with no user rule involved, because that is the only
+    bucket ``compare()`` excludes from the verdict (see
+    ``DetectCppPatterns._suppress_grouped_children``'s own (a)/(b) note for
+    the mechanics). The bucket therefore does *not* identify the mechanism,
+    and the ledger cannot infer it: labelling these ``suppressed`` makes
+    ``semver.recommend_release`` read an ordinary grouping or version-rename
+    collapse as a user-waived major break. So every such step names itself
+    here instead, and ``DispositionLedger.record`` being first-write-wins is
+    what makes that stick against the ledger's own closing fallback.
+
+    Every current caller collapses a finding into another one (a grouped
+    parent, a surviving duplicate, a version-rename pair), which is why they
+    share one disposition and differ only in *application_point*. A future
+    step that parks a change in ``ctx.suppressed`` for some other
+    rule-less reason needs its own recording call, not this one.
     """
     if ctx.disposition_ledger is None:
         return
-    ctx.disposition_ledger.record(
-        change, Disposition.DEDUPLICATED, application_point=application_point
-    )
+    for change in changes:
+        ctx.disposition_ledger.record(
+            change, Disposition.DEDUPLICATED, application_point=application_point
+        )
 
 
 def _record_dropped_duplicates(
@@ -815,7 +829,9 @@ def _merge_findings_respecting_suppression(
             # reaches ``Pipeline.run``'s own dropped-finding sweep either:
             # these objects are created *by* the step, so they are not in the
             # snapshot that sweep diffs against.
-            _record_grouped_child(c, ctx, application_point="merge_late_findings")
+            _record_collapsed_findings(
+                [c], ctx, application_point="merge_late_findings"
+            )
             continue
         changes.append(c)
         seen_keys.add(key)
@@ -1129,7 +1145,9 @@ class DetectCppPatterns:
             if ch.kind == ChangeKind.FUNC_REMOVED and any(
                 _matches_suppression_key(ch.symbol, key) for key in suppressed_keys
             ):
-                _record_grouped_child(ch, ctx)
+                _record_collapsed_findings(
+                    [ch], ctx, application_point="grouped_into_parent_finding"
+                )
                 ctx.suppressed.append(ch)
                 continue
             to_keep.append(ch)
@@ -1415,6 +1433,14 @@ class DetectVersionedSymbolScheme:
                 f" [{advisory.caused_count} version-renames collapsed as compatible]"
             )
             matched_ids = {id(c) for c in matched}
+            # G15's collapse is a reclassification of a version-rename pair as
+            # compatible, not a user waiver -- see
+            # ``_record_collapsed_findings`` for why the bucket alone cannot
+            # say which, and what reading it as a waiver would do to the
+            # release recommendation.
+            _record_collapsed_findings(
+                matched, ctx, application_point="versioned_symbol_collapse"
+            )
             ctx.suppressed.extend(matched)
             kept = [c for c in changes if id(c) not in matched_ids]
             ctx.kept = kept  # keep verdict source in sync (set mid-pipeline by FilterRedundant)

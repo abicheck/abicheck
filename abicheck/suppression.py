@@ -588,6 +588,7 @@ class SuppressionList:
         *,
         source_sha256: str | None = None,
         source_path: str | None = None,
+        rule_sources: list[str | None] | None = None,
     ) -> None:
         self._suppressions = suppressions
         #: sha256 of the exact raw bytes :meth:`load` read, when these rules
@@ -603,11 +604,48 @@ class SuppressionList:
         #: on the same one read as ``source_sha256`` above, and ``None`` for a
         #: programmatically-built or merged list.
         self.source_path = source_path
+        #: Per-rule origin, positionally parallel to ``_suppressions``.
+        #: ``source_path`` above answers "where did *this list* come from",
+        #: which a merged list cannot answer at all -- and a merge is exactly
+        #: where the question matters, since the ABICC front end combines a
+        #: file-backed ``--suppress`` list with rules synthesized from
+        #: ``-skip-*``/whitelist options. Without this, every record sourced
+        #: from a merged list reported ``source_file: null`` even for a rule
+        #: that really did come from the YAML document (ADR-067 D3/D4).
+        self._rule_sources: list[str | None] = (
+            list(rule_sources)
+            if rule_sources is not None
+            else [source_path] * len(suppressions)
+        )
 
     @classmethod
     def merge(cls, a: SuppressionList, b: SuppressionList) -> SuppressionList:
-        """Return a new SuppressionList combining rules from both lists."""
-        return cls(suppressions=[*a._suppressions, *b._suppressions])
+        """Return a new SuppressionList combining rules from both lists.
+
+        Each side's per-rule origin is carried across (see
+        :attr:`_rule_sources`), so a rule loaded from a ``--suppress``
+        document still reports that document after being merged with
+        programmatically-built rules. The merged list has no ``source_path``
+        of its own, which is the honest answer for a list assembled from two
+        origins -- and is precisely why the per-rule record exists.
+        """
+        return cls(
+            suppressions=[*a._suppressions, *b._suppressions],
+            rule_sources=[*a._rule_sources, *b._rule_sources],
+        )
+
+    def source_for(self, rule: Suppression) -> str | None:
+        """The document *rule* was loaded from, or ``None`` if it was built
+        programmatically (``-skip-*`` options, a direct API caller).
+
+        Matched by identity, not by value: two rules can be equal and come
+        from different files, and the caller always holds the exact object
+        :meth:`evaluate` returned.
+        """
+        for candidate, source in zip(self._suppressions, self._rule_sources):
+            if candidate is rule:
+                return source
+        return None
 
     @classmethod
     def load(cls, path: Path, *, require_justification: bool = False) -> SuppressionList:

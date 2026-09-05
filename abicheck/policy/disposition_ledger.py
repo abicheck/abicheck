@@ -356,8 +356,7 @@ class DispositionLedger:
         gated._seen_ids = dict(self._seen_ids)
         gated._records = [
             record
-            if record.disposition
-            not in (Disposition.GATING, Disposition.NON_GATING)
+            if record.disposition not in (Disposition.GATING, Disposition.NON_GATING)
             else replace(
                 record,
                 disposition=_kept_disposition(
@@ -475,8 +474,30 @@ def record_suppressed_change(
         change,
         rule=rule,
         application_point=application_point,
-        source_file=getattr(suppression, "source_path", None),
+        source_file=_source_file_for(suppression, rule),
     )
+
+
+def _source_file_for(
+    suppression: object | None, rule: Suppression | None
+) -> str | None:
+    """The document *rule* came from, preferring its own per-rule origin.
+
+    A merged rule set (the ABICC front end combines a ``--suppress`` file with
+    rules synthesized from ``-skip-*`` options) has no single source path, so
+    the list-level answer is ``None`` there even for a rule that really did
+    come from the file. ``SuppressionList.source_for`` answers per rule; the
+    list-level ``source_path`` remains the fallback for any other rule-set
+    implementation.
+    """
+    if rule is not None:
+        source_for = getattr(suppression, "source_for", None)
+        if callable(source_for):
+            resolved = source_for(rule)
+            if resolved is not None:
+                return str(resolved)
+    source_path = getattr(suppression, "source_path", None)
+    return str(source_path) if source_path is not None else None
 
 
 def _verdict_class_of(change: object) -> str | None:

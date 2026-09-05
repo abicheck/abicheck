@@ -760,6 +760,123 @@ def test_a_late_duplicate_finding_is_conserved_with_and_without_a_rule() -> None
     assert totals["no rule"] == totals["matching rule"] == 1
 
 
+def test_a_versioned_symbol_collapse_is_deduplicated_not_suppressed() -> None:
+    """Third instance of the same shape as the grouped-children case: G15's
+    `--collapse-versioned-symbols` parks the matched rename pair in
+    `ctx.suppressed` because that is the only bucket excluded from the
+    verdict — no user rule is involved, and reading it as a waiver would make
+    the release recommendation contradict the option's whole purpose (the
+    pair is *reclassified as compatible*).
+    """
+    from abicheck.checker_types import Change, DiffResult
+    from abicheck.post_processing import PipelineContext, _record_collapsed_findings
+    from abicheck.semver import recommend_release
+
+    old, new = _snapshots()
+    matched = [
+        Change(kind=ChangeKind.FUNC_REMOVED, symbol="u_foo_70", description="x"),
+        Change(kind=ChangeKind.FUNC_ADDED, symbol="u_foo_71", description="x"),
+    ]
+    ledger = DispositionLedger()
+    ctx = PipelineContext(old=old, new=new, disposition_ledger=ledger)
+    _record_collapsed_findings(
+        matched, ctx, application_point="versioned_symbol_collapse"
+    )
+    for change in matched:
+        record = ledger.record_for(change)
+        assert record is not None
+        assert record.disposition is Disposition.DEDUPLICATED
+        assert record.rule is None
+
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libfoo",
+        suppressed_changes=list(matched),
+        suppressed_count=len(matched),
+    )
+    result.disposition_ledger = finalize_ledger(ledger, result)
+    assert recommend_release(result).bump is not SemverBump.MAJOR
+
+
+def test_every_rule_less_suppressed_bucket_write_is_recorded() -> None:
+    """The sweep, as an executable check rather than a one-time audit.
+
+    Three steps now park a change in `ctx.suppressed` with no rule
+    (`_suppress_grouped_children`, the late-duplicate drop, the versioned
+    -symbol collapse), and each was found one review round at a time. This
+    asserts the *property* they share: after any default-pipeline run, no
+    finding in `ctx.suppressed` is labelled `suppressed` without a rule
+    attributed — which is exactly what made `recommend_release` misread them.
+    """
+    from abicheck.checker_types import Change
+    from abicheck.post_processing import DEFAULT_PIPELINE
+
+    old, new = _snapshots()
+    inputs = [
+        Change(kind=ChangeKind.FUNC_REMOVED, symbol="dup", description="a"),
+        Change(kind=ChangeKind.FUNC_REMOVED, symbol="dup", description="b"),
+        Change(kind=ChangeKind.FUNC_ADDED, symbol="added", description="c"),
+    ]
+    ledger = DispositionLedger()
+    ctx = DEFAULT_PIPELINE.run(list(inputs), old, new, disposition_ledger=ledger)
+    for change in ctx.suppressed:
+        record = ledger.record_for(change)
+        assert record is not None, (
+            "a rule-less suppression bucket write went unrecorded"
+        )
+        if record.disposition is Disposition.SUPPRESSED:
+            assert record.rule is not None, (
+                f"{change.symbol!r} is labelled suppressed with no rule attributed"
+            )
+
+
+def test_a_merged_suppression_list_keeps_each_rule_source() -> None:
+    """The ABICC front end merges a `--suppress` document with rules
+    synthesized from `-skip-*` options. The merged list has no single source
+    path, so a list-level answer reports `None` for *every* rule — including
+    the ones that really did come from the file."""
+    from abicheck.policy.disposition_ledger import rule_provenance
+
+    from_file = Suppression(symbol="a", reason="from yaml")
+    from_flag = Suppression(symbol="b", reason="from -skip-symbol")
+    file_list = SuppressionList([from_file], source_path="/tmp/suppressions.yml")
+    flag_list = SuppressionList([from_flag])
+    merged = SuppressionList.merge(file_list, flag_list)
+
+    assert merged.source_path is None  # honest: two origins, no single one
+    assert merged.source_for(from_file) == "/tmp/suppressions.yml"
+    assert merged.source_for(from_flag) is None
+
+    from abicheck.policy.disposition_ledger import _source_file_for
+
+    assert _source_file_for(merged, from_file) == "/tmp/suppressions.yml"
+    assert _source_file_for(merged, from_flag) is None
+    assert rule_provenance(from_file, source_file=None).rule_id is not None
+
+
+def test_merged_rule_provenance_reaches_a_real_comparison(tmp_path) -> None:
+    """…and end to end, through `compare()` and the report: a finding hidden
+    by a file-backed rule names the file even when the rule set reaching the
+    engine was merged with programmatic rules."""
+    path = tmp_path / "suppress.yml"
+    path.write_text(
+        "version: 1\nsuppressions:\n  - symbol_pattern: '.*gone0.*'\n"
+        "    reason: from the document\n    allow_public_break: true\n",
+        encoding="utf-8",
+    )
+    merged = SuppressionList.merge(
+        SuppressionList.load(path),
+        SuppressionList([Suppression(symbol="unrelated", reason="from a flag")]),
+    )
+    old, new = _snapshots(removed=1)
+    audit = compute_disposition_audit(compare(old, new, merged))
+    assert len(audit.rules) == 1
+    rule, _ = audit.rules[0]
+    assert rule.source_file == str(path)
+    assert rule.reason == "from the document"
+
+
 # ---------------------------------------------------------------------------
 # not_evaluated detectors
 # ---------------------------------------------------------------------------

@@ -20,6 +20,11 @@
   effect, the split follows `severity.gate_contribution_for_change` — the same
   per-finding function the exit code folds — so a promoted addition reads
   `gating` and a demoted break reads `non_gating`.
+- **Per-rule suppression provenance survives a merge.** `SuppressionList`
+  now tracks each rule's originating document, so the ABICC front end's
+  merged rule set (a `--suppress` file plus rules synthesized from `-skip-*`
+  options) still reports the real source file for a file-backed rule instead
+  of `null`.
 - **Rule provenance in the suppression ledger.** Each
   `suppression.suppressed_changes[]` entry now records *which* rule hid the
   finding — its selector identity, the `--suppress` document's path, reason,
