@@ -1870,7 +1870,19 @@ def check_plugin_host_contract(
         suppression=suppression, policy=policy, policy_file=policy_file,
     )
 
-    return scope_diff_to_required_symbols(
+    scoped = scope_diff_to_required_symbols(
         diff, old_plugin, new_plugin, required_entrypoints,
         policy=policy, policy_file=policy_file,
     )
+    # ADR-067: the standalone plugin-host entry point is the orchestrator for
+    # its own single host contract, exactly as `check_appcompat` is for its
+    # consumer -- so it makes the one closing call too. Without it a plugin
+    # that drops an unrelated export while keeping every required entrypoint
+    # correctly returns COMPATIBLE while the audit still calls that removal
+    # `gating` (Codex review; the repo-wide sweep for `close_consumer_scope`
+    # call sites is what this closes).
+    relevant = scoped.breaking_for_host
+    close_consumer_scope(
+        ledger_for(diff), diff, gating=relevant, also_detected=relevant
+    )
+    return scoped

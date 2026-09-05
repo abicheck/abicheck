@@ -182,22 +182,21 @@ def finalize_ledger(
 
     gate = _GateContext.of(result)
     for change in _bucket("changes"):
-        if _is_policy_overlay(change):
-            # D1 counts *observed* changes. A policy-generated diagnostic is
-            # not one: `ApplySuppression` emits
-            # SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK alongside the finding it is
-            # about when a broad selector matched but the reachability gate
-            # withheld it, so recording it here made merely *adding* a rule
-            # that changes nothing move `detected_total` from 1 to 2 -- the
-            # conservation this audit exists to make checkable, broken by the
-            # audit itself. It is an overlay on a record that already exists,
-            # not a second detection (Codex review).
-            continue
+        # D1 counts *observed* changes. A policy-generated diagnostic is not
+        # one: `ApplySuppression` emits SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
+        # alongside the finding it is about when a broad selector matched but
+        # the reachability gate withheld it, so counting it made merely
+        # *adding* a rule that changes nothing move `detected_total` from 1 to
+        # 2. It is still *recorded* (`policy_overlay`), because a severity
+        # configuration can gate on it independently of the finding it
+        # describes -- skipping it outright dropped that real contribution
+        # (Codex review, both halves).
         ledger.record(
             change,
             _kept_disposition(change, result, severity_config, gate),
             application_point="verdict",
             from_gate=True,
+            policy_overlay=_is_policy_overlay(change),
         )
     # ``redundant_changes`` is two different populations concatenated, split at
     # ``redundant_count`` (``checker.compare``: ``redundant + opaque_filtered``,
@@ -343,6 +342,10 @@ def close_consumer_scope(
             change,
             Disposition.NON_GATING if excluded else disposition,
             application_point="consumer_scope",
+            # The late scoped path appends its own diagnostics too
+            # (`scope_diff_to_app`'s suppression-overreach advisory reaches
+            # `scoped_only_changes`), so the same rule applies here.
+            policy_overlay=_is_policy_overlay(change),
             # Explicit rather than derived: an in-scope finding the gate
             # scored `non_gating` is *not* gate-excluded, and an out-of-scope
             # one is -- whatever the gate said. Only this call site knows

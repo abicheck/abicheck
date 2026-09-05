@@ -349,3 +349,44 @@ def test_every_policy_overlay_kind_is_produced_by_policy_not_a_detector() -> Non
     assert _POLICY_OVERLAY_KINDS == {
         ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK.value
     }
+
+
+def test_the_plugin_host_entry_point_closes_its_own_scope() -> None:
+    """`check_plugin_host_contract` is an orchestrator too.
+
+    A repo-wide sweep for `close_consumer_scope` call sites found this one
+    missing: the standalone plugin-host path returned
+    `scope_diff_to_required_symbols`'s result directly, so a plugin dropping
+    an unrelated export while keeping every required entrypoint correctly
+    returned COMPATIBLE while the audit still called that removal `gating`.
+
+    Driven through the **real public function**, not a hand-assembled
+    reproduction of the pair it runs — the defect was a missing call, so a
+    test that made the call itself would have passed against it.
+    """
+    from abicheck.appcompat import check_plugin_host_contract
+    from abicheck.policy.disposition_close import ledger_for
+    from abicheck.policy.disposition_ledger import Disposition
+
+    old, new = _snapshots(removed=2, prefix="plug")
+    # The host requires only the first of the two removed entrypoints; the
+    # other removal is real, observed, and irrelevant to this contract.
+    required = old.functions[0].mangled
+    scoped = check_plugin_host_contract(old, new, [required])
+
+    diff = scoped.full_diff
+    assert diff is not None
+    ledger = ledger_for(diff)
+    assert ledger.detected_total == 2, "both removals were still observed"
+    assert ledger.effective_total == len(scoped.breaking_for_host), (
+        "the audit gates on exactly the host contract's own relevant set, "
+        "not on the whole library"
+    )
+    assert ledger.effective_total < 2, (
+        "the unrelated removal must not still read as gating"
+    )
+    for change in diff.changes:
+        if not any(c is change for c in scoped.breaking_for_host):
+            record = ledger.record_for(change)
+            assert record.disposition is Disposition.NON_GATING
+            assert record.gate_excluded is True

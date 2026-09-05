@@ -414,3 +414,87 @@ def test_an_alias_absent_from_the_union_is_still_excluded() -> None:
     assert excluded.disposition is Disposition.NON_GATING
     assert excluded.gate_excluded is True
     assert ledger.effective_total == 1
+
+
+def test_a_policy_overlay_keeps_its_own_gate_contribution() -> None:
+    """An overlay is not a detection, but it *is* a finding the gate scores.
+
+    `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK` must not move `detected_total` (its
+    existence depends on a rule, not on what was observed) — but severity
+    settings can gate on it independently of the break it describes:
+    `abi_breaking: info` demotes the original while `potential_breaking:
+    error` promotes the diagnostic. Skipping the record outright kept the raw
+    total honest and dropped that real contribution, so the record exists and
+    is excluded from the *counts* instead.
+    """
+    from abicheck.checker_types import DiffResult
+    from abicheck.policy.disposition_close import conservation_holds, finalize_ledger
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+
+    result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+    break_ = Change(kind=ChangeKind.FUNC_REMOVED, symbol="pub", description="the break")
+    overlay = Change(
+        kind=ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
+        symbol="pub",
+        description="rule matched but was withheld",
+        caused_by_type="pub",
+    )
+    result.changes = [break_, overlay]
+    ledger = finalize_ledger(DispositionLedger(), result)
+
+    assert ledger.detected_total == 1, "one observation, plus a diagnostic"
+    assert sum(ledger.counts().values()) == 1
+    assert conservation_holds(ledger)
+    assert ledger.record_for(overlay) is not None, (
+        "the overlay still needs a record, or its own gate effect is unrepresentable"
+    )
+    assert ledger.to_dict()["policy_overlays"] == 1
+
+    # The configuration the finding describes: the break demoted, the
+    # diagnostic promoted. The audit must show the diagnostic gating.
+    inverted = SeverityConfig(
+        abi_breaking=SeverityLevel.INFO,
+        potential_breaking=SeverityLevel.ERROR,
+        quality_issues=SeverityLevel.ERROR,
+        addition=SeverityLevel.ERROR,
+    )
+    gated = ledger.with_gate(result, inverted)
+    assert gated.record_for(break_).disposition is Disposition.NON_GATING
+    assert gated.record_for(overlay).disposition is Disposition.GATING
+    assert gated.effective_total == 1, (
+        "the run gates on the diagnostic alone, and the audit says so"
+    )
+    assert gated.detected_total == 1, "…without it becoming an observation"
+    assert conservation_holds(gated)
+
+
+def test_a_late_policy_overlay_is_not_a_detection_either() -> None:
+    """The scoped path appends its own diagnostics (`scope_diff_to_app`'s
+    suppression-overreach advisory reaches `scoped_only_changes`), which
+    bypassed the rule entirely — so a consumer-only missing export with a
+    withheld broad suppression double-counted exactly as the ordinary path
+    used to."""
+    from abicheck.policy.disposition_close import conservation_holds
+
+    result = _sweep_result()
+    ledger = DispositionLedger()
+    missing = Change(
+        kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+        symbol="pub",
+        description="Consumer 'app' requires symbol 'pub'",
+    )
+    advisory = Change(
+        kind=ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
+        symbol="pub",
+        description="rule matched but was withheld",
+        caused_by_type="pub",
+    )
+    close_consumer_scope(
+        ledger,
+        result,
+        gating=[missing, advisory],
+        also_detected=[missing, advisory],
+    )
+    assert ledger.detected_total == 1
+    assert conservation_holds(ledger)
+    assert ledger.record_for(advisory) is not None

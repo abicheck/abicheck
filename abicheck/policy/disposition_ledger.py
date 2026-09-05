@@ -58,7 +58,7 @@ new dependency on the report or gate layers.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from ..model.change_catalog.registry import Verdict
@@ -66,7 +66,10 @@ from .disposition_gate import (
     _GateContext as _GateContext,
     _kept_disposition as _kept_disposition,
 )
-from .disposition_types import Disposition as Disposition
+from .disposition_types import (
+    Disposition as Disposition,
+    DispositionRecord as DispositionRecord,
+)
 from .rule_provenance import (
     RuleProvenance as RuleProvenance,
     rule_provenance as rule_provenance,
@@ -95,75 +98,6 @@ _EFFECTIVE_DISPOSITIONS = frozenset({Disposition.GATING})
 #: describes what the run did rather than inventing a second gate algorithm
 #: (ADR-067's "no second gate algorithm" constraint).
 _GATING_VERDICTS = frozenset({Verdict.BREAKING, Verdict.API_BREAK})
-
-
-@dataclass(frozen=True, slots=True)
-class DispositionRecord:
-    """One atomically detected change and the single disposition it received."""
-
-    kind: str
-    symbol: str | None
-    disposition: Disposition
-    application_point: str
-    #: The change's effective verdict class at the moment it was disposed of,
-    #: e.g. ``"breaking"``. Read off the existing per-change verdict, never
-    #: recomputed — it is what lets a consumer ask "was anything major-class
-    #: suppressed?" without re-running policy over a set policy never scored.
-    verdict_class: str | None = None
-    rule: RuleProvenance | None = None
-    #: D2 overlay attribute, independent of ``disposition``: the policy
-    #: reclassification rule that moved this finding's verdict, if any.
-    reclassified_by: str | None = None
-    #: Set when something *other than severity* already put this finding
-    #: outside the gate that decides the run: a consumer scope
-    #: (``--used-by``/``--required-symbol``) judged it irrelevant, ADR-039
-    #: build-context reconciliation proved it a header-parse artifact, or the
-    #: opaque-handle downgrade excluded it from the verdict on its own merits.
-    #:
-    #: Tracked separately from the disposition because the two are decided by
-    #: different authorities and must not overwrite each other: severity says
-    #: *how severe* a finding is, never whether it reached the gate at all.
-    #: Without it, resolving a severity configuration re-answers
-    #: ``_kept_disposition`` for such a record and can promote it back to
-    #: ``gating`` -- reporting a run as gating on a finding
-    #: ``gate_decision_for_result`` never scored, since that reads
-    #: ``result.changes`` and these are not in it.
-    #:
-    #: Generalized from a scope-only flag once a second source appeared. Any
-    #: future exclusion that happens *before* the gate belongs here too; the
-    #: rule is "was this finding withheld from the gate by something severity
-    #: does not control", not "which mechanism withheld it" (that is the
-    #: application point).
-    gate_excluded: bool = False
-    #: Set when a *consumer scope* (``--used-by``/``--required-symbol``)
-    #: ruled on this finding -- **in scope or out**, not only out.
-    #:
-    #: It marks which *gate* decided the record, which is why it is separate
-    #: from :attr:`gate_excluded` (whether that gate excluded it). A scoped
-    #: run is gated by ``cli_helpers_compare._scoped_exit_code`` over the
-    #: consumer's own relevant set, not by ``gate_decision_for_result`` over
-    #: ``result.changes`` -- so :meth:`with_gate`'s re-read of
-    #: ``result.changes`` membership, which is what lets a restored redundant
-    #: row rejoin the gate, must not touch a scope-decided record at all: it
-    #: would demote a scoped-only finding the scoped gate really does score
-    #: (a synthesized missing entrypoint is in no ``result.changes``), and
-    #: un-exclude one the consumer simply does not use.
-    scope_decided: bool = False
-
-    def to_dict(self) -> dict[str, object]:
-        entry: dict[str, object] = {
-            "kind": self.kind,
-            "symbol": self.symbol,
-            "disposition": self.disposition.value,
-            "application_point": self.application_point,
-        }
-        if self.verdict_class is not None:
-            entry["verdict_class"] = self.verdict_class
-        if self.rule is not None:
-            entry["rule"] = self.rule.to_dict()
-        if self.reclassified_by is not None:
-            entry["reclassified_by"] = self.reclassified_by
-        return entry
 
 
 class DispositionLedger:
@@ -211,6 +145,7 @@ class DispositionLedger:
         gate_excluded: bool | None = None,
         scope_decided: bool = False,
         dedupe_key: str | None = None,
+        policy_overlay: bool = False,
     ) -> None:
         """Record *change*'s single terminal *disposition*.
 
@@ -276,6 +211,7 @@ class DispositionLedger:
                 reclassified_by=getattr(change, "reclassified_by", None),
                 gate_excluded=gate_excluded,
                 scope_decided=scope_decided,
+                policy_overlay=policy_overlay,
             )
         )
 
@@ -318,8 +254,14 @@ class DispositionLedger:
 
     @property
     def detected_total(self) -> int:
-        """Every atomically detected change, before any disposition applied."""
-        return len(self._records)
+        """Every atomically detected change, before any disposition applied.
+
+        Excludes :attr:`DispositionRecord.policy_overlay` records: a
+        diagnostic policy generated about another finding is not an
+        observation, and D1's raw total must not move when adding a rule
+        produces one.
+        """
+        return sum(1 for r in self._records if not r.policy_overlay)
 
     @property
     def effective_total(self) -> int:
@@ -332,6 +274,8 @@ class DispositionLedger:
         :attr:`detected_total` by construction (ADR-067 D3)."""
         counts = {d.value: 0 for d in Disposition}
         for record in self._records:
+            if record.policy_overlay:
+                continue  # not a detection; see `detected_total`
             counts[record.disposition.value] += 1
         return counts
 
@@ -726,6 +670,11 @@ class DispositionLedger:
             "detected_total": self.detected_total,
             "effective_total": self.effective_total,
             "counts": self.counts(),
+            # Stated rather than left invisible: an overlay is in
+            # `effective_total` but in neither `detected_total` nor `counts`,
+            # so a consumer reconciling the three needs to know how many
+            # there were.
+            "policy_overlays": sum(1 for r in self._records if r.policy_overlay),
             "rules": [
                 {**rule.to_dict(), "matched_count": count}
                 for rule, count in self.rules()
