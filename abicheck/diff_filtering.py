@@ -21,6 +21,7 @@ from collections import deque
 
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
+from .compare.dedup_key import hashable_value
 from .compare.opaque_types import (
     find_by_value_types,
     find_opaque_types,
@@ -1335,12 +1336,71 @@ def _filter_reserved_field_renames(changes: list[Change]) -> list[Change]:
     return result
 
 
+#: Kinds whose colliding-group handling can emit more than one finding for
+#: an identical (kind, description, symbol, old_value, new_value) tuple --
+#: the only kinds `_dedup_exact` needs `entity_id`/`disambiguator` to tell
+#: apart (Codex review, PR #1078, twenty-first round). Not every kind:
+#: `diff_types.py`'s AST-based `FIELD_RENAMED` sets a real `entity_id`, but
+#: `diff_platform.py`'s DWARF-layout-based `FIELD_RENAMED` for the same
+#: rename does not -- an unscoped key would stop that pair from collapsing
+#: across evidence tiers, reintroducing a duplicate the pre-sixteenth-round
+#: key never had.
+_OCCURRENCE_AWARE_KINDS = frozenset(
+    {
+        ChangeKind.TYPEDEF_REMOVED,
+        ChangeKind.TYPEDEF_BASE_CHANGED,
+        ChangeKind.TYPEDEF_VERSION_SENTINEL,
+        ChangeKind.CONSTANT_ADDED,
+        ChangeKind.CONSTANT_CHANGED,
+        ChangeKind.CONSTANT_REMOVED,
+    }
+)
+
+
 def _dedup_exact(changes: list[Change]) -> list[Change]:
-    """Pass 1: collapse entries with the same (kind, description)."""
+    """Pass 1: collapse entries with the same (kind, description, symbol,
+    old_value, new_value), plus (entity_id, disambiguator) for
+    :data:`_OCCURRENCE_AWARE_KINDS`.
+
+    **Not just (kind, description)** (Codex review, PR #1078, sixteenth
+    round): `compare.typedefs`/`compare.constants`'s occurrence-level
+    collision handling deliberately emits one finding per contributing
+    entity for a whole colliding group's removal/addition, and two such
+    entities sharing a rendered alias produce byte-identical `description`
+    text by construction -- the old key silently collapsed two distinct,
+    independently-provable findings into one (`test_diff_layout.py`'s
+    `test_second_type_still_compared_when_first_shares_its_bare_name` names
+    a related, separately-tracked risk for bare-name-keyed `RecordType`
+    findings that this key does not claim to close). `old_value`/`new_value`
+    go through `hashable_value` since they are not always hashable scalars
+    (`diff_python.py` stores lists).
+
+    **`entity_id` alone still isn't enough** (Codex review, PR #1078,
+    seventeenth round): two genuine ODR/multi-TU occurrences legitimately
+    share one `EntityId`, distinguished only by `OccurrenceId.disambiguator`
+    -- if both are removed with the same value, `entity_id.key` alone still
+    collapses them. `Change.disambiguator` carries that value, closing the
+    residual gap the sixteenth round's own fix left open.
+
+    **Scoped to `_OCCURRENCE_AWARE_KINDS`, not every kind** (Codex review,
+    PR #1078, twenty-first round): see that constant's own docstring --
+    unlike `disambiguator`, `entity_id` predates this PR and is already
+    asymmetrically populated across evidence tiers for other kinds."""
     result: list[Change] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[object, ...]] = set()
     for c in changes:
-        key = (c.kind.value, c.description)
+        key: tuple[object, ...] = (
+            c.kind.value,
+            c.description,
+            c.symbol,
+            hashable_value(c.old_value),
+            hashable_value(c.new_value),
+        )
+        if c.kind in _OCCURRENCE_AWARE_KINDS:
+            key = key + (
+                c.entity_id.key if c.entity_id is not None else None,
+                c.disambiguator,
+            )
         if key in seen:
             continue
         seen.add(key)
@@ -1441,9 +1501,7 @@ def _dedup_cross_kind(
 
             # Exact symbol match
             if any(
-                _matches(
-                    ast_findings.get((ak.value, canon_symbol)), dwarf_transition
-                )
+                _matches(ast_findings.get((ak.value, canon_symbol)), dwarf_transition)
                 for ak in equiv_ast_kinds
             ):
                 continue

@@ -99,9 +99,12 @@
 # duplication-and-convergence-assessment.md's "2026-09-05 re-assessment"
 # section and its Phase 6): a concept's `authority` value must reflect
 # which representation *decides*, not which one is populated. Two
-# corrections this file carries: `semantic_ir`'s landed cohorts are
-# fidelity gates (both indexes built every comparison, legacy adjudicates),
-# not authority transfers; and an "investigated and declined" disposition
+# corrections this file carries: at the time of this re-assessment,
+# `semantic_ir`'s landed cohorts were fidelity gates (both indexes built
+# every comparison, legacy adjudicates), not authority transfers -- Track
+# T3 below (same day) is what actually closes that gap for the typedef/
+# constant cohorts, changing `authority` from `legacy` to `mixed`; and an
+# "investigated and declined" disposition
 # for a *behavioral* change never closes an *implementation* consolidation's
 # removal gate.
 #
@@ -361,14 +364,26 @@ concepts:
     primitive: complete
     producers: partial
     consumers: partial
-    # 2026-09-05 re-assessment: lowered from `mixed` to `legacy`. Both
-    # migrated cohorts run behind a fidelity gate that can only select the
-    # IR when it already reproduces the legacy projection exactly, so the
-    # IR cannot produce an outcome the legacy representation would not --
-    # the legacy projection is what decides. `mixed` would require an
-    # authoritative IR consumer that is not so adjudicated; there is none
-    # today. See this concept's removal_gate for the full account.
-    authority: legacy
+    # 2026-09-05 re-assessment: lowered from `mixed` to `legacy` (both
+    # migrated cohorts ran behind a fidelity gate that could only select
+    # the IR when it already reproduced the legacy projection exactly, so
+    # the legacy projection was what decided). Track T3 ("typedef/constant
+    # authority cutover") closed that gap the same day: `typedef_index_pair`/
+    # `constant_index_pair` no longer build a legacy index at all when both
+    # sides carry a real SemanticIR, and a real IR-vs-sidecar disagreement
+    # is now a hard `SemanticIrAuthorityError` at snapshot construction
+    # rather than a silent runtime fallback -- see this concept's own
+    # removal_gate for the full account. Raised back to `mixed`, not `self`:
+    # two cohorts are now genuinely authoritative, but every other detector
+    # family still reads the legacy collections directly and does not
+    # consume SemanticIR at all, so `self` (full authority, no legacy
+    # consumer left standing anywhere) would overclaim. `lifecycle: wired`
+    # is the one value `mixed` corresponds to on the ladder (this file's own
+    # header comment: `mixed` picks out exactly the `wired` rung), so it
+    # stays `wired` even though two cohorts individually reached
+    # `authoritative` -- the concept as a whole has not, since most detector
+    # families still never read SemanticIR at all.
+    authority: mixed
     lifecycle: wired
     removal_gate: >-
       Phase 6B (semantic-ir-checker-cutover), two cohorts landed so far.
@@ -455,18 +470,655 @@ concepts:
       AbiSnapshot.types/.enums for a BTF/CTF-sourced snapshot;
       function/variable/typedef identity remains unimplemented for both
       formats.
-      **2026-09-05 re-assessment correction:** both landed cohorts are
+      **2026-09-05 re-assessment correction:** both landed cohorts were
       *fidelity gates*, not authority transfers. typedef_index_pair and
-      constant_index_pair construct the IR-backed AND the legacy-backed
-      index on every comparison, and use the IR only when the legacy
-      projection agrees on names, values, identities and ordering --
-      the legacy representation still adjudicates -- which is why this
-      concept's own authority field reads `legacy`, not `mixed`. The gate closes when
-      a current-format snapshot causes no legacy index to be built at all
-      and a disagreement is an explicit consistency failure rather than a
-      silent fallback. Tracked as duplication-and-convergence-assessment.md
-      Phase 6 item 2 / track T3.
+      constant_index_pair used to construct the IR-backed AND the
+      legacy-backed index on every comparison, and use the IR only when the
+      legacy projection agreed on names, values, identities and ordering --
+      the legacy representation adjudicated -- which is why this concept's
+      own authority field read `legacy`, not `mixed`. Tracked as
+      duplication-and-convergence-assessment.md Phase 6 item 2 / track T3.
+
+      **Track T3 landed (2026-09-05), same day:** the gate closes exactly
+      as this note specified. `typedef_index_pair`/`constant_index_pair`
+      now decide EACH SIDE independently (not both-or-neither -- a Codex
+      review round on the landing PR found the first both-or-neither cut
+      would have discarded a side's real SemanticIR in favor of a legacy
+      reconstruction of it whenever the *other* side lacked one, which is
+      safe only by the accident of today's producers always keeping their
+      flat collections and SemanticIR in sync; a hand-built or
+      future-producer snapshot violating that would have fabricated a
+      removal). A side with a real SemanticIR builds no legacy index at all
+      for itself and reads it directly; a side with none reads through the
+      legacy adapter's projection of its own flat collection. The two
+      shapes are matched by rendered alias name, not by EntityId, so mixing
+      an IR-backed side with a legacy-adapted one is safe -- EXCEPT for one
+      exception a second Codex round found: when one side does not trust
+      qualified typedef naming (pre-v25, which also predates SemanticIR),
+      `typedef_index_pair` renders BOTH sides through the legacy adapter
+      over the comparison's own bare-keyed maps, since a real SemanticIR
+      always renders fully qualified and using it directly there would key
+      one side "ns::Alias" against the other's bare "Alias", fabricating a
+      removal. A third Codex round found `diff_constants` still silently
+      compared a value as unchanged when its canonical SemanticIR spelling
+      was Fact.unsupported() on both sides (real for a same-backend
+      compound-initializer/bool-literal edit) -- fixed by falling back to
+      each snapshot's own flat `AbiSnapshot.constants` raw text, gated
+      through the existing fingerprint-unreliability predicate. A fourth
+      Codex round found the strict `render_display_name` made an
+      anonymous-namespace typedef/constant disappear from comparison
+      entirely once a real SemanticIR is used directly (the legacy
+      adapter's own synthetic identity for the identical declaration always
+      renders, since it is built from the flat map's own string key with an
+      empty scope) -- fixed by a new `render_display_name_or_leaf` that
+      keeps every named scope segment and only omits the unrenderable one
+      (matching the header-AST parsers' own qualified-name convention for
+      the flat legacy collections), used by both cohorts' own name-keying
+      projections. A current-format
+      snapshot's IR disagreeing, by identity, with its own
+      `typedef_entity_ids`/`constant_entity_ids` sidecar is no longer a
+      case this selector can even reach: it is caught earlier, at snapshot
+      construction (`AbiSnapshot.__post_init__` calling
+      `model.semantic_ir_legacy_adapter.assert_typedef_ir_consistent`/
+      `assert_constant_ir_consistent`), which raises
+      `errors.SemanticIrAuthorityError` -- an explicit consistency failure,
+      not a silent fallback, and also re-run explicitly after
+      `serialization.snapshot_from_dict` decodes a stored SemanticIR onto
+      an already-constructed snapshot (a second Codex-review finding: that
+      assignment bypasses `__post_init__` entirely). The name/value
+      equality half of the old gate (an IR's own rendered names/values
+      reproducing the legacy alias map's) is deliberately NOT preserved as
+      a comparison-time or construction-time check: requiring it would make
+      a populated legacy collection an accidental prerequisite of
+      SemanticIR-only construction -- exactly the outcome authority
+      transfer exists to end. Only the identity half survives, because it
+      is the one piece checking two representations the *same producer*
+      wrote for the *same* declaration, not a value comparison against a
+      collection this migration is meant to make optional. A side with no
+      real IR (DWARF-only, a producer with no typedef/constant identity, a
+      pre-v38 reload) still reads through the legacy adapter for that side
+      alone -- unchanged, and correctly so: there is no real producer
+      output there for an IR to be authoritative over.
+
+      **Two further Codex review rounds (2026-09-05, same PR) found real
+      gaps in the per-side-independence design itself, both fixed.** A
+      sixth round found `_aliases`/`_values` collapsed every entity
+      colliding on one rendered alias down to a single `setdefault` winner
+      -- harmless for the legacy adapter (its own flat map already
+      collapses a bare-name collision upstream, a pre-existing, accepted,
+      different failure mode), but a real `SemanticIR` genuinely keeps two
+      colliding occurrences (e.g. two anonymous-scoped typedefs sharing a
+      leaf name) distinct, so a value change on whichever occurrence lost
+      the race was silently read as "unchanged". Fixed by grouping every
+      colliding entity into a list per alias and comparing the sorted value
+      *multiset* on each side, picking a symmetric-difference
+      representative pair only when reporting a real difference -- mirrored
+      identically in both `compare/typedefs.py` and `compare/constants.py`.
+      A seventh round found the bare-key-space branch (one side pre-v25,
+      forcing both sides through the legacy adapter over the comparison's
+      own bare-keyed maps) trusted the caller-supplied bare map alone, so a
+      side carrying a real `SemanticIR` but an incomplete bare map (not
+      reachable from any current real header-AST producer -- both backends
+      populate `typedefs`/`typedefs_qualified`/`semantic_ir` from one
+      shared filtered-element pass, so the bare map is empty if and only if
+      the qualified map and `semantic_ir` are too -- but exactly the kind
+      of hand-built-or-future-producer case this design's own per-side
+      independence reasoning already declines to assume can't occur) had
+      its real evidence silently discarded, fabricating a removal. Fixed by
+      `_bare_typedef_side_index`, which projects a side's own real
+      `SemanticIR` down onto bare aliases when it has one, rather than
+      trusting the bare map parameter alone; constants have no
+      bare/qualified split (no schema-versioned bare-only baseline
+      predates them), so this round is typedef-only.
+
+      **An eighth round found two further gaps in the sixth round's own
+      collision fix, both fixed the same day.** `diff_constants`'s multiset
+      comparison filtered out unsupported (`None`) values *before*
+      comparing, so a colliding group's own membership shrinking (an
+      unsupported occurrence disappearing, alongside an unchanged
+      comparable one) produced an identical *filtered* value list on both
+      sides and read as "unchanged" -- fixed by also comparing each side's
+      raw occurrence count, reporting a change (no recoverable value text)
+      whenever the counts disagree even though the filtered values agree;
+      typedefs have no equivalent gap, since `_underlying` never returns
+      `None` (an unresolved chain uses the `"?"` sentinel, always
+      comparable). Separately, `_assert_sidecar_identity_consistent` keyed
+      its lookup by the strict `render_display_name`, which refuses to
+      render for an `Anonymous`/`LocalToFunction` segment -- so an
+      anonymous-scoped identity's sidecar disagreement passed construction
+      silently, even though the same producer's own sidecar is keyed by the
+      flattened name (the `render_display_name_or_leaf` convention), not
+      skipped for such a declaration at all. Fixed by keying the check by
+      `render_display_name_or_leaf` instead, grouping colliding entities and
+      flagging a disagreement only when none of them match the sidecar's
+      recorded id (the sidecar itself, a plain `dict` comprehension over the
+      same colliding key, can only ever reflect one member).
+
+      **A ninth round found two further gaps in the collision path itself,
+      both closed by rebuilding it around `collections.Counter` multiset
+      subtraction instead of sorted-list equality.** A colliding group that
+      grew or shrank by a value already present elsewhere in the group
+      (e.g. a second anonymous-namespace `X=1` alongside an existing
+      `X=1`) read as a value change under sorted-list comparison,
+      reporting `CONSTANT_CHANGED` (an API break) for what is a purely
+      compatible addition -- `Counter` subtraction now classifies a pure
+      net-addition/net-removal as `CONSTANT_ADDED`/`CONSTANT_REMOVED`,
+      reserving `CONSTANT_CHANGED` for a group with both a net addition
+      and a net removal. Separately, the per-name legacy fallback text
+      reflects only one raw value per bare name -- whichever occurrence's
+      own parse happened to win that same collision upstream -- so
+      applying it to every unresolved occurrence in a colliding group
+      risked masking a real difference (both sides coincide on borrowed
+      text) or fabricating one (the borrowed text differs between sides
+      for reasons unrelated to either occurrence's own value); the
+      collision path no longer consults it at all, representing an
+      unresolved occurrence with an internal sentinel instead. Typedefs
+      have no equivalent gap for either round: `_underlying` never returns
+      `None` (an unresolved chain uses the always-comparable `"?"`
+      sentinel), so there is no per-occurrence fallback ambiguity to
+      misattribute and no unresolved-value cardinality question distinct
+      from an ordinary value multiset.
+
+      **A tenth round found the sixth round's typedef collision fix never
+      received the ninth round's own `Counter`-based correction, plus one
+      further gap in the ninth round's own mixed-group handling, plus one
+      direction the sidecar-identity check still didn't cover.**
+      `diff_typedefs` compared its colliding group by sorted-list equality
+      still, sharing the identical blind spot `diff_constants` had before
+      the ninth round: a group that grew or shrank by a value already
+      present (a duplicate `Alias=int`) read as `TYPEDEF_BASE_CHANGED`
+      with an identical `old_value`/`new_value` instead of a pure,
+      untracked-and-compatible addition or a `TYPEDEF_REMOVED`. Fixed by
+      the identical `Counter` multiset-subtraction rewrite, adapted for
+      typedefs having no `ADDED` `ChangeKind` at all (a pure addition's
+      leftover is simply never reported, mirroring how a brand-new alias
+      absent from the old side is already never visited). Separately,
+      `diff_constants`'s own mixed-group case (both a net removal and a
+      net addition present at once) picked one representative pair from
+      each side and emitted a single `CONSTANT_CHANGED`, silently dropping
+      whichever removed/added value didn't get picked -- fixed by pairing
+      off exactly one removed value with one added value as that one
+      `CONSTANT_CHANGED`, then reporting every other leftover distinct
+      value in either set as its own `CONSTANT_ADDED`/`CONSTANT_REMOVED`.
+      Finally, `_assert_sidecar_identity_consistent` only checked a
+      `SemanticIR` occurrence's rendered name against the sidecar when
+      present -- a sidecar entry naming a declaration `SemanticIR` has no
+      occurrence for at all passed construction silently, even though such
+      a declaration would never reach a comparison at all (the sole
+      comparison-time source omits it entirely). The check now also
+      iterates the sidecar's own keys, raising
+      `errors.SemanticIrAuthorityError` for any name with no corresponding
+      `SemanticIR` occurrence.
+
+      **An eleventh round found three further defects in the ninth/tenth
+      rounds' own `Counter`-based collision fix, in both families.**
+      Converting a `Counter` multiset difference to a `set` for iteration
+      -- done to pick the one removed/added value pairing into a
+      `CHANGED` finding -- has two failure modes: `set` iteration order
+      depends on `PYTHONHASHSEED` (string hashing), so which value paired
+      into the `CHANGED` finding, and therefore the outcome of the
+      `is_fingerprint_comparison_unreliable` gate applied to that specific
+      pairing, could differ between runs of the identical comparison; and
+      converting to a `set` collapses repeated identical values to one
+      entry, so three colliding occurrences sharing one value shrinking to
+      one occurrence reported only one removal, silently dropping the
+      second. Separately, every finding emitted for a colliding name
+      shared a single `entity_id` computed once from
+      `old_ids[0]`/`new_ids[0]`, so a residual `CONSTANT_ADDED`/
+      `CONSTANT_REMOVED` was attributed to whichever entity happened to
+      occupy that position, not the occurrence that actually changed.
+      Fixed in both `compare/constants.py` and `compare/typedefs.py` by
+      replacing the `Counter`/`set` machinery entirely with
+      occurrence-level bookkeeping: `old_by_value`/`new_by_value` group
+      each side's own entities by value in a plain, insertion-ordered
+      `dict` (deterministic regardless of hash seed, matching the same
+      `SemanticIR`'s own occurrence order every run), so the excess count
+      for a value on one side over the other is exactly that many
+      removed/added *occurrences*, each still carrying its own real
+      entity_id.
+
+      **A twelfth round found two further gaps.** First, both families'
+      whole-name/whole-alias membership paths (`CONSTANT_REMOVED`/
+      `CONSTANT_ADDED` in `compare/constants.py`,
+      `TYPEDEF_REMOVED`/`TYPEDEF_VERSION_SENTINEL` in `compare/
+      typedefs.py`) still stamped only `old_ids[0]`/`new_ids[0]` when the
+      whole colliding group vanished or newly appeared, even though such a
+      group can carry more than one distinct entity -- each now emits one
+      finding per contributing entity. Second, `_bare_typedef_side_index`
+      (the seventh round's own bare-projection fix) projected a side's
+      real `SemanticIR` straight into a `dict[str, str]` and handed it to
+      `legacy_typedef_ir`, which can only construct one occurrence per
+      key -- so two qualified entities sharing a bare leaf name (an
+      unchanged `a::Alias` and a newly-added `b::Alias`) silently
+      overwrote each other, fabricating a `TYPEDEF_BASE_CHANGED` for an
+      unchanged declaration. Fixed by giving each real IR entity its own
+      synthetic, collision-safe bare identity (an `Anonymous` scope
+      wrapper that renders to nothing but keeps the identity distinct)
+      instead of collapsing into a shared dict key, so the existing
+      occurrence-level collision handling in `diff_typedefs` -- already
+      correct once given the chance -- compares them properly. Constants
+      have no bare/qualified split at all (no schema-versioned bare-only
+      baseline predates them), so this second fix is typedef-only.
+
+      **A thirteenth round found the collision path still matched purely
+      by value, never by shared identity.** Both `diff_constants` and
+      `diff_typedefs` now compute `set(old_ids) & set(new_ids)` first --
+      an entity present under the identical `EntityId` on both sides is
+      the same declaration, so comparing its own old/new value directly is
+      exact, not a heuristic pairing. Without this, a stable entity
+      changing value (`X=1` -> `X=2`) while a different, newly-added
+      colliding entity happened to carry the old value (`X=1`) let
+      value-only multiset subtraction cancel the stable entity's old value
+      against the new entity's, reporting only a compatible-looking
+      addition and losing both the real change and the genuine addition.
+      Only the remaining, identity-unmatched occurrences on each side feed
+      the existing value-based bookkeeping. Separately,
+      `diff_constants`'s whole-group vanish/appear loops (the twelfth
+      round's own per-entity fix) still called the per-name legacy
+      fallback for every member of a multi-entity group, crediting the
+      same borrowed text to genuinely different declarations -- the
+      fallback is now used only for a single-entity group, matching the
+      ninth round's identical rule for the general collision path.
+
+      **A fourteenth round found the identity-matched set itself was not
+      restricted to cross-snapshot-stable identities.** An
+      `Anonymous`/`LocalToFunction` scope segment's own ordinal is not
+      stable across two snapshots by design (inserting an earlier
+      anonymous sibling shifts every later one's ordinal, even though
+      nothing about those later declarations changed -- see
+      `model/identity_stability.py`'s own docstring, which names exactly
+      this class of consumer as needing this gate before trusting a raw
+      `EntityId` match across snapshots). Both functions now filter their
+      identity-matched set through
+      `entity_id_is_cross_snapshot_stable` -- the first real call site for
+      that predicate, which existed with no consumer specifically because
+      it needed one with this same review rigor before being wired in.
+      Without the gate, an old colliding group `X=[1, 2]` becoming
+      `[3, 1, 2]` after inserting an earlier-declared sibling (shifting
+      the original two declarations' ordinals by one) would have paired
+      old ordinal 0 against new ordinal 0 and old ordinal 1 against new
+      ordinal 1 by raw `EntityId` equality -- two fabricated `CHANGED`
+      findings for declarations that never changed, instead of the one
+      real, provable addition.
+
+      **A fifteenth round found the collision helpers themselves still
+      read through `SemanticIRIndex`'s reduced view.**
+      `compare/typedefs.py`'s `_aliases`/`_underlying` and
+      `compare/constants.py`'s `_values`/`_value` answered off
+      `entities_of_kind()`/`.fact()` -- both backed by
+      `SemanticIR.canonical_entities()`'s explicit one-entry-per-`EntityId`
+      reduction, whose own docstring already warns it must never back a
+      legacy-shape projection. Two genuine occurrences sharing one
+      `EntityId` (an ODR-duplicate/multi-TU pair, distinguished only by
+      `OccurrenceId.disambiguator`) collapsed to a single "most facts
+      present, then `canonical_key` order" winner, silently discarding the
+      other occurrence's own value evidence -- exactly the distinction
+      `SemanticIR.occurrences` (keyed by `OccurrenceId`, not bare
+      `EntityId`) exists to keep. All four helpers, plus
+      `_bare_typedef_side_index`'s own bare-projection loop (which shared
+      the bug and additionally passed a now-mistyped `EntityId` into
+      `_underlying` once it started expecting an `OccurrenceId`, making
+      every bare-projected typedef read as permanently unresolved), now
+      iterate `SemanticIRIndex.ir.occurrences` directly and key by
+      `OccurrenceId` -- a same-identity pair is just another instance of
+      the alias-collision multiset comparison the twelfth-through-
+      fourteenth rounds already handle correctly.
+
+      **A sixteenth round found the occurrence-level findings themselves
+      did not survive the public pipeline's own post-processing.**
+      `diff_typedefs`/`diff_constants` correctly emit one finding per
+      contributing entity when a whole colliding group vanishes or newly
+      appears (twelfth round), but `diff_filtering._dedup_exact` -- the
+      first pass `checker.compare()` runs over every detector's output --
+      keyed only on `(kind, description)`. Two entities in one colliding
+      group render identical description text by construction, so this
+      pass silently collapsed the independently-provable findings back
+      down to one before a caller ever saw them (`test_diff_layout.py` had
+      already named the identical risk for a bare-name-keyed `RecordType`
+      detector as a known, then-unaddressed concern). Fixed generically,
+      not just for this cohort: the key now also includes `symbol`,
+      `old_value`/`new_value` (via the existing `compare.dedup_key.
+      hashable_value`, since those slots are not guaranteed hashable
+      scalars), and `entity_id` (the compare-time `EntityId`'s own `.key`,
+      when a producer set one) -- additive for a producer that predates
+      entity identity, since two `None`s still compare equal.
+
+      **A seventeenth round found two further gaps.** First, `entity_id`
+      alone still could not distinguish two genuine ODR/multi-TU occurrences
+      that legitimately share one identity (`OccurrenceId.disambiguator`
+      does): removing both with the same value still collapsed to one.
+      `Change` gained a `disambiguator` field (populated via the new
+      `producer_occurrence_disambiguator`, mirroring `producer_entity_id`'s
+      own synthetic-vs-real gate) and `_dedup_exact`'s key now includes it,
+      closing the residual gap the sixteenth round's own fix left open.
+      Second, `_assert_sidecar_identity_consistent`'s reverse-direction
+      check (a sidecar entry with no matching `SemanticIR` occurrence) fired
+      unconditionally, but a stored v38-v41 snapshot written between the
+      identity-resolution slice for a kind (always populates its sidecar)
+      and that kind's own *normalization* slice (populates matching
+      occurrences) legitimately has a populated sidecar with zero matching
+      occurrences -- indistinguishable from stored data alone from "genuinely
+      has none of that kind". The check now only runs this direction once
+      `SemanticIR` resolves *some* occurrence of the kind in question, since
+      every occurrence of a kind comes from the same parse pass.
+
+      **An eighteenth round found two further gaps.** First,
+      `report_finding_id` (schema 2.3's stable per-finding fingerprint)
+      never looked at `disambiguator` either, so two ODR-duplicate findings
+      that now legitimately survive `_dedup_exact` still collided on this
+      separate, consumer-facing id. Fixed the same conditional way: appended
+      only when set, so every pre-existing finding still hashes identically
+      (unconditional appending would have rehashed every id this function
+      has ever produced, the same cost a prior round explicitly declined to
+      pay for a narrower risk). Second,
+      `compare.typedefs._bare_typedef_side_index` wraps each real IR entity
+      in a fresh synthetic `EntityId` for bare-alias-collision safety, but
+      dropped the *source* occurrence's own `disambiguator` in the process
+      -- so an ODR-duplicate pair projected through this bare-key path
+      collapsed right back together downstream. Fixed by carrying the
+      source disambiguator onto the new `OccurrenceId`, which also required
+      loosening `producer_occurrence_disambiguator`'s own gate: it no longer
+      returns `None` for a synthetic `entity_id`, since `disambiguator` is a
+      purely internal dedup discriminator, never an external identity
+      reference the way `entity_id` is.
+
+      **A nineteenth round found three further gaps.** First, the
+      eighteenth round's own bare-alias-projection fix carried a source
+      occurrence's real disambiguator forward, but two genuinely distinct
+      qualified entities with no real disambiguator at all -- the common
+      case -- still produced two `Change`s with both `entity_id` and
+      `disambiguator` unset, colliding right back together. Each
+      bare-projected occurrence's own per-alias ordinal (already used for
+      synthetic-`EntityId` scope uniqueness) is now folded into its
+      `disambiguator` unconditionally, collision-safe on its own and still
+      carrying real ODR-duplicate evidence through when the source has one.
+      Second, the seventeenth round's own sidecar-consistency relaxation
+      lets a v38-v41 snapshot load with a populated sidecar for a kind but
+      zero matching `SemanticIR` occurrences (the legitimate window between
+      identity-resolution and normalization for that kind) -- but the
+      constant and typedef side-index selectors still trusted any non-`None`
+      `semantic_ir` wholesale for that cohort, silently discarding such a
+      snapshot's real flat evidence and missing a genuine removal. Both
+      selectors now trust `semantic_ir` for a cohort only once it resolves
+      at least one occurrence of that kind (the new
+      `model.semantic_ir_legacy_adapter.semantic_ir_covers_kind`), falling
+      back to the legacy adapter's projection otherwise. Third, on
+      CodeRabbit review: `diff_constants`'s mixed-group pairing always took
+      position 0 from each side's occurrence list, which could pair an
+      unresolved-marker occurrence ahead of a resolved one even when a
+      resolved pair existed -- now prefers a pair whose values are both
+      resolved when one exists.
+
+      **A twentieth round found four further gaps across two Codex
+      passes, in code the nineteenth round's own fixes had just introduced
+      or left untouched.** First, `report_finding_id` (the public,
+      documented-stable per-finding fingerprint) never looked at
+      `entity_id` at all, so two entity-distinct occurrences that both
+      carry a blank `disambiguator` -- the common case for two
+      anonymous-scope entities, which have no source disambiguator to
+      begin with -- still collided on this id even though `_dedup_exact`
+      already told them apart via `entity_id.key`. First fixed by
+      appending `entity_id.key` to `report_finding_id` conditionally
+      (mirroring the eighteenth round's own `disambiguator` fix), then
+      **reverted** on the round's second Codex pass: unlike
+      `disambiguator`, `entity_id` predates this PR entirely
+      (function/variable/layout detectors already populate it), so that
+      fix would have silently rehashed this id for that whole pre-existing,
+      already-shipped population, not just the newly-collision-prone
+      typedef/constant occurrences this round targeted. Fixed at the
+      source instead: the new `_collision_safe_disambiguator` in both
+      `compare.typedefs`/`compare.constants` gives a genuinely
+      distinguishable occurrence a real `disambiguator` whenever its
+      producer supplied none, so `report_finding_id`'s existing conditional
+      `disambiguator` append closes the gap without touching any other
+      kind's id. Second, `diff_constants`/`diff_typedefs` iterated their
+      `shared_ids` set directly to emit each cross-snapshot-stable shared
+      identity's own finding, but a `set` has no defined iteration order --
+      when a colliding group carries more than one such shared identity,
+      their relative emission order varied with `PYTHONHASHSEED` across two
+      runs of byte-identical input. Both now iterate in `old_ids`'s own
+      deterministic encounter order, keeping the set only for O(1)
+      membership checks. Third: `diff_constants`/`diff_typedefs`'s
+      mixed-group pairing paired off exactly one removed/added occurrence
+      pair as a single `CHANGED` finding, leaving every further pair in the
+      same colliding group to fall through as an independent
+      `REMOVED`/`ADDED` -- fabricating a removal-and-addition story for
+      what equal cardinality on both sides makes an equally valid
+      multi-pair substitution (e.g. anonymous `X=[1,2]` becoming
+      `X=[3,4]`). Both now loop the pairing while occurrences remain on
+      each side -- the direct generalization of the tenth round's own
+      one-pair fix, with the exact same "genuine leftover is only the
+      excess beyond `min(removed, added)`" invariant. Fourth, on the same
+      round's second Codex pass: a *partial* removal/addition within an
+      equal-valued, entity-unstable colliding group picked an arbitrary
+      list-prefix occurrence and stamped its real `entity_id` on the
+      residual finding -- presenting unrecoverable evidence as observed
+      attribution, and potentially crediting a still-*present*
+      declaration's identity to a finding claiming it vanished. The new
+      `_attribute_residuals` now attributes a real identity only when the
+      *entire* value bucket vanishes from one side (every occurrence in it
+      genuinely is gone); a partial residual carries no
+      `entity_id`/`disambiguator` at all.
+
+      A fifth, P1 finding from the round's first Codex pass -- that the
+      stability filter excludes an anonymous-scope entity from
+      `shared_ids` even when its literal `entity_id` matches on both
+      sides, so a real value change on it can be value-cancelled against
+      an unrelated same-valued addition elsewhere in the same colliding
+      group instead of reported as a `TYPEDEF_BASE_CHANGED`/
+      `CONSTANT_CHANGED` -- was investigated and declined; see
+      `investigated_declined` below.
+
+      **A twenty-first round found two further gaps in code the twentieth
+      round's own fixes had just introduced.** First, more than one
+      ambiguous residual within one colliding value bucket (e.g. four
+      equal-valued, entity-unstable occurrences shrinking to one -- three
+      independent removals, not one repeated three times) each carried
+      `entity_id=None`/`disambiguator=None` alike, so they were
+      byte-identical and collapsed to one via `_dedup_exact`, silently
+      losing two of the three real removals. Each ambiguous residual now
+      gets its own synthetic, non-identity-claiming disambiguator
+      (`"ambiguous:<i>"`), so multiplicity survives dedup without
+      attributing any real identity. Second: `_dedup_exact`'s
+      `entity_id`/`disambiguator` key components (seventeenth round) were
+      applied to every `ChangeKind`, but `entity_id` predates this PR and
+      is already asymmetrically populated between evidence tiers for other
+      kinds -- `diff_types.py`'s AST-based `FIELD_RENAMED` sets a real
+      `entity_id`, but `diff_platform.py`'s DWARF-layout-based
+      `FIELD_RENAMED` for the identical rename does not, so the unscoped
+      key stopped that pair from collapsing across evidence tiers the way
+      it always had, reintroducing a duplicate the pre-sixteenth-round key
+      never produced. Scoped via a new `_OCCURRENCE_AWARE_KINDS` constant
+      naming exactly the typedef/constant kinds that can legitimately emit
+      more than one finding for an identical (kind, description, symbol,
+      old_value, new_value) tuple.
+
+      **A twenty-second round found the twenty-first round's own
+      `_collision_safe_disambiguator` fallback overreached.** It was called
+      unconditionally at every whole-group-vanished, shared-identity, and
+      whole-group-added call site, even when the "group" held exactly one
+      entity -- an ordinary, non-colliding finding with nothing to
+      disambiguate. That fabricated a nonempty `disambiguator` from the
+      entity's own id anyway, silently rehashing `report_finding_id` for the
+      overwhelming common case instead of only the genuinely collision-prone
+      one the fallback exists for. Replaced those three call sites with a new
+      `_group_safe_disambiguator(occurrence_id, group_size)`, which only
+      routes through `_collision_safe_disambiguator` when `group_size > 1`;
+      a group of one keeps the bare, unfallen-back disambiguator exactly as
+      before the twentieth round.
+
+      **A twenty-third round found that `diff_types._has_type_evidence`
+      never learned about `SemanticIR`.** It only checked the legacy flat
+      `types`/`enums`/`typedefs` collections, but `compare.typedefs`' own
+      per-side-independence design (this Track) can legitimately trust a
+      real `SemanticIR` for typedef comparison even when a snapshot's flat
+      `typedefs` map is empty -- exactly the "hand-built or future-producer
+      snapshot" case that module's own docstring already calls "not
+      hypothetical." Such a `SemanticIR`-only snapshot has real type
+      evidence, but `_has_type_evidence` read it as none at all, tripping
+      `_removals_are_unconfirmed`'s stripped-binary heuristic and silently
+      reclassifying a genuine typedef removal as unconfirmed. Fixed by also
+      recognizing `SemanticIR` type/enum/typedef occurrences as evidence.
+
+      **A twenty-fourth round found two more instances of the same
+      collision-disambiguator overreach class.** First,
+      `_bare_typedef_side_index` (the bare-key-space fallback for a
+      pre-v25 comparison side) built its own disambiguator inline rather
+      than through `_group_safe_disambiguator`, and inherited the identical
+      bug that helper was built to fix: it unconditionally stamped
+      `str(ordinal)` -- always `"0"` for a bare alias with exactly one real
+      entity -- with no collision to disambiguate. Fixed by counting
+      occurrences per bare alias up front and only stamping the ordinal
+      when the count exceeds one. Second: `finding_id`'s public JSON Schema
+      description still documented only the original six-field algorithm,
+      never updated when the seventeenth round's conditional
+      `disambiguator` append landed -- a consumer following the documented
+      algorithm could not reproduce the id for a disambiguated finding.
+      Fixed the schema description and bumped `REPORT_SCHEMA_VERSION` to
+      2.50 (later renumbered to 2.51 -- see the merge-conflict note below).
+
+      **A twenty-fifth round found two more consumers of the changed
+      `finding_id` algorithm left undocumented.** `cli_scan_baseline.
+      _finding_summary()` serializes the identical `report_finding_id()`
+      whose hash gained a seventh input, but `SCAN_SCHEMA_VERSION` stayed
+      unbumped -- fixed by bumping it to 1.28 (later renumbered to 1.29) in
+      lockstep with `compare`'s 2.50/2.51. Separately,
+      `docs/use/output-formats.md`'s user-facing
+      `finding_id` description still documented only the original six-field
+      algorithm after the schema's own description was updated -- fixed to
+      match.
+
+      **A twenty-sixth round found a genuine key-space mismatch, not
+      another disambiguator overreach.** A DWARF-sourced snapshot's flat
+      `typedefs` map is already qualified-keyed (DWARF keys it by the full
+      qualified name), unlike a header-AST backend's bare keying.
+      `_bare_typedef_side_index` unconditionally rendered the *other*
+      side's real IR down to bare leaf names regardless, so a global alias
+      and a same-leaf namespaced one collapsed onto one key on the real-IR
+      side while the DWARF side kept them as two separate opaque keys --
+      silently dropping a real global-alias value change entirely (not
+      merely rehashing an id). `typedef_index_pair` now detects a
+      DWARF-qualified-native side and renders the real-IR side fully
+      qualified too, matching DWARF's own convention.
+
+      **A twenty-seventh round found the twenty-sixth round's own
+      `dwarf is not None` predicate too coarse.** A header-parsed ELF
+      binary that also carries DWARF debug info sets both `dwarf` and a
+      bare, header-derived `typedefs` together (`dumper.py`'s combined
+      header+DWARF path) -- `dwarf is not None` alone misclassified that
+      side as DWARF-qualified, rendering the *other* side's real IR fully
+      qualified against this side's actually-bare key and fabricating a
+      removal for an entirely unchanged typedef.
+      `typedef_flat_map_is_dwarf_qualified` now also requires
+      `not snapshot.from_headers`, the field that actually distinguishes
+      "typedefs came from headers" from "came from DWARF" regardless of
+      whether DWARF metadata also exists.
+
+      **A twenty-eighth round found a real false-negative in the
+      twenty-sixth round's own leftover-reconciliation skip.** A BTF/CTF
+      snapshot sets `dwarf` and a real `semantic_ir`
+      (`extract.debug_layout_semantic_ir.semantic_ir_from_debug_metadata`)
+      that deliberately never covers typedefs at all, while its own flat
+      `typedefs` map is populated independently
+      (`workflows/input_resolution.py`'s raw-blob assembler) and can carry
+      real data. Unconditionally skipping the leftover fallback under
+      `qualified_keys` silently dropped every one of this side's typedefs
+      -- including a genuine removal, a missed BREAKING change rather than
+      a merely-false one. The leftover fallback now also runs whenever the
+      side itself is DWARF-qualified, a case a first review pass declined
+      as unreachable before a follow-up review pass located the actual
+      construction sites (`dumper_elf_fallback.py`'s own DWARF slice
+      faithfully covers typedefs and needs no fallback; BTF/CTF's slice
+      does not and does).
+
+      **Merging `origin/main` after the twenty-eighth round produced a real
+      version-number collision, not just a text conflict.** `origin/main`
+      had independently claimed `REPORT_SCHEMA_VERSION` 2.50 (ADR-065 S2's
+      `comparison_scope`/`run_outcome` additions) and `SCAN_SCHEMA_VERSION`
+      1.28 (ADR-065 S2's scan-side mirror) for its own, unrelated additive
+      bumps in the same two constants this track had already bumped to the
+      identical numbers for the disambiguator-hash-input change above.
+      Resolved the same "renumber, don't reuse" way the file's own history
+      already handles a colliding bump (the 2.32/2.36/2.38/2.48 precedent):
+      kept `origin/main`'s 2.50/1.28 assignments as landed first, and
+      renumbered this track's own conflicting bumps to 2.51/1.29 --
+      updating every place that named the old numbers for this track's own
+      change (the schema file's own history comments, both copies of
+      `compare_report.schema.json`, `docs/use/output-formats.md`, this
+      status file, and the changelog fragment) while leaving every
+      ADR-065-owned 2.50/1.28 reference (including its own tests) alone,
+      since those numbers are genuinely, correctly ADR-065's.
+
+      **Merging `origin/main` a second time produced the identical
+      collision again, one version number later.** Between the previous
+      merge landing and this branch's next push, `origin/main` advanced
+      twice more (PR #1076, then PR #1082/ADR-067 C-S1). ADR-067 C-S1
+      independently claimed `REPORT_SCHEMA_VERSION` 2.51 (the
+      `disposition_audit` block, per-suppression `rule` provenance, and
+      `detectors[].not_evaluated`) and `SCAN_SCHEMA_VERSION` 1.29 (the
+      scan-side `not_evaluated` mirror) for its own unrelated additive
+      bumps -- the exact numbers this track had just renumbered its own
+      bump to. Resolved the same way again: kept ADR-067's 2.51/1.29 as
+      landed first, and renumbered this track's own bump a second time,
+      to 2.53/1.30, updating every place that named the old 2.51/1.29
+      numbers for this track's own change (the same file set as the
+      previous renumbering, plus `architecture/debt.yaml`'s baseline
+      rationale for `abicheck/schemas/__init__.py`) while leaving every
+      ADR-067-owned 2.51/1.29 reference alone. A third, unrelated
+      `duplication-and-convergence-assessment.md` table-row conflict (this
+      track's Track T3 "done" row versus a concurrently-merged Track T4
+      status update) and a `checker_types.py`/`abicheck/schemas/__init__.py`
+      debt-baseline line-count conflict (both files grew independently on
+      each side) were resolved the same additive way -- keep both sides'
+      real content, recompute the baseline from the merged file's actual
+      line count.
+
+      Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
+      track T3 -- landed, per the Track T3 account above.
     investigated_declined:
+      - item: >-
+          Trusting an anonymous/local-scoped entity's literal `EntityId`
+          equality across two snapshots for *value-change* detection
+          specifically, when it happens to match on both sides of a
+          colliding alias group (Codex review, PR #1078, twentieth round).
+          The scenario: an anonymous typedef/constant keeps its ordinal and
+          changes value (e.g. `int` -> `long`) while a second, genuinely
+          new anonymous entity with the *old* value is added to the same
+          colliding group in the same comparison. The fourteenth round's
+          stability filter (`entity_id_is_cross_snapshot_stable`) excludes
+          this pair from `shared_ids` by design, so the by-value multiset
+          bookkeeping treats the old entity's `int` and the new entity's
+          `int` as fungible, netting out to report only the new `long`
+          value as an addition -- correctly reporting that a `long`
+          appeared, but not that the specific anonymous entity's own value
+          changed, since that identity claim is unprovable from raw
+          evidence alone.
+        decided: "2026-09-05"
+        leaves_open: >-
+          Trusting the literal `EntityId` match here for this narrower
+          purpose would directly reintroduce the fourteenth round's own
+          counterexample in the opposite direction: an unrelated anonymous
+          sibling inserted or removed elsewhere in the same scope shifts
+          every later sibling's ordinal, so two literally-equal anonymous
+          `EntityId`s across two snapshots are not reliably "the same
+          declaration" evidence, only "happened to land on the same
+          ordinal this time." This is the second identity heuristic
+          considered and rejected for this exact ambiguity (the first being
+          the fourteenth round's own rejection of trusting the raw
+          intersection at all) -- per this repository's own accepted
+          precedent (`tests/CLAUDE.md`'s "Primitive-level property tests"
+          section, citing `_type_index_items`'s and `_diff_constants`'s
+          structural-identity docstrings), a heuristic falsified this way
+          twice is accepted as a documented, evidentiary limitation of
+          value-based multiset matching without stable identity, not
+          reattempted a third time. A different fix shape -- e.g. a new
+          "ambiguous identity" signal distinct from both `_CHANGED` and
+          `_ADDED`/`_REMOVED` -- would be a new detector-output contract,
+          not a bug fix, and is out of this track's scope.
+        tracked_as: >-
+          No open tracking item; recorded here as the decision record per
+          this file's own convention. A future proposal to resolve this
+          ambiguity differently should read this entry first.
       - item: >-
           Changing how the record and function detector families MATCH --
           the behavioral half of migrating them onto SemanticIRIndex as

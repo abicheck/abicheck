@@ -235,6 +235,53 @@ def test_stripped_new_side_does_not_fabricate_type_removals():
     assert not any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in result.changes)
 
 
+def test_semantic_ir_only_typedef_evidence_still_confirms_a_real_removal():
+    """The stripped-side guard must not misfire when the new side's only type
+    evidence lives in a real ``SemanticIR`` rather than the legacy flat
+    ``typedefs`` map (Codex review, PR #1078, twenty-third round).
+
+    ``compare.typedefs``' per-side-independence design (ADR-063 Track T3) can
+    legitimately trust a real ``SemanticIR`` for typedef comparison even when
+    the snapshot's own flat ``typedefs`` map is empty. Before this fix,
+    ``diff_types._has_type_evidence`` only checked the flat map, so such a
+    snapshot read as "no type evidence at all" -- exactly
+    ``_removals_are_unconfirmed``'s stripped-binary signature -- and silently
+    reclassified a genuine typedef removal as unconfirmed, even though the new
+    side actually has real (IR-only) type evidence and genuinely dropped one
+    of the old side's two typedefs.
+    """
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model.fact import Fact
+    from abicheck.model.identity import entity_id_for_typedef
+    from abicheck.model.occurrence import OccurrenceId
+    from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
+
+    old = _elf_snapshot(functions=[_exported_func("use_alias")])
+    old.typedefs = {"A": "int", "B": "long"}
+
+    # new: same exported function, flat `typedefs` map empty, but a real
+    # SemanticIR resolves `A` (only) -- `B` was genuinely removed.
+    new = _elf_snapshot(functions=[_exported_func("use_alias")])
+    new.dwarf = None
+    new.semantic_ir = SemanticIR(
+        occurrences={
+            OccurrenceId(entity_id_for_typedef((), "A")): CanonicalEntity(
+                canonical_spelling=Fact.present("int")
+            )
+        }
+    )
+
+    result = compare(old, new)
+    assert any(
+        c.kind == ChangeKind.TYPEDEF_REMOVED and c.symbol == "B"
+        for c in result.changes
+    ), (
+        "a typedef genuinely absent from the new side's real SemanticIR must "
+        f"still be reported as removed; changes: "
+        f"{[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
 def test_real_removal_still_reported_when_symbols_also_dropped():
     """The stripped-side guard must NOT hide a genuine class removal: when the
     removed type's exported methods are also gone, symbol retention is low and
@@ -922,4 +969,140 @@ def test_stdlib_field_access_change_is_breaking_when_target_is_the_runtime():
     assert result.verdict in (Verdict.BREAKING, Verdict.API_BREAK), (
         f"std:: field access narrowing in libstdc++ itself must still be reported; "
         f"kinds: {[c.kind.value for c in result.changes]}"
+    )
+
+
+def test_dwarf_qualified_flat_typedefs_keep_their_key_space():
+    """Regression coverage for Codex review, PR #1078, twenty-sixth round: a
+    DWARF-sourced snapshot's flat ``typedefs`` map is already
+    qualified-keyed, unlike a header-AST backend's bare keying. Forcing the
+    *other* side's real IR down to bare leaf names collapsed a global alias
+    and a same-leaf namespaced one onto one key on that side, while DWARF
+    kept them as two separate opaque keys -- silently losing the global
+    alias's real value change.
+    """
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.dwarf_metadata import DwarfMetadata
+    from abicheck.model.fact import Fact
+    from abicheck.model.identity import Namespace, entity_id_for_typedef
+    from abicheck.model.occurrence import OccurrenceId
+    from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
+
+    old = _elf_snapshot(functions=[_exported_func("use_alias")])
+    old.typedefs = {"Alias": "int", "ns::Alias": "int"}
+    old.dwarf = DwarfMetadata()
+
+    eid_global = entity_id_for_typedef((), "Alias")
+    eid_ns = entity_id_for_typedef((Namespace("ns"),), "Alias")
+    new = _elf_snapshot(functions=[_exported_func("use_alias")])
+    new.typedefs_qualified = {"Alias": "long", "ns::Alias": "int"}
+    new.typedef_entity_ids = {"Alias": eid_global, "ns::Alias": eid_ns}
+    new.semantic_ir = SemanticIR(
+        occurrences={
+            OccurrenceId(eid_global): CanonicalEntity(
+                canonical_spelling=Fact.present("long")
+            ),
+            OccurrenceId(eid_ns): CanonicalEntity(
+                canonical_spelling=Fact.present("int")
+            ),
+        }
+    )
+
+    result = compare(old, new)
+    typedef_changes = [
+        c for c in result.changes if c.kind == ChangeKind.TYPEDEF_BASE_CHANGED
+    ]
+    assert len(typedef_changes) == 1, (
+        "only the genuinely-changed global alias should be reported; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+    assert typedef_changes[0].symbol == "Alias"
+    assert typedef_changes[0].old_value == "int"
+    assert typedef_changes[0].new_value == "long"
+
+
+def test_header_backed_snapshot_with_incidental_dwarf_stays_bare_keyed():
+    """Regression coverage for Codex review, PR #1078, twenty-seventh round:
+    ``dwarf is not None`` alone is not proof this side's flat ``typedefs``
+    is DWARF-qualified -- a header-parsed ELF binary that also carries
+    DWARF debug info sets both ``dwarf`` and a bare, header-derived
+    ``typedefs`` together (``dumper.py``'s combined header+DWARF path).
+    Treating such a side as DWARF-qualified rendered the *other* side's
+    real IR fully qualified against this side's actually-bare key,
+    fabricating a removal for an entirely unchanged typedef.
+    """
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.dwarf_metadata import DwarfMetadata
+    from abicheck.model.fact import Fact
+    from abicheck.model.identity import Namespace, entity_id_for_typedef
+    from abicheck.model.occurrence import OccurrenceId
+    from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
+
+    old = _elf_snapshot(functions=[_exported_func("use_alias")])
+    old.typedefs = {"Alias": "int"}
+    old.dwarf = DwarfMetadata()
+    old.from_headers = True
+
+    eid_ns = entity_id_for_typedef((Namespace("ns"),), "Alias")
+    new = _elf_snapshot(functions=[_exported_func("use_alias")])
+    new.typedefs_qualified = {"ns::Alias": "int"}
+    new.typedef_entity_ids = {"ns::Alias": eid_ns}
+    new.semantic_ir = SemanticIR(
+        occurrences={
+            OccurrenceId(eid_ns): CanonicalEntity(canonical_spelling=Fact.present("int"))
+        }
+    )
+
+    result = compare(old, new)
+    assert not any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in result.changes), (
+        "an unchanged typedef must not be reported as removed just because "
+        f"this side happens to also carry DWARF metadata; changes: "
+        f"{[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
+def test_btf_ctf_typedef_removal_still_reported_via_leftover_fallback():
+    """Regression coverage for Codex/CodeRabbit review, PR #1078, twenty-eighth
+    round (fresh evidence): a BTF/CTF-sourced snapshot sets `dwarf` (via
+    `to_dwarf_metadata()`) and a real `semantic_ir`
+    (`extract.debug_layout_semantic_ir.semantic_ir_from_debug_metadata`) that
+    deliberately never covers typedefs, while its own flat `typedefs` map is
+    populated independently and can carry real data
+    (`workflows/input_resolution.py`'s raw-blob assembler,
+    `typedefs=dict(btf.typedefs)`). Skipping the leftover-reconciliation
+    fallback whenever `qualified_keys` was set (the twenty-sixth round's own
+    fix) silently dropped every one of this side's typedefs, including a
+    genuine removal -- a missed BREAKING change, not merely a false one.
+    """
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.dwarf_metadata import DwarfMetadata
+    from abicheck.extract.debug_layout_semantic_ir import (
+        semantic_ir_from_debug_metadata,
+    )
+    from abicheck.model.fact import Fact
+    from abicheck.model.identity import entity_id_for_typedef
+    from abicheck.model.occurrence import OccurrenceId
+    from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
+
+    dwarf_meta = DwarfMetadata()
+    old = _elf_snapshot(functions=[_exported_func("use_alias")])
+    old.typedefs = {"kept_typedef": "int", "removed_typedef": "long"}
+    old.dwarf = dwarf_meta
+    old.semantic_ir = semantic_ir_from_debug_metadata(dwarf_meta, "btf")
+
+    eid = entity_id_for_typedef((), "kept_typedef")
+    new = _elf_snapshot(functions=[_exported_func("use_alias")])
+    new.typedefs_qualified = {"kept_typedef": "int"}
+    new.typedef_entity_ids = {"kept_typedef": eid}
+    new.semantic_ir = SemanticIR(
+        occurrences={
+            OccurrenceId(eid): CanonicalEntity(canonical_spelling=Fact.present("int"))
+        }
+    )
+
+    result = compare(old, new)
+    removed = [c for c in result.changes if c.kind == ChangeKind.TYPEDEF_REMOVED]
+    assert len(removed) == 1 and removed[0].symbol == "removed_typedef", (
+        "a genuine typedef removal on a BTF/CTF-sourced side must still be "
+        f"reported; changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
     )

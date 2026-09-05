@@ -51,12 +51,15 @@ from typing import TYPE_CHECKING, Protocol
 from ..diff_helpers import make_change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.identity import EntityId, EntityKind
-from ..model.semantic_ir import SemanticIR
+from ..model.identity_stability import entity_id_is_cross_snapshot_stable
+from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
     legacy_constant_ir,
     producer_entity_id,
-    render_display_name,
+    producer_occurrence_disambiguator,
+    render_display_name_or_leaf,
+    semantic_ir_covers_kind,
 )
 
 if TYPE_CHECKING:
@@ -79,38 +82,178 @@ class _ReliabilityPredicate(Protocol):
     def __call__(self, old_value: str, new_value: str) -> bool: ...
 
 
-def _values(index: SemanticIRIndex) -> dict[str, EntityId]:
-    """This index's constant occurrences, keyed by their rendered qualified
-    name. Mirrors ``compare.typedefs._aliases``: an identity with no
-    faithful flat rendering is skipped, which ``constant_index_pair``'s own
-    fidelity gate is what makes unreachable on the ``SemanticIR`` path."""
-    by_name: dict[str, EntityId] = {}
-    for entity_id in index.entities_of_kind(EntityKind.CONSTANT):
-        name = render_display_name(entity_id)
-        if name is not None:
-            by_name.setdefault(name, entity_id)
+#: Sentinel for "this occurrence's value could not be established" inside a
+#: colliding group's ``Counter`` multiset (``diff_constants``, Codex review,
+#: PR #1078, ninth round) -- a reserved, unlikely-to-collide string rather
+#: than typedefs' bare ``"?"`` (``compare.typedefs._UNRESOLVED_TYPE_
+#: SENTINEL``), since a constant's own raw value text is arbitrary source
+#: content and a real constant literally spelled ``"?"`` is not implausible
+#: the way an underlying-type spelling of ``"?"`` would be.
+_UNRESOLVED_MARKER = "\x00<abicheck-constant-unresolved>"
+
+
+def _unresolved_to_none(value: str) -> str | None:
+    """*value* unless it is :data:`_UNRESOLVED_MARKER`, in which case
+    ``None`` -- the public shape a ``Change``'s ``old_value``/``new_value``
+    already uses for "no recoverable value text", same as a whole-name
+    ``CONSTANT_ADDED``/``CONSTANT_REMOVED`` for an unsupported fact."""
+    return None if value == _UNRESOLVED_MARKER else value
+
+
+def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
+    """Own disambiguator when set, else a fallback from its real
+    (non-synthetic) entity id (Codex review, PR #1078, twentieth round):
+    closes a collision between two entity-distinct occurrences that both
+    lack a source disambiguator, without touching ``report_finding_id``
+    itself (see that function's docstring). Callers needing to skip this
+    fallback for a non-colliding group use :func:`_group_safe_disambiguator`
+    instead."""
+    disambiguator = producer_occurrence_disambiguator(occurrence_id)
+    if disambiguator:
+        return disambiguator
+    entity_id = producer_entity_id(occurrence_id.entity_id)
+    return None if entity_id is None else str(entity_id.key)
+
+
+def _group_safe_disambiguator(
+    occurrence_id: OccurrenceId, group_size: int
+) -> str | None:
+    """Falls back through :func:`_collision_safe_disambiguator` only when
+    *group_size* > 1 (22nd round): a non-colliding finding has no ambiguity
+    to resolve, so fabricating one would rehash the common case's id."""
+    if group_size <= 1:
+        return producer_occurrence_disambiguator(occurrence_id)
+    return _collision_safe_disambiguator(occurrence_id)
+
+
+#: One residual: ``(occurrence_id, synthetic_disambiguator)``. The id is
+#: real/attributable or ``None`` (dishonest attribution); the synthetic
+#: value, set only alongside ``None``, keeps residuals from collapsing
+#: without claiming an identity (Codex review, PR #1078, 21st round).
+_Residual = tuple["OccurrenceId | None", "str | None"]
+
+
+def _residual_entity_id(occurrence_id: OccurrenceId | None) -> EntityId | None:
+    """``None`` for an ambiguous residual (:func:`_attribute_residuals`)."""
+    if occurrence_id is None:
+        return None
+    return producer_entity_id(occurrence_id.entity_id)
+
+
+def _residual_disambiguator(
+    occurrence_id: OccurrenceId | None, synthetic: str | None = None
+) -> str | None:
+    """*synthetic* (no identity claim) for an ambiguous residual."""
+    if occurrence_id is not None:
+        return _collision_safe_disambiguator(occurrence_id)
+    return synthetic
+
+
+def _attribute_residuals(
+    ids_for_value: list[OccurrenceId], excess: int
+) -> list[_Residual]:
+    """The *excess* occurrences of one value bucket to report as
+    removed/added residuals, attributed to a real identity only when
+    unambiguous (Codex review, PR #1078, twentieth round).
+
+    When the *entire* bucket vanishes (``excess == len(ids_for_value)``),
+    each occurrence's identity is genuine evidence. When only *some* are
+    excess, which one(s) is unrecoverable from a bare value match -- an
+    arbitrary list prefix (the old behavior) could stamp a still-*present*
+    declaration's identity onto a finding claiming it vanished, so no
+    identity is attributed in that case.
+
+    Each ambiguous residual still gets its own synthetic disambiguator
+    (21st round): shrinking four equal-valued occurrences to one is *three*
+    independent removals, and a shared blank identity would collapse them
+    to one via ``_dedup_exact``.
+    """
+    if excess == len(ids_for_value):
+        return [(i, None) for i in ids_for_value]
+    return [(None, f"ambiguous:{i}") for i in range(excess)]
+
+
+def _values(index: SemanticIRIndex) -> dict[str, list[OccurrenceId]]:
+    """This index's constant occurrences, grouped by their rendered name --
+    a *list* per name, not a single winner (Codex review, PR #1078, sixth
+    round). Mirrors ``compare.typedefs._aliases`` exactly, including using
+    ``render_display_name_or_leaf`` rather than the strict
+    ``render_display_name`` (Codex review, PR #1078, fourth round) -- see
+    that function's own docstring for why an anonymous/local-to-function-
+    scoped constant still needs a name to compare under, and for why a
+    collision on that rendered name must keep every occurrence rather than
+    ``setdefault``-ing to the first: two distinct anonymous-scoped constants
+    sharing a leaf name are still two distinct pieces of evidence, and
+    collapsing to one silently discarded whichever occurrence didn't win the
+    race. :func:`diff_constants` compares the *set* of values under a
+    colliding name rather than a single representative, for the same reason
+    :func:`~abicheck.compare.typedefs.diff_typedefs` does.
+
+    **Grouped by raw occurrence, not by the reduced entity view** (Codex
+    review, PR #1078, fifteenth round -- mirrors ``compare.typedefs.
+    _aliases``'s identical fix; see that function's own docstring for the
+    full account): ``SemanticIRIndex.entities_of_kind`` answers off
+    ``SemanticIR.canonical_entities()``'s explicit one-entry-per-``EntityId``
+    reduction, which would collapse a genuine ODR-duplicate/multi-TU pair of
+    constants sharing one ``EntityId`` down to a single "most facts present"
+    winner -- exactly the case ``SemanticIR.occurrences`` (keyed by
+    :class:`~abicheck.model.occurrence.OccurrenceId`, not bare ``EntityId``)
+    exists to keep distinct. Iterating ``index.ir.occurrences`` directly
+    instead means such a pair is just another instance of the alias-collision
+    this function already groups and :func:`diff_constants` already compares
+    by multiset."""
+    by_name: dict[str, list[OccurrenceId]] = {}
+    for occurrence_id in index.ir.occurrences:
+        if occurrence_id.entity_id.kind is not EntityKind.CONSTANT:
+            continue
+        by_name.setdefault(
+            render_display_name_or_leaf(occurrence_id.entity_id), []
+        ).append(occurrence_id)
     return by_name
 
 
-def _value(index: SemanticIRIndex, entity_id: EntityId) -> str | None:
-    """*entity_id*'s value text, or ``None`` when this producer has no
+def _value(index: SemanticIRIndex, occurrence_id: OccurrenceId) -> str | None:
+    """*occurrence_id*'s value text, or ``None`` when this producer has no
     comparable spelling for it (``Fact.unsupported()`` -- a clang compound-
     initializer fingerprint or Python-bool-derived literal spelling, see
     ``extract/semantic_normalizer.py``'s "Scope of the fourth slice").
 
+    Reads *occurrence_id*'s own ``CanonicalEntity`` directly off
+    ``index.ir.occurrences`` -- never ``SemanticIRIndex.fact()``/``.entity()``,
+    which answer off the reduced view and would silently collapse two
+    genuine ODR-duplicate/multi-TU occurrences sharing one identity onto a
+    single winner (Codex review, PR #1078, fifteenth round; see
+    :func:`_values`'s own docstring for the full account).
+
     Unlike a typedef's unresolved-chain placeholder (``"?"``, a real string
     both backends agree on), a constant carries no legacy sentinel for this
     case -- the raw fingerprint text a ``Fact.unsupported()`` occurrence
-    would need to compare against is not retained on the fact at all. This
-    is never reachable on the ``SemanticIR`` path in practice:
-    ``constant_index_pair``'s fidelity gate already falls back to the
-    adapter for both sides whenever any entity's projected value would
-    disagree with the legacy raw text this way (a ``None`` projection can
-    never equal a real legacy string) -- kept as a defensive floor, not the
-    mechanism, mirroring ``compare.typedefs._underlying``'s identical
-    defensive floor for the unresolved-typedef-chain case.
+    would need to compare against is not retained *on the ``Fact`` itself*
+    at all. Since ADR-063 Track T3 made ``SemanticIR`` the sole
+    comparison-time source for this cohort, ``diff_constants`` genuinely
+    reaches this ``None`` for a real clang compound-initializer/bool-literal
+    constant -- it is no longer routed around by falling back to the legacy
+    adapter's always-a-raw-string projection first. This function's own
+    caller, ``diff_constants``, does not simply give up here the way it
+    once did: the identical raw text is still available from each
+    snapshot's own flat ``AbiSnapshot.constants`` map (the same producer's
+    *legacy* declaration parser populates it independently of the
+    ``SemanticIR`` normalizer's cross-backend-safety decision), so
+    ``diff_constants`` falls back to that map for a *value comparison*
+    specifically, gated through the existing
+    *is_fingerprint_comparison_unreliable* predicate the same way any other
+    fingerprint comparison is (Codex review, PR #1078, second round --
+    silently treating "value incomparable" as "value unchanged" is exactly
+    what this codebase's "weaker evidence narrows conclusions" principle
+    (AGENTS.md) forbids). A membership change
+    (``CONSTANT_ADDED``/``CONSTANT_REMOVED``) needs no such fallback to
+    fire at all: whether a constant exists does not depend on whether its
+    value can be rendered (Codex review, PR #1078, first round) -- the
+    fallback there only makes the finding's own old/new value text more
+    informative.
     """
-    spelling = index.fact(entity_id, "canonical_spelling")
+    entity = index.ir.occurrences.get(occurrence_id)
+    spelling = entity.canonical_spelling if entity is not None else None
     if spelling is not None and spelling.is_present and spelling.value is not None:
         value = spelling.value
         assert isinstance(value, str)
@@ -123,110 +266,511 @@ def diff_constants(
     new_index: SemanticIRIndex,
     *,
     is_fingerprint_comparison_unreliable: _ReliabilityPredicate,
+    old_constants: dict[str, str],
+    new_constants: dict[str, str],
 ) -> list[Change]:
     """Detect constant additions, removals, and value changes, reading only
-    through the two indexes.
+    through the two indexes -- plus, for a value comparison specifically,
+    each snapshot's own flat ``AbiSnapshot.constants`` map as a same-backend
+    fallback when the canonical ``SemanticIR`` value is unsupported.
+
+    An addition or removal fires regardless of whether the constant's own
+    value can be rendered (``_value`` returning ``None`` for a
+    ``Fact.unsupported()`` occurrence) -- only a value-*comparison*
+    (``CONSTANT_CHANGED``) requires both sides' values to actually be
+    comparable text (Codex review, PR #1078: this used to skip the
+    membership check too for an unsupported old-side value, silently
+    dropping a real removal).
+
+    **The value comparison itself falls back to *constants* when
+    ``_value`` returns ``None``** (Codex review, PR #1078, second round):
+    ``Fact.unsupported()`` means the canonical ``SemanticIR`` spelling is
+    not a *cross-backend*-comparable value (a clang compound-initializer
+    fingerprint or Python-bool-derived literal spelling, see
+    ``extract/semantic_normalizer.py``) -- it does not mean the raw text is
+    unavailable. The same producer's *legacy* declaration parser
+    (``dumper_clang.py``'s own ``parse_constants()``) still populates
+    ``AbiSnapshot.constants`` with that identical raw text, independently
+    of the ``SemanticIR`` normalizer's cross-backend-safety decision, and a
+    *same-run, same-backend* comparison of two such fingerprints is exactly
+    what *is_fingerprint_comparison_unreliable* already exists to gate
+    (``diff_default_value_reliability.
+    constant_value_fingerprint_comparison_unreliable``) -- this function
+    already checked that predicate before this fix, it simply had nothing
+    to check it against once the canonical value went missing. Without this
+    fallback, a real edit to a compound initializer or a `constexpr bool`
+    aliased to a `True`/`False`-named identifier between two same-backend
+    header snapshots produced no finding at all, even though the pre-T3
+    legacy-only path (always ``Fact.present(value)``, never ``unsupported``)
+    caught it. Membership (``CONSTANT_ADDED``/``CONSTANT_REMOVED``) reports
+    the same fallback value too, purely for a more informative
+    old_value/new_value -- it never gates *whether* that finding fires.
 
     *is_fingerprint_comparison_unreliable* is the comparison-level decision
-    the caller already makes (``diff_default_value_reliability.
-    constant_value_fingerprint_comparison_unreliable``, closed over both
-    snapshots) -- injected for the same reason ``diff_typedefs``'s own
-    ``is_non_abi_surface_type`` is.
+    the caller already makes, closed over both snapshots -- injected for
+    the same reason ``diff_typedefs``'s own ``is_non_abi_surface_type`` is.
 
     Behavior is identical to the pre-cutover ``diff_symbols._diff_constants``,
     including which two spellings a ``CONSTANT_CHANGED`` finding carries
     (``old``/``new`` as ``repr()`` text alongside ``old_value``/``new_value``
     as the raw strings).
+
+    **A colliding name is compared by its whole value multiset, not one
+    representative** (Codex review, PR #1078, sixth round): ``_values``
+    groups every entity that renders to the same name, since two distinct
+    anonymous-scoped constants can share one leaf name. Picking an arbitrary
+    representative per side could miss a real value change on whichever
+    occurrence didn't become the representative, silently reporting no
+    change at all -- mirrors ``compare.typedefs.diff_typedefs``'s own fix
+    for the identical failure mode.
+
+    **The multiset comparison alone was not enough** (Codex review, PR
+    #1078, eighth round): filtering out unsupported (``None``) values
+    *before* comparing the multiset silently discarded a genuine membership
+    change inside a colliding group whenever the discarded occurrence's
+    absence didn't change the *filtered* list -- e.g. one comparable value
+    (``"1"``) plus one unsupported occurrence on the old side, the same
+    comparable value alone on the new side: both sides' filtered multisets
+    read ``["1"]``, so the group's own shrinking from two occurrences to one
+    was invisible. This function now also compares each side's raw
+    occurrence *count*, independent of value comparability, and reports a
+    change (with no recoverable value text) whenever the counts disagree
+    even though the filtered values agree -- the same "which occurrence
+    changed remains ambiguous" acceptance every other colliding-group case
+    here already carries, just extended to a membership change instead of a
+    value change.
+
+    **Several further gaps in the collision path itself**, across three
+    Codex review rounds (PR #1078, ninth/tenth/eleventh):
+
+    1. (Ninth round) A colliding group that grew (or shrank) by a value
+       *already present* in the group (e.g. a second anonymous-namespace
+       ``X=1`` alongside an existing ``X=1``) has sorted lists of different
+       length that a naive representative pick could still read as a value
+       *change* -- reporting ``CONSTANT_CHANGED`` (an API break) for what
+       is a purely compatible addition. Fixed (initially via
+       ``collections.Counter`` subtraction, later folded into the
+       occurrence-level bookkeeping below) so a pure addition/removal
+       inside the group is classified as ``CONSTANT_ADDED``/
+       ``CONSTANT_REMOVED``, and only a group with both a net addition and
+       a net removal is reported as ``CONSTANT_CHANGED``.
+    2. (Ninth round) The per-name legacy fallback (``constants.get(name)``)
+       reflects only *one* raw value per bare name -- whichever
+       occurrence's own parse happened to win that same collision upstream
+       -- so applying it to *every* unresolved occurrence in a colliding
+       group risked misattributing one occurrence's legacy text to a
+       different occurrence. The collision path never consults the
+       fallback at all -- an unresolved occurrence inside a colliding group
+       is represented by an internal sentinel, never a borrowed value.
+    3. (Tenth round) A *mixed* group (both a net removal and a net addition
+       at once, e.g. a stable ``X=1`` becoming ``X=2`` while a different,
+       newly-added anonymous-scope ``X=3`` also appears) used to pick one
+       representative pair and emit a single ``CONSTANT_CHANGED``, silently
+       dropping the independently provable residual ``CONSTANT_ADDED``/
+       ``CONSTANT_REMOVED``. Fixed by pairing off exactly one removed value
+       with one added value as that one ``CONSTANT_CHANGED``, then
+       reporting every other leftover value as its own finding.
+    4. (Eleventh round) The ninth/tenth rounds' own fix converted a
+       ``Counter`` difference to a ``set`` for iteration, which introduced
+       two further defects: iteration order (and therefore which colliding
+       value became the ``CONSTANT_CHANGED`` pairing, and therefore the
+       *outcome* of the ``is_fingerprint_comparison_unreliable`` gate on
+       it) depended on ``PYTHONHASHSEED``, so the identical comparison
+       could alternate between passing and failing across runs; and
+       converting to a ``set`` collapsed repeated values to one entry,
+       silently dropping every additional identical removal/addition
+       beyond the first (three colliding ``X=1`` occurrences shrinking to
+       one must report the loss of *two* occurrences, not one). Fixed by
+       replacing the ``Counter``/``set`` machinery entirely with
+       occurrence-level bookkeeping (``old_by_value``/``new_by_value``,
+       plain ``dict``s grouping each side's own entities by value in
+       insertion order) -- deterministic regardless of hash seed, exact on
+       multiplicity, and each removed/added occurrence keeps its own real
+       entity_id rather than every finding for the name sharing a single
+       id computed once from ``old_ids[0]``/``new_ids[0]`` (a third,
+       related eleventh-round finding: that shared id misattributed a
+       residual finding to whichever entity happened to occupy that
+       position, not the occurrence that actually changed).
     """
     changes: list[Change] = []
     old_values = _values(old_index)
     new_values = _values(new_index)
 
-    for name, old_id in old_values.items():
-        old_val = _value(old_index, old_id)
-        if old_val is None:
+    def _value_or_legacy(
+        index: SemanticIRIndex,
+        occurrence_id: OccurrenceId,
+        name: str,
+        constants: dict[str, str],
+    ) -> str | None:
+        value = _value(index, occurrence_id)
+        return value if value is not None else constants.get(name)
+
+    for name, old_ids in old_values.items():
+        new_ids = new_values.get(name)
+        if new_ids is None:
+            # A membership change (removed) is real regardless of whether
+            # this constant's own value was ever comparable -- checked
+            # before the `old_val is None` unsupported-value skip below, so
+            # a clang compound-initializer/bool-literal constant (or any
+            # future Fact.unsupported() producer) still reports its
+            # removal, just with no recoverable old_value text (Codex
+            # review: this used to `continue` here before ever reaching the
+            # membership check, silently dropping the removal).
+            #
+            # One `CONSTANT_REMOVED` per contributing entity, not just
+            # `old_ids[0]` (Codex review, PR #1078, twelfth round): when
+            # the whole colliding group vanishes -- not merely shrinks --
+            # every one of its distinct entities is an independent, real
+            # removal, and each carries its own entity_id rather than
+            # every finding sharing a single id.
+            #
+            # The per-name legacy fallback is used only when there is
+            # exactly one entity to attribute it to (Codex review, PR
+            # #1078, thirteenth round): `old_constants.get(name)` retains
+            # only one raw value per bare name, so applying it to *every*
+            # member of a multi-entity group vanishing at once would credit
+            # the same borrowed text to every one of them, same as the
+            # ninth round's identical reasoning for the general collision
+            # path -- this whole-group path just hadn't been given the
+            # same treatment yet.
+            for old_id in old_ids:
+                old_value = (
+                    _value_or_legacy(old_index, old_id, name, old_constants)
+                    if len(old_ids) == 1
+                    else _value(old_index, old_id)
+                )
+                changes.append(
+                    make_change(
+                        ChangeKind.CONSTANT_REMOVED,
+                        symbol=name,
+                        name=name,
+                        old_value=old_value,
+                        entity_id=producer_entity_id(old_id.entity_id),
+                        disambiguator=_group_safe_disambiguator(old_id, len(old_ids)),
+                    )
+                )
             continue
-        new_id = new_values.get(name)
-        eid = producer_entity_id(old_id) or (
-            producer_entity_id(new_id) if new_id is not None else None
-        )
-        if new_id is None:
+        if len(old_ids) == 1 and len(new_ids) == 1:
+            # The common, non-colliding case: preserved exactly as before
+            # any collision handling existed.
+            old_val = _value_or_legacy(old_index, old_ids[0], name, old_constants)
+            new_val = _value_or_legacy(new_index, new_ids[0], name, new_constants)
+            if old_val is None or new_val is None or new_val == old_val:
+                continue
+            if is_fingerprint_comparison_unreliable(old_val, new_val):
+                continue
+            changes.append(
+                make_change(
+                    ChangeKind.CONSTANT_CHANGED,
+                    symbol=name,
+                    name=name,
+                    old=repr(old_val),
+                    new=repr(new_val),
+                    old_value=old_val,
+                    new_value=new_val,
+                    entity_id=producer_entity_id(old_ids[0].entity_id)
+                    or producer_entity_id(new_ids[0].entity_id),
+                    disambiguator=(
+                        producer_occurrence_disambiguator(old_ids[0])
+                        if producer_entity_id(old_ids[0].entity_id) is not None
+                        else producer_occurrence_disambiguator(new_ids[0])
+                    ),
+                )
+            )
+            continue
+        # Shared real identity resolved *before* any value-based pairing
+        # (Codex review, PR #1078, thirteenth round): an entity present
+        # under the identical `EntityId` on both sides of the comparison is
+        # not an ambiguous member of the colliding group at all -- it is
+        # the same declaration, so its own old/new value comparison is
+        # exact, never a heuristic pairing. Skipping this and going
+        # straight to value-based matching let a stable entity's own real
+        # value change be silently absorbed into an unrelated occurrence's
+        # addition/removal whenever the multiset arithmetic happened to
+        # find a same-valued partner elsewhere in the group -- e.g. a
+        # stable `X` changing `1` -> `2` while a *different*, newly-added
+        # colliding entity is `1`: value-only subtraction cancels the
+        # stable entity's old `1` against the new entity's `1`, reporting
+        # only a compatible-looking addition of `2` instead of the real
+        # breaking change to the stable entity, and losing the genuine
+        # addition entirely. `set(old_ids) & set(new_ids)` is exact, not a
+        # heuristic, *for a stable identity*: `_values()` never repeats an
+        # `EntityId` within one side, so each shared id names exactly one
+        # occurrence per side -- but an `Anonymous`/`LocalToFunction` scope
+        # segment's own ordinal is explicitly not stable across two
+        # snapshots (``model.identity_stability``'s own docstring:
+        # inserting an earlier anonymous sibling shifts every later one's
+        # ordinal, and therefore its whole `EntityId`, even though nothing
+        # about that later declaration changed). Trusting a raw
+        # intersection here would risk pairing two genuinely unrelated
+        # declarations that happen to collide on a shifted ordinal plus the
+        # same bare name -- fabricating a `CONSTANT_CHANGED` for what is
+        # really just an unrelated addition (Codex review, PR #1078,
+        # fourteenth round). Gated through
+        # :func:`~abicheck.model.identity_stability.
+        # entity_id_is_cross_snapshot_stable` -- this collision path is
+        # exactly the "real consumer" that predicate's own docstring says
+        # needs its own adversarial review before being wired in, so this
+        # is the first real call site.
+        # No per-name legacy fallback here either, for the identical
+        # ninth-round reason the rest of this path avoids it.
+        shared_id_set = {
+            i
+            for i in set(old_ids) & set(new_ids)
+            if entity_id_is_cross_snapshot_stable(i.entity_id)
+        }
+        # Iterated in `old_ids`'s own order, not `shared_id_set`'s (Codex
+        # review, PR #1078, twentieth round): a `set` has no defined
+        # iteration order, so multiple stable shared entities emitted their
+        # `CONSTANT_CHANGED`s in a `PYTHONHASHSEED`-dependent order.
+        shared_ids = [i for i in old_ids if i in shared_id_set]
+        for shared_id in shared_ids:
+            old_val = _value(old_index, shared_id)
+            new_val = _value(new_index, shared_id)
+            if old_val is None or new_val is None or old_val == new_val:
+                continue
+            if is_fingerprint_comparison_unreliable(old_val, new_val):
+                continue
+            changes.append(
+                make_change(
+                    ChangeKind.CONSTANT_CHANGED,
+                    symbol=name,
+                    name=name,
+                    old=repr(old_val),
+                    new=repr(new_val),
+                    old_value=old_val,
+                    new_value=new_val,
+                    entity_id=producer_entity_id(shared_id.entity_id),
+                    disambiguator=_group_safe_disambiguator(shared_id, len(shared_ids)),
+                )
+            )
+        # A colliding group on at least one side (Codex review, PR #1078,
+        # ninth/tenth/eleventh rounds). Compared occurrence-by-occurrence,
+        # not by a bare value `Counter`: a `Counter` alone answers "how many
+        # of each value" but cannot say *which entity* carried a specific
+        # removed or added occurrence, and converting its difference to a
+        # `set` for iteration (an earlier version of this fix) made both
+        # the choice of which colliding value pairs into one
+        # `CONSTANT_CHANGED` and, through it, the `is_fingerprint_
+        # comparison_unreliable` verdict depend on `PYTHONHASHSEED` (string
+        # hashing) -- the identical comparison could alternate between
+        # passing and failing across runs (eleventh round). `set` also
+        # collapsed repeated values to one entry, silently dropping every
+        # additional identical removal/addition beyond the first
+        # (eleventh round's second finding: three colliding `X=1`
+        # occurrences shrinking to one must report the loss of *two*
+        # occurrences, not one).
+        #
+        # `old_by_value`/`new_by_value` group each side's own entities by
+        # value in insertion order (a plain ``dict``, not a ``set`` --
+        # deterministic regardless of hash seed, and matching the same
+        # `SemanticIR`'s own occurrence order every run). For each value,
+        # the excess count on one side over the other is exactly that many
+        # removed/added *occurrences*, each still carrying its own real
+        # entity_id -- fixing the third finding too (an emitted residual
+        # finding used to be stamped with a single id shared across every
+        # finding for the name, misattributing it to whichever entity
+        # happened to be `old_ids[0]`/`new_ids[0]`, not the occurrence that
+        # actually changed).
+        #
+        # This path also does not use `_value_or_legacy`'s per-name
+        # fallback at all: `AbiSnapshot.constants` retains only ONE raw
+        # value per bare name -- whichever occurrence's parse happened to
+        # win that same collision upstream -- so applying it to *every*
+        # unresolved occurrence in a colliding group would misattribute one
+        # occurrence's legacy text to a different occurrence entirely,
+        # potentially making two genuinely different unresolvable
+        # occurrences look identical (a false "unchanged") or crediting an
+        # unrelated occurrence's edit to one that didn't change. Reading
+        # `_value` directly and falling back to the `_UNRESOLVED_MARKER`
+        # sentinel is deliberately less informative than the single-entity
+        # fallback, but never fabricates a per-occurrence value this
+        # function cannot actually attribute.
+        old_by_value: dict[str, list[OccurrenceId]] = {}
+        for i in old_ids:
+            if i in shared_id_set:
+                continue
+            v = _value(old_index, i)
+            old_by_value.setdefault(
+                v if v is not None else _UNRESOLVED_MARKER, []
+            ).append(i)
+        new_by_value: dict[str, list[OccurrenceId]] = {}
+        for i in new_ids:
+            if i in shared_id_set:
+                continue
+            v = _value(new_index, i)
+            new_by_value.setdefault(
+                v if v is not None else _UNRESOLVED_MARKER, []
+            ).append(i)
+        removed_occurrences: list[tuple[str, OccurrenceId | None, str | None]] = []
+        for value, ids_for_value in old_by_value.items():
+            excess = len(ids_for_value) - len(new_by_value.get(value, ()))
+            if excess > 0:
+                removed_occurrences.extend(
+                    (value, i, synth)
+                    for i, synth in _attribute_residuals(ids_for_value, excess)
+                )
+        added_occurrences: list[tuple[str, OccurrenceId | None, str | None]] = []
+        for value, ids_for_value in new_by_value.items():
+            excess = len(ids_for_value) - len(old_by_value.get(value, ()))
+            if excess > 0:
+                added_occurrences.extend(
+                    (value, i, synth)
+                    for i, synth in _attribute_residuals(ids_for_value, excess)
+                )
+        if not removed_occurrences and not added_occurrences:
+            continue
+        # A mixed group (both a net removal and a net addition) carries more
+        # than one independent piece of evidence -- pairing off exactly one
+        # removed occurrence with one added occurrence as a single "value
+        # changed" story, then reporting whatever is *left over* as its own
+        # `CONSTANT_REMOVED`/`CONSTANT_ADDED`, rather than collapsing every
+        # mixed difference into one `CONSTANT_CHANGED` that silently drops
+        # the rest (tenth round: e.g. a stable-identity `X=1` becoming
+        # `X=2` while a *different*, newly-added anonymous-scope `X=3` also
+        # appears -- previously reported only one `CONSTANT_CHANGED` and
+        # silently lost the independently provable `CONSTANT_ADDED`).
+        # Every removed/added pair still available is an independent
+        # substitution, not just the first one (Codex review, PR #1078,
+        # twentieth round) -- the direct generalization of the tenth
+        # round's own one-pair fix; the excess beyond `min(len(removed),
+        # len(added))` is the real leftover evidence.
+        while removed_occurrences and added_occurrences:
+            # Prefers a pair with resolved value evidence on both sides
+            # (Codex review, PR #1078, nineteenth round) over always taking
+            # position 0: an unresolved occurrence (`_UNRESOLVED_MARKER`)
+            # can occupy the first slot on either side, which would demote
+            # a genuinely comparable removed/added pair sitting right next
+            # to it -- both to no recoverable value text (`old`/`new`
+            # rendering as `repr(None)`) and out of
+            # `is_fingerprint_comparison_unreliable`'s own reach (it
+            # requires both values to be non-`None`). Falls back to
+            # position 0 when no resolved pair exists, unchanged from
+            # before. Re-evaluated fresh each iteration since both lists
+            # shrink as pairs are consumed.
+            removed_pos = next(
+                (
+                    i
+                    for i, (value, _, _) in enumerate(removed_occurrences)
+                    if value != _UNRESOLVED_MARKER
+                ),
+                0,
+            )
+            added_pos = next(
+                (
+                    i
+                    for i, (value, _, _) in enumerate(added_occurrences)
+                    if value != _UNRESOLVED_MARKER
+                ),
+                0,
+            )
+            removed_value, removed_id, removed_synth = removed_occurrences.pop(
+                removed_pos
+            )
+            added_value, added_id, added_synth = added_occurrences.pop(added_pos)
+            old_val = _unresolved_to_none(removed_value)
+            new_val = _unresolved_to_none(added_value)
+            unreliable = (
+                old_val is not None
+                and new_val is not None
+                and is_fingerprint_comparison_unreliable(old_val, new_val)
+            )
+            if not unreliable:
+                changes.append(
+                    make_change(
+                        ChangeKind.CONSTANT_CHANGED,
+                        symbol=name,
+                        name=name,
+                        old=repr(old_val),
+                        new=repr(new_val),
+                        old_value=old_val,
+                        new_value=new_val,
+                        entity_id=_residual_entity_id(removed_id)
+                        or _residual_entity_id(added_id),
+                        disambiguator=(
+                            _residual_disambiguator(removed_id, removed_synth)
+                            if _residual_entity_id(removed_id) is not None
+                            else _residual_disambiguator(added_id, added_synth)
+                        ),
+                    )
+                )
+        for (
+            leftover_old_value,
+            leftover_old_id,
+            leftover_old_synth,
+        ) in removed_occurrences:
             changes.append(
                 make_change(
                     ChangeKind.CONSTANT_REMOVED,
                     symbol=name,
                     name=name,
-                    old_value=old_val,
-                    entity_id=eid,
+                    old_value=_unresolved_to_none(leftover_old_value),
+                    entity_id=_residual_entity_id(leftover_old_id),
+                    disambiguator=_residual_disambiguator(
+                        leftover_old_id, leftover_old_synth
+                    ),
                 )
             )
-            continue
-        new_val = _value(new_index, new_id)
-        if new_val is None or new_val == old_val:
-            continue
-        if is_fingerprint_comparison_unreliable(old_val, new_val):
-            continue
-        changes.append(
-            make_change(
-                ChangeKind.CONSTANT_CHANGED,
-                symbol=name,
-                name=name,
-                old=repr(old_val),
-                new=repr(new_val),
-                old_value=old_val,
-                new_value=new_val,
-                entity_id=eid,
+        for (
+            leftover_new_value,
+            leftover_new_id,
+            leftover_new_synth,
+        ) in added_occurrences:
+            changes.append(
+                make_change(
+                    ChangeKind.CONSTANT_ADDED,
+                    symbol=name,
+                    name=name,
+                    new_value=_unresolved_to_none(leftover_new_value),
+                    entity_id=_residual_entity_id(leftover_new_id),
+                    disambiguator=_residual_disambiguator(
+                        leftover_new_id, leftover_new_synth
+                    ),
+                )
             )
-        )
 
-    for name, new_id in new_values.items():
+    for name, new_ids in new_values.items():
         if name in old_values:
             continue
-        new_val = _value(new_index, new_id)
-        if new_val is None:
-            continue
-        changes.append(
-            make_change(
-                ChangeKind.CONSTANT_ADDED,
-                symbol=name,
-                name=name,
-                new_value=new_val,
-                entity_id=producer_entity_id(new_id),
+        # Mirrors the removal side above: an addition is real regardless of
+        # whether the new value is itself comparable. One `CONSTANT_ADDED`
+        # per contributing entity, not just `new_ids[0]` (Codex review, PR
+        # #1078, twelfth round): an entirely new colliding group can carry
+        # more than one distinct entity, each an independent addition. The
+        # per-name legacy fallback is used only for a single-entity group,
+        # for the identical reason the removal side above is (Codex
+        # review, PR #1078, thirteenth round).
+        for new_id in new_ids:
+            new_value = (
+                _value_or_legacy(new_index, new_id, name, new_constants)
+                if len(new_ids) == 1
+                else _value(new_index, new_id)
             )
-        )
+            changes.append(
+                make_change(
+                    ChangeKind.CONSTANT_ADDED,
+                    symbol=name,
+                    name=name,
+                    new_value=new_value,
+                    entity_id=producer_entity_id(new_id.entity_id),
+                    disambiguator=_group_safe_disambiguator(new_id, len(new_ids)),
+                )
+            )
     return changes
 
 
-def _constant_names_and_values(
-    index: SemanticIRIndex,
-) -> tuple[tuple[str, ...], tuple[str | None, ...]]:
-    """The name keys *index* projects for constants, **in order**, paired
-    with each one's value-text spelling. Mirrors ``compare.typedefs.
-    _typedef_display_names_and_underlying`` -- see that function's own
-    docstring for why order (not a set) and why the paired value (not the
-    name alone) both matter to the gate below."""
-    names: list[str] = []
-    values: list[str | None] = []
-    for entity_id, entity in index.entities_of_kind(EntityKind.CONSTANT).items():
-        rendered = render_display_name(entity_id)
-        if rendered is None:
-            continue
-        names.append(rendered)
-        spelling = entity.canonical_spelling
-        values.append(spelling.value if spelling.is_present else None)
-    return tuple(names), tuple(values)
-
-
-def _constant_identities_by_name(index: SemanticIRIndex) -> dict[str, EntityId]:
-    """Name -> resolved ``EntityId`` for every constant entity *index*
-    projects a faithful display name for. Mirrors ``compare.typedefs.
-    _typedef_identities_by_alias``."""
-    out: dict[str, EntityId] = {}
-    for entity_id in index.entities_of_kind(EntityKind.CONSTANT):
-        rendered = render_display_name(entity_id)
-        if rendered is not None:
-            out[rendered] = entity_id
-    return out
+def _constant_side_index(
+    snapshot: AbiSnapshot, constants: dict[str, str]
+) -> SemanticIRIndex:
+    """One side's index -- mirrors ``compare.typedefs._typedef_side_index``
+    exactly; see that function's own docstring, including the
+    :func:`~abicheck.model.semantic_ir_legacy_adapter.semantic_ir_covers_kind`
+    gate (Codex review, PR #1078, nineteenth round)."""
+    if snapshot.semantic_ir is not None and semantic_ir_covers_kind(
+        snapshot.semantic_ir, EntityKind.CONSTANT
+    ):
+        return SemanticIRIndex(snapshot.semantic_ir)
+    return SemanticIRIndex(legacy_constant_ir(snapshot, constants))
 
 
 def constant_index_pair(
@@ -236,32 +780,21 @@ def constant_index_pair(
     old_constants: dict[str, str],
     new_constants: dict[str, str],
 ) -> tuple[SemanticIRIndex, SemanticIRIndex]:
-    """The constant cohort's index pair: ``SemanticIR``-backed when -- and
-    only when -- that is provably equivalent to the legacy projection.
+    """The constant cohort's index pair: each side's real ``SemanticIR``
+    whenever it has one (ADR-063 Track T3, "typedef/constant authority
+    cutover").
 
     Mirrors ``compare.typedefs.typedef_index_pair`` exactly, substituting
-    the constant collections and ``EntityKind.CONSTANT``; see that
-    function's own docstring for the full reasoning behind the strict,
-    symmetric, both-or-neither gate (name-key-set equality, paired value
-    equality, and paired identity equality, all checked on both sides).
-    Nothing about the gate's shape differs between the two families -- only
-    which legacy collections and which entity kind are being projected.
+    the constant collections, ``EntityKind.CONSTANT``, and
+    :func:`~abicheck.model.semantic_ir_legacy_adapter.assert_constant_ir_consistent`
+    as the construction-time identity check -- see that function's own
+    docstring for the full before/after reasoning, including why each side
+    is decided independently rather than both-or-neither (Codex review,
+    PR #1078). Nothing about the shape differs between the two families --
+    only which legacy collections and which entity kind are being
+    projected.
     """
-    old_index = SemanticIRIndex(old.semantic_ir or SemanticIR())
-    new_index = SemanticIRIndex(new.semantic_ir or SemanticIR())
-    old_names, old_ir_values = _constant_names_and_values(old_index)
-    new_names, new_ir_values = _constant_names_and_values(new_index)
-    legacy_old_index = SemanticIRIndex(legacy_constant_ir(old, old_constants))
-    legacy_new_index = SemanticIRIndex(legacy_constant_ir(new, new_constants))
-    if (
-        old_names == tuple(old_constants)
-        and old_ir_values == tuple(old_constants.values())
-        and new_names == tuple(new_constants)
-        and new_ir_values == tuple(new_constants.values())
-        and _constant_identities_by_name(old_index)
-        == _constant_identities_by_name(legacy_old_index)
-        and _constant_identities_by_name(new_index)
-        == _constant_identities_by_name(legacy_new_index)
-    ):
-        return old_index, new_index
-    return legacy_old_index, legacy_new_index
+    return (
+        _constant_side_index(old, old_constants),
+        _constant_side_index(new, new_constants),
+    )

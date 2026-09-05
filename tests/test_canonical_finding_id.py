@@ -1056,3 +1056,53 @@ class TestFindingIdSuppressionSelector:
         yaml_path.write_text("version: 1\nsuppressions: []\n")
         suppressions = SuppressionList.load(yaml_path)
         assert len(suppressions) == 0  # would raise on a bad 'version' first
+
+
+class TestReportFindingIdDisambiguator:
+    """Regression coverage for Codex review, PR #1078, eighteenth round:
+    two ODR/multi-TU occurrence findings that now legitimately survive
+    `diff_filtering._dedup_exact` (distinguished only by `Change.
+    disambiguator`) would otherwise collide on the same `report_finding_id`
+    too, since that function never looked at `disambiguator` at all.
+    """
+
+    def test_two_findings_differing_only_by_disambiguator_get_distinct_ids(
+        self,
+    ) -> None:
+        a = _func_removed(
+            "_Z3fooi", description="Function removed: foo(int)", source_location=None
+        )
+        a.disambiguator = "tu-a"
+        b = _func_removed(
+            "_Z3fooi", description="Function removed: foo(int)", source_location=None
+        )
+        b.disambiguator = "tu-b"
+        assert report_finding_id(a) != report_finding_id(b)
+
+    def test_a_pre_existing_finding_with_no_disambiguator_hashes_unchanged(
+        self,
+    ) -> None:
+        """Backward compatibility: a `Change` that never sets
+        `disambiguator` (every finding predating this field, and the
+        overwhelming majority of findings today) must hash exactly as
+        before -- appending an always-empty segment would rehash every
+        finding id this function has ever produced."""
+        change = _func_removed(
+            "_Z3fooi", description="Function removed: foo(int)", source_location=None
+        )
+        assert change.disambiguator is None
+        key = "\x1f".join(
+            [
+                change.kind.value,
+                change.symbol,
+                change.old_value or "",
+                change.new_value or "",
+                change.source_location or "",
+                change.description or "",
+            ]
+        )
+        import hashlib
+
+        expected = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+        assert report_finding_id(change) == expected
+
