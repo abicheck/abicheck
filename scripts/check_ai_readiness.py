@@ -2539,17 +2539,16 @@ _RESOLVE_INPUT_WRAPPER_MODULES: frozenset[str] = frozenset({"cli_resolve"})
 # call is still there, not just that *some* finding exists at that site.
 # Pre-populated with the pre-existing, already-documented
 # `dumper.dump`/`service.resolve_input` direct-call sites Phase 1 of the
-# same plan names as duplication to converge
-# (`cli_dump_helpers.perform_elf_dump`, `appcompat.check_appcompat`,
+# same plan names as duplication to converge (`appcompat.check_appcompat`,
 # `cli_scan_baseline`'s baseline resolution) — a new entry beyond these
 # needs the same reviewed sign-off (mirrors the INTENTIONAL_SUBSET
-# philosophy of D10.2).
+# philosophy of D10.2). `cli_dump_helpers.perform_elf_dump`'s own entry was
+# the first to leave this list, and it left the way the plan intends one
+# to: not by rerouting the call, but by deleting the dead function that
+# made it (ADR-063 Track 1) once `dump_cmd` had already migrated onto the
+# shared typed executor.
 CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
     {
-        # Native ELF CLI dump (P0 item 2): calls `dumper.dump()` directly
-        # rather than through `service_dump_pipeline.run_dump_request` —
-        # tracked as Phase 1 item 1 of the convergence plan.
-        "abicheck/cli_dump_helpers.py:1299:19:dumper.dump",
         # Standalone application-compatibility (P0 item 6): dumps both
         # sides directly rather than through any of the other paths.
         "abicheck/appcompat.py:1604:19:dumper.dump",

@@ -13,9 +13,13 @@
 # limitations under the License.
 """ADR-050 D3 (G32 Phase B) — the `dump --dump-manifest PATH` CLI flag.
 
-Scope: the CLI-level wiring (cli.py's dump_cmd -> cli_dump_helpers.perform_elf_dump
--> dumper.dump()), not the manifest parser or the per-TU loop themselves --
-see test_dump_manifest.py / test_dumper_manifest.py for those.
+Scope: the CLI-level wiring (dump_cmd -> the shared typed executor
+(`service_dump_pipeline.execute_dump_request`, via
+`frontends.cli.dump_execute`) -> `dumper.dump()`; it was
+`cli_dump_helpers.perform_elf_dump` in the middle until ADR-063 Phase 1
+migrated the real run and Track 1 deleted the function), not the manifest
+parser or the per-TU loop themselves -- see test_dump_manifest.py /
+test_dumper_manifest.py for those.
 """
 
 from __future__ import annotations

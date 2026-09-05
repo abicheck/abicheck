@@ -21,13 +21,15 @@ context-managed session that owns any resource an artifact-resolution
 attempt allocates (an inferred-build temp directory, most concretely) from
 resolution onward — spanning through whichever of execution or dry-run
 inspection follows, not scoped to either alone. Every call site that
-allocates such a resource (``service_input_resolution._resolve_side_snapshot_impl``,
-``cli_dump_helpers.perform_elf_dump``/``handle_non_elf_dump``) now shares
-this one reviewed session type instead of its own hand-rolled
-``list[Callable[[], None]]`` accumulator plus a manual ``finally`` drain —
-each still its own separate instance (the three call sites are never
-invoked concurrently against the same one, so nothing here makes them share
-a session).
+allocates such a resource shares this one reviewed session type instead of
+its own hand-rolled ``list[Callable[[], None]]`` accumulator plus a manual
+``finally`` drain — each still its own separate instance (no two call sites
+are ever invoked concurrently against the same one, so nothing here makes
+them share a session). There were three when this type was introduced
+(``service_input_resolution._resolve_side_snapshot_impl`` plus
+``cli_dump_helpers.perform_elf_dump``/``handle_non_elf_dump``); ADR-063
+Track 1 deleted the latter two as dead code, leaving the typed pipeline's
+own as the live one.
 
 **Milestone B (this slice).** Item 1's "full shape" also asks
 ``ResolvedArtifactPlan`` to carry the resolved-fact fields the plan's
@@ -79,10 +81,13 @@ ADR-061 Phase 3: this contract has zero first-party dependencies, so it
 moved into ``abicheck.workflows.artifact`` (D2's target
 ``workflows/artifact/contracts.py``) as-is — the flat module's own leaf
 status above is exactly what made the physical move risk-free. Its four
-call sites (``service_dump_pipeline.py``, ``service_input_resolution.py``,
-``cli_dump_helpers.py``, ``cli_dump_non_elf.py``) stay flat for now and
-import it from its new location; the resolve/execute split this module's
-own docstring already defers is unaffected by the move.
+call sites at the time (``service_dump_pipeline.py``,
+``service_input_resolution.py``, ``cli_dump_helpers.py``,
+``cli_dump_non_elf.py``) stayed flat and imported it from its new location;
+the last two of those have since gone -- ADR-063 Track 1 deleted
+``cli_dump_non_elf.py`` outright and ``perform_elf_dump``, the only user of
+this contract in ``cli_dump_helpers.py``, with it. The resolve/execute split
+this module's own docstring already defers is unaffected by either.
 """
 
 from __future__ import annotations
@@ -109,7 +114,9 @@ class ResolvedArtifactPlan:
     Usage — the exact shape the plan's own "Lifetime problem" section
     specifies (``with resolve...() as plan: ... if dry_run: return
     render(plan) ... with execute...(plan) as result: ...``), collapsed here
-    to what one call site (``perform_elf_dump``) actually needs today: a
+    to what the live call site
+    (``service_input_resolution._resolve_side_snapshot_impl``, and
+    ``perform_elf_dump`` before it was retired) actually needs: a
     single ``with`` spanning resolution through execution::
 
         with ResolvedArtifactPlan() as plan:

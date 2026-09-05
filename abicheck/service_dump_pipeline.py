@@ -581,9 +581,10 @@ def execute_dump_request(
     ``dump`` CLI's real run for either binary format
     (``frontends.cli.dump_execute.execute_dump_cli_run``) -- ADR-063 Phase 1
     migrated PE/Mach-O onto this same function after ELF, so
-    ``cli_dump_non_elf.handle_non_elf_dump`` is no longer called from
-    ``dump_cmd`` for either format (it stays defined for its own direct
-    unit tests).
+    ``cli_dump_non_elf.handle_non_elf_dump`` stopped being called from
+    ``dump_cmd`` for either format; ADR-063 Track 1 then deleted it, and
+    ``cli_dump_helpers.perform_elf_dump`` with it, once the only thing left
+    holding either alive was its own unit tests.
 
     *seed_collect_mode*/*source_frontend_from_folded_context* (Codex review
     on the initial ELF migration -- two real regressions it introduced):

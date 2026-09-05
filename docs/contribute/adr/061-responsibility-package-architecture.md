@@ -1357,7 +1357,10 @@ re-exporting it. The module had zero first-party imports, so this is the
 `contracts.py` half of the `Request -> ResolvedPlan -> Result` split with no
 behavior change; its four flat call sites (`service_dump_pipeline.py`,
 `service_input_resolution.py`, `cli_dump_helpers.py`, `cli_dump_non_elf.py`)
-now import it from the new location but are themselves unchanged.
+now import it from the new location but are themselves unchanged. (Two of
+those four have since gone: ADR-063 Track 1 deleted `cli_dump_non_elf.py`
+outright and `perform_elf_dump`, `cli_dump_helpers.py`'s only user of this
+contract, with it — both were dead code by then.)
 
 **That blocker is now partly closed, and re-measuring it first changed the
 scope** — the same lesson Phase 2 recorded. The note above described a
