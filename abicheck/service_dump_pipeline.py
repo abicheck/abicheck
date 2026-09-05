@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from .workflows.resolved_execution_context import ResolvedExecutionContext
 
 __all__ = [
+    "DumpExecutionOptions",
     "DumpResult",
     "ResolvedDumpRequest",
     "execute_dump_request",
@@ -529,41 +530,31 @@ class _DumpAssuranceView:
     depth_satisfied: bool | None
 
 
-def execute_dump_request(
-    resolved: ResolvedDumpRequest,
-    *,
-    notify: Callable[[str], None] | None = None,
-    build_config: Path | None = None,
-    build_query: str | None = None,
-    build_compile_db: str | None = None,
-    changed_paths: tuple[str, ...] = (),
-    allow_build_query: bool | None = None,
-    legacy_compile_db_tokens: tuple[str, ...] = (),
-    legacy_compile_db_matched: bool = False,
-    seed_collect_mode: str | None = None,
-    source_frontend_from_folded_context: bool = False,
-) -> DumpResult:
-    """Execute a :class:`ResolvedDumpRequest` — steps 3-5 of
-    :func:`run_dump_request`'s own docstring (``resolve_input``, the
-    dependency walk, the depth floor).
-
-    *notify* is forwarded to :func:`abicheck.service.resolve_input` for
-    user-facing progress notes ("following a linker script"); ``None`` logs
-    them instead.
+@dataclass(frozen=True)
+class DumpExecutionOptions:
+    """The out-of-band execution semantics :func:`execute_dump_request`
+    needs beyond *resolved* itself and *notify*, folded into one typed value
+    -- ADR-063 ``duplication-and-convergence-assessment.md`` Track T4 ("Dump
+    request contract"). Before this, the nine fields below were nine
+    separate keyword parameters on :func:`execute_dump_request`: reaching
+    the same function did not mean a caller stated a coherent, nameable
+    execution plan, only that it happened to pass the same nine positional
+    names. Grouping them is additive, not a new decision point -- every
+    field keeps the exact default :func:`execute_dump_request` already gave
+    it, so ``DumpExecutionOptions()`` (the parameter's own default) is
+    bit-for-bit equivalent to omitting all nine kwargs before this change.
 
     *build_config*/*build_query*/*build_compile_db*/*changed_paths*/
     *allow_build_query* (PR 3A, dump/scan resolver convergence): optional
     pass-throughs to
-    :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl`,
-    all defaulted to their existing no-op values so :func:`run_dump_request`
-    and every other pre-existing caller is unaffected. These exist only for
-    the ELF ``dump`` CLI path's ``--config`` flag -- and, for a programmatic
-    caller, its own ``build_query``/``build_compile_db`` arguments (PR 3C
-    removed the CLI flags of those names; these parameters stay because a
-    Python API caller is the operator, exactly as an explicit ``--config``
-    is) -- to
-    route through this one shared primitive instead of a second, independent
-    call to the same underlying fold.
+    :func:`~abicheck.workflows.artifact.execute._resolve_side_snapshot_impl`.
+    These exist only for the ELF ``dump`` CLI path's ``--config`` flag --
+    and, for a programmatic caller, its own ``build_query``/
+    ``build_compile_db`` arguments (PR 3C removed the CLI flags of those
+    names; these fields stay because a Python API caller is the operator,
+    exactly as an explicit ``--config`` is) -- to route through this one
+    shared primitive instead of a second, independent call to the same
+    underlying fold.
 
     *legacy_compile_db_tokens* (ADR-063 Phase 1): the castxml flags the CLI's
     own legacy ``-p``/``--compile-db`` auto-match
@@ -576,11 +567,9 @@ def execute_dump_request(
     (Codex review, fresh evidence) is a separate signal from whether any
     tokens were actually derived -- see the resolve-layer function's own
     docstring for why a real match with zero derived flags still must set
-    it. Both default falsy, so every pre-existing caller (including
-    :func:`run_dump_request`) is unaffected. Both are passed by the migrated
-    ``dump`` CLI's real run for either binary format
-    (``frontends.cli.dump_execute.execute_dump_cli_run``) -- ADR-063 Phase 1
-    migrated PE/Mach-O onto this same function after ELF, so
+    it. Both are passed by the migrated ``dump`` CLI's real run for either
+    binary format (``frontends.cli.dump_execute.execute_dump_cli_run``) --
+    ADR-063 Phase 1 migrated PE/Mach-O onto this same function after ELF, so
     ``cli_dump_non_elf.handle_non_elf_dump`` stopped being called from
     ``dump_cmd`` for either format; ADR-063 Track 1 then deleted it, and
     ``cli_dump_helpers.perform_elf_dump`` with it, once the only thing left
@@ -590,21 +579,58 @@ def execute_dump_request(
     on the initial ELF migration -- two real regressions it introduced):
     forwarded verbatim to
     :func:`~abicheck.workflows.artifact.execute._resolve_side_snapshot_impl`,
-    whose own docstring documents each. Both default to this function's
-    pre-existing behavior (``seed_collect_mode=None`` pins the L2 seed's
-    collect mode to ``"off"``; ``source_frontend_from_folded_context=False``
-    keeps L4 replay pointed at the pre-fold compiler), so every pre-existing
-    caller is unaffected. The retired ``perform_elf_dump`` always forwarded
-    its own resolved ``collect_mode`` to the identical L2 seed call
-    (unconditionally running a zero-config inferred build query for a
-    ``--sources`` tree with no compile database) and always reassigned
-    ``gcc_path``/``gcc_prefix``/``effective_gcc_options`` from the L3 fold's
-    context once it applied (so an L4 source replay used the compiler the L3
-    fold actually matched, not the caller's pre-fold default) -- the
-    migrated ELF run passes ``seed_collect_mode=resolved.collect_mode`` and
-    ``source_frontend_from_folded_context=True`` to preserve both, exactly
-    as ``scan``'s own candidate resolution already does for the identical
-    reasons (see that call site's comments).
+    whose own docstring documents each. Both default to the pre-typed-object
+    behavior (``seed_collect_mode=None`` pins the L2 seed's collect mode to
+    ``"off"``; ``source_frontend_from_folded_context=False`` keeps L4 replay
+    pointed at the pre-fold compiler). The retired ``perform_elf_dump``
+    always forwarded its own resolved ``collect_mode`` to the identical L2
+    seed call (unconditionally running a zero-config inferred build query
+    for a ``--sources`` tree with no compile database) and always
+    reassigned ``gcc_path``/``gcc_prefix``/``effective_gcc_options`` from
+    the L3 fold's context once it applied (so an L4 source replay used the
+    compiler the L3 fold actually matched, not the caller's pre-fold
+    default) -- the migrated ELF run builds
+    ``DumpExecutionOptions(seed_collect_mode=resolved.collect_mode,
+    source_frontend_from_folded_context=True, ...)`` to preserve both,
+    exactly as ``scan``'s own candidate resolution already does for the
+    identical reasons (see that call site's comments).
+    """
+
+    build_config: Path | None = None
+    build_query: str | None = None
+    build_compile_db: str | None = None
+    changed_paths: tuple[str, ...] = ()
+    allow_build_query: bool | None = None
+    legacy_compile_db_tokens: tuple[str, ...] = ()
+    legacy_compile_db_matched: bool = False
+    seed_collect_mode: str | None = None
+    source_frontend_from_folded_context: bool = False
+
+
+def execute_dump_request(
+    resolved: ResolvedDumpRequest,
+    *,
+    notify: Callable[[str], None] | None = None,
+    options: DumpExecutionOptions | None = None,
+) -> DumpResult:
+    """Execute a :class:`ResolvedDumpRequest` — steps 3-5 of
+    :func:`run_dump_request`'s own docstring (``resolve_input``, the
+    dependency walk, the depth floor).
+
+    *notify* is forwarded to :func:`abicheck.service.resolve_input` for
+    user-facing progress notes ("following a linker script"); ``None`` logs
+    them instead. Kept as its own keyword rather than folded into *options*
+    -- it is a plain logging callback, not resolution semantics, and every
+    other Tier-2 entry point in this pipeline (``run_dump_request``,
+    :func:`~abicheck.service_compare_pipeline.resolve_compare_request`)
+    already takes ``notify`` the same way.
+
+    *options* (ADR-063 Track T4, "Dump request contract"; see
+    :class:`DumpExecutionOptions` for the full field-by-field rationale)
+    folds the nine out-of-band execution kwargs this function used to accept
+    directly into one typed value. ``None`` (the default) is equivalent to
+    ``DumpExecutionOptions()`` -- every pre-existing caller that passed none
+    of the nine is unaffected.
 
     Raises:
         ValidationError: If *resolved* requests a ``depth`` the resolved
@@ -616,6 +642,8 @@ def execute_dump_request(
     from .dependency_info import populate_side_dependency_info
     from .evidence_depth import depth_rank, gated_source_label
 
+    if options is None:
+        options = DumpExecutionOptions()
     request = resolved.request
     side = request.input
     if side.path is None:
@@ -664,15 +692,15 @@ def execute_dump_request(
         debug_format=resolved.debug_format,
         include_labels=dict(request.include_labels) or None,
         notify=notify,
-        build_config=build_config,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
-        changed_paths=changed_paths,
-        allow_build_query=allow_build_query,
-        legacy_compile_db_tokens=legacy_compile_db_tokens,
-        legacy_compile_db_matched=legacy_compile_db_matched,
-        seed_collect_mode=seed_collect_mode,
-        source_frontend_from_folded_context=source_frontend_from_folded_context,
+        build_config=options.build_config,
+        build_query=options.build_query,
+        build_compile_db=options.build_compile_db,
+        changed_paths=options.changed_paths,
+        allow_build_query=options.allow_build_query,
+        legacy_compile_db_tokens=options.legacy_compile_db_tokens,
+        legacy_compile_db_matched=options.legacy_compile_db_matched,
+        seed_collect_mode=options.seed_collect_mode,
+        source_frontend_from_folded_context=options.source_frontend_from_folded_context,
     )
     snap = resolution.snapshot
 

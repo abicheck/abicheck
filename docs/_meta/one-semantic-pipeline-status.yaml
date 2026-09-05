@@ -400,6 +400,16 @@ concepts:
       does not yet mean equivalent requests execute under the same resolved
       semantics. Tracked as duplication-and-convergence-assessment.md
       Phase 6 item 3 / track T4.
+      **2026-09-05 T4 first item landed:** execute_dump_request's nine
+      out-of-band semantic kwargs are folded into one typed
+      service_dump_pipeline.DumpExecutionOptions, passed as a single
+      options= keyword. This closes the "nine out-of-band semantic kwargs"
+      half of the note above -- reaching execute_dump_request now means
+      stating one nameable execution plan, not nine independently-passed
+      values -- but does not touch evaluation_config (still None on every
+      real instance) or either of T4's other two items (splitting backend
+      selection from fallback policy; a source-only dump execution
+      variant), both still open.
   run_outcome:
     primitive: complete
     producers: complete

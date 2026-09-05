@@ -181,18 +181,20 @@ def execute_dump_cli_run(
         click.ClickException: For any other extraction failure (exit 1).
     """
     from ...errors import ValidationError
-    from ...service_dump_pipeline import execute_dump_request
+    from ...service_dump_pipeline import DumpExecutionOptions, execute_dump_request
 
     try:
         result = execute_dump_request(
             exec_resolved,
             notify=notify,
-            build_config=build_config,
-            allow_build_query=allow_build_query,
-            legacy_compile_db_tokens=legacy_compile_db_tokens,
-            legacy_compile_db_matched=legacy_compile_db_matched,
-            seed_collect_mode=seed_collect_mode,
-            source_frontend_from_folded_context=source_frontend_from_folded_context,
+            options=DumpExecutionOptions(
+                build_config=build_config,
+                allow_build_query=allow_build_query,
+                legacy_compile_db_tokens=legacy_compile_db_tokens,
+                legacy_compile_db_matched=legacy_compile_db_matched,
+                seed_collect_mode=seed_collect_mode,
+                source_frontend_from_folded_context=source_frontend_from_folded_context,
+            ),
         )
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc
