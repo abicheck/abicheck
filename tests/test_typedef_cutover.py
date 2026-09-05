@@ -92,8 +92,7 @@ def _summary(changes):
 
     Nothing between a detector and a report re-sorts findings, so emission
     order is output order -- comparing sorted summaries would let the two
-    index backings differ in sequence and still pass. The selector's own
-    fidelity gate compares ordered alias sequences for the same reason.
+    index backings differ in sequence and still pass.
     """
     return [
         (c.kind, c.symbol, c.old_value, c.new_value, c.description) for c in changes
@@ -138,14 +137,15 @@ class TestBackendEquivalence:
             assert change.entity_id is not None
             assert change.entity_id.kind is EntityKind.TYPEDEF
 
-    def test_a_reordered_ir_is_refused_rather_than_emitted_out_of_order(
-        self,
-    ) -> None:
-        """The concrete reason the gate compares ordered sequences. An IR
-        holding exactly the right aliases in a different order would produce
-        exactly the right findings in the wrong sequence -- an unordered
-        check would wave that through. The selector falls back to the
-        adapter instead, which is the pre-migration order by construction.
+    def test_the_real_ir_own_order_is_emitted_directly(self) -> None:
+        """ADR-063 Track T3: ``typedef_index_pair`` no longer adjudicates
+        against a legacy alias map's order -- since both sides carry a real
+        ``SemanticIR`` here, it is used directly, in whatever order it
+        itself carries, not the legacy map's order. (Before T3, an IR
+        holding the right aliases in a *different* order than the legacy
+        map fell back to the adapter, which emits in the legacy map's
+        order; that fallback no longer exists once both sides have a real
+        IR.)
         """
         maps = {"A": "int", "B": "int", "C": "int"}
         reordered = {"C": "int", "A": "int", "B": "int"}
@@ -157,7 +157,7 @@ class TestBackendEquivalence:
             snap, snap, old_typedefs=maps, new_typedefs=maps
         )
         emitted = [c.symbol for c in _run(old_index, SemanticIRIndex(SemanticIR()))]
-        assert emitted == ["A", "B", "C"]
+        assert emitted == ["C", "A", "B"]
 
 
 # -- behavior preservation, case by case -----------------------------------
@@ -373,13 +373,12 @@ class TestSemanticIrCutoverGate:
 
 
 class TestPrivateHelpers:
-    """Direct coverage for two internal helpers whose branches no
-    caller-level (``diff_typedefs``) test happens to exercise: real call
-    sites only ever reach ``_has_version_family_successor`` after the same
-    regex has already matched, and only ever reach ``_aliases`` with
-    identities that already render (the fidelity gate falls back before a
-    detector would iterate an unrenderable one) -- both defensive floors,
-    per each function's own docstring, not dead code."""
+    """Direct coverage for two internal helpers: real call sites only ever
+    reach ``_has_version_family_successor`` after the same regex has
+    already matched, so its other branches need direct tests. ``_aliases``'
+    unrenderable-identity skip is, since ADR-063 Track T3, the real
+    load-bearing mechanism on the ``SemanticIR`` path (not a floor behind a
+    gate that used to fall back first) -- see its own docstring."""
 
     def test_has_version_family_successor_false_when_name_does_not_match(
         self,
@@ -398,10 +397,9 @@ class TestPrivateHelpers:
         )
 
     def test_aliases_skips_an_unrenderable_identity(self) -> None:
-        """The defensive floor itself: an ``Anonymous``-scoped typedef
-        identity contributes no entry, even directly against
-        ``SemanticIRIndex``, bypassing the fidelity gate that normally makes
-        this case unreachable from ``diff_typedefs``."""
+        """An ``Anonymous``-scoped typedef identity contributes no entry --
+        directly against ``SemanticIRIndex``, the same shape a real,
+        IR-authoritative comparison would see since Track T3."""
         from abicheck.compare.typedefs import _aliases
 
         anon = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")

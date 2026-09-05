@@ -710,12 +710,12 @@ class AbiSnapshot:
     def __post_init__(self) -> None:
         self.ast_resolved_standard, self.ast_resolved_standard_fact = (
             bridge_legacy_and_fact(
-                self.ast_resolved_standard,
-                self.ast_resolved_standard_fact,
-                None,
-                None,
+                self.ast_resolved_standard, self.ast_resolved_standard_fact, None, None
             )
         )
+        __import__("importlib").import_module(
+            ".semantic_ir_legacy_adapter", __package__
+        ).assert_snapshot_semantic_ir_consistent(self)  # ADR-063 T3, avoids a cycle
 
     def index(self) -> None:
         """Build lookup indexes. Uses first-wins for duplicate mangled names.

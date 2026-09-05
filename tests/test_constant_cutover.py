@@ -129,9 +129,10 @@ class TestBackendEquivalence:
             assert change.entity_id is not None
             assert change.entity_id.kind is EntityKind.CONSTANT
 
-    def test_a_reordered_ir_is_refused_rather_than_emitted_out_of_order(self) -> None:
-        """The concrete reason the gate compares ordered sequences -- see
-        ``test_typedef_cutover.py``'s identical test."""
+    def test_the_real_ir_own_order_is_emitted_directly(self) -> None:
+        """ADR-063 Track T3 -- see ``test_typedef_cutover.py``'s identical
+        test for the full reasoning: no more comparison-time adjudication
+        against a legacy map's order once both sides carry a real IR."""
         maps = {"A": "1", "B": "1", "C": "1"}
         reordered = {"C": "1", "A": "1", "B": "1"}
         snap = _snap(constants=maps, semantic_ir=_ir_backed(reordered).ir)
@@ -139,7 +140,7 @@ class TestBackendEquivalence:
             snap, snap, old_constants=maps, new_constants=maps
         )
         emitted = [c.symbol for c in _run(old_index, SemanticIRIndex(SemanticIR()))]
-        assert emitted == ["A", "B", "C"]
+        assert emitted == ["C", "A", "B"]
 
 
 # -- behavior preservation, case by case -----------------------------------
@@ -223,10 +224,10 @@ class TestDetectorBehavior:
         """An entity whose scope contains an ``Anonymous`` segment has no
         faithful flat spelling (``render_display_name`` returns ``None``,
         see ``semantic_ir_legacy_adapter.py``'s own docstring) -- exercised
-        directly against all three projections that skip it: ``_values``
-        (via ``diff_constants``), ``_constant_names_and_values``, and
-        ``_constant_identities_by_name`` (both via ``constant_index_pair``'s
-        fidelity gate)."""
+        directly against ``_values`` (via ``diff_constants``) and against
+        ``constant_index_pair`` itself, since Track T3 made ``SemanticIR``
+        the sole comparison-time source: an anonymous-scoped entity is still
+        present in the raw index either way, it simply renders no name."""
         unrenderable_id = entity_id_for_constant((Anonymous("namespace", 0),), "X")
         unrenderable = SemanticIRIndex(
             SemanticIR(
@@ -246,11 +247,13 @@ class TestDetectorBehavior:
         old_index, new_index = constant_index_pair(
             old, new, old_constants={}, new_constants={}
         )
-        # A fidelity gate that read the anonymous entity's non-name would
-        # disagree with the legacy adapter's own (empty) projection and
-        # fall back; reading nothing for it agrees, so the real IR is used.
+        # Both sides carry a real SemanticIR, so it is used directly --
+        # the anonymous entity is still present in the raw index (it is
+        # not projected away here), it simply has no rendered name for a
+        # detector's own `_values` projection to key it under.
         assert isinstance(old_index, SemanticIRIndex)
         assert isinstance(new_index, SemanticIRIndex)
+        assert unrenderable_id in old_index.entities_of_kind(EntityKind.CONSTANT)
 
 
 # -- end to end, through the real detector entry point ---------------------

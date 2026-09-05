@@ -336,8 +336,23 @@ class UseCaseManifestError(AbicheckError, ValueError):
     """
 
 
-class ReportError(AbicheckError):
-    """Error during report generation."""
+class SemanticIrAuthorityError(SnapshotError):
+    """Raised when an ``AbiSnapshot``'s real ``SemanticIR`` disagrees with a
+    legacy sidecar identity the same producer wrote for the same
+    declaration (ADR-063 Track T3, "typedef/constant authority cutover").
+
+    Before T3, ``compare/typedefs.py``/``compare/constants.py`` built both
+    an IR-backed and a legacy-projected index on every comparison and used
+    the IR only when it exactly reproduced the legacy one -- a producer bug
+    that left the two representations out of step was invisible, silently
+    absorbed by falling back to the legacy projection. Once the IR is the
+    sole comparison-time source for a snapshot that carries one, there is
+    no such fallback left to hide that bug behind: this error is raised at
+    snapshot construction (``AbiSnapshot.__post_init__``), the one point
+    where both representations are still available to check against each
+    other, so a real disagreement is a loud failure at the load boundary
+    rather than a silently-wrong comparison result downstream.
+    """
 
 
 class ExtractionSecurityError(AbicheckError):

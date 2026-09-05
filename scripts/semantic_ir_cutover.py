@@ -34,6 +34,34 @@ something only the legacy shape carries, the answer is to project it inside
 `abicheck/model/semantic_ir_legacy_adapter.py` — the one module allowed to
 read those collections — not to punch a hole here.
 
+**This module-level "no legacy attribute read" rule is necessary but was
+not, by itself, proof of authority (a real finding, not a hypothetical:**
+2026-09-05 re-assessment of `docs/contribute/plans/
+duplication-and-convergence-assessment.md`). The typedef/constant cohorts'
+own selector functions (`compare.typedefs.typedef_index_pair`/
+`compare.constants.constant_index_pair`) satisfied this rule from day one —
+neither read a forbidden attribute directly — while still building *both*
+an IR-backed and a legacy-projected index on every comparison and using the
+IR only when it exactly reproduced the legacy projection: a fidelity gate,
+not an authority transfer, since a disagreeing IR was never actually
+trusted. That gap is not one this AST scan can close on its own (whether a
+legacy projection "wins" is a runtime data question, not a static one); it
+was closed instead by deleting the dual-index construction and adjudication
+itself (ADR-063 Track T3, "typedef/constant authority cutover") —
+`typedef_index_pair`/`constant_index_pair` now read the real `SemanticIR`
+directly whenever both sides carry one, with no second index built to
+compare it against, and a disagreement between a real `SemanticIR` and its
+own legacy sidecar identity (`AbiSnapshot.typedef_entity_ids`/
+`constant_entity_ids`) is now caught earlier, at snapshot construction
+(`AbiSnapshot.__post_init__` ->
+`model.semantic_ir_legacy_adapter.assert_typedef_ir_consistent`/
+`assert_constant_ir_consistent`), as a hard
+`errors.SemanticIrAuthorityError` rather than a silently-absorbed fallback.
+Read this module's own AST-scan rule as "no *reachable* legacy read for a
+migrated cohort's detector," not as "this cohort's authority is real" —
+that second claim needs checking against the actual selector/producer
+dependency path, the same way this note now records for typedefs/constants.
+
 **A real AST scan, not a textual match.** The check resolves the attribute
 *base* to decide whether a read is one of the forbidden collections, so:
 

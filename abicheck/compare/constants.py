@@ -51,7 +51,6 @@ from typing import TYPE_CHECKING, Protocol
 from ..diff_helpers import make_change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.identity import EntityId, EntityKind
-from ..model.semantic_ir import SemanticIR
 from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
     legacy_constant_ir,
@@ -82,8 +81,11 @@ class _ReliabilityPredicate(Protocol):
 def _values(index: SemanticIRIndex) -> dict[str, EntityId]:
     """This index's constant occurrences, keyed by their rendered qualified
     name. Mirrors ``compare.typedefs._aliases``: an identity with no
-    faithful flat rendering is skipped, which ``constant_index_pair``'s own
-    fidelity gate is what makes unreachable on the ``SemanticIR`` path."""
+    faithful flat rendering is skipped -- since ADR-063 Track T3 made
+    ``SemanticIR`` the sole comparison-time source for this cohort (see
+    ``constant_index_pair``), this is the real mechanism for an
+    anonymous/local-to-function-scoped constant, not a defensive floor
+    behind a gate that used to fall back first."""
     by_name: dict[str, EntityId] = {}
     for entity_id in index.entities_of_kind(EntityKind.CONSTANT):
         name = render_display_name(entity_id)
@@ -101,14 +103,17 @@ def _value(index: SemanticIRIndex, entity_id: EntityId) -> str | None:
     Unlike a typedef's unresolved-chain placeholder (``"?"``, a real string
     both backends agree on), a constant carries no legacy sentinel for this
     case -- the raw fingerprint text a ``Fact.unsupported()`` occurrence
-    would need to compare against is not retained on the fact at all. This
-    is never reachable on the ``SemanticIR`` path in practice:
-    ``constant_index_pair``'s fidelity gate already falls back to the
-    adapter for both sides whenever any entity's projected value would
-    disagree with the legacy raw text this way (a ``None`` projection can
-    never equal a real legacy string) -- kept as a defensive floor, not the
-    mechanism, mirroring ``compare.typedefs._underlying``'s identical
-    defensive floor for the unresolved-typedef-chain case.
+    would need to compare against is not retained on the fact at all.
+    Since ADR-063 Track T3 made ``SemanticIR`` the sole comparison-time
+    source for this cohort, ``diff_constants`` genuinely reaches this
+    ``None`` for a real clang compound-initializer/bool-literal constant --
+    it is no longer routed around by falling back to the legacy adapter's
+    always-a-raw-string projection first. Skipping the finding rather than
+    fabricating a comparison against an evidence gap this codebase's own
+    "weaker evidence narrows conclusions" principle governs (AGENTS.md):
+    reporting no change here is honest about what could not be compared, a
+    documented limitation this family already accepted (see this module's
+    own docstring, "except clang's own compound-initializer value").
     """
     spelling = index.fact(entity_id, "canonical_spelling")
     if spelling is not None and spelling.is_present and spelling.value is not None:
@@ -197,38 +202,6 @@ def diff_constants(
     return changes
 
 
-def _constant_names_and_values(
-    index: SemanticIRIndex,
-) -> tuple[tuple[str, ...], tuple[str | None, ...]]:
-    """The name keys *index* projects for constants, **in order**, paired
-    with each one's value-text spelling. Mirrors ``compare.typedefs.
-    _typedef_display_names_and_underlying`` -- see that function's own
-    docstring for why order (not a set) and why the paired value (not the
-    name alone) both matter to the gate below."""
-    names: list[str] = []
-    values: list[str | None] = []
-    for entity_id, entity in index.entities_of_kind(EntityKind.CONSTANT).items():
-        rendered = render_display_name(entity_id)
-        if rendered is None:
-            continue
-        names.append(rendered)
-        spelling = entity.canonical_spelling
-        values.append(spelling.value if spelling.is_present else None)
-    return tuple(names), tuple(values)
-
-
-def _constant_identities_by_name(index: SemanticIRIndex) -> dict[str, EntityId]:
-    """Name -> resolved ``EntityId`` for every constant entity *index*
-    projects a faithful display name for. Mirrors ``compare.typedefs.
-    _typedef_identities_by_alias``."""
-    out: dict[str, EntityId] = {}
-    for entity_id in index.entities_of_kind(EntityKind.CONSTANT):
-        rendered = render_display_name(entity_id)
-        if rendered is not None:
-            out[rendered] = entity_id
-    return out
-
-
 def constant_index_pair(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -236,32 +209,21 @@ def constant_index_pair(
     old_constants: dict[str, str],
     new_constants: dict[str, str],
 ) -> tuple[SemanticIRIndex, SemanticIRIndex]:
-    """The constant cohort's index pair: ``SemanticIR``-backed when -- and
-    only when -- that is provably equivalent to the legacy projection.
+    """The constant cohort's index pair: ``SemanticIR`` is the sole source
+    whenever both sides carry one (ADR-063 Track T3, "typedef/constant
+    authority cutover").
 
     Mirrors ``compare.typedefs.typedef_index_pair`` exactly, substituting
-    the constant collections and ``EntityKind.CONSTANT``; see that
-    function's own docstring for the full reasoning behind the strict,
-    symmetric, both-or-neither gate (name-key-set equality, paired value
-    equality, and paired identity equality, all checked on both sides).
-    Nothing about the gate's shape differs between the two families -- only
-    which legacy collections and which entity kind are being projected.
+    the constant collections, ``EntityKind.CONSTANT``, and
+    :func:`~abicheck.model.semantic_ir_legacy_adapter.assert_constant_ir_consistent`
+    as the construction-time identity check -- see that function's own
+    docstring for the full before/after reasoning. Nothing about the shape
+    differs between the two families -- only which legacy collections and
+    which entity kind are being projected.
     """
-    old_index = SemanticIRIndex(old.semantic_ir or SemanticIR())
-    new_index = SemanticIRIndex(new.semantic_ir or SemanticIR())
-    old_names, old_ir_values = _constant_names_and_values(old_index)
-    new_names, new_ir_values = _constant_names_and_values(new_index)
-    legacy_old_index = SemanticIRIndex(legacy_constant_ir(old, old_constants))
-    legacy_new_index = SemanticIRIndex(legacy_constant_ir(new, new_constants))
-    if (
-        old_names == tuple(old_constants)
-        and old_ir_values == tuple(old_constants.values())
-        and new_names == tuple(new_constants)
-        and new_ir_values == tuple(new_constants.values())
-        and _constant_identities_by_name(old_index)
-        == _constant_identities_by_name(legacy_old_index)
-        and _constant_identities_by_name(new_index)
-        == _constant_identities_by_name(legacy_new_index)
-    ):
-        return old_index, new_index
-    return legacy_old_index, legacy_new_index
+    if old.semantic_ir is not None and new.semantic_ir is not None:
+        return SemanticIRIndex(old.semantic_ir), SemanticIRIndex(new.semantic_ir)
+    return (
+        SemanticIRIndex(legacy_constant_ir(old, old_constants)),
+        SemanticIRIndex(legacy_constant_ir(new, new_constants)),
+    )

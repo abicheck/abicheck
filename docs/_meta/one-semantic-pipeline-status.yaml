@@ -251,14 +251,21 @@ concepts:
     primitive: complete
     producers: partial
     consumers: partial
-    # 2026-09-05 re-assessment: lowered from `mixed` to `legacy`. Both
-    # migrated cohorts run behind a fidelity gate that can only select the
-    # IR when it already reproduces the legacy projection exactly, so the
-    # IR cannot produce an outcome the legacy representation would not --
-    # the legacy projection is what decides. `mixed` would require an
-    # authoritative IR consumer that is not so adjudicated; there is none
-    # today. See this concept's removal_gate for the full account.
-    authority: legacy
+    # 2026-09-05 re-assessment: lowered from `mixed` to `legacy` (both
+    # migrated cohorts ran behind a fidelity gate that could only select
+    # the IR when it already reproduced the legacy projection exactly, so
+    # the legacy projection was what decided). Track T3 ("typedef/constant
+    # authority cutover") closed that gap the same day: `typedef_index_pair`/
+    # `constant_index_pair` no longer build a legacy index at all when both
+    # sides carry a real SemanticIR, and a real IR-vs-sidecar disagreement
+    # is now a hard `SemanticIrAuthorityError` at snapshot construction
+    # rather than a silent runtime fallback -- see this concept's own
+    # removal_gate for the full account. Raised back to `mixed`, not `self`:
+    # two cohorts are now genuinely authoritative, but every other detector
+    # family still reads the legacy collections directly and does not
+    # consume SemanticIR at all, so `self` (full authority, no legacy
+    # consumer left standing anywhere) would overclaim.
+    authority: mixed
     removal_gate: >-
       Phase 6B (semantic-ir-checker-cutover), two cohorts landed so far.
       First cohort (2026-09-03): the TYPEDEF family now reads SemanticIR
@@ -344,17 +351,40 @@ concepts:
       AbiSnapshot.types/.enums for a BTF/CTF-sourced snapshot;
       function/variable/typedef identity remains unimplemented for both
       formats.
-      **2026-09-05 re-assessment correction:** both landed cohorts are
+      **2026-09-05 re-assessment correction:** both landed cohorts were
       *fidelity gates*, not authority transfers. typedef_index_pair and
-      constant_index_pair construct the IR-backed AND the legacy-backed
-      index on every comparison, and use the IR only when the legacy
-      projection agrees on names, values, identities and ordering --
-      the legacy representation still adjudicates -- which is why this
-      concept's own authority field reads `legacy`, not `mixed`. The gate closes when
-      a current-format snapshot causes no legacy index to be built at all
-      and a disagreement is an explicit consistency failure rather than a
-      silent fallback. Tracked as duplication-and-convergence-assessment.md
-      Phase 6 item 2 / track T3.
+      constant_index_pair used to construct the IR-backed AND the
+      legacy-backed index on every comparison, and use the IR only when the
+      legacy projection agreed on names, values, identities and ordering --
+      the legacy representation adjudicated -- which is why this concept's
+      own authority field read `legacy`, not `mixed`. Tracked as
+      duplication-and-convergence-assessment.md Phase 6 item 2 / track T3.
+
+      **Track T3 landed (2026-09-05), same day:** the gate closes exactly
+      as this note specified. `typedef_index_pair`/`constant_index_pair`
+      now build no legacy index at all when both sides carry a real
+      SemanticIR -- they read it directly, with nothing left to adjudicate
+      against. A current-format snapshot's IR disagreeing, by identity,
+      with its own `typedef_entity_ids`/`constant_entity_ids` sidecar is no
+      longer a case this selector can even reach: it is caught earlier, at
+      snapshot construction (`AbiSnapshot.__post_init__` calling
+      `model.semantic_ir_legacy_adapter.assert_typedef_ir_consistent`/
+      `assert_constant_ir_consistent`), which raises
+      `errors.SemanticIrAuthorityError` -- an explicit consistency failure,
+      not a silent fallback. The name/value equality half of the old gate
+      (an IR's own rendered names/values reproducing the legacy alias
+      map's) is deliberately NOT preserved as a comparison-time or
+      construction-time check: requiring it would make a populated legacy
+      collection an accidental prerequisite of SemanticIR-only construction
+      -- exactly the outcome authority transfer exists to end. Only the
+      identity half survives, because it is the one piece checking two
+      representations the *same producer* wrote for the *same* declaration,
+      not a value comparison against a collection this migration is meant
+      to make optional. A snapshot with no real IR on either side
+      (DWARF-only, a producer with no typedef/constant identity, a pre-v38
+      reload) still reads through the legacy adapter on both sides --
+      unchanged, and correctly so: there is no real producer output there
+      for an IR to be authoritative over.
   public_surface:
     primitive: complete
     producers: complete

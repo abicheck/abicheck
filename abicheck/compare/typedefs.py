@@ -54,7 +54,6 @@ from typing import TYPE_CHECKING, Protocol
 from ..diff_helpers import make_change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.identity import EntityId, EntityKind
-from ..model.semantic_ir import SemanticIR
 from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
     legacy_typedef_ir,
@@ -160,10 +159,14 @@ def _aliases(index: SemanticIRIndex) -> dict[str, EntityId]:
     """This index's typedef occurrences, keyed by their rendered alias.
 
     An identity with no faithful flat rendering is skipped -- it has no
-    alias a ``Change.symbol`` could name. ``typedef_index_pair``'s own
-    fidelity gate is what makes that skip unreachable on the ``SemanticIR``
-    path (it falls back to the adapter rather than let a detector iterate a
-    smaller set), so this is a defensive floor, not the mechanism.
+    alias a ``Change.symbol`` could name. Since ADR-063 Track T3 made
+    ``SemanticIR`` the sole comparison-time source for this cohort (see
+    ``typedef_index_pair``), this is the real, load-bearing mechanism for a
+    typedef nested in an anonymous/local-to-function scope, not a
+    defensive floor behind a gate that used to fall back before a detector
+    ever iterated a smaller set: such a typedef genuinely has no alias a
+    ``Change.symbol`` could name, on either the IR-backed or the
+    legacy-adapted path alike, and is simply absent from comparison.
     """
     by_alias: dict[str, EntityId] = {}
     for entity_id in index.entities_of_kind(EntityKind.TYPEDEF):
@@ -277,59 +280,6 @@ def diff_typedefs(
     return changes
 
 
-def _typedef_display_names_and_underlying(
-    index: SemanticIRIndex,
-) -> tuple[tuple[str, ...], tuple[str | None, ...]]:
-    """The alias keys *index* projects for typedefs, **in order**, paired
-    with each one's underlying-type spelling, dropping any identity with no
-    faithful rendering (which is what makes an unrenderable scope visible to
-    the gate below as a missing key).
-
-    Names are ordered, not a set, because nothing between a detector and a
-    report re-sorts findings -- emission order *is* output order. Two
-    projections holding the same aliases in a different order would
-    therefore produce the same findings in a different sequence, which is a
-    real (if cosmetic) output difference the gate below would otherwise wave
-    through. Both orders derive from the same header-AST element pass in
-    practice, so requiring equality here costs nothing real and removes the
-    assumption.
-
-    The underlying spelling is returned alongside the name, rather than
-    trusted separately, because the identity key and the value it resolves
-    to are independent facts about an ``EntityId`` -- a producer (or a
-    hand-built/loaded snapshot) can carry the right typedef *identities*
-    while disagreeing with the legacy alias map about what one of them
-    resolves *to*. Comparing names alone would let the gate accept an IR
-    whose spellings are stale relative to the legacy projection, silently
-    changing (or silently losing) a ``TYPEDEF_BASE_CHANGED`` finding. A
-    typedef entity with no ``canonical_spelling`` fact yields ``None`` here,
-    which never equals a legacy string and so always fails the gate below.
-    """
-    names: list[str] = []
-    underlying: list[str | None] = []
-    for entity_id, entity in index.entities_of_kind(EntityKind.TYPEDEF).items():
-        rendered = render_display_name(entity_id)
-        if rendered is None:
-            continue
-        names.append(rendered)
-        spelling = entity.canonical_spelling
-        underlying.append(spelling.value if spelling.is_present else None)
-    return tuple(names), tuple(underlying)
-
-
-def _typedef_identities_by_alias(index: SemanticIRIndex) -> dict[str, EntityId]:
-    """Alias -> resolved ``EntityId`` for every typedef entity *index*
-    projects a faithful display name for -- the identity half of the
-    fidelity gate, alongside :func:`_typedef_display_names_and_underlying`'s
-    name/value half."""
-    out: dict[str, EntityId] = {}
-    for entity_id in index.entities_of_kind(EntityKind.TYPEDEF):
-        rendered = render_display_name(entity_id)
-        if rendered is not None:
-            out[rendered] = entity_id
-    return out
-
-
 def typedef_index_pair(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -337,73 +287,45 @@ def typedef_index_pair(
     old_typedefs: dict[str, str],
     new_typedefs: dict[str, str],
 ) -> tuple[SemanticIRIndex, SemanticIRIndex]:
-    """The typedef cohort's index pair: ``SemanticIR``-backed when — and only
-    when — that is provably equivalent to the legacy projection.
+    """The typedef cohort's index pair: ``SemanticIR`` is the sole source
+    whenever both sides carry one (ADR-063 Track T3, "typedef/constant
+    authority cutover" -- superseding the fidelity gate this function used
+    to run).
 
-    The two-snapshot selector for the typedef cohort's ``SemanticIRIndex``
-    pair -- lives here, in ``compare/``, rather than beside
-    ``legacy_typedef_ir`` in ``model/semantic_ir_legacy_adapter.py``, since
-    choosing between two *snapshots'* competing representations is a
-    comparison-orchestration question ("match old/new entities" per
-    ADR-061's routing table), not a model shape or a single-snapshot
-    projection (Codex review on PR #1041). ``model/semantic_ir_legacy_
-    adapter.py`` keeps only the single-snapshot half
-    (:func:`~abicheck.model.semantic_ir_legacy_adapter.legacy_typedef_ir`)
-    and the rendering/identity primitives this function and that one both
-    depend on.
+    **Before T3:** this function built *both* an IR-backed and a
+    legacy-projected index on every comparison, and used the IR only when
+    its own rendered display names/values/identities exactly reproduced the
+    legacy alias maps this comparison already resolved
+    (``_typedef_diff_maps``, in the caller) -- so the legacy projection, not
+    the IR, decided the outcome. That was a fidelity *gate*, not an
+    authority transfer: an IR that disagreed with the legacy projection was
+    never actually trusted, only ever silently routed around.
 
-    The gate is strict and symmetric: **both** sides' IR-backed typedef
-    display-name key sets must exactly equal the alias maps this comparison
-    already resolved, *and* each key's IR-resolved underlying-type spelling
-    must exactly equal that same alias map's value, *and* each key's
-    IR-resolved ``EntityId`` must exactly equal the identity the legacy
-    adapter would independently assign that same alias (Codex review on
-    PR #1041, follow-up round). This third check closes a narrower gap the
-    first two don't: names and values can agree while the *identity*
-    disagrees -- e.g. a loaded/hand-built snapshot whose real IR resolves
-    ``ns::Alias`` under one scope-derived ``EntityId`` while its
-    ``typedef_entity_ids`` sidecar (what the legacy adapter would use)
-    resolves a differently-scoped one that happens to render to the same
-    text. Picking the IR path there would stamp a different ``entity_id``
-    on the emitted finding than the pre-cutover detector did for identical
-    data, silently changing which stored ``entity:``-alias suppression
-    rules match. Any difference at all — including that identity mismatch,
-    an unrenderable anonymous scope, a producer that resolved identity for
-    only some typedefs, a DWARF-only side with no IR, a pre-v38 reload, or
-    an IR whose ``canonical_spelling`` disagrees with (or is absent versus)
-    the legacy projection's own resolved value — and both sides fall back to
-    :func:`~abicheck.model.semantic_ir_legacy_adapter.legacy_typedef_ir`.
+    **After T3:** when both sides carry a real ``SemanticIR``, it is read
+    directly -- no second index is built, and there is nothing left to
+    adjudicate against. A snapshot whose ``SemanticIR`` disagrees, by
+    identity, with its own ``typedef_entity_ids`` sidecar can no longer
+    reach this function at all: that disagreement is now caught earlier, at
+    snapshot construction (``AbiSnapshot.__post_init__`` ->
+    ``model.semantic_ir_legacy_adapter.assert_typedef_ir_consistent``),
+    which raises :class:`~abicheck.errors.SemanticIrAuthorityError` rather
+    than leaving this selector to quietly fall back.
 
-    Both-or-neither matters, and is not merely tidiness: pairing an
-    IR-backed old side with an adapted new side would compare two
-    differently-derived key spaces, which fabricates a removal or an
-    addition out of a projection difference rather than a real ABI change.
-
-    The comparison is over ordered alias *sequences*, never a count and
-    never an unordered set: two producers can agree on how many typedefs
-    exist while disagreeing about which, and two that agree on which can
-    still disagree about the order findings would be emitted in (see
-    :func:`_typedef_display_names_and_underlying`). Values are compared
-    positionally against that same ordered sequence rather than through a
-    second name-keyed lookup, since the name sequence has already been
-    proven to equal the legacy map's key order by the time the value
-    comparison runs.
+    A snapshot with **no** real ``SemanticIR`` on either side (DWARF-only, a
+    producer that has not implemented typedef identity, or a snapshot
+    serialized before schema v38) is not a disagreement to adjudicate --
+    there is no real producer output here for the IR to be authoritative
+    over, which is exactly what
+    :func:`~abicheck.model.semantic_ir_legacy_adapter.legacy_typedef_ir`
+    exists for. Both-or-neither still matters for the same reason it did
+    under the old gate: pairing a real IR on one side with a
+    sidecar-reconstructed projection on the other would compare two
+    differently-derived key spaces, fabricating a change out of a
+    projection difference rather than a real ABI one.
     """
-    old_index = SemanticIRIndex(old.semantic_ir or SemanticIR())
-    new_index = SemanticIRIndex(new.semantic_ir or SemanticIR())
-    old_names, old_underlying = _typedef_display_names_and_underlying(old_index)
-    new_names, new_underlying = _typedef_display_names_and_underlying(new_index)
-    legacy_old_index = SemanticIRIndex(legacy_typedef_ir(old, old_typedefs))
-    legacy_new_index = SemanticIRIndex(legacy_typedef_ir(new, new_typedefs))
-    if (
-        old_names == tuple(old_typedefs)
-        and old_underlying == tuple(old_typedefs.values())
-        and new_names == tuple(new_typedefs)
-        and new_underlying == tuple(new_typedefs.values())
-        and _typedef_identities_by_alias(old_index)
-        == _typedef_identities_by_alias(legacy_old_index)
-        and _typedef_identities_by_alias(new_index)
-        == _typedef_identities_by_alias(legacy_new_index)
-    ):
-        return old_index, new_index
-    return legacy_old_index, legacy_new_index
+    if old.semantic_ir is not None and new.semantic_ir is not None:
+        return SemanticIRIndex(old.semantic_ir), SemanticIRIndex(new.semantic_ir)
+    return (
+        SemanticIRIndex(legacy_typedef_ir(old, old_typedefs)),
+        SemanticIRIndex(legacy_typedef_ir(new, new_typedefs)),
+    )
