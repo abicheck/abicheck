@@ -171,18 +171,17 @@ class TestConfigPrecedence:
         assert r.debuginfod_url == "https://dbginfo.example"
         assert r.show_redundant is True
 
-    def test_merge_cli_debug_format_precedence(self) -> None:
-        # ADR-040 L2 (Codex P2): every CLI format spelling beats config.
-        from abicheck.cli_compare_helpers import _merge_cli_debug_format
+    def test_resolve_dump_debug_format_precedence(self) -> None:
+        # ADR-040 L2 (Codex P2): --debug-format beats config; H1 hidden-shim
+        # deletion removed the legacy --btf/--ctf/--dwarf spellings this used
+        # to also reconcile, so only the selector itself is left to resolve.
+        from abicheck.cli_dump_helpers import resolve_dump_debug_format
 
-        # --debug-format wins over a typed legacy flag and over config.
-        assert _merge_cli_debug_format("btf", "dwarf", legacy_from_cli=True) == "btf"
-        # A typed legacy --dwarf (no --debug-format) is the effective CLI value.
-        assert _merge_cli_debug_format(None, "dwarf", legacy_from_cli=True) == "dwarf"
-        # A defaulted legacy dest (not typed) yields None → config wins downstream.
-        assert _merge_cli_debug_format(None, "dwarf", legacy_from_cli=False) is None
-        # Nothing on the command line → None.
-        assert _merge_cli_debug_format(None, None, legacy_from_cli=False) is None
+        assert resolve_dump_debug_format("btf") == "btf"
+        # An explicit "auto" returns to auto-detection.
+        assert resolve_dump_debug_format("auto") is None
+        # Nothing on the command line → None → config wins downstream.
+        assert resolve_dump_debug_format(None) is None
 
     def test_debug_and_show_redundant_cli_beats_config(self) -> None:
         cfg = BuildConfig(

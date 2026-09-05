@@ -317,10 +317,14 @@ categories. Coherent. The only issue is reach (§2.2), not the schema.
    always-severity-aware would change RISK handling. (§2.2)
 
 **Do next (consolidation):**
-3. ✅ **Done (additive).** Added `--debug-format {auto,dwarf,btf,ctf}` to
-   `compare`/`dump`; the legacy `--btf/--ctf/--dwarf` flags are hidden but still
-   functional. `--dwarf-only` was **not** renamed (a rename breaks documented
-   command lines; left as-is). (§3.4)
+3. ✅ **Done, and since completed further.** Added `--debug-format
+   {auto,dwarf,btf,ctf}` to `compare`/`dump`; the legacy `--btf/--ctf/--dwarf`
+   flags were initially kept as hidden, still-functional aliases, then deleted
+   outright (CLI cleanup phase two, H1 hidden-shim deletion) once `--debug-format`
+   had been the documented replacement long enough that the hidden spellings
+   were pure dead weight rather than a live deprecation window. `--dwarf-only`
+   was **not** renamed (a rename breaks documented command lines; left as-is).
+   (§3.4)
 4. ✅ **Done, and since completed.** `--report-mode` first gained `impact`
    as sugar for `full` + the standalone flag; that flag has since been
    removed, so `--report-mode impact` is now the only way to ask for the

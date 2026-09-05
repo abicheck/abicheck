@@ -72,9 +72,6 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
             "--debuginfod",
             "--debuginfod-url",
             "--debug-format",
-            "--btf",
-            "--ctf",
-            "--dwarf",
         }
     ),
 }

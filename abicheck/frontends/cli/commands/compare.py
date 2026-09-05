@@ -582,8 +582,8 @@ def _embed_inline_source_side(
                    "shape but adds properties.rootCauseId/rootCause to each "
                    "result; --format junit still renders as 'full'.")
 # ── Debug artifact resolution (ADR-021a + ADR-037 D3) ─────────────────────────
-# --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
-# --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.
+# --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format: the
+# shared local-ELF debug-resolution family.
 @debug_resolution_options
 @evidence_options  # --depth, --sources, --build-info
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
