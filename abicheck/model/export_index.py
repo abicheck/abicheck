@@ -15,28 +15,29 @@
 
 """ADR-063 T7 — one canonical raw export index, with named projections.
 
-Before this module, five call sites each kept their own copy of "read a
-snapshot's/binary's platform export table" (``policy.depth_projection.
+Before this module, at least six call sites each kept their own copy of "read
+a snapshot's/binary's platform export table" (``policy.depth_projection.
 _exported_symbol_names``, ``buildsource.crosscheck_base._exported_symbol_names``
 /``_linked_export_symbols``, ``buildsource.snapshot_exports.
 exported_symbols_from_snapshot``, ``post_manifest._exported_symbol_names``,
-``diff_unnamed_types._exported_symbol_names``) — each re-reading
-``snap.elf``/``snap.pe``/``snap.macho`` (or a raw ``ElfMetadata``) itself and
-each drifting slightly from the others on real distinctions: whether a
-non-default ELF version alias counts, whether a Mach-O name gets its leading
-underscore stripped once or left alone, whether an ELF symbol's callable-vs-data
-type matters, and whether "no platform table at all" is distinguished from "a
-table that parsed to zero entries."
+``diff_unnamed_types._exported_symbol_names``, ``buildsource.poi._exported_names``)
+— each re-reading ``snap.elf``/``snap.pe``/``snap.macho`` (or a raw
+``ElfMetadata``) itself and each drifting slightly from the others on real
+distinctions: whether a non-default ELF version alias counts, whether a
+Mach-O name gets its leading underscore stripped once or left alone, whether
+an ELF symbol's callable-vs-data type matters, and whether "no platform table
+at all" is distinguished from "a table that parsed to zero entries."
 
 The fix is not one universal set-of-strings helper — that would erase exactly
 the distinctions each call site individually earned (Codex review comments
-across five separate PRs). Instead: :func:`build_raw_export_index` is the
+across several separate PRs). Instead: :func:`build_raw_export_index` is the
 *one* place that reads a snapshot's or a raw platform-metadata object's export
 table, into :class:`RawExportIndex` — unfiltered, unnormalized, one row per
 raw table entry. Every caller's own distinction becomes a small, named,
 independently testable *projection* function over that one raw shape, so a
 change to how ELF/PE/Mach-O tables are read (a new field, a parsing fix)
-lands on every consumer at once instead of needing five independent edits.
+lands on every consumer at once instead of needing each duplicate edited
+independently.
 
 **Missing vs. confirmed-empty is structural, not a convention callers must
 remember.** ``build_raw_export_index`` returns ``None`` when *no* platform

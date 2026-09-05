@@ -49,6 +49,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from ..model.export_index import build_raw_export_index, default_versioned_names
+
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Function, Variable
     from ..model.source_graph import SourceGraphSummary
@@ -278,22 +280,15 @@ def _add_export_deltas(add: Any, baseline: AbiSnapshot, candidate: AbiSnapshot) 
 def _exported_names(snap: AbiSnapshot) -> set[str]:
     """Default/unversioned exported symbol names from a snapshot's export table.
 
-    Mirrors :func:`crosscheck._exported_symbol_names` (default ELF versions only,
-    Mach-O leading-underscore strip) but returns an empty set — not ``None`` —
-    when there is no export table, so the delta walk degrades to "no POIs from
-    exports" rather than raising.
+    ADR-063 T7: thin wrapper over ``model.export_index.default_versioned_names``
+    (over ``model.export_index.build_raw_export_index``'s raw read) — but
+    returns an empty set, not ``None``, when there is no export table, so the
+    delta walk degrades to "no POIs from exports" rather than raising.
     """
-    if snap.elf is not None:
-        return {s.name for s in snap.elf.symbols if s.name and s.is_default}
-    if snap.pe is not None:
-        return {e.name for e in snap.pe.exports if e.name}
-    if snap.macho is not None:
-        return {
-            e.name[1:] if e.name.startswith("_") else e.name
-            for e in snap.macho.exports
-            if e.name
-        }
-    return set()
+    index = build_raw_export_index(snap)
+    if index is None:
+        return set()
+    return set(default_versioned_names(index))
 
 
 def _public_decl_symbols(snap: AbiSnapshot) -> set[str] | None:
