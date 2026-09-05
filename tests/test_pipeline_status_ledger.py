@@ -659,6 +659,10 @@ def test_non_mapping_declined_entry_is_reported_not_crashed() -> None:
 
 
 def test_unknown_declined_entry_field_is_an_error_with_mixed_type_keys() -> None:
+    """A typo'd entry key must be caught rather than silently ignored, and
+    the report must survive a YAML mapping carrying non-string keys — the
+    same `sorted()`-over-mixed-types crash class the concept-level unknown
+    field check already guards, restated one level down."""
     entry = _declined_entry()
     entry["tracked_at"] = "typo of tracked_as"  # the misspelling is the point
     entry[7] = "a non-string YAML key"  # type: ignore[index]
