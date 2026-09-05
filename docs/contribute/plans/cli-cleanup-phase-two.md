@@ -209,7 +209,254 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > the account itself, per the same review's DRY finding). PR A/B/D/E/F and
 > PR 1/1b/2 are done.
 
+## Status 2026-09-05 — what remains here, and three parallel tracks
+
+**This plan is no longer the owner of the CLI's direction.**
+[`vision-api-abi-evolution.md`](vision-api-abi-evolution.md) is, together with
+[`vision.md`](../../../vision.md) and the Proposed
+[ADR-065](../adr/065-comparison-scope-selection-and-completeness.md) /
+[ADR-066](../adr/066-longitudinal-history-and-versioning-policy.md) /
+[ADR-067](../adr/067-change-intent-acknowledgment-and-disposition-audit.md).
+This file keeps what it was always good at — **interface hygiene and the
+convergence prerequisites behind each remaining deletion** — and is subordinate
+to that plan for anything about what a result *means*.
+
+The reason for the demotion, from an external re-review of `main` against the
+vision (2026-09-05): the remaining risk is not surface size. A short invocation
+is not clean if it treats an unproduced build as a removal, reports an accepted
+break as "no changes", or lets a supplied consumer silently narrow the gate.
+Those are result-semantics defects the vision plan's workstreams A/C/E own, and
+no flag deletion here fixes one. Corollary for anyone reading the older
+checkpoints above: **"remove five more flags" is not the next milestone**, and
+three positions this plan used to hold are explicitly revised by the vision:
+
+- `--used-by` keeps its input and **loses its gate replacement** — consumer
+  impact enriches the global result rather than substituting for it (workstream
+  D-S1). Not a deletion candidate.
+- `--fail-on-removed-library` is **not** deleted; its *input* is fixed first, so
+  it consumes proven removals rather than `old − new` filename stems (A-S2/S4).
+- `--require-complete-analysis` means *the required applicable capabilities for
+  the selected task were checked*, not *every evidence layer was available*
+  (E-S1). Stripped-binary and header-only tasks stay first-class.
+
+### What actually remains in this plan
+
+| Item | State | Blocked on |
+|---|---|---|
+| **H1 hidden-shim deletion** (new below) | Not started | Nothing |
+| **PR H** — `scan --artifact-set` member-identity manifest form | Open; syntax, cost/dry-run and audit-mode ownership all done | Nothing (last piece of PR H) |
+| **PR I** — live/stored operand driver; one evaluation/gate/report/dry-run path across all four operand shapes | Open; classification, flag deletion and stored/stored execution done | A shared gate/report object; overlaps vision A-S4 |
+| **PR J** — per-library header/compile-context topology in `BundleSpec`; `--max-json-object-nodes` → a calibrated `--resource-limit` | Open; `--manifest` rename and `--bundle-system-providers`/`--bundle-cohort` → `.abicheck.yml` done | G42 provider resolution (topology); a real bytes-per-node calibration (resource limit) |
+| **PR C tail** — `dump`/`compare` explicit-`--config` dry-run/execution parity | Open, narrow | Nothing |
+| `scan --artifact-set` bundle-topology config read | Open | Its own resolver still separate from `ResolvedCompareConfig`'s merge point |
+| `contract=public` default flip | Open | `EntityId`-based public closure (ADR-063 Phase 2), **not** a string heuristic |
+| PR 0/0B, PR 1, 1b, 2, A, B, C (binary formats), D, E, F, G1, G2 | Done / closed by decision | — |
+
+Everything else this file used to track (`--exit-code-scheme`,
+`--old-bundle-facts`, the compare provider/cohort switches, bare compare
+`--manifest`, the release fan-out's `GateOptions`, the shared gate-pack fold) is
+landed. **Do not re-open any of them.**
+
+### H1 — hidden inert shims and duplicate spellings (new, unblocked)
+
+Four surfaces still contradict this plan's own no-alias stance and #770's
+precedent. Each is `hidden=True` today, which is the deprecation window this
+repository says it does not run:
+
+- `--header-graph`, `--header-graph-includes`
+  (`abicheck/frontends/cli/options/release.py`, `header_graph_options`) — inert
+  no-ops since the L2 header graph became always-on; passing either prints a
+  stderr note and changes nothing. Delete both plus
+  `warn_deprecated_header_graph_flags` and its two `compare`/`dump_cmd` call
+  sites.
+- `dump --allow-build-query` (same module) — a deprecated no-op; an explicit
+  `--config` has been the only authorizer since PR F. **Delete the CLI option
+  and `dump_cmd`'s own always-`False` local only.** The engine-side
+  `allow_build_query` parameters are *not* part of this slice and must stay:
+  `service_dump_pipeline.execute_dump_request` and
+  `workflows/artifact/execute.py` use it as a live programmatic permission
+  gate (`frontends/cli/dump_execute.py` passes `True` deliberately, precisely
+  because the CLI flag is not a trust signal), and `ScanRequest
+  .allow_build_query` is a public typed-API field. Only
+  `buildsource/inline.collect_inline_pack`'s copy is genuinely ignored, and
+  `cli_scan_helpers.resolve_effective_allow_query`'s parameter is dead in the
+  `True` direction but load-bearing as the ADR-037 D4 level-implies-query
+  guard — neither is a CLI concern, so neither moves here (Codex review on
+  #1073, verified against the call sites).
+- `--btf` / `--ctf` / `--dwarf` — hidden duplicate spellings of
+  `--debug-format {btf,ctf,dwarf}`, which the option's own help text already
+  calls their supersession. **Declared twice**: `debug_resolution_options`
+  (`frontends/cli/options/release.py`, reached by `compare`) *and* inline on
+  `dump` (`frontends/cli/commands/dump.py`, three `@click.option` lines) —
+  editing only the shared decorator would leave `dump` still accepting all
+  three (Codex review on #1073). Two further touchpoints in the same slice:
+  the `debug_resolution` family set in `frontends/cli/options/inventory.py`,
+  which the contract gate keys on, and the `--help-all` grouping in
+  `frontends/cli/help.py` (which also still lists `--allow-build-query`).
+
+**Six spellings, not four**, and each has to be tested on *every* command that
+declares it — `--header-graph`/`--header-graph-includes` on `compare` and
+`dump`, `--allow-build-query` on `dump`, and the three debug aliases on
+`compare` and `dump` separately.
+
+Acceptance: each of the six spellings exits `64` with `No such option` on
+every command that declares it today; the canonical replacement behaves
+identically; `build.query`'s explicit-`--config` trust gate
+is unchanged; `--help-all` and `docs/reference/cli-reference.md` regenerated.
+This slice depends on nothing in the vision rollout and must not wait for it.
+
+### Parallel work blocks an agent can start now
+
+Seven blocks, each with a disjoint primary file set. **Four can start
+immediately** (tier 0 and tier 1 below); the other three have a real
+dependency and are listed with it rather than as free parallelism. The tiers
+are the owning plan's own global order — *A and E first under one integration
+owner, then C's audit half with G's first reporting slice, then B/D/F* — not a
+re-sequencing of it (Codex review on #1073). **The requirements for every block live in the workstream
+this table names — read that section before starting; what is written here
+is only the entry point, the first file to open, and the boundary with the
+other blocks.** Deliberately not a second copy of the owning plan's
+checklist: where the two ever disagree, `vision-api-abi-evolution.md` wins.
+
+| # | Block | Start | Owning workstream | Primary files | Shared types |
+|---|---|---|---|---|---|
+| 1 | H1 hidden-shim deletion | **Tier 0 — now** | this plan (H1 above) | `frontends/cli/options/release.py`, `frontends/cli/commands/dump.py`, `options/inventory.py`, `help.py` | No |
+| 7 | Explicit-`--config` dry-run/execution parity | **Tier 0 — now** | this plan (PR C tail) | `cli_dump_request.py`, `cli_compare*` config discovery | No |
+| 3 | Release-path scope & completeness | **Tier 1 — now** | A-S1/S2 (deletion gate A-S4) | `cli_compare_release*`, `workflows/`, `policy/outcome.py` | **Yes — integration owner** |
+| 5 | Per-dimension comparability + failed evidence | **Tier 1 — now** | E-S1/S2 | `comparability.py`, `analysis_assurance.py`, `workflows/plan.py` | **Yes — integration owner** |
+| 2 | Scalar disposition audit | Tier 2 — after A/E's field contract (S0) is agreed | C-S1 + G-S1 | `policy/`, `report/`, `checker.py`, `semver.py` | No |
+| 4 | Header-only capture and comparison | Tier 3 — after E-S1 | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `service_dump_pipeline.py`, `workflows/artifact/` | No |
+| 6 | `scan --artifact-set` member-identity manifest | Tier 3 — needs A-S3's component inventory | this plan (PR H, last piece) | `cli_scan*`, a member-identity schema that does not exist yet | Indirectly (A's inventory) |
+
+Tier 0 is outside the vision sequence entirely — pure interface hygiene with
+no shared model behind it. Tier 1 is the owning plan's own first pair, and the
+two blocks in it are the ones its integration owner reviews; they are
+independent of each other (A touches the release/outcome path, E the
+comparability/assurance path). Tier 2's *scalar* half can begin as soon as
+A/E's S0 field contract is written down — it does not need those slices
+finished — but starting it before that vocabulary exists is how two ledgers
+get invented. Tier 3 consumes upstream fields and should not start earlier.
+
+**Block 1 — H1 hidden-shim deletion.** Exactly the slice above, with the
+`allow_build_query` boundary it states. Deliverable: four spellings exit `64`,
+`warn_deprecated_header_graph_flags` and its two call sites gone,
+`--help-all` and `docs/reference/cli-reference.md` regenerated
+(`python scripts/gen_cli_reference.py`). No semantic change, no changelog
+fragment beyond the removal note.
+
+**Block 2 — scalar disposition audit.** C-S1 plus G-S1's first slice, scoped
+to single-pair `compare` — so it needs A/E's S0 field contract in writing, but
+not their slices finished (tier 2 above).
+Start by opening the four suppression application points C-S1 enumerates and
+deciding, per call shape, converge-or-cover: `post_processing
+.ApplySuppression.apply()`, `checker._filter_suppressed_changes()`,
+`checker._filter_pattern_synthetic()`, `appcompat.py`'s consumer overlay.
+Everything else this block owes — ledger fields, rule provenance, which
+projections carry the counts, the detector state, the fixture — is C-S1's and
+G's "Report invariants" list; do not re-derive it here. One correction this
+plan adds, because it is a behavior change and needs its own migration note:
+`semver.recommend_release` reads `result.verdict`/`result.changes`, i.e. the
+post-suppression list, so a suppressed break currently becomes "no bump
+needed" — it must read the conserved delta instead.
+
+**Block 3 — release-path scope and completeness.** A-S1 and A-S2 as they
+apply to the release fan-out, *in that order*: the completeness model comes
+first, the pairing rewrite follows it. Concretely, this block adds the
+acquisition states and the completeness axis (A-S2's `RunOutcome`/
+`ExitDecision` work), then makes `cli_compare_release_pairwise.py`'s
+zero-matched-pairs path a no-comparison outcome instead of `NO_CHANGE`/exit 0,
+and stops `cli_compare_release._resolve_stranded_library` persisting a
+degraded ELF-only snapshot unmarked. **`_match_release_keys`'s set difference
+is not the opening move**: A-S4 is its deletion gate, and it is deleted once
+every removal finding flows from proven inventory completeness — replacing it
+before the shared model exists would be one more release-local approximation
+of the behavior it is meant to fix (Codex review on #1073, agreeing with the
+owning plan's own sequencing). `--fail-on-removed-library` keeps its spelling
+throughout and starts consuming proven removals at that gate; exit `8`'s
+precedence over the coverage contribution is unchanged.
+
+**Block 4 — header-only capture and comparison (F-S1).** Make
+`abicheck dump -H include/api.hpp --lang c++ -o old.abi.json` a real operand,
+with no synthesized binary and no required compile database, so two such
+snapshots compare. Two concrete blockers to start from, both named in F's
+"Existing": `buildsource/project_targets.py` hard-requires `binary_pattern`,
+and `dump_source_only()` (`cli_buildsource.py`) discards `-H` — the L2 header
+parse never reaches the written snapshot for a binary-less input. Route the
+input through the existing `DumpRequest`/`CompareRequest` path with an
+explicit parse context rather than adding an operand shape beside them —
+concretely `service_dump_pipeline.run_dump_request`/`execute_dump_request`
+and `workflows/artifact/{resolve,execute}.py`, the modules that own dump
+resolution today. There is no `workflows/dump` package and this block must
+not create one (Codex review on #1073); and
+keep `-H` (what to parse), `-I` (where to resolve includes) and public-root
+data (what is promised) distinct — collapsing them is a model regression, not
+a simplification. L0/L1 must read `NOT_APPLICABLE` for this task, never
+"empty": no SONAME or export claim may be invented. Acceptance is F-S1's list
+(removed declaration, added API, changed enum/constant, signature, default
+argument, qualifier, access). Static archives are explicitly *not* in this
+block.
+
+**Block 5 — per-dimension comparability and failed evidence (E-S1/S2).**
+`ComparabilityMismatch` (`comparability.py`) carries a single
+`kind: "scope" | "profile" | "dependency_scope"`, so a GCC-vs-Clang pair is
+today either wholly refused or wholly trusted, and `--diagnostic-comparison`'s
+report-wide `assurance: none` is the only middle. Replace that with a
+per-dimension record — symbol, declaration, layout, runtime, source — so an
+intentional cross-profile comparison keeps its valid declaration conclusions
+while layout reads explicitly unverified. In the same block: a compiler-probe
+failure must produce a `FAILED` toolchain identity rather than an *absent*
+one (an absent fingerprint currently lets a mismatched pair compare
+silently), and an incomplete later stage must not erase a change an earlier
+stage already proved. Leave `DetectorRegistry`'s `not_evaluated` state to
+block 2 — it is the one E/C overlap, and two blocks adding it is a conflict.
+`--require-complete-analysis` keeps its spelling; only its meaning becomes
+task-relative.
+
+**Block 6 — `scan --artifact-set` member-identity manifest (PR H's last
+piece).** Syntax refinement, cost/dry-run, and audit-mode ownership all
+landed (see PR 5's own section); what remains is a manifest form that names
+each set member's *identity* rather than only its path, so a member is matched
+by what it is and an unsatisfied entry is reportable. **This block's first
+deliverable is that identity contract, and it cannot be `InstantiationManifest`
+reused as-is**: a `ManifestEntry` is exactly one of `symbol`/`pattern`/
+`template` plus an optional provider name (`abicheck/bundle_manifest.py`) —
+there is no member path and no member identity in the schema, so the shipped
+`scan --artifact-set --manifest` expected-provider check consumes it for a
+different question entirely (Codex review on #1073, verified against the
+dataclass). Take the identity vocabulary from A-S3's package component
+inventories rather than minting a third one, which is why this block sits
+behind A; extending a canonical schema explicitly is fine, inventing a second
+manifest format is not. ADR-056 D2's safety boundary — no implicit
+positional-directory dispatch — stands unchanged either way.
+
+**Block 7 — explicit-`--config` dry-run/execution parity (PR C's tail).**
+Config discovery is closed for `scan` in both cases and for `dump`/`compare`'s
+auto-discovery case; the residual is `dump`/`compare` with an *explicit*
+`--config`, where what `--dry-run` projects and what execution resolves can
+still differ. The full account is the "Configuration discovery (PR C's tail)"
+bullet under "Re-verified, unchanged, still open" — read it first, it is
+narrower than it sounds and has already been re-litigated once. `build.query`
+executes only from an explicit `--config` (ADR-032 D5) and that must remain
+true through whatever this block changes; the trust receipt in `--dry-run` is
+part of the parity, not an optional extra.
+
+**Blocked, deliberately not on this list.** `--used-by`'s enrichment
+rewrite (D-S1) needs block 2's disposition model first, or per-consumer rows
+land beside counts that still do not reconcile. History and versioning policy
+(B) need blocks 2, 3 and 5. The `contract=public` default flip needs
+ADR-063 Phase 2's `EntityId` closure, not a string heuristic. PR I's
+evaluation/gate/report unification needs a shared gate/report object that no
+block above creates.
+
+Blocks 2, 3, 4 and 5 are behavior changes: each needs a changelog fragment, a
+migration note, and its invariant stated in `tests/regressions/manifest.py` as
+a bug class rather than a single reproducer. Blocks 1, 6 and 7 need a
+changelog fragment only where they touch `abicheck/**/*.py`.
+
 ## Problem
+
+*(Historical framing. The 2026-09-05 status section above revises the
+priority: result semantics, not surface size.)*
 
 Phase one removed the *duplicate spellings*. What is left is a different class
 of surface: options that are real, single-spelling, and still wrong to keep on
@@ -5207,6 +5454,10 @@ docs/schema gates all green.
   parity, multi-DSO ownership, and contract-evaluation precision instead.
 
 ## Ordering
+
+**Read "Status 2026-09-05" above first** — this sequence is still accurate for
+what is *done*, but the three tracks worth starting now are listed there, and
+the direction is owned by `vision-api-abi-evolution.md`.
 
 The original ordering (kept below for reference) sequenced by risk. The
 post-#780/#782 review re-sequences by *contract convergence*: every remaining
