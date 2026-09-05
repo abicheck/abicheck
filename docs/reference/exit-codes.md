@@ -517,11 +517,24 @@ Phase 7), and the exit code is the worst contribution across them:
   was still incomplete (a contract-coverage gap). Both can independently
   produce exit `1`, for unrelated reasons, and `aggregate` records which one
   fired rather than merging them into one undifferentiated `1`.
+- **scope_completeness** — reads back each analyzed target's own
+  completeness-axis contributions (the `exit` block's
+  `incomplete_scope_contribution` and `no_comparison_completed_contribution`;
+  see "The completeness axis" above) and folds their `max` the same way
+  (aggregate schema `1.8`); `aggregate` never recomputes them. A release that
+  exited `1` because a selected member went unchecked under
+  `--on-incomplete-scope block`, or because it completed no comparison at
+  all, therefore aggregates to `1` as well — its `run_outcome.gate` and
+  `operational` axes read `none` for that case, so without this axis the
+  target read green. Reported as its own `scope_completeness` block and a
+  per-target `scope_completeness_exit`, and named per profile as
+  `scope_incomplete_profiles`, so an exit of `1` stays attributable to
+  exactly one axis.
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
+| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; a release target's comparison scope gated (`--on-incomplete-scope block`, or no comparison completed); **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |

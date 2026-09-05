@@ -45,7 +45,12 @@
   (`unsupported`, `failed`) leaves the graph with its counterpart rather
   than reading as a deleted provider. A `--bundle-facts-out` recapture from
   a stored `ProjectSnapshot` package inherits the package's own degraded
-  marker.
+  marker. `abicheck aggregate` folds the axis too (aggregate schema `1.8`:
+  a `scope_completeness` block, a per-target `scope_completeness_exit`, and
+  `scope_incomplete_profiles` per profile-matrix entry), reading each
+  report's own `exit` contributions, so a release that exited `1` for an
+  incomplete scope or for completing no comparison aggregates to `1` rather
+  than to a green target.
 - **`--fail-on-removed-library` exit `8` migration.** Exit `8` now requires the
   removal to be *proven* — the NEW side's inventory must be proven complete
   (a stored `ProjectSnapshot` package's declared composition). A partial

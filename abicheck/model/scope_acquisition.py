@@ -291,11 +291,18 @@ class ScopeAcquisitionRecord:
     def proven_removed_members(self) -> tuple[MemberAcquisition, ...]:
         """D2: selected OLD-only members whose absence the NEW side's
         proven-complete inventory establishes -- the only input the
-        removal finding and exit ``8`` may read."""
+        removal finding and exit ``8`` may read. Only a ``not_supplied``
+        member qualifies: a ``failed`` one (its own acquisition never
+        established what the OLD artifact was) is unchecked, never a
+        removal, however complete NEW's inventory is (Codex review)."""
         if self.new_inventory.completeness is not InventoryCompleteness.PROVEN:
             return ()
         return tuple(
-            m for m in self.expected_members if m.old_present and not m.new_present
+            m
+            for m in self.expected_members
+            if m.state is AcquisitionState.NOT_SUPPLIED
+            and m.old_present
+            and not m.new_present
         )
 
     @property
@@ -305,7 +312,11 @@ class ScopeAcquisitionRecord:
         if self.old_inventory.completeness is not InventoryCompleteness.PROVEN:
             return ()
         return tuple(
-            m for m in self.expected_members if m.new_present and not m.old_present
+            m
+            for m in self.expected_members
+            if m.state is AcquisitionState.NOT_SUPPLIED
+            and m.new_present
+            and not m.old_present
         )
 
     # -- codec ------------------------------------------------------------
