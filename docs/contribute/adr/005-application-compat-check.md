@@ -1,7 +1,14 @@
 # ADR-005: Application Compatibility Checking
 
 **Date:** 2026-03-17
-**Status:** Accepted — implemented
+**Status:** Accepted — implemented. See
+[ADR-049's 2026-09 amendment](049-contract-relevance-and-compatibility-configuration.md)
+for a proposed (not yet implemented) migration of `--used-by`-scoped
+evidence from a gate-affecting override toward enrichment beside the
+whole-comparison result — this ADR establishes the original
+consumer-perspective narrowing (`compat`'s application-symbol scoping) that
+`--used-by`/ADR-057's consumer graph later generalized, so a change to how
+consumer evidence affects the reported result is relevant here too.
 **Decision maker:** Nikolay Petrov
 
 ---

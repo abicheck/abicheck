@@ -89,7 +89,7 @@ A real invocation is a point in this space:
 | Header-only / inline-only | `planned` | castxml can't emit concept bodies / ctor mangled names (G4; cases 78/105/106/111 dormant) |
 | Kernel / eBPF (BTF/CTF) | `complete` | **G6 closed**: BTF + CTF struct-change run through `compare`; committed `case121` BTF blobs + bare-blob CLI ingestion + `gcc -gbtf` integration fixture |
 | SYCL / accelerator (PI/UR) | `complete` | **G6 closed**: PI *and* UR adapter entrypoint-drop driven through `compare` + reports |
-| Static libraries (`.a`/`.lib`) | `by_design_excluded` | **G8 decided (option A)**: non-goal; CLI rejects archives with guidance |
+| Static libraries (`.a`/`.lib`) | `by_design_excluded` | **G8 decided (option A, shipped)**: unsupported input today; CLI rejects archives with guidance. `vision.md`'s amended framing treats this as a current limitation open to a bounded future investigation, not a permanent exclusion — see [g8](plans/g8-static-libraries.md) |
 | FFI consumers (Rust/Go/Python) | `by_design_excluded` | C ABI covered; other languages a stated non-goal |
 
 ---
@@ -105,7 +105,7 @@ A real invocation is a point in this space:
 | **G5** | ✅ closed | `plugin-check` and `check_plugin_host_contract` cover host↔plugin load contracts. |
 | **G6** | ✅ closed | BTF/CTF and SYCL PI/UR workflows run through `compare` and reports. |
 | **G7** | ✅ closed | Semver bump and SONAME action recommendations are emitted by the report layer. |
-| **G8** | by-design excluded | Static/import archives are rejected with guidance; archive member API checking is a non-goal. |
+| **G8** | by-design excluded (option A, shipped) | Static/import archives are rejected with guidance. `vision.md`'s amended framing treats archive-member API checking as a current limitation open to a bounded future investigation, not a permanent non-goal — see [g8](plans/g8-static-libraries.md). |
 | **G9** | ✅ closed | Vendored-library pairing, both halves: `strip_vendor_hash` normalizes the auditwheel/delocate content-hash suffix in `compare-release`'s matching pass (filename) and in `bundle.py`'s cohort-scoped SONAME-skew detector (embedded DT_SONAME/install-name) — a bundled `libpng16-<hash>.so.16.x` pairs across rebuilds instead of removed+added noise, and a real break in the paired dependency (e.g. a SONAME major bump) still surfaces. |
 | **G10** | ✅ closed | manylinux glibc-floor / platform-baseline check. `check_platform_baseline_floor` (`diff_versioning.py`) compares a binary's own max required `GLIBC_2.x` (plus the implied floor from `DT_RELR`) against a declared floor (`--env-matrix`'s `runtime_floors` — no new flag) and emits `platform_baseline_floor_raised` — fires even with no old/new delta, unlike the pre-existing `runtime_floor_raised` reclassification. `package.parse_manylinux_glibc_floor` derives the floor from a manylinux wheel tag for programmatic use. |
 | **G11** | planned | Single-binary ABI audit/lint mode. |

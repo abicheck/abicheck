@@ -45,7 +45,13 @@ open: `suppression.py`, its third named module, turns out to construct no
 migrated, Slice 2), so there was never a fourth producer to migrate, only an
 imprecise module name in the original decision text — see "Slice 11" below.
 See "Slice 8"/"Slice 9"/"Slice 10"/"Slice 11" below for the full scoping
-rationale.
+rationale. See
+[ADR-049's 2026-09 amendment](049-contract-relevance-and-compatibility-configuration.md)
+for a proposed (not yet implemented) migration of `--used-by`-scoped
+evidence from a gate-affecting override toward enrichment beside the
+whole-comparison result — this ADR's report-level impact-attribution model
+is the natural home for that "beside the global result" enrichment block,
+should it be picked up.
 **Verified:** main@7c59880 on 2026-08-10
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own

@@ -126,6 +126,25 @@ captured with sufficient evidence; an unobserved deprecation is `unknown`,
 not absent; a missing intermediate release yields an `unknown_interval`.
 Branching histories and backports are kept as branches, never flattened.
 
+**Clarification (2026-09): negative evidence across releases reuses
+ADR-065's absence semantics, not a separate interpretation.** "Not present
+in snapshot B" must never become "removed in release B" purely because a
+later comparison against snapshot B fails to find the entity — the same
+completeness question ADR-065 D2 answers for a two-sided comparison applies
+identically to a history built by walking N releases: B's own snapshot must
+carry evidence *sufficient to conclude absence* — a proven-complete header
+surface or exports inventory for the relevant contract/variant, not merely
+"the AST walk over whatever headers were captured didn't happen to mention
+it." A snapshot captured under a narrower variant, an incomplete header set,
+or missing evidence for the entity's contract records `unknown`
+(this section's own terminology above), never `removed`, exactly the way
+ADR-065 D2 requires proven completeness before an unmatched member becomes
+a removal finding in an ordinary two-sided comparison. History is not a
+second, independently-invented notion of absence; it is the same
+completeness/evidence-adequacy machinery (ADR-065's D1/D2, the evidence-
+adequacy workstream amending ADR-028/049) applied across more than two
+points instead of two.
+
 ### D3 — Adjacent pairs do not prove a window
 
 Compatibility against a support window is evaluated against the baselines
@@ -134,6 +153,25 @@ pass results — especially across differing contracts, profiles, or
 evidence coverage. Cached pairwise results may be reused only under a
 complete key (both digests, config fingerprint, tool version, identity
 scheme) and each conclusion keeps the evidence it rests on.
+
+**Clarification (2026-09): the cross-release correspondence step (D2) is
+itself part of that complete key.** D2's correspondence algorithm — the
+identity projection, the signature-discriminator disambiguation, and the
+provenance corroboration rule that promotes a possible correspondence to an
+asserted `changed` event — is exactly the kind of thing this ADR expects to
+be revised as real multi-release corpora surface new edge cases (D2 already
+names overloads and rebased paths as cases it had to get right on the first
+attempt). A history index computed under one correspondence-algorithm
+version and a later one computed under a revised algorithm are not
+comparable, and reusing a cached lifecycle event across that boundary would
+silently mix two different notions of "the same declaration." So the
+correspondence algorithm carries its own version, folded into D3's "complete
+key" the same way a config fingerprint or identity scheme already is: a
+history index entry, and any cached comparison feeding it, records which
+correspondence-algorithm version produced it, and a version bump requires
+either a full history recompute or an explicit, reported
+"history predates algorithm vN" marker — never a silent mix of two
+algorithm generations in one timeline.
 
 ### D4 — Versioning policy is a small, separable model
 
@@ -225,6 +263,23 @@ support/deprecation evaluation, and integration with the existing
 SemVer/SONAME advice. S3: CI publication/resolution through the existing
 artifact channels. S4: report projections, bounded retention, and
 reproducible comparison reuse.
+
+**Clarification (2026-09): S4's rendering is explicitly the last slice, not
+an accident of numbering.** Do not start implementation with a rendered
+timeline view. The reproducible unit this ADR defines is the *lifecycle
+event stream* (D2's `first_observed`/`changed`/`deprecated`/`removed`/
+`reintroduced` events, each with its own coverage/`unknown` honesty per the
+terminology above) plus the coverage record that says which intervals are
+`unknown_interval` rather than confirmed-unchanged. A timeline (S4) is a
+**projection** of that event stream for display — the same fact/formatting
+split this codebase already applies everywhere else (ADR-061's
+`ReportDocument` "compute vs. render" split; see that ADR's own
+distinction for the precedent) — never a second, independently-computed
+representation of history. Building a timeline view before the event
+stream and its honesty-about-gaps machinery (S0/S1) exist and are correct
+would recreate exactly the failure mode ADR-022's retired registry avoided
+by not existing: a display artifact whose correctness nobody can check
+against the facts it claims to summarize.
 
 ## Mandatory tests (contract)
 

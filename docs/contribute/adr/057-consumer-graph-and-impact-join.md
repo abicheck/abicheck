@@ -14,12 +14,25 @@ vocabulary (`USE_CASE_NODE_KINDS`/`USE_CASE_EDGE_KINDS` in
 `impact-use-cases.yaml` manifest (`use_case`/`entrypoints`/`tests`) that
 `build_use_case_graph`/`join_use_case_graph` promote to graph facts and join
 onto the library graph, mirroring slice 1's build/join API and mutation-safety
-discipline exactly. See "Slice 2: declared use cases" below. Still **not
-implemented**: runtime-trace ingestion, and any report-level
-`affected_use_cases`/`USE_CASE_IMPACT_CONFIRMED` surface reading the joined
-graph — the two remaining reserved use-case edge kinds this slice registers
-(`TRACE_OBSERVED_ENTRY`, `TRACE_OBSERVED_EDGE`) mark where trace ingestion
-attaches. The three `CONSUMER_*` reserved edge kinds from slice 1
+discipline exactly. See "Slice 2: declared use cases" below.
+**Update (2026-09-02):** `abicheck/impact/use_case_impact.py`'s
+`build_use_case_impact` (engine for `compare --use-cases MANIFEST`) is a
+further, real step past graph-building alone — a genuine report-level
+surface (`DiffResult.use_case_impact`, emitted by the full JSON path and
+folded into text/markdown/review output — `cli_compare_fold.
+_USE_CASE_IMPACT_BEARING_FORMATS`; the summary/`stat` JSON path and
+sarif/junit/html deliberately carry none of it, and `compare` rejects
+`--use-cases` outright when no selected output format is in that set)
+attributing a real comparison's changed symbols to the declared use cases
+whose entrypoints reach them. This is
+**not** the same thing as the two items still **not implemented**: runtime-
+trace ingestion (the `TRACE_OBSERVED_ENTRY`/`TRACE_OBSERVED_EDGE` reserved
+edge kinds stay unimplemented), and a per-finding, report-*schema*
+`Change.affected_use_cases` field or `USE_CASE_IMPACT_CONFIRMED` finding
+kind wired into `compare`'s own change objects/exit code (that needs its
+own schema bump and FP-gate examples — see
+`abicheck/impact/use_cases.py`'s own "Not implemented in this slice" note).
+The three `CONSUMER_*` reserved edge kinds from slice 1
 (`CONSUMER_INSTANTIATES_DECL`, `CONSUMER_COMPILED_FROM_HEADER`,
 `RUNTIME_FAILED_TO_RESOLVE_SYMBOL`) also remain unimplemented. See
 "Deliberately not implemented this slice".

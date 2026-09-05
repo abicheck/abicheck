@@ -15,7 +15,12 @@ monorepo changed-component planning, and additional build-system provider
 plugins remain open. Also open: `check-project.yml` does not restore the
 `accepted-main` baseline cache automatically (a caller must prepare it), and
 a second real-upstream, multi-DSO/vendor-toolchain CI pilot (beyond the PVXS
-validation already run) has not been executed.
+validation already run) has not been executed. See
+[ADR-049's 2026-09 amendment](049-contract-relevance-and-compatibility-configuration.md)
+for a proposed (not yet implemented) migration of `--used-by`-scoped
+evidence to enrichment beside the whole-comparison result — a project's
+`.abicheck.yml`-driven workflow here is the surface that migration's
+deprecation-window note would need to reach.
 **Decision maker:** Nikolay Petrov
 
 **Amendments:**

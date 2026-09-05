@@ -186,13 +186,21 @@ model:
   **not** a reuse of `usecase-registry.yaml`) — `abicheck/impact/use_cases.py`
   parses the manifest and builds/joins `use_case`/`test_case` nodes and
   `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` edges onto the library graph,
-  mirroring slice 1's build/join API and mutation-safety discipline. Still
-  open: best-effort runtime-trace ingestion, and any report-level
-  `affected_use_cases`/`USE_CASE_IMPACT_CONFIRMED` surface reading the joined
-  use-case graph (G29 Phase 6) — the reserved edge kinds ADR-057 registers
-  (`CONSUMER_INSTANTIATES_DECL`/`CONSUMER_COMPILED_FROM_HEADER`/
-  `RUNTIME_FAILED_TO_RESOLVE_SYMBOL`/`TRACE_OBSERVED_ENTRY`/
-  `TRACE_OBSERVED_EDGE`) mark where that work attaches.
+  mirroring slice 1's build/join API and mutation-safety discipline.
+  **Update (2026-09-02, also done):** `abicheck/impact/use_case_impact.py`'s
+  `build_use_case_impact` is a further real step past graph-building alone
+  — `compare --use-cases MANIFEST` is a real flag on the native `compare`
+  command, and it attributes a comparison's changed symbols to the declared
+  use cases whose entrypoints reach them as a genuine report-level
+  `DiffResult.use_case_impact` surface (emitted through the JSON/markdown/
+  text/review formats; see ADR-057). Still open: best-effort runtime-trace
+  ingestion, and a per-finding, report-*schema* `Change.affected_use_cases`
+  field / `USE_CASE_IMPACT_CONFIRMED` finding kind wired into `compare`'s
+  own change objects/exit code (G29 Phase 6) — the reserved edge kinds
+  ADR-057 registers (`CONSUMER_INSTANTIATES_DECL`/
+  `CONSUMER_COMPILED_FROM_HEADER`/`RUNTIME_FAILED_TO_RESOLVE_SYMBOL`/
+  `TRACE_OBSERVED_ENTRY`/`TRACE_OBSERVED_EDGE`) mark where that work
+  attaches.
 - **G29.6** — The five open graph families (template instantiation, virtual
   dispatch, macro/config, callback/function-pointer, object/archive link
   provenance) implemented behind the same coverage-honesty discipline as the
@@ -706,10 +714,11 @@ decisions.
   function/variable-shaped change (backed by a `SOURCE_DECL_MAPS_TO_SYMBOL`
   edge) can be named, never a type layout change; and only a
   consumer-compiled entrypoint can walk transitively past its own
-  declaration. Still not done: a `compare --use-cases <manifest>` flag on
-  the native `compare` command itself (today only reachable via `project
-  validate-use-cases --against-new`, a separate invocation over the same
-  two snapshots), any `Change.affected_use_cases` field, any
+  declaration. **Update (2026-09-02, done):** `compare --use-cases <manifest>`
+  is now a real flag on the native `compare` command itself (see the update
+  above) — `project validate-use-cases --against-new` remains a separate,
+  earlier-built entry point over the same two snapshots, not the only one.
+  Still not done: any `Change.affected_use_cases` field, any
   `USE_CASE_IMPACT_CONFIRMED` finding (both G29 Phase 6, needing their own
   schema bump and FP-gate examples), and runtime-trace ingestion.
 - `docs/contribute/use-case-impact.md` (new, **done**): manifest format, entrypoint
