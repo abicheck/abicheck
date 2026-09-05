@@ -23,12 +23,12 @@
     },
     {
       "path": "abicheck/appcompat.py",
-      "baseline_lines": 1854,
+      "baseline_lines": 1865,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1818 -> 1832 (ADR-067 C-S1, scalar disposition audit): the consumer-overlay suppression pass -- one of the four application points ADR-067 enumerates -- now records the finding it withholds into the run's conserved disposition ledger through the same `policy.disposition_ledger.record_suppressed_change` primitive the other four call sites use. The added lines are that one call plus the comment recording why an overlay built from a raw `missing_symbols` string needs no second record type. There is no responsibility to move: the suppression decision itself already lives here, and the ledger it now feeds is a `policy/` leaf. Raised again 1832 -> 1854 (Codex review on PR #1082): the consumer overlay now records into the ledger on *both* branches, not only when a suppression rule fires -- recording one side only made adding a matching rule change the *detected* total instead of moving the finding between dispositions, which is precisely the conservation ADR-067 D1 requires.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1818 -> 1832 (ADR-067 C-S1, scalar disposition audit): the consumer-overlay suppression pass -- one of the four application points ADR-067 enumerates -- now records the finding it withholds into the run's conserved disposition ledger through the same `policy.disposition_ledger.record_suppressed_change` primitive the other four call sites use. The added lines are that one call plus the comment recording why an overlay built from a raw `missing_symbols` string needs no second record type. There is no responsibility to move: the suppression decision itself already lives here, and the ledger it now feeds is a `policy/` leaf. Raised again 1832 -> 1854 (Codex review on PR #1082): the consumer overlay now records into the ledger on *both* branches, not only when a suppression rule fires -- recording one side only made adding a matching rule change the *detected* total instead of moving the finding between dispositions, which is precisely the conservation ADR-067 D1 requires. Raised again 1854 -> 1865 in the same review round: `ledger_for` no longer attaches a lazily-built ledger to the result it is asked about (a projection must not mutate what it renders -- `tests/unit/report/test_render_html.py` states that executably), so this engine-side call site resolves the ledger once and attaches it explicitly.",
       "review_by": "2026-11-30"
     },
     {
@@ -913,12 +913,12 @@
     },
     {
       "path": "abicheck/junit_report.py",
-      "baseline_lines": 1205,
+      "baseline_lines": 1211,
       "target": "report",
       "rule": "no_growth",
       "category": "legacy_report_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1160 -> 1205 (ADR-067 D3, Codex review on PR #1082): a testsuite-level `<properties>` block carrying the raw-versus-effective counts. D3 names JUnit explicitly, and a JUnit consumer reads `tests`/`failures`, which are the *effective* numbers by construction -- a fully suppressed comparison reports zero failures and otherwise carried no trace that anything was detected. Its own properties element rather than an extension of `_add_scoped_properties`, which is emitted only under `--used-by` scoping while these counts are owed unconditionally.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1160 -> 1205 (ADR-067 D3, Codex review on PR #1082): a testsuite-level `<properties>` block carrying the raw-versus-effective counts. D3 names JUnit explicitly, and a JUnit consumer reads `tests`/`failures`, which are the *effective* numbers by construction -- a fully suppressed comparison reports zero failures and otherwise carried no trace that anything was detected. Its own properties element rather than an extension of `_add_scoped_properties`, which is emitted only under `--used-by` scoping while these counts are owed unconditionally. Raised again 1205 -> 1211 in the same review round: the audit rows and the pre-existing scoped rows now share one testsuite `<properties>` element (the JUnit convention, and what every existing consumer of the scoped block already looks for) instead of emitting two.",
       "review_by": "2026-11-30"
     },
     {
@@ -1893,12 +1893,12 @@
     },
     {
       "path": "tests/test_junit_report.py",
-      "baseline_lines": 1962,
+      "baseline_lines": 1978,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Baseline raised 1962 -> 1978 (ADR-067 D3): `test_no_properties_when_no_scoping` became `test_no_scoped_properties_when_no_scoping` -- the `<properties>` element is no longer conditional now that the disposition audit shares it, so the test asserts the absence of the scoped rows *by name*, which is the claim it was always making, plus a positive check that it cannot pass by the element being empty.",
       "review_by": "2026-11-30"
     },
     {

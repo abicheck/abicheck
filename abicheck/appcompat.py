@@ -1448,6 +1448,17 @@ def scope_diff_to_app(
     required_count = len(app_reqs.undefined_symbols)
     coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
 
+    # ADR-067 C-S1: the consumer overlay is the one recording call site that
+    # runs *after* `compare()` closed the ledger, so it resolves the diff's own
+    # ledger once here and attaches it when the diff carries none (a caller
+    # that built the DiffResult itself). `ledger_for` deliberately never
+    # attaches on its own -- a report projection must not mutate what it
+    # renders -- so this engine-side assignment is what makes the overlay's
+    # records reach the same object every projection reads.
+    overlay_ledger = ledger_for(diff)
+    if getattr(diff, "disposition_ledger", None) is None:
+        diff.disposition_ledger = overlay_ledger
+
     suppressed_missing: set[str] = set()
     uncovered = list(uncovered_missing_symbols(missing_symbols, breaking_for_app))
     # G29 Phase 4 (ADR-057): one joined consumer/source-graph walk for every
@@ -1498,7 +1509,7 @@ def scope_diff_to_app(
         overlay_change.impact_assessment = assess_change(overlay_change)
         if suppression is None:
             record_kept_change(
-                ledger_for(diff),
+                overlay_ledger,
                 overlay_change,
                 diff,
                 application_point="consumer_overlay",
@@ -1530,7 +1541,7 @@ def scope_diff_to_app(
             # points use -- one record type, one query surface (D2), with the
             # consumer overlay named as its own application point.
             record_suppressed_change(
-                ledger_for(diff),
+                overlay_ledger,
                 overlay_change,
                 rule=outcome.matched_rule,
                 application_point="consumer_overlay",
@@ -1545,7 +1556,7 @@ def scope_diff_to_app(
         # finding between dispositions -- exactly the conservation the audit
         # exists to make checkable.
         record_kept_change(
-            ledger_for(diff),
+            overlay_ledger,
             overlay_change,
             diff,
             application_point="consumer_overlay",

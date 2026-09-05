@@ -486,8 +486,14 @@ def test_ledger_for_a_hand_built_result_still_reconciles() -> None:
     ledger = ledger_for(result)
     assert ledger.detected_total == 2
     assert conservation_holds(ledger)
-    # Cached, not rebuilt per call — two consumers must not see two ledgers.
-    assert ledger_for(result) is ledger
+    # Derived, never attached: a projection asking for the ledger must not
+    # mutate the result it is about to render (the invariant
+    # `tests/unit/report/test_render_html.py` states executably). Two calls
+    # therefore agree on the facts without sharing an object.
+    assert result.disposition_ledger is None
+    again = ledger_for(result)
+    assert again.counts() == ledger.counts()
+    assert again.detected_total == ledger.detected_total
 
 
 class TestGatingFollowsTheResolvedGate:

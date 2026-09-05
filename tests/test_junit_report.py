@@ -1537,12 +1537,28 @@ class TestScopedProperties:
     as `abicheck.full_library_verdict` for context, but no longer drives
     what a JUnit-consuming CI dashboard treats as failing."""
 
-    def test_no_properties_when_no_scoping(self) -> None:
+    def test_no_scoped_properties_when_no_scoping(self) -> None:
+        """No ``--used-by``/``--required-symbol(s)`` scoping means none of
+        *these* rows.
+
+        The ``<properties>`` element itself is no longer conditional: ADR-067
+        D3 puts the raw-versus-effective disposition counts in every
+        projection, JUnit included, and they share this one element (see
+        ``_add_disposition_audit_properties``). So this asserts the absence of
+        the scoped rows by name rather than the absence of the container,
+        which is the claim it was always making.
+        """
         r = _make_result([], verdict=Verdict.BREAKING)
         xml_str = to_junit_xml(r)
         root = _parse(xml_str)
         ts = root.find("testsuite")
-        assert ts.find("properties") is None
+        names = {p.get("name") for p in ts.find("properties").findall("property")}
+        assert not any(n.startswith("abicheck.gate_") for n in names)
+        assert "abicheck.scoped_verdict" not in names
+        assert "abicheck.full_library_verdict" not in names
+        # …and the audit rows that replaced the container's own conditionality
+        # really are there, so this cannot pass by the element being empty.
+        assert "abicheck.detected_total" in names
 
     def test_properties_present_and_can_disagree_with_full_verdict(self) -> None:
         r = _make_result([], verdict=Verdict.BREAKING)

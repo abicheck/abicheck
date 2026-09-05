@@ -336,19 +336,29 @@ class DispositionLedger:
             counts[record.disposition.value] += 1
         return counts
 
-    def apply_gate(self, result: DiffResult, severity_config: object) -> None:
-        """Re-label the evaluated records against the *resolved* gate.
+    def with_gate(
+        self, result: DiffResult, severity_config: object
+    ) -> DispositionLedger:
+        """A copy of this ledger re-labelled against the *resolved* gate.
+
+        A copy, not an in-place relabel: a report projection must not mutate
+        the result it renders (``tests/unit/report/test_render_html.py``
+        states that as an executable invariant), and the same run can be
+        rendered twice under different severity configurations.
 
         Touches only ``gating``/``non_gating`` records: a suppressed,
         out-of-contract, unresolved or deduplicated finding never reached the
         gate at all, so no severity configuration can change its disposition
-        (D2 -- one change, one terminal disposition). Idempotent, so a second
-        projection asking for the same ledger cannot double-apply it.
+        (D2 -- one change, one terminal disposition).
         """
-        for index, (record, change) in enumerate(zip(self._records, self._anchors)):
-            if record.disposition not in (Disposition.GATING, Disposition.NON_GATING):
-                continue
-            self._records[index] = replace(
+        gated = DispositionLedger()
+        gated._anchors = list(self._anchors)
+        gated._seen_ids = dict(self._seen_ids)
+        gated._records = [
+            record
+            if record.disposition
+            not in (Disposition.GATING, Disposition.NON_GATING)
+            else replace(
                 record,
                 disposition=_kept_disposition(
                     change,  # type: ignore[arg-type]
@@ -356,6 +366,9 @@ class DispositionLedger:
                     severity_config,
                 ),
             )
+            for record, change in zip(self._records, self._anchors)
+        ]
+        return gated
 
     def resolve_verdict_classes(self, result: DiffResult) -> None:
         """Fill in the verdict class of every record that had none.
@@ -654,29 +667,28 @@ def ledger_for(
     ``None``: a report projection must be able to state D3's counts
     unconditionally.
 
+    Never mutates *result*: a report projection that attached (or relabelled)
+    a ledger on the object it renders would break the "rendering changes
+    nothing" invariant the HTML renderer already tests for. A caller that
+    wants the ledger to *persist* on the result assigns it explicitly —
+    ``checker.compare()`` does, which is what gives every projection the
+    per-rule provenance recorded during the run.
+
     *severity_config* is the run's resolved severity configuration, which
     ``checker.compare()`` never sees — the gate is resolved by the front end
     (ADR-064), strictly later. Passing it here is the audit *learning* the
-    gate the run was actually scored on, applied once to the one shared
-    ledger so every projection agrees; it is not a renderer changing a gate,
-    and it can only ever move a finding between ``gating`` and
-    ``non_gating`` (:meth:`DispositionLedger.apply_gate`).
+    gate the run was actually scored on; it is not a renderer changing a
+    gate, and it can only ever move a finding between ``gating`` and
+    ``non_gating`` (:meth:`DispositionLedger.with_gate`).
     """
     existing = getattr(result, "disposition_ledger", None)
     if isinstance(existing, DispositionLedger):
-        if severity_config is not None:
-            existing.apply_gate(result, severity_config)
-        return existing
-    ledger = finalize_ledger(DispositionLedger(), result, severity_config)
-    # Attached, not only returned: a later recording call site (the consumer
-    # overlay, whose suppressions happen after ``compare()`` returned) must
-    # reach the *same* ledger every projection will read, and two callers
-    # asking for "this result's ledger" must not get two divergent objects.
-    try:
-        result.disposition_ledger = ledger
-    except AttributeError:  # pragma: no cover - a slotted/frozen stand-in
-        pass
-    return ledger
+        return (
+            existing
+            if severity_config is None
+            else existing.with_gate(result, severity_config)
+        )
+    return finalize_ledger(DispositionLedger(), result, severity_config)
 
 
 def conservation_holds(ledger: DispositionLedger) -> bool:
