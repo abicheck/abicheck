@@ -65,10 +65,14 @@ from .workflows.gate import (
     resolve_release_exit_decision_for_report,
     resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
 )
-from .workflows.release_scope import StrandedLibraryResolution
+from .workflows.release_scope import (
+    StrandedLibraryResolution,
+    scope_manifest_to_members,
+)
 
 if TYPE_CHECKING:
     from .bundle_manifest import InstantiationManifest
+    from .model.scope_acquisition import ScopeAcquisitionRecord
     from .pack_application import PackApplication
     from .workflows.extraction import PackageExtractor
     from .workflows.gate import SeverityConfig
@@ -339,6 +343,7 @@ def _run_bundle_analysis(
     new_root: Path | None = None,
     old_variant: str | None = None,
     new_variant: str | None = None,
+    scope_record: ScopeAcquisitionRecord | None = None,
 ) -> BundleDiffResult | None:
     """Run bundle-level (ADR-023) analysis on a compare-release run.
 
@@ -367,26 +372,18 @@ def _run_bundle_analysis(
     -- *not* the library's file basename), matching what
     ``BundleSnapshot.resolution`` itself keys providers/consumers by.
 
-    G38 stabilization Phase 12: both stages (the core
-    ``compare_bundle()`` suite and the Phase 4 signature-evidence gate)
-    now run through the single :func:`abicheck.bundle_analysis.
-    analyze_bundle` orchestrator -- the same one
-    :func:`abicheck.bundle_facts.compare_bundle_from_facts` calls for a
-    stored-baseline comparison -- rather than being sequenced by hand here.
-    This function's own job narrows to what only the live release path
-    needs: building the two live ``BundleSnapshot``\\ s, loading an
-    explicit ``--instantiation-manifest``, and re-surfacing ``analyze_bundle``'s
-    structured ``analysis_errors`` as the same ``click.echo(...,
-    err=True)`` warnings this function has always emitted.
+    G38 stabilization Phase 12: both stages run through the single
+    :func:`abicheck.bundle_analysis.analyze_bundle` orchestrator (shared
+    with :func:`abicheck.bundle_facts.compare_bundle_from_facts`); this
+    function only builds the two live ``BundleSnapshot``\\ s, resolves the
+    manifest, and re-surfaces ``analysis_errors`` as stderr warnings.
 
     *old_root*/*new_root* (ADR-062 A1.7) are the two release operands
-    themselves (a stored ``ProjectSnapshot`` package directory or a live
-    directory), used only for the embedded-``InstantiationManifest``
-    fallback below -- a package whose selected variant carries zero
-    artifacts has no entry in *old_map*/*new_map* at all to search for one
-    (Codex review, fresh evidence: a valid empty ``BundleFacts`` package
-    can still carry a manifest, and the required-symbol check was silently
-    skipped for it). *old_variant*/*new_variant* select which variant's manifest that fallback reads.
+    themselves, used only for the embedded-``InstantiationManifest``
+    fallback -- a package whose selected variant carries zero artifacts has
+    no *old_map*/*new_map* entry to search (Codex review). *old_variant*/
+    *new_variant* select which variant's manifest that fallback reads.
+    *scope_record* (ADR-065 D2) scopes that manifest to the retained members.
     """
     from .bundle import build_bundle_snapshot_mixed
     from .bundle_analysis import analyze_bundle
@@ -401,6 +398,7 @@ def _run_bundle_analysis(
         old_variant=old_variant,
         new_variant=new_variant,
     )
+    manifest, manifest_note = scope_manifest_to_members(manifest, scope_record)
     if not old_map and not new_map and manifest is None:
         return None
     try:
@@ -441,6 +439,8 @@ def _run_bundle_analysis(
     # orchestrator itself is a pure/leaf function with no CLI-echoing
     # concerns of its own (it's shared with the stored-facts path, which
     # has no `click` context to echo into).
+    if manifest_note is not None:
+        result.analysis_errors.append(manifest_note)
     for err in result.analysis_errors:
         click.echo(f"Warning: {err}", err=True)
 
@@ -773,6 +773,7 @@ def _collect_bundle_result(
     new_root: Path | None = None,
     old_variant: str | None = None,
     new_variant: str | None = None,
+    scope_record: ScopeAcquisitionRecord | None = None,
 ) -> tuple[BundleDiffResult | None, str]:
     """Extract stashed DiffResults, run bundle analysis, update worst verdict.
 
@@ -821,6 +822,7 @@ def _collect_bundle_result(
         new_root=new_root,
         old_variant=old_variant,
         new_variant=new_variant,
+        scope_record=scope_record,
     )
     if bundle_result is not None:
         bundle_result.policy_file = policy_file  # G38 Phase 16

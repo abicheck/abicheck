@@ -554,9 +554,9 @@ def import_bundle_facts(
             bundle_facts_document.get("degraded_members", _ABSENT), "degraded_members"
         ),
     }
-    require_degraded_marker_version(
+    require_degraded_marker_version(  # an absent key is a v1 document, not the default
         composition_payload["degraded_members"],
-        raw_container_schema_version,
+        raw_container_schema_version if "schema_version" in bundle_facts_document else 1,
         what="bundle_facts_document",
     )
     composition_dto = bundle_composition_to_dto(composition_payload)

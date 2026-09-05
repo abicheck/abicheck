@@ -327,7 +327,13 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         )
     raw_manifest = d.get("manifest")
     degraded_members = validated_degraded_members(d.get("degraded_members"))
-    require_degraded_marker_version(degraded_members, schema_version)
+    # An absent key is a v1 document (the legacy rule above), *not* the
+    # current version the int(...) default supplied: a pre-S2 reader
+    # defaults the same document to its own maximum and ignores the marker
+    # (Codex review).
+    require_degraded_marker_version(
+        degraded_members, schema_version if "schema_version" in d else 1
+    )
     return BundleFacts(
         schema_version=schema_version,
         variant_fingerprint=validated_variant_fingerprint(

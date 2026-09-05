@@ -971,12 +971,15 @@ def _facts_file(
     name: str,
     libs: dict[str, AbiSnapshot],
     degraded: dict[str, str] | None = None,
+    manifest: object | None = None,
 ) -> Path:
     from abicheck.bundle_facts import capture_bundle_facts
     from abicheck.serialization import save_bundle_facts
 
     path = tmp_path / name
-    save_bundle_facts(capture_bundle_facts(libs, degraded_members=degraded), path)
+    save_bundle_facts(
+        capture_bundle_facts(libs, manifest=manifest, degraded_members=degraded), path
+    )
     return path
 
 

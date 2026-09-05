@@ -511,6 +511,7 @@ def compare_release_against_bundle_facts(
         bundle_analysis_members,
         out_of_scope_provider_names,
         restrict_bundle_facts,
+        scope_manifest_to_members,
     )
 
     scope_record = build_stored_baseline_scope_record(
@@ -526,12 +527,17 @@ def compare_release_against_bundle_facts(
     # ADR-065 D2: the bundle graph sees matched members and proven
     # removals/additions only (Codex review) -- see bundle_analysis_members.
     bundle_members = bundle_analysis_members(scope_record)
-    manifest = load_manifest(manifest_path) if manifest_path is not None else None
+    # ADR-065 D2 (Codex review): a promise only an excluded member could
+    # answer is withheld, not reported as manifest drift.
+    manifest, manifest_note = scope_manifest_to_members(
+        load_manifest(manifest_path) if manifest_path is not None else old_facts.manifest,
+        scope_record,
+    )
     new_bundle_snapshot = build_bundle_snapshot(
         {k: v for k, v in new_map.items() if k in bundle_members}
     )
     result = compare_bundle_from_facts(
-        restrict_bundle_facts(old_facts, bundle_members),
+        restrict_bundle_facts(old_facts, scope_record),
         new_bundle_snapshot,
         per_library_results,
         manifest=manifest,
@@ -554,5 +560,7 @@ def compare_release_against_bundle_facts(
         "per-library comparison skipped (ADR-065 D6)"
         for key, reason in sorted(unsupported.items())
     )
+    if manifest_note is not None:
+        result.analysis_errors.append(manifest_note)
     result.scope_record = scope_record
     return result

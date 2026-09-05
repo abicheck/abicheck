@@ -880,6 +880,7 @@ def compare_release_cmd(
                     new_root=new_dir,
                     old_variant=old_variant,
                     new_variant=new_variant,
+                    scope_record=scope_record,
                 )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.

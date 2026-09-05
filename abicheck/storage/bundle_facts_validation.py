@@ -322,6 +322,10 @@ def require_degraded_marker_version(
     the marker under version 1 or 2 is therefore self-contradictory -- it
     would still open in that older reader, which is the failure the version
     exists to prevent -- so this reader refuses it too (Codex review).
+    *schema_version* is the version the document *declares*: a caller whose
+    reader defaults an absent key must pass the legacy version that absence
+    means (1), never the default it substituted, or a schema-less document
+    carrying the marker would pass here and still open in a pre-S2 reader.
     """
     if degraded_members and schema_version < DEGRADED_MARKER_SCHEMA_VERSION:
         raise ValueError(

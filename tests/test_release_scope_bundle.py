@@ -39,6 +39,7 @@ from test_release_scope_completeness import (
     _write_stored_package,
 )
 
+from abicheck.bundle_manifest import InstantiationManifest
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.errors import IncompatibleSnapshotSchemaError, UnsupportedArtifactError
 from abicheck.model import AbiSnapshot, Function, Visibility
@@ -220,16 +221,29 @@ class TestBundleAnalysisScope:
         facts = capture_bundle_facts(
             _provider_and_consumer(), degraded_members={"libcore.so": "boom"}
         )
-        scoped = restrict_bundle_facts(facts, frozenset({"libalgo.so"}))
+        record = build_stored_baseline_scope_record(
+            facts.per_library_snapshots,
+            {"libalgo.so": Path("libalgo.so")},
+            compared=["libalgo.so"],
+            degraded={},
+            old_provenance="t",
+            new_provenance="t",
+        )
+        scoped = restrict_bundle_facts(facts, record)
         assert set(scoped.per_library_snapshots) == {"libalgo.so"}
         assert set(scoped.library_filenames) <= {"libalgo.so"}
         assert scoped.degraded_members == {}
         assert scoped.artifact_type == facts.artifact_type
-        # A superset restriction is the identity, not a copy.
-        assert (
-            restrict_bundle_facts(facts, frozenset(facts.per_library_snapshots))
-            is facts
+        # A complete scope is the identity, not a copy.
+        complete = build_stored_baseline_scope_record(
+            facts.per_library_snapshots,
+            {k: Path(k) for k in facts.per_library_snapshots},
+            compared=list(facts.per_library_snapshots),
+            degraded={},
+            old_provenance="t",
+            new_provenance="t",
         )
+        assert restrict_bundle_facts(facts, complete) is facts
         old_map, new_map = scoped_bundle_maps({"a": Path("a")}, {"b": Path("b")}, None)
         assert (old_map, new_map) == ({"a": Path("a")}, {"b": Path("b")})
 
@@ -519,6 +533,37 @@ class TestDegradedMarkerVersionGate:
             _import(d)
         assert _import(_degraded_facts_dict()) is not None
 
+    @pytest.mark.parametrize("reader", ["json", "import"])
+    def test_schemaless_document_rejects_the_marker(self, reader: str) -> None:
+        """An absent `schema_version` is a v1 document, not the current
+        default the reader substitutes: a pre-S2 reader defaults it to its
+        own maximum and ignores the marker (Codex review, eighth round)."""
+        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
+        from abicheck.serialization import SCHEMA_VERSION
+        from abicheck.storage.import_bundle_facts import import_bundle_facts
+        from abicheck.storage.package import InMemoryObjectStore
+
+        def _read(doc: dict[str, object]) -> object:
+            if reader == "json":
+                return bundle_facts_from_dict(doc)
+            return import_bundle_facts(
+                doc,
+                store=InMemoryObjectStore(),
+                max_known_schema_version=SCHEMA_VERSION,
+            )
+
+        d = _degraded_facts_dict()
+        del d["schema_version"]
+        del d["artifact_type"]
+        with pytest.raises(ValueError, match="degraded_members.*schema_version 3"):
+            _read(d)
+        # The same schema-less document without the marker is still a
+        # loadable legacy v1 document.
+        d["degraded_members"] = {}
+        assert _read(d) is not None
+        del d["degraded_members"]
+        assert _read(d) is not None
+
     def test_composition_section_v1_rejects_the_marker(self) -> None:
         from abicheck.storage.dto import (
             BUNDLE_COMPOSITION_SECTION_KIND,
@@ -776,3 +821,210 @@ class TestMarkdownAndNoticeRenderResolvedUnchecked:
         assert notice is not None
         assert "lib1.so (unsupported)" in notice
         assert "lib0.so" not in notice
+
+
+# ---------------------------------------------------------------------------
+# The release manifest is enforced over the retained members only (D2)
+# ---------------------------------------------------------------------------
+
+
+def _manifest(*entries: tuple[str, str | None]) -> InstantiationManifest:
+    """``(symbol, pinned_provider_or_None)`` entries."""
+    from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+
+    return InstantiationManifest(
+        entries=tuple(
+            ManifestEntry(symbol=sym, library=lib, optional_provider=lib is None)
+            for sym, lib in entries
+        )
+    )
+
+
+def _write_stored_package_with_manifest(
+    root: Path, libraries: dict[str, AbiSnapshot], manifest: InstantiationManifest
+) -> None:
+    from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
+    from abicheck.bundle_facts_store import write_bundle_facts_package
+    from abicheck.project_snapshot_store import (
+        DirectoryObjectStore,
+        write_project_manifest,
+    )
+
+    facts = capture_bundle_facts(libraries, variant_fingerprint="gcc13")
+    facts = BundleFacts(
+        variant_fingerprint=facts.variant_fingerprint,
+        per_library_snapshots=facts.per_library_snapshots,
+        library_filenames={name: name for name in facts.per_library_snapshots},
+        manifest=manifest,
+    )
+    store = DirectoryObjectStore(root)
+    write_project_manifest(root, write_bundle_facts_package(facts, store=store))
+
+
+def _manifest_findings(doc: dict[str, object]) -> list[str]:
+    findings = doc.get("bundle_findings") or []
+    assert isinstance(findings, list)
+    return [
+        str(f["symbol"])
+        for f in findings
+        if isinstance(f, dict)
+        and str(f.get("kind", "")).startswith("bundle_manifest_instantiation_")
+    ]
+
+
+class TestManifestScopedToRetainedMembers:
+    """`scope_manifest_to_members`: once any expected member is absent from
+    the bundle graph, only a promise pinned to a retained provider stays
+    decidable; every other promise is withheld and named (Codex review,
+    eighth round)."""
+
+    @staticmethod
+    def _record(
+        other: AcquisitionState, *, new_proven: bool = False
+    ) -> ScopeAcquisitionRecord:
+        from abicheck.model.scope_acquisition import MemberAcquisition
+
+        return ScopeAcquisitionRecord(
+            (
+                MemberAcquisition("libkept.so", AcquisitionState.AVAILABLE, True, True),
+                MemberAcquisition(
+                    "libother.so",
+                    other,
+                    other is not AcquisitionState.EXPECTED_NOT_PRODUCED,
+                    other is not AcquisitionState.NOT_SUPPLIED,
+                    "why",
+                    display_name="libother.so.2",
+                ),
+            ),
+            SideInventory(InventoryCompleteness.UNPROVEN, "t"),
+            SideInventory(
+                InventoryCompleteness.PROVEN
+                if new_proven
+                else InventoryCompleteness.UNPROVEN,
+                "t",
+            ),
+            "all_expected",
+        )
+
+    @pytest.mark.parametrize("new_proven", [False, True])
+    @pytest.mark.parametrize("other", list(AcquisitionState))
+    def test_withheld_iff_a_member_is_absent_from_the_graph(
+        self, other: AcquisitionState, new_proven: bool
+    ) -> None:
+        from abicheck.workflows.release_scope import scope_manifest_to_members
+
+        record = self._record(other, new_proven=new_proven)
+        manifest = _manifest(
+            ("any_fn", None),
+            ("kept_fn", "libkept.so"),
+            ("kept_versioned_fn", "libkept.so.3"),
+            ("other_fn", "libother.so.2"),
+        )
+        scoped, note = scope_manifest_to_members(manifest, record)
+        graph_complete = bundle_analysis_members(record) == {
+            "libkept.so",
+            "libother.so",
+        }
+        if graph_complete:
+            assert scoped is manifest and note is None
+            return
+        assert scoped is not None
+        assert [e.symbol for e in scoped.entries] == ["kept_fn", "kept_versioned_fn"]
+        assert note is not None
+        assert "any_fn" in note and "other_fn" in note and "libother.so.2" in note
+        # Nothing pinned to a retained member: the manifest is withheld whole.
+        scoped_none, note_none = scope_manifest_to_members(
+            _manifest(("any_fn", None), ("other_fn", "libother.so")), record
+        )
+        assert scoped_none is None and note_none is not None
+
+    def test_no_manifest_or_no_record_is_the_identity(self) -> None:
+        from abicheck.workflows.release_scope import scope_manifest_to_members
+
+        manifest = _manifest(("any_fn", None))
+        assert scope_manifest_to_members(
+            None, self._record(AcquisitionState.FAILED)
+        ) == (None, None)
+        assert scope_manifest_to_members(manifest, None) == (manifest, None)
+
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    def test_narrowed_live_new_does_not_fabricate_manifest_drift(
+        self, tmp_path: Path, policy: str
+    ) -> None:
+        """A stored OLD package with an embedded manifest against NEW named
+        as one current artifact (D9 narrowing): the promise the unselected
+        member provides is withheld, not `BUNDLE_MANIFEST_INSTANTIATION_REMOVED`."""
+        old = tmp_path / "old_pkg"
+        _write_stored_package_with_manifest(
+            old,
+            {
+                "libcore.so": _lib("libcore.so", exports=("core_fn",)),
+                "libalgo.so": _lib("libalgo.so", exports=("algo_fn",)),
+            },
+            _manifest(("core_fn", None)),
+        )
+        new = tmp_path / "new"
+        _write(new, "libalgo.so.json", _lib("libalgo.so", exports=("algo_fn",)))
+        code, doc = _invoke_json(
+            "compare",
+            str(old),
+            str(new / "libalgo.so.json"),
+            "-j",
+            "1",
+            "--on-incomplete-scope",
+            policy,
+        )
+        assert _manifest_findings(doc) == []
+        assert doc["verdict"] != "BREAKING"
+        errors = doc.get("bundle_analysis_errors") or []
+        assert any("core_fn" in e and "withheld" in e for e in errors), errors
+        # D9 narrowing is a deliberate selection: complete under either policy.
+        assert doc["comparison_scope"]["completeness"] == "complete"
+        assert doc["comparison_scope"]["out_of_scope"] == ["libcore.so-libcore.so"]
+        assert code == 0
+
+    def test_proven_new_inventory_still_enforces_the_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        """Control: with NEW a proven-complete stored package that dropped
+        the provider, the removal is proven and the promise is enforced."""
+        old = tmp_path / "old_pkg"
+        libs = {
+            "libcore.so": _lib("libcore.so", exports=("core_fn",)),
+            "libalgo.so": _lib("libalgo.so", exports=("algo_fn",)),
+        }
+        _write_stored_package_with_manifest(old, libs, _manifest(("core_fn", None)))
+        new = tmp_path / "new_pkg"
+        _write_stored_package(new, {"libalgo.so": libs["libalgo.so"]})
+        code, doc = _invoke_json("compare", str(old), str(new), "-j", "1")
+        assert "core_fn" in _manifest_findings(doc)
+        assert doc["comparison_scope"]["completeness"] == "complete"
+        assert not doc.get("bundle_analysis_errors")
+
+    def test_stored_pair_driver_withholds_too(self, tmp_path: Path) -> None:
+        """The stored/stored driver: OLD's captured manifest promises a
+        symbol only the member degraded on NEW provides."""
+        from abicheck.workflows.bundle_stored_pair_compare import (
+            compare_stored_bundle_facts_pair,
+        )
+
+        libs = {
+            "libcore.so": _lib("libcore.so", exports=("core_fn",)),
+            "libalgo.so": _lib("libalgo.so", exports=("algo_fn",)),
+        }
+        old = _facts_file(
+            tmp_path,
+            "old.bundlefacts.json",
+            libs,
+            manifest=_manifest(("core_fn", None)),
+        )
+        new = _facts_file(
+            tmp_path,
+            "new.bundlefacts.json",
+            {**libs, "libcore.so": _lib("libcore.so")},
+            degraded={"libcore.so": "dump failed"},
+        )
+        result = compare_stored_bundle_facts_pair(old, new)
+        kinds = {f.kind.value for f in result.bundle_findings}
+        assert not any(k.startswith("bundle_manifest_instantiation_") for k in kinds)
+        assert any("core_fn" in e and "withheld" in e for e in result.analysis_errors)

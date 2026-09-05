@@ -48,9 +48,9 @@ if TYPE_CHECKING:
     from .suppression import SuppressionList
 from .release_scope import (
     build_stored_baseline_scope_record,
-    bundle_analysis_members,
     out_of_scope_provider_names,
     restrict_bundle_facts,
+    scope_manifest_to_members,
 )
 
 
@@ -339,12 +339,14 @@ def compare_stored_bundle_facts_pair(
         old_provenance="stored bundle-facts capture: the captured set is not a proven inventory",
         new_provenance="stored bundle-facts capture: the captured set is not a proven inventory",
     )
-    bundle_members = bundle_analysis_members(scope_record)
+    # ADR-065 D2 (Codex review): a promise only an excluded member could
+    # answer is withheld, not reported as manifest drift.
+    manifest, manifest_note = scope_manifest_to_members(manifest, scope_record)
     new_bundle_snapshot = bundle_snapshot_from_facts(
-        restrict_bundle_facts(new_facts, bundle_members)
+        restrict_bundle_facts(new_facts, scope_record)
     )
     result = compare_bundle_from_facts(
-        restrict_bundle_facts(old_facts, bundle_members),
+        restrict_bundle_facts(old_facts, scope_record),
         new_bundle_snapshot,
         per_library_results,
         manifest=manifest,
@@ -366,5 +368,7 @@ def compare_stored_bundle_facts_pair(
         new_signature_evidence=dict(projected_new_snapshots),
     )
     result.analysis_errors.extend(degraded_notes)
+    if manifest_note is not None:
+        result.analysis_errors.append(manifest_note)
     result.scope_record = scope_record
     return result

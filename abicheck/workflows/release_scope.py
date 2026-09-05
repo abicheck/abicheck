@@ -62,6 +62,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..bundle_facts import BundleFacts
+    from ..bundle_manifest import InstantiationManifest
 
 from ..model.scope_acquisition import (
     AcquisitionState,
@@ -84,6 +85,7 @@ __all__ = [
     "release_global_ran",
     "release_inventory_evidence",
     "restrict_bundle_facts",
+    "scope_manifest_to_members",
     "stored_degraded_matched_members",
     "stored_side_degraded_members",
     "scoped_bundle_maps",
@@ -459,11 +461,19 @@ def scoped_bundle_maps(
     )
 
 
-def restrict_bundle_facts(facts: BundleFacts, members: frozenset[str]) -> BundleFacts:
-    """A copy of *facts* carrying only *members* -- the stored-side
-    counterpart of :func:`scoped_bundle_maps` for a driver whose OLD (or
-    NEW) bundle is reconstructed from a ``BundleFacts`` document."""
-    if members >= set(facts.per_library_snapshots):
+def restrict_bundle_facts(
+    facts: BundleFacts, record: ScopeAcquisitionRecord
+) -> BundleFacts:
+    """A copy of *facts* carrying only :func:`bundle_analysis_members` --
+    the stored-side counterpart of :func:`scoped_bundle_maps` for a driver
+    whose OLD (or NEW) bundle is reconstructed from a ``BundleFacts``
+    document. The captured manifest is scoped the same way
+    (:func:`scope_manifest_to_members`), so a driver falling back to
+    ``facts.manifest`` cannot enforce a promise the retained members were
+    never the ones to answer."""
+    members = bundle_analysis_members(record)
+    manifest, _note = scope_manifest_to_members(facts.manifest, record)
+    if members >= set(facts.per_library_snapshots) and manifest is facts.manifest:
         return facts
     return replace(
         facts,
@@ -476,7 +486,65 @@ def restrict_bundle_facts(facts: BundleFacts, members: frozenset[str]) -> Bundle
         degraded_members={
             k: v for k, v in facts.degraded_members.items() if k in members
         },
+        manifest=manifest,
     )
+
+
+def scope_manifest_to_members(
+    manifest: InstantiationManifest | None,
+    record: ScopeAcquisitionRecord | None,
+) -> tuple[InstantiationManifest | None, str | None]:
+    """*manifest* restricted to the promises the retained bundle members
+    can answer, plus a note naming what was withheld (``None`` when nothing
+    was).
+
+    The manifest drift check asks "does the NEW bundle still provide each
+    promise?", and the bundle graph sees :func:`bundle_analysis_members`
+    only. Once any expected member is missing from that graph -- unchecked
+    (D6) or deliberately out of scope -- an unanswered promise is
+    undecidable: the excluded member may be the one providing it, so
+    ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED``/``_ADDED`` would be a
+    manufactured finding (ADR-065 D2, Codex review). Only an entry pinned
+    to a *retained* provider (``optional_provider=False`` naming it) is
+    still decidable by that provider alone and stays. A complete scope
+    keeps the manifest untouched. The withheld entries are named in the
+    returned note for ``BundleDiffResult.analysis_errors``; the excluded
+    members themselves are already on the completeness axis.
+    """
+    if manifest is None or record is None:
+        return manifest, None
+    keep = bundle_analysis_members(record)
+    excluded = [m for m in record.members if m.member not in keep]
+    if not excluded:
+        return manifest, None
+    from .extraction import _canonical_library_key
+
+    retained_names = {m.member for m in record.members if m.member in keep}
+    retained_names |= {m.name for m in record.members if m.member in keep}
+
+    def _pinned_to_retained(library: str | None) -> bool:
+        if library is None:
+            return False
+        return (
+            library in retained_names
+            or _canonical_library_key(Path(library)) in retained_names
+        )
+
+    kept = tuple(
+        e
+        for e in manifest.entries
+        if not e.optional_provider and _pinned_to_retained(e.library)
+    )
+    withheld = [e.display_name() for e in manifest.entries if e not in kept]
+    if not withheld:
+        return manifest, None
+    note = (
+        "manifest drift check withheld for "
+        f"{len(withheld)} promise(s) ({', '.join(withheld)}): "
+        f"{len(excluded)} member(s) absent from bundle analysis "
+        f"({', '.join(m.name for m in excluded)}) may provide them (ADR-065 D2)"
+    )
+    return (replace(manifest, entries=kept) if kept else None), note
 
 
 def stored_side_degraded_members(
