@@ -820,9 +820,15 @@ def _from_release(
             or _as_int(scope.get("no_comparison_completed_exit_contribution"))
         )
         no_comparison_completed = bool(scope.get("no_comparison_completed"))
+        unmatched_states = {
+            str(m.get("name")): str(m.get("state"))
+            for m in scope.get("members") or []
+            if isinstance(m, dict) and m.get("name") and m.get("state")
+        }
     else:
         removed, added = unmatched_old, unmatched_new
         scope_notice, scope_blocking, no_comparison_completed = None, False, False
+        unmatched_states = {}
     incomplete, incomplete_blocking = _release_contract_coverage_findings(report)
     return CommentModel(
         mode="release",
@@ -853,6 +859,7 @@ def _from_release(
         scope_notice=scope_notice,
         scope_blocking=scope_blocking,
         no_comparison_completed=no_comparison_completed,
+        unmatched_states=unmatched_states,
     )
 
 

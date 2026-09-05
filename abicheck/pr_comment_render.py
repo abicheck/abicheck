@@ -446,14 +446,25 @@ def _library_notes(model: CommentModel) -> list[str]:
     unmatched_old = [x for x in model.unmatched_old if x not in model.removed_libraries]
     unmatched_new = [x for x in model.unmatched_new if x not in model.added_libraries]
     if unmatched_old or unmatched_new:
+        # Each member carries its own acquisition state (a failed OLD
+        # acquisition is not "the NEW inventory is unproven"; Codex review);
+        # the trailing rule is the one D2 statement true of all of them.
+        def _named(x: str) -> str:
+            state = model.unmatched_states.get(x)
+            return f"`{_esc(x)}`" + (
+                f" ({_esc(state.replace('_', ' '))})" if state else ""
+            )
+
         parts = []
         if unmatched_old:
-            parts.append("OLD-only " + ", ".join(f"`{_esc(x)}`" for x in unmatched_old))
+            parts.append("OLD-only " + ", ".join(_named(x) for x in unmatched_old))
         if unmatched_new:
-            parts.append("NEW-only " + ", ".join(f"`{_esc(x)}`" for x in unmatched_new))
+            parts.append("NEW-only " + ", ".join(_named(x) for x in unmatched_new))
         out += [
-            "> ↔️ Unmatched libraries (no counterpart; not removed/added -- the "
-            "lacking side's inventory is unproven, ADR-065 D2): " + "; ".join(parts),
+            "> ↔️ Unmatched libraries (present on one side only; a removal or "
+            "addition needs the lacking side's inventory proven complete, and a "
+            "failed acquisition is never one -- see the comparison scope, "
+            "ADR-065 D2): " + "; ".join(parts),
             "",
         ]
     return out

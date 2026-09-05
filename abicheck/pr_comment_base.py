@@ -247,6 +247,13 @@ class CommentModel:
     # fields above (and the only value `compare`'s non-scan modes ever set).
     scan_incomplete_total: int | None = None
 
+    # ADR-065 S2 (release mode): each `comparison_scope.members` row's
+    # acquisition state by display name, so the unmatched note can say why
+    # a member has no counterpart (`not_supplied`, `failed`, ...) instead of
+    # asserting one reason for all of them (Codex review). Declared last so
+    # a positional caller keeps binding the older tail.
+    unmatched_states: dict[str, str] = field(default_factory=dict)
+
     @property
     def incomplete_total(self) -> int:
         """Exact analysis-incomplete count -- see `scan_incomplete_total`."""
@@ -285,7 +292,9 @@ class CommentModel:
             return (
                 self.scan_breaking_total,
                 self.scan_review_total or 0,
-                self.scan_safe_total if self.scan_safe_total is not None else len(self.safe),
+                self.scan_safe_total
+                if self.scan_safe_total is not None
+                else len(self.safe),
             )
         return len(self.breaking), len(self.review), len(self.safe)
 
@@ -438,9 +447,12 @@ def _evidence_symbol_label(kind: str, raw_symbol: str) -> str:
 #: all (only `diff["compatible"]`/`quality`).
 _EVIDENCE_KIND_DEFAULT_BUCKET = {
     kind: (
-        "breaking" if ChangeKind(kind) in BREAKING_KINDS
-        else "api_break" if ChangeKind(kind) in API_BREAK_KINDS
-        else "risk" if ChangeKind(kind) in RISK_KINDS
+        "breaking"
+        if ChangeKind(kind) in BREAKING_KINDS
+        else "api_break"
+        if ChangeKind(kind) in API_BREAK_KINDS
+        else "risk"
+        if ChangeKind(kind) in RISK_KINDS
         else "compatible"
     )
     for kind in _EVIDENCE_KIND_VALUES
@@ -556,7 +568,6 @@ def _breaking_severities(findings: list[Finding]) -> frozenset[str]:
     return frozenset(f.severity for f in findings if f.severity)
 
 
-
 def _esc(value: object) -> str:
     # Sanitise for a single markdown table cell: escape pipes, neutralise
     # backticks (which would break the surrounding code span) and flatten
@@ -577,4 +588,3 @@ def _esc(value: object) -> str:
         .replace("\n", " ")
         .strip()
     )
-
