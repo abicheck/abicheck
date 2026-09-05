@@ -1768,7 +1768,17 @@ Ordered by dependency, not by size:
    index and its named views, shared report preparation, and standard
    multi-artifact flows. **Every cohort must reduce the number of live
    legacy readers and writers**; a cohort that ends with another populated
-   sidecar has not landed.
+   sidecar has not landed. The **record and function families** are the
+   concrete instance of that last clause and are named here explicitly so
+   they have an owner: `SemanticIR` already populates their occurrences on
+   every header-AST and DWARF producer while their detectors still read
+   `AbiSnapshot.types`/`.functions`. Migration was investigated on
+   2026-09-03 and declined — but the decline is of the *behavioral* change
+   (their matching already resolves through ADR-045's `TypeMap` and
+   `resolve_function_identity`'s CANONICAL tier, so changing matching
+   precedence or published finding IDs would close no defect), not of the
+   consolidation, which needs no new bug to justify it. Track T3 does not
+   cover this: its scope is typedefs and constants.
 
 Extend the existing architecture checks rather than adding a planning
 system. `scripts/semantic_ir_cutover.py`'s per-cohort registration is the

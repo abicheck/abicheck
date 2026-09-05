@@ -455,24 +455,41 @@ concepts:
       Phase 6 item 2 / track T3.
     investigated_declined:
       - item: >-
-          Migrating the record and function detector families onto
-          SemanticIRIndex as Phase 6B's third cohort. Both candidates were
-          checked rather than assumed and neither is blocked the way the
-          original cohort-1 framing described -- but neither has the
-          concrete matching or spelling defect typedefs and constants had,
-          so the migration was declined for lack of a demonstrated benefit.
+          Changing how the record and function detector families MATCH --
+          the behavioral half of migrating them onto SemanticIRIndex as
+          Phase 6B's third cohort. Both candidates were checked rather than
+          assumed and neither is blocked the way the original cohort-1
+          framing described, but neither has the concrete matching or
+          spelling defect typedefs and constants had (records already match
+          through ADR-045's qualified-name-keyed TypeMap; functions already
+          match on the mangled name via resolve_function_identity's
+          CANONICAL tier). Changing their matching precedence or published
+          finding IDs with no defect to close is the kind of behavioral
+          change this repository declines, so it was declined.
         decided: "2026-09-03"
         leaves_open: >-
-          Phase 6B's authority cutover for the two cohorts that DID migrate.
-          typedef_index_pair/constant_index_pair still build the IR-backed
-          AND the legacy-backed index on every comparison and let the legacy
-          projection adjudicate, so no family reads the IR as its sole
-          source. Collapsing that dual construction is an implementation
-          consolidation and needs no new bug to justify it -- which is
-          exactly why this decline cannot close it.
+          The record/function implementation consolidation itself, which
+          this decline does NOT dispose of and which no track owns today.
+          SemanticIR already populates record and function occurrences on
+          every header-AST and DWARF producer while every record and
+          function detector still reads AbiSnapshot.types/.functions -- two
+          independently writable current representations of the same
+          semantic fact, which is the governing prohibition, and a
+          populated sidecar, which Phase 6 item 5 says means a cohort has
+          not landed. Consolidating them needs no new bug to justify it;
+          only the matching change above was declined. Explicitly NOT
+          covered by track T3, whose scope is typedefs and constants only
+          (Codex review, PR #1066 -- the first version of this entry cited
+          T3 here, which left the item this decline actually concerns with
+          no owner at all, recreating the loophole this field exists to
+          close).
         tracked_as: >-
-          duplication-and-convergence-assessment.md Phase 6 item 2 / track
-          T3.
+          duplication-and-convergence-assessment.md Phase 6 item 5
+          ("Expand the proven pattern"), which names the remaining detector
+          families and the populated-sidecar rule. The typedef/constant
+          cutover (Phase 6 item 2 / track T3) is a separate open item, not
+          what this decline leaves open -- this concept's own removal_gate
+          covers it.
   public_surface:
     primitive: complete
     producers: complete
