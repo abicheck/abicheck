@@ -29,11 +29,44 @@ module holding the per-field thresholds both this module and ``fact_codec``
 need. Importing them back from ``fact_codec`` instead would be a real import
 cycle (``fact_codec`` re-exports this module's three public names for
 compatibility), which the ``import-cycle-growth`` gate rejects.
+
+**T9 / ADR-063 Phase 6 item 4 (the "legacy-hybrid backfill blocker"):** the
+whole-snapshot ``reliable``/``evidenced`` framework above cannot see the one
+ambiguity that only exists on a ``--ast-frontend hybrid`` snapshot: seven
+fields (``RecordType.deprecated``, ``EnumType.deprecated``/``is_scoped``,
+``Function.deprecated``, ``Variable.deprecated``, ``TypeField.deprecated``/
+``default``) are gated, at COMPARE time, by ``fact_provenance.py``'s
+per-declaration ``AbiSnapshot.fact_provenance`` map rather than by a
+snapshot-level flag -- because a hybrid merge's own two backends can
+disagree on which of them actually populated any one declaration's fact,
+which no whole-snapshot boolean can express. ``clang_deprecation_facts_
+reliable`` reads ``True`` for a hybrid producer unconditionally (an
+ordinary, fresh hybrid dump states this fact explicitly per declaration, so
+the flag has no reason to distrust it), so the ``unreliable``/
+``unproduceable`` checks above both pass for a legacy (pre-``min_schema_
+version``) hybrid document, and the pre-existing ``__post_init__`` bridge's
+``Fact.present(raw_value)`` is left standing -- even for a declaration
+neither backend actually confirmed on that document, since the legacy JSON
+format always serializes SOME value (there is no "omitted" concept once a
+dict round-trips through a dataclass constructor). ``fact_provenance_kind``
+on :class:`CaseAFactRule`, consulted only when the
+document's ``ast_producer`` is exactly ``"hybrid"`` and only for a rule
+that names one, resolves this the same way ``fact_provenance.
+resolved_fact_producer`` already does at compare time: probe the
+declaration's namespace-qualified provenance key first, falling back to the
+bare pre-qualification key only when no OTHER declaration on this same
+snapshot shares that bare name (an ambiguous bare fallback would misattribute
+one declaration's real provenance to an unrelated sibling). No entry under
+either key means neither backend's merge recorded ever having looked --
+which downgrades the *claim* exactly like an ``evidenced``-only miss above
+(never the value, and only when the value is already the field's own
+resting default -- the existing "downgrade the claim, never the value"
+convention this module's own callers already rely on).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -71,6 +104,19 @@ class CaseAFactRule:
     ``ast_producer`` note); ``normalized_default`` is the value the legacy
     field is reset to when the fact is downgraded, so the pair cannot be
     left holding a placeholder beside a NOT_COLLECTED status.
+
+    ``fact_provenance_kind`` (see this module's own "legacy-hybrid backfill
+    blocker" docstring section) names which per-declaration
+    ``fact_provenance`` key shape this field's provenance is recorded under
+    on a hybrid merge — ``"type"``/``"enum"``/``"field"`` (namespace-
+    qualified with a bare-name fallback, keyed by the owning
+    ``RecordType``/``EnumType``'s own identity) or ``"func"``/``"var"``
+    (keyed by the declaration's own mangled name, already unique — no
+    bare/qualified split to resolve). ``None`` (the default) means this
+    field carries no such per-declaration mechanism, so the check is never
+    consulted for it — every rule converted before this one, and
+    ``is_va_list``/``is_restrict``/``access``, which have their own
+    independent reliability signals instead.
     """
 
     owner: str
@@ -78,43 +124,78 @@ class CaseAFactRule:
     min_schema_version: int
     reliable: bool
     normalized_default: Any
+    fact_provenance_kind: str | None = None
+
+
+#: ``(qualified key, bare key)`` for the entity a rule's per-declaration
+#: ``fact_provenance`` lookup is scoped by -- the object itself for a
+#: ``RecordType``/``EnumType`` rule, its OWNING record for a ``TypeField``
+#: rule (a field's provenance key is scoped by its type, not the field's own
+#: name -- see ``dumper_hybrid._merge_field``), and the declaration's own
+#: mangled name twice over for ``Function``/``Variable`` (already unique, so
+#: there is no bare/qualified split to fall back through). ``(None, None)``
+#: for ``Param``, which carries no per-declaration provenance mechanism at
+#: all -- its one case-(a) field (``is_va_list``) is gated by a snapshot-level
+#: producer check instead (``apply_legacy_fact_backfill``'s own
+#: ``ast_producer_value == "clang"`` gate), so no rule ever sets
+#: ``fact_provenance_kind`` for it and this value is never consulted.
+_OwnerKey = tuple[str, str] | tuple[None, None]
 
 
 def _owner_pairs(
     d: dict[str, Any],
     owner: str,
     decoded: dict[str, list[Any]],
-) -> Iterator[tuple[dict[str, Any], Any]]:
-    """Every ``(raw dict, decoded object)`` pair for one *owner* dataclass.
+) -> Iterator[tuple[dict[str, Any], Any, _OwnerKey]]:
+    """Every ``(raw dict, decoded object, owner_key)`` triple for one *owner*
+    dataclass.
 
     The one place this module knows how a given owner's instances are
     reached from the raw snapshot document — two owners (``TypeField``,
     ``Param``) live one level below a collection rather than in one, and a
     per-field ``zip`` open-coded at each call site is exactly the kind of
     duplication a later owner's conversion would get subtly wrong.
+
+    ``owner_key`` (added for the module docstring's "legacy-hybrid backfill
+    blocker" section) is threaded through unconditionally rather than
+    computed only when a rule needs it — every owner already has it for
+    free from the same objects this generator already walks, and computing
+    it lazily per-rule would mean re-deriving the same TypeField-owning
+    RecordType walk a second time.
     """
     if owner == "RecordType":
-        yield from zip(d.get("types", []), decoded.get("types", []), strict=False)
+        for raw, obj in zip(d.get("types", []), decoded.get("types", []), strict=False):
+            yield raw, obj, (obj.qualified_name or obj.name, obj.name)
     elif owner == "EnumType":
-        yield from zip(d.get("enums", []), decoded.get("enums", []), strict=False)
+        for raw, obj in zip(d.get("enums", []), decoded.get("enums", []), strict=False):
+            yield raw, obj, (obj.qualified_name or obj.name, obj.name)
     elif owner == "Variable":
-        yield from zip(
+        for raw, obj in zip(
             d.get("variables", []), decoded.get("variables", []), strict=False
-        )
+        ):
+            yield raw, obj, (obj.mangled, obj.mangled)
     elif owner == "Function":
-        yield from zip(
+        for raw, obj in zip(
             d.get("functions", []), decoded.get("functions", []), strict=False
-        )
+        ):
+            yield raw, obj, (obj.mangled, obj.mangled)
     elif owner == "TypeField":
         for type_dict, record in zip(
             d.get("types", []), decoded.get("types", []), strict=False
         ):
-            yield from zip(type_dict.get("fields", []), record.fields, strict=False)
+            owner_key: _OwnerKey = (record.qualified_name or record.name, record.name)
+            for raw, field in zip(
+                type_dict.get("fields", []), record.fields, strict=False
+            ):
+                yield raw, field, owner_key
     elif owner == "Param":
         for func_dict, func in zip(
             d.get("functions", []), decoded.get("functions", []), strict=False
         ):
-            yield from zip(func_dict.get("params", []), func.params, strict=False)
+            for raw, param in zip(
+                func_dict.get("params", []), func.params, strict=False
+            ):
+                yield raw, param, (None, None)
     else:  # pragma: no cover - guarded by the caller's own closed rule set
         raise ValueError(f"no raw-document navigation known for owner {owner!r}")
 
@@ -249,6 +330,82 @@ def _unproduceable(owner: str, field: str, evidenced: frozenset[str]) -> bool:
     return not (set(entry.producing_backends) & evidenced)
 
 
+def _bare_name_ambiguous(entities: list[Any]) -> dict[str, bool]:
+    """Per bare ``.name``, whether more than one DISTINCT qualified identity
+    on this document's side shares it.
+
+    The per-snapshot-side counterpart of
+    ``fact_provenance.resolved_fact_producer``'s own ``bare_unambiguous``
+    guard, computed once here instead of once per rule/declaration:
+    :func:`_hybrid_provenance_confirms` must not fall back from a
+    qualified-but-absent provenance key to the bare one when two distinct
+    types/enums on this same side happen to share a leaf name, since the
+    fallback would then attribute one declaration's real provenance entry
+    to an unrelated sibling.
+    """
+    qualified_by_bare: dict[str, set[str]] = {}
+    for e in entities:
+        qualified_by_bare.setdefault(e.name, set()).add(e.qualified_name or e.name)
+    return {bare: len(qualified) > 1 for bare, qualified in qualified_by_bare.items()}
+
+
+def _hybrid_provenance_confirms(
+    rule: CaseAFactRule,
+    obj: Any,
+    owner_key: _OwnerKey,
+    fact_provenance: Mapping[str, str],
+    bare_ambiguous: bool,
+) -> bool:
+    """Whether *this declaration's* ``fact_provenance`` entry (module
+    docstring's "legacy-hybrid backfill blocker" section) confirms that some
+    backend's merge actually recorded looking at *rule.field* here.
+
+    Key formats are inlined rather than imported from ``fact_provenance.py``
+    (a flat-root, ``model``-only-adjacent module): ``storage`` may depend on
+    ``model`` only (``architecture/modules.yaml``), and the scheme itself is
+    small, public, and stable across a serialize/deserialize round-trip
+    (``fact_provenance.py``'s own module docstring) -- a second literal
+    formatting of the same three-token scheme, not a duplicated algorithm.
+
+    Probes the namespace-qualified key first, falling back to the former
+    bare key only when *bare_ambiguous* says no OTHER declaration on this
+    side shares that bare name -- the same qualified-then-bare-with-
+    ambiguity-guard shape ``fact_provenance.resolved_fact_producer`` already
+    applies at compare time, so a hybrid baseline persisted before the
+    provenance-key qualification fix (real data recorded under the bare key
+    alone) is not wrongly treated as unconfirmed.
+    """
+    qualified, bare = owner_key
+    kind = rule.fact_provenance_kind
+    if kind == "func":
+        return f"func:{qualified}:{rule.field}" in fact_provenance
+    if kind == "var":
+        return f"var:{qualified}:{rule.field}" in fact_provenance
+    if kind == "type":
+        prefix = "type"
+    elif kind == "enum":
+        prefix = "enum"
+    elif kind == "field":
+        prefix = "type"
+        # A field's own key names both the owning type and the field itself
+        # (`fact_provenance.field_fact_key`) -- the field's bare NAME is not
+        # part of the ambiguity question above (only the owning type's is).
+        suffix = f":field:{obj.name}:{rule.field}"
+        if f"{prefix}:{qualified}{suffix}" in fact_provenance:
+            return True
+        if bare != qualified and not bare_ambiguous:
+            return f"{prefix}:{bare}{suffix}" in fact_provenance
+        return False
+    else:  # pragma: no cover - guarded by the caller's own closed rule set
+        raise ValueError(f"unknown fact_provenance_kind {kind!r}")
+    suffix = f":{rule.field}"
+    if f"{prefix}:{qualified}{suffix}" in fact_provenance:
+        return True
+    if bare != qualified and not bare_ambiguous:
+        return f"{prefix}:{bare}{suffix}" in fact_provenance
+    return False
+
+
 def apply_case_a_fact_backfill(
     d: dict[str, Any],
     *,
@@ -261,6 +418,13 @@ def apply_case_a_fact_backfill(
     # document with no header provenance at all (CodeRabbit review, PR #995).
     # A caller with nothing to report passes `frozenset()`.
     evidenced: frozenset[str],
+    # Both optional and both `None` by default -- a caller that never heard
+    # of the legacy-hybrid provenance check (every pre-existing call site)
+    # gets exactly the old behavior, since no rule it passes can carry a
+    # `fact_provenance_kind` it doesn't already set. See the module
+    # docstring's "legacy-hybrid backfill blocker" section.
+    fact_provenance: Mapping[str, str] | None = None,
+    ast_producer: str | None = None,
     **decoded: list[Any],
 ) -> None:
     """Downgrade every case-(a) fact a legacy document cannot vouch for.
@@ -283,7 +447,28 @@ def apply_case_a_fact_backfill(
     :func:`evidenced_producers`): a producer this document shows no trace of
     cannot have observed a fact only it produces, which no reliability flag
     expresses.
+
+    ``fact_provenance``/``ast_producer`` carry the third downgrade reason
+    (module docstring, "legacy-hybrid backfill blocker"): for a rule whose
+    ``fact_provenance_kind`` is set, on a document whose ``ast_producer`` is
+    exactly ``"hybrid"``, the whole-snapshot ``reliable``/``evidenced``
+    checks above both pass unconditionally, but the per-DECLARATION question
+    they cannot ask -- did either backend's merge actually record having
+    looked at this one declaration's fact -- is exactly what
+    ``fact_provenance`` answers. Absent on both callers, this check is
+    inert, matching every pre-existing rule and call site exactly.
     """
+    # Bare-name ambiguity, precomputed once per document rather than
+    # per-rule: whether a given bare `RecordType`/`EnumType` name is shared
+    # by more than one distinct qualified identity on THIS side (needed only
+    # by the hybrid-provenance check below, mirroring
+    # `fact_provenance.resolved_fact_producer`'s own `bare_unambiguous`
+    # guard -- an ambiguous bare fallback would misattribute one
+    # declaration's real provenance to an unrelated sibling sharing its leaf
+    # name). Harmless (and unused) when no rule sets `fact_provenance_kind`.
+    type_bare_ambiguous = _bare_name_ambiguous(decoded.get("types", []))
+    enum_bare_ambiguous = _bare_name_ambiguous(decoded.get("enums", []))
+
     for rule in rules:
         if schema_version >= rule.min_schema_version:
             continue
@@ -306,10 +491,28 @@ def apply_case_a_fact_backfill(
         # block, the document's own platform.
         unreliable = not rule.reliable
         unproduceable = _unproduceable(rule.owner, rule.field, evidenced)
-        if not (unreliable or unproduceable):
+        # Third reason, hybrid-only (module docstring, "legacy-hybrid
+        # backfill blocker"): a rule naming a `fact_provenance_kind`, on a
+        # document whose merge recorded per-declaration provenance at all,
+        # needs every declaration probed even when `unreliable`/
+        # `unproduceable` are both False -- so this must join the rule-level
+        # skip below, not just gate what happens inside the loop.
+        provenance_gated = (
+            rule.fact_provenance_kind is not None
+            and ast_producer == "hybrid"
+            and fact_provenance is not None
+        )
+        if not (unreliable or unproduceable or provenance_gated):
             continue
         fact_key = f"{rule.field}_fact"
-        for raw, obj in _owner_pairs(d, rule.owner, decoded):
+        bare_ambiguous: dict[str, bool]
+        if rule.owner in ("RecordType", "TypeField"):
+            bare_ambiguous = type_bare_ambiguous
+        elif rule.owner == "EnumType":
+            bare_ambiguous = enum_bare_ambiguous
+        else:
+            bare_ambiguous = {}
+        for raw, obj, owner_key in _owner_pairs(d, rule.owner, decoded):
             # Skip only an entry carrying a *usable* fact, not merely the
             # key. A `"<field>_fact": {}` or `: null` decodes to nothing
             # (`decode_fact`'s own `if not raw`), so the owning dataclass's
@@ -324,13 +527,36 @@ def apply_case_a_fact_backfill(
             if unreliable:
                 setattr(obj, rule.field, rule.normalized_default)
                 setattr(obj, fact_key, Fact.not_collected())
-            elif getattr(obj, rule.field) == rule.normalized_default:
-                # Unproduceable-only: downgrade the *claim*, never the
-                # value. A non-header document carrying a non-resting value
-                # for one of these fields got it from somewhere this
-                # registry doesn't model, and discarding it would lose real
-                # data -- unlike the unreliable case, where the value is
-                # known to be a placeholder.
+                continue
+            downgrade_claim_only = unproduceable
+            bare_name = owner_key[1]
+            if (
+                not downgrade_claim_only
+                and provenance_gated
+                and fact_provenance is not None  # narrows for mypy
+                and not _hybrid_provenance_confirms(
+                    rule,
+                    obj,
+                    owner_key,
+                    fact_provenance,
+                    bare_ambiguous.get(bare_name, False)
+                    if bare_name is not None
+                    else False,
+                )
+            ):
+                downgrade_claim_only = True
+            if (
+                downgrade_claim_only
+                and getattr(obj, rule.field) == rule.normalized_default
+            ):
+                # Downgrade the *claim*, never the value, in either
+                # remaining case: a non-header document (unproduceable) or a
+                # hybrid document whose merge never recorded provenance for
+                # this declaration (provenance_gated) carrying a non-resting
+                # value for one of these fields got it from somewhere this
+                # correction doesn't model, and discarding it would lose
+                # real data -- unlike the unreliable case above, where the
+                # value is known to be a placeholder.
                 setattr(obj, fact_key, Fact.not_collected())
 
 
@@ -357,6 +583,12 @@ def apply_legacy_fact_backfill(
     castxml_var_access_facts_reliable_value: bool = True,
     clang_field_initializer_facts_reliable_value: bool = True,
     clang_deprecation_facts_reliable_value: bool = True,
+    # T9 / ADR-063 Phase 6 item 4: the raw `AbiSnapshot.fact_provenance` map,
+    # threaded through so the seven rules below carrying a
+    # `fact_provenance_kind` can resolve the legacy-hybrid backfill blocker
+    # (see `apply_case_a_fact_backfill`'s own docstring). `None` (the
+    # default) leaves every rule's existing behavior exactly unchanged.
+    fact_provenance: Mapping[str, str] | None = None,
 ) -> None:
     """Correct the legacy backfill for every case-(a) fact a document predates.
 
@@ -466,6 +698,7 @@ def apply_legacy_fact_backfill(
                 _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
                 clang_field_initializer_facts_reliable_value,
                 None,
+                fact_provenance_kind="field",
             ),
             CaseAFactRule(
                 "TypeField",
@@ -473,17 +706,32 @@ def apply_legacy_fact_backfill(
                 _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
                 clang_deprecation_facts_reliable_value,
                 None,
+                fact_provenance_kind="field",
             ),
             # ADR-063 Phase 5 (ninth batch, schema v40): the other four
             # `deprecated` surfaces plus EnumType.is_scoped, all guarded by
             # the same flag TypeField.deprecated is -- one rule each, which
             # is the whole point of the rule table.
+            #
+            # T9 / ADR-063 Phase 6 item 4: all seven rules in this batch
+            # (including the two TypeField ones above) also carry a
+            # `fact_provenance_kind` -- the whole-snapshot
+            # `clang_deprecation_facts_reliable`/`clang_field_initializer_
+            # facts_reliable` flags above both read True unconditionally for
+            # a hybrid producer (an ordinary fresh hybrid dump states these
+            # facts explicitly per declaration), so on a document that
+            # predates this fact family's own schema version, only a real
+            # per-declaration `fact_provenance` lookup -- not either flag --
+            # can tell "neither backend's merge ever recorded looking here"
+            # apart from "confirmed, genuinely resting-default". See
+            # `apply_case_a_fact_backfill`'s own docstring.
             CaseAFactRule(
                 "Function",
                 "deprecated",
                 _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
                 clang_deprecation_facts_reliable_value,
                 None,
+                fact_provenance_kind="func",
             ),
             CaseAFactRule(
                 "Variable",
@@ -491,6 +739,7 @@ def apply_legacy_fact_backfill(
                 _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
                 clang_deprecation_facts_reliable_value,
                 None,
+                fact_provenance_kind="var",
             ),
             CaseAFactRule(
                 "RecordType",
@@ -498,6 +747,7 @@ def apply_legacy_fact_backfill(
                 _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
                 clang_deprecation_facts_reliable_value,
                 None,
+                fact_provenance_kind="type",
             ),
             CaseAFactRule(
                 "EnumType",
@@ -505,6 +755,7 @@ def apply_legacy_fact_backfill(
                 _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
                 clang_deprecation_facts_reliable_value,
                 None,
+                fact_provenance_kind="enum",
             ),
             CaseAFactRule(
                 "EnumType",
@@ -512,6 +763,7 @@ def apply_legacy_fact_backfill(
                 _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
                 clang_deprecation_facts_reliable_value,
                 None,
+                fact_provenance_kind="enum",
             ),
             # ADR-063 Phase 5 (tenth batch, schema v41): the last two
             # case-(a) fields, each with its own guarding flag.
@@ -531,6 +783,8 @@ def apply_legacy_fact_backfill(
             ),
         ),
         evidenced=evidenced,
+        fact_provenance=fact_provenance,
+        ast_producer=ast_producer_value,
         types=types,
         functions=funcs,
         variables=variables or [],

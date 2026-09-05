@@ -41,7 +41,10 @@ from abicheck.model import (
     Variable,
 )
 from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
-from abicheck.storage.fact_codec import _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
+from abicheck.storage.fact_codec import (
+    _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
+)
 
 _LEGACY = _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS - 1
 
@@ -198,6 +201,246 @@ class TestDeprecatedFamilyRoundTrip:
         )
         f = snapshot_from_dict(d).types[0].fields[0]
         assert f.deprecated_fact.status is FactStatus.NOT_COLLECTED
+
+
+#: A well-formed ``qualified_name_fact``/``enum``-sibling encoding -- needed
+#: whenever a fixture below sets a real ``qualified_name`` differing from its
+#: bare ``name`` at ``_LEGACY`` (which already sits above both
+#: ``RecordType``/``EnumType``'s own case-(b) qualified-name schema
+#: thresholds): without it, the missing sibling key reads as a
+#: malformed/hand-authored document (`decode_fact`'s own documented
+#: contract) and the explicit ``Fact.not_collected()`` that produces
+#: overwrites the legacy ``qualified_name`` value back to ``None`` --
+#: unrelated to, and a confound for, the mechanism these tests target.
+def _present(value: object) -> dict[str, object]:
+    return {"status": "present", "value": value}
+
+
+class TestLegacyHybridProvenanceBackfill:
+    """T9 / ADR-063 Phase 6 item 4 ("legacy-hybrid backfill blocker").
+
+    ``clang_deprecation_facts_reliable`` reads True unconditionally for a
+    hybrid producer (an ordinary, fresh hybrid dump states this fact
+    explicitly per declaration, so the flag has no reason to distrust it),
+    so on a document that predates this fact family's own schema version the
+    whole-snapshot ``reliable``/``evidenced`` checks both pass regardless —
+    only a real per-declaration ``fact_provenance`` lookup can tell "neither
+    backend's merge ever recorded looking here" apart from "confirmed,
+    genuinely resting-default". See ``storage/fact_backfill.py``'s own
+    module docstring for the full account.
+
+    Every fixture spells its ambiguous fact as an EXPLICIT resting value
+    (``"deprecated": None``), never an omitted key: an omitted legacy key is
+    a *different*, already-covered shape (`decode_fact_with_legacy_presence`
+    resolves it to ``Fact.not_collected()`` outright, before this module's
+    correction pass ever runs) -- the shape this module's own docstring
+    describes is the legacy JSON format's inability to omit a value at all.
+    """
+
+    def test_confirmed_by_qualified_provenance_key_stays_present(self) -> None:
+        d = _minimal_dict(
+            schema_version=_LEGACY,
+            ast_producer="hybrid",
+            from_headers=True,
+            types=[
+                {
+                    "name": "Foo",
+                    "qualified_name": "ns::Foo",
+                    "qualified_name_fact": _present("ns::Foo"),
+                    "kind": "class",
+                    "deprecated": None,
+                }
+            ],
+            fact_provenance={"type:ns::Foo:deprecated": "castxml"},
+        )
+        rec = snapshot_from_dict(d).types[0]
+        assert rec.deprecated_fact.status is FactStatus.PRESENT
+
+    def test_no_provenance_entry_downgrades_a_resting_default(self) -> None:
+        d = _minimal_dict(
+            schema_version=_LEGACY,
+            ast_producer="hybrid",
+            from_headers=True,
+            types=[
+                {
+                    "name": "Foo",
+                    "qualified_name": "ns::Foo",
+                    "qualified_name_fact": _present("ns::Foo"),
+                    "kind": "class",
+                    "deprecated": None,
+                }
+            ],
+            fact_provenance={},
+        )
+        rec = snapshot_from_dict(d).types[0]
+        assert rec.deprecated is None
+        assert rec.deprecated_fact.status is FactStatus.NOT_COLLECTED
+
+    def test_no_provenance_entry_preserves_a_real_non_default_value(self) -> None:
+        # "Downgrade the claim, never the value" -- a document carrying a
+        # non-resting value for this field got it from somewhere this
+        # correction doesn't model, and discarding it would lose real data.
+        d = _minimal_dict(
+            schema_version=_LEGACY,
+            ast_producer="hybrid",
+            from_headers=True,
+            types=[
+                {
+                    "name": "Foo",
+                    "qualified_name": "ns::Foo",
+                    "qualified_name_fact": _present("ns::Foo"),
+                    "kind": "class",
+                    "deprecated": "use Bar",
+                }
+            ],
+            fact_provenance={},
+        )
+        rec = snapshot_from_dict(d).types[0]
+        assert rec.deprecated == "use Bar"
+        assert rec.deprecated_fact.status is FactStatus.PRESENT
+
+    def test_bare_key_fallback_when_unambiguous(self) -> None:
+        # A hybrid baseline persisted before the provenance-key
+        # qualification fix has real provenance recorded under the former
+        # bare key alone -- must still resolve, not read as unconfirmed.
+        d = _minimal_dict(
+            schema_version=_LEGACY,
+            ast_producer="hybrid",
+            from_headers=True,
+            types=[
+                {
+                    "name": "Foo",
+                    "qualified_name": "ns::Foo",
+                    "qualified_name_fact": _present("ns::Foo"),
+                    "kind": "class",
+                    "deprecated": None,
+                }
+            ],
+            fact_provenance={"type:Foo:deprecated": "castxml"},
+        )
+        rec = snapshot_from_dict(d).types[0]
+        assert rec.deprecated_fact.status is FactStatus.PRESENT
+
+    def test_bare_key_fallback_declined_when_ambiguous(self) -> None:
+        # Two distinct qualified types share the bare name "Foo" -- the
+        # bare-keyed provenance entry cannot be safely attributed to either
+        # one, so neither may fall back to it.
+        d = _minimal_dict(
+            schema_version=_LEGACY,
+            ast_producer="hybrid",
+            from_headers=True,
+            types=[
+                {
+                    "name": "Foo",
+                    "qualified_name": "ns::Foo",
+                    "qualified_name_fact": _present("ns::Foo"),
+                    "kind": "class",
+                    "deprecated": None,
+                },
+                {
+                    "name": "Foo",
+                    "qualified_name": "other::Foo",
+                    "qualified_name_fact": _present("other::Foo"),
+                    "kind": "class",
+                    "deprecated": None,
+                },
+            ],
+            fact_provenance={"type:Foo:deprecated": "castxml"},
+        )
+        recs = snapshot_from_dict(d).types
+        assert {r.deprecated_fact.status for r in recs} == {FactStatus.NOT_COLLECTED}
+
+    def test_typefield_deprecated_uses_owning_type_provenance_key(self) -> None:
+        # TypeField.deprecated converted one batch earlier (v39) than the
+        # other six fields in this table (v40) -- needs its OWN, one-lower
+        # legacy threshold to actually reach the backfill rule at all
+        # (schema_version == 39 is already >= TypeField's own min_schema_
+        # version, so at 39 this rule's own decode-time
+        # `decode_fact_with_legacy_presence` resolves it directly, never
+        # reaching this correction pass -- see
+        # `test_typefield_deprecated_answers_to_the_same_flag` above for
+        # that already-covered, ordinary v39 shape).
+        d = _minimal_dict(
+            schema_version=_MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS - 1,
+            ast_producer="hybrid",
+            from_headers=True,
+            types=[
+                {
+                    "name": "Foo",
+                    "qualified_name": "ns::Foo",
+                    "qualified_name_fact": _present("ns::Foo"),
+                    "kind": "class",
+                    "fields": [{"name": "m", "type": "int", "deprecated": None}],
+                }
+            ],
+            fact_provenance={"type:ns::Foo:field:m:deprecated": "clang"},
+        )
+        field = snapshot_from_dict(d).types[0].fields[0]
+        assert field.deprecated_fact.status is FactStatus.PRESENT
+
+    def test_function_and_variable_use_mangled_name_key(self) -> None:
+        # Mangled names are already unique -- no bare/qualified split, and
+        # no provenance entry at all means neither backend ever looked.
+        d = _minimal_dict(
+            schema_version=_LEGACY,
+            ast_producer="hybrid",
+            from_headers=True,
+            functions=[
+                {
+                    "name": "f",
+                    "mangled": "_Z1fv",
+                    "return_type": "void",
+                    "deprecated": None,
+                }
+            ],
+            variables=[
+                {"name": "g", "mangled": "g", "type": "int", "deprecated": None}
+            ],
+            fact_provenance={},
+        )
+        snap = snapshot_from_dict(d)
+        assert snap.functions[0].deprecated_fact.status is FactStatus.NOT_COLLECTED
+        assert snap.variables[0].deprecated_fact.status is FactStatus.NOT_COLLECTED
+
+    def test_enum_is_scoped_uses_the_enum_provenance_key(self) -> None:
+        d = _minimal_dict(
+            schema_version=_LEGACY,
+            ast_producer="hybrid",
+            from_headers=True,
+            enums=[
+                {
+                    "name": "Color",
+                    "qualified_name": "ns::Color",
+                    "qualified_name_fact": _present("ns::Color"),
+                    "is_scoped": False,
+                }
+            ],
+            fact_provenance={"enum:ns::Color:is_scoped": "clang"},
+        )
+        e = snapshot_from_dict(d).enums[0]
+        assert e.is_scoped_fact.status is FactStatus.PRESENT
+
+    def test_non_hybrid_producer_is_unaffected(self) -> None:
+        # The provenance check only ever applies to ast_producer == "hybrid"
+        # -- a plain clang/castxml legacy document keeps its pre-existing
+        # (unrelated) reliability-flag-only behavior exactly.
+        d = _minimal_dict(
+            schema_version=_LEGACY,
+            ast_producer="castxml",
+            from_headers=True,
+            types=[
+                {
+                    "name": "Foo",
+                    "qualified_name": "ns::Foo",
+                    "qualified_name_fact": _present("ns::Foo"),
+                    "kind": "class",
+                    "deprecated": None,
+                }
+            ],
+            fact_provenance={},
+        )
+        rec = snapshot_from_dict(d).types[0]
+        assert rec.deprecated_fact.status is FactStatus.PRESENT
 
 
 class TestEnumIsScopedFact:
