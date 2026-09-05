@@ -517,6 +517,12 @@ Phase 7), and the exit code is the worst contribution across them:
   was still incomplete (a contract-coverage gap). Both can independently
   produce exit `1`, for unrelated reasons, and `aggregate` records which one
   fired rather than merging them into one undifferentiated `1`.
+- **analysis_assurance** — reads back each analyzed target's own
+  `analysis_assurance_exit_contribution` (`--require-complete-analysis`; see
+  "Analysis-assurance contribution" above) and folds it with `max` the same way (aggregate
+  schema `1.5`); `aggregate` never recomputes it. A target whose own evidence
+  was incomplete under that flag aggregates to `1` on this axis alone,
+  independently of contract coverage and of the completeness axis below.
 - **scope_completeness** — reads back each analyzed target's own
   completeness-axis contributions (the `exit` block's
   `incomplete_scope_contribution` and `no_comparison_completed_contribution`;
@@ -534,7 +540,7 @@ Phase 7), and the exit code is the worst contribution across them:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; a release target's comparison scope gated (`--on-incomplete-scope block`, or no comparison completed); **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
+| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; a target's own analysis assurance was incomplete under `--require-complete-analysis`; a release target's comparison scope gated (`--on-incomplete-scope block`, or no comparison completed); **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
@@ -593,11 +599,13 @@ the JSON output's `effective_policy` block, including which source
 appears for a direct Python-API caller of `aggregate()` forcing a value
 (there is no CLI spelling for it). The `--format json` output is versioned
 (`aggregate_schema_version` — see `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION`
-for the current value) and carries the four axes
-separately under `gate` / `coverage` / `compatibility` / `contract_coverage`
-— the last is `{"exit_contribution": 0, "incomplete_targets": []}`-shaped and
-present even when no target used `--contract` (an empty
-`incomplete_targets` list, not an omitted block).
+for the current value) and carries the six axes
+separately under `gate` / `coverage` / `compatibility` / `contract_coverage` /
+`analysis_assurance` / `scope_completeness` — the last three are
+`{"exit_contribution": 0, "incomplete_targets": []}`-shaped and present even
+when no target used `--contract`/`--require-complete-analysis` or every
+release target checked its whole scope (an empty `incomplete_targets` list,
+not an omitted block).
 
 When targets are checked under several toolchain profiles (report ids of the
 form `target@profile#channel@depth`), two additional reporting-only blocks
