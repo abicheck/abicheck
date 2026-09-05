@@ -895,3 +895,117 @@ class TestStoredLiveDriverSurvivesAMemberExtractionFailure:
         assert by_key["libbad.so"].state is AcquisitionState.FAILED
         assert [m.member for m in record.unchecked_members] == ["libbad.so"]
         assert record.is_incomplete and not record.no_comparison_completed
+
+
+class TestStoredLiveExtractionFailureIsAnOperationalError:
+    """A NEW member whose extraction fails *in this run* is the native
+    fan-out's per-library `ERROR`: `run_outcome.operational` reads
+    `extraction_error` and the exit is floored at 4 under either
+    `--on-incomplete-scope` policy -- never a warn-accepted scope gap that
+    lets a damaged current artifact exit 0. A stored capture's own D8
+    `degraded` marker stays a scope-axis matter (Codex review, nineteenth
+    round)."""
+
+    @staticmethod
+    def _point_discovery_at_json(monkeypatch: pytest.MonkeyPatch) -> None:
+        import abicheck.package as package
+
+        monkeypatch.setattr(
+            package,
+            "discover_shared_libraries",
+            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
+        )
+
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    @pytest.mark.parametrize(
+        "damage", [b"{not json", b'{"schema_version": 1}'], ids=["syntax", "fields"]
+    )
+    def test_cli_floors_the_exit_and_names_the_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        policy: str,
+        damage: bytes,
+    ) -> None:
+        self._point_discovery_at_json(monkeypatch)
+        libs = {
+            "libok.so": _lib("libok.so", exports=("ok_fn",)),
+            "libbad.so": _lib("libbad.so", exports=("bad_fn",)),
+        }
+        old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
+        new_dir = tmp_path / "new"
+        _write(new_dir, "libok.so.json", libs["libok.so"])
+        (new_dir / "libbad.so.json").write_bytes(damage)
+        code, doc = _invoke_json(
+            "compare", str(old), str(new_dir), "--on-incomplete-scope", policy
+        )
+        assert code == 4, doc
+        assert doc["run_outcome"]["operational"] == "extraction_error"
+        assert doc["run_outcome"]["scope"] == "incomplete"
+        assert list(doc["libraries"]) == ["libok.so"]
+        assert list(doc["extraction_failures"]) == ["libbad.so"]
+        assert doc["comparison_scope"]["unchecked"] == ["libbad.so"]
+        assert doc["comparison_scope"]["counts"]["failed"] == 1
+        assert any(
+            "libbad.so" in e and "failed extraction" in e
+            for e in doc["analysis_errors"]
+        )
+
+    def test_a_stored_degraded_marker_is_not_an_extraction_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Control: the D8 marker records a *past* capture failure; it is
+        gated by the completeness policy, not floored as this run's error."""
+        self._point_discovery_at_json(monkeypatch)
+        libs = {
+            "libok.so": _lib("libok.so", exports=("ok_fn",)),
+            "libdeg.so": _lib("libdeg.so", exports=("deg_fn",)),
+        }
+        old = _facts_file(
+            tmp_path, "old.bundlefacts.json", libs, degraded={"libdeg.so": "ELF-only"}
+        )
+        new_dir = tmp_path / "new"
+        for name, snap in libs.items():
+            _write(new_dir, f"{name}.json", snap)
+        code, doc = _invoke_json("compare", str(old), str(new_dir))
+        assert code == 0, doc
+        assert doc["run_outcome"]["operational"] == "none"
+        assert doc["extraction_failures"] == {}
+        code, doc = _invoke_json(
+            "compare", str(old), str(new_dir), "--on-incomplete-scope", "block"
+        )
+        assert code == 1
+
+    def test_every_member_failing_is_also_no_comparison_completed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._point_discovery_at_json(monkeypatch)
+        libs = {"libbad.so": _lib("libbad.so", exports=("bad_fn",))}
+        old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        (new_dir / "libbad.so.json").write_bytes(b"{not json")
+        code, doc = _invoke_json("compare", str(old), str(new_dir))
+        assert code == 4, doc
+        assert doc["comparison_scope"]["no_comparison_completed"] is True
+        assert doc["run_outcome"]["compatibility"] is None
+        assert doc["extraction_failures"] == {
+            "libbad.so": doc["extraction_failures"]["libbad.so"]
+        }
+
+    def test_render_json_states_the_operational_axis(self, tmp_path: Path) -> None:
+        from abicheck.bundle_models import BundleDiffResult
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+
+        result = BundleDiffResult(old_root=tmp_path, new_root=tmp_path)
+        clean = json.loads(
+            _render_json(result, old_facts_path=tmp_path, new_dir=tmp_path)
+        )
+        assert clean["run_outcome"]["operational"] == "none"
+        assert clean["extraction_failures"] == {}
+        result.extraction_failures = {"libbad.so": "boom"}
+        doc = json.loads(
+            _render_json(result, old_facts_path=tmp_path, new_dir=tmp_path)
+        )
+        assert doc["run_outcome"]["operational"] == "extraction_error"
+        assert doc["extraction_failures"] == {"libbad.so": "boom"}

@@ -680,6 +680,15 @@ class BundleDiffResult:
     #: clean `per_library` list as a fully checked scope. `None` for the
     #: live `compare_bundle` path, whose own fan-out owns its record.
     scope_record: ScopeAcquisitionRecord | None = None
+    #: ADR-065 D1 (Codex review): matched members whose NEW artifact failed
+    #: extraction *in this run* (a damaged snapshot file, an unreadable
+    #: binary), keyed by member with the reason -- the stored-live driver's
+    #: counterpart of the native fan-out's per-library ``ERROR`` result.
+    #: Distinct from a stored capture's own D8 ``degraded`` marker (a
+    #: recorded past failure the scope axis governs): a current-run failure
+    #: is an operational error, so a consumer floors the exit on it under
+    #: either ``--on-incomplete-scope`` policy. Empty for every other path.
+    extraction_failures: dict[str, str] = field(default_factory=dict)
     #: Optional :class:`~abicheck.policy_file.PolicyFile`, applied on top of
     #: *policy* when scoring ``bundle_verdict`` -- previously bundle-level
     #: findings were always scored under the bare *policy* name alone, even

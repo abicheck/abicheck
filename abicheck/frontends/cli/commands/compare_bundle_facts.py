@@ -678,12 +678,9 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         )
         _safe_write_output(Path(secondary_output), secondary_text)
     if output_dir is not None:
-        # Codex review: NEW_INPUT is a release-style operand here, so
-        # --output-dir's own per-library-report contract applies -- the
-        # live release fan-out writes one `{library}.json` per matched
-        # library (cli_compare_release.py's own output_dir handling); mirror
-        # that layout exactly rather than silently accepting the flag and
-        # producing nothing.
+        # Codex review: NEW_INPUT is a release-style operand, so --output-dir
+        # writes one `{library}.json` per matched library, mirroring the
+        # live release fan-out's own layout.
         from ....reporter import to_json
 
         for diff in result.per_library:
@@ -698,16 +695,15 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
             # of how many `/`/`..` segments precede it, so it can never
             # escape `output_dir` on this platform's own separator rules.
             safe_name = Path(diff.library).name or "library"
-            # Codex review, fresh evidence: same root cause as the -o/
-            # --write fix above -- a direct write_text() here leaked a
-            # traceback for an unwritable output_dir or any other OSError,
-            # after the primary report may have already been emitted.
-            # Routed through the same shared writer the live release
-            # fan-out uses for its own per-library artifacts.
+            # Codex review: a direct write_text() leaked a traceback for an
+            # unwritable output_dir; routed through the shared writer.
             _safe_write_output(output_dir / f"{safe_name}.json", to_json(diff))
 
     _exit_compare_release(
-        result.verdict.value,
+        # ADR-065 D1 (Codex review): a NEW member whose extraction failed in
+        # this run is the native fan-out's per-library `ERROR`, floored at
+        # exit 4 under either --on-incomplete-scope policy.
+        "ERROR" if result.extraction_failures else result.verdict.value,
         fail_on_removed=False,
         removed_keys=[],
         incomplete_scope_exit_contribution=scope_terms.incomplete_scope_exit_contribution,
@@ -755,7 +751,7 @@ def _render_json(
         "verdict": result.verdict.value,
         "per_library_verdict": result.per_library_verdict.value,
         "bundle_verdict": result.bundle_verdict.value,
-        **json_scope_fields(terms, run_outcome),
+        **json_scope_fields(terms, run_outcome, result.extraction_failures),
         "libraries": libraries,
         "bundle_findings": [
             {
@@ -771,6 +767,7 @@ def _render_json(
             for f in result.bundle_findings
         ],
         "analysis_errors": list(result.analysis_errors),
+        "extraction_failures": dict(result.extraction_failures),
     }
     return json.dumps(summary, indent=2)
 

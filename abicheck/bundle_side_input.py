@@ -586,4 +586,5 @@ def compare_release_against_bundle_facts(
     if manifest_note is not None:
         result.analysis_errors.append(manifest_note)
     result.scope_record = scope_record
+    result.extraction_failures = dict(failed)
     return result

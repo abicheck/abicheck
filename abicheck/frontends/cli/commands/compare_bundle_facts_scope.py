@@ -68,14 +68,24 @@ def has_unchecked_matched_members(result: Any) -> bool:
 
 
 def json_scope_fields(
-    terms: ComparisonScopeTerms, run_outcome: dict[str, Any]
+    terms: ComparisonScopeTerms,
+    run_outcome: dict[str, Any],
+    extraction_failures: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """`run_outcome` with its `scope` axis set -- and, when the selected
     scope completed no comparison at all (D7), its `operational` axis set to
     `no_comparison_completed`, the same reading the release fan-out's own
     `run_outcome_dict_for_release` gives that contribution -- plus the
-    `comparison_scope` section (absent when the driver built no record)."""
+    `comparison_scope` section (absent when the driver built no record).
+
+    *extraction_failures* (ADR-065 D1, Codex review) are the matched
+    members whose NEW artifact failed extraction in *this* run: an
+    operational `extraction_error` whatever the completeness policy
+    accepted (the native fan-out's per-library `ERROR`), stated unless the
+    stronger D7 status applies because nothing at all was compared."""
     run_outcome["scope"] = terms.completeness.value
+    if extraction_failures:
+        run_outcome["operational"] = OperationalStatus.EXTRACTION_ERROR.value
     if terms.no_comparison_completed_exit_contribution == 1:
         run_outcome["operational"] = OperationalStatus.NO_COMPARISON_COMPLETED.value
         run_outcome["compatibility"] = None
