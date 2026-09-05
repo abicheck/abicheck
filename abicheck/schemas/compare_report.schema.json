@@ -1555,8 +1555,21 @@
             "complete",
             "incomplete"
           ],
-          "description": "schema 2.50 (ADR-065 D6): the completeness axis -- whether every selected, expected member of the comparison scope reached a completed comparison. Optional rather than required so a pre-2.50 run_outcome block (every one of which described a scalar/synthetic report whose scope was the one pair it named) still validates; a reader treats absence as complete. incomplete is only ever produced by a directory/package release report, whose comparison_scope block carries the per-member evidence."
+          "description": "schema 2.50 (ADR-065 D6): the completeness axis -- whether every selected, expected member of the comparison scope reached a completed comparison. Optional only for a run_outcome schema_version 1.0 (or earlier) block (every one of which described a scalar/synthetic report whose scope was the one pair it named, and which a reader backfills as complete); required from run_outcome schema_version 1.1 on (the version that introduced it), so a 1.1 block can never omit the decision-bearing axis and be re-read as complete (Codex review). incomplete is only ever produced by a directory/package release report, whose comparison_scope block carries the per-member evidence."
         }
+      },
+      "if": {
+        "description": "A run_outcome schema version that predates the scope axis (0.x, 1, 1.0): scope may be omitted and reads as complete. Any other version (1.1 on) must carry it (ADR-065 D6; policy.outcome.run_outcome_scope_required is the same rule).",
+        "properties": {
+          "schema_version": {
+            "pattern": "^(0(\\.[0-9]+)*|1(\\.0+)?)$"
+          }
+        }
+      },
+      "else": {
+        "required": [
+          "scope"
+        ]
       }
     },
     "comparison_scope": {

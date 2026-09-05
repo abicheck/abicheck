@@ -2420,11 +2420,27 @@ elif query == "scope_incomplete":
 elif query == "scope_where":
     # What went unchecked, from the release report's `comparison_scope`
     # block -- the actionable half, the same way `coverage_where` names the
-    # provider that fell short.
+    # provider that fell short. Member names are PR-controlled file names
+    # and every sink interpolates this value inside a Markdown code span on
+    # one summary line, so each is flattened first (Codex review): a line
+    # break, a control character, a backtick, or a table pipe in a file
+    # name must not terminate the span or forge a heading/row/verdict in
+    # $GITHUB_STEP_SUMMARY.
+    def _md_safe(text):
+        out = []
+        for ch in str(text):
+            if ch in "`|":
+                out.append("'" if ch == "`" else "/")
+            elif ch in "\r\n\t\f\v" or ord(ch) < 0x20 or ord(ch) == 0x7F:
+                out.append(" ")
+            else:
+                out.append(ch)
+        return " ".join("".join(out).split()) or "?"
+
     cs = report.get("comparison_scope")
     cs = cs if isinstance(cs, dict) else {}
     parts = ["no comparison completed"] if cs.get("no_comparison_completed") else []
-    parts.extend(str(n) for n in (cs.get("unchecked") or []) if isinstance(n, str))
+    parts.extend(_md_safe(n) for n in (cs.get("unchecked") or []) if isinstance(n, str))
     print(", ".join(parts))
 elif query == "assurance_notes":
     # `analysis_assurance.notes` — same field name and shape on both compare

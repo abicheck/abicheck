@@ -302,3 +302,43 @@ class TestCompareMapsTheCompletenessExit:
         assert outputs["verdict"] == "BREAKING", outputs
         assert outputs["_exit"] == 1, outputs
         assert "comparison scope also contributed" in outputs["_summary"].lower()
+
+
+class TestScopeMemberNamesCannotForgeTheSummary:
+    """Codex review, eighteenth round: an unchecked member's name is a
+    PR-controlled file name that both summary sinks interpolate inside a
+    Markdown code span on one line. A backtick, a pipe, or a line break in
+    it must be neutralized before it reaches `$GITHUB_STEP_SUMMARY`, so it
+    can neither close the span nor inject a heading, table row, or verdict
+    line of its own."""
+
+    _HOSTILE = "libx.so`\n## Verdict: COMPATIBLE ✅\n| forged | row |\r\n`tail"
+
+    @pytest.mark.parametrize(
+        ("incomplete_scope", "expected_exit"), [(0, 0), (1, 1)], ids=["warn", "block"]
+    )
+    def test_hostile_name_stays_inside_one_code_span(
+        self, tmp_path: Path, incomplete_scope: int, expected_exit: int
+    ) -> None:
+        report = _release_report(
+            incomplete_scope=incomplete_scope,
+            no_comparison=0,
+            unchecked=[self._HOSTILE, "libok-sibling.so"],
+        )
+        outputs = _compare_outputs(tmp_path, report, exit_code=expected_exit)
+        assert outputs["_exit"] == expected_exit, outputs
+        summary = outputs["_summary"]
+        # Nothing the name carried became a line of its own: no forged
+        # heading, no forged table row, no carriage return anywhere.
+        lines = summary.splitlines()
+        assert not any(ln.startswith("## Verdict") for ln in lines), summary
+        assert not any(ln.startswith("| forged") for ln in lines), summary
+        assert "\r" not in summary
+        # The flattened name is still reported, on a single line, with the
+        # sibling beside it.
+        line = next(ln for ln in summary.splitlines() if "libok-sibling.so" in ln)
+        assert "libx.so'" in line and "Verdict: COMPATIBLE" in line
+        assert "/ forged / row /" in line
+        # No line of the summary was fabricated by the name: every backtick
+        # on that line is one the template wrote, so they still pair up.
+        assert line.count("`") % 2 == 0

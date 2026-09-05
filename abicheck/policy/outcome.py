@@ -73,6 +73,7 @@ __all__ = [
     "PolicyGateDecision",
     "RunOutcome",
     "RUN_OUTCOME_SCHEMA_VERSION",
+    "run_outcome_scope_required",
     "ScopeCompleteness",
     "TargetLifecycle",
     "analysis_assurance_dict",
@@ -95,6 +96,19 @@ __all__ = [
 #: backfills ``complete`` -- true of every ``1.0`` writer, all of which
 #: described one pair.
 RUN_OUTCOME_SCHEMA_VERSION = "1.1"
+
+
+def run_outcome_scope_required(schema_version: object) -> bool:
+    """Whether a ``run_outcome`` block stamped *schema_version* must carry
+    ``scope`` (ADR-065 D6): every version from ``1.1`` (the one that
+    introduced the axis) on. A ``1.0``/pre-``1.1`` or unparseable version
+    predates it and reads absence as complete (Codex review)."""
+    if not isinstance(schema_version, str):
+        return False
+    try:
+        return tuple(int(p) for p in schema_version.split(".")) >= (1, 1)
+    except ValueError:
+        return False
 
 
 class PolicyGateDecision(str, Enum):
@@ -332,12 +346,17 @@ class RunOutcome:
             )
         except ValueError:
             lifecycle = TargetLifecycle.EXISTING
-        # `scope` absent (a pre-ADR-065 writer) reads COMPLETE: every such
-        # writer was a scalar/synthetic report whose scope was the one pair
-        # it described, so this backfills what was true, not a guess.
+        # `scope` absent from a pre-1.1 block (a pre-ADR-065 writer) reads
+        # COMPLETE: every such writer was a scalar/synthetic report whose
+        # scope was the one pair it described -- a backfill of what was
+        # true, not a guess. From 1.1 on it is required: a block that omits
+        # or corrupts it does not parse (`run_outcome_scope_required`).
+        required = run_outcome_scope_required(data.get("schema_version"))
         try:
-            scope = ScopeCompleteness(data.get("scope", ScopeCompleteness.COMPLETE))
+            scope = ScopeCompleteness(data.get("scope"))
         except ValueError:
+            if required:
+                return None
             scope = ScopeCompleteness.COMPLETE
         compatibility: Verdict | None = None
         compat_raw = data.get("compatibility")
