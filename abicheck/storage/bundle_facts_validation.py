@@ -375,11 +375,10 @@ def require_degraded_members_known(
 
 def validated_degraded_members(raw: object) -> dict[str, str]:
     """Validate and convert a persisted ``degraded_members`` mapping
-    (ADR-065 D8: ``{library: failure reason}``) -- absent reads as empty,
-    a non-mapping or a non-string reason is rejected rather than coerced,
-    the same rule :func:`validated_filename_map` applies."""
-    if raw is None:
-        return {}
+    (ADR-065 D8: ``{library: failure reason}``). A caller distinguishes an
+    *absent* key itself (``d.get("degraded_members", {})``); an explicitly
+    present ``null`` is a non-mapping and is rejected like any other, never
+    read as "no member is degraded" (Codex review)."""
     if not isinstance(raw, dict):
         raise ValueError(
             f"bundle facts: 'degraded_members' must be a mapping, got "

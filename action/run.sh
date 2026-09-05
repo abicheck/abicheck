@@ -2403,6 +2403,20 @@ elif query == "scope_contribution":
         return 1 if value == 1 else 0
 
     print(max(_zero_or_one(src.get(k)) for k in keys))
+elif query == "scope_incomplete":
+    # ADR-065 D6, informational (Codex review): whether the report *recorded*
+    # an incomplete scope at all, whatever it contributed -- under the
+    # default --on-incomplete-scope warn both contributions are 0, and the
+    # summary must still name what went unchecked rather than read as a
+    # plain COMPATIBLE. Never a gate: `_scope_gated` alone decides failure.
+    cs = report.get("comparison_scope")
+    cs = cs if isinstance(cs, dict) else {}
+    ro = _either("run_outcome", {})
+    ro = ro if isinstance(ro, dict) else {}
+    if cs.get("completeness") == "incomplete" or ro.get("scope") == "incomplete":
+        print(1)
+    else:
+        raise SystemExit(1)
 elif query == "scope_where":
     # What went unchecked, from the release report's `comparison_scope`
     # block -- the actionable half, the same way `coverage_where` names the
@@ -2694,6 +2708,16 @@ _scope_gated() {
   [[ "$_contribution" == "1" ]]
 }
 
+# Informational sibling (Codex review): the report recorded an incomplete
+# scope, gating or accepted under `--on-incomplete-scope warn`. Read from the
+# structured report only, like `_scope_gated`, and never a failure signal --
+# it only decides whether the summary names the unchecked members.
+_scope_incomplete() {
+  local _src
+  _src=$(_json_report_src)
+  [[ "$(_report_query "$_src" scope_incomplete)" == "1" ]]
+}
+
 # scan's own evidence-contract axis (ADR-037 D5 -- a *pinned*
 # --depth/--source-method whose required source evidence was never
 # collected, `scan_engine._EvidenceContractError`) has its own dedicated
@@ -2914,6 +2938,19 @@ _verdict_rank() {
 # rather than one keeping its own copy -- the API_BREAK branch had the note
 # and BREAKING did not, which is exactly how escalation produced a failing
 # summary that mentioned only the ABI break.
+# Accepted under the default `--on-incomplete-scope warn` (Codex review):
+# nothing gated, but the verdict covers the compared members only, so the
+# summary names the gap -- on a push, or with PR comments off, it is the only
+# UI. Prints nothing for a complete scope or one `_scope_gated` already noted.
+_scope_accepted_note() {
+  _scope_incomplete || return 0
+  _scope_gated && return 0
+  local _scope_accepted_where
+  _scope_accepted_where=$(_report_query "$(_json_report_src)" scope_where 2>/dev/null || true)
+  echo ">"
+  echo "> ℹ️ The comparison scope was **not fully checked** (ADR-065), accepted by \`--on-incomplete-scope warn\` (the default)${_scope_accepted_where:+: \`$_scope_accepted_where\`}. The compatibility verdict above covers the compared members only — see \`comparison_scope\` in the JSON report."
+}
+
 _blocking_gate_note() {
   local _cats
   _cats=$(_severity_gate_categories | tr ',' '\n' \
@@ -2956,6 +2993,8 @@ _blocking_gate_note() {
   if _scope_gated && [[ "$GATE_TIER" != "SCOPE_INCOMPLETE" ]]; then
     echo ">"
     echo "> ⚠️ The comparison scope also contributed to this run's exit (ADR-065: an unchecked selected member under --on-incomplete-scope block, or no comparison completed). Orthogonal to the compatibility verdict and to the severity policy — see \`comparison_scope\` in the JSON report."
+  else
+    _scope_accepted_note
   fi
   [[ -n "$GATE_TIER" && "$GATE_TIER" != "$VERDICT" ]] || return 0
   echo ">"
@@ -3354,6 +3393,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
     case $VERDICT in
       COMPATIBLE)
         echo "> **Verdict: COMPATIBLE** — No binary ABI break detected."
+        _scope_accepted_note
         ;;
       COMPATIBLE_WITH_RISK)
         # R1 follow-up (Codex review, PR #1016): VERDICT can carry this tier
@@ -3363,6 +3403,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # so `add-job-summary: true` published a summary with every finding
         # table but no verdict line at all for this tier.
         echo "> **Verdict: COMPATIBLE_WITH_RISK** ⚠️ — Binary-compatible, but carries deployment risk; review advised (see findings below)."
+        _scope_accepted_note
         ;;
       SEVERITY_ERROR)
         # SEVERITY_ERROR (exit code 1) means a severity-config category is

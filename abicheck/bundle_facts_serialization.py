@@ -326,7 +326,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
             f"{type(raw_snapshots).__name__}"
         )
     raw_manifest = d.get("manifest")
-    degraded_members = validated_degraded_members(d.get("degraded_members"))
+    degraded_members = validated_degraded_members(d.get("degraded_members", {}))
     # An absent key is a v1 document (the legacy rule above), *not* the
     # current version the int(...) default supplied: a pre-S2 reader
     # defaults the same document to its own maximum and ignores the marker

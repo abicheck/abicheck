@@ -221,6 +221,11 @@ stays as recorded in `.github/AGENTS.md`.
 
 ## ADR-065 completeness axis (`SCOPE_INCOMPLETE`)
 
+`_scope_incomplete()` is the informational sibling of `_scope_gated()`: it
+reads `_report_query ... scope_incomplete` (the report's own
+`comparison_scope.completeness`/`run_outcome.scope` reading `incomplete`) and
+only decides whether the step summary names an accepted gap under the default
+`--on-incomplete-scope warn`; it never fails the step (Codex review).
 `_scope_gated()` mirrors `_coverage_gated()` exactly (report contribution
 first -- `_report_query ... scope_contribution`, the max of the release
 `exit` block's `incomplete_scope_contribution`/`no_comparison_completed_

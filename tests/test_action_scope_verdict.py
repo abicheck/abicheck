@@ -165,6 +165,41 @@ class TestCompareMapsTheCompletenessExit:
         assert "SCOPE_INCOMPLETE" not in outputs["_summary"]
 
     @pytest.mark.parametrize("event", ["push", "pull_request"])
+    def test_a_warn_accepted_gap_is_still_named_in_the_summary(
+        self, tmp_path: Path, event: str
+    ) -> None:
+        """Codex review, fifteenth round: under `warn` nothing gates, but the
+        step summary (the only UI on a push, or with PR comments off) must
+        still say the scope was not fully checked and name the unchecked
+        member, rather than read as a plain COMPATIBLE."""
+        report = _release_report(
+            incomplete_scope=0, no_comparison=0, unchecked=["libb.so"]
+        )
+        bindir = _stub_abicheck(tmp_path, exit_code=0, report=report)
+        env = {
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "json",
+            "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            "GITHUB_EVENT_NAME": event,
+        }
+        if event == "pull_request":
+            event_path = tmp_path / "event.json"
+            event_path.write_text(
+                '{"pull_request": {"number": 7, "head": {"sha": "abc123"}}}',
+                encoding="utf-8",
+            )
+            env["GITHUB_EVENT_PATH"] = str(event_path)
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+        assert outputs["_exit"] == 0, outputs
+        summary = outputs["_summary"]
+        assert "not fully checked" in summary, summary
+        assert "libb.so" in summary, summary
+        assert "SCOPE_INCOMPLETE" not in summary
+
+    @pytest.mark.parametrize("event", ["push", "pull_request"])
     def test_no_json_report_still_fails_the_step_but_claims_no_scope_gate(
         self, tmp_path: Path, event: str
     ) -> None:

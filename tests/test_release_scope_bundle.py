@@ -885,3 +885,42 @@ class TestDegradedMarkerMustNameAStoredMember:
         assert bundle_facts_from_dict(_degraded_facts_dict()).degraded_members == {
             "liba.so": "ELF-only: boom"
         }
+
+
+class TestExplicitNullMarkerIsRejected:
+    @pytest.mark.parametrize("reader", ["json", "archive"])
+    def test_null_is_not_no_marker(self, tmp_path: Path, reader: str) -> None:
+        """`"degraded_members": null` is a non-mapping, rejected like any
+        other; only an absent key reads as empty (Codex review, fifteenth
+        round)."""
+        from abicheck.bundle_facts import BUNDLE_ARCHIVE_ARTIFACT_TYPE
+        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
+        from abicheck.serialization import load_bundle_facts
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        with pytest.raises(ValueError, match="degraded_members.*mapping"):
+            if reader == "json":
+                d = _degraded_facts_dict()
+                d["degraded_members"] = None
+                bundle_facts_from_dict(d)
+            else:
+                out = tmp_path / "old.bundlefacts.archive.zip"
+                with BundleArchiveWriter(out) as writer:
+                    writer.write_manifest(
+                        {
+                            "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+                            "schema_version": 1,
+                            "bundle_facts_schema_version": 3,
+                            "library_blobs": {},
+                            "degraded_members": None,
+                        }
+                    )
+                load_bundle_facts(out, format="archive")
+
+    def test_an_absent_key_still_reads_as_empty(self) -> None:
+        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
+
+        d = _degraded_facts_dict()
+        del d["degraded_members"]
+        d["schema_version"] = 2
+        assert bundle_facts_from_dict(d).degraded_members == {}
