@@ -35,6 +35,7 @@ from abicheck.compare.typedefs import (
     is_version_stamped_typedef,
     typedef_index_pair,
 )
+from abicheck.finding_identity import report_finding_id
 from abicheck.model import AbiSnapshot
 from abicheck.model.fact import Fact
 from abicheck.model.identity import (
@@ -92,8 +93,7 @@ def _summary(changes):
 
     Nothing between a detector and a report re-sorts findings, so emission
     order is output order -- comparing sorted summaries would let the two
-    index backings differ in sequence and still pass. The selector's own
-    fidelity gate compares ordered alias sequences for the same reason.
+    index backings differ in sequence and still pass.
     """
     return [
         (c.kind, c.symbol, c.old_value, c.new_value, c.description) for c in changes
@@ -138,14 +138,15 @@ class TestBackendEquivalence:
             assert change.entity_id is not None
             assert change.entity_id.kind is EntityKind.TYPEDEF
 
-    def test_a_reordered_ir_is_refused_rather_than_emitted_out_of_order(
-        self,
-    ) -> None:
-        """The concrete reason the gate compares ordered sequences. An IR
-        holding exactly the right aliases in a different order would produce
-        exactly the right findings in the wrong sequence -- an unordered
-        check would wave that through. The selector falls back to the
-        adapter instead, which is the pre-migration order by construction.
+    def test_the_real_ir_own_order_is_emitted_directly(self) -> None:
+        """ADR-063 Track T3: ``typedef_index_pair`` no longer adjudicates
+        against a legacy alias map's order -- since both sides carry a real
+        ``SemanticIR`` here, it is used directly, in whatever order it
+        itself carries, not the legacy map's order. (Before T3, an IR
+        holding the right aliases in a *different* order than the legacy
+        map fell back to the adapter, which emits in the legacy map's
+        order; that fallback no longer exists once both sides have a real
+        IR.)
         """
         maps = {"A": "int", "B": "int", "C": "int"}
         reordered = {"C": "int", "A": "int", "B": "int"}
@@ -157,13 +158,324 @@ class TestBackendEquivalence:
             snap, snap, old_typedefs=maps, new_typedefs=maps
         )
         emitted = [c.symbol for c in _run(old_index, SemanticIRIndex(SemanticIR()))]
-        assert emitted == ["A", "B", "C"]
+        assert emitted == ["C", "A", "B"]
 
 
 # -- behavior preservation, case by case -----------------------------------
 
 
 class TestDetectorBehavior:
+    def test_a_removed_anonymous_namespace_typedef_is_still_detected(self) -> None:
+        """The exact scenario Codex review (PR #1078, fourth round) named:
+        a typedef declared in an anonymous namespace, real on the old side
+        and genuinely removed on the new side. Before the leaf-name
+        fallback, this would have been silently invisible to comparison
+        (``_aliases`` skipped it outright); the strict renderer's ``None``
+        is not proof the typedef doesn't exist."""
+        gone = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(gone): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        (change,) = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert change.kind is ChangeKind.TYPEDEF_REMOVED
+        assert change.symbol == "Alias"
+
+    def test_a_whole_colliding_group_disappearing_reports_every_removal(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, twelfth round: two anonymous-scoped
+        typedefs collide on ``Alias`` and the whole group vanishes on the
+        new side -- not merely shrinks. Both are independent, real
+        removals, not just `old_ids[0]`."""
+        first = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        second = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_REMOVED for c in changes)
+        assert {c.old_value for c in changes} == {"int", "long"}
+
+    def test_a_value_change_on_one_of_two_colliding_anonymous_typedefs_is_still_caught(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, sixth round: two typedefs declared in two
+        distinct anonymous namespaces both render to the bare leaf name
+        ``Alias`` (``render_display_name_or_leaf`` cannot distinguish them --
+        neither carries a named ancestor). Picking an arbitrary
+        representative per side used to mean a real value change on
+        whichever occurrence didn't become the representative was silently
+        read as "unchanged" whenever the *other* occurrence's value happened
+        to match across sides. Here the first occurrence's value (``int``)
+        is unchanged and the second's (``long`` -> ``char``) is not -- the
+        whole point of comparing by value multiset rather than by picking
+        one entity to stand in for the whole group."""
+        first_old = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        second_old = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        first_new = entity_id_for_typedef((Anonymous("namespace", 2),), "Alias")
+        second_new = entity_id_for_typedef((Anonymous("namespace", 3),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(second_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(second_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("char")
+                    ),
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.TYPEDEF_BASE_CHANGED
+        assert change.symbol == "Alias"
+        assert change.old_value == "long"
+        assert change.new_value == "char"
+
+    def test_a_stable_identitys_own_base_change_is_not_masked_by_a_new_arrival(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, thirteenth round: a stable, real-backend
+        identity ``Alias`` changes from ``int`` to ``long`` while a
+        *different*, newly-added anonymous-scope ``Alias`` arrives as
+        ``int``. Value-only multiset matching cancels the stable entity's
+        old ``int`` against the new entity's ``int``, reporting a clean
+        comparison (a pure addition, untracked) -- silently masking the
+        stable entity's own real, breaking base-type change. Matching by
+        shared ``EntityId`` first must catch it directly.
+
+        ``stable`` uses an empty scope, not a named ``Namespace``, so it
+        renders to the identical bare alias ``added`` does (Codex review, PR
+        #1078, nineteenth round: with a named scope, `render_display_name_
+        or_leaf` keeps it, so the two rendered under different aliases
+        entirely and never entered the colliding-group path this test
+        claims to cover -- it passed for a reason unrelated to the fix)."""
+        stable = entity_id_for_typedef((), "Alias")
+        added = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                    OccurrenceId(added): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.TYPEDEF_BASE_CHANGED
+        assert change.old_value == "int"
+        assert change.new_value == "long"
+        assert change.entity_id == stable
+
+    def test_shifted_anonymous_ordinals_are_not_trusted_as_stable_identity(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, fourteenth round: the typedef-family
+        sibling of the identical constant-family finding. Two
+        anonymous-scoped ``Alias`` declarations (``int``, ``long``) collide
+        on the old side; a new, earlier-declared sibling shifts both of
+        their ordinals by one on the new side, landing a genuinely new
+        ``Alias=char`` at the vacated ordinal 0. Trusting a raw
+        `EntityId` intersection would pair old ordinal 0 (``int``) against
+        new ordinal 0 (``char``, actually the new declaration) and old
+        ordinal 1 (``long``) against new ordinal 1 (``int``, actually the
+        original ordinal-0 declaration merely renumbered) -- two fabricated
+        ``TYPEDEF_BASE_CHANGED`` findings for declarations that never
+        changed. The only provable difference is the addition of
+        ``Alias=char`` -- untracked for typedefs, so no finding at all."""
+        old_first = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_second = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        new_inserted = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        new_first_shifted = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        new_second_shifted = entity_id_for_typedef(
+            (Anonymous("namespace", 2),), "Alias"
+        )
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_first): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(old_second): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_inserted): CanonicalEntity(
+                        canonical_spelling=Fact.present("char")
+                    ),
+                    OccurrenceId(new_first_shifted): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(new_second_shifted): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                }
+            )
+        )
+        assert _run(old_index, new_index) == []
+
+    def test_a_duplicate_value_added_to_a_colliding_group_is_not_a_base_change(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, tenth round: the new side adds a second
+        anonymous-namespace ``Alias=int`` alongside an existing
+        ``Alias=int`` -- the group grows from one occurrence to two, both
+        sharing the identical underlying type. A sorted-list
+        multiset-equality check cannot tell this apart from a genuine value
+        substitution that happens to leave a coincidentally-equal
+        representative pair, and used to report ``TYPEDEF_BASE_CHANGED``
+        (breaking) with ``old_value == new_value == "int"`` for what is a
+        purely compatible, and for typedefs entirely *untracked*, addition
+        -- typedef additions carry no ``ChangeKind`` at all."""
+        old_id = entity_id_for_typedef((), "Alias")
+        new_first = entity_id_for_typedef((), "Alias")
+        new_second = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_first): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(new_second): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        assert _run(old_index, new_index) == []
+
+    def test_a_duplicate_value_removed_from_a_colliding_group_is_a_removal(
+        self,
+    ) -> None:
+        """The mirror image: the group shrinks from two occurrences (both
+        ``int``) to one, and must be classified ``TYPEDEF_REMOVED``, not
+        ``TYPEDEF_BASE_CHANGED``."""
+        old_first = entity_id_for_typedef((), "Alias")
+        old_second = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        new_id = entity_id_for_typedef((), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_first): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(old_second): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.TYPEDEF_REMOVED
+        assert change.symbol == "Alias"
+        assert change.old_value == "int"
+
+    def test_three_colliding_occurrences_shrinking_to_one_reports_two_removals(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, eleventh round (typedef-family sibling
+        of the identical constant-family finding): three anonymous-scoped
+        occurrences all sharing ``Alias=int`` on the old side, only one on
+        the new side -- the loss of *two* occurrences, not one. Converting
+        the multiset difference to a ``set`` (an earlier version of this
+        fix) collapsed the repeated value to a single entry, silently
+        dropping the second removal."""
+        first_old = entity_id_for_typedef((), "Alias")
+        second_old = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        third_old = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        new_id = entity_id_for_typedef((), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(second_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(third_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_REMOVED for c in changes)
+        assert all(c.old_value == "int" for c in changes)
+
     def test_removal_change_and_no_op(self) -> None:
         changes = _run(
             _ir_backed({"gone": "int", "moved": "int", "same": "int"}),
@@ -373,13 +685,12 @@ class TestSemanticIrCutoverGate:
 
 
 class TestPrivateHelpers:
-    """Direct coverage for two internal helpers whose branches no
-    caller-level (``diff_typedefs``) test happens to exercise: real call
-    sites only ever reach ``_has_version_family_successor`` after the same
-    regex has already matched, and only ever reach ``_aliases`` with
-    identities that already render (the fidelity gate falls back before a
-    detector would iterate an unrenderable one) -- both defensive floors,
-    per each function's own docstring, not dead code."""
+    """Direct coverage for two internal helpers: real call sites only ever
+    reach ``_has_version_family_successor`` after the same regex has
+    already matched, so its other branches need direct tests. ``_aliases``'
+    unrenderable-identity skip is, since ADR-063 Track T3, the real
+    load-bearing mechanism on the ``SemanticIR`` path (not a floor behind a
+    gate that used to fall back first) -- see its own docstring."""
 
     def test_has_version_family_successor_false_when_name_does_not_match(
         self,
@@ -397,11 +708,16 @@ class TestPrivateHelpers:
             "_version_1_0_0", frozenset({"_version_2_0_0"})
         )
 
-    def test_aliases_skips_an_unrenderable_identity(self) -> None:
-        """The defensive floor itself: an ``Anonymous``-scoped typedef
-        identity contributes no entry, even directly against
-        ``SemanticIRIndex``, bypassing the fidelity gate that normally makes
-        this case unreachable from ``diff_typedefs``."""
+    def test_aliases_falls_back_to_the_bare_leaf_name_for_an_unrenderable_identity(
+        self,
+    ) -> None:
+        """An ``Anonymous``-scoped typedef identity still contributes an
+        entry, keyed by its bare leaf name -- Codex review, PR #1078,
+        fourth round: the legacy adapter's own synthetic identity for the
+        identical declaration always renders (an empty scope), so skipping
+        it here would make an anonymous-namespace typedef disappear the
+        moment a real ``SemanticIR`` is used directly, visible on the
+        legacy-adapted path only by accident."""
         from abicheck.compare.typedefs import _aliases
 
         anon = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
@@ -412,4 +728,471 @@ class TestPrivateHelpers:
                 )
             }
         )
-        assert _aliases(SemanticIRIndex(ir)) == {}
+        assert _aliases(SemanticIRIndex(ir)) == {"Alias": [OccurrenceId(anon)]}
+
+
+class TestOdrDuplicateOccurrencesSurviveReduction:
+    """Regression coverage for Codex review, PR #1078, fifteenth round:
+    ``_aliases``/``_underlying`` used to read through ``SemanticIRIndex``'s
+    *reduced*, one-entry-per-``EntityId`` view (``entities_of_kind()``/
+    ``.fact()``), which silently collapsed two genuine occurrences sharing
+    one identity -- distinguished only by ``OccurrenceId.disambiguator`` --
+    onto a single "most facts present" winner. A real value change on
+    whichever occurrence did not win that reduction was then invisible to
+    ``diff_typedefs`` even though ``SemanticIR.occurrences`` never actually
+    merged the two: it is keyed by ``OccurrenceId``, not bare ``EntityId``,
+    precisely to keep this pair distinct.
+    """
+
+    def _ir_with_two_occurrences(
+        self, eid, *, value_a: str, value_b: str
+    ) -> SemanticIR:
+        return SemanticIR(
+            occurrences={
+                OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                    canonical_spelling=Fact.present(value_a)
+                ),
+                OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                    canonical_spelling=Fact.present(value_b)
+                ),
+            }
+        )
+
+    def test_aliases_keeps_both_odr_duplicate_occurrences_distinct(self) -> None:
+        from abicheck.compare.typedefs import _aliases
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        ir = self._ir_with_two_occurrences(eid, value_a="int", value_b="int")
+        grouped = _aliases(SemanticIRIndex(ir))
+        assert set(grouped) == {"ns::Alias"}
+        assert set(grouped["ns::Alias"]) == {
+            OccurrenceId(eid, "tu-a"),
+            OccurrenceId(eid, "tu-b"),
+        }
+
+    def test_a_value_change_on_one_odr_duplicate_occurrence_is_detected(
+        self,
+    ) -> None:
+        """Two occurrences share one ``EntityId`` (an ODR-duplicate pair,
+        e.g. two internal-linkage typedefs in different TUs). Only one of
+        them changes value between snapshots -- the reduced-view bug would
+        have let the ``canonical_entities()`` "most facts present" tie-break
+        pick the same, *unchanged* occurrence as the representative on both
+        sides, reporting no change at all despite a real base-type change on
+        the sibling occurrence.
+        """
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old_index = SemanticIRIndex(
+            self._ir_with_two_occurrences(eid, value_a="int", value_b="int")
+        )
+        new_index = SemanticIRIndex(
+            self._ir_with_two_occurrences(eid, value_a="int", value_b="long")
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.kind is ChangeKind.TYPEDEF_BASE_CHANGED
+        assert change.symbol == "Alias"
+        assert change.old_value == "int"
+        assert change.new_value == "long"
+
+
+class TestWholeGroupRemovalSurvivesPostProcessingDedup:
+    """Regression coverage for Codex review, PR #1078, sixteenth round:
+    ``diff_typedefs`` emits one ``TYPEDEF_REMOVED`` per contributing entity
+    when a whole colliding group vanishes (twelfth round), but the public
+    ``checker.compare()`` pipeline's own post-processing used to run
+    ``diff_filtering._dedup_exact`` keyed only on ``(kind, description)`` --
+    identical text for every entity in a colliding group by construction --
+    silently collapsing these independently-provable removals back down to
+    one before a caller ever saw them. This is checked at the seam between
+    the two modules directly, not only within ``diff_typedefs`` in
+    isolation, since a test calling ``diff_typedefs`` alone cannot see this
+    downstream loss.
+    """
+
+    def test_two_colliding_removals_both_survive_dedup_exact(self) -> None:
+        from abicheck.diff_filtering import _dedup_exact
+
+        first = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        second = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 2
+        # Same value on both sides of the collision -- the case the old
+        # (kind, description) key alone could not distinguish even with
+        # this PR's own `entity_id` improvement, since these are also the
+        # findings' own identical `symbol`/`old_value`; only `entity_id`
+        # tells them apart.
+        assert {c.old_value for c in changes} == {"int"}
+        deduped = _dedup_exact(changes)
+        assert len(deduped) == 2
+
+
+class TestOdrDuplicateRemovalsSurviveDedupExact:
+    """Regression coverage for Codex review, PR #1078, seventeenth round:
+    the sixteenth round's own `entity_id`-based `_dedup_exact` fix still
+    collapsed two genuine ODR/multi-TU occurrences that legitimately share
+    one `EntityId` (distinguished only by `OccurrenceId.disambiguator`) when
+    both were removed with the same value -- `entity_id.key` alone cannot
+    tell them apart. `Change.disambiguator` closes that residual gap.
+    """
+
+    def test_two_odr_duplicate_removals_with_the_same_value_both_survive(
+        self,
+    ) -> None:
+        from abicheck.diff_filtering import _dedup_exact
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 2
+        assert {c.old_value for c in changes} == {"int"}
+        # entity_id alone is identical for both -- only `disambiguator`
+        # distinguishes them.
+        assert {c.entity_id for c in changes} == {eid}
+        assert {c.disambiguator for c in changes} == {"tu-a", "tu-b"}
+        deduped = _dedup_exact(changes)
+        assert len(deduped) == 2
+
+
+class TestSharedIdOrderIsDeterministic:
+    """Regression coverage for Codex review, PR #1078, twentieth round --
+    mirrors ``tests.test_constant_cutover.TestSharedIdOrderIsDeterministic``
+    exactly; see that class's own docstring for the full account."""
+
+    def test_two_shared_stable_occurrences_change_in_old_ids_order(self) -> None:
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("short")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("char")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_BASE_CHANGED for c in changes)
+        # Deterministic by `old_ids`' own encounter order (`SemanticIR.
+        # occurrences`' insertion order), not by `PYTHONHASHSEED`.
+        assert [c.old_value for c in changes] == ["int", "short"]
+        assert [c.new_value for c in changes] == ["long", "char"]
+        assert [c.disambiguator for c in changes] == ["tu-a", "tu-b"]
+
+
+class TestEqualCardinalityCollisionPairsAllSubstitutions:
+    """Regression coverage for Codex review, PR #1078, twentieth round --
+    mirrors ``tests.test_constant_cutover.
+    TestEqualCardinalityCollisionPairsAllSubstitutions`` exactly; see that
+    class's own docstring for the full account."""
+
+    def test_two_colliding_pairs_both_report_as_changed(self) -> None:
+        old_a = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_b = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        new_a = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        new_b = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(old_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("short")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                    OccurrenceId(new_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("char")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_BASE_CHANGED for c in changes)
+        assert {c.old_value for c in changes} == {"int", "short"}
+        assert {c.new_value for c in changes} == {"long", "char"}
+
+
+class TestCollisionSafeDisambiguatorClosesReportFindingIdGap:
+    """Regression coverage for Codex review, PR #1078, twentieth round --
+    mirrors ``tests.test_constant_cutover_dedup.
+    TestCollisionSafeDisambiguatorClosesReportFindingIdGap`` exactly; see
+    that class's own docstring for the full account."""
+
+    def test_two_whole_group_removals_get_distinct_report_finding_ids(
+        self,
+    ) -> None:
+        first = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        second = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 2
+        assert all(c.disambiguator for c in changes)
+        assert len({c.disambiguator for c in changes}) == 2
+        ids = {report_finding_id(c) for c in changes}
+        assert len(ids) == 2
+
+
+class TestAmbiguousResidualsGetNoAttributedIdentity:
+    """Regression coverage for Codex review, PR #1078, twentieth round --
+    mirrors ``tests.test_constant_cutover_dedup.
+    TestAmbiguousResidualsGetNoAttributedIdentity`` exactly; see that
+    class's own docstring for the full account."""
+
+    def test_a_partial_removal_from_an_equal_valued_group_has_no_identity(
+        self,
+    ) -> None:
+        old_a = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_b = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        new_a = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(old_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.kind is ChangeKind.TYPEDEF_REMOVED
+        assert change.old_value == "int"
+        # No real identity is attributed -- but a synthetic,
+        # non-identity-claiming disambiguator is still assigned (Codex
+        # review, PR #1078, twenty-first round; see its constant sibling's
+        # own docstring for the full account).
+        assert change.entity_id is None
+        assert change.disambiguator == "ambiguous:0"
+
+    def test_a_whole_bucket_removal_keeps_its_real_identity(self) -> None:
+        old_a = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_b = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(old_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(SemanticIR())
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_REMOVED for c in changes)
+        assert all(c.entity_id is not None for c in changes)
+        assert {c.entity_id for c in changes} == {old_a, old_b}
+
+
+class TestPartialRemovalsPreserveMultiplicityAcrossDedup:
+    """Regression coverage for Codex review, PR #1078, twenty-first round --
+    mirrors ``tests.test_constant_cutover_dedup.
+    TestPartialRemovalsPreserveMultiplicityAcrossDedup`` exactly; see that
+    class's own docstring for the full account."""
+
+    def test_three_ambiguous_removals_all_survive_dedup_exact(self) -> None:
+        from abicheck.diff_filtering import _dedup_exact
+
+        old_ids = [
+            entity_id_for_typedef((Anonymous("namespace", i),), "Alias")
+            for i in range(4)
+        ]
+        new_id = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                    for eid in old_ids
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 3
+        assert all(c.kind is ChangeKind.TYPEDEF_REMOVED for c in changes)
+        assert all(c.entity_id is None for c in changes)
+        assert len({c.disambiguator for c in changes}) == 3
+        deduped = _dedup_exact(changes)
+        assert len(deduped) == 3
+        assert len({report_finding_id(c) for c in changes}) == 3
+
+
+class TestOrdinaryEntityBackedFindingsKeepBlankDisambiguator:
+    """Regression coverage for Codex review, PR #1078, twenty-second round --
+    mirrors ``tests.test_constant_cutover_dedup.
+    TestOrdinaryEntityBackedFindingsKeepBlankDisambiguator`` exactly; see
+    that class's own docstring for the full account."""
+
+    def test_a_single_entity_whole_group_removal_keeps_blank_disambiguator(
+        self,
+    ) -> None:
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.kind is ChangeKind.TYPEDEF_REMOVED
+        assert change.entity_id == eid
+        assert change.disambiguator is None
+
+
+class TestBareProjectionKeepsBlankDisambiguatorForALoneAlias:
+    """Regression coverage for Codex review, PR #1078, twenty-fourth round:
+    ``_bare_typedef_side_index`` unconditionally stamped a synthetic
+    ``str(ordinal)`` disambiguator (always ``"0"`` for a lone entity) with
+    no collision to disambiguate, rehashing ``report_finding_id`` for the
+    ordinary case -- the same overreach ``_group_safe_disambiguator`` fixed
+    (twenty-second round) for the qualified-key-space path; this path builds
+    its own disambiguator inline, so it needed its own fix."""
+
+    def test_a_lone_bare_alias_gets_no_synthetic_disambiguator(self) -> None:
+        from abicheck.compare.typedefs import _bare_typedef_side_index
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        snap = _snap(
+            typedefs_qualified={"ns::Alias": "long"},
+            typedef_entity_ids={"ns::Alias": eid},
+            semantic_ir=_ir_backed({"ns::Alias": "long"}).ir,
+        )
+        index = _bare_typedef_side_index(snap, {"Alias": "long"})
+        (occurrence_id,) = index.ir.occurrences
+        assert occurrence_id.disambiguator == ""
+
+    def test_two_colliding_bare_aliases_still_get_distinct_disambiguators(
+        self,
+    ) -> None:
+        """The collision case the ordinal exists for must still work: two
+        distinct qualified entities sharing one bare leaf name."""
+        from abicheck.compare.typedefs import _bare_typedef_side_index
+
+        maps = {"a::Alias": "int", "b::Alias": "long"}
+        snap = _snap(
+            typedefs_qualified=maps,
+            typedef_entity_ids={
+                "a::Alias": entity_id_for_typedef((Namespace("a"),), "Alias"),
+                "b::Alias": entity_id_for_typedef((Namespace("b"),), "Alias"),
+            },
+            semantic_ir=_ir_backed(maps).ir,
+        )
+        index = _bare_typedef_side_index(snap, {"Alias": "int"})
+        disambiguators = {oid.disambiguator for oid in index.ir.occurrences}
+        assert len(index.ir.occurrences) == 2
+        assert "" not in disambiguators
+        assert len(disambiguators) == 2
+
+    def test_through_compare_a_lone_bare_alias_value_change_keeps_its_id(
+        self,
+    ) -> None:
+        """End-to-end: comparing a pre-v25 side against a real-IR side over
+        one lone bare alias must not change ``finding_id`` relative to the
+        pre-existing legacy-adapter-only behavior."""
+        from abicheck.diff_types import _diff_typedefs
+
+        old = _snap(typedefs={"Alias": "int"})
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        new = _snap(
+            typedefs_qualified={"ns::Alias": "long"},
+            typedef_entity_ids={"ns::Alias": eid},
+            semantic_ir=_ir_backed({"ns::Alias": "long"}).ir,
+        )
+        (change,) = _diff_typedefs(old, new)
+        assert change.kind is ChangeKind.TYPEDEF_BASE_CHANGED
+        assert change.disambiguator is None
+        legacy_old = _snap(typedefs={"Alias": "int"})
+        legacy_new = _snap(typedefs={"Alias": "long"})
+        (legacy_change,) = _diff_typedefs(legacy_old, legacy_new)
+        assert report_finding_id(change) == report_finding_id(legacy_change)

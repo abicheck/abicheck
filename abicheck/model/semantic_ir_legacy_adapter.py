@@ -33,23 +33,35 @@ agreement with the first — exactly the duplication ADR-063's governing
 invariant forbids. The adapter's output goes through
 ``SemanticIRIndex(ir)`` unchanged.
 
-**Display names, and why they need a fidelity gate.** The legacy typedef
-collections are keyed by a flat qualified spelling; ``SemanticIR`` is keyed
-by ``EntityId``. :func:`render_display_name` is the one projection between
-them, and it deliberately answers ``None`` — never a best-effort string —
-for an ``EntityId`` whose ``ScopePath`` contains an ``Anonymous`` or
+**Display names.** The legacy typedef collections are keyed by a flat
+qualified spelling; ``SemanticIR`` is keyed by ``EntityId``.
+:func:`render_display_name` is the one projection between them, and it
+deliberately answers ``None`` — never a best-effort string — for an
+``EntityId`` whose ``ScopePath`` contains an ``Anonymous`` or
 ``LocalToFunction`` segment: both carry a parse-order ordinal that appears
 in no source spelling, so any string produced for them would be an
-invention, and two distinct such declarations would render alike.
-``compare.typedefs.typedef_index_pair`` turns that ``None`` (and any other
-divergence) into a fallback to this adapter rather than into a silently
-smaller set for a detector to iterate. That selector itself lives in
-``compare/`` rather than here: choosing between two *snapshots'* competing
-representations is a comparison-orchestration question, not a model shape
-or a single-snapshot projection, per ADR-061's ownership split (Codex
-review on PR #1041) — this module stays the single-snapshot projection
-(:func:`legacy_typedef_ir`) plus the rendering/identity primitives every
-consumer of it, on either side of that split, shares.
+invention, and two distinct such declarations would render alike. Before
+ADR-063 Track T3, ``compare.typedefs.typedef_index_pair`` turned that
+``None`` (and any other divergence from the legacy projection) into a
+fallback to this adapter; since T3, each side's real ``SemanticIR`` is used
+directly whenever *that side* carries one -- decided independently per side,
+not both-or-neither (a second Codex review round found the both-or-neither
+cut would discard a side's real evidence purely because the other side
+lacked any) -- and an entity that renders ``None`` is simply invisible to a
+detector's own alias/name projection (it has no flat spelling to key a
+finding under, on either backing). This module's own
+identity primitives (:func:`producer_entity_id`, and the two Track T3
+consistency checks below) are what a real ``SemanticIR`` is now checked
+against instead: not a competing legacy projection, but the same
+producer's own legacy sidecar identity for the same declaration. The
+selector functions themselves (``compare.typedefs.typedef_index_pair``/
+``compare.constants.constant_index_pair``) live in ``compare/`` rather than
+here: choosing between two *snapshots'* representations is a
+comparison-orchestration question, not a model shape or a single-snapshot
+projection, per ADR-061's ownership split (Codex review on PR #1041) — this
+module stays the single-snapshot projection (:func:`legacy_typedef_ir`)
+plus the rendering/identity primitives every consumer of it, on either side
+of that split, shares.
 
 **Cohort 2 (constants) reuses this module verbatim.** ADR-063 Phase 6B's
 second detector cohort (``compare/constants.py``) is the identical shape as
@@ -81,6 +93,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..errors import SemanticIrAuthorityError
 from .fact import Fact
 from .identity import (
     EntityId,
@@ -92,16 +105,23 @@ from .identity import (
 )
 from .occurrence import OccurrenceId
 from .semantic_ir import CanonicalEntity, SemanticIR
+from .semantic_ir_index import SemanticIRIndex
 
 if TYPE_CHECKING:
     from .snapshot import AbiSnapshot
 
 __all__ = [
     "SYNTHETIC_IDENTITY_EXTRA",
+    "assert_constant_ir_consistent",
+    "assert_snapshot_semantic_ir_consistent",
+    "assert_typedef_ir_consistent",
     "legacy_constant_ir",
     "legacy_typedef_ir",
     "producer_entity_id",
+    "producer_occurrence_disambiguator",
     "render_display_name",
+    "render_display_name_or_leaf",
+    "semantic_ir_covers_kind",
 ]
 
 #: ``EntityId.extra`` marker for an identity this adapter derived from a
@@ -134,6 +154,50 @@ def render_display_name(entity_id: EntityId) -> str | None:
     return "::".join(parts)
 
 
+def render_display_name_or_leaf(entity_id: EntityId) -> str:
+    """A best-effort flat spelling for *entity_id*: every *renderable* scope
+    segment, in order, joined with ``"::"``, then the leaf name -- an
+    unrenderable segment (``Anonymous``/``LocalToFunction``) is *omitted*,
+    not treated as a reason to abandon the whole rendering the way
+    :func:`render_display_name` does (Codex review, PR #1078, fourth and
+    fifth rounds).
+
+    This is deliberately the identical convention the header-AST parsers'
+    own legacy qualified-name walk already uses for the flat
+    ``typedefs``/``typedefs_qualified``/``constants`` collections
+    (``extract.headers.castxml.location.qualified_name``: an anonymous
+    namespace's own XML ``name`` attribute is empty, so that parent
+    contributes nothing to the joined string, but the walk keeps going
+    to *its* named ancestors) -- not a new, independently-chosen fallback.
+    ``N::<anonymous>::X`` renders ``"N::X"`` here, matching the legacy
+    map's own key for the identical declaration exactly, rather than
+    collapsing all the way to the bare leaf ``"X"`` (which a prior version
+    of this function did, and which a Codex review round after that found
+    would itself fabricate a removal/addition pair against an unchanged
+    declaration whenever the anonymous segment had a named ancestor).
+
+    A migrated cohort's own display-name projection (``compare.typedefs.
+    _aliases``/``compare.constants._values``) used to skip such an entity
+    outright once ``SemanticIR`` became the sole comparison-time source,
+    silently dropping an anonymous-namespace typedef/constant from
+    comparison entirely -- exactly the kind of case the pre-T3 fidelity
+    gate's "any divergence falls back to the adapter" rule used to catch
+    by accident, not by design. Two distinct anonymous-scoped declarations
+    that render to the same string this way (identical named ancestors,
+    identical leaf name) still collide onto one dict entry in a caller
+    keyed by this name -- the identical, already-accepted collision risk
+    the legacy map's own key already carries for the same case, never a
+    new one.
+    """
+    parts = [
+        rendered
+        for segment in entity_id.scope
+        if (rendered := _render_segment(segment)) is not None
+    ]
+    parts.append(entity_id.leaf_name)
+    return "::".join(parts)
+
+
 def _render_segment(segment: ScopeSegment) -> str | None:
     if isinstance(segment, Namespace | Record | InlineNamespace):
         return segment.name
@@ -153,6 +217,58 @@ def producer_entity_id(entity_id: EntityId) -> EntityId | None:
     if tuple(entity_id.extra) == SYNTHETIC_IDENTITY_EXTRA:
         return None
     return entity_id
+
+
+def producer_occurrence_disambiguator(occurrence_id: OccurrenceId) -> str | None:
+    """*occurrence_id*'s own disambiguator for ``Change.disambiguator``, or
+    ``None`` when it carries none (Codex review, PR #1078, seventeenth
+    round) -- ``entity_id`` alone cannot distinguish two genuine ODR/multi-TU
+    occurrences that legitimately share one identity, which is exactly what
+    ``OccurrenceId.disambiguator`` exists for. An empty disambiguator
+    normalizes to ``None`` here, matching ``OccurrenceId``'s own convention.
+
+    **Deliberately not gated on** :func:`producer_entity_id` (Codex review,
+    PR #1078, eighteenth round, fresh evidence): an earlier version of this
+    function returned ``None`` whenever ``entity_id`` was synthetic, on the
+    reasoning that entity_id and disambiguator should travel together as one
+    trust unit. That broke ``compare.typedefs._bare_typedef_side_index``'s
+    bare-alias projection, which deliberately wraps a *real* occurrence's
+    identity in a fresh, synthetic per-alias-collision ``EntityId`` while
+    still carrying that occurrence's own real ``disambiguator`` forward --
+    the synthetic wrapper means "don't stamp this fabricated scope onto a
+    durable ``Change.entity_id``", not "this occurrence's own disambiguator
+    evidence is untrustworthy". Unlike ``entity_id`` (an external identity
+    reference callers may treat as a real declaration pointer),
+    ``disambiguator`` is purely an internal dedup discriminator with no such
+    trust requirement, so gating it the same way only threw away real
+    evidence for no safety benefit."""
+    return occurrence_id.disambiguator or None
+
+
+def semantic_ir_covers_kind(semantic_ir: SemanticIR, kind: EntityKind) -> bool:
+    """Whether *semantic_ir* resolves at least one occurrence of *kind*
+    (Codex review, PR #1078, nineteenth round).
+
+    ``compare.typedefs._typedef_side_index``/``compare.constants.
+    _constant_side_index`` used to trust a snapshot's ``SemanticIR``
+    wholesale for a cohort the moment it was non-``None``, with no per-kind
+    check -- but a real snapshot can carry a ``SemanticIR`` whose identity-
+    resolution slice for one kind (always populating that kind's flat
+    sidecar, per ADR-063 Phase 2) predates its *normalization* slice for the
+    same kind (populating matching ``SemanticIR`` occurrences): a real,
+    historical v38-v41 window this module's own load-boundary check already
+    accepts as legitimate (see :func:`_assert_sidecar_identity_consistent`'s
+    own ``by_rendered`` gate). Trusting such a ``SemanticIR`` wholesale for
+    that kind silently blinds comparison to every constant/typedef the
+    snapshot's own flat collection still has real evidence for -- a false
+    "nothing here" rather than a real absence. A side index selector should
+    call this before trusting ``semantic_ir`` for one cohort, falling back
+    to the legacy adapter's projection of that side's own flat collection
+    when it answers ``False``."""
+    return any(
+        occurrence_id.entity_id.kind is kind
+        for occurrence_id in semantic_ir.occurrences
+    )
 
 
 def _synthetic_entity_id(kind: EntityKind, display_name: str) -> EntityId:
@@ -238,3 +354,159 @@ def legacy_constant_ir(snapshot: AbiSnapshot, constants: dict[str, str]) -> Sema
             canonical_spelling=Fact.present(value)
         )
     return SemanticIR(occurrences=occurrences)
+
+
+def _assert_sidecar_identity_consistent(
+    snapshot: AbiSnapshot,
+    *,
+    kind: EntityKind,
+    sidecar: dict[str, EntityId],
+    family: str,
+) -> None:
+    """Raise :class:`~abicheck.errors.SemanticIrAuthorityError` if
+    *snapshot*'s real ``SemanticIR`` resolves a different ``EntityId`` than
+    *sidecar* for the same rendered alias/qualified name (ADR-063 Track T3).
+
+    This is the one piece of the pre-T3 comparison-time fidelity gate that
+    is still worth checking once IR is the sole comparison-time source: not
+    ``typedefs``/``typedefs_qualified``/``constants``' *values* against the
+    IR's own ``canonical_spelling`` (the whole point of the cutover is that
+    ``SemanticIR``-only construction — no populated legacy dict at all — is
+    now a completely ordinary, valid snapshot, not one this check should
+    require a legacy companion for), but whether *two identity
+    representations the same producer wrote for the same snapshot* agree
+    with each other. ``typedef_entity_ids``/``constant_entity_ids`` and
+    ``semantic_ir`` are populated from the same parse
+    (``extract/semantic_normalizer.py``/``dumper_castxml.py``/
+    ``dumper_clang.py``); a disagreement between them for the identical
+    rendered name is not a legitimate difference in evidence the way
+    "no ``SemanticIR`` at all" is — it is a producer bug in one of the two
+    identity-resolution paths, and T3's whole point is that such a bug must
+    fail loudly instead of being silently routed around by falling back to
+    whichever representation happens to look consistent.
+
+    Keyed by :func:`render_display_name_or_leaf`, not the strict
+    :func:`render_display_name` (Codex review, PR #1078, eighth round): the
+    same producer's flat sidecar (``typedef_entity_ids``/
+    ``constant_entity_ids``) is keyed by the header-AST parsers' own
+    qualified-name walk, which already keeps every named ancestor around an
+    unrenderable ``Anonymous``/``LocalToFunction`` segment rather than
+    refusing the whole name (``extract.headers.castxml.location.
+    qualified_name`` -- the exact convention :func:`render_display_name_or_
+    leaf` itself matches) -- so an anonymous-scoped declaration's sidecar
+    entry is real, keyed by that flattened name, and skipping it here
+    (the strict renderer's ``None``) let a genuine identity disagreement
+    for it pass silently, defeating this very check for exactly the family
+    of declarations :func:`render_display_name_or_leaf` exists to keep
+    visible to comparison in the first place.
+
+    Two distinct entities can render to the identical flattened name (the
+    same collision :func:`render_display_name_or_leaf`'s own docstring
+    accepts), in which case the sidecar -- itself built by a plain
+    ``dict`` comprehension over the same colliding key -- reflects only
+    one of them. So the check groups entities by their rendered name and
+    only flags a disagreement when *none* of the colliding entities match
+    the sidecar's recorded id, rather than picking one arbitrary member to
+    compare against and risking a false failure purely from which member
+    that happened to be.
+
+    **Checked in both directions** (Codex review, PR #1078, tenth round):
+    a sidecar entry naming a rendered name with *no* corresponding
+    ``SemanticIR`` occurrence at all is exactly as much a producer
+    disagreement as a mismatched id for a name both representations
+    resolve -- the two identity representations still disagree on whether
+    the declaration exists, and a comparison reading only through
+    ``SemanticIR`` (this cohort's sole comparison-time source since T3)
+    would see nothing for it, silently masking a real removal against any
+    other snapshot that also lacks it. The one-way check above catches a
+    *wrong* id; this direction catches a *missing* one -- but only when
+    SemanticIR resolves *some* occurrence of `kind`; see this direction's
+    own gate below for why a producer that resolves none at all is exempt.
+    """
+    index = SemanticIRIndex(snapshot.semantic_ir) if snapshot.semantic_ir else None
+    if index is None:
+        return
+    by_rendered: dict[str, list[EntityId]] = {}
+    for entity_id in index.entities_of_kind(kind):
+        by_rendered.setdefault(render_display_name_or_leaf(entity_id), []).append(
+            entity_id
+        )
+    for rendered, entity_ids in by_rendered.items():
+        sidecar_id = sidecar.get(rendered)
+        if sidecar_id is not None and sidecar_id not in entity_ids:
+            raise SemanticIrAuthorityError(
+                f"{family} {rendered!r}: SemanticIR resolves entity_id(s) "
+                f"{entity_ids!r}, but the snapshot's own "
+                f"{family}_entity_ids sidecar records {sidecar_id!r} for "
+                "the same name -- the producer's two identity "
+                "representations disagree (ADR-063 Track T3: SemanticIR is "
+                "the sole comparison-time source for this cohort, so this "
+                "can no longer be silently resolved by falling back to a "
+                "legacy projection)"
+            )
+    # Skipped entirely when SemanticIR has *no* occurrence of `kind` at all
+    # (Codex review, PR #1078, seventeenth round): a v38-v41 snapshot
+    # written between the identity-resolution slice and the *normalization*
+    # slice for this kind (see this module's own account of the third vs.
+    # fourth slice) legitimately carries a populated sidecar with zero
+    # matching SemanticIR occurrences -- indistinguishable, from stored data
+    # alone, from a snapshot that genuinely has none. Raising here would
+    # reject a real, valid historical snapshot as corrupt; every occurrence
+    # of `kind` is written from the same parse pass, so as soon as the
+    # producer resolves even one, a *specific* name's own absence is a real
+    # disagreement, not this ambiguity.
+    if by_rendered:
+        for rendered, sidecar_id in sidecar.items():
+            if rendered not in by_rendered:
+                raise SemanticIrAuthorityError(
+                    f"{family} {rendered!r}: the snapshot's own "
+                    f"{family}_entity_ids sidecar records entity_id "
+                    f"{sidecar_id!r} for this name, but SemanticIR has no "
+                    "occurrence rendering to it at all -- the producer's two "
+                    "identity representations disagree on whether this "
+                    "declaration exists (ADR-063 Track T3: SemanticIR is the "
+                    "sole comparison-time source for this cohort, so a "
+                    "declaration the sidecar names but SemanticIR omits would "
+                    "silently vanish from comparison)"
+                )
+
+
+def assert_typedef_ir_consistent(snapshot: AbiSnapshot) -> None:
+    """Raise :class:`~abicheck.errors.SemanticIrAuthorityError` if
+    *snapshot* carries a real ``SemanticIR`` whose typedef occurrences
+    disagree, by identity, with its own ``typedef_entity_ids`` sidecar.
+
+    Called once, from ``AbiSnapshot.__post_init__`` -- the load boundary --
+    rather than by ``compare/typedefs.py`` on every comparison a snapshot
+    participates in: the pre-T3 fidelity gate ran this class of check
+    (among others) inside the comparison-time selector, once per
+    comparison, for a value that only ever depends on one side. See
+    :func:`_assert_sidecar_identity_consistent` for the full reasoning.
+    """
+    _assert_sidecar_identity_consistent(
+        snapshot,
+        kind=EntityKind.TYPEDEF,
+        sidecar=snapshot.typedef_entity_ids,
+        family="typedef",
+    )
+
+
+def assert_constant_ir_consistent(snapshot: AbiSnapshot) -> None:
+    """The constant-family counterpart of :func:`assert_typedef_ir_consistent`
+    -- same reasoning, substituting ``AbiSnapshot.constant_entity_ids`` and
+    :attr:`~abicheck.model.identity.EntityKind.CONSTANT`."""
+    _assert_sidecar_identity_consistent(
+        snapshot,
+        kind=EntityKind.CONSTANT,
+        sidecar=snapshot.constant_entity_ids,
+        family="constant",
+    )
+
+
+def assert_snapshot_semantic_ir_consistent(snapshot: AbiSnapshot) -> None:
+    """Both families' Track T3 load-boundary check, in one call --
+    ``AbiSnapshot.__post_init__``'s single entry point into this module (via
+    ``importlib``, to avoid a real import cycle; see that method's own
+    comment)."""
+    assert_typedef_ir_consistent(snapshot)
+    assert_constant_ir_consistent(snapshot)

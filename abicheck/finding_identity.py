@@ -1766,17 +1766,42 @@ def report_finding_id(c: object) -> str:
     correlated with the report's own findings, and importing ``reporter_markdown``
     from ``checker`` would close a cycle the ``import-cycle-growth``
     AI-readiness gate rejects.
+
+    ``disambiguator`` (``Change``'s ODR/multi-TU occurrence discriminator,
+    Codex review, PR #1078, eighteenth round) is appended **only when set**:
+    unconditionally joining it would rehash every id this function has ever
+    produced (always ``None`` before this field existed) -- the same
+    universal-rehash cost a prior round declined to pay for a *narrower*
+    risk (``docs/contribute/plans/public-contract-default.md``'s
+    "delimiter" finding). Conditional append costs nothing for a pre-
+    existing finding while resolving the real, newly-reachable collision:
+    two ODR-duplicate occurrences now legitimately both survive
+    ``diff_filtering._dedup_exact`` with otherwise-identical fields.
+
+    **Deliberately does NOT also fold in ``entity_id``** (tried and
+    reverted, Codex review, PR #1078, twentieth round): unlike
+    ``disambiguator``, ``entity_id`` predates this PR -- function/variable/
+    layout detectors already populate it -- so appending it here would
+    rehash this id for that entire pre-existing, already-shipped
+    population, not just the new typedef/constant occurrences this round
+    targeted. Fixed at the source instead: ``compare.typedefs``/
+    ``compare.constants``'s own ``_collision_safe_disambiguator`` now gives
+    a genuinely distinguishable occurrence a real ``disambiguator`` even
+    when its producer supplied none, so the existing conditional append
+    above already closes the gap without touching any other kind's id.
     """
-    key = "\x1f".join(
-        [
-            str(getattr(getattr(c, "kind", None), "value", getattr(c, "kind", ""))),
-            str(getattr(c, "symbol", None) or ""),
-            str(getattr(c, "old_value", None) or ""),
-            str(getattr(c, "new_value", None) or ""),
-            str(getattr(c, "source_location", None) or ""),
-            str(getattr(c, "description", None) or ""),
-        ]
-    )
+    parts = [
+        str(getattr(getattr(c, "kind", None), "value", getattr(c, "kind", ""))),
+        str(getattr(c, "symbol", None) or ""),
+        str(getattr(c, "old_value", None) or ""),
+        str(getattr(c, "new_value", None) or ""),
+        str(getattr(c, "source_location", None) or ""),
+        str(getattr(c, "description", None) or ""),
+    ]
+    disambiguator = getattr(c, "disambiguator", None)
+    if disambiguator:
+        parts.append(str(disambiguator))
+    key = "\x1f".join(parts)
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 

@@ -39,6 +39,7 @@ from abicheck.model.identity import (
     EntityKind,
     Namespace,
     entity_id_for_constant,
+    entity_id_for_typedef,
 )
 from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
@@ -66,6 +67,8 @@ def _run(old_index, new_index, **kw):
         old_index,
         new_index,
         is_fingerprint_comparison_unreliable=kw.get("unreliable", _never_unreliable),
+        old_constants=kw.get("old_constants", {}),
+        new_constants=kw.get("new_constants", {}),
     )
 
 
@@ -129,9 +132,10 @@ class TestBackendEquivalence:
             assert change.entity_id is not None
             assert change.entity_id.kind is EntityKind.CONSTANT
 
-    def test_a_reordered_ir_is_refused_rather_than_emitted_out_of_order(self) -> None:
-        """The concrete reason the gate compares ordered sequences -- see
-        ``test_typedef_cutover.py``'s identical test."""
+    def test_the_real_ir_own_order_is_emitted_directly(self) -> None:
+        """ADR-063 Track T3 -- see ``test_typedef_cutover.py``'s identical
+        test for the full reasoning: no more comparison-time adjudication
+        against a legacy map's order once both sides carry a real IR."""
         maps = {"A": "1", "B": "1", "C": "1"}
         reordered = {"C": "1", "A": "1", "B": "1"}
         snap = _snap(constants=maps, semantic_ir=_ir_backed(reordered).ir)
@@ -139,7 +143,7 @@ class TestBackendEquivalence:
             snap, snap, old_constants=maps, new_constants=maps
         )
         emitted = [c.symbol for c in _run(old_index, SemanticIRIndex(SemanticIR()))]
-        assert emitted == ["A", "B", "C"]
+        assert emitted == ["C", "A", "B"]
 
 
 # -- behavior preservation, case by case -----------------------------------
@@ -179,13 +183,16 @@ class TestDetectorBehavior:
         )
         assert changes == []
 
-    def test_unsupported_fact_yields_no_comparable_value(self) -> None:
+    def test_unsupported_fact_yields_no_comparable_value_with_no_legacy_fallback(
+        self,
+    ) -> None:
         """A ``Fact.unsupported()`` occurrence (the clang compound-
         initializer-fingerprint/bool-literal case, see ``extract/
-        semantic_normalizer.py``) carries no value text -- defensively
-        skipped rather than compared against ``None``. Unreachable from the
-        real ``constant_index_pair`` gate in practice (see that function's
-        own docstring), exercised directly here as the defensive floor."""
+        semantic_normalizer.py``) carries no value text on the ``Fact``
+        itself -- skipped rather than compared against ``None`` when there
+        is also no ``AbiSnapshot.constants`` fallback text to use instead
+        (see ``test_a_same_backend_value_change_hidden_by_an_unsupported_
+        fact_is_still_caught`` for the case where there is one)."""
         unsupported = SemanticIRIndex(
             SemanticIR(
                 occurrences={
@@ -199,11 +206,70 @@ class TestDetectorBehavior:
         assert _run(unsupported, _ir_backed({"X": "1"})) == []
         assert _run(_ir_backed({"X": "1"}), unsupported) == []
 
-    def test_a_newly_added_unsupported_fact_is_skipped_not_reported(self) -> None:
-        """The addition-side counterpart of the above: a constant that only
-        exists on the *new* side and carries an unsupported fact must be
-        skipped by the second loop's own ``new_val is None`` guard, not
-        just the first loop's. Distinct code path from
+    def test_a_same_backend_value_change_hidden_by_an_unsupported_fact_is_still_caught(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, second round: two same-backend snapshots
+        both carrying "X" with an unsupported canonical spelling (e.g. a
+        clang compound-initializer fingerprint that genuinely changed) must
+        still report ``CONSTANT_CHANGED`` by falling back to each
+        snapshot's own flat ``AbiSnapshot.constants`` raw text -- the same
+        text the pre-T3 legacy-only path always compared directly, before
+        ``SemanticIR`` authority made ``_value`` reach ``None`` for this
+        case at all."""
+        eid = entity_id_for_constant((), "X")
+        unsupported_ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.unsupported("not comparable")
+                )
+            }
+        )
+        old_index = SemanticIRIndex(unsupported_ir)
+        new_index = SemanticIRIndex(unsupported_ir)
+        (change,) = _run(
+            old_index,
+            new_index,
+            old_constants={"X": "expr:aaaaaaaaaaaaaaaa"},
+            new_constants={"X": "expr:bbbbbbbbbbbbbbbb"},
+        )
+        assert change.kind is ChangeKind.CONSTANT_CHANGED
+        assert change.old_value == "expr:aaaaaaaaaaaaaaaa"
+        assert change.new_value == "expr:bbbbbbbbbbbbbbbb"
+
+    def test_the_legacy_fallback_still_defers_to_the_unreliable_predicate(
+        self,
+    ) -> None:
+        """The fallback value comparison is still gated through
+        *is_fingerprint_comparison_unreliable* exactly like any other
+        fingerprint comparison -- it does not bypass that safety check."""
+        eid = entity_id_for_constant((), "X")
+        unsupported_ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.unsupported("not comparable")
+                )
+            }
+        )
+        old_index = SemanticIRIndex(unsupported_ir)
+        new_index = SemanticIRIndex(unsupported_ir)
+        changes = _run(
+            old_index,
+            new_index,
+            old_constants={"X": "expr:aaaaaaaaaaaaaaaa"},
+            new_constants={"X": "expr:bbbbbbbbbbbbbbbb"},
+            unreliable=lambda old_value, new_value: True,
+        )
+        assert changes == []
+
+    def test_a_newly_added_unsupported_fact_is_still_reported_as_an_addition(
+        self,
+    ) -> None:
+        """A membership change is real regardless of whether the constant's
+        own value is comparable (Codex review, PR #1078): a constant that
+        only exists on the *new* side and carries an unsupported fact is
+        still a genuine addition -- it must not be silently dropped just
+        because ``new_value`` cannot be rendered. Distinct code path from
         ``test_unsupported_fact_yields_no_comparable_value``'s cases, none
         of which exercise a name absent from ``old_values`` entirely."""
         unsupported = SemanticIRIndex(
@@ -215,42 +281,666 @@ class TestDetectorBehavior:
                 }
             )
         )
-        assert _run(_ir_backed({}), unsupported) == []
+        (change,) = _run(_ir_backed({}), unsupported)
+        assert change.kind is ChangeKind.CONSTANT_ADDED
+        assert change.symbol == "X"
+        assert change.new_value is None
 
-    def test_an_unrenderable_scope_segment_is_skipped_by_every_projection(
+    def test_a_removed_unsupported_fact_is_still_reported_as_a_removal(
+        self,
+    ) -> None:
+        """The removal-side mirror of the addition test above: a constant
+        that only exists on the *old* side and carries an unsupported fact
+        is still a genuine removal."""
+        unsupported = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(entity_id_for_constant((), "X")): CanonicalEntity(
+                        canonical_spelling=Fact.unsupported("not comparable")
+                    )
+                }
+            )
+        )
+        (change,) = _run(unsupported, _ir_backed({}))
+        assert change.kind is ChangeKind.CONSTANT_REMOVED
+        assert change.symbol == "X"
+        assert change.old_value is None
+
+    def test_a_whole_colliding_group_disappearing_reports_every_removal(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, twelfth round: two anonymous-scoped
+        constants collide on ``X`` and the whole group vanishes on the new
+        side -- not merely shrinks. Both are independent, real removals,
+        not just `old_ids[0]`."""
+        first = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        second = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_REMOVED for c in changes)
+        assert {c.old_value for c in changes} == {"1", "2"}
+
+    def test_a_whole_new_colliding_group_reports_every_addition(self) -> None:
+        """The addition-side mirror: an entirely new colliding group (not
+        present in `old_values` at all) can carry more than one distinct
+        entity, each an independent addition."""
+        first = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        second = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        changes = _run(SemanticIRIndex(SemanticIR()), new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_ADDED for c in changes)
+        assert {c.new_value for c in changes} == {"1", "2"}
+
+    def test_an_unrenderable_scope_segment_falls_back_to_its_bare_leaf_name(
         self,
     ) -> None:
         """An entity whose scope contains an ``Anonymous`` segment has no
-        faithful flat spelling (``render_display_name`` returns ``None``,
-        see ``semantic_ir_legacy_adapter.py``'s own docstring) -- exercised
-        directly against all three projections that skip it: ``_values``
-        (via ``diff_constants``), ``_constant_names_and_values``, and
-        ``_constant_identities_by_name`` (both via ``constant_index_pair``'s
-        fidelity gate)."""
-        unrenderable_id = entity_id_for_constant((Anonymous("namespace", 0),), "X")
-        unrenderable = SemanticIRIndex(
+        *faithful* flat spelling (``render_display_name`` returns ``None``,
+        see ``semantic_ir_legacy_adapter.py``'s own docstring), but
+        ``_values`` still keys it under its bare leaf name via
+        ``render_display_name_or_leaf`` (Codex review, PR #1078, fourth
+        round) -- the same name the legacy adapter's own synthetic identity
+        already surfaces for it. A same-leaf value change across two
+        *different* anonymous scopes is still detected, which the strict
+        renderer would have made invisible entirely."""
+        old_id = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        new_id = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        old_index = SemanticIRIndex(
             SemanticIR(
                 occurrences={
-                    OccurrenceId(unrenderable_id): CanonicalEntity(
+                    OccurrenceId(old_id): CanonicalEntity(
                         canonical_spelling=Fact.present("1")
                     )
                 }
             )
         )
-        assert _run(unrenderable, unrenderable) == []
-        (change,) = _run(unrenderable, _ir_backed({"X": "1"}))
-        assert change.kind is ChangeKind.CONSTANT_ADDED
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    )
+                }
+            )
+        )
+        assert _run(old_index, old_index) == []
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_CHANGED
+        assert change.symbol == "X"
+        assert change.old_value == "1"
+        assert change.new_value == "2"
 
-        old = _snap(constants={}, semantic_ir=unrenderable.ir)
-        new = _snap(constants={}, semantic_ir=unrenderable.ir)
-        old_index, new_index = constant_index_pair(
+        old = _snap(constants={}, semantic_ir=old_index.ir)
+        new = _snap(constants={}, semantic_ir=new_index.ir)
+        pair_old_index, pair_new_index = constant_index_pair(
             old, new, old_constants={}, new_constants={}
         )
-        # A fidelity gate that read the anonymous entity's non-name would
-        # disagree with the legacy adapter's own (empty) projection and
-        # fall back; reading nothing for it agrees, so the real IR is used.
-        assert isinstance(old_index, SemanticIRIndex)
-        assert isinstance(new_index, SemanticIRIndex)
+        # Both sides carry a real SemanticIR, so it is used directly.
+        assert isinstance(pair_old_index, SemanticIRIndex)
+        assert isinstance(pair_new_index, SemanticIRIndex)
+        assert old_id in pair_old_index.entities_of_kind(EntityKind.CONSTANT)
+
+    def test_a_value_change_on_one_of_two_colliding_anonymous_constants_is_still_caught(
+        self,
+    ) -> None:
+        """Mirrors ``test_typedef_cutover.py``'s identical fix (Codex review,
+        PR #1078, sixth round): two constants declared in two distinct
+        anonymous namespaces both render to the bare leaf name ``X``.
+        Picking an arbitrary representative per side used to mean a real
+        value change on whichever occurrence didn't become the
+        representative was silently read as "unchanged" whenever the
+        *other* occurrence's value happened to match across sides."""
+        first_old = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        second_old = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        first_new = entity_id_for_constant((Anonymous("namespace", 2),), "X")
+        second_new = entity_id_for_constant((Anonymous("namespace", 3),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("3")
+                    ),
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_CHANGED
+        assert change.symbol == "X"
+        assert change.old_value == "2"
+        assert change.new_value == "3"
+
+    def test_a_membership_change_masked_by_an_unsupported_occurrence_is_still_caught(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, eighth round: the old side has two
+        occurrences colliding on ``X`` -- one comparable (``"1"``) and one
+        ``Fact.unsupported()`` with no legacy fallback text -- while the new
+        side has only the comparable one. Filtering out the unsupported
+        value before comparing left both sides' *filtered* multisets reading
+        ``["1"]``, so the group's own shrinking from two occurrences to one
+        was invisible even though a real removal happened.
+
+        Classified as ``CONSTANT_REMOVED`` (not ``CONSTANT_CHANGED``) since
+        the ninth round's own ``Counter``-based multiset fix: the
+        comparable value (``"1"``) is present on both sides unchanged, and
+        only the unresolved occurrence's own net removal differs -- a pure
+        shrink, not a value edit."""
+        comparable_old = entity_id_for_constant((), "X")
+        unsupported_old = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        comparable_new = entity_id_for_constant((), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(comparable_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(unsupported_old): CanonicalEntity(
+                        canonical_spelling=Fact.unsupported("not comparable")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(comparable_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_REMOVED
+        assert change.symbol == "X"
+        assert change.old_value is None
+        assert change.new_value is None
+
+    def test_a_stable_identitys_own_value_change_is_not_masked_by_a_new_arrival(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, thirteenth round: a stable, real-backend
+        identity ``X`` changes from ``1`` to ``2`` while a *different*,
+        newly-added anonymous-scope ``X`` arrives with value ``1``.
+        Value-only multiset matching cancels the stable entity's old ``1``
+        against the new entity's ``1``, reporting only a compatible-looking
+        ``CONSTANT_ADDED`` for value ``2`` -- silently masking the real,
+        breaking change to the stable entity and never reporting the
+        genuine addition at all. Matching by shared ``EntityId`` first
+        must catch the stable entity's own value change directly, and the
+        addition must still be reported separately.
+
+        ``stable`` uses an empty scope, not a named ``Namespace``, so it
+        renders to the identical bare name ``added`` does (Codex review, PR
+        #1078, nineteenth round: with a named scope the two rendered under
+        different names entirely and never entered the colliding-group path
+        this test claims to cover)."""
+        stable = entity_id_for_constant((), "X")
+        added = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                    OccurrenceId(added): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        by_kind = {c.kind: c for c in changes}
+        assert set(by_kind) == {ChangeKind.CONSTANT_CHANGED, ChangeKind.CONSTANT_ADDED}
+        changed = by_kind[ChangeKind.CONSTANT_CHANGED]
+        assert changed.old_value == "1"
+        assert changed.new_value == "2"
+        assert changed.entity_id == stable
+        added_change = by_kind[ChangeKind.CONSTANT_ADDED]
+        assert added_change.new_value == "1"
+        assert added_change.entity_id == added
+
+    def test_shifted_anonymous_ordinals_are_not_trusted_as_stable_identity(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, fourteenth round: an
+        ``Anonymous``-scoped identity's own ordinal is not stable across
+        snapshots (``model.identity_stability``'s own docstring) --
+        inserting an earlier anonymous sibling shifts every later one's
+        ordinal, even though nothing about those later declarations
+        changed. Two anonymous-scoped ``X`` declarations (``1``, ``2``)
+        collide on the old side; a *new*, earlier-declared sibling shifts
+        both of their ordinals by one on the new side, landing a
+        genuinely new ``X=3`` at the vacated ordinal 0. Naively trusting
+        `set(old_ids) & set(new_ids)` would pair old ordinal 0 (``1``)
+        against new ordinal 0 (``3``, actually the new declaration) and
+        old ordinal 1 (``2``) against new ordinal 1 (``1``, actually the
+        original ordinal-0 declaration, merely renumbered) -- two
+        fabricated ``CONSTANT_CHANGED`` findings for declarations that
+        never changed, on top of losing the real addition's own identity.
+        The only provable difference is the addition of ``X=3``."""
+        old_first = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_second = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        new_inserted = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        new_first_shifted = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        new_second_shifted = entity_id_for_constant((Anonymous("namespace", 2),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_first): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(old_second): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_inserted): CanonicalEntity(
+                        canonical_spelling=Fact.present("3")
+                    ),
+                    OccurrenceId(new_first_shifted): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(new_second_shifted): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_ADDED
+        assert change.new_value == "3"
+
+    def test_a_duplicate_value_added_to_a_colliding_group_is_an_addition_not_a_change(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, ninth round: the new side adds a second
+        anonymous-namespace ``X=1`` alongside the pre-existing ``X=1`` --
+        the group grows from one occurrence to two, both sharing the
+        identical value. A sorted-list multiset-equality check cannot tell
+        this apart from "an equal-length group's value changed and
+        happens to coincide" -- with a naive representative pick this
+        used to fall through into ``CONSTANT_CHANGED`` (an API break) for a
+        purely compatible addition. ``Counter`` subtraction has no such
+        blind spot: nothing was removed, one ``"1"`` was net-added."""
+        old_id = entity_id_for_constant((), "X")
+        new_first = entity_id_for_constant((), "X")
+        new_second = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_first): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(new_second): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_ADDED
+        assert change.symbol == "X"
+        assert change.new_value == "1"
+
+    def test_a_duplicate_value_removed_from_a_colliding_group_is_a_removal(
+        self,
+    ) -> None:
+        """The mirror image of the addition case above: the group shrinks
+        from two occurrences (both ``"1"``) to one, and must be classified
+        ``CONSTANT_REMOVED``, not ``CONSTANT_CHANGED``."""
+        old_first = entity_id_for_constant((), "X")
+        old_second = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        new_id = entity_id_for_constant((), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_first): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(old_second): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_REMOVED
+        assert change.symbol == "X"
+        assert change.old_value == "1"
+
+    def test_a_shared_legacy_fallback_is_not_misattributed_across_a_collision(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, ninth round: two anonymous-namespace
+        constants collide on ``X`` -- one retains its comparable value
+        (``"1"``, genuinely unchanged across sides) and the other is
+        ``Fact.unsupported()`` on both sides. ``AbiSnapshot.constants``
+        retains only *one* raw value per bare name -- whichever occurrence's
+        own parse happened to win that same collision upstream -- and that
+        single flat-map entry differs between the old and new snapshot here
+        (``"expr:aaaa..."`` vs. ``"expr:bbbb..."``) for reasons entirely
+        unrelated to either occurrence's own real value (e.g. which
+        occurrence the flat map's own construction happened to retain).
+        Applying this name-level text as a *per-occurrence* fallback (the
+        pre-ninth-round behavior) would misattribute it to the unsupported
+        occurrence and fabricate a ``CONSTANT_CHANGED`` finding from data
+        that was never actually this occurrence's own evidence. The
+        collision path does not consult the fallback at all, so no such
+        finding is fabricated -- the comparable occurrence is genuinely
+        unchanged, and the unresolved one contributes no evidence either
+        way on either side."""
+        stable_old = entity_id_for_constant((), "X")
+        unsupported_old = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        stable_new = entity_id_for_constant((), "X")
+        unsupported_new = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(unsupported_old): CanonicalEntity(
+                        canonical_spelling=Fact.unsupported("not comparable")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(unsupported_new): CanonicalEntity(
+                        canonical_spelling=Fact.unsupported("not comparable")
+                    ),
+                }
+            )
+        )
+        changes = _run(
+            old_index,
+            new_index,
+            old_constants={"X": "expr:aaaaaaaaaaaaaaaa"},
+            new_constants={"X": "expr:bbbbbbbbbbbbbbbb"},
+        )
+        assert changes == []
+
+    def test_a_whole_removed_groups_own_fallback_is_not_shared_across_members(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, thirteenth round: two anonymous-scoped,
+        unsupported-valued constants collide on ``X`` and the whole group
+        vanishes at once. ``AbiSnapshot.constants`` retains only one raw
+        value per bare name -- applying it as a per-occurrence fallback to
+        *both* removed entities would credit the same borrowed text to two
+        genuinely different declarations. With more than one entity in the
+        vanishing group, the fallback must not be consulted at all -- each
+        removal reports ``old_value=None``, same as the general collision
+        path's own identical rule."""
+        first = entity_id_for_constant((), "X")
+        second = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.unsupported("not comparable")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.unsupported("not comparable")
+                    ),
+                }
+            )
+        )
+        changes = _run(
+            old_index,
+            SemanticIRIndex(SemanticIR()),
+            old_constants={"X": "expr:aaaaaaaaaaaaaaaa"},
+        )
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_REMOVED for c in changes)
+        assert all(c.old_value is None for c in changes)
+
+    def test_a_mixed_group_reports_both_the_change_and_the_residual_addition(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, tenth round: a stable-identity `X=1`
+        becomes `X=2` while a *different*, newly-added anonymous-scope
+        `X=3` also appears in the same colliding group -- `removed={1}`,
+        `added={2, 3}`. Pairing off one removed value with one added value
+        as a single ``CONSTANT_CHANGED`` story must not silently drop the
+        independently provable ``CONSTANT_ADDED`` for the leftover value."""
+        stable_old = entity_id_for_constant((), "X")
+        stable_new = entity_id_for_constant((), "X")
+        added_new = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                    OccurrenceId(added_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("3")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        by_kind = {c.kind: c for c in changes}
+        assert set(by_kind) == {ChangeKind.CONSTANT_CHANGED, ChangeKind.CONSTANT_ADDED}
+        assert by_kind[ChangeKind.CONSTANT_CHANGED].old_value == "1"
+        # Since the eleventh round's occurrence-level (dict-ordered, not
+        # `set`-ordered) rewrite, which value pairs into the ``CHANGED``
+        # finding is deterministic -- the first-encountered added value in
+        # insertion order ("2", from `stable_new`, listed first) -- rather
+        # than depending on `PYTHONHASHSEED`. Both values are accounted
+        # for regardless.
+        assert by_kind[ChangeKind.CONSTANT_CHANGED].new_value == "2"
+        assert by_kind[ChangeKind.CONSTANT_ADDED].new_value == "3"
+
+    def test_a_mixed_group_reports_both_the_change_and_the_residual_removal(
+        self,
+    ) -> None:
+        """The mirror image: `removed={1, 4}`, `added={2}` -- one pairing
+        consumes `1`/`2` as a ``CONSTANT_CHANGED``, leaving `4` as an
+        independently provable ``CONSTANT_REMOVED``."""
+        stable_old = entity_id_for_constant((), "X")
+        removed_old = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        stable_new = entity_id_for_constant((), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(removed_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("4")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    )
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        by_kind = {c.kind: c for c in changes}
+        assert set(by_kind) == {
+            ChangeKind.CONSTANT_CHANGED,
+            ChangeKind.CONSTANT_REMOVED,
+        }
+        assert by_kind[ChangeKind.CONSTANT_CHANGED].new_value == "2"
+        # Since the eleventh round's occurrence-level (dict-ordered, not
+        # `set`-ordered) rewrite, which value pairs into the ``CHANGED``
+        # finding is deterministic -- the first-encountered removed value
+        # in insertion order ("1", from `stable_old`, listed first) --
+        # rather than depending on `PYTHONHASHSEED`. Both values are
+        # accounted for regardless.
+        assert by_kind[ChangeKind.CONSTANT_CHANGED].old_value == "1"
+        assert by_kind[ChangeKind.CONSTANT_REMOVED].old_value == "4"
+
+    def test_three_colliding_occurrences_shrinking_to_one_reports_two_removals(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, eleventh round: three anonymous-scoped
+        occurrences all sharing ``X=1`` on the old side, only one on the
+        new side -- the loss of *two* occurrences, not one. Converting the
+        multiset difference to a ``set`` (an earlier version of this fix)
+        collapsed the repeated value to a single entry, silently dropping
+        the second removal."""
+        first_old = entity_id_for_constant((), "X")
+        second_old = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        third_old = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        new_id = entity_id_for_constant((), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(third_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_REMOVED for c in changes)
+        assert all(c.old_value == "1" for c in changes)
+
+    def test_residual_findings_carry_the_contributing_entitys_own_id(self) -> None:
+        """Codex review, PR #1078, eleventh round: the residual
+        ``CONSTANT_ADDED`` for a newly-added anonymous-scope ``X=2``
+        alongside an unchanged, real-backend-identified ``X=1`` must carry
+        *that new occurrence's own* entity_id -- not a single id reused
+        across every finding for the name, which would misattribute the
+        addition to the pre-existing declaration."""
+        stable_old = entity_id_for_constant((Namespace("ns"),), "X")
+        stable_new = entity_id_for_constant((Namespace("ns"),), "X")
+        added_new = entity_id_for_constant((Namespace("ns2"),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(added_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_ADDED
+        assert change.new_value == "2"
+        assert change.entity_id == added_new
+        assert change.entity_id != stable_old
+        assert change.entity_id != stable_new
 
 
 # -- end to end, through the real detector entry point ---------------------
@@ -301,6 +991,42 @@ class TestThroughCompare:
             snap, snap, old_constants=maps, new_constants=maps
         )
         assert _run(old_index, new_index) == []
+
+    def test_a_pre_normalization_snapshots_real_constant_removal_is_still_detected(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, nineteenth round: fresh evidence beyond
+        the resolved load-validation thread. A v38-v41 snapshot legitimately
+        carries a populated ``constant_entity_ids`` sidecar with zero
+        matching ``SemanticIR`` occurrences (the identity-resolution slice
+        predates the normalization slice for constants) -- the seventeenth
+        round's own relaxation of the construction-time check lets such a
+        snapshot load. Before this fix, ``_constant_side_index`` still
+        trusted any non-``None`` ``semantic_ir`` wholesale, so this side's
+        comparison saw an empty constant surface and a genuine removal of
+        ``K`` was silently missed."""
+        typedef_eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        constant_eid = entity_id_for_constant((Namespace("ns"),), "K")
+        old = _snap(
+            constants={"ns::K": "1"},
+            constant_entity_ids={"ns::K": constant_eid},
+            # Pre-normalization: semantic_ir exists (typedef identity
+            # already resolved) but has zero CONSTANT occurrences at all.
+            semantic_ir=SemanticIR(
+                occurrences={
+                    OccurrenceId(typedef_eid): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            ),
+        )
+        new = _snap(constants={})
+        old_index, new_index = constant_index_pair(
+            old, new, old_constants=old.constants, new_constants=new.constants
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_REMOVED
+        assert change.symbol == "ns::K"
 
 
 # -- the architecture gate -------------------------------------------------
@@ -361,3 +1087,104 @@ class TestSemanticIrCutoverGate:
             'x = some_object.getattr(snap, "constants")',
         ):
             assert legacy_collection_reads(ast.parse(source), forbidden) == []
+
+
+class TestSharedIdOrderIsDeterministic:
+    """Regression coverage for Codex review, PR #1078, twentieth round:
+    when a colliding group carries more than one cross-snapshot-stable
+    shared identity (Codex review, PR #1078, thirteenth round), each
+    independently able to emit its own ``CONSTANT_CHANGED``, the order
+    those findings were emitted in used to depend on `set` iteration order
+    -- a real, reachable non-determinism (``PYTHONHASHSEED`` varies
+    between runs of the same input), even though a `set` has never been
+    the mechanism this collision path uses for *value* bucketing (that has
+    been dict-insertion-ordered since the eleventh round). Two ODR-
+    duplicate occurrences sharing one stable entity, both persisting across
+    old and new with a real value change each, isolate the gap: the
+    ``shared_ids`` set alone decided their relative order.
+    """
+
+    def test_two_shared_stable_occurrences_change_in_old_ids_order(self) -> None:
+        eid = entity_id_for_constant((Namespace("ns"),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("5")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("6")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_CHANGED for c in changes)
+        # Deterministic by `old_ids`' own encounter order (`SemanticIR.
+        # occurrences`' insertion order), not by `PYTHONHASHSEED`.
+        assert [c.old_value for c in changes] == ["1", "5"]
+        assert [c.new_value for c in changes] == ["2", "6"]
+        assert [c.disambiguator for c in changes] == ["tu-a", "tu-b"]
+
+
+class TestEqualCardinalityCollisionPairsAllSubstitutions:
+    """Regression coverage for Codex review, PR #1078, twentieth round: a
+    mixed removed/added group with more than one pair left after the
+    shared-identity pass used to pair only the first removed/added pair as
+    a `CONSTANT_CHANGED`, leaving every further pair to fall through the
+    leftover loops as an independent `CONSTANT_REMOVED`/`CONSTANT_ADDED` --
+    fabricating a removal-and-addition story for what equal cardinality on
+    both sides makes an equally valid (and less alarming) multi-pair
+    substitution. Two anonymous-scoped `X` occurrences valued `1`/`2` on the
+    old side becoming `3`/`4` on the new side must report two
+    `CONSTANT_CHANGED`s, not one `CONSTANT_CHANGED` plus a fabricated
+    `CONSTANT_REMOVED`/`CONSTANT_ADDED` pair.
+    """
+
+    def test_two_colliding_pairs_both_report_as_changed(self) -> None:
+        old_a = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_b = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        new_a = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        new_b = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(old_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("3")
+                    ),
+                    OccurrenceId(new_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("4")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_CHANGED for c in changes)
+        assert {c.old_value for c in changes} == {"1", "2"}
+        assert {c.new_value for c in changes} == {"3", "4"}

@@ -2038,7 +2038,7 @@
         },
         "finding_id": {
           "type": "string",
-          "description": "Stable, deterministic fingerprint (sha256 of kind/symbol/old_value/new_value/source_location/description, truncated to 16 hex chars) \u2014 lets a consumer correlate the same finding across two report runs without relying on array order. description disambiguates otherwise-identical findings on the same symbol (e.g. the same pointer-depth change on two different parameters). Excludes policy-derived fields (severity, evidence_status) so the same underlying finding hashes identically under any --policy."
+          "description": "Stable, deterministic fingerprint (sha256 of kind/symbol/old_value/new_value/source_location/description, truncated to 16 hex chars; report_schema_version 2.53 adds a seventh, conditional component -- see below) \u2014 lets a consumer correlate the same finding across two report runs without relying on array order. description disambiguates otherwise-identical findings on the same symbol (e.g. the same pointer-depth change on two different parameters). Excludes policy-derived fields (severity, evidence_status) so the same underlying finding hashes identically under any --policy. As of report_schema_version 2.53, a finding whose internal occurrence-identity discriminator is set (only ever true for a typedef/constant occurrence-level finding needing collision disambiguation -- not itself a reported field) has that discriminator appended as the seventh hash input; every other finding's id is computed exactly as before."
         },
         "canonical_finding_id": {
           "type": "string",

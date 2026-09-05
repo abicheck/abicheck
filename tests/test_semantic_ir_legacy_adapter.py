@@ -14,23 +14,31 @@
 # limitations under the License.
 
 """The legacy-flat-snapshot adapter and the typedef cutover's index selector
-(ADR-063 Phase 6B).
+(ADR-063 Phase 6B; Track T3, "typedef/constant authority cutover", for the
+authority-transfer half).
 
-Two properties carry the whole cutover's safety and are therefore stated
-here as invariants over generated input rather than as fixed examples:
+Properties stated here as invariants over generated input rather than as
+fixed examples:
 
 1. :func:`render_display_name` round-trips a synthetic identity exactly, and
-   refuses (``None``) any identity carrying a parse-order ordinal — the
-   property :func:`typedef_index_pair`'s fidelity gate rests on.
-2. The gate is *both-or-neither*: it never pairs an IR-backed index with an
-   adapted one, whatever the two sides' evidence looks like.
+   refuses (``None``) any identity carrying a parse-order ordinal.
+2. :func:`render_display_name_or_leaf` matches it whenever it renders, and
+   otherwise keeps every *named* scope segment (only omitting an
+   unrenderable one), matching the header-AST parsers' own qualified-name
+   convention for a flat legacy collection's key.
+3. :func:`typedef_index_pair` decides each side of a comparison
+   independently (real ``SemanticIR`` when present, the legacy adapter's
+   own projection otherwise) *unless* the two sides disagree on whether
+   they trust qualified typedef naming, in which case both sides render
+   through the legacy adapter to keep one shared key-space granularity.
 """
 
 from __future__ import annotations
 
 from hypothesis import given, strategies as st
 
-from abicheck.compare.typedefs import typedef_index_pair
+from abicheck.checker_policy import ChangeKind
+from abicheck.compare.typedefs import diff_typedefs, typedef_index_pair
 from abicheck.model import AbiSnapshot
 from abicheck.model.fact import Fact
 from abicheck.model.identity import (
@@ -53,6 +61,7 @@ from abicheck.model.semantic_ir_legacy_adapter import (
     legacy_typedef_ir,
     producer_entity_id,
     render_display_name,
+    render_display_name_or_leaf,
 )
 
 _names = st.text(alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=6)
@@ -128,6 +137,62 @@ class TestRenderDisplayName:
         owner_id = EntityId(scope=(), kind=EntityKind.FUNCTION, leaf_name=owner)
         scope = (LocalToFunction(owner=owner_id, block_ordinal=block),)
         assert render_display_name(entity_id_for_typedef(scope, leaf)) is None
+
+
+# -- render_display_name_or_leaf --------------------------------------------
+
+
+class TestRenderDisplayNameOrLeaf:
+    """Codex review, PR #1078, fourth and fifth rounds: the fallback
+    detectors use to key an otherwise-unrenderable identity, matching the
+    header-AST parsers' own qualified-name convention exactly (an anonymous
+    segment contributes nothing to the joined string but does not abort the
+    walk to its named ancestors)."""
+
+    @given(scope=st.lists(_names, max_size=4), leaf=_names)
+    def test_agrees_with_render_display_name_when_it_renders(
+        self, scope: list[str], leaf: str
+    ) -> None:
+        eid = entity_id_for_typedef(tuple(Namespace(n) for n in scope), leaf)
+        assert render_display_name_or_leaf(eid) == render_display_name(eid)
+
+    def test_a_named_ancestor_survives_an_anonymous_segment(self) -> None:
+        """The exact scenario a Codex review round found the bare-leaf-only
+        fallback got wrong: ``N::<anonymous>::X`` must render ``"N::X"`` --
+        matching the flat legacy map's own key for the identical
+        declaration -- not collapse all the way to the bare leaf ``"X"``,
+        which would fabricate a removal/addition pair against an unchanged
+        declaration."""
+        eid = entity_id_for_typedef((Namespace("N"), Anonymous("namespace", 0)), "X")
+        assert render_display_name(eid) is None
+        assert render_display_name_or_leaf(eid) == "N::X"
+
+    def test_a_bare_anonymous_segment_with_no_named_ancestor_falls_back_to_the_leaf(
+        self,
+    ) -> None:
+        eid = entity_id_for_typedef((Anonymous("namespace", 0),), "X")
+        assert render_display_name_or_leaf(eid) == "X"
+
+    @given(
+        prefix=st.lists(_names, min_size=1, max_size=2),
+        suffix=st.lists(_names, max_size=2),
+        ordinal=st.integers(min_value=0, max_value=8),
+        leaf=_names,
+    )
+    def test_every_named_segment_is_kept_regardless_of_position(
+        self, prefix: list[str], suffix: list[str], ordinal: int, leaf: str
+    ) -> None:
+        """Position-independent, the mirror of ``render_display_name``'s own
+        ``test_any_anonymous_segment_anywhere_refuses_to_render``: wherever
+        the unrenderable segment sits, every *named* segment around it still
+        contributes to the rendered name, in order."""
+        scope = (
+            *(Namespace(n) for n in prefix),
+            Anonymous("struct", ordinal),
+            *(Namespace(n) for n in suffix),
+        )
+        eid = entity_id_for_typedef(scope, leaf)
+        assert render_display_name_or_leaf(eid) == "::".join([*prefix, *suffix, leaf])
 
 
 # -- synthetic identity ----------------------------------------------------
@@ -240,13 +305,19 @@ class TestLegacyConstantIr:
 
 
 class TestTypedefIndexPair:
+    """ADR-063 Track T3: ``typedef_index_pair`` is no longer a fidelity gate
+    -- when both sides carry a real ``SemanticIR`` it is used directly, with
+    no comparison against (and no fallback to) the legacy projection. A
+    disagreement between the real IR and its own ``typedef_entity_ids``
+    sidecar is caught earlier, at snapshot construction, as a hard
+    :class:`~abicheck.errors.SemanticIrAuthorityError` -- see
+    ``TestConstructionTimeConsistency`` below."""
+
     def test_a_faithful_ir_on_both_sides_is_used(self) -> None:
         """A real producer populates ``semantic_ir`` and the legacy
         ``typedef_entity_ids`` sidecar from the same pass (see
         ``dumper.py``'s own ``ast_result.typedef_entity_ids``), so a
-        genuinely faithful snapshot carries both, agreeing -- the identity
-        half of the fidelity gate (Codex review on PR #1041, follow-up
-        round) requires exactly that agreement."""
+        genuinely faithful snapshot carries both, agreeing."""
         eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
         maps = {"ns::Alias": "int"}
         old = _snap(
@@ -264,53 +335,21 @@ class TestTypedefIndexPair:
         assert old_index.fact(eid, "canonical_spelling").value == "int"
         assert new_index.fact(eid, "canonical_spelling").value == "long"
 
-    def test_a_sidecar_identity_disagreeing_with_the_ir_forces_the_fallback(
+    def test_the_real_ir_is_trusted_even_when_the_legacy_map_disagrees_on_membership(
         self,
     ) -> None:
-        """Regression for the Codex review on PR #1041, follow-up round:
-        names and values matching is not enough -- the real IR's own
-        ``EntityId`` for an alias must also agree with what the legacy
-        adapter would independently assign that same alias via the
-        ``typedef_entity_ids`` sidecar. A loaded or Python-constructed
-        snapshot can carry a real IR resolving ``ns::Alias`` under one
-        scope while its sidecar names a *different*, differently-scoped
-        identity that happens to render back to the identical alias text
-        (e.g. two same-named typedefs the sidecar and the IR each
-        associate with a different one of two structurally distinct
-        anonymous scopes). Picking the IR path there would stamp the
-        wrong ``entity_id`` on the emitted finding relative to the
-        pre-cutover detector, silently changing which stored
-        ``entity:``-alias suppression rules match -- so this must fall
-        back to the adapter instead, even though every name and value
-        still matches exactly."""
-        ir_eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
-        sidecar_eid = entity_id_for_typedef((Namespace("other"),), "Alias")
-        maps = {"ns::Alias": "int"}
-        old = _snap(
-            semantic_ir=_typedef_ir({ir_eid: "int"}),
-            typedef_entity_ids={"ns::Alias": sidecar_eid},
-        )
-        new = _snap(
-            semantic_ir=_typedef_ir({ir_eid: "int"}),
-            typedef_entity_ids={"ns::Alias": sidecar_eid},
-        )
-        old_index, new_index = typedef_index_pair(
-            old, new, old_typedefs=maps, new_typedefs=maps
-        )
-        # The adapter ran, not the real IR: its identities are synthetic
-        # (the sidecar's own EntityId doesn't render back to "ns::Alias",
-        # since it names a different scope, so `legacy_typedef_ir` falls
-        # back to a synthetic identity for it too).
-        for index in (old_index, new_index):
-            for eid_ in index.entities_of_kind(EntityKind.TYPEDEF):
-                assert producer_entity_id(eid_) is None
-
-    def test_an_ir_missing_one_alias_falls_back_on_both_sides(self) -> None:
-        """Set equality, not a count: the IR here has the right *number* of
-        typedefs on the old side and still disagrees about which."""
+        """Before T3, an IR whose alias *set* didn't reproduce the legacy
+        map exactly (a count match with a different member) fell back to
+        the adapter on both sides. After T3 there is nothing left to fall
+        back to when both sides carry a real IR: the IR's own alias set is
+        authoritative, whatever a *stale* legacy map says -- e.g. a legacy
+        ``typedefs_qualified``/``typedef_entity_ids`` sidecar this
+        comparison was handed that predates a later real parse."""
         present = entity_id_for_typedef((Namespace("ns"),), "Alias")
         old = _snap(semantic_ir=_typedef_ir({present: "int"}))
         new = _snap(semantic_ir=_typedef_ir({present: "int"}))
+        # The legacy map this comparison was handed names a typedef the
+        # real IR does not -- no longer enough to force a fallback.
         maps = {"ns::Alias": "int", "ns::Other": "char"}
         old_index, new_index = typedef_index_pair(
             old, new, old_typedefs=maps, new_typedefs=maps
@@ -320,12 +359,21 @@ class TestTypedefIndexPair:
                 render_display_name(e)
                 for e in index.entities_of_kind(EntityKind.TYPEDEF)
             }
-            assert names == {"ns::Alias", "ns::Other"}
+            assert names == {"ns::Alias"}
+            # The real IR ran, not the adapter: its identity is a genuine
+            # producer one, never synthetic.
+            for eid_ in index.entities_of_kind(EntityKind.TYPEDEF):
+                assert producer_entity_id(eid_) is not None
 
-    def test_one_faithful_side_and_one_unfaithful_side_never_mix(self) -> None:
-        """Both-or-neither. Pairing an IR-backed old side with an adapted new
-        side compares two differently-derived key spaces, which fabricates a
-        removal out of a projection difference."""
+    def test_each_side_is_decided_independently_not_both_or_neither(self) -> None:
+        """ADR-063 Track T3 (Codex review, PR #1078): a side with a real IR
+        uses it directly even when the *other* side has none at all -- the
+        old both-or-neither rule would have discarded the old side's real
+        IR in favor of a legacy reconstruction of it, purely because the new
+        side had nothing to be authoritative over. See
+        ``compare.typedefs.typedef_index_pair``'s own docstring for why
+        mixing is safe: both index shapes are matched by rendered alias
+        name, not by ``EntityId``."""
         eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
         old = _snap(semantic_ir=_typedef_ir({eid: "int"}))
         new = _snap()  # no SemanticIR at all
@@ -333,28 +381,289 @@ class TestTypedefIndexPair:
         old_index, new_index = typedef_index_pair(
             old, new, old_typedefs=maps, new_typedefs=maps
         )
-        # Both adapted: the adapter marks its identities synthetic, the real
-        # IR path does not -- so this is a direct check of which side ran.
-        for index in (old_index, new_index):
-            for eid_ in index.entities_of_kind(EntityKind.TYPEDEF):
-                assert producer_entity_id(eid_) is None
+        # The real IR ran for old (a genuine producer identity survives);
+        # the adapter ran for new (no IR to prefer, so its identity is
+        # synthetic) -- each side decided on its own merits.
+        for eid_ in old_index.entities_of_kind(EntityKind.TYPEDEF):
+            assert producer_entity_id(eid_) is not None
+        for eid_ in new_index.entities_of_kind(EntityKind.TYPEDEF):
+            assert producer_entity_id(eid_) is None
 
-    def test_an_unrenderable_anonymous_scope_forces_the_fallback(self) -> None:
-        """The concrete case ``render_display_name``'s ``None`` exists for:
-        the IR carries the typedef, but under an identity with no faithful
-        flat spelling, so it cannot be matched to the alias map."""
+    def test_the_ir_side_is_not_starved_when_both_sides_trust_qualified_naming(
+        self,
+    ) -> None:
+        """The concrete regression per-side independence closes (Codex
+        review, PR #1078, first round): a stored baseline with no
+        ``SemanticIR`` but real, *qualified-trusted* flat typedefs, compared
+        against a live snapshot that carries a real IR -- and, as every real
+        producer does, the identical content in its own flat
+        ``typedefs_qualified`` too. Under the old both-or-neither rule the
+        live side's real IR would have been discarded in favor of a legacy
+        reconstruction of it purely because the old side lacked IR; deciding
+        per side means it never is."""
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old = _snap(typedefs_qualified={"ns::Alias": "int"}, ast_producer="")
+        new = _snap(
+            typedefs_qualified={"ns::Alias": "int"},
+            semantic_ir=_typedef_ir({eid: "int"}),
+        )
+        old_index, new_index = typedef_index_pair(
+            old,
+            new,
+            old_typedefs={"ns::Alias": "int"},
+            new_typedefs={"ns::Alias": "int"},
+        )
+        changes = diff_typedefs(
+            old_index,
+            new_index,
+            exclude_stdlib_namespaces=False,
+            suppress_removed=False,
+            is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
+        )
+        assert changes == []
+        # The real IR ran for `new`: its identity is a genuine producer one.
+        for eid_ in new_index.entities_of_kind(EntityKind.TYPEDEF):
+            assert producer_entity_id(eid_) is not None
+
+    def test_bare_mode_uses_the_legacy_adapter_for_both_sides_even_with_real_ir(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, second round: when the OLD side does not
+        trust qualified naming (a genuinely pre-v25/pre-v38 baseline, which
+        also means it carries no ``SemanticIR`` at all), the whole
+        comparison operates in *bare*-keyed mode -- and a real ``SemanticIR``
+        on the other side, which always renders under its own fully
+        *qualified* name, must not be used directly there either: doing so
+        would key that side under ``"ns::Alias"`` while the bare-mode old
+        side is keyed under ``"Alias"``, fabricating a removal out of a pure
+        naming-granularity mismatch rather than a real one. Both sides must
+        render through the legacy adapter over the comparison's own
+        bare-keyed maps instead, exactly as every pre-T3 comparison already
+        did in this narrower case."""
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old = _snap(typedefs={"Alias": "int"}, ast_producer="")
+        # `new` carries a real, qualified-named IR *and* the matching
+        # `typedefs_qualified` a real producer would also populate -- but
+        # `_typedef_diff_maps` still resolves the *bare* maps for both
+        # sides here, since `old` cannot express qualified names at all.
+        new = _snap(
+            typedefs_qualified={"ns::Alias": "int"},
+            typedefs={"Alias": "int"},
+            semantic_ir=_typedef_ir({eid: "int"}),
+        )
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs={"Alias": "int"}, new_typedefs={"Alias": "int"}
+        )
+        changes = diff_typedefs(
+            old_index,
+            new_index,
+            exclude_stdlib_namespaces=False,
+            suppress_removed=False,
+            is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
+        )
+        assert changes == []
+        # `new`'s own real IR is bare-projected (Codex review, PR #1078,
+        # twelfth round: each real entity gets its own synthetic,
+        # collision-safe bare identity rather than collapsing into a
+        # shared `legacy_typedef_ir` dict key) -- still synthetic (no
+        # backend evidence to stamp onto a `Change`) and still keyed bare
+        # ("Alias"), not qualified, via the best-effort renderer (the
+        # synthetic identity's own `Anonymous` wrapper makes the strict
+        # renderer refuse it).
+        for eid_ in new_index.entities_of_kind(EntityKind.TYPEDEF):
+            assert producer_entity_id(eid_) is None
+            assert render_display_name_or_leaf(eid_) == "Alias"
+
+    def test_bare_mode_still_uses_a_side_own_real_ir_when_its_bare_map_is_incomplete(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, seventh round: the OLD side is genuinely
+        pre-v25 (no ``typedefs_qualified``, no ``semantic_ir``), forcing the
+        whole comparison into bare-key mode -- but the NEW side's own
+        *bare* ``typedefs`` map is empty even though it carries a real,
+        qualified ``SemanticIR`` (a hand-built or future-producer snapshot;
+        every current real header-AST parser populates ``typedefs``/
+        ``typedefs_qualified``/``semantic_ir`` together from one pass, so
+        this specific split does not occur from a real dump today -- but
+        this module's own per-side-independence design already rejects
+        relying on that as a standing invariant, see
+        ``_bare_typedef_side_index``'s own docstring). Before the fix, the
+        bare-mode branch trusted the empty *new_typedefs* parameter alone
+        and fabricated ``TYPEDEF_REMOVED`` for a typedef the new side's real
+        IR still has."""
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old = _snap(typedefs={"Alias": "int"}, ast_producer="")
+        new = _snap(
+            typedefs={},
+            typedefs_qualified={"ns::Alias": "int"},
+            semantic_ir=_typedef_ir({eid: "int"}),
+        )
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs={"Alias": "int"}, new_typedefs={}
+        )
+        changes = diff_typedefs(
+            old_index,
+            new_index,
+            exclude_stdlib_namespaces=False,
+            suppress_removed=False,
+            is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
+        )
+        assert changes == []
+        # The bare-projected synthetic identity's own `Anonymous` wrapper
+        # (Codex review, PR #1078, twelfth round) makes the strict renderer
+        # refuse it -- use the best-effort one, matching how the alias
+        # grouping itself reads this entity.
+        assert "Alias" in {
+            render_display_name_or_leaf(e)
+            for e in new_index.entities_of_kind(EntityKind.TYPEDEF)
+        }
+
+    def test_bare_projection_preserves_ambiguity_across_colliding_qualified_names(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, twelfth round: the OLD side is pre-v25
+        with ``Alias=int``; the NEW side carries a real, qualified IR with
+        *two* distinct entities that both flatten to the bare alias
+        ``Alias`` -- an unchanged ``a::Alias=int`` and a newly-added
+        ``b::Alias=long``. Projecting straight into a ``dict[str, str]``
+        (an earlier version of this fix) collapsed both onto one bare key,
+        with the later one silently overwriting the earlier -- comparing
+        ``Alias=int`` (old) against whichever one survived (``long``)
+        fabricated a ``TYPEDEF_BASE_CHANGED`` for a declaration that never
+        actually changed. The only provable difference is the untracked,
+        compatible addition of ``b::Alias`` -- so no finding at all."""
+        unchanged_eid = entity_id_for_typedef((Namespace("a"),), "Alias")
+        added_eid = entity_id_for_typedef((Namespace("b"),), "Alias")
+        old = _snap(typedefs={"Alias": "int"}, ast_producer="")
+        new = _snap(
+            typedefs_qualified={"a::Alias": "int", "b::Alias": "long"},
+            semantic_ir=_typedef_ir({unchanged_eid: "int", added_eid: "long"}),
+        )
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs={"Alias": "int"}, new_typedefs={}
+        )
+        changes = diff_typedefs(
+            old_index,
+            new_index,
+            exclude_stdlib_namespaces=False,
+            suppress_removed=False,
+            is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
+        )
+        assert changes == []
+
+    def test_bare_projection_preserves_odr_duplicate_disambiguators(self) -> None:
+        """Codex review, PR #1078, eighteenth round: the OLD side is
+        pre-v25 with no ``Alias`` at all; the NEW side carries a real,
+        qualified IR with *two* ODR/multi-TU occurrences of the identical
+        ``ns::Alias`` entity (same ``EntityId``, distinguished only by
+        ``OccurrenceId.disambiguator``), both with the same value. An
+        earlier version of the bare-alias projection dropped the source
+        occurrence's own disambiguator when wrapping it in a fresh,
+        collision-safe synthetic identity, so both bare-projected
+        occurrences collapsed right back together in
+        ``diff_filtering._dedup_exact`` -- silently reporting only one of
+        the two real removals."""
+        from abicheck.diff_filtering import _dedup_exact
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        # A genuinely pre-v25 side (non-empty bare `typedefs`, no
+        # `typedefs_qualified`) forces the whole comparison into bare-key
+        # mode, exactly like the other bare-mode tests in this class.
+        old = _snap(typedefs={"Placeholder": "x"}, ast_producer="")
+        new = _snap(
+            typedefs_qualified={"ns::Alias": "int"},
+            semantic_ir=SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            ),
+        )
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs={"Placeholder": "x"}, new_typedefs={}
+        )
+        changes = diff_typedefs(
+            new_index,
+            old_index,
+            exclude_stdlib_namespaces=False,
+            suppress_removed=False,
+            is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
+        )
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_REMOVED for c in changes)
+        # Codex review, PR #1078, nineteenth round: the disambiguator is now
+        # `"<ordinal>:<source disambiguator>"`, not the bare source value --
+        # see `_bare_typedef_side_index`'s own docstring for why the ordinal
+        # must be included unconditionally.
+        assert {c.disambiguator for c in changes} == {"0:tu-a", "1:tu-b"}
+        assert len(_dedup_exact(changes)) == 2
+
+    def test_bare_projection_distinguishes_distinct_entities_with_blank_disambiguators(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, nineteenth round: fresh evidence beyond
+        the eighteenth round's own ODR-duplicate fix. Two *distinct*
+        qualified typedefs (``a::Alias``, ``b::Alias``) with the same value
+        and no real ``OccurrenceId.disambiguator`` at all (the overwhelming
+        common case) are forced through the bare-key path. Carrying only
+        the source disambiguator forward (the eighteenth round's own fix)
+        left both bare-projected occurrences with `entity_id=None` and
+        `disambiguator=None` alike, colliding right back together in
+        `_dedup_exact` -- the ordinal must be included unconditionally, not
+        just when the source disambiguator happens to be real."""
+        from abicheck.diff_filtering import _dedup_exact
+
+        a_eid = entity_id_for_typedef((Namespace("a"),), "Alias")
+        b_eid = entity_id_for_typedef((Namespace("b"),), "Alias")
+        old = _snap(typedefs={"Placeholder": "x"}, ast_producer="")
+        new = _snap(
+            typedefs_qualified={"a::Alias": "int", "b::Alias": "int"},
+            semantic_ir=SemanticIR(
+                occurrences={
+                    OccurrenceId(a_eid): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(b_eid): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            ),
+        )
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs={"Placeholder": "x"}, new_typedefs={}
+        )
+        changes = diff_typedefs(
+            new_index,
+            old_index,
+            exclude_stdlib_namespaces=False,
+            suppress_removed=False,
+            is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
+        )
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_REMOVED for c in changes)
+        assert all(c.entity_id is None for c in changes)
+        assert len({c.disambiguator for c in changes}) == 2
+        assert len(_dedup_exact(changes)) == 2
+
+    def test_an_unrenderable_anonymous_scope_is_used_but_invisible_to_aliasing(
+        self,
+    ) -> None:
+        """The real IR is used directly (both sides carry one) -- an
+        anonymous-scoped identity is still present in the raw index, but
+        renders no alias, exactly the same as it would on the legacy
+        adapter path: it genuinely has no flat spelling a ``Change.symbol``
+        could name, on either backing."""
         anon = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
         ir = _typedef_ir({anon: "int"})
         old = _snap(semantic_ir=ir)
         new = _snap(semantic_ir=ir)
-        maps = {"Alias": "int"}
-        old_index, _ = typedef_index_pair(
-            old, new, old_typedefs=maps, new_typedefs=maps
-        )
-        assert {
-            render_display_name(e)
-            for e in old_index.entities_of_kind(EntityKind.TYPEDEF)
-        } == {"Alias"}
+        old_index, _ = typedef_index_pair(old, new, old_typedefs={}, new_typedefs={})
+        assert anon in old_index.entities_of_kind(EntityKind.TYPEDEF)
+        assert render_display_name(anon) is None
 
     def test_two_empty_sides_still_agree_and_use_the_ir_path(self) -> None:
         old_index, new_index = typedef_index_pair(
@@ -364,47 +673,235 @@ class TestTypedefIndexPair:
         assert old_index.entities_of_kind(EntityKind.TYPEDEF) == {}
         assert new_index.entities_of_kind(EntityKind.TYPEDEF) == {}
 
-    def test_matching_names_with_a_stale_underlying_spelling_still_falls_back(
+    def test_a_stale_legacy_value_no_longer_matters_once_ir_is_authoritative(
         self,
     ) -> None:
-        """The name-only reading of the gate this regression test pins: a
-        snapshot's ``semantic_ir`` can carry the *right* typedef identity
-        while its ``canonical_spelling`` disagrees with what the legacy
-        alias map (independently resolved from the same snapshot's flat
-        typedef collection) says the same alias resolves to -- e.g. a
-        hand-built or loaded snapshot where the two representations were
-        never cross-validated. Comparing display names alone would accept
-        this IR and either silently drop or silently fabricate a
-        ``TYPEDEF_BASE_CHANGED`` finding depending on which side is stale.
-        The gate must also compare the resolved underlying spelling, so this
-        must still fall back to the legacy adapter on both sides."""
+        """Before T3, an IR whose ``canonical_spelling`` disagreed with the
+        legacy alias map's own value forced a fallback. After T3 the real
+        IR's value is trusted directly -- the whole point of authority
+        transfer is that a real IR need not agree with a legacy projection
+        derived independently from the same snapshot's flat collection."""
         eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
-        # The IR's own value ("long") disagrees with the alias map's value
-        # ("int") for the identical, correctly-identified alias.
         old = _snap(semantic_ir=_typedef_ir({eid: "long"}))
         new = _snap(semantic_ir=_typedef_ir({eid: "long"}))
         maps = {"ns::Alias": "int"}
         old_index, new_index = typedef_index_pair(
             old, new, old_typedefs=maps, new_typedefs=maps
         )
-        # Both adapted (fell back to the legacy projection), not the real IR
-        # whose stale "long" would otherwise have leaked through.
         for index in (old_index, new_index):
             for eid_ in index.entities_of_kind(EntityKind.TYPEDEF):
-                assert producer_entity_id(eid_) is None
-                assert index.fact(eid_, "canonical_spelling").value == "int"
+                assert producer_entity_id(eid_) is not None
+                assert index.fact(eid_, "canonical_spelling").value == "long"
 
 
-def test_typedef_identities_by_alias_skips_an_unrenderable_entity() -> None:
-    """Defensive-floor coverage for `_typedef_identities_by_alias`: an
-    entity whose identity has no faithful flat rendering (an anonymous
-    scope) is skipped rather than keyed under `None` -- direct unit test
-    since `typedef_index_pair`'s own callers never reach this branch (an
-    unrenderable real-IR entity already fails the name-sequence check
-    first, short-circuiting before the identity comparison runs)."""
-    from abicheck.compare.typedefs import _typedef_identities_by_alias
+class TestConstructionTimeConsistency:
+    """ADR-063 Track T3: the one piece of the old fidelity gate still worth
+    checking (a sidecar identity disagreeing with the real IR for the same
+    rendered name) now fires at snapshot construction, as a hard
+    :class:`~abicheck.errors.SemanticIrAuthorityError`, instead of being
+    silently absorbed by a per-comparison fallback."""
 
-    anon = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
-    named = entity_id_for_typedef((Namespace("ns"),), "Alias")
-    index = SemanticIRIndex(_typedef_ir({anon: "int", named: "int"}))
-    assert _typedef_identities_by_alias(index) == {"ns::Alias": named}
+    def test_a_sidecar_identity_disagreeing_with_the_ir_is_a_hard_failure(
+        self,
+    ) -> None:
+        """The same scenario the old fidelity gate used to route around
+        silently: a real IR resolving ``ns::Alias`` under one scope while
+        the ``typedef_entity_ids`` sidecar names a *different* identity for
+        the identical rendered alias. This is now a producer bug that must
+        fail loudly at construction, not a difference to adjudicate away at
+        comparison time."""
+        import pytest
+
+        from abicheck.errors import SemanticIrAuthorityError
+
+        ir_eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        sidecar_eid = entity_id_for_typedef((Namespace("other"),), "Alias")
+        with pytest.raises(SemanticIrAuthorityError):
+            _snap(
+                semantic_ir=_typedef_ir({ir_eid: "int"}),
+                typedef_entity_ids={"ns::Alias": sidecar_eid},
+            )
+
+    def test_an_agreeing_sidecar_is_not_a_failure(self) -> None:
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        snap = _snap(
+            semantic_ir=_typedef_ir({eid: "int"}),
+            typedef_entity_ids={"ns::Alias": eid},
+        )
+        assert snap.semantic_ir is not None
+
+    def test_no_sidecar_at_all_is_not_a_failure(self) -> None:
+        """The common, forward-looking case: a snapshot carrying only a
+        real ``SemanticIR`` with no legacy sidecar populated at all. There
+        is nothing to disagree with, so this must construct cleanly --
+        requiring a populated sidecar would make the legacy dict an
+        accidental prerequisite of the very representation meant to replace
+        it."""
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        snap = _snap(semantic_ir=_typedef_ir({eid: "int"}))
+        assert snap.semantic_ir is not None
+
+    def test_an_anonymous_scoped_entity_is_checked_by_its_flattened_name(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, eighth round: the sidecar check is keyed
+        by ``render_display_name_or_leaf`` (the same flattened name a real
+        producer's own sidecar uses), not the strict ``render_display_name``
+        that refuses an anonymous-scoped identity outright -- so an
+        anonymous-scoped IR entity *is* checked against its sidecar entry,
+        and an agreeing pair (as here) constructs cleanly."""
+        anon = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        snap = _snap(
+            semantic_ir=_typedef_ir({anon: "int"}),
+            typedef_entity_ids={"Alias": anon},
+        )
+        assert snap.semantic_ir is not None
+
+    def test_an_anonymous_scoped_sidecar_disagreement_is_now_caught(self) -> None:
+        """Codex review, PR #1078, eighth round: before keying by the
+        flattened name, an anonymous-scoped identity's ``None`` rendering
+        made this check skip it entirely, so a genuine identity
+        disagreement for such a declaration passed construction silently --
+        defeating the check for exactly the family of declarations
+        ``render_display_name_or_leaf`` exists to keep visible."""
+        import pytest
+
+        from abicheck.errors import SemanticIrAuthorityError
+
+        ir_eid = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        sidecar_eid = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        with pytest.raises(SemanticIrAuthorityError):
+            _snap(
+                semantic_ir=_typedef_ir({ir_eid: "int"}),
+                typedef_entity_ids={"Alias": sidecar_eid},
+            )
+
+    def test_a_colliding_anonymous_group_is_satisfied_by_any_member(self) -> None:
+        """Two distinct anonymous-scoped entities can render to the
+        identical flattened name (the same collision
+        ``render_display_name_or_leaf`` itself accepts) -- the sidecar,
+        built by a plain ``dict`` comprehension over the same colliding
+        key, can only ever record one of them, so agreement with *either*
+        colliding IR entity must not raise."""
+        first = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        second = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        snap = _snap(
+            semantic_ir=_typedef_ir({first: "int", second: "long"}),
+            typedef_entity_ids={"Alias": second},
+        )
+        assert snap.semantic_ir is not None
+
+    def test_a_sidecar_entry_with_no_matching_ir_occurrence_is_a_hard_failure(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, tenth round: the sidecar names a
+        declaration (``"ns::Other"``) that ``SemanticIR`` has no occurrence
+        for at all -- not merely a mismatched id for a name both sides
+        resolve, but a disagreement on whether the declaration exists in
+        the first place. Since ``SemanticIR`` is the sole comparison-time
+        source for this cohort, a comparison would never see this
+        declaration at all, silently masking a real removal against any
+        other snapshot that also lacks it -- so this must fail loudly at
+        construction, the same as a mismatched id does."""
+        import pytest
+
+        from abicheck.errors import SemanticIrAuthorityError
+
+        ir_eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        other_eid = entity_id_for_typedef((Namespace("ns"),), "Other")
+        with pytest.raises(SemanticIrAuthorityError):
+            _snap(
+                semantic_ir=_typedef_ir({ir_eid: "int"}),
+                typedef_entity_ids={
+                    "ns::Alias": ir_eid,
+                    "ns::Other": other_eid,
+                },
+            )
+
+    def test_a_populated_sidecar_with_zero_matching_kind_occurrences_is_not_a_failure(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, seventeenth round: a v38-v41 snapshot
+        written between the identity-resolution slice (Phase 2, which
+        always populates ``constant_entity_ids``) and the *normalization*
+        slice for constants (which populates ``SemanticIR`` occurrences for
+        them) legitimately has a populated ``constant_entity_ids`` sidecar
+        while ``SemanticIR`` carries zero constant occurrences at all --
+        indistinguishable, from stored data alone, from a snapshot that
+        genuinely has none. This must construct cleanly rather than being
+        rejected as corrupt: the reverse-direction check only fires once
+        ``SemanticIR`` resolves *some* occurrence of the kind in question,
+        which it never does here for constants (only for typedefs)."""
+        typedef_eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        constant_eid = entity_id_for_constant((Namespace("ns"),), "K")
+        snap = _snap(
+            semantic_ir=_typedef_ir({typedef_eid: "int"}),
+            constant_entity_ids={"ns::K": constant_eid},
+        )
+        assert snap.semantic_ir is not None
+
+    def test_the_constant_family_gets_the_identical_check(self) -> None:
+        import pytest
+
+        from abicheck.errors import SemanticIrAuthorityError
+
+        ir_eid = entity_id_for_constant((Namespace("ns"),), "K")
+        sidecar_eid = entity_id_for_constant((Namespace("other"),), "K")
+        with pytest.raises(SemanticIrAuthorityError):
+            _snap(
+                semantic_ir=SemanticIR(
+                    occurrences={
+                        OccurrenceId(ir_eid): CanonicalEntity(
+                            canonical_spelling=Fact.present("1")
+                        )
+                    }
+                ),
+                constant_entity_ids={"ns::K": sidecar_eid},
+            )
+
+
+class TestConsistencyCheckedOnDeserialize:
+    """Codex review, PR #1078: ``AbiSnapshot.__post_init__`` alone cannot
+    catch a disagreement in a *loaded* snapshot -- ``serialization.
+    snapshot_from_dict`` constructs the ``AbiSnapshot`` (running
+    ``__post_init__`` with ``semantic_ir`` still ``None``) and only
+    afterward calls ``storage.semantic_ir_codec.decode_semantic_ir``, which
+    mutates ``snap.semantic_ir`` directly -- bypassing ``__post_init__``
+    entirely. ``snapshot_from_dict`` must re-run the Track T3 consistency
+    check itself after that decode."""
+
+    def test_a_disagreeing_stored_sidecar_is_caught_on_load(self) -> None:
+        from abicheck.errors import SemanticIrAuthorityError
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+        from abicheck.storage.entity_ids import domain_entity_id_to_dto
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        other = entity_id_for_typedef((Namespace("other"),), "Alias")
+        snap = _snap(
+            typedefs_qualified={"ns::Alias": "int"},
+            typedef_entity_ids={"ns::Alias": eid},
+            semantic_ir=_typedef_ir({eid: "int"}),
+        )
+        d = snapshot_to_dict(snap)
+        # Corrupt the stored sidecar so it disagrees with the stored IR for
+        # the identical rendered alias -- the same disagreement
+        # `test_a_sidecar_identity_disagreeing_with_the_ir_is_a_hard_failure`
+        # catches at construction time, reproduced here as it would arrive
+        # from disk instead.
+        d["typedef_entity_ids"]["ns::Alias"] = domain_entity_id_to_dto(other)
+        import pytest
+
+        with pytest.raises(SemanticIrAuthorityError):
+            snapshot_from_dict(d)
+
+    def test_an_agreeing_stored_snapshot_loads_cleanly(self) -> None:
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        snap = _snap(
+            typedefs_qualified={"ns::Alias": "int"},
+            typedef_entity_ids={"ns::Alias": eid},
+            semantic_ir=_typedef_ir({eid: "int"}),
+        )
+        loaded = snapshot_from_dict(snapshot_to_dict(snap))
+        assert loaded.semantic_ir is not None

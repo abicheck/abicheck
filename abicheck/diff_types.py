@@ -102,7 +102,8 @@ from .model import (
     resolved_fact_value,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
-from .model.identity import EntityId
+from .model.identity import EntityId, EntityKind
+from .model.semantic_ir_legacy_adapter import semantic_ir_covers_kind
 
 #: Back-compat alias: the ADR-063 Phase 6 typedef cutover moved this
 #: predicate into ``diff_typedefs.py`` with the rest of its family, but
@@ -170,11 +171,27 @@ def _exported_elf_symbol_names(
 
 
 def _has_type_evidence(snap: AbiSnapshot) -> bool:
-    """True if *snap* carries any type-level surface (records/enums/typedefs/DWARF).
+    """True if *snap* carries any type-level surface (records/enums/typedefs/
+    SemanticIR/DWARF).
 
-    A stripped, symbols-only snapshot has none of these.
+    A stripped, symbols-only snapshot has none of these. Checking only the
+    legacy flat ``types``/``enums``/``typedefs`` collections missed a real
+    ``SemanticIR``-only side: ``compare.typedefs``' own per-side-independence
+    design (ADR-063 Track T3) can legitimately trust a snapshot's real
+    ``SemanticIR`` for typedef comparison even when that snapshot's flat
+    ``typedefs`` map is empty (Codex review, PR #1078, twenty-third round) --
+    such a snapshot has real type evidence this function must recognize, or
+    a genuine removal on that side gets silently reclassified as "unconfirmed"
+    by :func:`_removals_are_unconfirmed` purely because the legacy sidecar
+    wasn't populated.
     """
     if snap.types or snap.enums or snap.typedefs:
+        return True
+    semantic_ir = snap.semantic_ir
+    if semantic_ir is not None and any(
+        semantic_ir_covers_kind(semantic_ir, kind)
+        for kind in (EntityKind.TYPE, EntityKind.ENUM, EntityKind.TYPEDEF)
+    ):
         return True
     dwarf = getattr(snap, "dwarf", None)
     # has_dwarf alone is not enough: a stripped binary can carry an empty

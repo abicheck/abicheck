@@ -44,6 +44,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .model.semantic_ir_legacy_adapter import assert_snapshot_semantic_ir_consistent
 from .snapshot_platform_blocks import (
     dwarf_advanced_from_dict as _dwarf_advanced_from_dict,
     dwarf_from_dict as _dwarf_from_dict,
@@ -1246,6 +1247,11 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     )
     decode_surface_graph(d, snap)  # storage/surface_graph_codec.py (v29)
     decode_semantic_ir(d, snap)  # storage/semantic_ir_codec.py (v38)
+    # ADR-063 Track T3: decode_semantic_ir() mutates snap.semantic_ir directly,
+    # after AbiSnapshot.__post_init__ already ran (with semantic_ir still None
+    # at that point) -- so a loaded snapshot's own Track T3 consistency check
+    # never ran at all without this second, explicit call (Codex review).
+    assert_snapshot_semantic_ir_consistent(snap)
 
     # G14: derive the CPython extension surface for snapshots that predate the
     # key (or a `dump` path that didn't attach it), so a saved abi3 baseline is
