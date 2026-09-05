@@ -711,10 +711,14 @@ def _render_index(cases: list[Case]) -> str:
         n = len(by_eco.get(eco, []))
         lines.append(f"| [{ECOSYSTEM_LABEL[eco]}](by-ecosystem/{eco}.md) | {n} |\n")
     lines.append("\n## Browse by scenario kind\n\n")
+    # Derived, never written down: this page is compared against this same
+    # generator, so a hardcoded count would be blessed by `--check` and go
+    # stale the first time a case is added or reclassified.
+    rule_case_count = sum(1 for c in cases if c.entity == "rule")
     lines.append(
         "A *scenario* composes several rules into one realistic problem. "
-        "The other 167 cases are atomic rules — see **Browse by rule** "
-        "above.\n\n"
+        f"The other {rule_case_count} cases are atomic rules — see "
+        "**Browse by rule** above.\n\n"
     )
     lines.append("| Scenario kind | Cases | What it is |\n")
     lines.append("|---------------|-------|------------|\n")

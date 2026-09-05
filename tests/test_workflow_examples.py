@@ -447,3 +447,94 @@ def test_non_json_output_is_reported_and_stops_payload_checks():
     )
     assert any("not JSON" in f for f in failures)
     assert not any("verdict" in f for f in failures)
+
+
+# --------------------------------------------------------------------------
+# Sequence fields must be sequences. `tuple("BREAKING")` is eight
+# one-character assertions, and `"BRAKEING"` satisfies every one of them --
+# so the common YAML slip `stdout_contains: BREAKING` (no `- `) would turn a
+# real output check into one that passes on text missing the required word.
+# Silently weakening an assertion is worse than having none.
+# --------------------------------------------------------------------------
+
+
+SEQUENCE_FIELDS = [
+    ("platforms", "platforms: linux\n"),
+    ("requires", "requires: gcc\n"),
+    (
+        "expect.stdout_contains",
+        "steps: [{name: a, run: 'true', expect: {stdout_contains: BREAKING}}]\n",
+    ),
+    (
+        "expect.stdout_excludes",
+        "steps: [{name: a, run: 'true', expect: {stdout_excludes: ERROR}}]\n",
+    ),
+    ("json_variant", "steps: [{name: a, run: 'true', json_variant: --format}]\n"),
+]
+
+
+def _manifest(tmp_path: Path, override: str) -> Path:
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text("# demo\n", encoding="utf-8")
+    base = {
+        "id": "demo\n",
+        "task": "Does it work?\n",
+        "platforms": "[linux]\n",
+        "steps": "[{name: a, run: 'true'}]\n",
+    }
+    key = override.split(":", 1)[0].split(".")[0]
+    lines = [
+        f"{k}: {v}" for k, v in base.items() if k != key and not override.startswith(k)
+    ]
+    text = "".join(lines)
+    # `override` already carries its own "key: value\n".
+    text += override
+    (directory / "workflow.yaml").write_text(text, encoding="utf-8")
+    return directory
+
+
+@pytest.mark.parametrize(
+    ("field_name", "override"), SEQUENCE_FIELDS, ids=[f for f, _ in SEQUENCE_FIELDS]
+)
+def test_a_bare_string_where_a_list_belongs_is_rejected(
+    tmp_path: Path, field_name: str, override: str
+):
+    directory = _manifest(tmp_path, override)
+    with pytest.raises(
+        workflow_examples.ManifestError, match="must be a list of strings"
+    ):
+        workflow_examples.load(directory)
+
+
+@pytest.mark.parametrize("bad_item", ["4", "null", "[1, 2]", "{a: b}", "true"])
+def test_a_non_string_item_in_a_sequence_is_rejected(tmp_path: Path, bad_item: str):
+    directory = _manifest(
+        tmp_path,
+        f"steps: [{{name: a, run: 'true', expect: {{stdout_contains: [{bad_item}]}}}}]\n",
+    )
+    with pytest.raises(
+        workflow_examples.ManifestError, match="must contain only strings"
+    ):
+        workflow_examples.load(directory)
+
+
+def test_the_scalar_rejection_is_not_theoretical():
+    """The exact failure mode: a scalar splits into per-character assertions
+    that a *wrong* string satisfies. If this ever stops holding, the
+    rejection above could be relaxed -- while it holds, it must not be."""
+    misspelled = "BRAKEING"
+    assert "BREAKING" not in misspelled
+    assert all(char in misspelled for char in tuple("BREAKING"))
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_real_manifests_use_real_sequences(directory: Path):
+    workflow = workflow_examples.load(directory)
+    assert all(isinstance(p, str) and len(p) > 1 for p in workflow.platforms)
+    for step in workflow.steps:
+        for needle in (*step.stdout_contains, *step.stdout_excludes):
+            assert len(needle) > 1, (
+                f"{workflow.id}/{step.name}: {needle!r} is a single character -- "
+                "the hallmark of a scalar that was split"
+            )

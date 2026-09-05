@@ -67,6 +67,38 @@ class ManifestError(Exception):
     """A `workflow.yaml` that does not satisfy the schema above."""
 
 
+def _string_list(value: object, where: str) -> tuple[str, ...]:
+    """Coerce a YAML sequence-of-strings field, rejecting a bare scalar.
+
+    A bare string must never be accepted here. `tuple("BREAKING")` is eight
+    one-character assertions, every one of which `"BRAKEING"` satisfies --
+    so the common YAML slip `stdout_contains: BREAKING` (no `- `) would
+    silently turn a real output check into one that passes on text missing
+    the required word entirely. Normalizing the scalar to a one-item tuple
+    would also work, but rejecting says so out loud rather than quietly
+    accepting two spellings of the same field.
+    """
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        raise ManifestError(
+            f"{where} must be a list of strings, not the bare string "
+            f"{value!r} -- a scalar here becomes one assertion per character. "
+            f"Write it as a YAML sequence (`- {value}`)."
+        )
+    if not isinstance(value, (list, tuple)):
+        raise ManifestError(
+            f"{where} must be a list of strings, got {type(value).__name__}"
+        )
+    for item in value:
+        if not isinstance(item, str):
+            raise ManifestError(
+                f"{where} must contain only strings; got {item!r} "
+                f"({type(item).__name__})"
+            )
+    return tuple(value)
+
+
 @dataclass(frozen=True)
 class Step:
     name: str
@@ -132,7 +164,7 @@ def load(directory: Path) -> Workflow:
     if not task:
         raise ManifestError(f"{manifest}: `task` must state the user's question")
 
-    platforms = tuple(raw.get("platforms") or ())
+    platforms = _string_list(raw.get("platforms"), f"{manifest}: `platforms`")
     if not platforms:
         raise ManifestError(f"{manifest}: `platforms` must list at least one platform")
     bad = sorted(set(platforms) - KNOWN_PLATFORMS)
@@ -187,7 +219,9 @@ def load(directory: Path) -> Workflow:
                 f"{manifest}: step {name!r}: unknown expect key(s) {unknown}"
             )
         expect_json = entry.get("expect_json") or {}
-        json_variant = tuple(entry.get("json_variant") or ())
+        json_variant = _string_list(
+            entry.get("json_variant"), f"{manifest}: step {name!r}: `json_variant`"
+        )
         if expect_json and not json_variant:
             raise ManifestError(
                 f"{manifest}: step {name!r} declares `expect_json` with no "
@@ -199,8 +233,14 @@ def load(directory: Path) -> Workflow:
                 run=command,
                 argv=tuple(argv),
                 exit_code=expect.get("exit_code"),
-                stdout_contains=tuple(expect.get("stdout_contains") or ()),
-                stdout_excludes=tuple(expect.get("stdout_excludes") or ()),
+                stdout_contains=_string_list(
+                    expect.get("stdout_contains"),
+                    f"{manifest}: step {name!r}: `expect.stdout_contains`",
+                ),
+                stdout_excludes=_string_list(
+                    expect.get("stdout_excludes"),
+                    f"{manifest}: step {name!r}: `expect.stdout_excludes`",
+                ),
                 json_variant=json_variant,
                 expect_json=dict(expect_json),
                 allow_failure=bool(entry.get("allow_failure", False)),
@@ -212,7 +252,7 @@ def load(directory: Path) -> Workflow:
         task=task,
         directory=directory,
         platforms=platforms,
-        requires=tuple(raw.get("requires") or ()),
+        requires=_string_list(raw.get("requires"), f"{manifest}: `requires`"),
         steps=tuple(steps),
     )
 
