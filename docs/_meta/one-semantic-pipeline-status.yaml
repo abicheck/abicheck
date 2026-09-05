@@ -974,6 +974,19 @@ concepts:
       algorithm after the schema's own description was updated -- fixed to
       match.
 
+      **A twenty-sixth round found a genuine key-space mismatch, not
+      another disambiguator overreach.** A DWARF-sourced snapshot's flat
+      `typedefs` map is already qualified-keyed (DWARF keys it by the full
+      qualified name), unlike a header-AST backend's bare keying.
+      `_bare_typedef_side_index` unconditionally rendered the *other*
+      side's real IR down to bare leaf names regardless, so a global alias
+      and a same-leaf namespaced one collapsed onto one key on the real-IR
+      side while the DWARF side kept them as two separate opaque keys --
+      silently dropping a real global-alias value change entirely (not
+      merely rehashing an id). `typedef_index_pair` now detects a
+      DWARF-qualified-native side and renders the real-IR side fully
+      qualified too, matching DWARF's own convention.
+
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.
     investigated_declined:

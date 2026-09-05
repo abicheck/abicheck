@@ -356,32 +356,24 @@ def typedef_diff_maps(
     over, preferring the qualified-name-keyed twin when both sides carry one.
 
     ``AbiSnapshot.typedefs`` is keyed by *bare* (unqualified) name on both
-    header backends, so two distinct member/nested typedefs that happen to
-    share a bare spelling in different classes/namespaces (e.g. two unrelated
-    ``impl_value_t`` member aliases on different classes) silently collapse
-    onto one dict entry, whichever declaration the backend visits last
-    winning (see that field's own docstring in ``model.py`` for the full
-    incident history). Diffing that collapsed dict directly means an
-    unrelated class gaining or losing its own same-named alias can flip the
-    surviving entry's recorded value, fabricating a spurious
-    ``TYPEDEF_BASE_CHANGED`` for a typedef that never itself changed.
+    header backends (DWARF's own population is qualified instead -- see
+    :func:`typedef_flat_map_is_dwarf_qualified`), so two distinct member/
+    nested typedefs sharing a bare spelling in different classes/namespaces
+    silently collapse onto one dict entry, last-visited winning (see that
+    field's own docstring in ``model.py`` for the full incident history) --
+    fabricating a spurious ``TYPEDEF_BASE_CHANGED`` for an unchanged typedef.
 
     ``AbiSnapshot.typedefs_qualified`` (schema v25) carries the identical set
-    of typedef declarations keyed by qualified name instead, unique per
-    declaration and therefore immune to this collision. A side "trusts" its
-    own qualified map when that map is non-empty, OR its legacy bare map is
-    itself empty (a side with zero typedefs total loses nothing by reporting
-    zero qualified ones either, whether or not it actually populates the
-    field) -- this is what lets an old side with real qualified typedefs
-    still enumerate every one of them as removed when the new side has
-    genuinely stripped all typedefs (rather than merely never populating the
-    field), instead of collapsing to the legacy bare map and losing
-    per-declaration granularity purely because the empty side's qualified
-    dict is indistinguishable, by non-emptiness alone, from "unsupported"
-    (Codex review). Used only when *both* sides trust their own map this
-    way; falls back to the legacy bare maps otherwise (a DWARF-only or
-    pre-v25 snapshot with real typedefs) so that comparison path is
-    unaffected.
+    keyed by qualified name instead, immune to this collision. A side
+    "trusts" its own qualified map when non-empty, OR its legacy bare map
+    is itself empty (a side with zero typedefs loses nothing reporting zero
+    qualified ones either) -- lets an old side with real qualified typedefs
+    still enumerate every one as removed when the new side has genuinely
+    stripped all typedefs, rather than collapsing to the legacy bare map
+    purely because emptiness alone can't distinguish "unsupported" from
+    "genuinely none" (Codex review). Used only when *both* sides trust
+    their own map; falls back to the legacy bare maps otherwise (a
+    DWARF-only or pre-v25 snapshot).
     """
     if typedef_side_trusts_qualified(old) and typedef_side_trusts_qualified(new):
         return old.typedefs_qualified, new.typedefs_qualified
@@ -391,6 +383,14 @@ def typedef_diff_maps(
 def typedef_side_trusts_qualified(snapshot: AbiSnapshot) -> bool:
     """One side of `typedef_diff_maps`'s trust rule, split out (Codex review, PR #1078) for `compare.typedefs.typedef_index_pair` to reuse."""
     return bool(snapshot.typedefs_qualified) or not snapshot.typedefs
+
+
+def typedef_flat_map_is_dwarf_qualified(snapshot: AbiSnapshot) -> bool:
+    """True when *snapshot* doesn't trust ``typedefs_qualified`` yet its flat
+    ``typedefs`` is already qualified-keyed (Codex review, PR #1078,
+    twenty-sixth round): DWARF keys it by the full qualified name, and
+    ``dwarf is not None`` unambiguously means DWARF populated this side."""
+    return snapshot.dwarf is not None
 
 
 def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:

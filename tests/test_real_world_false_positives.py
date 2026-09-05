@@ -970,3 +970,52 @@ def test_stdlib_field_access_change_is_breaking_when_target_is_the_runtime():
         f"std:: field access narrowing in libstdc++ itself must still be reported; "
         f"kinds: {[c.kind.value for c in result.changes]}"
     )
+
+
+def test_dwarf_qualified_flat_typedefs_keep_their_key_space():
+    """Regression coverage for Codex review, PR #1078, twenty-sixth round: a
+    DWARF-sourced snapshot's flat ``typedefs`` map is already
+    qualified-keyed, unlike a header-AST backend's bare keying. Forcing the
+    *other* side's real IR down to bare leaf names collapsed a global alias
+    and a same-leaf namespaced one onto one key on that side, while DWARF
+    kept them as two separate opaque keys -- silently losing the global
+    alias's real value change.
+    """
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.dwarf_metadata import DwarfMetadata
+    from abicheck.model.fact import Fact
+    from abicheck.model.identity import Namespace, entity_id_for_typedef
+    from abicheck.model.occurrence import OccurrenceId
+    from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
+
+    old = _elf_snapshot(functions=[_exported_func("use_alias")])
+    old.typedefs = {"Alias": "int", "ns::Alias": "int"}
+    old.dwarf = DwarfMetadata()
+
+    eid_global = entity_id_for_typedef((), "Alias")
+    eid_ns = entity_id_for_typedef((Namespace("ns"),), "Alias")
+    new = _elf_snapshot(functions=[_exported_func("use_alias")])
+    new.typedefs_qualified = {"Alias": "long", "ns::Alias": "int"}
+    new.typedef_entity_ids = {"Alias": eid_global, "ns::Alias": eid_ns}
+    new.semantic_ir = SemanticIR(
+        occurrences={
+            OccurrenceId(eid_global): CanonicalEntity(
+                canonical_spelling=Fact.present("long")
+            ),
+            OccurrenceId(eid_ns): CanonicalEntity(
+                canonical_spelling=Fact.present("int")
+            ),
+        }
+    )
+
+    result = compare(old, new)
+    typedef_changes = [
+        c for c in result.changes if c.kind == ChangeKind.TYPEDEF_BASE_CHANGED
+    ]
+    assert len(typedef_changes) == 1, (
+        "only the genuinely-changed global alias should be reported; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+    assert typedef_changes[0].symbol == "Alias"
+    assert typedef_changes[0].old_value == "int"
+    assert typedef_changes[0].new_value == "long"

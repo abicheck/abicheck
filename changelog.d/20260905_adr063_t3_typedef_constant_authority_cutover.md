@@ -574,3 +574,15 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   hash input too.** `docs/use/output-formats.md` still described
   `finding_id` as the hash of exactly the original six fields after the
   schema's own description was updated -- fixed to match (Codex review).
+- **A DWARF-vs-real-IR typedef comparison no longer silently loses a
+  genuine global-alias value change.** A DWARF-sourced snapshot's flat
+  `typedefs` map is already qualified-keyed (`dwarf_snapshot.py` keys it
+  by the full qualified name), unlike a header-AST backend's bare keying.
+  `_bare_typedef_side_index` unconditionally rendered the *other* side's
+  real IR down to bare leaf names, so a global alias and a same-leaf
+  namespaced one collapsed onto one key there while the DWARF side kept
+  them as two separate opaque keys -- a key-space mismatch that could
+  silently drop a real base-type change entirely. `typedef_index_pair`
+  now detects a DWARF-qualified-native side (`diff_helpers.
+  typedef_flat_map_is_dwarf_qualified`) and renders the real-IR side fully
+  qualified too, matching DWARF's own convention (Codex review).

@@ -51,7 +51,11 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Protocol
 
-from ..diff_helpers import make_change, typedef_side_trusts_qualified
+from ..diff_helpers import (
+    make_change,
+    typedef_flat_map_is_dwarf_qualified,
+    typedef_side_trusts_qualified,
+)
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.fact import Fact
 from ..model.identity import Anonymous, EntityId, EntityKind
@@ -571,7 +575,7 @@ def _typedef_side_index(
 
 
 def _bare_typedef_side_index(
-    snapshot: AbiSnapshot, typedefs: dict[str, str]
+    snapshot: AbiSnapshot, typedefs: dict[str, str], *, qualified_keys: bool = False
 ) -> SemanticIRIndex:
     """One side's index for the bare-key-space branch of
     :func:`typedef_index_pair` -- projects this side's own real
@@ -583,28 +587,32 @@ def _bare_typedef_side_index(
     ``semantic_ir``) falls through to the plain legacy-adapter path below
     unaffected. But a real ``SemanticIR`` with typedef occurrences and an
     empty bare *typedefs* map is not hypothetical (this module's own
-    per-side-independence design, see :func:`typedef_index_pair`'s
-    docstring, already rejects relying on the two always agreeing) --
-    without this projection such a side's real evidence was silently
-    discarded the moment the *other* side forced bare-key comparison,
-    fabricating a removal for every typedef only this side's IR carries.
+    per-side-independence design already rejects relying on the two always
+    agreeing) -- without this projection such a side's real evidence was
+    silently discarded the moment the *other* side forced bare-key
+    comparison, fabricating a removal for every typedef only this side's
+    IR carries.
 
     **Preserves ambiguity rather than picking a last-wins winner** (Codex
     review, PR #1078, twelfth round): projecting straight into a
-    ``dict[str, str]`` and handing it to :func:`legacy_typedef_ir` -- which
-    can only ever construct one occurrence per key -- collapsed two
-    distinct qualified entities sharing a bare leaf name (e.g. ``a::Alias``
-    and a newly-added ``b::Alias``) onto a single bare-string assignment,
-    the later one silently overwriting the earlier, fabricating a spurious
-    ``TYPEDEF_BASE_CHANGED`` whenever the discarded entity's value differed
-    from the survivor's. So each real IR entity gets its own synthetic
-    bare-projected identity (a fresh :class:`~abicheck.model.identity.
-    Anonymous` scope tagged with a per-alias ordinal, purely to stay
-    distinct -- not a real anonymous declaration) instead of collapsing
-    into a shared dict key: it still renders under its shared bare *alias*
-    via :func:`~abicheck.model.semantic_ir_legacy_adapter.
-    render_display_name_or_leaf`, but as a genuinely separate entry
-    :func:`_aliases` groups into one colliding list rather than overwriting.
+    ``dict[str, str]`` and handing it to :func:`legacy_typedef_ir` -- one
+    occurrence per key -- collapsed two distinct qualified entities sharing
+    a bare leaf name (e.g. ``a::Alias``, a newly-added ``b::Alias``) onto a
+    single bare-string assignment, the later one silently overwriting the
+    earlier, fabricating a spurious ``TYPEDEF_BASE_CHANGED`` whenever the
+    discarded entity's value differed. So each real IR entity gets its own
+    synthetic bare-projected identity (a fresh :class:`~abicheck.model.
+    identity.Anonymous` scope tagged with a per-alias ordinal, purely to
+    stay distinct) instead of collapsing into a shared dict key: it still
+    renders under its shared bare *alias*, but as a genuinely separate
+    entry :func:`_aliases` groups into one colliding list rather than
+    overwriting.
+
+    *qualified_keys*, set by :func:`typedef_index_pair` when either side is
+    DWARF-qualified-native (Codex review, PR #1078, twenty-sixth round),
+    renders each entity's *full* qualified name instead of the bare leaf --
+    matching that side's flat ``typedefs`` convention rather than forcing
+    a still-qualified IR down to leaf names that no longer align with it.
     """
     if snapshot.semantic_ir is None:
         return SemanticIRIndex(legacy_typedef_ir(snapshot, typedefs))
@@ -612,6 +620,11 @@ def _bare_typedef_side_index(
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     covered_aliases: set[str] = set()
     ordinal_by_alias: dict[str, int] = {}
+
+    def _key_for(entity_id: EntityId) -> str:
+        rendered = render_display_name_or_leaf(entity_id)
+        return rendered if qualified_keys else rendered.rsplit("::", 1)[-1]
+
     # Counted up front so a lone bare alias gets no synthetic ordinal
     # discriminator (Codex review, PR #1078, twenty-fourth round): mirrors
     # `_group_safe_disambiguator`'s group-size gate for this inline path.
@@ -619,9 +632,7 @@ def _bare_typedef_side_index(
     for occurrence_id in ir_index.ir.occurrences:
         if occurrence_id.entity_id.kind is not EntityKind.TYPEDEF:
             continue
-        bare_alias = render_display_name_or_leaf(occurrence_id.entity_id).rsplit(
-            "::", 1
-        )[-1]
+        bare_alias = _key_for(occurrence_id.entity_id)
         bare_alias_counts[bare_alias] = bare_alias_counts.get(bare_alias, 0) + 1
     for occurrence_id in ir_index.ir.occurrences:
         # Iterates raw occurrences, not the reduced `entities_of_kind()` view
@@ -636,8 +647,7 @@ def _bare_typedef_side_index(
         # typedef in this branch as unresolved).
         if occurrence_id.entity_id.kind is not EntityKind.TYPEDEF:
             continue
-        alias = render_display_name_or_leaf(occurrence_id.entity_id)
-        bare_alias = alias.rsplit("::", 1)[-1]
+        bare_alias = _key_for(occurrence_id.entity_id)
         covered_aliases.add(bare_alias)
         ordinal = ordinal_by_alias.get(bare_alias, 0)
         ordinal_by_alias[bare_alias] = ordinal + 1
@@ -649,21 +659,13 @@ def _bare_typedef_side_index(
         )
         # Stamps a collision-safe discriminator, not just the *source*
         # occurrence's own disambiguator (Codex review, PR #1078, eighteenth
-        # and nineteenth rounds). The eighteenth round carried
-        # `occurrence_id.disambiguator` forward alone, which closes the
-        # ODR/multi-TU case (two occurrences sharing one `EntityId`, a real
-        # disambiguator distinguishing them) but not the plainer one a
-        # nineteenth-round finding named: two *distinct* qualified entities
-        # (`a::Alias`, `b::Alias`) whose own disambiguators are both blank
-        # (the overwhelming common case) still produce two `Change`s with
-        # `entity_id=None` (synthetic) and `disambiguator=None` alike, which
-        # collide right back together in `_dedup_exact`. `ordinal` is
-        # already guaranteed unique per entity processed for one bare_alias
-        # -- it exists precisely to keep `bare_id.scope` distinct -- so
-        # combining it with the source disambiguator (when one is real)
-        # closes both cases with one value: always collision-safe via the
-        # ordinal, and still carrying genuine ODR-duplicate evidence
-        # through when it exists.
+        # and nineteenth rounds): two *distinct* qualified entities sharing
+        # a bare leaf (e.g. `a::Alias`, `b::Alias`) both carry a blank source
+        # disambiguator, so without `ordinal` folded in they'd collide right
+        # back together in `_dedup_exact`. `ordinal` is already unique per
+        # bare_alias -- combining it with the source disambiguator (when
+        # real) is collision-safe while still carrying genuine ODR-duplicate
+        # evidence through.
         disambiguator: str | None
         if bare_alias_counts[bare_alias] > 1:
             disambiguator = (
@@ -679,12 +681,14 @@ def _bare_typedef_side_index(
     # A bare alias this side's own *typedefs* map carries but the real IR
     # doesn't cover at all still needs representation -- delegate to the
     # legacy adapter's own single-occurrence-per-alias construction for
-    # exactly those leftover aliases (there is no collision risk for them,
-    # since the caller-supplied bare map is itself already single-valued
-    # per key).
-    leftover = {k: v for k, v in typedefs.items() if k not in covered_aliases}
-    if leftover:
-        occurrences.update(legacy_typedef_ir(snapshot, leftover).occurrences)
+    # exactly those leftover aliases (no collision risk: the caller-supplied
+    # map is already single-valued per key). Skipped under qualified_keys:
+    # *typedefs* stays bare-keyed regardless, so comparing it against
+    # covered_aliases's now-qualified strings would misfire.
+    if not qualified_keys:
+        leftover = {k: v for k, v in typedefs.items() if k not in covered_aliases}
+        if leftover:
+            occurrences.update(legacy_typedef_ir(snapshot, leftover).occurrences)
     return SemanticIRIndex(SemanticIR(occurrences=occurrences))
 
 
@@ -778,9 +782,15 @@ def typedef_index_pair(
     legacy maps were themselves complete.
     """
     if not (typedef_side_trusts_qualified(old) and typedef_side_trusts_qualified(new)):
+        # A DWARF-sourced side's flat `typedefs` is already qualified-keyed
+        # (Codex review, PR #1078, twenty-sixth round) -- render the other
+        # side's real IR fully qualified too, not to bare leaf names.
+        qualified_keys = typedef_flat_map_is_dwarf_qualified(
+            old
+        ) or typedef_flat_map_is_dwarf_qualified(new)
         return (
-            _bare_typedef_side_index(old, old_typedefs),
-            _bare_typedef_side_index(new, new_typedefs),
+            _bare_typedef_side_index(old, old_typedefs, qualified_keys=qualified_keys),
+            _bare_typedef_side_index(new, new_typedefs, qualified_keys=qualified_keys),
         )
     return _typedef_side_index(old, old_typedefs), _typedef_side_index(
         new, new_typedefs
