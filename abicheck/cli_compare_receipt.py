@@ -435,11 +435,13 @@ def resolve_release_pack_application(
     assign one at all) into the release fan-out's own resolved
     :class:`~abicheck.policy.release_gate_options.GateOptions`
     (``resolve_release_gate_options``, ADR-064, landed 2026-09-02) via
-    ``cli_compare_release_helpers.apply_release_gate_pack`` -- which still
-    *mirrors*, rather than *calls*,
-    :func:`~abicheck.pack_application.apply_to_compare_config`'s identical
-    logic, a distinct, smaller residual than ``GateOptions`` itself. Full
-    account, including why this isn't ADR-064's own PR G2: ADR-063 Track 4's
+    ``cli_compare_release_helpers.apply_release_gate_pack`` -- which, since
+    duplication-and-convergence-assessment T6, shares the *one*
+    :func:`~abicheck.policy.gate_pack_fold.fold_gate_pack_severity` with
+    :func:`~abicheck.pack_application.apply_to_compare_config` instead of
+    mirroring its logic, leaving only the two call sites' genuinely
+    different fold targets (raw strings here, a resolved ``SeverityConfig``
+    there) separate. Historical account of that residual: ADR-063 Track 4's
     7B ledger entry, ``docs/_meta/one-semantic-pipeline-status.yaml``.
     ``scan --against`` accepts a ``kind: gate`` pack too (a later "PR B"
     slice): unlike the release fan-out, it already has a real
@@ -843,6 +845,7 @@ def _release_summary_effective_config_block(
         effective_config_fields,
     )
     from .frontends.cli.options.params import _load_suppression_and_policy
+    from .workflows.gate import gate_exit_code_scheme
 
     suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
     if pack_application is not None:
@@ -868,7 +871,7 @@ def _release_summary_effective_config_block(
         scope_to_public_surface=scope_public_headers,
         scope_to_public_surface_requested=scope_public_headers,
     )
-    ec_scheme = "severity" if severity_config is not None else "legacy"
+    ec_scheme = gate_exit_code_scheme(severity_config is not None)
     ec_fields = effective_config_fields(
         ec_result, severity_config=severity_config, exit_code_scheme=ec_scheme
     )

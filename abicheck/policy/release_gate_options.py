@@ -36,6 +36,14 @@ the real class: ``pack_application.py`` is a grandfathered flat
 depend only on ``model``, ``compare``, and the public root surfaces), so an
 `import` of it here would be a real, checked dependency-direction violation,
 not a style choice.
+
+The severity fold itself is no longer written here at all: both this module
+and ``pack_application.apply_to_compare_config`` call the one shared
+:func:`~abicheck.policy.gate_pack_fold.fold_gate_pack_severity`
+(duplication-and-convergence-assessment T6), which lives in a leaf module
+inward of both -- the shape ADR-061 prescribes for logic two differently
+classified modules share, and the only one that does not invert this
+package's own permitted-import direction.
 """
 
 from __future__ import annotations
@@ -44,6 +52,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from .gate_pack_fold import fold_gate_pack_severity, gate_exit_code_scheme
 from .severity import SeverityConfig, resolve_severity_config
 
 
@@ -99,45 +108,40 @@ def apply_release_gate_pack(
     directly-unit-tested step of that pipeline rather than being inlined
     into it.
 
-    The release fan-out has no ``ResolvedCompareConfig``-shaped object of
-    its own to fold onto the way :func:`~abicheck.pack_application.
-    apply_to_compare_config` does for a single-pair ``compare`` -- its
-    severity resolution is a set of raw CLI-or-config strings, re-derived
-    at several call sites, so applying a pack-supplied
-    ``gate.severity.<category>`` is necessarily shaped differently here
-    (overriding one of five independent optional raw strings, only ever
-    reached when nothing more explicit -- ``--severity-<category>``/
-    ``.abicheck.yml`` -- already stated it, since :func:`~abicheck.
-    pack_application.pack_application` already excludes a field an explicit
-    source shadowed) than it is for ``apply_to_compare_config`` (a single
-    ``dataclasses.replace`` on an already-resolved ``SeverityConfig``).
+    The fold rule itself is not written here (duplication-and-convergence-
+    assessment T6): :func:`~abicheck.policy.gate_pack_fold.
+    fold_gate_pack_severity` owns it, and ``pack_application.
+    apply_to_compare_config`` -- single-pair ``compare``'s own gate-pack
+    application -- calls the identical function. What stays this function's
+    own job is the *shape* difference the two call sites genuinely have: the
+    release fan-out folds onto four independent optional raw CLI-or-config
+    strings, before any :class:`SeverityConfig` exists, where ``compare``
+    folds onto an already-resolved one. That difference is real (a release
+    run must still be able to distinguish "no severity setting in effect"
+    from "the default levels", which a resolved config cannot express), so
+    it is expressed here, around one shared fold, rather than by a second
+    copy of the fold.
 
     A no-op when *pack_application* is ``None`` (no ``--pack`` given) or
     contributed no severity level -- every pre-existing invocation reaches
     the five inputs completely unchanged.
     """
-    if pack_application is None:
-        return (
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
-        )
-    levels = pack_application.severity_levels
-    if levels:
-        severity_abi_breaking = levels.get("abi_breaking", severity_abi_breaking)
-        severity_potential_breaking = levels.get(
-            "potential_breaking", severity_potential_breaking
-        )
-        severity_quality_issues = levels.get("quality_issues", severity_quality_issues)
-        severity_addition = levels.get("addition", severity_addition)
+    levels = {} if pack_application is None else pack_application.severity_levels
+    folded = fold_gate_pack_severity(
+        {
+            "abi_breaking": severity_abi_breaking,
+            "potential_breaking": severity_potential_breaking,
+            "quality_issues": severity_quality_issues,
+            "addition": severity_addition,
+        },
+        levels,
+    )
     return (
         severity_preset,
-        severity_abi_breaking,
-        severity_potential_breaking,
-        severity_quality_issues,
-        severity_addition,
+        folded["abi_breaking"],
+        folded["potential_breaking"],
+        folded["quality_issues"],
+        folded["addition"],
     )
 
 
@@ -197,17 +201,36 @@ class GateOptions:
     scheme, or no severity configuration at all) -- since PR G2 there is
     only one way: ``severity is None`` exactly when no severity setting is
     in effect. Still the same simplification ``ResolvedCompareConfig``'s
-    own severity field already gives `compare`/`scan`. ``exit_code_scheme``
-    is kept alongside it, purely derived (``"severity"`` when ``severity``
-    is not ``None``, else ``"legacy"``) for provenance/reporting (e.g. a
-    dry-run scheme label) -- it is not authoritative for "should severity be
-    folded", ``severity`` is, and it is no longer a settable input anywhere
-    in this module.
+    own severity field already gives `compare`/`scan`.
+
+    ``exit_code_scheme`` is kept alongside it for provenance/reporting (e.g.
+    a dry-run scheme label), and is a **derived property, not a field**
+    (duplication-and-convergence-assessment T6). It was documented as
+    "purely derived" from the moment PR G2 deleted the manual selector, but
+    stayed an independently constructible dataclass field beside
+    ``severity``, so the *model* still permitted the two to disagree -- and
+    two unit-test helpers were already constructing a ``GateOptions``
+    carrying ``exit_code_scheme=None`` beside a real ``SeverityConfig``,
+    which is exactly the state a reader of this docstring would have
+    believed impossible. Deriving it makes the documented invariant
+    structural: it is not authoritative for "should severity be folded"
+    (``severity`` is), and it can no longer be stated at all.
     """
 
-    exit_code_scheme: str
     severity_preset: str | None
     severity: SeverityConfig | None
+
+    @property
+    def exit_code_scheme(self) -> str:
+        """``"severity"`` when a severity setting is in effect, else ``"legacy"``.
+
+        Derived through the one shared
+        :func:`~abicheck.policy.gate_pack_fold.gate_exit_code_scheme` rule
+        that ``ResolvedCompareConfig`` and the
+        ``CompatibilityEvaluationConfig`` front end also state their scheme
+        with, so the release fan-out cannot drift from either.
+        """
+        return gate_exit_code_scheme(self.severity is not None)
 
 
 def resolve_release_gate_options(
@@ -224,10 +247,11 @@ def resolve_release_gate_options(
     Folds a selected ``kind: gate`` pack's severity contribution
     (:func:`apply_release_gate_pack`), then resolves the severity config
     (:func:`_resolve_release_severity_config`). The one automatic gate
-    algorithm (ADR-064/CLI cleanup phase two PR G2): ``exit_code_scheme`` is
-    ``"severity"`` exactly when a severity setting ended up in effect
-    (``severity_config is not None``), else ``"legacy"`` -- there is no
-    manual override any more. (Before PR G2, an explicit
+    algorithm (ADR-064/CLI cleanup phase two PR G2) needs nothing stated
+    here at all any more: :attr:`GateOptions.exit_code_scheme` derives
+    itself from whether a severity setting ended up in effect
+    (``severity is not None``) -- there is no manual override any more.
+    (Before PR G2, an explicit
     ``--exit-code-scheme``/``.abicheck.yml``/pack override could force
     either direction regardless of what severity configuration was
     present; removed along with the CLI flag, the config key, and the
@@ -255,7 +279,6 @@ def resolve_release_gate_options(
         severity_addition,
     )
     return GateOptions(
-        exit_code_scheme="severity" if severity_config is not None else "legacy",
         severity_preset=severity_preset,
         severity=severity_config,
     )

@@ -110,6 +110,7 @@ from .compatibility_evaluation_wiring import (
     resolve_selected_packs,
 )
 from .contract_relevance_types import ContractMode, SelectorLayer, coerce_contract_mode
+from .policy.gate_pack_fold import gate_exit_code_scheme
 from .severity import SEVERITY_PRESETS, SeverityConfig, SeverityLevel
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -1469,7 +1470,7 @@ def resolve_compatibility_evaluation_config(
     # profile, project config, or pack can state to move this value in
     # either direction.
     severity_active = _severity_active(explicit, project, gate_pack_fields, profile)
-    auto_scheme = "severity" if severity_active else "legacy"
+    auto_scheme = gate_exit_code_scheme(severity_active)
 
     gate_packs, prov[GATE_PACKS_FIELD] = packs_by_field[GATE_PACKS_FIELD]
     gate = GateConfig(

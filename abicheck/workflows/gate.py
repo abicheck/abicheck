@@ -41,6 +41,12 @@ because the fan-out's frontend module (``cli_compare_release_helpers.py``)
 may not import ``policy`` directly (``frontends -> policy`` is forbidden,
 same rule as every other name here).
 
+``gate_exit_code_scheme``/``fold_gate_pack_severity``/
+``GATE_SEVERITY_CATEGORIES`` (duplication-and-convergence-assessment T6) are
+the one gate-algorithm derivation and the one gate-pack severity fold, owned
+by ``policy/gate_pack_fold.py`` and re-exported here for the same
+``frontends -> policy`` reason as the release-gate names above.
+
 ``note_if_same_binary_compared`` (Codex review) is not an exit-code axis, but
 it belongs here rather than in ``extraction.py`` for the same reason as the
 axes above: it decides part of the *process response* a completed comparison
@@ -72,6 +78,11 @@ from ..policy.exit_decision_precedence import (
     resolve_release_exit_decision_for_report,
 )
 from ..policy.gate_decision import gate_decision_for_result
+from ..policy.gate_pack_fold import (
+    GATE_SEVERITY_CATEGORIES,
+    fold_gate_pack_severity,
+    gate_exit_code_scheme,
+)
 from ..policy.release_gate_options import (
     GateOptions,
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064 (private; __all__ excludes it by convention)
@@ -93,6 +104,7 @@ from ..policy.severity import (
 )
 
 __all__ = [
+    "GATE_SEVERITY_CATEGORIES",
     "PRESET_DEFAULT",
     "ExitDecision",
     "GateOptions",
@@ -114,7 +126,9 @@ __all__ = [
     "coverage_exit_for_context",
     "fold_analysis_assurance_exit",
     "fold_coverage_exit",
+    "fold_gate_pack_severity",
     "gate_decision_for_result",
+    "gate_exit_code_scheme",
     "legacy_exit_code",
     "missing_contract_exit_code",
     "note_if_same_binary_compared",

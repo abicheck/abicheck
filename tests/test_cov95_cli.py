@@ -92,10 +92,14 @@ def _severity_config(tmp_path: Path, **levels: str) -> Path:
     return cfg
 
 
-def _gate(preset, abi=None, potential=None, quality=None, addition=None, scheme=None):
+def _gate(preset, abi=None, potential=None, quality=None, addition=None):
     """Build a :class:`~abicheck.cli_compare_release_helpers.GateOptions` the
     way :func:`~abicheck.cli_compare_release_helpers.resolve_release_gate_options`
-    would (minus pack folding, irrelevant to these unit tests) -- since
+    would (minus pack folding, irrelevant to these unit tests). There is no
+    ``scheme`` parameter: ``GateOptions.exit_code_scheme`` is a derived
+    property, not a settable field (duplication-and-convergence-assessment
+    T6) -- this helper used to pass ``scheme=None`` beside a real
+    ``SeverityConfig``, a combination the resolver can never produce. -- since
     ADR-064's rewrite, ``_fold_release_global_severity`` takes the resolved
     object, not the six raw preset/category/scheme strings directly."""
     from abicheck.cli_compare_release_helpers import GateOptions
@@ -103,9 +107,7 @@ def _gate(preset, abi=None, potential=None, quality=None, addition=None, scheme=
     severity = _resolve_release_severity_config(
         preset, abi, potential, quality, addition
     )
-    return GateOptions(
-        exit_code_scheme=scheme, severity_preset=preset, severity=severity
-    )
+    return GateOptions(severity_preset=preset, severity=severity)
 
 
 def _suppression_strict_config(tmp_path: Path) -> Path:

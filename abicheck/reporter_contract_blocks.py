@@ -101,7 +101,9 @@ def add_contract_context(
     # follows an unrelated 0/1/2 ABICC-style scheme, so this block's
     # native-scheme `code` would disagree with the real compat exit for the
     # same run (Codex review).
-    scheme = "severity" if severity_config is not None else "legacy"
+    from .policy.gate_pack_fold import gate_exit_code_scheme
+
+    scheme = gate_exit_code_scheme(severity_config is not None)
     if include_exit_decision:
         from .exit_decision import resolve_compare_exit_decision
 
@@ -225,10 +227,9 @@ def add_effective_config_digest(
         effective_config_digest,
         effective_config_fields,
     )
+    from .policy.gate_pack_fold import gate_exit_code_scheme
 
-    scheme = exit_code_scheme or (
-        "severity" if severity_config is not None else "legacy"
-    )
+    scheme = exit_code_scheme or gate_exit_code_scheme(severity_config is not None)
     ec_fields = effective_config_fields(
         result,
         severity_config=severity_config,
