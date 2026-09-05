@@ -31,6 +31,7 @@ from abicheck.buildsource.poi import (
     PointOfInterest,
     PointsOfInterest,
     POIReason,
+    _exported_names,
     build_points_of_interest,
     resolve_changed_paths_public_impact,
     resolve_symbol_tus,
@@ -527,3 +528,24 @@ def test_changed_paths_impact_degrades_without_graph_or_paths() -> None:
         resolve_changed_paths_public_impact(["a.cpp"], SourceGraphSummary())
         == frozenset()
     )
+
+
+def test_exported_names_empty_set_without_any_platform_table() -> None:
+    """ADR-063 T7: unlike `model.export_index.build_raw_export_index`, this
+    wrapper returns an empty set -- not `None` -- when there is no platform
+    export table at all, so the delta walk degrades to "no POIs from
+    exports" rather than raising."""
+    no_table = AbiSnapshot(library="libfoo.so", version="1.0")
+    assert no_table.elf is None
+    assert _exported_names(no_table) == set()
+
+
+def test_exported_names_default_versioned_elf_only() -> None:
+    snap = _snap()
+    snap.elf = ElfMetadata(
+        symbols=[
+            ElfSymbol(name="_Z3foov", version="LIB_1", is_default=True),
+            ElfSymbol(name="_Z3oldv", version="LIB_1", is_default=False),
+        ]
+    )
+    assert _exported_names(snap) == {"_Z3foov"}
