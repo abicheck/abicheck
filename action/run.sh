@@ -430,11 +430,18 @@ _extra_args_options() {
 # temp file (Codex review). Skipping our own injection when the user's is
 # present restores the older, always-correct "no PR_JSON at all" fallback
 # path instead.
+#
+# Fed through a `<<<` here-string rather than `< <(...)` process
+# substitution (Codex review, P1, fresh evidence): this file's own
+# conventions prefer a here-string over process substitution where one
+# works, for the stock bash 3.2 contributors and macOS runners carry (this
+# and its three siblings below are the only new process-substitution use
+# this refactor introduced).
 _extra_args_has_write_flag() {
   local _name _value
   while IFS=$'\t' read -r _name _value; do
     [[ "$_name" == "--write" ]] && return 0
-  done < <(_extra_args_options)
+  done <<<"$(_extra_args_options)"
   return 1
 }
 
@@ -454,7 +461,7 @@ _extra_args_has_dry_run_flag() {
   local _name _value
   while IFS=$'\t' read -r _name _value; do
     [[ "$_name" == "--dry-run" ]] && return 0
-  done < <(_extra_args_options)
+  done <<<"$(_extra_args_options)"
   return 1
 }
 
@@ -485,7 +492,7 @@ _extra_args_write_json_path() {
           ;;
       esac
     fi
-  done < <(_extra_args_options)
+  done <<<"$(_extra_args_options)"
   return 1
 }
 
@@ -510,7 +517,7 @@ _effective_format() {
   local _name _value _found="${FORMAT:-}"
   while IFS=$'\t' read -r _name _value; do
     [[ "$_name" == "--format" ]] && _found="$_value"
-  done < <(_extra_args_options)
+  done <<<"$(_extra_args_options)"
   printf '%s' "$_found"
 }
 
