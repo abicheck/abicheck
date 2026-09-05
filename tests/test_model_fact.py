@@ -488,3 +488,40 @@ class TestFactProducer:
         raw = {"status": "unsupported", "value": None, "diagnostics": [], "producer": 7}
         with pytest.raises(TypeError):
             decode_fact(raw, schema_version=999)
+
+    def test_encode_fact_fields_omits_an_unset_producer(self) -> None:
+        """``encode_fact_fields`` must not turn every existing
+        ``"producer": None`` `dataclasses.asdict()` writes in -- the
+        overwhelming majority of facts, since only PDB's own vtable facts
+        set one today -- into a persisted ``"producer": null`` key.
+        Confirmed regression: this test fails without the fix
+        (`tests/test_g20_catalog.py::test_fixtures_match_generator` caught
+        it against the committed example fixtures, whose serialized
+        `snapshot.abi.json` files would otherwise drift on every save for
+        an unrelated reason)."""
+        from abicheck.storage.fact_codec import encode_fact_fields
+
+        d: dict[str, object] = {
+            "types": [
+                {
+                    "vtable_fact": dataclasses.asdict(Fact.not_collected()),
+                }
+            ]
+        }
+        encode_fact_fields(d)
+        vtable_fact = d["types"][0]["vtable_fact"]  # type: ignore[index]
+        assert "producer" not in vtable_fact
+
+    def test_encode_fact_fields_keeps_a_set_producer(self) -> None:
+        from abicheck.storage.fact_codec import encode_fact_fields
+
+        d: dict[str, object] = {
+            "types": [
+                {
+                    "vtable_fact": dataclasses.asdict(Fact.unsupported(producer="pdb")),
+                }
+            ]
+        }
+        encode_fact_fields(d)
+        vtable_fact = d["types"][0]["vtable_fact"]  # type: ignore[index]
+        assert vtable_fact["producer"] == "pdb"

@@ -216,6 +216,19 @@ def _encode_one(fact_dict: dict[str, Any] | None) -> None:
     status = fact_dict.get("status")
     if isinstance(status, FactStatus):
         fact_dict["status"] = status.value
+    # T9 (duplication-and-convergence-assessment Phase 6 item 4): `dataclasses.
+    # asdict()` already put a `"producer": None` key into every fact dict here
+    # (the overwhelming majority, since only PDB's vtable_fact/
+    # vptr_offset_bits_fact sets one today) -- dropped rather than left as an
+    # explicit null, matching this codec's own established sparse-field
+    # convention (a document predating this field simply lacks the key, and
+    # `decode_fact` already reads a missing key as `None`) and keeping every
+    # pre-existing persisted document/fixture byte-for-byte unchanged unless
+    # it actually carries a producer. Symmetric with `storage/
+    # semantic_ir_codec.py`'s own `_fact_to_dict`, which applies the identical
+    # omit-when-unset rule for the same reason.
+    if fact_dict.get("producer") is None:
+        fact_dict.pop("producer", None)
 
 
 def decode_fact(
