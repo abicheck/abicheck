@@ -411,10 +411,6 @@ def _build_with_cmake(
     case_out = build_dir / case_name
     build_type = "Release" if variant in {"release-headers", "build-source"} else "Debug"
 
-    # The CMake project root is catalog/ (catalog/CMakeLists.txt globs
-    # cases/case*), not case_dir.parent (catalog/cases/) -- Phase 4 of the
-    # examples/catalog split added that extra cases/ nesting level between
-    # the project root and each case directory.
     configure_cmd = [
         cmake, "-S", str(example_catalog.CATALOG_DIR), "-B", str(build_dir),
         f"-DCMAKE_BUILD_TYPE={build_type}",
