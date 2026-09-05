@@ -538,3 +538,96 @@ def test_real_manifests_use_real_sequences(directory: Path):
                 f"{workflow.id}/{step.name}: {needle!r} is a single character -- "
                 "the hallmark of a scalar that was split"
             )
+
+
+# --------------------------------------------------------------------------
+# The drift check must match whole commands, not substrings. A README that
+# *extends* a documented command still contains the manifest's shorter form
+# as a substring, so substring matching reported no drift while CI ran a
+# command different from the one a reader copies -- the exact failure the
+# check exists to catch, hiding inside the check.
+# --------------------------------------------------------------------------
+
+
+def _workflow_at(tmp_path: Path, source: workflow_examples.Workflow, readme: str):
+    import shutil
+    from dataclasses import replace
+
+    directory = tmp_path / source.id
+    shutil.copytree(source.directory, directory)
+    (directory / "README.md").write_text(readme, encoding="utf-8")
+    return replace(source, directory=directory)
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+@pytest.mark.parametrize(
+    "extension",
+    [" --contract public", " --format json", " -o out.json", " 2>/dev/null"],
+)
+def test_a_readme_that_extends_a_command_is_drift(
+    tmp_path: Path, directory: Path, extension: str
+):
+    """Generated over every step and several extensions: appending anything
+    to the documented command must be reported, however it is spelled."""
+    workflow = workflow_examples.load(directory)
+    for index, step in enumerate(workflow.steps):
+        readme = workflow.readme.read_text(encoding="utf-8")
+        extended = readme.replace(step.run.strip(), step.run.strip() + extension)
+        if extended == readme:
+            # The step's command is wrapped across lines in the README; append
+            # to its last fragment instead so the test still exercises it.
+            tail = step.run.strip().rsplit(" ", 1)[-1]
+            extended = readme.replace(tail, tail + extension, 1)
+        mutated = _workflow_at(tmp_path / f"ext{index}", workflow, extended)
+        drift = workflow_examples.readme_drift(mutated)
+        assert any(step.name in message for message in drift), (
+            f"extending {step.name!r}'s documented command with {extension!r} "
+            "was not reported as drift"
+        )
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_a_prefix_of_a_documented_command_is_also_drift(
+    tmp_path: Path, directory: Path
+):
+    """The mirror case: the manifest must not be satisfied by a README
+    command that merely starts the same way."""
+    workflow = workflow_examples.load(directory)
+    for index, step in enumerate(workflow.steps):
+        argv = step.argv
+        if len(argv) < 3:
+            continue
+        truncated = " ".join(argv[:-1])
+        readme = workflow.readme.read_text(encoding="utf-8")
+        shortened = readme.replace(step.run.strip(), truncated)
+        if shortened == readme:
+            continue
+        mutated = _workflow_at(tmp_path / f"pre{index}", workflow, shortened)
+        assert any(
+            step.name in message for message in workflow_examples.readme_drift(mutated)
+        )
+
+
+def test_documented_commands_reads_only_shell_fences():
+    """A required language tag, anchored to the line. With the tag optional
+    the regex pairs a *closing* fence with a later opening one and captures
+    the prose between them -- which it silently did on the first cut, making
+    every command "documented"."""
+    text = (
+        "```text\nVerdict: BREAKING\n```\n\n"
+        "some prose that is not a command\n\n"
+        "```bash\nabicheck compare a.so b.so\n```\n"
+        "```python\nprint('not a shell command')\n```\n"
+    )
+    assert workflow_examples.documented_commands(text) == ["abicheck compare a.so b.so"]
+
+
+def test_documented_commands_joins_wrapped_lines_and_drops_comments():
+    text = "```bash\n# build it\ngcc a.c \\\n    -o liba.so   # trailing note\n```\n"
+    assert workflow_examples.documented_commands(text) == ["gcc a.c -o liba.so"]
+
+
+def test_documented_commands_reads_a_blockquoted_fence():
+    """The no-CastXML callout style: a fence nested inside a blockquote."""
+    text = "> ```bash\n> abicheck compare a.so b.so\n> ```\n"
+    assert workflow_examples.documented_commands(text) == ["abicheck compare a.so b.so"]

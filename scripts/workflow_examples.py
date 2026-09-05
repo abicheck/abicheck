@@ -272,16 +272,52 @@ def normalize_command(text: str) -> str:
     return " ".join(text.replace("\\\n", " ").split())
 
 
+# The language tag is required, and the fence must start a line. An optional
+# tag lets the regex pair a *closing* fence with a later opening one and
+# capture the prose between them -- which it did, silently, on the first cut.
+_FENCE_RE = re.compile(
+    r"^[ \t>]*```(?:bash|sh|shell|console)[ \t]*\n(.*?)^[ \t>]*```",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def documented_commands(text: str) -> list[str]:
+    """Every shell command a Markdown document shows, one normalized line each.
+
+    Deliberately whole *lines*, not the document as one string. Substring
+    matching would accept a manifest command that the README has since
+    extended: `abicheck compare old.so new.so` is a substring of
+    `abicheck compare old.so new.so --contract public`, so CI would keep
+    running a command different from the one a reader copies, with the drift
+    check reporting nothing -- the exact failure the check exists to catch.
+    """
+    commands: list[str] = []
+    for block in _FENCE_RE.findall(text):
+        # A fence inside a blockquote carries a "> " prefix on every line.
+        unquoted = "\n".join(
+            line[2:] if line.startswith("> ") else line.removeprefix(">")
+            for line in block.splitlines()
+        )
+        # Join shell line continuations before splitting into lines, so a
+        # wrapped invocation is one command rather than several fragments.
+        for line in unquoted.replace("\\\n", " ").splitlines():
+            line = line.split("#", 1)[0].strip().removeprefix("$ ").strip()
+            if line:
+                commands.append(normalize_command(line))
+    return commands
+
+
 def readme_drift(workflow: Workflow) -> list[str]:
     """Return one message per `run:` command the README does not show."""
     if not workflow.readme.is_file():
         return [f"{workflow.directory}: no {README_NAME}"]
-    documented = normalize_command(workflow.readme.read_text(encoding="utf-8"))
+    documented = documented_commands(workflow.readme.read_text(encoding="utf-8"))
     missing = []
     for step in workflow.steps:
-        if normalize_command(step.run) not in documented:
+        wanted = normalize_command(step.run)
+        if wanted not in documented:
             missing.append(
                 f"{workflow.id}: step {step.name!r} runs a command the README "
-                f"does not show: {normalize_command(step.run)!r}"
+                f"does not show verbatim: {wanted!r}"
             )
     return missing
