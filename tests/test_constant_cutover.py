@@ -200,11 +200,14 @@ class TestDetectorBehavior:
         assert _run(unsupported, _ir_backed({"X": "1"})) == []
         assert _run(_ir_backed({"X": "1"}), unsupported) == []
 
-    def test_a_newly_added_unsupported_fact_is_skipped_not_reported(self) -> None:
-        """The addition-side counterpart of the above: a constant that only
-        exists on the *new* side and carries an unsupported fact must be
-        skipped by the second loop's own ``new_val is None`` guard, not
-        just the first loop's. Distinct code path from
+    def test_a_newly_added_unsupported_fact_is_still_reported_as_an_addition(
+        self,
+    ) -> None:
+        """A membership change is real regardless of whether the constant's
+        own value is comparable (Codex review, PR #1078): a constant that
+        only exists on the *new* side and carries an unsupported fact is
+        still a genuine addition -- it must not be silently dropped just
+        because ``new_value`` cannot be rendered. Distinct code path from
         ``test_unsupported_fact_yields_no_comparable_value``'s cases, none
         of which exercise a name absent from ``old_values`` entirely."""
         unsupported = SemanticIRIndex(
@@ -216,7 +219,30 @@ class TestDetectorBehavior:
                 }
             )
         )
-        assert _run(_ir_backed({}), unsupported) == []
+        (change,) = _run(_ir_backed({}), unsupported)
+        assert change.kind is ChangeKind.CONSTANT_ADDED
+        assert change.symbol == "X"
+        assert change.new_value is None
+
+    def test_a_removed_unsupported_fact_is_still_reported_as_a_removal(
+        self,
+    ) -> None:
+        """The removal-side mirror of the addition test above: a constant
+        that only exists on the *old* side and carries an unsupported fact
+        is still a genuine removal."""
+        unsupported = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(entity_id_for_constant((), "X")): CanonicalEntity(
+                        canonical_spelling=Fact.unsupported("not comparable")
+                    )
+                }
+            )
+        )
+        (change,) = _run(unsupported, _ir_backed({}))
+        assert change.kind is ChangeKind.CONSTANT_REMOVED
+        assert change.symbol == "X"
+        assert change.old_value is None
 
     def test_an_unrenderable_scope_segment_is_skipped_by_every_projection(
         self,

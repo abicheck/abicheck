@@ -108,12 +108,17 @@ def _value(index: SemanticIRIndex, entity_id: EntityId) -> str | None:
     source for this cohort, ``diff_constants`` genuinely reaches this
     ``None`` for a real clang compound-initializer/bool-literal constant --
     it is no longer routed around by falling back to the legacy adapter's
-    always-a-raw-string projection first. Skipping the finding rather than
-    fabricating a comparison against an evidence gap this codebase's own
-    "weaker evidence narrows conclusions" principle governs (AGENTS.md):
-    reporting no change here is honest about what could not be compared, a
-    documented limitation this family already accepted (see this module's
-    own docstring, "except clang's own compound-initializer value").
+    always-a-raw-string projection first. ``diff_constants`` skips only the
+    *value comparison* (``CONSTANT_CHANGED``) when either side's value is
+    unsupported this way -- fabricating a value comparison against an
+    evidence gap is exactly what this codebase's "weaker evidence narrows
+    conclusions" principle (AGENTS.md) forbids, a documented limitation
+    this family already accepted (see this module's own docstring, "except
+    clang's own compound-initializer value"). A membership change
+    (``CONSTANT_ADDED``/``CONSTANT_REMOVED``) is unaffected: whether a
+    constant exists at all does not depend on whether its value can be
+    rendered, so those findings still fire with a ``None`` old/new value
+    text (Codex review, PR #1078).
     """
     spelling = index.fact(entity_id, "canonical_spelling")
     if spelling is not None and spelling.is_present and spelling.value is not None:
@@ -132,6 +137,14 @@ def diff_constants(
     """Detect constant additions, removals, and value changes, reading only
     through the two indexes.
 
+    An addition or removal fires regardless of whether the constant's own
+    value can be rendered (``_value`` returning ``None`` for a
+    ``Fact.unsupported()`` occurrence) -- only a value-*comparison*
+    (``CONSTANT_CHANGED``) requires both sides' values to actually be
+    comparable text (Codex review, PR #1078: this used to skip the
+    membership check too for an unsupported old-side value, silently
+    dropping a real removal).
+
     *is_fingerprint_comparison_unreliable* is the comparison-level decision
     the caller already makes (``diff_default_value_reliability.
     constant_value_fingerprint_comparison_unreliable``, closed over both
@@ -148,26 +161,32 @@ def diff_constants(
     new_values = _values(new_index)
 
     for name, old_id in old_values.items():
-        old_val = _value(old_index, old_id)
-        if old_val is None:
-            continue
         new_id = new_values.get(name)
         eid = producer_entity_id(old_id) or (
             producer_entity_id(new_id) if new_id is not None else None
         )
         if new_id is None:
+            # A membership change (removed) is real regardless of whether
+            # this constant's own value was ever comparable -- checked
+            # before the `old_val is None` unsupported-value skip below, so
+            # a clang compound-initializer/bool-literal constant (or any
+            # future Fact.unsupported() producer) still reports its
+            # removal, just with no recoverable old_value text (Codex
+            # review: this used to `continue` here before ever reaching the
+            # membership check, silently dropping the removal).
             changes.append(
                 make_change(
                     ChangeKind.CONSTANT_REMOVED,
                     symbol=name,
                     name=name,
-                    old_value=old_val,
+                    old_value=_value(old_index, old_id),
                     entity_id=eid,
                 )
             )
             continue
+        old_val = _value(old_index, old_id)
         new_val = _value(new_index, new_id)
-        if new_val is None or new_val == old_val:
+        if old_val is None or new_val is None or new_val == old_val:
             continue
         if is_fingerprint_comparison_unreliable(old_val, new_val):
             continue
@@ -187,15 +206,14 @@ def diff_constants(
     for name, new_id in new_values.items():
         if name in old_values:
             continue
-        new_val = _value(new_index, new_id)
-        if new_val is None:
-            continue
+        # Mirrors the removal side above: an addition is real regardless of
+        # whether the new value is itself comparable.
         changes.append(
             make_change(
                 ChangeKind.CONSTANT_ADDED,
                 symbol=name,
                 name=name,
-                new_value=new_val,
+                new_value=_value(new_index, new_id),
                 entity_id=producer_entity_id(new_id),
             )
         )

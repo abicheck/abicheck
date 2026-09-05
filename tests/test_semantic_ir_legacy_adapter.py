@@ -440,3 +440,50 @@ class TestConstructionTimeConsistency:
                 ),
                 constant_entity_ids={"ns::K": sidecar_eid},
             )
+
+
+class TestConsistencyCheckedOnDeserialize:
+    """Codex review, PR #1078: ``AbiSnapshot.__post_init__`` alone cannot
+    catch a disagreement in a *loaded* snapshot -- ``serialization.
+    snapshot_from_dict`` constructs the ``AbiSnapshot`` (running
+    ``__post_init__`` with ``semantic_ir`` still ``None``) and only
+    afterward calls ``storage.semantic_ir_codec.decode_semantic_ir``, which
+    mutates ``snap.semantic_ir`` directly -- bypassing ``__post_init__``
+    entirely. ``snapshot_from_dict`` must re-run the Track T3 consistency
+    check itself after that decode."""
+
+    def test_a_disagreeing_stored_sidecar_is_caught_on_load(self) -> None:
+        from abicheck.errors import SemanticIrAuthorityError
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+        from abicheck.storage.entity_ids import domain_entity_id_to_dto
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        other = entity_id_for_typedef((Namespace("other"),), "Alias")
+        snap = _snap(
+            typedefs_qualified={"ns::Alias": "int"},
+            typedef_entity_ids={"ns::Alias": eid},
+            semantic_ir=_typedef_ir({eid: "int"}),
+        )
+        d = snapshot_to_dict(snap)
+        # Corrupt the stored sidecar so it disagrees with the stored IR for
+        # the identical rendered alias -- the same disagreement
+        # `test_a_sidecar_identity_disagreeing_with_the_ir_is_a_hard_failure`
+        # catches at construction time, reproduced here as it would arrive
+        # from disk instead.
+        d["typedef_entity_ids"]["ns::Alias"] = domain_entity_id_to_dto(other)
+        import pytest
+
+        with pytest.raises(SemanticIrAuthorityError):
+            snapshot_from_dict(d)
+
+    def test_an_agreeing_stored_snapshot_loads_cleanly(self) -> None:
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        snap = _snap(
+            typedefs_qualified={"ns::Alias": "int"},
+            typedef_entity_ids={"ns::Alias": eid},
+            semantic_ir=_typedef_ir({eid: "int"}),
+        )
+        loaded = snapshot_from_dict(snapshot_to_dict(snap))
+        assert loaded.semantic_ir is not None
