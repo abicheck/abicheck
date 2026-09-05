@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `exported-function-removed`. [← back to all rules](index.md)
 
+> A function is no longer exported, so existing binaries that import it fail to resolve at load or call time.
+
 ## Canonical demonstration
 
 - [case01_symbol_removal](../case01_symbol_removal.md) — Symbol Removal (🔴 BREAKING)

@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `type-kind-changed`. [← back to all rules](index.md)
 
+> A declaration changes between struct, class, and union, changing both its layout rules and how consumer source may use it.
+
 ## Canonical demonstration
 
 - [case55_type_kind_changed](../case55_type_kind_changed.md) — Type Kind Changed (struct → union) (🔴 BREAKING)

@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `atomic-qualifier-changed`. [← back to all rules](index.md)
 
+> A type gains or loses _Atomic, changing its size, alignment, and access protocol for existing binaries.
+
 ## Canonical demonstration
 
 - [case116_atomic_qualifier_changed](../case116_atomic_qualifier_changed.md) — _Atomic Qualifier Added (C11) (🔴 BREAKING)

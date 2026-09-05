@@ -139,4 +139,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pointer level](by-rule/pointer-level.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pointer indirection level changed](by-rule/pointer-level.md)._

@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `symbol-binding-strengthened`. [← back to all rules](index.md)
 
+> A weak symbol becomes strong, so consumer definitions that previously overrode it now collide with it.
+
 ## Canonical demonstration
 
 - [case128_symbol_binding_strengthened](../case128_symbol_binding_strengthened.md) — Symbol Binding Strengthened (Weak → Global) (🟢 COMPATIBLE)

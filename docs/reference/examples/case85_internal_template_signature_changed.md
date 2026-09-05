@@ -142,4 +142,4 @@ exit-code comparison.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal template signature changed](by-rule/internal-template-signature-changed.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal template signature leaks through the public API](by-rule/internal-template-signature-changed.md)._

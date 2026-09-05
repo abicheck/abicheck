@@ -10,19 +10,29 @@ Before this module, roughly a dozen consumers (`scripts/gen_examples_docs.py`,
 each independently derived `EXAMPLES_DIR = <repo root> / "examples"` and then
 joined a case id onto it by hand (`EXAMPLES_DIR / case_name`). That's fine
 while every case lives directly under `examples/`, but Phase 4's planned
-physical split (`examples/caseNN_*` -> one of
-`catalog/{rules,patterns,case-studies,capabilities}/...`) would otherwise
-require editing every one of those call sites in lockstep, in one
+physical split (`examples/caseNN_*` -> `catalog/cases/caseNN_*`) would
+otherwise require editing every one of those call sites in lockstep, in one
 un-reviewable diff.
 
 Routing through `case_dir(case_id)` instead means Phase 4 only ever changes
-*this* module -- once cases physically move, this resolves each id via
-`ground_truth.json["taxonomy"]`'s `entity`/`scenario_kind` fields (already
-computed by Phase 1/2, see `gen_catalog_taxonomy.py`) to pick the right
-`catalog/` subtree, and every caller below is unaffected. Until Phase 4
-lands, this is a thin, behavior-preserving wrapper: every path it returns is
+*this* module: once cases physically move, this returns
+`catalog/cases/<case_id>` and every caller below is unaffected. Until then
+it's a thin, behavior-preserving wrapper -- every path it returns is
 byte-identical to what the hand-rolled `EXAMPLES_DIR / case_name` joins
 already produced.
+
+Note the resolver deliberately does **not** consult the taxonomy to pick a
+destination subtree. An earlier Phase 4 target model routed each case to one
+of `catalog/{rules,patterns,case-studies,capabilities}/` by its
+`entity`/`scenario_kind`; an external review found that unsound before any
+move landed, on three counts -- no destination existed for several groups,
+rule/ecosystem/language/evidence/topology are independent dimensions of
+which only one can own a filesystem path, and it created a bootstrap cycle
+(`gen_catalog_taxonomy.py` calls `case_dir()` to inspect a case's own files
+while *building* the taxonomy a taxonomy-reading resolver would first need
+to consult). The corrected model keeps one flat `catalog/cases/` namespace
+and expresses every other dimension as a generated view. See the plan's
+"Corrected Phase 4 target model" section.
 
 Pure stdlib, importable before `pip install -e .` (mirrors
 `check_ai_readiness.py`'s own constraint -- it's one of this module's
@@ -41,8 +51,10 @@ GROUND_TRUTH_PATH = EXAMPLES_DIR / "ground_truth.json"
 
 def case_dir(case_id: str) -> Path:
     """Resolve a case id (e.g. ``"case01_symbol_removal"``) to its
-    directory. Today this is always ``examples/<case_id>``; Phase 4 is the
-    only change this module is meant to absorb without touching callers.
+    directory. Today this is always ``examples/<case_id>``, and after
+    Phase 4 always ``catalog/cases/<case_id>`` -- unconditional either way,
+    with no taxonomy lookup (see the module docstring for why). Phase 4 is
+    the only change this module is meant to absorb without touching callers.
     """
     return EXAMPLES_DIR / case_id
 

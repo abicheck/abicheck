@@ -166,4 +166,4 @@ environment (`abidiff` is not installed here).
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Glibcxx dual abi flip](by-rule/glibcxx-dual-abi-flip.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: libstdc++ dual ABI flipped](by-rule/glibcxx-dual-abi-flip.md)._

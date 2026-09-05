@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `public-typedef-removed`. [← back to all rules](index.md)
 
+> A typedef declared by a public header is deleted, so consumer source naming it no longer compiles.
+
 ## Canonical demonstration
 
 - [case158_public_typedef_removed](../case158_public_typedef_removed.md) — Public Typedef Removed (🟠 API_BREAK)

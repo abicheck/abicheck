@@ -132,4 +132,4 @@ public handle that wraps the internal type.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public function private parameter type](by-rule/public-function-private-parameter-type.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public function takes a private parameter type](by-rule/public-function-private-parameter-type.md)._

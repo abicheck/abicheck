@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `inline-function-removed`. [← back to all rules](index.md)
 
+> A header-inline function is deleted, so consumer source that calls it no longer compiles.
+
 ## Canonical demonstration
 
 - [case157_inline_function_removed](../case157_inline_function_removed.md) — Inline Function Removed (🟠 API_BREAK)

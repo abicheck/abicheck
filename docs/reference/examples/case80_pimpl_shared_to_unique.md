@@ -142,4 +142,4 @@ cleanup a maintainer might propose without realizing it's binary-incompatible.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pimpl shared to unique](by-rule/pimpl-shared-to-unique.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pimpl handle type changed](by-rule/pimpl-shared-to-unique.md)._

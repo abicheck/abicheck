@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `symbol-binding-weakened`. [← back to all rules](index.md)
 
+> A strong symbol becomes weak, so it can be silently interposed or left undefined at link time.
+
 ## Canonical demonstration
 
 - [case27_symbol_binding_weakened](../case27_symbol_binding_weakened.md) — Symbol Binding Weakened (GLOBAL → WEAK) (🟢 COMPATIBLE)

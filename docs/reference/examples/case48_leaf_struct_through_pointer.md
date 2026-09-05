@@ -138,4 +138,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Leaf struct through pointer](by-rule/leaf-struct-through-pointer.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pointed-to struct changed size](by-rule/leaf-struct-through-pointer.md)._

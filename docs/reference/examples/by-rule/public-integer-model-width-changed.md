@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `public-integer-model-width-changed`. [← back to all rules](index.md)
 
+> An integer type the public interface is expressed in changes width, changing every signature and layout that spells it.
+
 ## Canonical demonstration
 
 _No single-library case demonstrates this rule alone yet — referenced only by the scenario(s) below._

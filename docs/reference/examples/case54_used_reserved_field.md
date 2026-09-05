@@ -117,4 +117,4 @@ reserves space for future extensions; Wayland protocol structs use
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Used reserved field](by-rule/used-reserved-field.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Reserved field put to use](by-rule/used-reserved-field.md)._

@@ -115,4 +115,4 @@ layer.
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Threadsafe statics flip](by-rule/threadsafe-statics-flip.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Thread-safe statics mode flipped](by-rule/threadsafe-statics-flip.md)._

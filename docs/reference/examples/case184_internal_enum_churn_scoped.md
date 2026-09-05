@@ -137,4 +137,4 @@ cross-tool reproduction is included here.
 - `v2.h`
 - `v2_internal.h`
 
-_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal enum churn scoped](by-rule/internal-enum-churn-scoped.md)._
+_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal enumeration churn, out of contract](by-rule/internal-enum-churn-scoped.md)._

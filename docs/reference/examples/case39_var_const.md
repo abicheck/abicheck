@@ -149,4 +149,4 @@ echo "exit: $?"   # → 12 (detected at binary level)
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Var const](by-rule/var-const.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported variable became const](by-rule/var-const.md)._

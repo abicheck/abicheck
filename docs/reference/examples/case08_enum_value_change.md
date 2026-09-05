@@ -132,4 +132,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enum member value changed](by-rule/enum-member-value-changed.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enumerator value changed](by-rule/enum-member-value-changed.md)._

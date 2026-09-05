@@ -142,4 +142,4 @@ the symbol-table regression is easy to miss in review.
 - `good.c`
 - `good.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Func became inline](by-rule/func-became-inline.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Function became inline](by-rule/func-became-inline.md)._

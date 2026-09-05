@@ -105,4 +105,4 @@ isn't something `abidiff`/`abi-compliance-checker` do.
 
 - `snapshot.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Audit unversioned export](by-rule/audit-unversioned-export.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Exported symbol carries no version](by-rule/audit-unversioned-export.md)._

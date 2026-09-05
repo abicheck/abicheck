@@ -561,6 +561,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_canonical_finding_id_completeness.py",
             "tests/test_report_classifications_unit.py",
+            "tests/test_catalog_rule_registry.py",
         ),
         known_gaps=(
             KnownGap(

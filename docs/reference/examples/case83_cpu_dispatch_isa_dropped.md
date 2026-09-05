@@ -138,4 +138,4 @@ exit-code comparison on the same kind of raw symbol removal.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Cpu dispatch isa dropped](by-rule/cpu-dispatch-isa-dropped.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Dispatched ISA variant dropped](by-rule/cpu-dispatch-isa-dropped.md)._

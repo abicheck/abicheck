@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `overload-added`. [← back to all rules](index.md)
 
+> An overload is added to an existing name, which can make previously unambiguous consumer calls ambiguous.
+
 ## Canonical demonstration
 
 - [case169_overload_added](../case169_overload_added.md) — Overload Added to a Previously Unique Function (🟡 COMPATIBLE_WITH_RISK)

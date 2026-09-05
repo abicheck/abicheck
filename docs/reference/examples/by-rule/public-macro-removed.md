@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `public-macro-removed`. [← back to all rules](index.md)
 
+> A macro defined by a public header is deleted, so consumer source that uses it no longer compiles.
+
 ## Canonical demonstration
 
 - [case156_public_macro_removed](../case156_public_macro_removed.md) — _public_macro_removed — Public macro removed (🟠 API_BREAK)

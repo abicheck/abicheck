@@ -168,4 +168,4 @@ an abicheck-specific `ChangeKind`.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Bit int width changed](by-rule/bit-int-width-changed.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: _BitInt width changed](by-rule/bit-int-width-changed.md)._

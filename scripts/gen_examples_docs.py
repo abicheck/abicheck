@@ -18,6 +18,7 @@ import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # identical sibling-import guard for the identical reason.
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+import catalog_rule_registry  # noqa: E402
 import example_catalog  # noqa: E402
 
 EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
@@ -173,11 +175,34 @@ def _short_title(title: str) -> str:
     return stripped or title
 
 
+@lru_cache(maxsize=1)
+def _rule_registry() -> dict[str, catalog_rule_registry.RuleDefinition]:
+    """The canonical rule registry (examples/catalog_rules.yaml), loaded once.
+
+    It, not this module, owns each rule's reader-facing title and its
+    one-sentence definition -- so the by-rule pages say what a rule *means*
+    rather than only de-kebab-casing its slug.
+    """
+    return catalog_rule_registry.load_registry()
+
+
 def _slug_title(slug: str) -> str:
     """A rule_slug (e.g. "exported-function-removed") as a reader-facing
-    sentence-case title ("Exported function removed")."""
+    title -- the registry's own `title` when it defines one, else a
+    sentence-cased spelling of the slug itself (so an as-yet-unregistered
+    slug still renders; `catalog_rule_registry.validate_registry` is what
+    turns that state into an error, in one place)."""
+    entry = _rule_registry().get(slug)
+    if entry and entry.title:
+        return entry.title
     words = slug.replace("-", " ")
     return words[:1].upper() + words[1:]
+
+
+def _slug_definition(slug: str) -> str:
+    """The registry's one-sentence definition of a rule, or "" if none."""
+    entry = _rule_registry().get(slug)
+    return entry.definition if entry else ""
 
 
 @dataclass
@@ -703,6 +728,9 @@ def _render_rule_family_page(fam: RuleFamily) -> str:
         f"# Rule: {_slug_title(fam.slug)}\n\n",
         f"_Canonical rule slug:_ `{fam.slug}`. [← back to all rules](index.md)\n\n",
     ]
+    definition = _slug_definition(fam.slug)
+    if definition:
+        lines.append(f"> {definition}\n\n")
     if fam.canonical is not None:
         c = fam.canonical
         vinfo = VERDICT_META[c.verdict]

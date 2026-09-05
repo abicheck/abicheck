@@ -148,4 +148,4 @@ echo "exit: $?"   # → 4 (with -g / DWARF present)
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Template abi](by-rule/template-abi.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Template instantiation layout changed](by-rule/template-abi.md)._

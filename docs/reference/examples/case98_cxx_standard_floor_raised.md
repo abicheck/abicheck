@@ -132,4 +132,4 @@ build-context layer is for.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Cxx standard floor raised](by-rule/cxx-standard-floor-raised.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: C++ standard floor raised](by-rule/cxx-standard-floor-raised.md)._

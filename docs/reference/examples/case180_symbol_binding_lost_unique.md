@@ -139,4 +139,4 @@ difference abicheck's `symbol_binding_lost_unique` detector reads.
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Symbol binding lost unique](by-rule/symbol-binding-lost-unique.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Unique binding lost](by-rule/symbol-binding-lost-unique.md)._

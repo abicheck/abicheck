@@ -109,4 +109,4 @@ to check it against their environment.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Runpath changed](by-rule/runpath-changed.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: RUNPATH changed](by-rule/runpath-changed.md)._

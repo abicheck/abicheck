@@ -129,4 +129,4 @@ change at all.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Header constant value changed](by-rule/header-constant-value-changed.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public constant value changed](by-rule/header-constant-value-changed.md)._

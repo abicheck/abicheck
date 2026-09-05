@@ -163,4 +163,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Field qualifiers](by-rule/field-qualifiers.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Field type qualifiers changed](by-rule/field-qualifiers.md)._

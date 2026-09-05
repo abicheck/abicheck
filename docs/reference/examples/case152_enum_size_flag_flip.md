@@ -129,4 +129,4 @@ localizes the cause to the flag flip.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Enum size flag flip](by-rule/enum-size-flag-flip.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Short-enums build flag flipped](by-rule/enum-size-flag-flip.md)._

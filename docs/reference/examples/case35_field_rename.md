@@ -150,4 +150,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Field rename](by-rule/field-rename.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Field renamed](by-rule/field-rename.md)._

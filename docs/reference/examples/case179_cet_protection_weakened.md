@@ -117,4 +117,4 @@ hardening notes at all, so this class of finding is abicheck-specific.
 - `v1.c`
 - `v2.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Cet protection weakened](by-rule/cet-protection-weakened.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: CET protection weakened](by-rule/cet-protection-weakened.md)._

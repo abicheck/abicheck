@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `internal-version-node-churn`. [← back to all rules](index.md)
 
+> A symbol version node the library documents as private is retired, which is churn rather than a supported-surface break.
+
 ## Canonical demonstration
 
 - [case183_internal_version_node_churn](../case183_internal_version_node_churn.md) — Internal ELF symbol-version node churn (🟡 COMPATIBLE_WITH_RISK)

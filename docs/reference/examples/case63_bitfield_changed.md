@@ -142,4 +142,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Bitfield changed](by-rule/bitfield-changed.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Bitfield width or position changed](by-rule/bitfield-changed.md)._

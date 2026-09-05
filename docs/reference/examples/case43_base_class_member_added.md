@@ -150,4 +150,4 @@ echo "exit: $?"   # → 4 (ABI change: base class data member added)
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Base class member added](by-rule/base-class-member-added.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Base class gained a member](by-rule/base-class-member-added.md)._

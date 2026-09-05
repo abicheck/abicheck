@@ -176,4 +176,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Detail base class changed](by-rule/detail-base-class-changed.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal base class leaks through a public type](by-rule/detail-base-class-changed.md)._

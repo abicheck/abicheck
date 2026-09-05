@@ -142,4 +142,4 @@ reproduced here.
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Long double abi changed](by-rule/long-double-abi-changed.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: long double ABI changed](by-rule/long-double-abi-changed.md)._

@@ -163,4 +163,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline namespace moved](by-rule/inline-namespace-moved.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline namespace membership changed](by-rule/inline-namespace-moved.md)._

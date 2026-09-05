@@ -136,4 +136,4 @@ abidiff v1.xml v2.xml
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Struct return convention](by-rule/struct-return-convention.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Struct return convention changed](by-rule/struct-return-convention.md)._

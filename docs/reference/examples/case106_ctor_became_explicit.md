@@ -110,4 +110,4 @@ g++ -std=c++17 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Ctor became explicit](by-rule/ctor-became-explicit.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Constructor became explicit](by-rule/ctor-became-explicit.md)._

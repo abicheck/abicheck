@@ -164,4 +164,4 @@ echo "exit: $?"   # → 0 (no binary ABI change; abidiff doesn't read header
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Param defaults](by-rule/param-defaults.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Parameter default value changed](by-rule/param-defaults.md)._

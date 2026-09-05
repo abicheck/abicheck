@@ -128,4 +128,4 @@ readelf -d libfoo_v2.so | grep SONAME   # → (SONAME) Library soname: [libv2.so
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Soname](by-rule/soname.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: SONAME missing](by-rule/soname.md)._

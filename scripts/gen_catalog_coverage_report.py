@@ -65,6 +65,7 @@ OUT_PATH = ROOT / "docs" / "contribute" / "catalog-coverage.md"
 # identical reason.
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+import catalog_rule_registry  # noqa: E402
 import example_catalog  # noqa: E402
 
 GENERATED_NOTE = (
@@ -91,101 +92,111 @@ PHASE5_TARGET_WORKFLOWS: tuple[str, ...] = (
 
 
 def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
+    """Rule/variant/duplicate coverage, derived from the canonical registry.
+
+    The families, their canonical/variant/duplicate membership, and each
+    rule's demonstrated-vs-referenced-only status all come from
+    `catalog_rule_registry.build_families()` rather than being re-derived
+    here: this page's headline is the one number the registry exists to keep
+    honest, so re-deriving it from the raw taxonomy would be a second copy
+    of exactly the join the registry owns.
+    """
     rules = {k: v for k, v in taxonomy.items() if v["entity"] == "rule"}
-    scenarios = {k: v for k, v in taxonomy.items() if v["entity"] == "scenario"}
-    slug_cases: dict[str, list[str]] = {}
-    for case_id, entry in rules.items():
-        slug_cases.setdefault(entry["rule_slug"], []).append(case_id)  # type: ignore[arg-type]
+    families = catalog_rule_registry.build_families(taxonomy)
 
-    # A distinct rule is any rule_slug a rule-entity case demonstrates,
-    # *plus* any conceptual slug a scenario names in its own related_rules
-    # with no rule-entity case of its own (e.g. "overload-set-removed" --
-    # the design doc's own worked examples deliberately name a generic
-    # mechanism no single-library case demonstrates alone yet). Counting
-    # only rule-entity slugs would undercount the catalog's real rule
-    # vocabulary by exactly that many.
-    scenario_only_slugs: set[str] = set()
-    for entry in scenarios.values():
-        for slug in entry.get("related_rules") or []:  # type: ignore[union-attr]
-            if slug not in slug_cases:
-                scenario_only_slugs.add(slug)
-    distinct_rule_count = len(slug_cases) + len(scenario_only_slugs)
+    demonstrated = {
+        slug: fam
+        for slug, fam in families.items()
+        if fam.status == catalog_rule_registry.STATUS_DEMONSTRATED
+    }
+    referenced_only = {
+        slug: fam
+        for slug, fam in families.items()
+        if fam.status == catalog_rule_registry.STATUS_REFERENCED_ONLY
+    }
 
-    # A family's canonical case(s) are those with variant_of=None; everything
-    # else in the family is either a genuine variant (relation_type ==
-    # "variant", a robustness demonstration under a named relation_axis) or
-    # a plain duplicate (relation_type == "duplicate", the same
-    # demonstration restated with no distinguishing condition). Reported
-    # separately -- collapsing the two is exactly what let three duplicate
-    # restatements count as three robustness variants before this split. A
-    # family with 2 cases has exactly 1 variant or 1 duplicate, not "more
-    # than one". Case counts are filtered by each case's own relation_type
-    # directly (never by which bucket its whole family fell into) so a
-    # hypothetical mixed family -- one variant case plus one duplicate case
-    # sharing the same rule_slug, not present in today's data but not ruled
-    # out by the schema either -- can't have its duplicate silently
-    # miscounted as a variant or vice versa; a family that mixes the two
-    # legitimately appears in both family sets below, not just one.
-    multi_case_families = {
-        slug: cases for slug, cases in slug_cases.items() if len(cases) > 1
-    }
-    variant_families = {
-        slug: cases
-        for slug, cases in multi_case_families.items()
-        if any(rules[c]["relation_type"] == "variant" for c in cases)
-    }
-    duplicate_families = {
-        slug: cases
-        for slug, cases in multi_case_families.items()
-        if any(rules[c]["relation_type"] == "duplicate" for c in cases)
-    }
-    multi_case_ids = [c for cases in multi_case_families.values() for c in cases]
-    variant_case_ids = [
-        c for c in multi_case_ids if rules[c]["relation_type"] == "variant"
-    ]
-    duplicate_case_ids = [
-        c for c in multi_case_ids if rules[c]["relation_type"] == "duplicate"
-    ]
+    # A family with 2 cases has exactly 1 variant or 1 duplicate, not "more
+    # than one". Variants and duplicates are counted from each case's own
+    # `relation_type` (never from which bucket its family fell into), so a
+    # mixed family -- one variant case plus one duplicate case sharing a
+    # rule_slug, not present in today's data but not ruled out by the schema
+    # either -- legitimately appears in both family sets rather than having
+    # one of its cases silently miscounted as the other kind.
+    variant_families = {s: f for s, f in demonstrated.items() if f.variant_cases}
+    duplicate_families = {s: f for s, f in demonstrated.items() if f.duplicate_cases}
+    variant_case_count = sum(len(f.variant_cases) for f in demonstrated.values())
+    duplicate_case_count = sum(len(f.duplicate_cases) for f in demonstrated.values())
+    singleton_count = sum(
+        1
+        for f in demonstrated.values()
+        if not f.variant_cases and not f.duplicate_cases
+    )
 
     lines = [
         "## Rule coverage",
         "",
-        f"- **{distinct_rule_count} distinct compatibility rules** in total "
-        f"-- **{len(slug_cases)}** demonstrated by at least one rule-entity "
+        "Every rule named below is defined in "
+        "[`examples/catalog_rules.yaml`](../../examples/catalog_rules.yaml), "
+        "the canonical rule registry. A slug used by a case but missing from "
+        "that file (or defined there but used by no case) fails "
+        "`scripts/gen_catalog_taxonomy.py` and "
+        "`tests/test_catalog_taxonomy.py` -- which is what stops a typo, a "
+        "synonym, or an accidental rename from silently becoming one more "
+        "\"distinct compatibility rule\" in the headline below.",
+        "",
+        f"- **{len(families)} distinct compatibility rules** in total "
+        f"-- **{len(demonstrated)}** demonstrated by at least one rule-entity "
         f"case (across **{len(rules)} rule-entity cases**), plus "
-        f"**{len(scenario_only_slugs)}** named only in a scenario's own "
+        f"**{len(referenced_only)}** named only in a scenario's own "
         "`related_rules` (a generic mechanism no single-library case "
-        "demonstrates alone yet).",
-        f"- **{len(variant_families)} of the rule-entity-backed rules** have "
-        f"a demonstrated *variant* beyond their canonical case -- a genuine "
-        f"robustness demonstration under a different condition "
-        f"({len(variant_case_ids)} variant cases total -- see the per-family "
+        "demonstrates alone yet). The two are **not** equivalent coverage: "
+        "a referenced-only rule has a definition and a scenario that "
+        "composes it, but no case that isolates it.",
+        f"- **{len(variant_families)} of the demonstrated rules** have "
+        "a *variant* beyond their canonical case -- a genuine "
+        "robustness demonstration under a different condition "
+        f"({variant_case_count} variant cases total -- see the per-family "
         "breakdown below); these are robustness demonstrations of an "
         "already-counted rule, not additional rules.",
-        f"- **{len(duplicate_families)} of the rule-entity-backed rules** "
-        f"also have a *duplicate* -- the same demonstration restated "
-        f"with no distinguishing condition ({len(duplicate_case_ids)} "
+        f"- **{len(duplicate_families)} of the demonstrated rules** "
+        "also have a *duplicate* -- the same demonstration restated "
+        f"with no distinguishing condition ({duplicate_case_count} "
         "duplicate cases total); these don't add robustness coverage and "
         "are candidates for eventual removal, not a variant to keep. (A "
         "family can appear in both this count and the variant count above "
         "if it has one of each.)",
-        f"- **{len(slug_cases) - len(multi_case_families)} rule-entity-backed "
-        "rules** have exactly one demonstrated case so far, with no "
-        "variant or duplicate yet.",
+        f"- **{singleton_count} demonstrated rules** have exactly one case "
+        "so far, with no variant or duplicate yet.",
         "",
         "| Rule | Canonical case | Variant case(s) | Duplicate case(s) |",
         "|---|---|---|---|",
     ]
-    for slug in sorted(multi_case_families):
-        cases = sorted(multi_case_families[slug])
-        canonical = [c for c in cases if rules[c]["variant_of"] is None]
-        variants = [c for c in cases if rules[c]["relation_type"] == "variant"]
-        duplicates = [c for c in cases if rules[c]["relation_type"] == "duplicate"]
+    for slug in sorted(s for s, f in demonstrated.items() if len(f.rule_cases) > 1):
+        fam = demonstrated[slug]
+        variants = ", ".join(f"`{c}`" for c, _ in sorted(fam.variant_cases))
+        duplicates = ", ".join(f"`{c}`" for c in sorted(fam.duplicate_cases))
         lines.append(
-            f"| `{slug}` | {', '.join(f'`{c}`' for c in canonical)} | "
-            f"{', '.join(f'`{c}`' for c in variants)} | "
-            f"{', '.join(f'`{c}`' for c in duplicates)} |"
+            f"| `{slug}` | `{fam.canonical_case}` | {variants} | {duplicates} |"
         )
+
+    lines += [
+        "",
+        "### Referenced-only rules",
+        "",
+        f"{len(referenced_only)} rules the catalog names but does not yet "
+        "isolate in a case of its own. Each is a real compatibility "
+        "mechanism a scenario composes; adding a rule-entity case whose "
+        "`rule_slug` is one of these promotes it to *demonstrated* "
+        "automatically, with no registry edit.",
+        "",
+        "| Rule | Composed by |",
+        "|---|---|",
+    ]
+    for slug in sorted(referenced_only):
+        composed = ", ".join(
+            f"`{c}`" for c in sorted(referenced_only[slug].scenario_cases)
+        )
+        lines.append(f"| `{slug}` | {composed} |")
     lines.append("")
     return "\n".join(lines)
 

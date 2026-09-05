@@ -158,4 +158,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual method added](by-rule/virtual-method-added.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual function added](by-rule/virtual-method-added.md)._

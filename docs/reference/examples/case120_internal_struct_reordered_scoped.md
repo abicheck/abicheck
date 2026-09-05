@@ -127,4 +127,4 @@ environment, so no cross-tool output is reproduced here.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal struct reordered scoped](by-rule/internal-struct-reordered-scoped.md)._
+_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal struct reordered, out of contract](by-rule/internal-struct-reordered-scoped.md)._

@@ -109,4 +109,4 @@ against its own header provenance).
 
 - `snapshot.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Audit rtti for internal](by-rule/audit-rtti-for-internal.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: RTTI emitted for an internal type](by-rule/audit-rtti-for-internal.md)._
