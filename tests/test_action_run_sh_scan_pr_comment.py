@@ -42,6 +42,19 @@ _END_MARKER = (
 #: immediately follow the ``scan --artifact-set`` block, up to (not
 #: including) the pull_request-event check.
 _VERDICT_GUARDS_END_MARKER = '[[ "$VERDICT" == "BUDGET_OVERFLOW" ]] && return 0\n'
+_DRY_RUN_FLAG_HELPER_MARKER = "_extra_args_has_dry_run_flag() {"
+
+
+def _extra_args_has_dry_run_flag_source() -> str:
+    """`_maybe_post_pr_comment`'s own dry-run guard (Codex review, P2, fresh
+    evidence) now calls this helper too -- extracted verbatim, the same
+    discipline as the fragments below, and prepended so the isolated
+    function body doesn't hit "command not found" for a real caller it
+    depends on."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_DRY_RUN_FLAG_HELPER_MARKER)
+    end = text.index("\n}\n", start) + len("\n}\n")
+    return text[start:end]
 
 
 def _mode_gate_fragment() -> str:
@@ -77,7 +90,12 @@ def _mode_and_verdict_gate_fragment() -> str:
         _VERDICT_GUARDS_END_MARKER
     )
     body = text[start:end]
-    return body + '  echo "PAST_VERDICT_GUARDS"\n  return 0\n}\n'
+    return (
+        _extra_args_has_dry_run_flag_source()
+        + "\n"
+        + body
+        + '  echo "PAST_VERDICT_GUARDS"\n  return 0\n}\n'
+    )
 
 
 def _bash_executable() -> str:
@@ -205,6 +223,35 @@ def test_compatible_verdict_passes_the_verdict_guards():
     result = _run_verdict_guards("COMPATIBLE")
     assert result.returncode == 0, result.stderr
     assert "PAST_VERDICT_GUARDS" in result.stdout
+
+
+def test_an_effective_dry_run_via_extra_args_skips_the_comment():
+    # Codex review, P2, fresh evidence: `INPUT_DRY_RUN` alone used to be
+    # checked here, so a caller passing `--dry-run` through `extra-args`
+    # (with the dedicated input left false) fell through into this
+    # function's own JSON-acquisition path -- launching a doomed second
+    # invocation (retaining `--dry-run` while appending `--format json
+    # -o ...`) instead of the clean, silent skip a real dry run gets.
+    script = (
+        _mode_and_verdict_gate_fragment() + '\n_maybe_post_pr_comment\necho "REACHED"\n'
+    )
+    env = dict(os.environ)
+    env["MODE"] = "scan"
+    env["INPUT_PR_COMMENT"] = "true"
+    env["INPUT_DRY_RUN"] = "false"
+    env["INPUT_PR_COMMENT_ON"] = "changes"
+    env["VERDICT"] = "COMPATIBLE"
+    env["INPUT_EXTRA_ARGS"] = "--dry-run"
+    result = subprocess.run(
+        [_bash_executable(), "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "PAST_VERDICT_GUARDS" not in result.stdout
+    assert "REACHED" in result.stdout
 
 
 def test_pr_comment_renderer_uses_resolved_py_bin_not_bare_python3():

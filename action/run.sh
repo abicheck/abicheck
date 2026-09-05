@@ -3392,7 +3392,19 @@ _maybe_post_pr_comment() {
   # A dry run performed no real comparison -- posting a comment would either
   # show nothing (no PR_JSON) or silently trigger a second, real compare just
   # to produce one, defeating the point of --dry-run. Skip entirely.
-  [[ "${INPUT_DRY_RUN:-false}" == "true" ]] && return 0
+  #
+  # Also checks the effective dry run, not only the dedicated input (Codex
+  # review, P2, fresh evidence): an earlier revision checked `INPUT_DRY_RUN`
+  # alone, so a caller passing `--dry-run` through `extra-args` on a
+  # pull_request run (PR comments enabled by default) still fell through
+  # into this function's own JSON-acquisition path -- retaining `--dry-run`
+  # while appending `--format json -o ...` for a second invocation the CLI
+  # itself rejects (the identical `--dry-run`-vs-`-o`/`--write` conflict the
+  # sidecar-injection guard above exists to avoid at the command-assembly
+  # stage), before this function's own error handling turned that failure
+  # into a misleading "no JSON report produced" warning instead of the
+  # clean, silent skip a real dry run gets.
+  { [[ "${INPUT_DRY_RUN:-false}" == "true" ]] || _extra_args_has_dry_run_flag; } && return 0
   [[ "${INPUT_PR_COMMENT_ON:-changes}" == "never" ]] && return 0
   [[ "$VERDICT" == "ERROR" ]] && return 0
   # scan's own _BudgetOverflow handler (abicheck/cli_scan.py) exits 5 before
