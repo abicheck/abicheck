@@ -877,6 +877,90 @@ def test_merged_rule_provenance_reaches_a_real_comparison(tmp_path) -> None:
     assert rule.reason == "from the document"
 
 
+def test_a_substituting_step_records_one_observation_not_two() -> None:
+    """`DowngradeOpaqueStructChanges` replaces a breaking layout finding with
+    a compatible one describing the *same* observation. Counting the original
+    as a drop *and* the replacement as new would report two detected changes
+    where one was observed — the audit's whole job is to make that number
+    trustworthy.
+    """
+    from abicheck.checker_types import Change
+    from abicheck.post_processing import (
+        DowngradeOpaqueStructChanges,
+        PipelineContext,
+        _record_dropped_duplicates,
+    )
+
+    old, new = _snapshots()
+    original = Change(
+        kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Handle", description="x"
+    )
+    replacement = Change(
+        kind=ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+        symbol="Handle",
+        description="(opaque struct) x",
+    )
+    ledger = DispositionLedger()
+    ctx = PipelineContext(old=old, new=new, disposition_ledger=ledger)
+    _record_dropped_duplicates(
+        {id(original): original},
+        [replacement],
+        ctx,
+        DowngradeOpaqueStructChanges.name,
+        DowngradeOpaqueStructChanges.dropped_finding_disposition,
+    )
+    assert ledger.detected_total == 0, "the substituted original is not a drop"
+    assert ledger.counts()[Disposition.DEDUPLICATED.value] == 0
+
+
+@pytest.mark.parametrize(
+    ("declared", "expected_records", "expected_disposition"),
+    [
+        (Disposition.DEDUPLICATED, 1, Disposition.DEDUPLICATED),
+        (Disposition.NON_GATING, 1, Disposition.NON_GATING),
+        (None, 0, None),
+    ],
+)
+def test_a_steps_declared_drop_meaning_is_what_gets_recorded(
+    declared, expected_records, expected_disposition
+) -> None:
+    """The mechanism itself, over its whole (three-valued) domain.
+
+    None of the three answers — folded into another finding, excluded as
+    compatible noise, substituted by a replacement — is derivable from the
+    before/after lists, so each step declares its own and this asserts the
+    declaration is honoured rather than one step's happening to work.
+    """
+    from abicheck.checker_types import Change
+    from abicheck.post_processing import PipelineContext, _record_dropped_duplicates
+
+    old, new = _snapshots()
+    dropped = Change(kind=ChangeKind.FUNC_REMOVED, symbol="gone", description="x")
+    ledger = DispositionLedger()
+    ctx = PipelineContext(old=old, new=new, disposition_ledger=ledger)
+    _record_dropped_duplicates({id(dropped): dropped}, [], ctx, "a_step", declared)
+    assert ledger.detected_total == expected_records
+    if expected_disposition is not None:
+        assert ledger.record_for(dropped).disposition is expected_disposition
+
+
+def test_the_one_line_view_states_a_support_gap_on_a_zero_change_run() -> None:
+    """The one view where "no changes (0 total)" is the entire report: if the
+    counts are all zero *and* detectors were skipped for missing evidence,
+    dropping the note leaves the assurance gap stated nowhere at all."""
+    from abicheck.reporter_markdown import to_stat
+
+    old, new = _snapshots()
+    result = compare(old, new)
+    audit = compute_disposition_audit(result)
+    assert audit.detected_total == 0
+    assert audit.not_evaluated_detectors, "this pair must leave detectors unevaluated"
+
+    line = to_stat(result)
+    assert "no changes (0 total)" in line
+    assert f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated" in line
+
+
 # ---------------------------------------------------------------------------
 # not_evaluated detectors
 # ---------------------------------------------------------------------------

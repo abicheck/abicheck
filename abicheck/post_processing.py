@@ -48,6 +48,24 @@ if TYPE_CHECKING:
 class PipelineStep(Protocol):
     """Protocol for a single post-processing step."""
 
+    #: ADR-067: what it *means* when this step's output no longer contains a
+    #: finding its input did, for a finding that did not land in one of the
+    #: context's own buckets. Three answers, and the step is the only thing
+    #: that knows which applies:
+    #:
+    #: * ``Disposition.DEDUPLICATED`` (the default, declared by
+    #:   :data:`_DEFAULT_DROPPED_DISPOSITION`) -- the finding was folded into
+    #:   another one that survived;
+    #: * ``Disposition.NON_GATING`` -- it was excluded on its own merits as
+    #:   compatible noise, not collapsed into anything;
+    #: * ``None`` -- the step *substituted* a replacement object for it (a
+    #:   reclassification of the same observation), so recording the original
+    #:   as a drop would count one observed change twice: once as a
+    #:   disappearance and once as the replacement.
+    #:
+    #: Declared as a class attribute rather than inferred, because none of
+    #: the three is derivable from the before/after lists alone.
+
     name: str
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
@@ -115,6 +133,10 @@ class FilterReservedFieldRenames:
     """Suppress TYPE_FIELD_REMOVED false positives from reserved-field renames."""
 
     name = "filter_reserved_field_renames"
+    # Same reasoning as `DowngradeOpaqueTypeChanges`: a rename into a reserved
+    # field is recognized as compatible and excluded, not folded into a
+    # surviving finding.
+    dropped_finding_disposition = Disposition.NON_GATING
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _filter_reserved_field_renames
@@ -139,6 +161,12 @@ class DowngradeOpaqueStructChanges:
     """Downgrade changes for types opaque in both snapshots."""
 
     name = "downgrade_opaque_struct_changes"
+    # Substitution, not a drop: `_downgrade_opaque_struct_changes` replaces a
+    # breaking layout finding with a compatible `TYPE_FIELD_ADDED_COMPATIBLE`
+    # one describing the *same* observation. Recording the original as
+    # dropped would count that one observed change twice -- once as a
+    # disappearance, once as the replacement.
+    dropped_finding_disposition = None
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _downgrade_opaque_struct_changes
@@ -175,6 +203,10 @@ class DowngradeOpaqueTypeChanges:
     """Suppress structural changes for opaque types."""
 
     name = "downgrade_opaque_type_changes"
+    # A real drop, but not a collapse into another finding: a layout change on
+    # a type consumers only ever hold a pointer to is excluded on its own
+    # merits, which is what `non_gating` says.
+    dropped_finding_disposition = Disposition.NON_GATING
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _downgrade_opaque_type_changes
@@ -692,6 +724,11 @@ def _build_suppression_unknown_reachability_change(
     )
 
 
+#: The answer for a step that does not declare one: most steps that drop a
+#: finding drop it because another finding now covers it.
+_DEFAULT_DROPPED_DISPOSITION = Disposition.DEDUPLICATED
+
+
 def _record_collapsed_findings(
     changes: Iterable[Change],
     ctx: PipelineContext,
@@ -730,6 +767,7 @@ def _record_dropped_duplicates(
     after: list[Change],
     ctx: PipelineContext,
     step_name: str,
+    disposition: Disposition | None = _DEFAULT_DROPPED_DISPOSITION,
 ) -> None:
     """Record findings a step discarded outright as ``deduplicated``.
 
@@ -749,9 +787,13 @@ def _record_dropped_duplicates(
     redundancy and opaque buckets are labelled when the ledger is closed over
     the result). Since :meth:`DispositionLedger.record` is identity-keyed and
     first-write-wins, mislabelling one here would be permanent.
+
+    *disposition* is what the step declares its drops mean
+    (:class:`PipelineStep`'s own ``dropped_finding_disposition``); ``None``
+    means the step substitutes rather than drops, and nothing is recorded.
     """
     ledger = ctx.disposition_ledger
-    if ledger is None:
+    if ledger is None or disposition is None:
         return
     survived = {id(c) for c in after}
     for bucket in (
@@ -763,11 +805,7 @@ def _record_dropped_duplicates(
         survived.update(id(c) for c in bucket)
     for key, change in before.items():
         if key not in survived:
-            ledger.record(
-                change,
-                Disposition.DEDUPLICATED,
-                application_point=step_name,
-            )
+            ledger.record(change, disposition, application_point=step_name)
 
 
 def _merge_findings_respecting_suppression(
@@ -1649,7 +1687,15 @@ class PostProcessingPipeline:
         for step in self.steps:
             before = {id(c): c for c in changes}
             changes = step.run(changes, ctx)
-            _record_dropped_duplicates(before, changes, ctx, step.name)
+            _record_dropped_duplicates(
+                before,
+                changes,
+                ctx,
+                step.name,
+                getattr(
+                    step, "dropped_finding_disposition", _DEFAULT_DROPPED_DISPOSITION
+                ),
+            )
             if step.name == FilterRedundant.name:
                 kept_tracking_active = True
             elif kept_tracking_active and ctx.kept is not changes:

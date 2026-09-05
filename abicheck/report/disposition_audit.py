@@ -179,20 +179,29 @@ def add_disposition_audit(
 def render_disposition_audit_note(audit: DispositionAudit) -> str:
     """The compact one-line/`--stat` form: counts only, never dropped.
 
-    Empty string only when nothing was detected at all — there is then no
-    raw-versus-effective distinction to state. Carries the counts and nothing
-    else: the not-evaluated detector list is detail this view collapses (it
-    stays in full in the JSON and Markdown projections), which D3 permits;
-    dropping the *counts* is what it forbids.
+    Empty only when there is genuinely nothing to state: no change was
+    detected *and* every detector ran. Carries the counts plus the
+    not-evaluated detector *count* — the per-detector list is detail this view
+    collapses (it stays in full in the JSON and Markdown projections), which
+    D3 permits; dropping the count is what it forbids, and this is the one
+    view where a zero-change run would otherwise read "no changes (0 total)"
+    with the missing-evidence signal nowhere at all.
     """
-    if audit.detected_total == 0:
+    parts: list[str] = []
+    if audit.detected_total or not audit.not_evaluated_detectors:
+        parts += [
+            f"{audit.detected_total} detected",
+            f"{audit.effective_total} gating",
+        ]
+        parts += [
+            f"{count} {name}"
+            for name, count in audit.counts
+            if count and name != Disposition.GATING.value
+        ]
+    if audit.not_evaluated_detectors:
+        parts.append(f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated")
+    if not parts:
         return ""
-    parts = [f"{audit.detected_total} detected", f"{audit.effective_total} gating"]
-    parts += [
-        f"{count} {name}"
-        for name, count in audit.counts
-        if count and name != Disposition.GATING.value
-    ]
     return " [audit: " + ", ".join(parts) + "]"
 
 

@@ -8,7 +8,9 @@
   application points route through. Every report projection carries the
   resulting raw-versus-effective counts: the JSON report gains an additive
   top-level `disposition_audit` block, `--stat`'s one-line summary gains an
-  `[audit: N detected, M gating, …]` suffix, the review digest and sticky PR
+  `[audit: N detected, M gating, …]` suffix (including a "N detector(s) not
+  evaluated" count, which on a zero-change run is the only place that
+  assurance gap is stated), the review digest and sticky PR
   comment gain a disposition table/row, SARIF gains a run-level
   `properties.dispositionAudit`, JUnit gains testsuite-level
   `abicheck.detected_total`/`abicheck.effective_total`/
