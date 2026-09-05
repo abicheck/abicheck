@@ -171,9 +171,8 @@ def _underlying(index: SemanticIRIndex, occurrence_id: OccurrenceId) -> str:
 
 
 def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
-    """Mirrors ``compare.constants._collision_safe_disambiguator`` exactly;
-    see that function's own docstring (Codex review, PR #1078, twentieth
-    round)."""
+    """Mirrors ``compare.constants._collision_safe_disambiguator`` exactly
+    (Codex review, PR #1078, 20th round)."""
     disambiguator = producer_occurrence_disambiguator(occurrence_id)
     if disambiguator:
         return disambiguator
@@ -181,13 +180,22 @@ def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
     return None if entity_id is None else str(entity_id.key)
 
 
+def _group_safe_disambiguator(
+    occurrence_id: OccurrenceId, group_size: int
+) -> str | None:
+    """Mirrors ``compare.constants._group_safe_disambiguator`` exactly
+    (22nd round)."""
+    if group_size <= 1:
+        return producer_occurrence_disambiguator(occurrence_id)
+    return _collision_safe_disambiguator(occurrence_id)
+
+
 #: Mirrors ``compare.constants._Residual`` exactly.
 _Residual = tuple["OccurrenceId | None", "str | None"]
 
 
 def _residual_entity_id(occurrence_id: OccurrenceId | None) -> EntityId | None:
-    """*occurrence_id*'s entity id, or ``None`` for an ambiguous residual
-    (see :func:`_attribute_residuals`)."""
+    """``None`` for an ambiguous residual (:func:`_attribute_residuals`)."""
     if occurrence_id is None:
         return None
     return producer_entity_id(occurrence_id.entity_id)
@@ -196,8 +204,7 @@ def _residual_entity_id(occurrence_id: OccurrenceId | None) -> EntityId | None:
 def _residual_disambiguator(
     occurrence_id: OccurrenceId | None, synthetic: str | None = None
 ) -> str | None:
-    """Mirrors ``compare.constants._residual_disambiguator`` exactly (Codex
-    review, PR #1078, twenty-first round)."""
+    """Mirrors ``compare.constants._residual_disambiguator`` exactly."""
     if occurrence_id is not None:
         return _collision_safe_disambiguator(occurrence_id)
     return synthetic
@@ -206,9 +213,7 @@ def _residual_disambiguator(
 def _attribute_residuals(
     ids_for_value: list[OccurrenceId], excess: int
 ) -> list[_Residual]:
-    """Mirrors ``compare.constants._attribute_residuals`` exactly; see that
-    function's own docstring (Codex review, PR #1078, twentieth/twenty-first
-    rounds)."""
+    """Mirrors ``compare.constants._attribute_residuals`` exactly."""
     if excess == len(ids_for_value):
         return [(i, None) for i in ids_for_value]
     return [(None, f"ambiguous:{i}") for i in range(excess)]
@@ -349,7 +354,9 @@ def diff_typedefs(
                             name=bare_alias,
                             old_value=_underlying(old_index, rotated_id),
                             entity_id=producer_entity_id(rotated_id.entity_id),
-                            disambiguator=_collision_safe_disambiguator(rotated_id),
+                            disambiguator=_group_safe_disambiguator(
+                                rotated_id, len(old_ids)
+                            ),
                         )
                     )
                 continue
@@ -367,7 +374,9 @@ def diff_typedefs(
                         name=bare_alias,
                         old_value=_underlying(old_index, removed_id),
                         entity_id=producer_entity_id(removed_id.entity_id),
-                        disambiguator=_collision_safe_disambiguator(removed_id),
+                        disambiguator=_group_safe_disambiguator(
+                            removed_id, len(old_ids)
+                        ),
                         description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                     )
                 )
@@ -411,16 +420,11 @@ def diff_typedefs(
             for i in set(old_ids) & set(new_ids)
             if entity_id_is_cross_snapshot_stable(i.entity_id)
         }
-        # Iterated in `old_ids`'s own order, not `shared_id_set`'s (Codex
-        # review, PR #1078, twentieth round -- mirroring
-        # ``compare.constants.diff_constants``'s identical fix): a `set`
-        # has no defined iteration order, so when more than one stable
-        # shared entity in one colliding group each independently emits a
-        # ``TYPEDEF_BASE_CHANGED``, their relative order in the report
-        # varied with `PYTHONHASHSEED` for two runs over byte-identical
-        # input. `old_ids` names each shared identity in the same relative
-        # position it already holds on its own side, so ordering by it is
-        # deterministic.
+        # Iterated in `old_ids`'s own order, not `shared_id_set`'s -- mirrors
+        # `compare.constants.diff_constants`'s identical fix (Codex review,
+        # PR #1078, twentieth round): a `set` has no defined iteration
+        # order, so multiple stable shared entities emitted their
+        # `TYPEDEF_BASE_CHANGED`s in a `PYTHONHASHSEED`-dependent order.
         shared_ids = [i for i in old_ids if i in shared_id_set]
         for shared_id in shared_ids:
             old_type = _underlying(old_index, shared_id)
@@ -435,7 +439,7 @@ def diff_typedefs(
                     old_value=old_type,
                     new_value=new_type,
                     entity_id=producer_entity_id(shared_id.entity_id),
-                    disambiguator=_collision_safe_disambiguator(shared_id),
+                    disambiguator=_group_safe_disambiguator(shared_id, len(shared_ids)),
                     description=(
                         f"Typedef base type changed: {bare_alias}{qualified_suffix}"
                     ),
@@ -485,18 +489,11 @@ def diff_typedefs(
                 )
         if not removed_occurrences and not added_occurrences:
             continue
-        # Every removed/added pair still available after the shared-identity
-        # pass is an independent substitution story, not just the first one
-        # (Codex review, PR #1078, twentieth round): pairing only
-        # `pop(0)`/`pop(0)` once and letting every further residual fall
-        # through to the leftover loops below reported `Alias={1,2}` ->
-        # `Alias={3,4}` (equal cardinality, two substitutions) as one
-        # `TYPEDEF_BASE_CHANGED` plus a fabricated `TYPEDEF_REMOVED`/
-        # `TYPEDEF_ADDED` pair, instead of two `TYPEDEF_BASE_CHANGED`s.
-        # Pairing off as many removed/added occurrences as both sides have
-        # in common is the direct generalization of the tenth round's own
-        # one-pair fix -- exactly the excess beyond `min(len(removed),
-        # len(added))` is real leftover evidence, and no less.
+        # Every removed/added pair still available is an independent
+        # substitution, not just the first one (Codex review, PR #1078,
+        # twentieth round) -- the direct generalization of the tenth
+        # round's own one-pair fix; the excess beyond `min(len(removed),
+        # len(added))` is the real leftover evidence.
         while removed_occurrences and added_occurrences:
             old_type, old_id, old_synth = removed_occurrences.pop(0)
             new_type, new_id, new_synth = added_occurrences.pop(0)

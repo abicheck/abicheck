@@ -101,13 +101,13 @@ def _unresolved_to_none(value: str) -> str | None:
 
 
 def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
-    """*occurrence_id*'s own producer disambiguator when set, else a
-    fallback derived from its own real (non-synthetic) entity id (Codex
-    review, PR #1078, twentieth round) -- closes a collision between two
-    entity-distinct occurrences that both lack a source disambiguator (the
-    common anonymous-scope case) without touching ``report_finding_id``
-    itself: see that function's docstring for why folding ``entity_id`` in
-    there directly was tried and reverted."""
+    """Own disambiguator when set, else a fallback from its real
+    (non-synthetic) entity id (Codex review, PR #1078, twentieth round):
+    closes a collision between two entity-distinct occurrences that both
+    lack a source disambiguator, without touching ``report_finding_id``
+    itself (see that function's docstring). Callers needing to skip this
+    fallback for a non-colliding group use :func:`_group_safe_disambiguator`
+    instead."""
     disambiguator = producer_occurrence_disambiguator(occurrence_id)
     if disambiguator:
         return disambiguator
@@ -115,17 +115,26 @@ def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
     return None if entity_id is None else str(entity_id.key)
 
 
-#: One residual: ``(occurrence_id, synthetic_disambiguator)``. The id is the
-#: real, attributable identity, or ``None`` when attribution would be
-#: dishonest; the synthetic value is set only alongside a ``None`` id, to
-#: keep otherwise-identical ambiguous residuals from collapsing downstream
-#: -- it carries no identity claim (Codex review, PR #1078, 21st round).
+def _group_safe_disambiguator(
+    occurrence_id: OccurrenceId, group_size: int
+) -> str | None:
+    """Falls back through :func:`_collision_safe_disambiguator` only when
+    *group_size* > 1 (22nd round): a non-colliding finding has no ambiguity
+    to resolve, so fabricating one would rehash the common case's id."""
+    if group_size <= 1:
+        return producer_occurrence_disambiguator(occurrence_id)
+    return _collision_safe_disambiguator(occurrence_id)
+
+
+#: One residual: ``(occurrence_id, synthetic_disambiguator)``. The id is
+#: real/attributable or ``None`` (dishonest attribution); the synthetic
+#: value, set only alongside ``None``, keeps residuals from collapsing
+#: without claiming an identity (Codex review, PR #1078, 21st round).
 _Residual = tuple["OccurrenceId | None", "str | None"]
 
 
 def _residual_entity_id(occurrence_id: OccurrenceId | None) -> EntityId | None:
-    """*occurrence_id*'s entity id, or ``None`` for an ambiguous residual
-    (see :func:`_attribute_residuals`)."""
+    """``None`` for an ambiguous residual (:func:`_attribute_residuals`)."""
     if occurrence_id is None:
         return None
     return producer_entity_id(occurrence_id.entity_id)
@@ -134,8 +143,7 @@ def _residual_entity_id(occurrence_id: OccurrenceId | None) -> EntityId | None:
 def _residual_disambiguator(
     occurrence_id: OccurrenceId | None, synthetic: str | None = None
 ) -> str | None:
-    """*occurrence_id*'s collision-safe disambiguator, else *synthetic*
-    (claims no identity, only keeps residuals from collapsing in dedup)."""
+    """*synthetic* (no identity claim) for an ambiguous residual."""
     if occurrence_id is not None:
         return _collision_safe_disambiguator(occurrence_id)
     return synthetic
@@ -149,18 +157,16 @@ def _attribute_residuals(
     unambiguous (Codex review, PR #1078, twentieth round).
 
     When the *entire* bucket vanishes (``excess == len(ids_for_value)``),
-    every occurrence in it really did stop appearing with this value --
-    each one's identity is genuine evidence. When only *some* are excess,
-    which specific occurrence(s) is unrecoverable from a bare value match:
-    the unstable/anonymous identities are interchangeable given only "N
-    share this value", so an arbitrary list prefix (the old behavior)
-    could stamp a still-*present* declaration's identity onto a finding
-    claiming it vanished. No identity is attributed in that case.
+    each occurrence's identity is genuine evidence. When only *some* are
+    excess, which one(s) is unrecoverable from a bare value match -- an
+    arbitrary list prefix (the old behavior) could stamp a still-*present*
+    declaration's identity onto a finding claiming it vanished, so no
+    identity is attributed in that case.
 
     Each ambiguous residual still gets its own synthetic disambiguator
-    (twenty-first round): shrinking four equal-valued occurrences to one is
-    *three* independent removals, and a shared ``entity_id=None``/
-    ``disambiguator=None`` would collapse them to one via ``_dedup_exact``.
+    (21st round): shrinking four equal-valued occurrences to one is *three*
+    independent removals, and a shared blank identity would collapse them
+    to one via ``_dedup_exact``.
     """
     if excess == len(ids_for_value):
         return [(i, None) for i in ids_for_value]
@@ -440,7 +446,7 @@ def diff_constants(
                         name=name,
                         old_value=old_value,
                         entity_id=producer_entity_id(old_id.entity_id),
-                        disambiguator=_collision_safe_disambiguator(old_id),
+                        disambiguator=_group_safe_disambiguator(old_id, len(old_ids)),
                     )
                 )
             continue
@@ -515,11 +521,8 @@ def diff_constants(
         }
         # Iterated in `old_ids`'s own order, not `shared_id_set`'s (Codex
         # review, PR #1078, twentieth round): a `set` has no defined
-        # iteration order, so multiple stable shared entities in one group
-        # emitted their `CONSTANT_CHANGED`s in a `PYTHONHASHSEED`-dependent
-        # order. `old_ids` names each shared identity in the same relative
-        # position it already holds on its own side, so ordering by it is
-        # deterministic.
+        # iteration order, so multiple stable shared entities emitted their
+        # `CONSTANT_CHANGED`s in a `PYTHONHASHSEED`-dependent order.
         shared_ids = [i for i in old_ids if i in shared_id_set]
         for shared_id in shared_ids:
             old_val = _value(old_index, shared_id)
@@ -538,7 +541,7 @@ def diff_constants(
                     old_value=old_val,
                     new_value=new_val,
                     entity_id=producer_entity_id(shared_id.entity_id),
-                    disambiguator=_collision_safe_disambiguator(shared_id),
+                    disambiguator=_group_safe_disambiguator(shared_id, len(shared_ids)),
                 )
             )
         # A colliding group on at least one side (Codex review, PR #1078,
@@ -627,14 +630,11 @@ def diff_constants(
         # `X=2` while a *different*, newly-added anonymous-scope `X=3` also
         # appears -- previously reported only one `CONSTANT_CHANGED` and
         # silently lost the independently provable `CONSTANT_ADDED`).
-        # Every removed/added pair still available after the shared-identity
-        # pass is an independent substitution story, not just the first one
-        # (Codex review, PR #1078, twentieth round): pairing only once left
-        # every further pair to fall through as a fabricated
-        # `CONSTANT_REMOVED`/`CONSTANT_ADDED` instead of another
-        # `CONSTANT_CHANGED`. This loop is the direct generalization of the
-        # tenth round's own one-pair fix -- the excess beyond
-        # `min(len(removed), len(added))` is the real leftover evidence.
+        # Every removed/added pair still available is an independent
+        # substitution, not just the first one (Codex review, PR #1078,
+        # twentieth round) -- the direct generalization of the tenth
+        # round's own one-pair fix; the excess beyond `min(len(removed),
+        # len(added))` is the real leftover evidence.
         while removed_occurrences and added_occurrences:
             # Prefers a pair with resolved value evidence on both sides
             # (Codex review, PR #1078, nineteenth round) over always taking
@@ -753,7 +753,7 @@ def diff_constants(
                     name=name,
                     new_value=new_value,
                     entity_id=producer_entity_id(new_id.entity_id),
-                    disambiguator=_collision_safe_disambiguator(new_id),
+                    disambiguator=_group_safe_disambiguator(new_id, len(new_ids)),
                 )
             )
     return changes

@@ -374,3 +374,69 @@ class TestPartialRemovalsPreserveMultiplicityAcrossDedup:
         deduped = _dedup_exact(changes)
         assert len(deduped) == 3
         assert len({report_finding_id(c) for c in changes}) == 3
+
+
+class TestOrdinaryEntityBackedFindingsKeepBlankDisambiguator:
+    """Regression coverage for Codex review, PR #1078, twenty-second round:
+    the twentieth round's `_collision_safe_disambiguator` fallback fired
+    even for an ordinary, non-colliding entity-backed finding (a single
+    distinct entity whose whole bare-alias group vanished/appeared, or the
+    lone shared stable identity in a group of one), fabricating a nonempty
+    `disambiguator` from its `entity_id` where none is needed -- silently
+    rehashing `report_finding_id` for the overwhelming common case, not
+    just the genuinely collision-prone one the fallback exists for. The
+    new `_group_safe_disambiguator` only falls back when the group
+    actually has more than one entity.
+    """
+
+    def test_a_single_entity_whole_group_removal_keeps_blank_disambiguator(
+        self,
+    ) -> None:
+        eid = entity_id_for_constant((Namespace("ns"),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        changes = diff_constants(
+            old_index,
+            SemanticIRIndex(SemanticIR()),
+            is_fingerprint_comparison_unreliable=lambda o, n: False,
+            old_constants={},
+            new_constants={},
+        )
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.kind is ChangeKind.CONSTANT_REMOVED
+        assert change.entity_id == eid
+        assert change.disambiguator is None
+
+    def test_a_single_entity_whole_group_addition_keeps_blank_disambiguator(
+        self,
+    ) -> None:
+        eid = entity_id_for_constant((Namespace("ns"),), "X")
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        changes = diff_constants(
+            SemanticIRIndex(SemanticIR()),
+            new_index,
+            is_fingerprint_comparison_unreliable=lambda o, n: False,
+            old_constants={},
+            new_constants={},
+        )
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.kind is ChangeKind.CONSTANT_ADDED
+        assert change.entity_id == eid
+        assert change.disambiguator is None

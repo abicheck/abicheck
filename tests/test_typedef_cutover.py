@@ -1101,3 +1101,30 @@ class TestPartialRemovalsPreserveMultiplicityAcrossDedup:
         deduped = _dedup_exact(changes)
         assert len(deduped) == 3
         assert len({report_finding_id(c) for c in changes}) == 3
+
+
+class TestOrdinaryEntityBackedFindingsKeepBlankDisambiguator:
+    """Regression coverage for Codex review, PR #1078, twenty-second round --
+    mirrors ``tests.test_constant_cutover_dedup.
+    TestOrdinaryEntityBackedFindingsKeepBlankDisambiguator`` exactly; see
+    that class's own docstring for the full account."""
+
+    def test_a_single_entity_whole_group_removal_keeps_blank_disambiguator(
+        self,
+    ) -> None:
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.kind is ChangeKind.TYPEDEF_REMOVED
+        assert change.entity_id == eid
+        assert change.disambiguator is None

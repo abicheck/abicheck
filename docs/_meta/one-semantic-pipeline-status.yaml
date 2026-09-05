@@ -917,6 +917,20 @@ concepts:
       more than one finding for an identical (kind, description, symbol,
       old_value, new_value) tuple.
 
+      **A twenty-second round found the twenty-first round's own
+      `_collision_safe_disambiguator` fallback overreached.** It was called
+      unconditionally at every whole-group-vanished, shared-identity, and
+      whole-group-added call site, even when the "group" held exactly one
+      entity -- an ordinary, non-colliding finding with nothing to
+      disambiguate. That fabricated a nonempty `disambiguator` from the
+      entity's own id anyway, silently rehashing `report_finding_id` for the
+      overwhelming common case instead of only the genuinely collision-prone
+      one the fallback exists for. Replaced those three call sites with a new
+      `_group_safe_disambiguator(occurrence_id, group_size)`, which only
+      routes through `_collision_safe_disambiguator` when `group_size > 1`;
+      a group of one keeps the bare, unfallen-back disambiguator exactly as
+      before the twentieth round.
+
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.
     investigated_declined:

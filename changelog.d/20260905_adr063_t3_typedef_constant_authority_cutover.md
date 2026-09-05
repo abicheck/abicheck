@@ -524,3 +524,14 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   the way it always had, reintroducing a duplicate the pre-sixteenth-round
   key never produced. Scoped via a new `_OCCURRENCE_AWARE_KINDS` constant
   (Codex review).
+- **An ordinary, non-colliding entity-backed constant/typedef finding no
+  longer changes its public `finding_id`.** The twentieth round's
+  `_collision_safe_disambiguator` fallback fired even for a single
+  distinct entity whose whole bare-alias group vanished/appeared, or the
+  lone shared identity in a group of one -- fabricating a nonempty
+  `disambiguator` from its `entity_id` with no actual ambiguity to
+  resolve, silently rehashing `report_finding_id` for the common case
+  instead of just the genuinely collision-prone one. The new
+  `_group_safe_disambiguator` only falls back when the group genuinely has
+  more than one entity; an ordinary finding keeps hashing exactly as
+  before (Codex review).
