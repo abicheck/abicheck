@@ -22,4 +22,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `NOT_COLLECTED`/`FAILED` handling is unchanged, so the previously-fixed
   leaf-class regression (`tests/test_abicc_scenario_parity.py::
   TestLeafClassVirtualMethodAdditions::test_virtual_added_to_leaf_class`)
-  is unaffected.
+  is unaffected. `producer` round-trips through both the legacy
+  (`storage/fact_codec.py`) and semantic-IR (`storage/semantic_ir_codec.py`)
+  wire codecs, rejecting rather than coercing a non-string value, and
+  `qualified_name_segments_walk.py`'s two structural `Fact` recognizers
+  (used by the anonymous-closure-identity renumbering pass) were updated
+  for the new field shape so they keep recognizing `Fact` at all.
