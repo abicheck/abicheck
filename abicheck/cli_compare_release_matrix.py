@@ -637,8 +637,14 @@ def _prepare_compare_release_inputs(
     list[str],
     list[str],
     list[str],
+    dict[str, str],
+    dict[str, str],
 ]:
     """Prepare inputs/maps/keys for compare-release command.
+
+    The trailing two mappings (ADR-065 D1) name the stored members
+    `--dso-only` could not classify on OLD/NEW, keyed like the maps, with
+    the reason; empty whenever the flag is off or a side is live.
 
     *old_variant*/*new_variant* and *make_temp_dir* (ADR-062 A1.7) are the
     stored-side plumbing for a `ProjectSnapshot` package operand -- ``None``
@@ -661,6 +667,10 @@ def _prepare_compare_release_inputs(
         if make_temp_dir is not None
         else None
     )
+    # ADR-065 D1/D2: a stored member --dso-only could not classify is an
+    # acquisition failure the caller records, not a silent narrowing.
+    old_unclassified: dict[str, str] = {}
+    new_unclassified: dict[str, str] = {}
     if dso_only:
         # --dso-only's stored-side counterpart to is_elf_shared_object
         # filtering a live directory's files below (Codex review: previously
@@ -668,7 +678,11 @@ def _prepare_compare_release_inputs(
         # in scope). No-op on either map that's already None.
         from .workflows.release_package import dso_only_filter_pair
 
-        old_pkg_map, new_pkg_map = dso_only_filter_pair(old_pkg_map, new_pkg_map)
+        old_cls, new_cls = dso_only_filter_pair(old_pkg_map, new_pkg_map)
+        if old_cls is not None:
+            old_pkg_map, old_unclassified = old_cls.members, old_cls.unclassified
+        if new_cls is not None:
+            new_pkg_map, new_unclassified = new_cls.members, new_cls.unclassified
 
     old_lib_dir, old_debug_dir, old_header_dir, old_symbols_file = extract_if_package(
         old_dir,
@@ -769,4 +783,6 @@ def _prepare_compare_release_inputs(
         matched_keys,
         removed_keys,
         added_keys,
+        old_unclassified,
+        new_unclassified,
     )

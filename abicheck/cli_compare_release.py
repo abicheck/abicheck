@@ -531,6 +531,8 @@ def compare_release_cmd(
                 matched_keys,
                 removed_keys,
                 added_keys,
+                old_unclassified,
+                new_unclassified,
             ) = _prepare_compare_release_inputs(
                 old_dir,
                 new_dir,
@@ -567,6 +569,10 @@ def compare_release_cmd(
                 # D9 reads intent from the operand shape: a single-file NEW
                 # (not a directory/archive that discovered one member).
                 new_single_artifact=new_dir.is_file() and not is_package(new_dir),
+                # ADR-065 D2 (Codex review): a stored member --dso-only
+                # could not classify withholds that side's proof.
+                old_unclassified=old_unclassified,
+                new_unclassified=new_unclassified,
             )
 
             if fmt != "json":
@@ -689,8 +695,20 @@ def compare_release_cmd(
             # complete) -- what exit 8, the verdict bump, and the Markdown
             # removed/added sections read; the raw set difference stays in
             # the record and is reported as `unmatched_old`/`unmatched_new`.
+            for key in sorted(set(old_unclassified) | set(new_unclassified)):
+                reason = old_unclassified.get(key) or new_unclassified[key]
+                library_results.append(
+                    {"library": key, "verdict": "failed", "reason": reason}
+                )
+                click.echo(f"Failed: {key}: {reason}", err=True)
             scope_record = build_release_scope_record(
-                old_map, new_map, matched_keys, library_results, inventory_evidence
+                old_map,
+                new_map,
+                matched_keys,
+                library_results,
+                inventory_evidence,
+                old_failed=old_unclassified,
+                new_failed=new_unclassified,
             )
             scope_terms = comparison_scope_terms(scope_record, on_incomplete_scope)
             removed_keys = [m.member for m in scope_record.proven_removed_members]

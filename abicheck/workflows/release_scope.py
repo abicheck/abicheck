@@ -156,14 +156,31 @@ def release_inventory_evidence(
     new_stored: bool,
     direct_pair: bool = False,
     new_single_artifact: bool = False,
+    old_unclassified: Mapping[str, str] | None = None,
+    new_unclassified: Mapping[str, str] | None = None,
 ) -> ReleaseInventoryEvidence:
-    """S2's inventory-proof rule, in one place."""
+    """S2's inventory-proof rule, in one place.
 
-    def _side(stored: bool) -> SideInventory:
+    *old_unclassified*/*new_unclassified* (ADR-065 D2, Codex review) name
+    the stored members a lossy selection (``--dso-only``) could not
+    classify on that side: the declared composition is still complete, but
+    the run could not tell which of those members it *selected*, so the
+    proof is withheld -- their counterparts on the other side stay
+    unmatched, never proven removed/added.
+    """
+
+    def _side(stored: bool, unclassified: Mapping[str, str] | None) -> SideInventory:
         """One side's inventory proof from whether it is a stored package (or a direct file pair)."""
         if direct_pair:
             return SideInventory(
                 InventoryCompleteness.UNPROVEN, _DIRECT_PAIR_PROVENANCE
+            )
+        if stored and unclassified:
+            return SideInventory(
+                InventoryCompleteness.UNPROVEN,
+                "stored project snapshot package, but --dso-only could not "
+                f"classify {len(unclassified)} declared member(s) "
+                f"({', '.join(sorted(unclassified))}), so the proof is withheld",
             )
         if stored:
             return SideInventory(
@@ -172,8 +189,8 @@ def release_inventory_evidence(
         return SideInventory(InventoryCompleteness.UNPROVEN, _LIVE_PROVENANCE)
 
     return ReleaseInventoryEvidence(
-        old=_side(old_stored),
-        new=_side(new_stored),
+        old=_side(old_stored, old_unclassified),
+        new=_side(new_stored, new_unclassified),
         direct_pair=direct_pair,
         new_single_artifact=new_single_artifact,
     )
@@ -204,14 +221,23 @@ def build_release_scope_record(
     matched_keys: Sequence[str],
     library_results: Sequence[Mapping[str, object]],
     evidence: ReleaseInventoryEvidence,
+    *,
+    old_failed: Mapping[str, str] | None = None,
+    new_failed: Mapping[str, str] | None = None,
 ) -> ScopeAcquisitionRecord:
     """The release's :class:`ScopeAcquisitionRecord` (see module docstring).
 
     *library_results* entries are keyed by ``old_map[key].name`` (their
     ``"library"`` field), the same join ``write_bundle_facts_out`` performs
     -- a member with no entry at all is recorded ``FAILED`` rather than
-    silently ``AVAILABLE``.
+    silently ``AVAILABLE``. *old_failed*/*new_failed* (D1) are declared
+    members absent from *old_map*/*new_map* because their acquisition on
+    that side failed before matching (``--dso-only`` could not classify
+    them): recorded ``FAILED``, present on that side, never as an unmatched
+    or removed member.
     """
+    old_failed = dict(old_failed or {})
+    new_failed = dict(new_failed or {})
     results_by_name: dict[str, Mapping[str, object]] = {}
     for entry in library_results:
         name = entry.get("library")
@@ -257,11 +283,23 @@ def build_release_scope_record(
     )
     candidate = next(iter(new_map.values())).name if narrow else ""
     members: list[MemberAcquisition] = []
-    for key in sorted(set(old_map) | set(new_map)):
-        old_present = key in old_map
-        new_present = key in new_map
-        display = (old_map[key] if old_present else new_map[key]).name
-        if key in matched:
+    for key in sorted(set(old_map) | set(new_map) | set(old_failed) | set(new_failed)):
+        old_present = key in old_map or key in old_failed
+        new_present = key in new_map or key in new_failed
+        display = (old_map.get(key) or new_map.get(key) or Path(key)).name
+        if key in old_failed or key in new_failed:
+            state, reason = (
+                AcquisitionState.FAILED,
+                "; ".join(
+                    f"{side}: {why}"
+                    for side, why in (
+                        ("OLD", old_failed.get(key)),
+                        ("NEW", new_failed.get(key)),
+                    )
+                    if why is not None
+                ),
+            )
+        elif key in matched:
             state, reason = _state_for_result(results_by_name.get(old_map[key].name))
         elif old_present and narrow:
             state, reason = (

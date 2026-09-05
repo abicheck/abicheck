@@ -1028,3 +1028,147 @@ class TestManifestScopedToRetainedMembers:
         kinds = {f.kind.value for f in result.bundle_findings}
         assert not any(k.startswith("bundle_manifest_instantiation_") for k in kinds)
         assert any("core_fn" in e and "withheld" in e for e in result.analysis_errors)
+
+
+# ---------------------------------------------------------------------------
+# --dso-only over a stored side: unclassifiable is failed, never narrowed (D1/D2)
+# ---------------------------------------------------------------------------
+
+
+class TestDsoOnlyUnclassifiedIsFailed:
+    """`--dso-only` excludes a stored member whose kind or ELF metadata it
+    cannot read. That exclusion is an acquisition failure: recorded
+    `failed`, and the side's inventory proof withheld, so the other side's
+    copy is never a proven removal/addition (Codex review, ninth round)."""
+
+    @staticmethod
+    def _libs() -> dict[str, AbiSnapshot]:
+        from dataclasses import replace
+
+        return {
+            "libdso.so": _lib("libdso.so", exports=("dso_fn",)),
+            # Declared ELF (no platform stated) but carrying no ELF section.
+            "libnoelf.so": AbiSnapshot(library="libnoelf.so", version="1"),
+            # Confirmed not a DSO: silently outside the selection.
+            "libwin.dll": replace(
+                AbiSnapshot(library="libwin.dll", version="1"), platform="pe"
+            ),
+        }
+
+    def test_classification_names_the_unreadable_member(self, tmp_path: Path) -> None:
+        from abicheck.workflows.release_package import (
+            classify_dso_only_package_map,
+            dso_only_package_map,
+            resolve_release_package_map,
+        )
+
+        pkg = tmp_path / "pkg"
+        _write_stored_package(pkg, self._libs())
+        resolved = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        assert len(resolved) == 3
+        cls = classify_dso_only_package_map(resolved)
+        assert set(cls.members) == {"libdso.so"}
+        assert set(cls.unclassified) == {"libnoelf.so"}
+        assert "ELF metadata" in cls.unclassified["libnoelf.so"]
+        assert dso_only_package_map(resolved) == cls.members
+
+    @pytest.mark.parametrize("side", ["old", "new"])
+    def test_record_marks_it_failed_and_withholds_the_proof(self, side: str) -> None:
+        from abicheck.workflows.release_scope import release_inventory_evidence
+
+        unclassified = {"libx.so": "--dso-only could not read it"}
+        evidence = release_inventory_evidence(
+            old_stored=True,
+            new_stored=True,
+            old_unclassified=unclassified if side == "old" else None,
+            new_unclassified=unclassified if side == "new" else None,
+        )
+        lacking = evidence.old if side == "old" else evidence.new
+        proven = evidence.new if side == "old" else evidence.old
+        assert lacking.completeness is InventoryCompleteness.UNPROVEN
+        assert "libx.so" in lacking.provenance
+        assert proven.completeness is InventoryCompleteness.PROVEN
+        # libx.so classified fine on the other side, libok.so on both.
+        maps = {"libok.so": Path("libok.so"), "libx.so": Path("libx.so")}
+        record = build_release_scope_record(
+            {"libok.so": maps["libok.so"]} if side == "old" else maps,
+            maps if side == "old" else {"libok.so": maps["libok.so"]},
+            ["libok.so"],
+            [{"library": "libok.so", "verdict": "NO_CHANGE"}],
+            evidence,
+            old_failed=unclassified if side == "old" else None,
+            new_failed=unclassified if side == "new" else None,
+        )
+        by_key = {m.member: m for m in record.members}
+        assert by_key["libx.so"].state is AcquisitionState.FAILED
+        assert (by_key["libx.so"].old_present, by_key["libx.so"].new_present) == (
+            True,
+            True,
+        )
+        assert side.upper() in by_key["libx.so"].reason
+        assert record.proven_removed_members == ()
+        assert record.proven_added_members == ()
+        assert [m.member for m in record.unchecked_members] == ["libx.so"]
+        assert by_key["libok.so"].state is AcquisitionState.AVAILABLE
+
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    def test_stored_pair_dso_only_never_fabricates_a_removal(
+        self, tmp_path: Path, policy: str
+    ) -> None:
+        libs = self._libs()
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        _write_stored_package(
+            old, {**libs, "libnoelf.so": _lib("libnoelf.so", exports=("x",))}
+        )
+        _write_stored_package(new, libs)
+        code, doc = _invoke_json(
+            "compare",
+            str(old),
+            str(new),
+            "-j",
+            "1",
+            "--dso-only",
+            "--fail-on-removed-library",
+            "--on-incomplete-scope",
+            policy,
+        )
+        scope = doc["comparison_scope"]
+        assert scope["new_inventory"]["completeness"] == "unproven"
+        assert "libnoelf.so" in scope["new_inventory"]["provenance"]
+        assert scope["old_inventory"]["completeness"] == "proven"
+        assert scope["proven_removed"] == []
+        assert scope["counts"]["failed"] == 1
+        assert [n.split("-")[0] for n in scope["unchecked"]] == ["libnoelf.so"]
+        assert scope["completeness"] == "incomplete"
+        assert _removal_findings(doc) == []
+        by_name = {lib["library"].split("-")[0]: lib for lib in doc["libraries"]}
+        assert by_name["libnoelf.so"]["verdict"] == "failed"
+        assert by_name["libdso.so"]["verdict"] == "NO_CHANGE"
+        assert "libwin.dll" not in by_name
+        assert code == (1 if policy == "block" else 0)
+
+    def test_fully_classified_stored_pair_stays_proven(self, tmp_path: Path) -> None:
+        """Control: every declared member classifies, so the proof stands
+        and a DSO the proven NEW side dropped is a real removal."""
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        libs = {k: v for k, v in self._libs().items() if k != "libnoelf.so"}
+        _write_stored_package(
+            old, {**libs, "libgone.so": _lib("libgone.so", exports=("g",))}
+        )
+        _write_stored_package(new, libs)
+        code, doc = _invoke_json(
+            "compare",
+            str(old),
+            str(new),
+            "-j",
+            "1",
+            "--dso-only",
+            "--fail-on-removed-library",
+        )
+        scope = doc["comparison_scope"]
+        assert scope["new_inventory"]["completeness"] == "proven"
+        assert [n.split("-")[0] for n in scope["proven_removed"]] == ["libgone.so"]
+        assert scope["completeness"] == "complete"
+        assert code == 8

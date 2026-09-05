@@ -40,6 +40,7 @@ classified module -- `frontends.may_import` lists `workflows`, not
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -98,12 +99,15 @@ def read_embedded_manifest(
         summary = read_manifest_summary(root)
     except Exception:
         return None
-    variant_ids = (variant_id,) if variant_id is not None else tuple(summary.variant_ids)
+    variant_ids = (
+        (variant_id,) if variant_id is not None else tuple(summary.variant_ids)
+    )
     for vid in variant_ids:
         payload = read_variant_composition_manifest_payload(root, vid)
         if payload is not None:
             return manifest_from_dict(payload)
     return None
+
 
 #: The two `ArtifactRef.native_identity` keys used, independently, by both of
 #: today's not-yet-reconciled multi-artifact package writers
@@ -248,7 +252,9 @@ def resolve_release_package_degraded_members(
         root, resolved_variant_id
     )
     return {
-        _canonical_library_key(Path(library_filenames.get(bundle_key) or bundle_key)): reason
+        _canonical_library_key(
+            Path(library_filenames.get(bundle_key) or bundle_key)
+        ): reason
         for bundle_key, reason in degraded.items()
     }
 
@@ -417,6 +423,55 @@ def _display_dirname(key: str, artifact_id: str) -> str:
     return f"{sanitized}-{artifact_id}"
 
 
+@dataclass(frozen=True)
+class DsoOnlyClassification:
+    """`--dso-only` over one stored side: the members confirmed to be real
+    shared objects, and the declared members whose kind or ELF metadata
+    could not be read at all. The latter is an acquisition failure the
+    caller must record (ADR-065 D1) and a reason to withhold the side's
+    inventory proof (D2) -- never a silent narrowing of the scope, which
+    would turn the other side's copy into a proven removal/addition (Codex
+    review, ninth round). A member confirmed *not* to be a DSO is simply
+    absent from both: that is the selection the user asked for."""
+
+    members: dict[str, Path]
+    unclassified: dict[str, str] = field(default_factory=dict)
+
+
+def classify_dso_only_package_map(pkg_map: dict[str, Path]) -> DsoOnlyClassification:
+    """`dso_only_package_map`, also reporting the members it could not classify."""
+    from ..bundle import _stored_elf_metadata
+    from ..package import _has_shared_object_name
+    from ..project_snapshot_store import read_artifact_ref, read_manifest_summary
+
+    members: dict[str, Path] = {}
+    unclassified: dict[str, str] = {}
+    for key, sub_dir in pkg_map.items():
+        try:
+            summary = read_manifest_summary(sub_dir)
+            (artifact_id,) = summary.artifact_ids
+            if read_artifact_ref(sub_dir, artifact_id).kind != "elf":
+                continue
+        except Exception as exc:
+            unclassified[key] = (
+                f"--dso-only could not read the stored artifact's kind: {exc}"
+            )
+            continue
+        elf = _stored_elf_metadata(sub_dir)
+        if elf is None:
+            unclassified[key] = (
+                "--dso-only could not read the stored ELF metadata of an artifact "
+                "declared as ELF"
+            )
+            continue
+        if elf.is_pie:
+            continue
+        if elf.interpreter and not _has_shared_object_name(key):
+            continue
+        members[key] = sub_dir
+    return DsoOnlyClassification(members, unclassified)
+
+
 def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
     """*pkg_map* (a `resolve_release_package_map` result), restricted to
     members whose materialized `ArtifactRef.kind` is `"elf"` and whose
@@ -437,41 +492,24 @@ def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
     (`package._has_shared_object_name`) the live path applies for that
     same ambiguous case.
 
-    Best-effort per member: a sub-package whose own kind or ELF metadata
-    cannot be determined is *excluded*, not included -- `--dso-only`'s
-    whole contract is "only compare what is confirmed to be a DSO", so
-    uncertainty must not silently widen it.
+    A sub-package whose own kind or ELF metadata cannot be determined is
+    *excluded* here too -- `--dso-only`'s whole contract is "only compare
+    what is confirmed to be a DSO", so uncertainty must not silently widen
+    it -- but :func:`classify_dso_only_package_map` names it, and a release
+    caller must use that form so the exclusion is recorded as a failure
+    rather than read as the member's absence.
     """
-    from ..bundle import _stored_elf_metadata
-    from ..package import _has_shared_object_name
-    from ..project_snapshot_store import read_artifact_ref, read_manifest_summary
-
-    filtered: dict[str, Path] = {}
-    for key, sub_dir in pkg_map.items():
-        try:
-            summary = read_manifest_summary(sub_dir)
-            (artifact_id,) = summary.artifact_ids
-            if read_artifact_ref(sub_dir, artifact_id).kind != "elf":
-                continue
-        except Exception:
-            continue
-        elf = _stored_elf_metadata(sub_dir)
-        if elf is None or elf.is_pie:
-            continue
-        if elf.interpreter and not _has_shared_object_name(key):
-            continue
-        filtered[key] = sub_dir
-    return filtered
+    return classify_dso_only_package_map(pkg_map).members
 
 
 def dso_only_filter_pair(
     old_pkg_map: dict[str, Path] | None, new_pkg_map: dict[str, Path] | None
-) -> tuple[dict[str, Path] | None, dict[str, Path] | None]:
-    """`dso_only_package_map` applied to whichever of *old_pkg_map*/
-    *new_pkg_map* is not `None` -- the pair shape
+) -> tuple[DsoOnlyClassification | None, DsoOnlyClassification | None]:
+    """`classify_dso_only_package_map` applied to whichever of
+    *old_pkg_map*/*new_pkg_map* is not `None` -- the pair shape
     `cli_compare_release_matrix._prepare_compare_release_inputs` needs for
     its own two stored-side maps in one call."""
     return (
-        dso_only_package_map(old_pkg_map) if old_pkg_map is not None else None,
-        dso_only_package_map(new_pkg_map) if new_pkg_map is not None else None,
+        classify_dso_only_package_map(old_pkg_map) if old_pkg_map is not None else None,
+        classify_dso_only_package_map(new_pkg_map) if new_pkg_map is not None else None,
     )
