@@ -1684,8 +1684,12 @@ class PostProcessingPipeline:
         # comments). Enforce the invariant here instead of trusting every future
         # step author to remember it.
         kept_tracking_active = False
+        # One identity snapshot per step is the cost of the dropped-finding
+        # sweep below; skipped entirely when no ledger was supplied, so a
+        # caller that did not opt into the audit pays nothing for it.
+        auditing = ctx.disposition_ledger is not None
         for step in self.steps:
-            before = {id(c): c for c in changes}
+            before = {id(c): c for c in changes} if auditing else {}
             changes = step.run(changes, ctx)
             _record_dropped_duplicates(
                 before,
