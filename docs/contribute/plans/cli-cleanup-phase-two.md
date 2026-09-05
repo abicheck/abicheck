@@ -213,7 +213,7 @@ its own section below), PR 4 changes what a CI job's exit code means.
 
 **This plan is no longer the owner of the CLI's direction.**
 [`vision-api-abi-evolution.md`](vision-api-abi-evolution.md) is, together with
-[`vision.md`](../../../vision.md) and the Proposed
+[`vision.md`](../vision.md) and the Proposed
 [ADR-065](../adr/065-comparison-scope-selection-and-completeness.md) /
 [ADR-066](../adr/066-longitudinal-history-and-versioning-policy.md) /
 [ADR-067](../adr/067-change-intent-acknowledgment-and-disposition-audit.md).
