@@ -54,8 +54,10 @@ produces and calls ``frontends.cli.dump_execute``, which runs it through
 ``perform_elf_dump``/``handle_non_elf_dump`` call sites (both deleted by
 ADR-063 Track 1 once that migration left them with no production caller). The legacy ``-p``/``--compile-db`` auto-match this note
 used to call a blocker is threaded through as an explicit pass-through
-(``execute_dump_request(..., legacy_compile_db_tokens=...,
-legacy_compile_db_matched=...)``) rather than a typed-API field — see
+(``execute_dump_request(..., options=DumpExecutionOptions(
+legacy_compile_db_tokens=..., legacy_compile_db_matched=...))`` — ADR-063
+Track T4 folded this and the other eight out-of-band execution kwargs into
+that one typed value) rather than a typed-``DumpRequest``-level field — see
 ``docs/contribute/known-gaps.md``'s "PR C" entry for the precise mechanism.
 The PE/Mach-O half was verified only via mock-based CLI/unit tests, not a
 real PE/Mach-O toolchain — none was available where this was done.
