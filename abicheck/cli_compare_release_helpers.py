@@ -617,6 +617,7 @@ def write_bundle_facts_out(
     old_map: dict[str, Path],
     *,
     resolve_stranded_library: Callable[[Path], AbiSnapshot | StrandedLibraryResolution],
+    inherited_degraded: Mapping[str, str] | None = None,
     resolved_manifest: InstantiationManifest | None = None,
 ) -> None:
     """Persist the OLD side's per-library snapshots (plus manifest, if any)
@@ -700,14 +701,14 @@ def write_bundle_facts_out(
     fresh evidence: this parameter's absence meant a captured
     ``--bundle-facts-out`` baseline silently dropped that contract).
     *manifest_path* is still respected when *resolved_manifest* is
-    `None`, for a caller that predates this parameter.
+    `None`. *inherited_degraded* (ADR-065 D8) is a stored OLD package's own
+    persisted marker, keyed like *old_map*: it stays marked in this recapture
+    even though its ELF-only stand-in reloads fine (Codex review).
 
     Failure here (a bad *manifest_path*, an unwritable *bundle_facts_out*)
-    is a genuine usage error -- unlike bundle *analysis* itself, which
-    degrades to a warning on failure (see ``_run_bundle_analysis``'s own
-    docstring), writing an explicitly-requested output file that silently
-    fails would leave a user believing a baseline was captured when it
-    was not.
+    is a usage error, unlike bundle *analysis* (which degrades to a warning):
+    an explicitly requested baseline that silently fails to write would leave
+    a user believing it was captured.
     """
     from .bundle_facts import capture_bundle_facts
     from .bundle_manifest import load_manifest
@@ -721,19 +722,12 @@ def write_bundle_facts_out(
         else:
             manifest = load_manifest(manifest_path) if manifest_path is not None else None
 
-        # Canonicalize DiffResult.library itself (the real, possibly-
-        # versioned filename each compared snapshot reports) the same way
-        # old_map's own keys were derived, rather than matching by basename
-        # against old_map's *values* -- a stored operand's value is a
-        # materialized sub-package directory (its own display dirname, not
-        # the real library filename), which a basename match silently
-        # misses; the same successful diff pair then also (wrongly) reads
-        # as "stranded" below and gets appended a second time under its
-        # real canonical key (Codex review, fresh evidence: a stored
-        # comparison's captured baseline could contain the same library
-        # twice, reading as false library/provider findings). Falls back to
-        # the basename itself only if truly unmatched (shouldn't happen for
-        # a genuine diff_pairs entry, but degrades safely either way).
+        # Canonicalize DiffResult.library the same way old_map's keys were
+        # derived, not by basename against old_map's *values* -- a stored
+        # operand's value is a materialized sub-package dirname, which a
+        # basename match misses, so the pair also read as "stranded" below
+        # and was captured twice (Codex review). Basename fallback only if
+        # truly unmatched (degrades safely).
         per_library_snapshots: dict[str, AbiSnapshot] = {}
         for diff, old_snapshot in diff_pairs:
             key = _canonical_library_key(Path(diff.library))
@@ -742,7 +736,9 @@ def write_bundle_facts_out(
             per_library_snapshots[key] = old_snapshot
         # ADR-065 D8: a failed stranded dump is persisted *with* its failure
         # (`BundleFacts.degraded_members`); a bare AbiSnapshot means resolved.
-        degraded_members: dict[str, str] = {}
+        degraded_members: dict[str, str] = {
+            k: v for k, v in (inherited_degraded or {}).items() if k in old_map
+        }
         for key, old_path in old_map.items():
             if key in per_library_snapshots:
                 continue
@@ -750,7 +746,7 @@ def write_bundle_facts_out(
             if isinstance(resolved, StrandedLibraryResolution):
                 per_library_snapshots[key] = resolved.snapshot
                 if resolved.failure is not None:
-                    degraded_members[key] = resolved.failure
+                    degraded_members.setdefault(key, resolved.failure)
             else:
                 per_library_snapshots[key] = resolved
         facts = capture_bundle_facts(

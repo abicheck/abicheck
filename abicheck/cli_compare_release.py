@@ -111,6 +111,7 @@ from .workflows.release_scope import (
     release_inventory_evidence,
     scoped_bundle_maps,
     stored_degraded_matched_members,
+    stored_side_degraded_members,
 )
 from .workflows.storage import is_project_snapshot_package_dir
 
@@ -783,6 +784,11 @@ def compare_release_cmd(
                     manifest_path,
                     old_map,
                     resolve_stranded_library=_resolve_stranded_library,
+                    # ADR-065 D8 (Codex review): a stored OLD package's own
+                    # marker survives the recapture, matched or stranded.
+                    inherited_degraded=stored_side_degraded_members(
+                        old_dir, variant_id=old_variant
+                    ),
                     # ADR-062 A1.7: the same explicit-or-embedded manifest
                     # resolution the bundle-analysis call below applies, so
                     # a stored OLD side's own manifest-drift contract is

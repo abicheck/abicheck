@@ -85,6 +85,7 @@ __all__ = [
     "release_inventory_evidence",
     "restrict_bundle_facts",
     "stored_degraded_matched_members",
+    "stored_side_degraded_members",
     "scoped_bundle_maps",
     "unmatched_names",
 ]
@@ -391,7 +392,8 @@ def release_global_ran(
 
 def bundle_analysis_members(record: ScopeAcquisitionRecord) -> frozenset[str]:
     """The members bundle-level (cross-library) analysis may see: every
-    matched member, plus a *proven* removal or addition.
+    matched member whose own comparison *completed* (``available``), plus a
+    *proven* removal or addition.
 
     An unmatched member whose lacking side's inventory is unproven, and an
     ``out_of_scope`` member, are absent from the bundle graph rather than
@@ -399,10 +401,15 @@ def bundle_analysis_members(record: ScopeAcquisitionRecord) -> frozenset[str]:
     intra-bundle dependency-removal detectors would read a partial local
     build (or a deliberately narrowed comparison) as a provider deleted from
     the release and score it breaking, which is exactly the D2 reading this
-    record replaces (Codex review). What such a member *is* -- unchecked --
-    is carried by the completeness axis instead.
+    record replaces (Codex review). A *matched* member that never reached a
+    completed comparison (``unsupported``, ``failed``) is excluded for the
+    same reason: its NEW artifact is not usable bundle evidence (an
+    unsupported container is dropped by the live ELF parse, a degraded
+    capture is an ELF-only stand-in), so keeping it would make the OLD
+    provider look deleted (Codex review, second finding). What such a
+    member *is* -- unchecked -- is carried by the completeness axis instead.
     """
-    keep = {m.member for m in record.members if m.old_present and m.new_present}
+    keep = {m.member for m in record.members if m.state is AcquisitionState.AVAILABLE}
     keep.update(m.member for m in record.proven_removed_members)
     keep.update(m.member for m in record.proven_added_members)
     return frozenset(keep)
@@ -470,6 +477,20 @@ def restrict_bundle_facts(facts: BundleFacts, members: frozenset[str]) -> Bundle
     )
 
 
+def stored_side_degraded_members(
+    side_dir: Path, *, variant_id: str | None
+) -> dict[str, str]:
+    """One side's own persisted ADR-065 D8 marker, ``{release match key:
+    reason}`` -- non-empty only for a stored ``ProjectSnapshot`` package
+    (a live directory or archive carries none)."""
+    from .release_package import resolve_release_package_degraded_members
+    from .storage import is_project_snapshot_package_dir
+
+    if not (side_dir.is_dir() and is_project_snapshot_package_dir(side_dir)):
+        return {}
+    return resolve_release_package_degraded_members(side_dir, variant_id=variant_id)
+
+
 def stored_degraded_matched_members(
     old_dir: Path,
     new_dir: Path,
@@ -484,19 +505,12 @@ def stored_degraded_matched_members(
     stored/stored and stored/live drivers give the marker. A live directory
     or archive side carries no marker and contributes nothing.
     """
-    from .release_package import resolve_release_package_degraded_members
-    from .storage import is_project_snapshot_package_dir
-
     found: dict[str, str] = {}
     for label, side_dir, variant in (
         ("OLD", old_dir, old_variant),
         ("NEW", new_dir, new_variant),
     ):
-        if not (side_dir.is_dir() and is_project_snapshot_package_dir(side_dir)):
-            continue
-        degraded = resolve_release_package_degraded_members(
-            side_dir, variant_id=variant
-        )
+        degraded = stored_side_degraded_members(side_dir, variant_id=variant)
         for key, reason in degraded.items():
             found.setdefault(
                 key,

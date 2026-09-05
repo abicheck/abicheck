@@ -176,6 +176,43 @@ class TestBundleAnalysisScope:
             f.kind.value == "bundle_library_removed" for f in result.bundle_findings
         )
 
+    def test_an_unsupported_matched_provider_is_not_a_bundle_removal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Stored OLD, live NEW: the provider *matches* but NEW's artifact is
+        unsupported, so its ELF never reaches the bundle graph. The OLD
+        provider must leave the graph with it -- never read as deleted while
+        its consumer survives (Codex review, fifth round)."""
+        import abicheck.package as package
+        import abicheck.service as service
+        from abicheck.bundle_side_input import compare_release_against_bundle_facts
+
+        monkeypatch.setattr(
+            package,
+            "discover_shared_libraries",
+            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
+        )
+        real_resolve = service.resolve_input
+
+        def _resolve(path: Path, **kwargs: object) -> AbiSnapshot:
+            if Path(path).name.startswith("libcore"):
+                raise UnsupportedArtifactError("Unsupported binary format: wasm")
+            return real_resolve(path, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(service, "resolve_input", _resolve)
+        libs = _provider_and_consumer()
+        old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
+        new_dir = tmp_path / "new"
+        for name, snap in libs.items():
+            _write(new_dir, f"{name}.json", snap)
+        result = compare_release_against_bundle_facts(old, new_dir)
+        assert [d.library for d in result.per_library] == ["libalgo.so"]
+        assert result.scope_record is not None
+        assert [m.name for m in result.scope_record.unchecked_members] == ["libcore.so"]
+        kinds = {f.kind.value for f in result.bundle_findings}
+        assert "bundle_library_removed" not in kinds
+        assert "bundle_intra_dep_removed" not in kinds
+
     def test_restrict_bundle_facts_keeps_only_the_members(self) -> None:
         from abicheck.bundle_facts import capture_bundle_facts
 
@@ -242,9 +279,14 @@ class TestBundleAnalysisMembersProperties:
         )
         kept = bundle_analysis_members(record)
         # Oracle from the evidence, not from the record's proven_* sets: a
-        # member is in the bundle graph iff both sides hold it, or the side
-        # lacking it has a proven inventory (so its absence is a fact).
-        expected = set(matched)
+        # member is in the bundle graph iff both sides hold it *and* its own
+        # comparison completed (an operational verdict is not usable bundle
+        # evidence), or the side lacking it has a proven inventory (so its
+        # absence is a fact).
+        operational = {"ERROR", "not_comparable", "unsupported", "failed"}
+        expected = {
+            k for k, v in zip(matched, verdicts, strict=False) if v not in operational
+        }
         expected |= {k for k in old_keys if k not in new_map and new_proven}
         expected |= {k for k in new_keys if k not in old_map and old_proven}
         assert kept == frozenset(expected)
@@ -538,6 +580,35 @@ class TestStoredPackageDegradedMember:
         assert scope["counts"]["failed"] == 1
         assert doc["run_outcome"]["scope"] == "incomplete"
         assert code == (1 if policy == "block" else 0)
+
+    def test_bundle_facts_out_inherits_the_stored_old_marker(
+        self, tmp_path: Path
+    ) -> None:
+        """`--bundle-facts-out` from a stored OLD package: the recaptured
+        baseline keeps the package's own degraded marker even though the
+        ELF-only stand-in reloads fine, so a stored-to-stored round trip can
+        never launder the marker away (Codex review, fifth round)."""
+        from abicheck.serialization import load_bundle_facts
+
+        healthy = {
+            "libfoo.so": _lib("libfoo.so", exports=("foo",)),
+            "libbar.so": _lib("libbar.so", exports=("bar",)),
+        }
+        degraded = {**healthy, "libfoo.so": _lib("libfoo.so")}
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        _write_stored_package(
+            old, degraded, degraded={"libfoo.so": "dump failed: boom"}
+        )
+        _write_stored_package(new, healthy)
+        out = tmp_path / "recaptured.bundlefacts.json"
+        code, doc = _invoke_json(
+            "compare", str(old), str(new), "-j", "1", "--bundle-facts-out", str(out)
+        )
+        assert code == 0
+        facts = load_bundle_facts(out)
+        assert facts.schema_version == 3
+        assert [k.split("-")[0] for k in facts.degraded_members] == ["libfoo.so"]
+        assert "dump failed: boom" in next(iter(facts.degraded_members.values()))
 
     def test_package_degraded_members_are_keyed_like_the_release_map(
         self, tmp_path: Path

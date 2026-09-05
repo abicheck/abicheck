@@ -41,7 +41,11 @@
   removals/additions only: an unchecked member is absent from the bundle
   graph, never a `BUNDLE_LIBRARY_REMOVED` provider, so a partial local
   build under `warn` cannot exit `4` on a library that was merely not
-  supplied.
+  supplied, and a matched member whose own comparison never completed
+  (`unsupported`, `failed`) leaves the graph with its counterpart rather
+  than reading as a deleted provider. A `--bundle-facts-out` recapture from
+  a stored `ProjectSnapshot` package inherits the package's own degraded
+  marker.
 - **`--fail-on-removed-library` exit `8` migration.** Exit `8` now requires the
   removal to be *proven* — the NEW side's inventory must be proven complete
   (a stored `ProjectSnapshot` package's declared composition). A partial
