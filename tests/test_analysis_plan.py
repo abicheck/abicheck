@@ -203,10 +203,8 @@ class TestBazelBuildTargetScoping:
     ):
         """CodeRabbit review: the failure message must say "explicit build
         config", not "auto-discovered .abicheck.yml", when *build_config*
-        names the file directly (``scan``'s own ``ScanRequest.build_config``,
-        or dump/compare's own future seam) rather than being found by
-        searching ``sources`` -- ``dump``/``compare`` have no request-level
-        seam for this today, so this calls
+        names the file directly (``scan``'s own ``ScanRequest.build_config``)
+        rather than being found by searching ``sources`` -- this calls
         :func:`~abicheck.workflows.plan.bazel_target_scoping_failure`
         directly, the same free function ``scan``'s own call sites use."""
         from abicheck.workflows.plan import bazel_target_scoping_failure
@@ -224,6 +222,83 @@ class TestBazelBuildTargetScoping:
         assert "//:from_explicit_config" in failure.requested
         assert "explicit build config" in failure.requested
         assert "auto-discovered .abicheck.yml" not in failure.requested
+
+    def test_dump_request_honors_explicit_build_config_over_auto_discovery(
+        self, tmp_path: Path
+    ):
+        """CLI cleanup phase two, Block 7 (PR C's tail): ``InputSpec.
+        build_config`` is the request-level seam ``dump``/``compare``
+        previously lacked (see this class's own preceding test, and
+        ``docs/contribute/known-gaps.md``'s "PR C" entry). An explicit
+        ``--config`` naming a *different* file than whatever
+        ``.abicheck.yml`` auto-discovery would find at ``sources`` must win
+        outright -- the same precedence ``embed_build_source`` already
+        applies at real-execution time -- so ``--dry-run``'s resolved plan
+        (which runs through this exact chokepoint) cannot disagree with what
+        execution actually does. Without threading ``build_config`` onto
+        ``InputSpec``, this would have silently used the *auto-discovered*
+        targets (or none) instead of the named file's, exactly the
+        dry-run/execution divergence this field closes."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        sources_dir = tmp_path / "src"
+        sources_dir.mkdir()
+        (sources_dir / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_auto_discovery\n",
+            encoding="utf-8",
+        )
+        explicit_cfg = tmp_path / "explicit.yml"
+        explicit_cfg.write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_explicit_config\n",
+            encoding="utf-8",
+        )
+        request = DumpRequest(
+            input=InputSpec.of(
+                path=None,
+                sources=sources_dir,
+                build_info=aquery,
+                build_config=explicit_cfg,
+            ),
+            depth="build",
+        )
+        with pytest.raises(PlanningError) as exc_info:
+            AnalysisPlanner.resolve(request)
+        failure = exc_info.value.failures[0]
+        assert "//:from_explicit_config" in failure.requested
+        assert "from_auto_discovery" not in failure.requested
+        assert "explicit build config" in failure.requested
+
+    def test_compare_request_honors_explicit_build_config_over_auto_discovery(
+        self, tmp_path: Path
+    ):
+        """Same seam, ``CompareRequest`` side -- each side's own
+        ``InputSpec.build_config`` is independent, mirroring how
+        ``sources``/``build_info``/``build_targets`` are already per-side."""
+        aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
+        sources_dir = tmp_path / "src"
+        sources_dir.mkdir()
+        (sources_dir / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_auto_discovery\n",
+            encoding="utf-8",
+        )
+        explicit_cfg = tmp_path / "explicit.yml"
+        explicit_cfg.write_text(
+            "build:\n  system: bazel\n  targets:\n    - //:from_explicit_config\n",
+            encoding="utf-8",
+        )
+        old = InputSpec.of(path=tmp_path / "old.so", sources=sources_dir)
+        new = InputSpec.of(
+            path=tmp_path / "new.so",
+            sources=sources_dir,
+            build_info=aquery,
+            build_config=explicit_cfg,
+        )
+        request = CompareRequest(old=old, new=new)
+        with pytest.raises(PlanningError) as exc_info:
+            AnalysisPlanner.resolve(request)
+        failure = exc_info.value.failures[0]
+        assert "'new'" in failure.requested
+        assert "//:from_explicit_config" in failure.requested
+        assert "from_auto_discovery" not in failure.requested
 
     def test_compare_config_sourced_target_scope_raises_planning_error(
         self, tmp_path: Path
