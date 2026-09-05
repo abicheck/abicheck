@@ -15,20 +15,22 @@
 
 """ADR-063 T7 — one canonical raw export index, with named projections.
 
-Before this module, at least eight call sites each kept their own copy of
+Before this module, at least nine call sites each kept their own copy of
 "read a snapshot's/binary's platform export table" (``policy.depth_projection.
 _exported_symbol_names``, ``buildsource.crosscheck_base._exported_symbol_names``
 /``_linked_export_symbols``, ``buildsource.snapshot_exports.
 exported_symbols_from_snapshot``, ``post_manifest._exported_symbol_names``/
 ``_snapshot_contract_symbols``, ``diff_unnamed_types._exported_symbol_names``,
-``buildsource.poi._exported_names``, ``python_ext._iter_exported_names``) —
-each re-reading ``snap.elf``/``snap.pe``/``snap.macho`` (or a raw
-``ElfMetadata``) itself and each drifting slightly from the others on real
-distinctions: whether a non-default ELF version alias counts, whether a
-Mach-O name gets its leading underscore stripped once or left alone, whether
-an ELF symbol's callable-vs-data type matters, whether ELF hidden/internal
-linkage visibility excludes a symbol, and whether "no platform table at all"
-is distinguished from "a table that parsed to zero entries."
+``buildsource.poi._exported_names``, ``python_ext._iter_exported_names``,
+``diff_cpp_patterns._raw_export_ids``) — each re-reading
+``snap.elf``/``snap.pe``/``snap.macho`` (or a raw ``ElfMetadata``) itself and
+each drifting slightly from the others on real distinctions: whether a
+non-default ELF version alias counts, whether a Mach-O name gets its leading
+underscore stripped once or left alone, whether an ELF symbol's callable-vs-data
+type matters, whether ELF hidden/internal linkage visibility excludes a
+symbol, whether an unnamed PE export gets an ``"ordinal:<N>"`` placeholder
+identity or is dropped, and whether "no platform table at all" is
+distinguished from "a table that parsed to zero entries."
 
 The fix is not one universal set-of-strings helper — that would erase exactly
 the distinctions each call site individually earned (Codex review comments
@@ -81,6 +83,7 @@ __all__ = [
     "macho_callable_names",
     "named_pe_exports",
     "ordinal_only_pe_exports",
+    "pe_export_ids_with_ordinal_placeholder",
 ]
 
 #: Which platform table a :class:`RawExportIndex` was read from.
@@ -252,6 +255,21 @@ def linked_export_names(index: RawExportIndex) -> frozenset[str]:
 def named_pe_exports(index: RawExportIndex) -> frozenset[str]:
     """PE exports that carry a real name, excluding ordinal-only entries."""
     return frozenset(e.name for e in index.entries if e.name)
+
+
+def pe_export_ids_with_ordinal_placeholder(index: RawExportIndex) -> frozenset[str]:
+    """Every PE export's stable identity: its name, or ``"ordinal:<N>"`` when nameless.
+
+    Unlike :func:`named_pe_exports` (which drops an unnamed export entirely),
+    this projection keeps a NONAME/ordinal-only export addressable — silently
+    repointing such a forwarder is still a real, detectable change. Matches
+    ``diff_platform._pe_export_id``'s identical formula, which
+    ``diff_platform._diff_pe`` and ``diff_cpp_patterns._raw_export_ids`` both
+    key their own PE export-delta identities against; keeping this spelling
+    exactly in sync with that formula is what lets a raw-export-id set built
+    here still line up with the suppression/matching keys those two emit.
+    """
+    return frozenset(e.name if e.name else f"ordinal:{e.ordinal}" for e in index.entries)
 
 
 def ordinal_only_pe_exports(index: RawExportIndex) -> frozenset[int]:

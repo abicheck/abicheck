@@ -6,9 +6,10 @@ Each projection function here states the exact contract one of the retired
 sibling implementations used to hand-roll on its own
 (``policy.depth_projection``, ``buildsource.crosscheck_base``,
 ``buildsource.snapshot_exports``, ``post_manifest``, ``diff_unnamed_types``,
-``buildsource.poi``, ``python_ext``) — these are the primitive-level
-property/contract tests the root ``AGENTS.md`` calls for on a new shared
-merge/projection primitive, decoupled from any one caller's own test module.
+``buildsource.poi``, ``python_ext``, ``diff_cpp_patterns``) — these are the
+primitive-level property/contract tests the root ``AGENTS.md`` calls for on a
+new shared merge/projection primitive, decoupled from any one caller's own
+test module.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from abicheck.model.export_index import (
     macho_callable_names,
     named_pe_exports,
     ordinal_only_pe_exports,
+    pe_export_ids_with_ordinal_placeholder,
 )
 from abicheck.pe_metadata import PeExport, PeMetadata
 
@@ -168,6 +170,20 @@ class TestPeOrdinalProjections:
             )
         )
         assert ordinal_only_pe_exports(index) == {2}
+
+    def test_pe_export_ids_with_ordinal_placeholder(self) -> None:
+        index = build_raw_export_index_from_pe(
+            PeMetadata(
+                exports=[
+                    PeExport(name="CreateFoo", ordinal=1),
+                    PeExport(name="", ordinal=2),
+                ]
+            )
+        )
+        assert pe_export_ids_with_ordinal_placeholder(index) == {
+            "CreateFoo",
+            "ordinal:2",
+        }
 
 
 class TestMachoCallableNames:
@@ -319,3 +335,35 @@ class TestExportNamesOrModeledFallback:
         exports = export_names_or_modeled_fallback(snap)
         assert exports == ("_ZN3FooC1Ev",)
         assert "_ZN3FooC4Ev" not in exports
+
+
+class TestRawExportIdsDispatch:
+    """`diff_cpp_patterns._raw_export_ids`'s per-platform dispatch onto
+    `pe_export_ids_with_ordinal_placeholder`/`all_export_names` (ADR-063 T7)."""
+
+    def test_macho_named_exports(self) -> None:
+        from abicheck.diff_cpp_patterns import _raw_export_ids
+
+        snap = AbiSnapshot(library="libfoo.dylib", version="1")
+        snap.macho = MachoMetadata(
+            exports=[MachoExport(name="_foo"), MachoExport(name="")]
+        )
+        assert _raw_export_ids(snap) == {"_foo"}
+
+    def test_pe_ordinal_only_export_gets_placeholder(self) -> None:
+        """An unnamed (NONAME/ordinal-only) PE export still gets a stable
+        `"ordinal:<N>"` identity, matching `diff_platform._pe_export_id`
+        exactly -- dropping it entirely would make a silently-repointed
+        ordinal-only forwarder invisible to this detector."""
+        from abicheck.diff_cpp_patterns import _raw_export_ids
+
+        snap = AbiSnapshot(library="foo.dll", version="1")
+        snap.pe = PeMetadata(exports=[PeExport(name="", ordinal=7)])
+        assert _raw_export_ids(snap) == {"ordinal:7"}
+
+    def test_elf_only_snapshot_contributes_nothing(self) -> None:
+        from abicheck.diff_cpp_patterns import _raw_export_ids
+
+        snap = AbiSnapshot(library="libfoo.so", version="1")
+        snap.elf = ElfMetadata(symbols=[ElfSymbol(name="_Z3foov")])
+        assert _raw_export_ids(snap) == set()
