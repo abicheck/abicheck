@@ -209,7 +209,127 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > the account itself, per the same review's DRY finding). PR A/B/D/E/F and
 > PR 1/1b/2 are done.
 
+## Status 2026-09-05 — what remains here, and three parallel tracks
+
+**This plan is no longer the owner of the CLI's direction.**
+[`vision-api-abi-evolution.md`](vision-api-abi-evolution.md) is, together with
+[`vision.md`](../../../vision.md) and the Proposed
+[ADR-065](../adr/065-comparison-scope-selection-and-completeness.md) /
+[ADR-066](../adr/066-longitudinal-history-and-versioning-policy.md) /
+[ADR-067](../adr/067-change-intent-acknowledgment-and-disposition-audit.md).
+This file keeps what it was always good at — **interface hygiene and the
+convergence prerequisites behind each remaining deletion** — and is subordinate
+to that plan for anything about what a result *means*.
+
+The reason for the demotion, from an external re-review of `main` against the
+vision (2026-09-05): the remaining risk is not surface size. A short invocation
+is not clean if it treats an unproduced build as a removal, reports an accepted
+break as "no changes", or lets a supplied consumer silently narrow the gate.
+Those are result-semantics defects the vision plan's workstreams A/C/E own, and
+no flag deletion here fixes one. Corollary for anyone reading the older
+checkpoints above: **"remove five more flags" is not the next milestone**, and
+three positions this plan used to hold are explicitly revised by the vision:
+
+- `--used-by` keeps its input and **loses its gate replacement** — consumer
+  impact enriches the global result rather than substituting for it (workstream
+  D-S1). Not a deletion candidate.
+- `--fail-on-removed-library` is **not** deleted; its *input* is fixed first, so
+  it consumes proven removals rather than `old − new` filename stems (A-S2/S4).
+- `--require-complete-analysis` means *the required applicable capabilities for
+  the selected task were checked*, not *every evidence layer was available*
+  (E-S1). Stripped-binary and header-only tasks stay first-class.
+
+### What actually remains in this plan
+
+| Item | State | Blocked on |
+|---|---|---|
+| **H1 hidden-shim deletion** (new below) | Not started | Nothing |
+| **PR H** — `scan --artifact-set` member-identity manifest form | Open; syntax, cost/dry-run and audit-mode ownership all done | Nothing (last piece of PR H) |
+| **PR I** — live/stored operand driver; one evaluation/gate/report/dry-run path across all four operand shapes | Open; classification, flag deletion and stored/stored execution done | A shared gate/report object; overlaps vision A-S4 |
+| **PR J** — per-library header/compile-context topology in `BundleSpec`; `--max-json-object-nodes` → a calibrated `--resource-limit` | Open; `--manifest` rename and `--bundle-system-providers`/`--bundle-cohort` → `.abicheck.yml` done | G42 provider resolution (topology); a real bytes-per-node calibration (resource limit) |
+| **PR C tail** — `dump`/`compare` explicit-`--config` dry-run/execution parity | Open, narrow | Nothing |
+| `scan --artifact-set` bundle-topology config read | Open | Its own resolver still separate from `ResolvedCompareConfig`'s merge point |
+| `contract=public` default flip | Open | `EntityId`-based public closure (ADR-063 Phase 2), **not** a string heuristic |
+| PR 0/0B, PR 1, 1b, 2, A, B, C (binary formats), D, E, F, G1, G2 | Done / closed by decision | — |
+
+Everything else this file used to track (`--exit-code-scheme`,
+`--old-bundle-facts`, the compare provider/cohort switches, bare compare
+`--manifest`, the release fan-out's `GateOptions`, the shared gate-pack fold) is
+landed. **Do not re-open any of them.**
+
+### H1 — hidden inert shims and duplicate spellings (new, unblocked)
+
+Four surfaces still contradict this plan's own no-alias stance and #770's
+precedent. Each is `hidden=True` today, which is the deprecation window this
+repository says it does not run:
+
+- `--header-graph`, `--header-graph-includes`
+  (`abicheck/frontends/cli/options/release.py`, `header_graph_options`) — inert
+  no-ops since the L2 header graph became always-on; passing either prints a
+  stderr note and changes nothing. Delete both plus
+  `warn_deprecated_header_graph_flags` and its two `compare`/`dump_cmd` call
+  sites.
+- `dump --allow-build-query` (same module) — a deprecated no-op; an explicit
+  `--config` has been the only authorizer since PR F. Delete the flag; the
+  engine-side `allow_build_query` parameters it no longer feeds
+  (`buildsource/inline.py`, `embed.py`, `service_dump_pipeline.py`,
+  `scan_engine.py`) come out in the same slice rather than being left as
+  ignored keyword arguments.
+- `--btf` / `--ctf` / `--dwarf` (`debug_resolution_options`) — hidden duplicate
+  spellings of `--debug-format {btf,ctf,dwarf}`, which the module's own help
+  text already calls their supersession.
+
+Acceptance: each old spelling exits `64` with `No such option`; the canonical
+replacement behaves identically; `build.query`'s explicit-`--config` trust gate
+is unchanged; `--help-all` and `docs/reference/cli-reference.md` regenerated.
+This slice depends on nothing in the vision rollout and must not wait for it.
+
+### Three pieces of parallel work an agent can start now
+
+Chosen so the three touch disjoint files and share no schema. One integration
+owner reviews any change to the shared request/plan/outcome types (the vision
+plan's own rule), which is why none of these three edits them.
+
+**Track 1 — H1 hidden-shim deletion (`frontends/`, tests, docs).**
+Exactly the slice above. Small, mechanical, no semantic change, no dependency
+on any other track. Deliverable: four spellings gone, dead engine parameters
+removed with them, references regenerated.
+
+**Track 2 — scalar disposition audit (`policy/`, `report/`, `semver.py`).**
+Vision workstream C-S1 plus G-S1's first slice, scoped to single-pair `compare`
+so it does not wait on scope or evidence work. Enumerate the four suppression
+application points C-S1 names (`post_processing.ApplySuppression.apply`,
+`checker._filter_suppressed_changes`, `checker._filter_pattern_synthetic`,
+`appcompat.py`'s consumer overlay) and route each through one ledger-recording
+primitive; carry rule provenance into the JSON suppression ledger; put
+detected / effective / per-disposition counts into *every* projection including
+the one-line and review digests; add `not_evaluated` to `DetectorRegistry` so a
+detector that returned early stops reading as `enabled=True, changes_count=0`;
+and make `semver.recommend_release` read the conserved delta rather than the
+post-suppression `result.changes`, so a suppressed break can no longer become
+"no bump needed". Fixture: 100 removals under one wildcard rule, still visible
+as 100 suppressed with their rule on a passing run.
+
+**Track 3 — release fan-out scope honesty (`cli_compare_release*`, `workflows/`).**
+Vision workstream A's first executable slice, and the deletion gate for this
+plan's oldest correctness complaint. Replace `_match_release_keys`'s
+`old − new` / `new − old` set difference with pairing that distinguishes
+selected, paired, unselected, expected-but-absent and failed members; make a
+removal finding require a complete NEW inventory and an addition a complete OLD
+one; make zero completed comparisons a no-comparison outcome instead of
+`NO_CHANGE` / exit 0; and stop persisting a stranded old-side library as an
+unmarked ELF-only snapshot. `--fail-on-removed-library` keeps its spelling and
+starts consuming proven removals. Exit `8` ordering versus the coverage
+contribution is unchanged.
+
+Tracks 2 and 3 are behavior corrections: each needs a changelog fragment and a
+migration note, and each states its invariant in `tests/regressions/manifest.py`
+as a bug class rather than a single reproducer. Track 1 needs neither.
+
 ## Problem
+
+*(Historical framing. The 2026-09-05 status section above revises the
+priority: result semantics, not surface size.)*
 
 Phase one removed the *duplicate spellings*. What is left is a different class
 of surface: options that are real, single-spelling, and still wrong to keep on
@@ -5207,6 +5327,10 @@ docs/schema gates all green.
   parity, multi-DSO ownership, and contract-evaluation precision instead.
 
 ## Ordering
+
+**Read "Status 2026-09-05" above first** — this sequence is still accurate for
+what is *done*, but the three tracks worth starting now are listed there, and
+the direction is owned by `vision-api-abi-evolution.md`.
 
 The original ordering (kept below for reference) sequenced by risk. The
 post-#780/#782 review re-sequences by *contract convergence*: every remaining
