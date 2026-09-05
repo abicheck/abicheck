@@ -963,6 +963,14 @@ def test_the_one_line_view_states_a_support_gap_on_a_zero_change_run() -> None:
     line = to_stat(result)
     assert "no changes (0 total)" in line
     assert f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated" in line
+    # ...and the counts are not dropped to make room for the note. This
+    # combined state (nothing detected *and* a detector refused) was the one
+    # cell where an earlier condition suppressed both zeros, leaving the
+    # detector warning standing alone with no raw-versus-effective statement
+    # at all -- D3 lets a view collapse detail, never the counts, and
+    # "0 detected, 0 gating" is a statement rather than an absence.
+    assert "0 detected" in line
+    assert "0 gating" in line
 
 
 def test_severity_cannot_un_demote_a_gate_excluded_finding() -> None:

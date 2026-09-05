@@ -63,7 +63,10 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from ..model.change_catalog.registry import Verdict
-from .rule_identity import rule_identity as rule_identity_of
+from .rule_provenance import (
+    RuleProvenance as RuleProvenance,
+    rule_provenance as rule_provenance,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import Change, DiffResult
@@ -104,81 +107,6 @@ _GATING_VERDICTS = frozenset({Verdict.BREAKING, Verdict.API_BREAK})
 
 
 @dataclass(frozen=True, slots=True)
-class RuleProvenance:
-    """ADR-067 D3's "rule id, source file, reason, expiry" for one match.
-
-    Built from a :class:`~abicheck.suppression.Suppression`'s already-existing
-    fields — this adds no field to the suppression grammar. ``intent`` is
-    always ``"unspecified"`` today: ADR-067 D5's explicit ``intent:`` key is
-    S3 work, and its own migration default for every rule that predates it is
-    exactly this value, so recording it now costs nothing and keeps the
-    consumer (``semver.recommend_release``'s "suppressed (intent:
-    unspecified), not compatible" wording) honest rather than silent.
-    """
-
-    rule_id: str | None = None
-    source_file: str | None = None
-    reason: str | None = None
-    label: str | None = None
-    expires: str | None = None
-    intent: str = "unspecified"
-    allow_public_break: bool = False
-
-    def to_dict(self) -> dict[str, object]:
-        """JSON-safe mapping; ``None`` fields are emitted so the ledger's rows
-        keep one stable shape for machine consumers."""
-        return {
-            "rule_id": self.rule_id,
-            "source_file": self.source_file,
-            "reason": self.reason,
-            "label": self.label,
-            "expires": self.expires,
-            "intent": self.intent,
-            "allow_public_break": self.allow_public_break,
-        }
-
-
-def rule_provenance(
-    rule: Suppression | None, *, source_file: str | None = None
-) -> RuleProvenance | None:
-    """Project one suppression *rule* onto :class:`RuleProvenance`.
-
-    Duck-typed (``getattr``) rather than importing ``Suppression``, keeping
-    this module a leaf; ``None`` in, ``None`` out, which is the honest answer
-    for a change whose matching rule was not recorded (a ``DiffResult``
-    reconstructed from JSON, for instance).
-    """
-    if rule is None:
-        return None
-    expires = getattr(rule, "expires", None)
-    label = getattr(rule, "label", None)
-    reason = getattr(rule, "reason", None)
-    rule_id = _rule_identity(rule) or label or reason
-    return RuleProvenance(
-        rule_id=rule_id,
-        source_file=source_file,
-        reason=reason,
-        label=label,
-        expires=expires.isoformat() if expires is not None else None,
-        allow_public_break=bool(getattr(rule, "allow_public_break", False)),
-    )
-
-
-def _rule_identity(rule: object) -> str | None:
-    """The rule's canonical selector-and-gate identity, when derivable.
-
-    Deliberately not the free-form ``label``/``reason`` prose: two rules
-    sharing a label must still be distinguishable in the audit. Delegates to
-    :func:`abicheck.policy.rule_identity.rule_identity`, the *same* derivation
-    ``SuppressionList.rule_identities`` uses -- this used to be a second,
-    hand-picked field list here, which omitted the gate fields and so merged a
-    public-only waiver and a proven-unreachable-only waiver sharing one
-    ``symbol_pattern`` into a single audit row (Codex review).
-    """
-    return rule_identity_of(rule)
-
-
-@dataclass(frozen=True, slots=True)
 class DispositionRecord:
     """One atomically detected change and the single disposition it received."""
 
@@ -216,6 +144,23 @@ class DispositionRecord:
     #: does not control", not "which mechanism withheld it" (that is the
     #: application point).
     gate_excluded: bool = False
+    #: The two gate schemes read *different inputs*, and one disposition
+    #: cannot describe both without saying which.
+    #:
+    #: ``checker.compare`` scores the legacy verdict over
+    #: ``kept + verdict_redundant``; ``policy.gate_decision.
+    #: gate_decision_for_result`` scores the severity gate over
+    #: ``result.changes`` alone. A redundant finding policy still scored is
+    #: therefore genuinely ``gating`` under the legacy scheme and genuinely
+    #: outside the gate once a severity configuration is in effect -- not a
+    #: contradiction, and not something ``gate_excluded`` can express, since
+    #: that flag says "no gate scored this" unconditionally.
+    #:
+    #: So this is the third state, and it is narrow on purpose: set only on a
+    #: record the legacy verdict scored and the severity gate's narrower input
+    #: does not contain. :meth:`with_gate` demotes it exactly when a severity
+    #: configuration is passed.
+    legacy_gate_only: bool = False
 
     def to_dict(self) -> dict[str, object]:
         entry: dict[str, object] = {
@@ -267,6 +212,7 @@ class DispositionLedger:
         rule: RuleProvenance | None = None,
         from_gate: bool = False,
         gate_excluded: bool | None = None,
+        legacy_gate_only: bool = False,
     ) -> None:
         """Record *change*'s single terminal *disposition*.
 
@@ -317,6 +263,7 @@ class DispositionLedger:
                 rule=rule,
                 reclassified_by=getattr(change, "reclassified_by", None),
                 gate_excluded=gate_excluded,
+                legacy_gate_only=legacy_gate_only,
             )
         )
 
@@ -391,27 +338,50 @@ class DispositionLedger:
         record is skipped for the same reason under a different authority:
         severity says how severe a finding is, never whether the consumer
         this run gates on uses it at all.
+
+        A :attr:`~DispositionRecord.legacy_gate_only` record is demoted
+        outright rather than re-scored, because the question changes with the
+        scheme: the severity gate reads ``result.changes``, which does not
+        contain it, so under *any* severity configuration it is outside the
+        gate that decides the run -- however severe its own kind is.
         """
         gate = _GateContext.of(result)
         gated = DispositionLedger()
         gated._anchors = list(self._anchors)
         gated._seen_ids = dict(self._seen_ids)
         gated._records = [
-            record
-            if record.gate_excluded
-            or record.disposition not in (Disposition.GATING, Disposition.NON_GATING)
-            else replace(
-                record,
-                disposition=_kept_disposition(
-                    change,  # type: ignore[arg-type]
-                    result,
-                    severity_config,
-                    gate,
-                ),
-            )
+            self._regated(record, change, result, severity_config, gate)
             for record, change in zip(self._records, self._anchors)
         ]
         return gated
+
+    @staticmethod
+    def _regated(
+        record: DispositionRecord,
+        change: object,
+        result: DiffResult,
+        severity_config: object,
+        gate: _GateContext,
+    ) -> DispositionRecord:
+        """One record's label under the resolved gate. See :meth:`with_gate`."""
+        if record.gate_excluded or record.disposition not in (
+            Disposition.GATING,
+            Disposition.NON_GATING,
+        ):
+            return record
+        if record.legacy_gate_only and severity_config is not None:
+            return replace(
+                record, disposition=Disposition.NON_GATING, gate_excluded=True
+            )
+        return replace(
+            record,
+            disposition=_kept_disposition(
+                change,  # type: ignore[arg-type]
+                result,
+                severity_config,
+                gate,
+            ),
+        )
 
     def resolve_verdict_classes(self, result: DiffResult) -> None:
         """Fill in the verdict class of every *suppressed* record that had none.

@@ -162,6 +162,11 @@ def finalize_ledger(
                 _kept_disposition(change, result, severity_config, gate),
                 application_point="redundancy_filter_scored",
                 from_gate=True,
+                # The legacy verdict scored it; the severity gate's input
+                # (`result.changes`) does not contain it. One boolean cannot
+                # say that, so the record carries the distinction and
+                # `with_gate` demotes it once a severity config is in effect.
+                legacy_gate_only=True,
             )
         else:
             ledger.record(

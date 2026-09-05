@@ -111,7 +111,7 @@ def test_the_audit_and_the_receipt_derive_one_identity() -> None:
     receipt (`SuppressionList.rule_identities`) and the ADR-067 audit must
     answer the same string for the same rule, or two parts of one report
     disagree about which rule fired."""
-    from abicheck.policy.disposition_ledger import _rule_identity
+    from abicheck.policy.rule_provenance import _rule_identity
 
     rules = [
         Suppression(symbol_pattern=".*", label="same", reason="r"),

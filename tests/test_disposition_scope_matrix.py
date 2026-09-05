@@ -548,25 +548,35 @@ def test_an_unscored_redundant_finding_stays_deduplicated() -> None:
 # Every place a finding can leave the gate, enumerated
 # ---------------------------------------------------------------------------
 
-#: Every bucket :func:`finalize_ledger` reads, with whether `checker.compare`
-#: scores the verdict over it. The oracle is that function's own verdict input
-#: — `kept + verdict_redundant`, i.e. `result.changes` plus the redundant
-#: findings policy did not exclude — stated here as a table rather than
-#: recomputed, so it cannot agree with the ledger by sharing its reasoning.
+#: Every bucket :func:`finalize_ledger` reads, with whether each of the two
+#: gate schemes scores it. The oracle is the two gates' own *inputs*, stated
+#: here as a table rather than recomputed:
 #:
-#: This table is the point of the test below: the round-10 and round-11
-#: findings were both "a bucket produced a disposition and a later pass made a
-#: wrong assumption about it", and a test that covers only the buckets a
-#: previous bug happened to touch cannot be the backstop for that family.
-#: A bucket added to `finalize_ledger` later and not added here fails
+#: * the legacy verdict is computed over ``kept + verdict_redundant``
+#:   (`checker.compare`), so `changes` and a policy-scored redundant finding
+#:   are both in it;
+#: * the severity gate is computed over ``result.changes`` alone
+#:   (`policy.gate_decision.gate_decision_for_result`), so the redundant one
+#:   is *not*.
+#:
+#: The two columns differ in exactly one row, and that row is round 13's
+#: finding: one boolean cannot describe a finding one gate scores and the
+#: other does not.
+#:
+#: This table is the point of the tests below: rounds 10-13's findings were
+#: all "a bucket produced a disposition and a later pass made a wrong
+#: assumption about it", and a test covering only the buckets a previous bug
+#: happened to touch cannot be the backstop for that family. A bucket added
+#: to `finalize_ledger` later and not added here fails
 #: `test_the_bucket_table_covers_every_bucket_the_finalizer_reads`.
 _BUCKET_SCORED = (
-    ("changes", True),
-    ("redundant_scored", True),
-    ("redundant_unscored", False),
-    ("opaque_filtered", False),
-    ("reconciled_changes", False),
-    ("out_of_surface_changes", False),
+    # bucket, scored by the legacy verdict, scored by the severity gate
+    ("changes", True, True),
+    ("redundant_scored", True, False),
+    ("redundant_unscored", False, False),
+    ("opaque_filtered", False, False),
+    ("reconciled_changes", False, False),
+    ("out_of_surface_changes", False, False),
 )
 
 
@@ -596,19 +606,20 @@ def _result_with_one_breaking_finding_in(bucket: str):
     return result, change, scored
 
 
-@pytest.mark.parametrize(("bucket", "scored"), _BUCKET_SCORED)
+@pytest.mark.parametrize(("bucket", "legacy_scored", "severity_scored"), _BUCKET_SCORED)
 @pytest.mark.parametrize("severity", [False, True])
 def test_only_the_scored_buckets_are_effective(
-    bucket: str, scored: bool, severity: bool
+    bucket: str, legacy_scored: bool, severity_scored: bool, severity: bool
 ) -> None:
-    """The invariant round 10 and round 11 each broke one instance of.
+    """The invariant rounds 10, 11 and 13 each broke one instance of.
 
-    A finding excluded from the verdict input stays out of `effective_total`,
-    *including* once a severity configuration is resolved — severity says how
-    severe a finding is, never whether it reached the gate. The severity
-    configuration used here rates every category `error`, so any bucket that
-    forgot to mark itself gate-excluded is promoted back to `gating` and
-    fails this test rather than being caught a round later.
+    A finding outside the *acting* gate's input stays out of
+    `effective_total`, and which gate is acting depends on whether a severity
+    configuration was resolved — the two read different inputs, which is the
+    whole of round 13's finding. The severity configuration used here rates
+    every category `error`, so a bucket that is outside the severity gate's
+    input but forgot to say so is promoted back to `gating` and fails here
+    rather than being caught a round later.
     """
     from abicheck.policy.disposition_close import finalize_ledger
     from abicheck.policy.severity import SeverityConfig, SeverityLevel
@@ -616,7 +627,7 @@ def test_only_the_scored_buckets_are_effective(
     result, change, verdict_scored = _result_with_one_breaking_finding_in(bucket)
     ledger = finalize_ledger(DispositionLedger(), result, verdict_scored=verdict_scored)
     assert ledger.detected_total == 1
-    assert ledger.effective_total == int(scored), bucket
+    assert ledger.effective_total == int(legacy_scored), bucket
 
     everything_is_an_error = SeverityConfig(
         abi_breaking=SeverityLevel.ERROR,
@@ -624,13 +635,47 @@ def test_only_the_scored_buckets_are_effective(
         quality_issues=SeverityLevel.ERROR,
         addition=SeverityLevel.ERROR,
     )
+    expected = severity_scored if severity else legacy_scored
     gated = ledger.with_gate(result, everything_is_an_error if severity else None)
-    assert gated.effective_total == int(scored), (
-        f"{bucket}: a severity configuration changed whether this finding "
-        "reached the gate, which is not severity's decision to make"
+    assert gated.effective_total == int(expected), (
+        f"{bucket}: the audit disagrees with the "
+        f"{'severity' if severity else 'legacy'} gate about whether this "
+        "finding reached it"
     )
     assert gated.detected_total == 1
     assert conservation_holds(gated)
+
+
+def test_a_severity_gating_record_is_in_the_severity_gates_own_input() -> None:
+    """The generic form, so a future bucket is covered without a new row.
+
+    `gate_decision_for_result` scores `result.changes` and nothing else, so a
+    record the audit calls `gating` under a severity configuration must be a
+    finding in that list. Stated over every bucket the table above knows,
+    against the gate function's own input rather than against the table.
+    """
+    from abicheck.policy.disposition_close import finalize_ledger
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+
+    strict = SeverityConfig(
+        abi_breaking=SeverityLevel.ERROR,
+        potential_breaking=SeverityLevel.ERROR,
+        quality_issues=SeverityLevel.ERROR,
+        addition=SeverityLevel.ERROR,
+    )
+    for bucket, _, _ in _BUCKET_SCORED:
+        result, change, verdict_scored = _result_with_one_breaking_finding_in(bucket)
+        ledger = finalize_ledger(
+            DispositionLedger(), result, verdict_scored=verdict_scored
+        )
+        gated = ledger.with_gate(result, strict)
+        record = gated.record_for(change)
+        if record.disposition is Disposition.GATING:
+            assert any(c is change for c in result.changes), (
+                f"{bucket}: the audit reports this finding as gating under a "
+                "severity configuration, but the severity gate scores "
+                "`result.changes` and this finding is not in it"
+            )
 
 
 def test_the_bucket_table_covers_every_bucket_the_finalizer_reads() -> None:
@@ -655,7 +700,7 @@ def test_the_bucket_table_covers_every_bucket_the_finalizer_reads() -> None:
     # for a finding no application point recorded, which by construction
     # never reaches the gate and is covered by the conservation matrix above.
     covered = {"changes", "redundant_changes", "suppressed_changes"} | {
-        name for name, _ in _BUCKET_SCORED
+        name for name, _, _ in _BUCKET_SCORED
     }
     assert read <= covered, (
         f"finalize_ledger reads buckets with no row in _BUCKET_SCORED: "

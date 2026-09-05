@@ -238,3 +238,40 @@ class TestRecommendReleaseReadsTheConservedDelta:
         rationale = recommend_release(result).rationale
         assert "symbol_pattern" in rationale
         assert "func_removed" in rationale
+
+
+@pytest.mark.parametrize("suppress_all", [False, True])
+@pytest.mark.parametrize(("removed", "added"), [(0, 0), (1, 0), (0, 1), (2, 3)])
+def test_the_one_line_view_always_states_both_totals(
+    removed: int, added: int, suppress_all: bool
+) -> None:
+    """The general form: whenever the one-line view says anything about the
+    audit at all, it says both totals.
+
+    The bug this closes was a *combination* -- a condition that read correctly
+    in every state tested and dropped both counts in the one that was not --
+    so this enumerates the states rather than adding one more example.
+    """
+    from abicheck.report.disposition_audit import (
+        compute_disposition_audit,
+        render_disposition_audit_note,
+    )
+
+    old, new = _snapshots(removed=removed, added=added)
+    rules = (
+        SuppressionList(
+            [Suppression(symbol_pattern=".*", reason="all", allow_public_break=True)]
+        )
+        if suppress_all
+        else None
+    )
+    result = compare(old, new, rules)
+    audit = compute_disposition_audit(result)
+    note = render_disposition_audit_note(audit)
+    if not note:
+        # The one silent case: nothing detected and every detector ran, so the
+        # counts repeat what the line beside them already says.
+        assert audit.detected_total == 0 and not audit.not_evaluated_detectors
+        return
+    assert f"{audit.detected_total} detected" in note
+    assert f"{audit.effective_total} gating" in note

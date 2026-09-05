@@ -191,20 +191,28 @@ def render_disposition_audit_note(audit: DispositionAudit) -> str:
     view where a zero-change run would otherwise read "no changes (0 total)"
     with the missing-evidence signal nowhere at all.
     """
-    parts: list[str] = []
-    if audit.detected_total or not audit.not_evaluated_detectors:
-        parts += [
-            f"{audit.detected_total} detected",
-            f"{audit.effective_total} gating",
-        ]
-        parts += [
-            f"{count} {name}"
-            for name, count in audit.counts
-            if count and name != Disposition.GATING.value
-        ]
+    # The two totals are unconditional. An earlier version gated them behind
+    # `detected_total or not not_evaluated_detectors`, which read correctly in
+    # every state but one -- nothing detected *and* a detector refused -- where
+    # it dropped both zeros and left the detector warning standing alone with
+    # no raw-versus-effective statement at all. D3's rule is that a view may
+    # collapse *detail*, never the counts, and "0 detected, 0 gating" is a
+    # statement, not an absence (Codex review).
+    parts: list[str] = [
+        f"{audit.detected_total} detected",
+        f"{audit.effective_total} gating",
+    ]
+    parts += [
+        f"{count} {name}"
+        for name, count in audit.counts
+        if count and name != Disposition.GATING.value
+    ]
     if audit.not_evaluated_detectors:
         parts.append(f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated")
-    if not parts:
+    if audit.detected_total == 0 and not audit.not_evaluated_detectors:
+        # Nothing detected and every detector ran: the counts are true but say
+        # nothing the line beside them ("no changes (0 total)") does not
+        # already say, so this one view stays silent rather than repeating it.
         return ""
     return " [audit: " + ", ".join(parts) + "]"
 
