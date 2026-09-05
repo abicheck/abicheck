@@ -38,7 +38,7 @@ from test_release_scope_completeness import (
     _write_stored_package,
 )
 
-from abicheck.bundle_manifest import InstantiationManifest
+from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
 from abicheck.model import AbiSnapshot
 from abicheck.model.scope_acquisition import (
     UNCHECKED_STATES,
@@ -61,8 +61,6 @@ from abicheck.workflows.release_scope import (
 
 def _manifest(*entries: tuple[str, str | None]) -> InstantiationManifest:
     """``(symbol, pinned_provider_or_None)`` entries."""
-    from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
-
     return InstantiationManifest(
         entries=tuple(
             ManifestEntry(symbol=sym, library=lib, optional_provider=lib is None)

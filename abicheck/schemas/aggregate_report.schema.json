@@ -251,7 +251,7 @@
     "profile_matrix_entry": {
       "type": "object",
       "description": "Added in schema 1.1. One logical target's outcome across every profile that checked it.",
-      "required": ["base_target", "profiles", "affected_profiles", "incomplete_profiles", "unanalyzed_profiles", "contract_incomplete_profiles", "analysis_incomplete_profiles", "verdict_by_profile"],
+      "required": ["base_target", "profiles", "affected_profiles", "incomplete_profiles", "unanalyzed_profiles", "contract_incomplete_profiles", "analysis_incomplete_profiles", "scope_incomplete_profiles", "verdict_by_profile"],
       "properties": {
         "base_target": {"type": "string"},
         "profiles": {
