@@ -19,8 +19,9 @@ per-concept status, use:*
   per-phase "Landed"/"Still not landed" notes — the primary, most detailed
   source, updated in the same PR that lands a slice;*
 - *`docs/_meta/one-semantic-pipeline-status.yaml` — a machine-readable,
-  per-concept summary (primitive/producers/consumers/authority/
-  removal_gate), structurally validated but hand-maintained content
+  per-concept summary (primitive/producers/consumers/authority/lifecycle/
+  removal_gate, plus an optional `investigated_declined` list),
+  structurally validated but hand-maintained content
   (no generator derives it from the plan or the codebase — update it in
   the same PR that changes a concept's status, exactly like the plan
   and this pointer), for a quick "who's authoritative today" check
