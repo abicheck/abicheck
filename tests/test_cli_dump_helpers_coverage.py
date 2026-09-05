@@ -5,7 +5,7 @@ Exercises the error paths, formatting branches, and resolution branches of the
 arguments (rather than driving the whole CLI), so each assertion pins a
 concrete return value or raised exception:
 
-- ``resolve_dump_debug_format``'s selector-supersedes branch (auto / explicit)
+- ``resolve_dump_debug_format``'s auto/explicit normalization
 - ``compile_db_from_build_info``'s derivation of the L2 database from
   ``--build-info``
 - ``check_dump_debug_format_error``'s PE/Mach-O rejection
@@ -43,24 +43,22 @@ from abicheck.workflows.extraction import dump_manifest_header_roots
 # ── resolve_dump_debug_format ───────────────────────────────────────────────
 
 
-def test_debug_format_selector_auto_returns_none_overriding_legacy() -> None:
-    """An explicit --debug-format auto returns to auto-detection (None) even when
-    a legacy --btf/--ctf/--dwarf value is also present (line 145)."""
-    assert resolve_dump_debug_format("auto", "btf") is None
+def test_debug_format_selector_auto_returns_none() -> None:
+    """An explicit --debug-format auto returns to auto-detection (None)."""
+    assert resolve_dump_debug_format("auto") is None
     # Case-insensitive: uppercase AUTO also normalizes to None.
-    assert resolve_dump_debug_format("AUTO", "dwarf") is None
+    assert resolve_dump_debug_format("AUTO") is None
 
 
-def test_debug_format_selector_explicit_supersedes_legacy() -> None:
-    """A non-auto selector value is returned verbatim, superseding the legacy flag."""
-    assert resolve_dump_debug_format("dwarf", "btf") == "dwarf"
-    assert resolve_dump_debug_format("ctf", None) == "ctf"
+def test_debug_format_selector_explicit_value_returned_verbatim() -> None:
+    """A non-auto selector value is returned verbatim."""
+    assert resolve_dump_debug_format("dwarf") == "dwarf"
+    assert resolve_dump_debug_format("ctf") == "ctf"
 
 
-def test_debug_format_absent_selector_falls_back_to_legacy() -> None:
-    """When the selector is absent the legacy flag value is used (else branch)."""
-    assert resolve_dump_debug_format(None, "btf") == "btf"
-    assert resolve_dump_debug_format(None, None) is None
+def test_debug_format_absent_selector_returns_none() -> None:
+    """When the selector is absent, the result is None (auto-detect)."""
+    assert resolve_dump_debug_format(None) is None
 
 
 # ── compile_db_from_build_info ──────────────────────────────────────────────
@@ -125,10 +123,10 @@ def test_compile_db_from_build_info_is_none_without_headers(tmp_path: Path) -> N
 
 def test_check_debug_format_error_only_for_pe_macho() -> None:
     assert check_dump_debug_format_error("dwarf", "pe") == (
-        "--dwarf is only supported for ELF binaries, not PE."
+        "--debug-format dwarf is only supported for ELF binaries, not PE."
     )
     assert check_dump_debug_format_error("btf", "macho") == (
-        "--btf is only supported for ELF binaries, not MACHO."
+        "--debug-format btf is only supported for ELF binaries, not MACHO."
     )
     assert check_dump_debug_format_error("dwarf", "elf") is None
     assert check_dump_debug_format_error(None, "pe") is None

@@ -2,7 +2,7 @@
 
 - compare: tri-state --demangle (default ON for human formats, OFF for json/sarif)
 - compare: explicit exit-code-scheme announcement on stderr
-- compare / dump: --debug-format selector superseding --btf/--ctf/--dwarf
+- compare / dump: --debug-format selector (auto/dwarf/btf/ctf)
 - compare: --report-mode impact is the one way to ask for the impact table
 - compare-release: --scope-public-headers default ON + toggle, -j default 0,
   severity-aware exit aggregation
@@ -194,22 +194,23 @@ class TestDebugFormatSelector:
 
     def test_dump_exposes_debug_format(self):
         # --debug-format is a debug-info-tier flag, folded behind --help-all
-        # by dump's curated --help (G21.8 M2) -- still visible there, unlike
-        # the legacy --btf/--ctf/--dwarf flags (still hidden).
+        # by dump's curated --help (G21.8 M2) -- still visible there.
         out = CliRunner().invoke(main, ["dump", "--help-all"]).output
         assert "--debug-format" in out
-        # The dump selector still shows the [auto|dwarf|btf|ctf] choices; the
-        # legacy --btf/--ctf/--dwarf flags remain hidden.
+        # The dump selector still shows the [auto|dwarf|btf|ctf] choices.
         assert "[auto|dwarf|btf|ctf]" in out
 
-    def test_legacy_dwarf_flag_still_works(self, tmp_path):
+    def test_legacy_dwarf_flag_removed(self, tmp_path):
+        # H1 hidden-shim deletion: the legacy --btf/--ctf/--dwarf spellings
+        # were deleted outright (not merely hidden) -- --debug-format
+        # {dwarf,btf,ctf} is the only selector left.
         old_p, new_p = _write_identical(tmp_path)
-        # Hidden does not mean removed: --dwarf must remain functional.
         result = CliRunner().invoke(
             main,
             ["compare", str(old_p), str(new_p), "--dwarf"],
         )
-        assert result.exit_code == 0
+        assert result.exit_code == 64
+        assert "No such option" in result.output
 
     def test_dump_compile_db_hidden(self):
         # --compile-db-filter is a build-evidence-tier flag, folded behind
@@ -869,20 +870,7 @@ class TestReleaseSeverityPolicyAndGlobal:
         )
 
 
-# ── §6 follow-ups: debug-format auto override + parallel determinism ─────────
-
-
-class TestDebugFormatAutoOverride:
-    def test_auto_overrides_legacy_flag(self, tmp_path):
-        # --debug-format auto must supersede a legacy --dwarf and run in
-        # auto-detect mode (on JSON snapshots this is a smoke check: it must
-        # not error and must exit 0 on identical input).
-        old_p, new_p = _write_identical(tmp_path)
-        result = CliRunner().invoke(
-            main,
-            ["compare", str(old_p), str(new_p), "--debug-format", "auto", "--dwarf"],
-        )
-        assert result.exit_code == 0
+# ── §6 follow-ups: parallel determinism ───────────────────────────────────────
 
 
 class TestCompareReleaseParallelOrdering:

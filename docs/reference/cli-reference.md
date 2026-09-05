@@ -288,7 +288,7 @@ Dump ABI snapshot of a shared library to JSON.
 | `--ld-library-path` | no | `` | Simulated LD\_LIBRARY\_PATH (with --follow-deps). |
 | `--dwarf-only` | no | `False` | Force DWARF-only mode: use DWARF debug info as the primary data source even when headers are available. Enables type-aware artifact checks without requiring castxml. |
 | `--dry-run` | no | `False` | Resolve and validate the invocation -- classify inputs, discover config, show which evidence depths (binary/headers/build/source) are available -- and print a report without producing a snapshot. Writes nothing; incompatible with -o/--output. |
-| `--debug-format` | no | — | Force the ELF debug format (auto=pick best available). Supersedes the individual --btf/--ctf/--dwarf flags. Choices: `auto`, `dwarf`, `btf`, `ctf`. |
+| `--debug-format` | no | — | Force the ELF debug format (auto=pick best available). Choices: `auto`, `dwarf`, `btf`, `ctf`. |
 | `--compile-db-filter` | no | — | Glob pattern to filter compile\_commands.json entries by source file (e.g. 'src/libfoo/**'). Useful for large databases. |
 | `--debug-root` | no | — | Directory containing separate debug files (build-id trees, path-mirror debug files, or dSYM bundles). This option can be repeated. |
 | `--debuginfod` | no | `False` | Enable debuginfod network resolution for debug info (opt-in). Uses DEBUGINFOD\_URLS environment variable or --debuginfod-url. |
