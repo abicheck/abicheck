@@ -72,8 +72,16 @@ class TestResolveInputErrors:
         hdr = tmp_path / "test.h"
         hdr.write_text("int f();", encoding="utf-8")
 
+        # `abicheck.dumper.dump` -- the binding `service_dump_native._dump_elf`
+        # actually resolves at call time. This used to name
+        # `abicheck.cli_dump_helpers.dump`, that module's own separate
+        # `from .dumper import dump` alias, which `_resolve_input` never
+        # consulted: the patch was inert and the ClickException below came
+        # from the fake ELF failing to parse for real. Retiring
+        # `perform_elf_dump` removed the alias and surfaced that (ADR-063
+        # Track 1).
         monkeypatch.setattr(
-            "abicheck.cli_dump_helpers.dump",
+            "abicheck.dumper.dump",
             lambda **_kw: (_ for _ in ()).throw(AbicheckError("castxml died")),
         )
         with pytest.raises(click.ClickException, match="Failed to dump"):

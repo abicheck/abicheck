@@ -1,5 +1,9 @@
 # Where abicheck Fits in the Python Build Ecosystem
 
+**Priority context:** see the canonical [vision](vision.md) — the Python
+build/packaging ecosystem is an optional provider domain, prioritized after
+the Linux C/C++ core and alongside the scientific-Python roadmap.
+
 **Status:** Proposed — vision/roadmap doc, same genre as the
 [SciPy / Scientific-Python Roadmap](scipy-scientific-python-roadmap.md) but
 focused on the packaging/build-tooling ecosystem (scikit-build-core,

@@ -133,3 +133,21 @@ python scripts/verify.py --profile fast
 Use focused tests for the migrated responsibility, then the established
 broader suite. A mechanical import move is not proven by import success
 alone; preserve public workflow behavior and output/schema parity.
+
+## Product invariants by layer
+
+Root `AGENTS.md`'s "Product decisions and change routing" section states the
+product rules once; this is the per-layer consequence, so a change lands in
+the layer that can honor it. Where a rule is not yet satisfied by an
+existing path, the workstream plan named there records the gap — do not
+add a second implementation to satisfy it locally.
+
+| Layer | Local consequence |
+|---|---|
+| `extract/` | Retain facts **with provenance and status**. A collection that fails yields `FactStatus.FAILED` (or an error), never `PRESENT` with an empty value; "not requested" is not "absent". |
+| `compare/` | Find changes; emit the complete observed change set for the selected scope. Never pre-filter for policy, and never let a pairing heuristic turn *unmatched* into *removed* without inventory evidence. |
+| `policy/` | Make **explicit** dispositions — suppression, reclassification, scope exclusion, acknowledgment, gating — each carrying its rule and reason, over the recorded change set. Policy never mutates the observed facts or their evidence status. |
+| `workflows/` | Resolve the user task, the comparison scope (selected members, expected inventory, actual acquisition), and resource lifetimes once, in the plan; the same resolution serves scalar and multi-component runs. |
+| `storage/` | Preserve identity and history: occurrence-preserving identities, content digests, release/variant coordinates, evidence coverage — enough that a later run can reference a stored snapshot without re-deriving or copying it. |
+| `report/` | Project completed decisions only (`abicheck/report/AGENTS.md`); a view may collapse detail but never drops the raw-versus-effective totals, coverage limitations, or scope/selection notices. |
+| `frontends/` | Parse and pass; a CLI option, Action input, or API field is a request field with one resolution, and equivalent *resolved* requests must decide identically across the three front ends (raw-input resolution still differs today: the CLI and Action fold in `.abicheck.yml`, `--profile`, and `--pack`; full parity is direction). |

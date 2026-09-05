@@ -7344,7 +7344,12 @@ around it. `frontends/cli/commands/dump.py`'s PE/Mach-O branch now builds
 the identical execution-scoped `ResolvedDumpRequest` and calls the same
 `execute_dump_cli_run`; `handle_non_elf_dump` is retired for this call
 site (kept defined, unchanged, for its own direct unit tests — the same
-discipline `perform_elf_dump` already follows). The shared real-run tail
+discipline `perform_elf_dump` already follows). **Both were deleted
+outright on 2026-09-05** by Track 1 of
+`docs/contribute/plans/duplication-and-convergence-assessment.md`, together
+with `cli_dump_non_elf.py` and `cli_dump_protocols.py`, once "kept alive by
+its own unit tests" was all either had left; see that plan's Phase 6 item 1
+for what the retirement surfaced. The shared real-run tail
 (execute, stamp provenance, write the snapshot) both formats now need was
 factored into a new `frontends/cli/dump_execute.
 execute_and_write_dump_cli_run` so `commands/dump.py` — already at the

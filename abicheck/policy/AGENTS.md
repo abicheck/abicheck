@@ -6,7 +6,7 @@ This package owns deciding relevance, suppression, classification,
 severity, and gate (exit-code) effect for an already-identified change. It
 answers "does this change matter, and how much" — never "are these two
 declarations the same entity" (that is `compare/`) and never "how is it
-reported" (that is `report/`).
+reported" (that is `report/`). This layer's product invariant (the local consequence of root `AGENTS.md`'s "Product decisions and change routing") is stated once in `abicheck/AGENTS.md` "Product invariants by layer"; it is not restated here.
 
 Most of that behavior still lives in flat root modules that
 `architecture/modules.yaml` lists as this layer's `legacy_paths`. Those stay

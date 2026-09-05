@@ -6,7 +6,7 @@ This package owns persistence: snapshot and baseline serialization, the
 schemas and migrations those formats carry, content addressing, and cache
 management, per ADR-061 D1. It answers "how is a fact stored, identified,
 versioned, and read back" — never "what that fact means" or "whether a
-comparison is valid".
+comparison is valid". This layer's product invariant (the local consequence of root `AGENTS.md`'s "Product decisions and change routing") is stated once in `abicheck/AGENTS.md` "Product invariants by layer"; it is not restated here.
 
 Three bodies of work live here and are deliberately independent:
 

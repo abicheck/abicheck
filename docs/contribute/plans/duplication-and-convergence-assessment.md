@@ -247,7 +247,7 @@ deletion**. Each row was verified against the implementation on
 
 | Existing path/representation | Canonical owner to use | Required cleanup |
 |---|---|---|
-| `cli_dump_helpers.perform_elf_dump()` / `cli_dump_non_elf.handle_non_elf_dump()` — defined, no production caller, kept alive only by their own unit tests | Typed dump execution (`service_dump_pipeline.execute_dump_request` via `frontends/cli/dump_execute.py`) | Rehome the unique behavioral assertions onto the replacement; delete both functions and any exclusively-supporting protocols/helpers (`cli_dump_protocols.py`) |
+| ~~`cli_dump_helpers.perform_elf_dump()` / `cli_dump_non_elf.handle_non_elf_dump()`~~ — **DONE (T1, 2026-09-05)**: both deleted, along with `abicheck/cli_dump_non_elf.py` and `abicheck/cli_dump_protocols.py` | Typed dump execution (`service_dump_pipeline.execute_dump_request` via `frontends/cli/dump_execute.py`) | Complete. The unique assertions were rehomed to `tests/test_dump_cli_execution_behaviors.py` (against the real `dump` CLI, since `header_roots` and the public-root forwarding are computed on either side of the executor); everything else those tests asserted was already owned at the shared pipeline's own seams, named individually in that module's docstring. `CLI_CONTRACT_ALLOWLIST` lost its `cli_dump_helpers.py:…:dumper.dump` entry — the first line to leave that list, and by deletion rather than rerouting. See the T1 row below for the two facts the retirement surfaced. |
 | `cli_buildsource.dump_source_only` — `execute_dump_request` explicitly refuses a binary-less request and redirects here | A source-only *execution variant* inside the shared workflow | Keep CLI parsing/presentation only; one semantic assembler, persistence path, and error contract for both variants |
 | `appcompat.check_appcompat()`'s two direct `dumper.dump()` calls | Shared extraction + comparison workflow | Delete the independent per-side header/include resolution; keep only application-specific requirement/impact evaluation |
 | `stack_checker._run_abi_diff()`'s direct `dumper.dump()`×2 + `checker.compare()` | Shared per-library comparison operation | Remove the bypass and the generic-failure-to-`None` collapse; carry typed operational outcomes into stack analysis; keep dependency resolution/loadability as stack-specific |
@@ -1702,15 +1702,45 @@ they replaced. Every item names both a canonical owner and a deletion — see
 "The explicit retirement table" above, which is this phase's work inventory.
 Ordered by dependency, not by size:
 
-1. **Remove already-obsolete implementations.** `perform_elf_dump()` and
-   `handle_non_elf_dump()` have no production caller; only their own unit
-   tests keep them alive. Transfer the unique behavioral assertions onto the
-   typed executor, then delete both plus any exclusively-supporting
-   protocols. The roadmap loophole half of this item — a declined
-   *behavioral* change no longer closing a *consolidation* item (see "The
-   completion rule this plan was missing" above) — landed separately as
-   track T2 on 2026-09-05, enforced by the ledger's schema-2 validator
-   rather than by convention.
+1. **Remove already-obsolete implementations.** ✅ **Done (T1, 2026-09-05.)**
+   `perform_elf_dump()` and `handle_non_elf_dump()` had no production caller;
+   only their own unit tests kept them alive. Both are deleted, with
+   `cli_dump_non_elf.py` and `cli_dump_protocols.py`. Two things worth
+   carrying forward from doing it:
+
+   - *Most of what those tests pinned was not unique.* The large majority
+     re-asserted, at a retired call site, behaviour the shared pipeline
+     already owns and already tests at its own seam (the ADR-039 collector
+     and the L2 seed/fold cleanup ordering in `test_typed_dump_request.py`;
+     the `parsed_with_build_context` stamp and its unmatched-database
+     negative in `test_header_compile_context.py`; the header-graph attach,
+     its `--dwarf-only`/`lang` normalisation, the Python/NumPy attach and
+     the AST-memoize scope in `test_service_unit.py`; the
+     explicit-`-I`-only provenance-widening rule in
+     `test_service_input_resolution.py`; the legacy `-p` token precedence
+     in `test_legacy_compile_db_typed_threading.py`). "Rehome the unique
+     assertions" was mostly an exercise in establishing which ones those
+     were — worth budgeting for on the remaining rows.
+   - *One assertion could not be rehomed, because the behaviour it pinned
+     changed with the migration.* `perform_elf_dump` routed a `-H <dir>`
+     operand into `dumper.dump`'s `scope_header_dirs` (extraction-contract
+     scope only, ADR-015 provenance tagging deliberately off); the typed
+     request splits `-H` with `header_utils.split_public_header_inputs` and
+     passes the directory as a real `public_header_dirs` entry, so `dump`
+     now tags provenance for it — the same thing `compare` has always done
+     with its own `-H` list. Nothing populates `scope_header_dirs` from a
+     typed request at all any more. That is a convergence, not a
+     regression: the two commands agree where they previously did not, and
+     `dump`'s own `--public-header-dir` flag (removed earlier as a second
+     way of saying the same thing) is what the behaviour now matches. It is
+     recorded rather than reverted, and
+     `test_dump_cli_execution_behaviors.py` pins the current channel with
+     the reasoning attached.
+
+   The roadmap loophole half of this item — a declined *behavioral* change
+   no longer closing a *consolidation* item (see "The completion rule this
+   plan was missing" above) — landed separately as track T2 on 2026-09-05,
+   enforced by the ledger's schema-2 validator rather than by convention.
 2. **Finish one complete data-authority cutover.** Typedefs and constants
    are closest. Establish one stored semantic state per migrated family
    (reusing the existing typed `Function`/`RecordType` payloads inside the
@@ -1807,19 +1837,19 @@ track, the steps are ordered.
 
 | Track | Scope | Touches | Depends on |
 |---|---|---|---:|
-| **T1 — Dead-implementation retirement** | Rehome `perform_elf_dump`/`handle_non_elf_dump` test assertions onto the typed executor; delete both and `cli_dump_protocols.py`'s now-unused protocols | `cli_dump_helpers.py`, `cli_dump_non_elf.py`, `cli_dump_protocols.py`, their tests | nothing |
-| **T2 — Ledger/status-model change** ✅ **landed 2026-09-05** | Add the `introduced → wired → authoritative → retired` ladder and a separate `investigated_declined` disposition to `docs/_meta/one-semantic-pipeline-status.yaml` + `scripts/pipeline_status_ledger.py`'s field/enum validation; re-audit every concept row against it. Shipped as ledger `schema_version: 2` with the cross-field rules and the re-audit described under "The four-state status model" above | `scripts/pipeline_status_ledger.py`, the ledger, `tests/` | nothing |
+| ~~**T1 — Dead-implementation retirement**~~ ✅ **done (2026-09-05)** | Rehomed `perform_elf_dump`/`handle_non_elf_dump`'s unique assertions onto the live path; deleted both functions, `cli_dump_non_elf.py` and `cli_dump_protocols.py` | `cli_dump_helpers.py` (-661 lines), `cli_dump_non_elf.py` + `cli_dump_protocols.py` (deleted), their tests, `architecture/{modules,debt}.yaml`, `CLI_CONTRACT_ALLOWLIST` | nothing |
+| ~~**T2 — Ledger/status-model change**~~ ✅ **done (2026-09-05)** | Added the `introduced → wired → authoritative → retired` ladder and a separate `investigated_declined` disposition to `docs/_meta/one-semantic-pipeline-status.yaml` + `scripts/pipeline_status_ledger.py`'s field/enum validation; re-audited every concept row against it. Shipped as ledger `schema_version: 2` with the cross-field rules and the re-audit described under "The four-state status model" above | `scripts/pipeline_status_ledger.py`, the ledger, `tests/` | nothing |
 | **T3 — Typedef/constant authority cutover** | Preserve the fidelity gate's four protected cases in the canonical model and the load-boundary adapter; then delete the runtime dual-index construction; extend the cohort guard to the selector and producers | `compare/typedefs.py`, `compare/constants.py`, `model/semantic_ir_legacy_adapter.py`, `scripts/semantic_ir_cutover.py` | nothing (T2 records it) |
-| **T4 — Dump request contract** | Fold `execute_dump_request`'s nine semantic kwargs into the typed request; split backend selection from fallback policy; give source-only dump an execution variant | `service_dump_pipeline.py`, `cli_dump_request.py`, `cli_buildsource.py`, `frontends/cli/dump_execute.py` | T1 (avoids re-migrating code about to be deleted) |
+| **T4 — Dump request contract** | Fold `execute_dump_request`'s nine semantic kwargs into the typed request; split backend selection from fallback policy; give source-only dump an execution variant | `service_dump_pipeline.py`, `cli_dump_request.py`, `cli_buildsource.py`, `frontends/cli/dump_execute.py` | ~~T1~~ — satisfied (T1 landed 2026-09-05) |
 | **T5 — Direct-bypass migration** | Route `appcompat.check_appcompat()` and `stack_checker._run_abi_diff()` through the shared extraction/comparison workflow; shrink `CLI_CONTRACT_ALLOWLIST` accordingly | `appcompat.py`, `stack_checker.py`, `cli_stack.py`, `scripts/check_ai_readiness.py` | T4 for the dump half; the compare half is independent |
 | **T6 — Effective gate/policy convergence** | Collapse `apply_release_gate_pack`'s raw-string mirror of `pack_application.apply_to_compare_config` onto one shared fold **without inverting the dependency direction** — `policy/release_gate_options.py` deliberately consumes a `_GatePackApplication` `Protocol` rather than importing the flat-root `pack_application`, since `policy` may not import it (ADR-061; `policy/AGENTS.md`'s "Permitted imports"), so the shared fold belongs in an inward module both may import, or an outer layer invokes both halves — never a `policy → legacy root` call. Also make `GateOptions.exit_code_scheme` derived rather than independently constructible | `policy/release_gate_options.py`, `pack_application.py`, a new inward fold owner, `tests/test_release_gate_pack_fold_parity.py` | nothing |
 | **T7 — Canonical export index** | One raw export index plus named projections (versioned ELF / default versions / Mach-O normalization / named PE / ordinal imports / missing-vs-empty); delete the five sibling implementations | `policy/depth_projection.py`, `buildsource/crosscheck_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, `diff_unnamed_types.py` | nothing |
 | **T8 — Action boundary** | Remove the residual raw-exit/stderr verdict reconstruction; keep only a transport-level no-result fallback; keep `fail-on-*` as step policy that never rewrites the verdict | `action/run.sh`, `action/` tests | nothing |
-| **T9 — Fact provenance and scope** | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, the import adapter | T2 for status recording; otherwise independent |
+| **T9 — Fact provenance and scope** | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, the import adapter | ~~T2~~ — satisfied (T2 landed 2026-09-05, so the ladder and `investigated_declined` are available to record this work's status); otherwise independent |
 | **T10 — Shared report preparation** | Compute evaluated findings/outcomes once ahead of format-specific construction; remove **both** runtime cycle escape hatches, which are distinct sites with distinct fixes: `render_markdown_document._reporter_markdown()`'s `..reporter_markdown` load (the Markdown cycle) and `report/scoped_gate.py`'s `..reporter` load (scoped-JSON construction, whose cycle exists only because `apply_scoped_gate` mutates an already-built payload); give consumer scoping an explicit finalization boundary instead of mutating shared changes | `report/render_markdown_document.py`, `report/render_markdown_alternate.py`, `report/scoped_gate.py`, `reporter_markdown.py`, `appcompat.py`'s `scope_diff_to_app` | T5's appcompat half for the scoping item |
 
-**Recommended first wave (fully parallel, no shared files):** T1, T2
-(landed), T6, T7, T8. **Second wave:** T3, T4, T9 (each large enough to be its own
+**Recommended first wave (fully parallel, no shared files):** ~~T1~~ (done),
+~~T2~~ (done), T6, T7, T8. **Second wave:** T3, T4, T9 (each large enough to be its own
 multi-PR effort). **Third wave:** T5, T10, once T4/T5's shared surfaces
 settle.
 

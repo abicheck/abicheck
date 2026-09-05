@@ -45,6 +45,18 @@
 schema_version: 1
 
 topics:
+  product-vision:
+    # The one hand-authored source is the repository-root vision.md; the
+    # docs page includes it verbatim via pymdownx.snippets. README.md, the
+    # docs home, goals.md, and backlog.md carry short summaries and link
+    # back — never a second narrative.
+    canonical_page: contribute/vision.md
+    fact_sources:
+      - vision.md
+    allowed_summaries:
+      - index.md
+      - contribute/goals.md
+      - contribute/backlog.md
   evidence-model:
     canonical_page: learn/evidence-and-detectability.md
     fact_sources:

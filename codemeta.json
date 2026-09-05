@@ -2,7 +2,7 @@
   "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
   "@type": "SoftwareSourceCode",
   "name": "abicheck",
-  "description": "ABI and API compatibility checker for C/C++ shared libraries.",
+  "description": "ABI and API compatibility checker for C/C++ libraries. Compares two builds using binary, debug-info, public-header, build-system, and optional source evidence; reports additions, removals, modifications, and breaks, and states what the supplied evidence could not establish.",
   "codeRepository": "https://github.com/abicheck/abicheck",
   "issueTracker": "https://github.com/abicheck/abicheck/issues",
   "url": "https://abicheck.github.io/abicheck/",

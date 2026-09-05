@@ -249,10 +249,15 @@ classify → outcome` — instead of each independently orchestrating
 This generalizes ADR-055's D1 (CLI and the typed API already share one
 input-resolution path for `compare`) and ADR-061's `workflows` ring to
 *every* operation, not only `compare`. Concretely: `dump`'s ELF/PE/Mach-O
-execution paths (`perform_elf_dump`/`handle_non_elf_dump`) are meant to
+execution paths (`perform_elf_dump`/`handle_non_elf_dump`) were meant to
 converge on the `resolve_dump_request`/`execute_dump_request` split already
-added to `service_dump_pipeline.py`, but still run their own legacy route
-today. `scan`'s candidate resolution (`scan_engine._build_new_snapshot`)
+added to `service_dump_pipeline.py`, and ran their own legacy route when this
+was written. **Both have since converged and then been deleted:** Phase 1
+routed `dump_cmd`'s real run for either binary format through
+`execute_dump_request` (via `frontends/cli/dump_execute.py`), and Track 1 of
+`docs/contribute/plans/duplication-and-convergence-assessment.md` removed
+the two now-callerless functions, `cli_dump_non_elf.py` and
+`cli_dump_protocols.py` (2026-09-05). `scan`'s candidate resolution (`scan_engine._build_new_snapshot`)
 already converges on the shared `workflows.artifact.execute.
 _resolve_side_snapshot_impl` primitive (`service_input_resolution` is only
 a delegating facade over this same module; import the real owner in new

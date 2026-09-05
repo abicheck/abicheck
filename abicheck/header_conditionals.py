@@ -1295,11 +1295,11 @@ def attach_build_context_for_parsed_headers(
 
     The one shared implementation of "should this input's snapshot carry
     build-context evidence, and from which compile database" -- CLI cleanup
-    phase two, PR 3A (dump/scan resolver convergence). Three independent
-    resolvers reach the collector today
-    (:func:`~abicheck.cli_dump_helpers.perform_elf_dump`, the typed pipeline's
-    :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl`, and
-    :func:`~abicheck.scan_engine._build_new_snapshot`); before this helper each
+    phase two, PR 3A (dump/scan resolver convergence). Two resolvers reach the
+    collector today -- the typed pipeline's
+    :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl` and
+    :func:`~abicheck.scan_engine._build_new_snapshot`; three until ADR-063
+    Track 1 deleted the dead ``perform_elf_dump``. Before this helper each
     gate was hand-written, which is how ``scan`` ended up as the one candidate
     resolver that never collected ADR-039 evidence at all while a ``dump``
     baseline it was compared against always did.

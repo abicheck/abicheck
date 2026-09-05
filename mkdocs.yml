@@ -279,6 +279,7 @@ nav:
       - Performance: contribute/performance.md
       - Known Gaps & Reverted Fixes: contribute/known-gaps.md
     - Roadmap & Status:
+      - Vision: contribute/vision.md
       - Goals: contribute/goals.md
       - SciPy / Scientific-Python Roadmap: contribute/scipy-scientific-python-roadmap.md
       - Python Build Ecosystem Positioning: contribute/python-build-ecosystem-positioning.md

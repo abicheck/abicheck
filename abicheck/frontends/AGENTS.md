@@ -124,3 +124,16 @@ not a frontend translation.
 entry points during migration. A supported CLI flag or Python API function
 may delegate to a `frontends` module, but this package must never import
 back through those root facades.
+
+## Product invariant (local consequence)
+
+A front end **parses and passes**: equivalent *resolved* requests through
+the CLI, the typed Python API, and the GitHub Action must produce the same
+decision (ADR-055/049's cross-front-end gate). Raw-input resolution still
+differs today — the CLI and Action discover `.abicheck.yml` and apply
+`--profile`/`--pack`, a bare typed-API call does not — and closing that
+gap is direction, not a claim. A new option
+that would only exist in one front end, or that changes analysis under the
+name of a presentation switch, is a request-model gap to fix at the owner,
+not a Click callback. Root `AGENTS.md` "Product decisions and change
+routing" states the rule.

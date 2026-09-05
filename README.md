@@ -2,7 +2,7 @@
 
 # abicheck
 
-**Know before you ship whether a C/C++ library upgrade will break the programs already built against it.**
+**See how a C/C++ library's API/ABI changed, know whether the change breaks the programs already built against it, and gate it in CI.**
 
 [![CI](https://github.com/abicheck/abicheck/actions/workflows/ci.yml/badge.svg)](https://github.com/abicheck/abicheck/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/abicheck/abicheck/branch/main/graph/badge.svg)](https://codecov.io/gh/abicheck/abicheck)
@@ -13,6 +13,7 @@
 
 [Documentation](https://abicheck.github.io/abicheck/) ·
 [Getting started](https://abicheck.github.io/abicheck/start/getting-started/) ·
+[Vision](vision.md) ·
 [Which command do I need?](#which-command-do-i-need) ·
 [Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/) ·
 [Migrate from ABICC / libabigail](#migrating-from-another-tool)
@@ -25,7 +26,9 @@
 
 You ship a shared library. Other people's programs were compiled against version 1, and you are about to release version 2. If an exported function vanished, a struct field moved, a vtable slot shifted, or an enum was renumbered, those programs **crash, corrupt data silently, or refuse to load**. No compiler warns you, and a test suite that rebuilds from source never sees it.
 
-abicheck compares the two versions, with whatever headers, debug info, build data, and sources you have, and tells you what breaks, why, and which version bump you owe.
+abicheck compares the two versions, with whatever headers, debug info, build data, and sources you have, and tells you what changed, what breaks, why, and which version bump you owe. Compatible additions are reported too, because a library's supported surface growing is a change its maintainer should see and confirm, not "nothing happened".
+
+ABI/API compatibility analysis is the foundation. The direction, recorded in [`vision.md`](vision.md), is to make the whole evolution of a library's surface visible, intentional, and traceable: what was added, removed, or modified; which declared contract and which known consumers it affects; what the evidence could and could not establish; and whether the project's versioning policy accepts it.
 
 ```bash
 abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=include/v2/
@@ -35,6 +38,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 
 - **Five layers of evidence, not one.** Binary, debug info, headers, build flags, sources. Each layer finds breaks the others miss and removes false positives the weaker ones raise.
 - **It says what it could not check.** Missing evidence is reported, never silently passed.
+- **Additions count.** A compatible release still lists every new function, variable, and enumerator, with a version-bump recommendation, so surface growth is reviewed rather than assumed.
 - **399 ABI/API change types**, and it keeps binary breaks (`BREAKING`) apart from source-only breaks (`API_BREAK`). It is the only tool in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK` as its own verdict; ABICC splits binary and source into separate reports without an equivalent verdict.
 - **Zero false positives** on the benchmark catalog, at 95.9% accuracy with headers and 99.5% with full evidence, where `abidiff` scores 28.5% and ABICC 44.6%.
 - **Made for CI.** Deterministic exit codes, SARIF/JSON/Markdown/HTML/JUnit, baselines, policies, suppressions, a [GitHub Action](#github-action), a typed [Python API](#python-api), and a drop-in `compat` mode for `abi-compliance-checker`. Pure Python, Linux/Windows/macOS.
@@ -359,7 +363,7 @@ Machine-readable metadata: [CITATION.cff](CITATION.cff) (GitHub's **Cite this re
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, code style, and the PR workflow, and [goals.md](docs/contribute/goals.md) for status and roadmap. Coding agents (Claude Code, Copilot, Cursor, or otherwise): the canonical repository contract is [AGENTS.md](AGENTS.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, code style, and the PR workflow; [vision.md](vision.md) for the product direction; and [goals.md](docs/contribute/goals.md) for enduring goals, history, and where the concrete plans live. Coding agents (Claude Code, Copilot, Cursor, or otherwise): the canonical repository contract is [AGENTS.md](AGENTS.md).
 
 ## License
 
