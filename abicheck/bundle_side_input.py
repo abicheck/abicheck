@@ -89,7 +89,7 @@ and PR I's tracking in ``docs/contribute/plans/cli-cleanup-phase-two.md``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -537,7 +537,11 @@ def compare_release_against_bundle_facts(
         {k: v for k, v in new_map.items() if k in bundle_members}
     )
     result = compare_bundle_from_facts(
-        restrict_bundle_facts(old_facts, scope_record),
+        # `manifest=` is the resolved, scoped manifest even when it is None
+        # (fully withheld): compare_bundle_from_facts's own fallback to
+        # `old_facts.manifest` must not re-enforce a stored manifest an
+        # explicit one already replaced (CodeRabbit review).
+        replace(restrict_bundle_facts(old_facts, scope_record), manifest=manifest),
         new_bundle_snapshot,
         per_library_results,
         manifest=manifest,

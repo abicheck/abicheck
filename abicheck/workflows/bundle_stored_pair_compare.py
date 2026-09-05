@@ -38,6 +38,7 @@ workflow in workflows" -- the same reasoning that already moved
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -346,7 +347,10 @@ def compare_stored_bundle_facts_pair(
         restrict_bundle_facts(new_facts, scope_record)
     )
     result = compare_bundle_from_facts(
-        restrict_bundle_facts(old_facts, scope_record),
+        # The scoped effective manifest even when None (fully withheld), so
+        # the fallback to `old_facts.manifest` cannot re-enforce a stored
+        # manifest an explicit one replaced (CodeRabbit review).
+        replace(restrict_bundle_facts(old_facts, scope_record), manifest=manifest),
         new_bundle_snapshot,
         per_library_results,
         manifest=manifest,

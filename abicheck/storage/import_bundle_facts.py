@@ -488,6 +488,16 @@ def import_bundle_facts(
     # preserved on the artifact's own `native_identity` for
     # `export_bundle_facts` to recover.
     artifact_ids_by_library = resolve_ref_ids(list(raw_snapshots), opaque_prefix="lib")
+    # Before any per-library write: `ObjectStore` has no rollback, so a
+    # marker rejected after the loop left orphaned objects (CodeRabbit).
+    degraded_members = _validated_library_filenames(  # ADR-065 D8, same shape
+        bundle_facts_document.get("degraded_members", _ABSENT), "degraded_members"
+    )
+    require_degraded_marker_version(  # an absent key is a v1 document, not the default
+        degraded_members,
+        raw_container_schema_version if "schema_version" in bundle_facts_document else 1,
+        what="bundle_facts_document",
+    )
 
     artifact_refs = []
     section_schema_versions: dict[str, int] = {}
@@ -550,15 +560,8 @@ def import_bundle_facts(
         "library_filenames": _validated_library_filenames(
             bundle_facts_document.get("library_filenames", _ABSENT)
         ),
-        "degraded_members": _validated_library_filenames(  # ADR-065 D8, same shape
-            bundle_facts_document.get("degraded_members", _ABSENT), "degraded_members"
-        ),
+        "degraded_members": degraded_members,
     }
-    require_degraded_marker_version(  # an absent key is a v1 document, not the default
-        composition_payload["degraded_members"],
-        raw_container_schema_version if "schema_version" in bundle_facts_document else 1,
-        what="bundle_facts_document",
-    )
     composition_dto = bundle_composition_to_dto(composition_payload)
     composition_ref = ObjectRef(
         kind=BUNDLE_COMPOSITION_SECTION_KIND,

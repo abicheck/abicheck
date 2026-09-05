@@ -26,6 +26,7 @@ file's helpers rather than copying them.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -464,3 +465,95 @@ class TestFailedMemberIsNeverAProvenRemoval:
         assert scope["counts"]["failed"] == 1
         assert _removal_findings(doc) == []
         assert code == 0
+
+
+class TestExplicitManifestNeverFallsBackToTheStoredOne:
+    """An explicit `--manifest` replaces a stored side's captured manifest
+    entirely. Once scoping withholds every explicit promise, the comparison
+    must enforce nothing -- not the stored manifest `compare_bundle_from_
+    facts`'s own fallback would otherwise pick up (CodeRabbit review)."""
+
+    @staticmethod
+    def _explicit(tmp_path: Path) -> Path:
+        # Optional-provider promise: withheld whole once a member is absent.
+        path = tmp_path / "manifest.json"
+        path.write_text(json.dumps({"provides": [{"symbol": "core_fn"}]}))
+        return path
+
+    @staticmethod
+    def _libs() -> dict[str, AbiSnapshot]:
+        return {
+            "libcore.so": _lib("libcore.so", exports=("core_fn",)),
+            "libalgo.so": _lib("libalgo.so", exports=("algo_fn",)),
+        }
+
+    # The stored manifest pins a promise NEW's retained member no longer
+    # provides -- enforced, it would fire; replaced by the explicit one, it
+    # must not.
+    _STORED = (("gone_fn", "libalgo.so"),)
+
+    def test_stored_pair_driver(self, tmp_path: Path) -> None:
+        from abicheck.workflows.bundle_stored_pair_compare import (
+            compare_stored_bundle_facts_pair,
+        )
+
+        libs = self._libs()
+        old = _facts_file(
+            tmp_path, "old.bundlefacts.json", libs, manifest=_manifest(*self._STORED)
+        )
+        new = _facts_file(
+            tmp_path,
+            "new.bundlefacts.json",
+            {**libs, "libcore.so": _lib("libcore.so")},
+            degraded={"libcore.so": "dump failed"},
+        )
+        result = compare_stored_bundle_facts_pair(
+            old, new, manifest_path=self._explicit(tmp_path)
+        )
+        kinds = {f.kind.value for f in result.bundle_findings}
+        assert not any(k.startswith("bundle_manifest_instantiation_") for k in kinds)
+        assert any("core_fn" in e and "withheld" in e for e in result.analysis_errors)
+
+    def test_stored_live_driver(self, tmp_path: Path) -> None:
+        from abicheck.bundle_side_input import compare_release_against_bundle_facts
+
+        libs = self._libs()
+        old = _facts_file(
+            tmp_path, "old.bundlefacts.json", libs, manifest=_manifest(*self._STORED)
+        )
+        new = tmp_path / "new"
+        _write(new, "libalgo.so.json", _lib("libalgo.so", exports=("algo_fn",)))
+        result = compare_release_against_bundle_facts(
+            old, new / "libalgo.so.json", manifest_path=self._explicit(tmp_path)
+        )
+        kinds = {f.kind.value for f in result.bundle_findings}
+        assert not any(k.startswith("bundle_manifest_instantiation_") for k in kinds)
+        assert any("core_fn" in e and "withheld" in e for e in result.analysis_errors)
+
+
+class TestDegradedMarkerIsValidatedBeforeAnyWrite:
+    def test_a_rejected_import_leaves_no_orphaned_object(self) -> None:
+        """`ObjectStore` has no rollback: the marker gate must run before
+        the per-library snapshot imports, or a rejected document leaves
+        unreferenced objects behind (CodeRabbit review)."""
+        from abicheck.bundle_facts import capture_bundle_facts
+        from abicheck.bundle_facts_serialization import bundle_facts_to_dict
+        from abicheck.serialization import SCHEMA_VERSION
+        from abicheck.storage.import_bundle_facts import import_bundle_facts
+        from abicheck.storage.package import InMemoryObjectStore
+
+        doc = dict(
+            bundle_facts_to_dict(
+                capture_bundle_facts(
+                    {"liba.so": AbiSnapshot(library="liba.so", version="")},
+                    degraded_members={"liba.so": "ELF-only: boom"},
+                )
+            )
+        )
+        doc["schema_version"] = 2
+        store = InMemoryObjectStore()
+        with pytest.raises(ValueError, match="degraded_members"):
+            import_bundle_facts(
+                doc, store=store, max_known_schema_version=SCHEMA_VERSION
+            )
+        assert store._objects == {}
