@@ -28,16 +28,21 @@ Phase 4 items 3 and 1 respectively, and its item 5 (post-render mutation)
 is this plan's P1 "Reporting composes too late" finding below, almost
 word-for-word; the two documents converged on the same diagnosis
 independently and should be read together rather than as competing plans)
-**Effort:** XL (five phases, each independently landable; Phase 1 alone spans
-several PRs) · **Risk:** high for Phase 1 (touches every extraction call
-site — `dump`, both `compare` operands, `scan` candidate and baseline,
-release fan-out); lower for later phases, which mostly consume what Phase 1
-and Phase 2 produce.
+**Effort:** XL (six phases, each independently landable; Phase 1 alone spans
+several PRs, and Phase 6 decomposes into ten parallel tracks) · **Risk:**
+high for Phase 1 (touches every extraction call site — `dump`, both
+`compare` operands, `scan` candidate and baseline, release fan-out); lower
+for Phases 2-5, which mostly consume what Phase 1 and Phase 2 produce;
+medium for Phase 6, whose risk is concentrated in deletions rather than new
+behavior.
 
 ## Why this document exists
 
 This assesses `abicheck` as of `main` at commit `e674d3127634176dc7a41566bd1943bf6f481176`
-(2026-08-20) for **semantic duplication**: places where the same
+(2026-08-20) for **semantic duplication**, re-assessed against `main` at the
+merge of PR #1062 (2026-09-04, the `--exit-code-scheme` removal) — see
+"2026-09-05 re-assessment" below, which supersedes this section's headline
+framing where the two differ. **Semantic duplication:** places where the same
 responsibility — a decision, a normalization, a workflow — exists in more
 than one codepath, expressed as different code that is intended (and mostly
 succeeds, at real correctness cost recorded in `AGENTS.md`'s "Known gaps")
@@ -95,6 +100,157 @@ registry deriving `BREAKING_KINDS`/`API_BREAK_KINDS`/`COMPATIBLE_KINDS`/
 decorators (`cli_options.py`) for cross-command concepts, and the stored
 SONAME mapping in bundle resolution that prevents a later graph traversal
 from independently reconstructing a subtly different one.
+
+## 2026-09-05 re-assessment — the remaining gap is authority transfer, not construction
+
+An external re-assessment of `main` (the merge of PR #1062, which removed
+`--exit-code-scheme`) was reviewed and **accepted** on 2026-09-05. It
+supersedes this document's own headline framing without invalidating any
+landed slice: the primitives this plan and
+[ADR-063](../adr/063-one-semantic-pipeline.md)/
+[one-semantic-pipeline.md](one-semantic-pipeline.md) call for are largely
+**built**; what is not done is making them the **sole** authority and
+deleting what they replaced.
+
+### What has genuinely closed since the original audit
+
+| Area | Now implemented | What that does *not* yet establish |
+|---|---|---|
+| Gate configuration | `policy/release_gate_options.py`'s `GateOptions`; the manual `--exit-code-scheme` selector deleted (PR #1062, ADR-064) | That effective-policy *application* has one implementation — see `apply_release_gate_pack` below |
+| Semantic consumers | The typedef and constant detector families read `SemanticIRIndex` (`compare/typedefs.py`, `compare/constants.py`), guarded by `scripts/semantic_ir_cutover.py` | That the IR is their *sole* data source |
+| Fact semantics | `compare_facts()`/`FactComparison` used by real detectors; base-class comparison refuses incomplete evidence rather than treating `PARTIAL` as a complete list | That every fact-dependent decision handles availability and scope consistently |
+| Execution context | `resolve_compare_request`/`execute_dump_request` both build and enrich a `ResolvedExecutionContext` | That execution and classification consume it as their sole authority |
+| Evidence depth | `policy/depth_projection.project_pair_to_depth()` is used in compare classification | That projection is provenance-driven rather than a manual field-clearing inventory |
+| Storage | Typed section codecs; multi-artifact import/export paths; **`bundle_facts_store.py` now delegates to one `import_bundle_facts`/`export_bundle_facts` implementation instead of keeping two physical layouts** | That standard single-/multi-artifact workflows share one logical flow |
+| Reporting | Every renderer family, including both alternate Markdown modes, crosses `ReportDocument` | That every report fact is computed once *before* format-specific construction |
+
+**Bundle storage is the model to copy.** Two tracks had implemented
+different physical layouts for the same bundle-composition facts; one now
+delegates to the other and the surviving entry points are adapters. That is
+what every remaining item below should look like when it is done.
+
+### The completion rule this plan was missing
+
+The review identified a real loophole in how items here and in
+one-semantic-pipeline.md have been closed: several migrations were
+*investigated and declined* because no currently-demonstrable finding
+justified them, and that disposition was then treated as equivalent to
+"the removal gate is closed." Those are different things. Separate the two
+decisions:
+
+- **Behavioral change** — changing matching precedence, suppressing a
+  finding, altering evidence requirements, or changing a published finding
+  ID. Needs a demonstrated benefit and correctness evidence. Declining one
+  for lack of a demonstrated benefit is *correct*, and this plan's existing
+  "attempted twice, reverted twice" discipline (AGENTS.md, `known-gaps.md`)
+  stays in force.
+- **Implementation consolidation** — moving existing, unchanged semantics
+  behind one owner and deleting the duplicate. This does **not** need a new
+  bug to justify it. Its benefit is fewer implementations, fewer
+  configuration-forwarding paths, and fewer independently mutable
+  representations of the same fact.
+
+> **"No current bug found" can justify preserving *behavior*. It cannot, by
+> itself, justify preserving a second *implementation* of that behavior.**
+
+The governing prohibition, stated precisely enough to be applied without
+over-reaching:
+
+> **No two independently maintained implementations of the same semantic
+> decision, and no two independently writable current representations of
+> the same semantic fact.**
+
+That is deliberately narrower than "no duplication": a pure import shim is
+not a duplicate implementation, a legacy decoder is not a duplicate current
+model, a different renderer is not a duplicate analysis engine, and a
+stack-loadability check is not the same question as library ABI
+compatibility. See "What should explicitly *not* be unified" below, which
+this rule refines rather than replaces.
+
+### The four-state status model
+
+The authority ledger (`docs/_meta/one-semantic-pipeline-status.yaml`) and
+this plan should both record a concept's position on one ladder:
+
+```text
+introduced → wired → authoritative → old implementation retired
+```
+
+with **`investigated_declined` as a separate disposition, not a synonym for
+`retired`.** A declined *behavioral* change leaves the consolidation item
+open; only an actual deletion (or reduction to delegation) closes it.
+
+This matters most concretely for the `vtable`/`TYPE_VTABLE_CHANGED` cluster
+(5B's "final closure"): the investigation is genuinely complete, but the
+PDB-driven fabricated-finding path it documents is still reachable and the
+authority transition still has not happened. Recording that as
+`investigated_declined` with an open removal gate is accurate; recording it
+as closed is not.
+
+### Corrections to current status prose
+
+Two claims elsewhere in this family of documents are now stale and are
+corrected here (drift of exactly the kind the ledger exists to prevent):
+
+1. **Dump/compare execution context is populated, not absent.**
+   `execute_dump_request` calls `with_assurance()` and carries per-side
+   `compile_contexts`; `resolve_compare_request` attaches a context and
+   `classify_compare_pair` reads `requested_depth` off it. The real gap is
+   that these objects are largely *unread*, and that `evaluation_config`
+   is still `None` on every real `ResolvedComparePair`/`ResolvedDumpRequest`
+   — not that the wiring is missing.
+2. **`action/run.sh` is partially migrated, not unmigrated.**
+   `_report_compat_verdict()` and `_severity_gate_exit()` already prefer
+   `run_outcome`'s structured fields. What remains is the residual
+   raw-process-exit/stderr-text interpretation, which PR #1062 extended
+   again for evidence-contract errors.
+
+### What "done" looks like for the next milestone
+
+Measurable as **fewer independent execution paths, no dual current-data
+fallback for the migrated cohorts, and named legacy implementations
+deleted** — not "more fields populated," "another phase investigated," or
+"all existing tests still pass."
+
+### The explicit retirement table
+
+Every consolidation item below needs a named replacement **and a named
+deletion**. Each row was verified against the implementation on
+`main` at the time of this update.
+
+| Existing path/representation | Canonical owner to use | Required cleanup |
+|---|---|---|
+| `cli_dump_helpers.perform_elf_dump()` / `cli_dump_non_elf.handle_non_elf_dump()` — defined, no production caller, kept alive only by their own unit tests | Typed dump execution (`service_dump_pipeline.execute_dump_request` via `frontends/cli/dump_execute.py`) | Rehome the unique behavioral assertions onto the replacement; delete both functions and any exclusively-supporting protocols/helpers (`cli_dump_protocols.py`) |
+| `cli_buildsource.dump_source_only` — `execute_dump_request` explicitly refuses a binary-less request and redirects here | A source-only *execution variant* inside the shared workflow | Keep CLI parsing/presentation only; one semantic assembler, persistence path, and error contract for both variants |
+| `appcompat.check_appcompat()`'s two direct `dumper.dump()` calls | Shared extraction + comparison workflow | Delete the independent per-side header/include resolution; keep only application-specific requirement/impact evaluation |
+| `stack_checker._run_abi_diff()`'s direct `dumper.dump()`×2 + `checker.compare()` | Shared per-library comparison operation | Remove the bypass and the generic-failure-to-`None` collapse; carry typed operational outcomes into stack analysis; keep dependency resolution/loadability as stack-specific |
+| `compare/typedefs.typedef_index_pair()` / `compare/constants.constant_index_pair()` runtime fidelity selectors — both build **IR-backed *and* legacy-backed** indexes on every comparison and let the legacy projection adjudicate | Canonical family data + a historical-input adapter at the load boundary | Stop rebuilding a legacy index for a current-format snapshot; a disagreement becomes an explicit consistency failure, not a silent fallback |
+| Writable legacy value + `*_fact` sibling pairs; current-runtime reliability flags | One canonical fact payload carrying observation-vs-inference, producer, scope, and positive-observation-vs-completeness | Remove dual writes and synchronization machinery once consumers migrate; historical decoding stays permanently in the import adapter |
+| `policy/release_gate_options.apply_release_gate_pack()` — folds pack severity into a 5-tuple of **raw strings**, mirroring `pack_application.apply_to_compare_config`'s fold over an already-resolved config | One shared effective-evaluation resolution (this plan's `EffectiveGate`/`EffectiveEvaluationConfig`), owned by a module `policy` is permitted to import — *not* by having `policy` call the flat-root `pack_application`, which is why the existing code takes a `_GatePackApplication` `Protocol` instead | Delete the mirrored raw-string application; `tests/test_release_gate_pack_fold_parity.py`'s parity property is the interim guard, not the destination |
+| `action/run.sh`'s residual raw-exit-code/stderr-text verdict reconstruction | Structured `run_outcome`/`exit` reader | Retain only a small transport-level fallback for "no valid result because invocation failed"; `fail-on-*` stays explicit step policy and must not rewrite the reported verdict |
+| Four sibling `_exported_symbol_names()`-shaped implementations (`policy/depth_projection.py`, `buildsource/crosscheck_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, plus `diff_unnamed_types`'s own) | One canonical **raw export index** with explicitly named projections | Remove the equivalent local implementations — while preserving the real distinctions (versioned ELF exports, default versions, Mach-O spelling normalization, named PE exports, ordinal imports, *missing* versus *confirmed-empty* tables) as named views, not one universal set-of-strings helper |
+| Report semantics recomputed per format (alternate Markdown builders still consult `DiffResult`, filtering, policy, and recommendation helpers, with a runtime import back into `reporter.py` to dodge a cycle) | Shared **report preparation** producing evaluated facts once | Keep only view construction and rendering in format-specific code; layout/grouping/presentation filters stay legitimately per-format |
+
+Two adjacent findings that are not retirements but belong with them:
+
+- **`GateOptions.exit_code_scheme` is documented as purely derived but
+  remains an independently constructible dataclass field beside
+  `severity`.** Make it a derived property, or enforce the invariant at
+  construction. The normal resolver supplies consistent values today; the
+  concern is that the *model* still permits disagreement.
+- **`DumpResult`'s effective include paths can point into an
+  already-deleted inferred-build directory.** Returning more paths is not a
+  substitute for owning their lifetime: the shared extraction session must
+  own those resources across every consumer that needs to *read* them
+  (parsing, enrichment, graph construction, persistence), which is the
+  resource-lifetime half of Phase 1 item 1 that is still open.
+- **`scope_diff_to_app()` synthesizes findings and mutates shared changes
+  after the original comparison**, forcing extra suppression and
+  impact-cache handling. A cleaner finalization boundary evaluates those
+  findings through the shared machinery and keeps full-library versus
+  consumer-scoped views explicit rather than mutating one into the other
+  (this is the same finding as P1 "Reporting composes too late" below,
+  reached from the consumer-scoping side).
 
 ## Hotspots, in priority order
 
@@ -1510,6 +1666,122 @@ re-deriving the other.
    --artifact-set` (ADR-056), and bundle operations.
 5. Keep distributed report aggregation a distinct operation, but have it
    consume the same envelope as everything else.
+
+### Phase 6 — Authority transfer and retirement (2026-09-05)
+
+Phases 0-5 build owners; this phase makes them *the* owners and deletes what
+they replaced. Every item names both a canonical owner and a deletion — see
+"The explicit retirement table" above, which is this phase's work inventory.
+Ordered by dependency, not by size:
+
+1. **Remove already-obsolete implementations.** `perform_elf_dump()` and
+   `handle_non_elf_dump()` have no production caller; only their own unit
+   tests keep them alive. Transfer the unique behavioral assertions onto the
+   typed executor, then delete both plus any exclusively-supporting
+   protocols. Simultaneously, close the roadmap loophole: a declined
+   *behavioral* change no longer closes a *consolidation* item (see "The
+   completion rule this plan was missing" above).
+2. **Finish one complete data-authority cutover.** Typedefs and constants
+   are closest. Establish one stored semantic state per migrated family
+   (reusing the existing typed `Function`/`RecordType` payloads inside the
+   canonical entity/occurrence model — *not* copying their fields into a
+   parallel generic representation), move legacy adaptation to the **input**
+   boundary, then delete the runtime dual-index selection. Acceptance is
+   concrete: *typedef/constant comparison no longer builds a legacy index
+   for a current-format canonical snapshot, and no producer can update the
+   same family through two writable representations.* Do not delete the
+   fidelity gate first — it currently protects anonymous-scope, identity,
+   missing-data, and ordering cases; preserve each in the canonical model
+   and the legacy adapter, then remove the double construction.
+3. **Finish execution/configuration ownership.** Eliminate
+   `execute_dump_request`'s out-of-band semantic kwargs
+   (`build_config`/`build_query`/`build_compile_db`/`changed_paths`/
+   `allow_build_query`/`legacy_compile_db_tokens`/
+   `legacy_compile_db_matched`/`seed_collect_mode`/
+   `source_frontend_from_folded_context`) by moving each into the typed
+   request/resolution model with its provenance; leave only operational
+   services (progress reporting, cancellation) as parameters. Keep the three
+   stages distinct — **preflight** (what is decidable without running
+   tools), **executable plan** (inputs, compile contexts, backend selection
+   *and fallback policy as separate fields*, scope, resources), **observed
+   result** (what ran, what evidence was obtained, what failed). Do not push
+   post-execution assurance into a pre-execution object, and do not make
+   dry-run secretly execute. Represent backend selection as
+   preferred-backend + fallback-policy rather than preserving `"auto"` as a
+   magic string carrying hidden control state (a prior premature
+   substitution to `"castxml"` changed behavior). Then route standalone
+   `check_appcompat()`, `stack_checker._run_abi_diff()`, and source-only
+   dump through the shared operations, and consolidate the release
+   gate-pack fold onto one effective-evaluation object.
+4. **Migrate fact semantics with explicit provenance and scope.** A fact
+   must record *what was observed versus inferred or supplied through a
+   legacy compatibility path*, *which producer and observation scope
+   support it*, and *whether the claim is a positive observation or a
+   completeness/absence claim* — because status alone cannot separate
+   "I observed this virtual method" from "I established the complete set of
+   virtual methods." That is what the PDB `vtable_fact=NOT_COLLECTED` case
+   needs and what a bare `FactStatus` guard could not deliver (round 2
+   landed, round 3 reverted). Fix it at the model/import boundary, along
+   with the legacy-hybrid backfill blocker holding the seven
+   `fact_provenance`-gated fields, rather than adding more snapshot-level
+   booleans or reliability side channels. Give declined comparisons a route
+   into shared analysis accounting (`observed changes` / `evaluated
+   requirements` / `unresolved requirements` / `unsupported requirements`)
+   so a `list[Change]`-returning detector cannot silently discard the reason
+   it emitted nothing — a missing *optional* producer must not make the
+   whole scan incomplete; assurance is relative to the requested analysis
+   contract. Then retire the raw legacy fields and reliability flags. For
+   public Python constructors, choose and document the compatibility
+   behavior explicitly instead of leaving every detector to infer whether an
+   omitted argument meant "unknown" or "empty".
+5. **Expand the proven pattern.** Remaining detector families, the export
+   index and its named views, shared report preparation, and standard
+   multi-artifact flows. **Every cohort must reduce the number of live
+   legacy readers and writers**; a cohort that ends with another populated
+   sidecar has not landed.
+
+Extend the existing architecture checks rather than adding a planning
+system. `scripts/semantic_ir_cutover.py`'s per-cohort registration is the
+right shape, but a module-level "no legacy attribute read" rule is **not**
+proof that a family has one authority — the typedef fidelity selector
+satisfies that rule while the legacy projection still adjudicates. Extend
+each cohort's guard to cover the actual dependency path (callers, adapters,
+selectors, producers) and the legacy-*writer* retirement condition.
+
+A phase item reaches **retired** only when all four hold:
+
+1. all applicable production callers use the owner;
+2. the replaced decision/data implementation is removed, or reduced to
+   delegation;
+3. old persisted inputs still enter through an explicit compatibility
+   adapter;
+4. an architecture check prevents reintroducing the old dependency/read
+   path.
+
+## Parallel execution tracks
+
+The Phase 6 items above are dependency-ordered, but they are not one serial
+queue. These tracks touch disjoint modules, have separate test surfaces, and
+can be executed concurrently by different contributors or sessions. Within a
+track, the steps are ordered.
+
+| Track | Scope | Touches | Depends on |
+|---|---|---|---:|
+| **T1 — Dead-implementation retirement** | Rehome `perform_elf_dump`/`handle_non_elf_dump` test assertions onto the typed executor; delete both and `cli_dump_protocols.py`'s now-unused protocols | `cli_dump_helpers.py`, `cli_dump_non_elf.py`, `cli_dump_protocols.py`, their tests | nothing |
+| **T2 — Ledger/status-model change** | Add the `introduced → wired → authoritative → retired` ladder and a separate `investigated_declined` disposition to `docs/_meta/one-semantic-pipeline-status.yaml` + `scripts/pipeline_status_ledger.py`'s field/enum validation; re-audit every concept row against it | `scripts/pipeline_status_ledger.py`, the ledger, `tests/` | nothing |
+| **T3 — Typedef/constant authority cutover** | Preserve the fidelity gate's four protected cases in the canonical model and the load-boundary adapter; then delete the runtime dual-index construction; extend the cohort guard to the selector and producers | `compare/typedefs.py`, `compare/constants.py`, `model/semantic_ir_legacy_adapter.py`, `scripts/semantic_ir_cutover.py` | nothing (T2 records it) |
+| **T4 — Dump request contract** | Fold `execute_dump_request`'s nine semantic kwargs into the typed request; split backend selection from fallback policy; give source-only dump an execution variant | `service_dump_pipeline.py`, `cli_dump_request.py`, `cli_buildsource.py`, `frontends/cli/dump_execute.py` | T1 (avoids re-migrating code about to be deleted) |
+| **T5 — Direct-bypass migration** | Route `appcompat.check_appcompat()` and `stack_checker._run_abi_diff()` through the shared extraction/comparison workflow; shrink `CLI_CONTRACT_ALLOWLIST` accordingly | `appcompat.py`, `stack_checker.py`, `cli_stack.py`, `scripts/check_ai_readiness.py` | T4 for the dump half; the compare half is independent |
+| **T6 — Effective gate/policy convergence** | Collapse `apply_release_gate_pack`'s raw-string mirror of `pack_application.apply_to_compare_config` onto one shared fold **without inverting the dependency direction** — `policy/release_gate_options.py` deliberately consumes a `_GatePackApplication` `Protocol` rather than importing the flat-root `pack_application`, since `policy` may not import it (ADR-061; `policy/AGENTS.md`'s "Permitted imports"), so the shared fold belongs in an inward module both may import, or an outer layer invokes both halves — never a `policy → legacy root` call. Also make `GateOptions.exit_code_scheme` derived rather than independently constructible | `policy/release_gate_options.py`, `pack_application.py`, a new inward fold owner, `tests/test_release_gate_pack_fold_parity.py` | nothing |
+| **T7 — Canonical export index** | One raw export index plus named projections (versioned ELF / default versions / Mach-O normalization / named PE / ordinal imports / missing-vs-empty); delete the five sibling implementations | `policy/depth_projection.py`, `buildsource/crosscheck_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, `diff_unnamed_types.py` | nothing |
+| **T8 — Action boundary** | Remove the residual raw-exit/stderr verdict reconstruction; keep only a transport-level no-result fallback; keep `fail-on-*` as step policy that never rewrites the verdict | `action/run.sh`, `action/` tests | nothing |
+| **T9 — Fact provenance and scope** | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, the import adapter | T2 for status recording; otherwise independent |
+| **T10 — Shared report preparation** | Compute evaluated findings/outcomes once ahead of format-specific construction; remove the alternate Markdown builders' runtime import back into `reporter.py`; give consumer scoping an explicit finalization boundary instead of mutating shared changes | `report/`, `reporter_markdown.py`, `appcompat.py`'s `scope_diff_to_app` | T5's appcompat half for the scoping item |
+
+**Recommended first wave (fully parallel, no shared files):** T1, T2, T6,
+T7, T8. **Second wave:** T3, T4, T9 (each large enough to be its own
+multi-PR effort). **Third wave:** T5, T10, once T4/T5's shared surfaces
+settle.
 
 ## Acceptance tests
 

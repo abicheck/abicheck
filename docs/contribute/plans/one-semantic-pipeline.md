@@ -171,6 +171,40 @@ around deletion/authority at all, and Phase 10 itself still documents that
 detector migration and legacy-projection retirement are separate future
 work it does not itself schedule. The six sub-phases below close that gap.
 
+### 2026-09-05 re-assessment of this extension (accepted)
+
+A second external review, of `main` at the merge of PR #1062, re-checked the
+six sub-phases below against the implementation rather than against their
+own completion labels. It was reviewed and **accepted** on 2026-09-05.
+**Its findings, reasoning, retirement table, and parallel-track
+decomposition are owned by
+[duplication-and-convergence-assessment.md](duplication-and-convergence-assessment.md)**
+("2026-09-05 re-assessment" and Phase 6), which already owns cross-cutting
+retirement work — read it there rather than a second copy here.
+
+Its governing correction, which applies to how every row below is closed:
+**"no current bug found" can justify preserving behavior, never a second
+implementation of that behavior.** `investigated_declined` is therefore a
+separate disposition on the `introduced → wired → authoritative → retired`
+ladder, and it leaves a removal gate **open**.
+
+What that means for this table specifically — the rows it corrects, and
+which track closes each:
+
+| Row | Correction | Track |
+|---|---|---|
+| 2B/6B | The landed typedef and constant cohorts are *fidelity gates*, not authority transfers: both indexes are built every comparison and the legacy projection adjudicates | T3 |
+| 4B | Built, not unwired, on both paths — what is open is consumption: partial on compare (`classify_compare_pair` reads `requested_depth`), absent on dump | T4 |
+| 5B | The `vtable` "final closure" is an investigated decline of a behavioral change; the PDB fabrication path and the authority transfer are still open | T9 |
+| 7B | `action/run.sh` is partially migrated — the residual is the raw exit/stderr path | T8 |
+
+One finding bears on this plan's own guardrail design rather than on a row:
+`scripts/semantic_ir_cutover.py`'s module-level "no legacy attribute read"
+rule is *satisfied by* the typedef selector while the legacy projection
+still decides, so it is not evidence of authority. Each cohort's guard must
+cover the whole dependency path — callers, adapters, selectors, producers —
+and the legacy-*writer* retirement condition.
+
 **Adopted sub-phases** — each slots after the parent phase it extends in
 the numbering, and each starts at status `not_started`. This table is the
 status owner for the six sub-phases themselves; the ledger

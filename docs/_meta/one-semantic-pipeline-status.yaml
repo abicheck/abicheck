@@ -38,7 +38,10 @@
 #
 # Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
-# as of base commit bfb40222 (Track 4's 7B ledger/plan-table drift fix --
+# as of base commit bbce489e (the base this 2026-09-05 re-assessment update
+# built on -- PR #1062, the --exit-code-scheme removal, is an ancestor of it,
+# so this receipt covers the implementation the re-assessment inspected).
+# bbce489e carries forward bfb40222 (Track 4's 7B ledger/plan-table drift fix --
 # updating the run_outcome concept's removal_gate to describe the landed
 # release-fan-out investigation and its parity test -- was built on and
 # merges this content forward), which itself carries forward 2a88a5bd (the
@@ -50,6 +53,19 @@
 # status-sync fixes. Update this file in the same PR that changes a
 # concept's landed status.
 #
+# 2026-09-05 re-assessment (accepted; see docs/contribute/plans/
+# duplication-and-convergence-assessment.md's "2026-09-05 re-assessment"
+# section and its Phase 6): a concept's `authority` value must reflect
+# which representation *decides*, not which one is populated. Two
+# corrections this file now carries: `semantic_ir`'s landed cohorts are
+# fidelity gates (both indexes built every comparison, legacy adjudicates),
+# not authority transfers; and an "investigated and declined" disposition
+# for a *behavioral* change never closes an *implementation* consolidation's
+# removal gate. A future schema bump should make that ladder explicit
+# (introduced -> wired -> authoritative -> retired, with
+# investigated_declined as a separate disposition); until then it is stated
+# in each affected removal_gate's prose.
+#
 # as_of_commit names a commit on the default branch, the same convention
 # adr/index.md's `**Verified:**` receipt uses and for the identical reason:
 # a PR-branch commit stops existing once the branch is squash-merged and
@@ -59,8 +75,8 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: bfb40222
-as_of_date: "2026-09-03"
+as_of_commit: bbce489e
+as_of_date: "2026-09-05"
 
 concepts:
   facts:
@@ -107,14 +123,29 @@ concepts:
       once, canonically, in diff_types_vtable.py's own module docstring
       ("Track 4, 5B final closure" section) — not repeated here. The PDB
       fabrication that closure's second round found remains real,
-      reachable, and open, not fixed. This closes the
-      removal gate for every one of the five originally-named fields
-      (bases/virtual_bases/vtable/vptr_offset_bits/is_va_list). Residual,
+      reachable, and open, not fixed. This closes the Phase 5B
+      *behavioral-investigation* gate for every one of the five
+      originally-named fields
+      (bases/virtual_bases/vtable/vptr_offset_bits/is_va_list) -- not the
+      implementation-consolidation removal gate, which stays open for the
+      vtable/TYPE_VTABLE_CHANGED cluster (see the 2026-09-05 re-assessment
+      correction below). Residual,
       separately tracked: seven case-(a) fields (default, the five
       deprecated/is_scoped surfaces) left on the existing fact_provenance
       mechanism after their own fourth-through-seventh-slice investigation
       found no safe conversion without a legacy-hybrid load-path fix.
-
+      **2026-09-05 re-assessment correction:** the vtable/
+      TYPE_VTABLE_CHANGED "final closure" is an *investigated decline* of a
+      behavioral change, which does not close this concept's implementation
+      consolidation -- the PDB-driven fabricated-finding path it documents
+      is still reachable and the authority transfer has not happened. The
+      re-assessment's finding is that FactStatus alone is insufficient here
+      by construction: the model must also carry observed-vs-inferred,
+      producer and observation scope, and positive-observation-vs-
+      completeness, so a detector can distinguish "I observed this virtual
+      method" from "I established the complete set of virtual methods."
+      Tracked as duplication-and-convergence-assessment.md Phase 6 item 4 /
+      track T9.
   identity:
     primitive: complete
     producers: partial
@@ -220,7 +251,14 @@ concepts:
     primitive: complete
     producers: partial
     consumers: partial
-    authority: mixed
+    # 2026-09-05 re-assessment: lowered from `mixed` to `legacy`. Both
+    # migrated cohorts run behind a fidelity gate that can only select the
+    # IR when it already reproduces the legacy projection exactly, so the
+    # IR cannot produce an outcome the legacy representation would not --
+    # the legacy projection is what decides. `mixed` would require an
+    # authoritative IR consumer that is not so adjudicated; there is none
+    # today. See this concept's removal_gate for the full account.
+    authority: legacy
     removal_gate: >-
       Phase 6B (semantic-ir-checker-cutover), two cohorts landed so far.
       First cohort (2026-09-03): the TYPEDEF family now reads SemanticIR
@@ -306,7 +344,17 @@ concepts:
       AbiSnapshot.types/.enums for a BTF/CTF-sourced snapshot;
       function/variable/typedef identity remains unimplemented for both
       formats.
-
+      **2026-09-05 re-assessment correction:** both landed cohorts are
+      *fidelity gates*, not authority transfers. typedef_index_pair and
+      constant_index_pair construct the IR-backed AND the legacy-backed
+      index on every comparison, and use the IR only when the legacy
+      projection agrees on names, values, identities and ordering --
+      the legacy representation still adjudicates -- which is why this
+      concept's own authority field reads `legacy`, not `mixed`. The gate closes when
+      a current-format snapshot causes no legacy index to be built at all
+      and a disagreement is an explicit consistency failure rather than a
+      silent fallback. Tracked as duplication-and-convergence-assessment.md
+      Phase 6 item 2 / track T3.
   public_surface:
     primitive: complete
     producers: complete
@@ -332,10 +380,26 @@ concepts:
       call site landed 2026-09-03: service_compare_pipeline.
       resolve_compare_request builds one from its own already-resolved
       AnalysisPlan and attaches it on ResolvedComparePair, additive and
-      unread by any consumer -- resolve_dump_request remains unwired, and
-      no evaluation_config/compile_contexts/with_assurance() caller exists
-      yet, so this gate stays open.
-
+      unread by any consumer at the time that slice landed. The two paths
+      have since diverged and are recorded separately rather than as one
+      status: the COMPARE path has one real consumer --
+      classify_compare_pair reads pair.resolved_execution_context.
+      requested_depth (fourth slice, 2026-09-04) -- so its consumption is
+      partial, not absent; the DUMP path is built but still wholly unread
+      (execute_dump_request calls with_assurance(), landed 2026-09-03, and
+      both paths thread per-side compile_contexts, but nothing downstream
+      of execute_dump_request reads the object back). What stays open on
+      both is consumption, not construction, and evaluation_config is
+      still None on every real ResolvedComparePair/ResolvedDumpRequest, so
+      this gate stays open.
+      **2026-09-05 re-assessment correction:** unread, not unwired, on both
+      paths -- compare classification still separately loads suppression and
+      policy, applies pack contributions, prepares source evidence, resolves
+      gate settings and computes assurance, and execute_dump_request still
+      takes nine out-of-band semantic kwargs, so reaching the same function
+      does not yet mean equivalent requests execute under the same resolved
+      semantics. Tracked as duplication-and-convergence-assessment.md
+      Phase 6 item 3 / track T4.
   run_outcome:
     primitive: complete
     producers: complete
@@ -391,7 +455,12 @@ concepts:
       owner for this concept per docs/AGENTS.md's fact-owner/narrative-owner
       split; not reproduced here in full, to avoid the exact
       ledger-vs-plan drift this same PR exists to fix.
-
+      **2026-09-05 re-assessment correction:** action/run.sh is partially
+      migrated -- _report_compat_verdict() and _severity_gate_exit() already
+      prefer run_outcome's structured fields; the residual is the raw
+      process-exit/stderr-text path, which PR #1062 extended again for
+      evidence-contract errors. Tracked as track T8; the release fan-out's
+      apply_release_gate_pack raw-string mirror is track T6.
   sectioned_storage:
     primitive: complete
     producers: complete
