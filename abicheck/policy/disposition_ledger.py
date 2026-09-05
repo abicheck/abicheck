@@ -195,14 +195,27 @@ class DispositionRecord:
     #: D2 overlay attribute, independent of ``disposition``: the policy
     #: reclassification rule that moved this finding's verdict, if any.
     reclassified_by: str | None = None
-    #: Set when a consumer scope (``--used-by``/``--required-symbol``) put
-    #: this finding outside the gate that actually decides the run. Tracked
-    #: separately from the disposition because the two are decided by
+    #: Set when something *other than severity* already put this finding
+    #: outside the gate that decides the run: a consumer scope
+    #: (``--used-by``/``--required-symbol``) judged it irrelevant, ADR-039
+    #: build-context reconciliation proved it a header-parse artifact, or the
+    #: opaque-handle downgrade excluded it from the verdict on its own merits.
+    #:
+    #: Tracked separately from the disposition because the two are decided by
     #: different authorities and must not overwrite each other: severity says
-    #: *how severe* a finding is, and no severity can make a finding the
-    #: consumer never uses gate this run. Without it, resolving a severity
-    #: config would un-demote a scope-excluded finding back into ``gating``.
-    scope_excluded: bool = False
+    #: *how severe* a finding is, never whether it reached the gate at all.
+    #: Without it, resolving a severity configuration re-answers
+    #: ``_kept_disposition`` for such a record and can promote it back to
+    #: ``gating`` -- reporting a run as gating on a finding
+    #: ``gate_decision_for_result`` never scored, since that reads
+    #: ``result.changes`` and these are not in it.
+    #:
+    #: Generalized from a scope-only flag once a second source appeared. Any
+    #: future exclusion that happens *before* the gate belongs here too; the
+    #: rule is "was this finding withheld from the gate by something severity
+    #: does not control", not "which mechanism withheld it" (that is the
+    #: application point).
+    gate_excluded: bool = False
 
     def to_dict(self) -> dict[str, object]:
         entry: dict[str, object] = {
@@ -252,14 +265,14 @@ class DispositionLedger:
         *,
         application_point: str,
         rule: RuleProvenance | None = None,
-        scope_excluded: bool = False,
+        gate_excluded: bool = False,
     ) -> None:
         """Record *change*'s single terminal *disposition*.
 
         A no-op when *change* was already recorded — the disposition it
         received first is the one that actually applied to it.
 
-        *scope_excluded* marks a finding a consumer-scoping pass judged
+        *gate_excluded* marks a finding a consumer-scoping pass judged
         irrelevant, so :meth:`with_gate` cannot later promote it into a gate
         the run never evaluated it for. It is set here, rather than only by
         :meth:`apply_scope`, because a late-appended finding is recorded for
@@ -281,7 +294,7 @@ class DispositionLedger:
                 verdict_class=_verdict_class_of(change),
                 rule=rule,
                 reclassified_by=getattr(change, "reclassified_by", None),
-                scope_excluded=scope_excluded,
+                gate_excluded=gate_excluded,
             )
         )
 
@@ -363,7 +376,7 @@ class DispositionLedger:
         gated._seen_ids = dict(self._seen_ids)
         gated._records = [
             record
-            if record.scope_excluded
+            if record.gate_excluded
             or record.disposition not in (Disposition.GATING, Disposition.NON_GATING)
             else replace(
                 record,
@@ -436,6 +449,56 @@ class DispositionLedger:
                 ).value,
             )
 
+    def refresh_promoted(self, result: DiffResult) -> None:
+        """Re-answer any record whose finding has since been *promoted*.
+
+        ADR-049 §4.3: a run given ``--used-by``/``--required-symbol`` has been
+        *told* what the contract is, and
+        ``contract_scoped_promotion.stamp_scoped_changes`` can promote a
+        finding the ``--contract`` evaluator had ruled ``PROVEN_OUT_OF_
+        CONTRACT`` (or left ``UNKNOWN_*``) to ``IN_CONTRACT`` -- an explicit
+        consumer outranks anything two snapshots can show. The scoped gate
+        then scores it, so its ledger record's ``out_of_contract`` /
+        ``unresolved_relevance`` label is stale, and
+        :meth:`apply_scope`'s narrowing-only guard skips exactly those two
+        dispositions rather than refreshing them. Left alone, an evaluated
+        breaking removal exits nonzero while the audit reports
+        ``effective_total: 0``.
+
+        A promotion is the one thing that may *widen* a record, which is why
+        it is a separate pass ahead of the narrowing one rather than a branch
+        inside it: the two move in opposite directions and the order between
+        them is what makes the result well-defined (promote first, then
+        narrow to the consumer's own set -- a promoted finding that consumer
+        does not use is still excluded).
+
+        Deliberately keyed on the finding's *own* evaluated state rather than
+        on a promotion having been recorded anywhere: this asks "does the
+        record still describe the finding", which is answerable for any
+        future promoter too.
+        """
+        from ..contract_gating import is_evaluated
+
+        gate = _GateContext.of(result)
+        for index, (record, change) in enumerate(zip(self._records, self._anchors)):
+            if record.disposition not in (
+                Disposition.OUT_OF_CONTRACT,
+                Disposition.UNRESOLVED_RELEVANCE,
+            ):
+                continue
+            if not is_evaluated(change):
+                continue
+            self._records[index] = replace(
+                record,
+                disposition=_kept_disposition(
+                    change,  # type: ignore[arg-type]
+                    result,
+                    None,
+                    gate,
+                ),
+                application_point="contract_promotion",
+            )
+
     def apply_scope(self, result: DiffResult, in_scope: Iterable[object]) -> None:
         """Narrow the gating set to the findings the *scoped* gate scores.
 
@@ -476,7 +539,7 @@ class DispositionLedger:
                 self._records[index] = replace(
                     record,
                     disposition=Disposition.NON_GATING,
-                    scope_excluded=True,
+                    gate_excluded=True,
                 )
 
     def record_for(self, change: object) -> DispositionRecord | None:

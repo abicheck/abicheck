@@ -95,14 +95,14 @@ def _oracle(
 ) -> tuple[Disposition, bool]:
     """What D2/D3 say the record should look like after the close and gate.
 
-    Returns ``(disposition, scope_excluded)``. Three rules, in order:
+    Returns ``(disposition, gate_excluded)``. Three rules, in order:
 
     1. **Scoping only ever narrows, and only what was evaluated.** A
        suppressed, deduplicated, out-of-contract or unresolved-relevance
        finding never reached the gate, so no scope decision can move it (D2:
        one change, one terminal disposition) and it is never marked excluded.
     2. **An evaluated finding outside the scope is demoted and marked.** It
-       becomes ``non_gating`` with ``scope_excluded`` set.
+       becomes ``non_gating`` with ``gate_excluded`` set.
     3. **Severity re-scores only what scoping left in.** A scope-excluded or
        non-evaluated record is untouched — severity says how severe a finding
        is, never whether the consumer this run gates on uses it at all.
@@ -228,7 +228,7 @@ def test_scope_and_gate_agree_with_the_oracle(
     """Every cell of the state space, against `_oracle`.
 
     Checks all four questions the mechanism has been wrong about at least
-    once: whether `scope_excluded` is set, what the disposition is after the
+    once: whether `gate_excluded` is set, what the disposition is after the
     close, what it is after `with_gate` re-scores it, and whether the
     detected total conserves across both.
     """
@@ -260,7 +260,7 @@ def test_scope_and_gate_agree_with_the_oracle(
     )
     record = ledger.record_for(change)
     assert record is not None, "the close must record a finding it was handed"
-    assert record.scope_excluded is expected_excluded
+    assert record.gate_excluded is expected_excluded
     assert record.disposition is expected_disposition
 
     # …and again after the resolved gate re-scores what scoping left in.
@@ -271,7 +271,7 @@ def test_scope_and_gate_agree_with_the_oracle(
     )
     gated_record = gated.record_for(change)
     assert gated_record.disposition is expected_gated
-    assert gated_record.scope_excluded is expected_gated_excluded
+    assert gated_record.gate_excluded is expected_gated_excluded
 
     # D3 conservation, on both the closed and the re-scored ledger: two
     # findings were detected, and every one of them holds exactly one
@@ -355,7 +355,7 @@ def test_scoping_never_relabels_a_non_evaluated_finding() -> None:
         close_consumer_scope(ledger, result, gating=[], also_detected=[late])
         record = ledger.record_for(late)
         assert record.disposition is expected
-        assert record.scope_excluded is False, (
+        assert record.gate_excluded is False, (
             "a finding the gate never scored cannot be excluded from it"
         )
 
@@ -372,14 +372,14 @@ def test_a_second_close_is_idempotent() -> None:
         _record_initially(ledger, change, Disposition.GATING, result)
 
     close_consumer_scope(ledger, result, gating=[kept], also_detected=[kept, dropped])
-    first = [(r.disposition, r.scope_excluded) for r in ledger._records]
+    first = [(r.disposition, r.gate_excluded) for r in ledger._records]
     close_consumer_scope(ledger, result, gating=[kept], also_detected=[kept, dropped])
-    assert [(r.disposition, r.scope_excluded) for r in ledger._records] == first
+    assert [(r.disposition, r.gate_excluded) for r in ledger._records] == first
     assert ledger.detected_total == 2
     assert ledger.effective_total == 1
 
 
-def test_a_scope_excluded_finding_survives_repeated_gate_projections() -> None:
+def test_a_gate_excluded_finding_survives_repeated_gate_projections() -> None:
     """`with_gate` returns a copy, so rendering the same run twice under two
     severity settings must give two independent answers and leave the closed
     ledger untouched — the projection-must-not-mutate rule, applied to the
@@ -393,8 +393,8 @@ def test_a_scope_excluded_finding_survives_repeated_gate_projections() -> None:
     for config in (None, _INVERTING_SEVERITY, None):
         record = ledger.with_gate(result, config).record_for(excluded)
         assert record.disposition is Disposition.NON_GATING
-        assert record.scope_excluded is True
-    assert ledger.record_for(excluded).scope_excluded is True
+        assert record.gate_excluded is True
+    assert ledger.record_for(excluded).gate_excluded is True
     assert ledger.effective_total == 0
 
 
@@ -538,4 +538,167 @@ def test_an_unscored_redundant_finding_stays_deduplicated() -> None:
     result.redundant_count = 1
     ledger = finalize_ledger(DispositionLedger(), result)
     assert ledger.record_for(derived).disposition is Disposition.DEDUPLICATED
+    assert ledger.effective_total == 0
+
+
+# ---------------------------------------------------------------------------
+# Every place a finding can leave the gate, enumerated
+# ---------------------------------------------------------------------------
+
+#: Every bucket :func:`finalize_ledger` reads, with whether `checker.compare`
+#: scores the verdict over it. The oracle is that function's own verdict input
+#: — `kept + verdict_redundant`, i.e. `result.changes` plus the redundant
+#: findings policy did not exclude — stated here as a table rather than
+#: recomputed, so it cannot agree with the ledger by sharing its reasoning.
+#:
+#: This table is the point of the test below: the round-10 and round-11
+#: findings were both "a bucket produced a disposition and a later pass made a
+#: wrong assumption about it", and a test that covers only the buckets a
+#: previous bug happened to touch cannot be the backstop for that family.
+#: A bucket added to `finalize_ledger` later and not added here fails
+#: `test_the_bucket_table_covers_every_bucket_the_finalizer_reads`.
+_BUCKET_SCORED = (
+    ("changes", True),
+    ("redundant_scored", True),
+    ("redundant_unscored", False),
+    ("opaque_filtered", False),
+    ("reconciled_changes", False),
+    ("out_of_surface_changes", False),
+)
+
+
+def _result_with_one_breaking_finding_in(bucket: str):
+    """A `DiffResult` whose single breaking finding sits only in *bucket*."""
+    from abicheck.checker_types import DiffResult
+
+    result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+    change = Change(
+        kind=ChangeKind.FUNC_REMOVED, symbol="only", description="the one finding"
+    )
+    scored: list[Change] = []
+    if bucket == "changes":
+        result.changes = [change]
+    elif bucket == "redundant_scored":
+        result.redundant_changes = [change]
+        result.redundant_count = 1
+        scored = [change]
+    elif bucket == "redundant_unscored":
+        result.redundant_changes = [change]
+        result.redundant_count = 1
+    elif bucket == "opaque_filtered":
+        result.redundant_changes = [change]
+        result.redundant_count = 0
+    else:
+        setattr(result, bucket, [change])
+    return result, change, scored
+
+
+@pytest.mark.parametrize(("bucket", "scored"), _BUCKET_SCORED)
+@pytest.mark.parametrize("severity", [False, True])
+def test_only_the_scored_buckets_are_effective(
+    bucket: str, scored: bool, severity: bool
+) -> None:
+    """The invariant round 10 and round 11 each broke one instance of.
+
+    A finding excluded from the verdict input stays out of `effective_total`,
+    *including* once a severity configuration is resolved — severity says how
+    severe a finding is, never whether it reached the gate. The severity
+    configuration used here rates every category `error`, so any bucket that
+    forgot to mark itself gate-excluded is promoted back to `gating` and
+    fails this test rather than being caught a round later.
+    """
+    from abicheck.policy.disposition_close import finalize_ledger
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+
+    result, change, verdict_scored = _result_with_one_breaking_finding_in(bucket)
+    ledger = finalize_ledger(DispositionLedger(), result, verdict_scored=verdict_scored)
+    assert ledger.detected_total == 1
+    assert ledger.effective_total == int(scored), bucket
+
+    everything_is_an_error = SeverityConfig(
+        abi_breaking=SeverityLevel.ERROR,
+        potential_breaking=SeverityLevel.ERROR,
+        quality_issues=SeverityLevel.ERROR,
+        addition=SeverityLevel.ERROR,
+    )
+    gated = ledger.with_gate(result, everything_is_an_error if severity else None)
+    assert gated.effective_total == int(scored), (
+        f"{bucket}: a severity configuration changed whether this finding "
+        "reached the gate, which is not severity's decision to make"
+    )
+    assert gated.detected_total == 1
+    assert conservation_holds(gated)
+
+
+def test_the_bucket_table_covers_every_bucket_the_finalizer_reads() -> None:
+    """The table above is only a backstop if it stays complete.
+
+    Read off `finalize_ledger`'s source rather than maintained by hand: a
+    bucket added there without a row here is the exact way this test would
+    silently stop being the backstop for the family it exists to close.
+    """
+    import inspect
+
+    from abicheck.policy import disposition_close
+
+    source = inspect.getsource(disposition_close.finalize_ledger)
+    read = {
+        line.split('_bucket("')[1].split('"')[0]
+        for line in source.splitlines()
+        if '_bucket("' in line
+    }
+    # `changes` and `redundant_changes` are covered by four rows between them
+    # (kept, scored, unscored, opaque); `suppressed_changes` is the fallback
+    # for a finding no application point recorded, which by construction
+    # never reaches the gate and is covered by the conservation matrix above.
+    covered = {"changes", "redundant_changes", "suppressed_changes"} | {
+        name for name, _ in _BUCKET_SCORED
+    }
+    assert read <= covered, (
+        f"finalize_ledger reads buckets with no row in _BUCKET_SCORED: "
+        f"{sorted(read - covered)}"
+    )
+
+
+def test_a_contract_promotion_refreshes_a_stale_exclusion() -> None:
+    """Round 11's second half: promotion has to update the record.
+
+    ADR-049 §4.3 lets an explicit `--used-by`/`--required-symbol` contract
+    promote a finding the `--contract` evaluator excluded, and the scoped
+    gate then scores it. `apply_scope` only ever demotes and skips exactly
+    the two non-evaluated dispositions, so without a promotion pass the
+    record keeps its stale `out_of_contract` label and an evaluated breaking
+    removal exits nonzero while the audit reports `effective_total: 0`.
+    """
+    result = _empty_result()
+    ledger = DispositionLedger()
+    promoted = _fixture_change(Disposition.OUT_OF_CONTRACT, 0)
+    _record_initially(ledger, promoted, Disposition.OUT_OF_CONTRACT, result)
+    assert ledger.record_for(promoted).disposition is Disposition.OUT_OF_CONTRACT
+
+    # What `contract_scoped_promotion.stamp_scoped_changes` does to the
+    # finding: an explicit consumer outranks the snapshot-derived exclusion.
+    promoted.contract_relevance = ContractRelevance.IN_CONTRACT
+
+    close_consumer_scope(ledger, result, gating=[promoted], also_detected=[promoted])
+    record = ledger.record_for(promoted)
+    assert record.disposition is Disposition.GATING
+    assert record.application_point == "contract_promotion"
+    assert ledger.effective_total == 1
+
+
+def test_a_promotion_outside_the_consumer_scope_is_still_excluded() -> None:
+    """Promotion widens, scoping narrows, and the order is promote-then-narrow:
+    a finding promoted into the contract that *this* consumer does not use is
+    still out of the gate, and marked so severity cannot pull it back."""
+    result = _empty_result()
+    ledger = DispositionLedger()
+    promoted = _fixture_change(Disposition.OUT_OF_CONTRACT, 0)
+    _record_initially(ledger, promoted, Disposition.OUT_OF_CONTRACT, result)
+    promoted.contract_relevance = ContractRelevance.IN_CONTRACT
+
+    close_consumer_scope(ledger, result, gating=[], also_detected=[])
+    record = ledger.record_for(promoted)
+    assert record.disposition is Disposition.NON_GATING
+    assert record.gate_excluded is True
     assert ledger.effective_total == 0

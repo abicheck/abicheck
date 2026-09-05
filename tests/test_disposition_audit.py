@@ -965,7 +965,7 @@ def test_the_one_line_view_states_a_support_gap_on_a_zero_change_run() -> None:
     assert f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated" in line
 
 
-def test_severity_cannot_un_demote_a_scope_excluded_finding() -> None:
+def test_severity_cannot_un_demote_a_gate_excluded_finding() -> None:
     """Scope and severity are different authorities, and the audit must not
     let one overwrite the other: severity says *how severe* a finding is,
     never whether the consumer this run gates on uses it at all. Without the
@@ -985,7 +985,7 @@ def test_severity_cannot_un_demote_a_scope_excluded_finding() -> None:
     assert compute_disposition_audit(result, strict).effective_total == 1
     excluded = ledger_for(result, strict).record_for(result.changes[1])
     assert excluded.disposition is Disposition.NON_GATING
-    assert excluded.scope_excluded is True
+    assert excluded.gate_excluded is True
 
 
 def test_one_close_over_the_union_not_one_per_consumer() -> None:

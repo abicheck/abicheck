@@ -107,7 +107,7 @@ def test_every_matching_relevant_field_separates_two_rules() -> None:
 
 
 def test_the_audit_and_the_receipt_derive_one_identity() -> None:
-    """"No second selector grammar" applied to rule identity: the ADR-049 D7
+    """ "No second selector grammar" applied to rule identity: the ADR-049 D7
     receipt (`SuppressionList.rule_identities`) and the ADR-067 audit must
     answer the same string for the same rule, or two parts of one report
     disagree about which rule fired."""
@@ -121,7 +121,9 @@ def test_the_audit_and_the_receipt_derive_one_identity() -> None:
             reason="r",
             reachability="proven-unreachable-only",
         ),
-        Suppression(symbol_pattern=".*", label="same", reason="r", allow_public_break=True),
+        Suppression(
+            symbol_pattern=".*", label="same", reason="r", allow_public_break=True
+        ),
     ]
     receipt = SuppressionList(rules).rule_identities()
     assert list(receipt) == [_rule_identity(r) for r in rules]

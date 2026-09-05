@@ -80,9 +80,16 @@ def _record_bucket(
     changes: Iterable[Change],
     disposition: Disposition,
     application_point: str,
+    *,
+    gate_excluded: bool = False,
 ) -> None:
     for change in changes:
-        ledger.record(change, disposition, application_point=application_point)
+        ledger.record(
+            change,
+            disposition,
+            application_point=application_point,
+            gate_excluded=gate_excluded,
+        )
 
 
 def finalize_ledger(
@@ -160,11 +167,19 @@ def finalize_ledger(
                 Disposition.DEDUPLICATED,
                 application_point="redundancy_filter",
             )
+    # `gate_excluded`: these two buckets are `non_gating` because they were
+    # taken *out of the verdict input* before any severity setting existed --
+    # `checker.compare` scores `kept + verdict_scored`, and neither is in it.
+    # Re-answering `_kept_disposition` for them under a severity config would
+    # promote a reconciled `TYPE_SIZE_CHANGED` back to `gating` under
+    # `abi_breaking: error`, reporting the run as gating on a finding
+    # `gate_decision_for_result` never scored (it reads `result.changes`).
     _record_bucket(
         ledger,
         redundant[redundant_count:],
         Disposition.NON_GATING,
         "opaque_downgrade",
+        gate_excluded=True,
     )
     _record_bucket(
         ledger,
@@ -181,6 +196,7 @@ def finalize_ledger(
         _bucket("reconciled_changes"),
         Disposition.NON_GATING,
         "build_context_reconciliation",
+        gate_excluded=True,
     )
     for change in _bucket("suppressed_changes"):
         ledger.record_suppression(
@@ -245,8 +261,14 @@ def close_consumer_scope(
             change,
             Disposition.NON_GATING if excluded else disposition,
             application_point="consumer_scope",
-            scope_excluded=excluded,
+            gate_excluded=excluded,
         )
+    # Promotion before narrowing: `_promote_scoped_contract` may have moved a
+    # finding the `--contract` evaluator excluded into the contract, and
+    # `apply_scope` only ever demotes (it skips exactly those dispositions).
+    # The order is what makes the result well-defined -- a finding promoted
+    # into the contract but not used by this consumer is still excluded.
+    ledger.refresh_promoted(result)
     ledger.apply_scope(result, gating)
     ledger.resolve_verdict_classes(result)
 
