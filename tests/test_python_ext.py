@@ -1155,3 +1155,20 @@ def test_explicit_null_python_ext_not_rederived() -> None:
     d = {"library": "libfoo.so", "version": "1.0", "elf": elf, "python_ext": None}
     snap = snapshot_from_dict(d)
     assert snap.python_ext is None
+
+
+def test_multiple_pyinit_exports_pick_deterministic_module() -> None:
+    """ADR-063 T7 (Codex review): `_iter_exported_names` must return a
+    deterministically-ordered sequence -- `all_export_names()` is a
+    `frozenset` whose iteration order depends on `PYTHONHASHSEED`, and
+    `_detect_init_export` picks the *first* `PyInit_*` match, so an unsorted
+    order would record a different `module_name`/`init_symbol` across runs of
+    the identical binary when more than one `PyInit_*` export is present."""
+    elf = ElfMetadata()
+    elf.symbols = [
+        ElfSymbol(name="PyInit_zzz", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
+        ElfSymbol(name="PyInit_aaa", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
+    ]
+    snap = AbiSnapshot(library="multi.so", version="1", elf=elf, source_path="multi.so")
+    results = {detect_python_extension(snap).module_name for _ in range(5)}
+    assert results == {"aaa"}  # sorted() always picks PyInit_aaa first

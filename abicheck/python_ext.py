@@ -95,12 +95,18 @@ def _iter_exported_names(snap: AbiSnapshot) -> list[str]:
     deliberately unfiltered by ELF default-version status, matching this
     function's original "every raw table entry" contract (only a
     ``PyInit_*``/``init<mod>`` pattern match on the result matters to its
-    caller, so no per-alias distinction is needed here).
+    caller, so no per-alias distinction is needed here). Sorted rather than
+    left in raw table order: ``all_export_names`` returns a ``frozenset``,
+    whose iteration order depends on ``PYTHONHASHSEED``, and
+    ``_detect_init_export`` (this function's one caller) returns the *first*
+    pattern match — when a shared object exports more than one ``PyInit_*``
+    function, an unsorted order would record a different ``module_name``/
+    ``init_symbol`` across runs of the same binary (Codex review).
     """
     index = build_raw_export_index(snap)
     if index is None:
         return []
-    return list(all_export_names(index))
+    return sorted(all_export_names(index))
 
 
 def _collect_cpython_imports(snap: AbiSnapshot) -> list[str]:
