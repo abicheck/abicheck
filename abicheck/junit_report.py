@@ -705,11 +705,11 @@ def _add_disposition_audit_properties(
             f"{count} finding(s); reason={rule.reason or 'none'}; "
             f"intent={rule.intent}; source={rule.source_file or 'inline'}",
         )
+    if audit.policy_overlays:  # findings the gate scores that are not detections
+        _prop("abicheck.policy_overlays", str(audit.policy_overlays))
     if audit.not_evaluated_detectors:
-        _prop(
-            "abicheck.not_evaluated_detectors",
-            ",".join(d.name for d in audit.not_evaluated_detectors),
-        )
+        names = ",".join(d.name for d in audit.not_evaluated_detectors)
+        _prop("abicheck.not_evaluated_detectors", names)
 
 
 def _add_scoped_properties(props: ET.Element, result: DiffResult) -> None:

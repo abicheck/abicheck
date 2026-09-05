@@ -36,14 +36,23 @@
   `suppression.suppressed_changes[]` entry now records *which* rule hid the
   finding — its selector identity, the `--suppress` document's path, reason,
   label and expiry — instead of computing that and dropping it. Report schema
-  bumped to `2.50` (additive only).
+  bumped to `2.50` (additive only), then `2.51` for `disposition_audit`'s
+  `policy_overlays` count -- findings policy generated *about* another
+  finding (a withheld-suppression advisory) appear in the effective total but
+  in neither the raw total nor the per-disposition counts, and this states
+  the difference rather than leaving it unaccounted.
 - **`not_evaluated` detector state.** A detector whose support gate refused it
   is now recorded as `not_evaluated` with the gate's reason rather than as
   `changes_count: 0`, so "did not run" and "ran, found nothing" are no longer
   the same report. The `dwarf` detector's own "neither side has debug info"
   early return moved onto that gate. `not_evaluated` is a reporting
   distinction only: it never changes a verdict, an exit code, or the run's
-  reported analysis confidence.
+  reported analysis confidence. A support predicate that is a *conclusive
+  trigger* rather than an evidence gate declares so at registration
+  (`support_is_trigger`) and reports an ordinary evaluated zero -- the
+  layout-coherence detector's "neither snapshot records a DWARF-vs-header
+  mismatch" is an answer, not a coverage limitation, and no longer reads as
+  one.
 
 ### Fixed
 

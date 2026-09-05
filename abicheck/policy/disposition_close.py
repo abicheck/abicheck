@@ -84,7 +84,20 @@ def record_kept_change(
 #: and appear in every report -- but they are not detections, so D1's raw
 #: total must not move when one appears (adding a rule redistributes
 #: dispositions; it never changes what was observed).
-_POLICY_OVERLAY_KINDS = frozenset({"suppression_would_hide_public_break"})
+#:
+#: Every kind ``post_processing``'s ``_build_suppression_*`` helpers
+#: synthesize belongs here, not only the one a review happened to report:
+#: both exist solely because a rule was written, so either one counted as a
+#: detection makes the raw total depend on the rule set.
+#: ``tests/test_disposition_state_sweep.py`` enumerates those builders from
+#: source and fails on a kind missing from this set, so a third diagnostic
+#: cannot be added without classifying it.
+_POLICY_OVERLAY_KINDS = frozenset(
+    {
+        "suppression_would_hide_public_break",
+        "suppression_reachability_unknown",
+    }
+)
 
 
 def _is_policy_overlay(change: object) -> bool:

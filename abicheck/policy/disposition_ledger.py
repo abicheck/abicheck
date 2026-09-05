@@ -664,6 +664,16 @@ class DispositionLedger:
             tally[record.rule] += 1
         return tuple((rule, tally[rule]) for rule in ordered)
 
+    @property
+    def policy_overlay_total(self) -> int:
+        """Records that are findings the gate can score but not observations.
+
+        In :attr:`effective_total` and in neither :attr:`detected_total` nor
+        :meth:`counts`, so a consumer reconciling the three needs this number
+        to account for the difference.
+        """
+        return sum(1 for r in self._records if r.policy_overlay)
+
     def to_dict(self) -> dict[str, object]:
         """The JSON ``disposition_audit`` block (report schema 2.50)."""
         return {
@@ -674,7 +684,7 @@ class DispositionLedger:
             # `effective_total` but in neither `detected_total` nor `counts`,
             # so a consumer reconciling the three needs to know how many
             # there were.
-            "policy_overlays": sum(1 for r in self._records if r.policy_overlay),
+            "policy_overlays": self.policy_overlay_total,
             "rules": [
                 {**rule.to_dict(), "matched_count": count}
                 for rule, count in self.rules()

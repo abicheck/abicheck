@@ -91,6 +91,14 @@ class DispositionAudit:
     #: ADR-067 D3's other half: capability that was never exercised reads as
     #: *not evaluated*, never as a finding count of zero.
     not_evaluated_detectors: tuple[NotEvaluatedDetector, ...]
+    #: Policy-generated diagnostics (a withheld-suppression advisory), which
+    #: are in :attr:`effective_total` but in neither :attr:`detected_total`
+    #: nor :attr:`counts` -- they are findings the gate can score, not
+    #: observations. Carried through every projection because without it a
+    #: consumer reconciling the three sees an effective finding that appears
+    #: in no raw total and no disposition count, and cannot tell whether that
+    #: is an overlay or a bug (Codex review).
+    policy_overlays: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -103,6 +111,7 @@ class DispositionAudit:
             "not_evaluated_detectors": [
                 det.to_dict() for det in self.not_evaluated_detectors
             ],
+            "policy_overlays": self.policy_overlays,
         }
 
     @classmethod
@@ -133,6 +142,7 @@ class DispositionAudit:
                 NotEvaluatedDetector(name=row["name"], reason=row.get("reason"))
                 for row in d.get("not_evaluated_detectors") or ()
             ),
+            policy_overlays=int(d.get("policy_overlays") or 0),
         )
 
 
@@ -162,6 +172,7 @@ def compute_disposition_audit(
             for det in getattr(result, "detector_results", None) or ()
             if getattr(det, "not_evaluated", False)
         ),
+        policy_overlays=ledger.policy_overlay_total,
     )
 
 
@@ -207,9 +218,15 @@ def render_disposition_audit_note(audit: DispositionAudit) -> str:
         for name, count in audit.counts
         if count and name != Disposition.GATING.value
     ]
+    if audit.policy_overlays:
+        parts.append(f"{audit.policy_overlays} policy overlay(s)")
     if audit.not_evaluated_detectors:
         parts.append(f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated")
-    if audit.detected_total == 0 and not audit.not_evaluated_detectors:
+    if (
+        audit.detected_total == 0
+        and not audit.not_evaluated_detectors
+        and not audit.policy_overlays
+    ):
         # Nothing detected and every detector ran: the counts are true but say
         # nothing the line beside them ("no changes (0 total)") does not
         # already say, so this one view stays silent rather than repeating it.
@@ -243,6 +260,12 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
                 f"- `{rule.rule_id or 'rule'}`{source} — {detail} "
                 f"[intent: {rule.intent}{expiry}] — {count} finding(s)"
             )
+        lines.append("")
+    if audit.policy_overlays:
+        lines.append(
+            f"**Policy overlays:** {audit.policy_overlays} "
+            "(diagnostics the gate can score; not counted as detections)"
+        )
         lines.append("")
     if audit.not_evaluated_detectors:
         # Collapsed to one line on purpose: D3 requires the *state* and its
@@ -295,6 +318,8 @@ def render_disposition_audit_comment_lines(audit: DispositionAudit) -> list[str]
         if count and name != Disposition.GATING.value
     )
     tail = f" · {counts}" if counts else ""
+    if audit.policy_overlays:
+        tail += f" · {audit.policy_overlays} policy overlay(s)"
     if audit.not_evaluated_detectors:
         # Same reason as the one-line view: on a zero-delta comparison this
         # row is the only place the reader learns a detector could not run,

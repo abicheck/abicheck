@@ -344,11 +344,38 @@ def test_every_policy_overlay_kind_is_produced_by_policy_not_a_detector() -> Non
         assert any(k.value == slug for k in ChangeKind), (
             f"{slug!r} is not a real ChangeKind"
         )
-    # The one member today, named so a second entry is a deliberate decision
-    # rather than a drive-by addition.
-    assert _POLICY_OVERLAY_KINDS == {
-        ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK.value
-    }
+    # Derived from the source rather than hand-listed: every kind
+    # `post_processing`'s `_build_suppression_*` helpers synthesize is a
+    # policy overlay by construction, and a third such builder must be
+    # classified rather than silently counted as an observation. This is what
+    # the reported gap was -- the sibling
+    # `SUPPRESSION_REACHABILITY_UNKNOWN` diagnostic existed and was never
+    # added to the set.
+    import ast
+    import inspect
+
+    from abicheck import post_processing
+
+    synthesized = set()
+    tree = ast.parse(inspect.getsource(post_processing))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        if not node.name.startswith("_build_suppression"):
+            continue
+        for inner in ast.walk(node):
+            if (
+                isinstance(inner, ast.Attribute)
+                and isinstance(inner.value, ast.Name)
+                and inner.value.id == "ChangeKind"
+            ):
+                synthesized.add(getattr(ChangeKind, inner.attr).value)
+    assert synthesized, "the builders must still be discoverable"
+    assert synthesized <= _POLICY_OVERLAY_KINDS, (
+        "policy synthesizes these diagnostics but they are counted as "
+        f"observations: {sorted(synthesized - _POLICY_OVERLAY_KINDS)}"
+    )
+    assert _POLICY_OVERLAY_KINDS == synthesized
 
 
 def test_the_plugin_host_entry_point_closes_its_own_scope() -> None:
@@ -390,3 +417,94 @@ def test_the_plugin_host_entry_point_closes_its_own_scope() -> None:
             record = ledger.record_for(change)
             assert record.disposition is Disposition.NON_GATING
             assert record.gate_excluded is True
+
+
+class TestSupportPredicateSemantics:
+    """ADR-067 D3: `not_evaluated` means *the evidence was absent*.
+
+    Every `requires_support` predicate returns a bare boolean, but two very
+    different things can make it false: the input a detector needs is missing
+    (a real coverage limitation), or the evidence is present and conclusively
+    says there is nothing to report. Reading the boolean alone recorded the
+    second as a coverage gap — claiming a limitation for a detector that
+    effectively ran and correctly found zero, which is precisely the
+    distinction this field exists to make.
+
+    The meaning is now declared at registration (`support_is_trigger`), and
+    these tests state the contract over the *whole registry* rather than the
+    one detector that was reported.
+    """
+
+    def test_every_registered_predicate_declares_what_false_means(self):
+        """A new detector must classify its predicate deliberately.
+
+        The classification cannot be derived — the boolean is identical
+        either way — so this pins the current split by name. Adding a
+        `requires_support` detector fails here until it is placed, the same
+        discipline `canonical_identity_contract.py` applies to `ChangeKind`.
+        """
+        from abicheck.detector_registry import registry
+
+        #: Predicates whose `False` means "the evidence is present and says
+        #: there is nothing here", not "the evidence is missing".
+        conclusive_triggers = {"dwarf_layout_coherence"}
+
+        gated = {
+            entry.name: entry.support_is_trigger
+            for entry in registry._detectors
+            if entry.support_fn is not None
+        }
+        assert gated, "the registry must still have gated detectors"
+        assert {name for name, trig in gated.items() if trig} == conclusive_triggers
+        # …and every other one really does read as an evidence gate: its
+        # reason names something *missing*, which is what makes it a gap.
+        for name, is_trigger in gated.items():
+            if is_trigger:
+                continue
+            entry = next(e for e in registry._detectors if e.name == name)
+            _, reason = entry.support_fn(
+                AbiSnapshot(library="l", version="1"),
+                AbiSnapshot(library="l", version="2"),
+            )
+            assert reason and any(
+                word in reason.lower()
+                for word in ("missing", "no ", "requires", "without")
+            ), (
+                f"{name}'s gate reason {reason!r} does not read as absent "
+                "evidence — is it a conclusive trigger instead?"
+            )
+
+    def test_a_conclusive_trigger_reports_an_evaluated_zero(self):
+        """The reported case, through a real comparison: two snapshots that
+        both record `matched` coherence leave the detector reporting zero,
+        not a coverage gap."""
+        old, new = _snapshots(kept=1)
+        old.dwarf_layout_coherence = "matched"
+        new.dwarf_layout_coherence = "matched"
+        result = compare(old, new)
+        det = next(
+            d for d in result.detector_results if d.name == "dwarf_layout_coherence"
+        )
+        assert det.changes_count == 0
+        assert det.not_evaluated is False, (
+            "both snapshots state their coherence and both say matched — an "
+            "answer, not a gap"
+        )
+        assert det.coverage_gap is None
+        assert det.enabled is True
+        from abicheck.report.disposition_audit import compute_disposition_audit
+
+        assert not any(
+            d.name == "dwarf_layout_coherence"
+            for d in compute_disposition_audit(result).not_evaluated_detectors
+        )
+
+    def test_an_evidence_gate_still_reports_not_evaluated(self):
+        """The negative control: the distinction must not erase real gaps."""
+        old, new = _snapshots(kept=1)
+        result = compare(old, new)
+        gated = [d for d in result.detector_results if d.not_evaluated]
+        assert gated, "a header-only pair leaves real coverage gaps"
+        for det in gated:
+            assert det.coverage_gap, f"{det.name} claims a gap with no reason"
+            assert det.enabled is False

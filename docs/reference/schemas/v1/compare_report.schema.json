@@ -430,7 +430,7 @@
     "disposition_audit": {
       "type": "object",
       "additionalProperties": true,
-      "description": "ADR-067 D3 (schema 2.50): the raw-versus-effective audit -- every atomically detected change with the single terminal disposition it received. `counts` sums to `detected_total` by construction, and the block is structurally unsuppressible: it is derived from the run's conserved disposition ledger, not from the post-disposition `changes` list.",
+      "description": "ADR-067 D3 (schema 2.50; `policy_overlays` added in 2.51): the raw-versus-effective audit -- every atomically detected change with the single terminal disposition it received. `counts` sums to `detected_total` by construction, and the block is structurally unsuppressible: it is derived from the run's conserved disposition ledger, not from the post-disposition `changes` list.",
       "required": [
         "detected_total",
         "effective_total",
@@ -462,6 +462,12 @@
             "type": "object",
             "additionalProperties": true
           }
+        },
+        "policy_overlays": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Findings policy generated *about* another finding (a withheld-suppression advisory), which appear in `effective_total` but in neither `detected_total` nor `counts` -- they are findings the gate can score, not observations. Stated so a consumer reconciling the three can account for the difference.",
+          "default": 0
         },
         "not_evaluated_detectors": {
           "type": "array",

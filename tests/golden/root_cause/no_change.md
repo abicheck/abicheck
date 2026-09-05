@@ -9,7 +9,6 @@
 > ⚠️ Detector 'elf_layout' disabled: missing ELF metadata on one side
 > ⚠️ Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode
 > ⚠️ Detector 'kabi' disabled: missing Module.symvers (kABI) metadata
-> ⚠️ Detector 'dwarf_layout_coherence' disabled: neither snapshot has a DWARF-vs-header-AST layout coherence mismatch
 > ⚠️ Detector 'long_double' disabled: missing ELF metadata on one side
 > ⚠️ Detector 'pe' disabled: missing PE metadata
 > ⚠️ Detector 'macho' disabled: missing Mach-O metadata
@@ -35,7 +34,7 @@
 | … unresolved relevance | 0 |
 | … deduplicated | 0 |
 
-**Not evaluated:** 14 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `dwarf_layout_coherence`, `long_double`, `pe`, … and 8 more
+**Not evaluated:** 13 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `pe`, `macho`, … and 7 more
 
 _No ABI changes detected._
 ---

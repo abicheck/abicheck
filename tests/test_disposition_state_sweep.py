@@ -498,3 +498,93 @@ def test_a_late_policy_overlay_is_not_a_detection_either() -> None:
     assert ledger.detected_total == 1
     assert conservation_holds(ledger)
     assert ledger.record_for(advisory) is not None
+
+
+def test_the_public_audit_carries_the_overlay_total() -> None:
+    """The `DispositionAudit` projection must explain its own arithmetic.
+
+    An overlay is in `effective_total` and in neither `detected_total` nor
+    `counts`, so a consumer reconciling the three sees an effective finding
+    that appears nowhere — and cannot tell an overlay from a bug. The ledger
+    said `policy_overlays`; the public projection dropped it, taking the
+    explanation out of every JSON-derived format.
+
+    Asserted through the full round trip, not just construction, because the
+    Markdown views reach their renderer through a `ReportDocument` mapping —
+    a field that survived `to_dict` but not `from_dict` would be lost exactly
+    where it is needed.
+    """
+    from abicheck.checker_types import DiffResult
+    from abicheck.policy.disposition_close import finalize_ledger
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+    from abicheck.report.disposition_audit import (
+        DispositionAudit,
+        compute_disposition_audit,
+        render_disposition_audit_comment_lines,
+        render_disposition_audit_lines,
+        render_disposition_audit_note,
+    )
+
+    result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+    break_ = Change(kind=ChangeKind.FUNC_REMOVED, symbol="pub", description="the break")
+    overlay = Change(
+        kind=ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
+        symbol="pub",
+        description="rule matched but was withheld",
+        caused_by_type="pub",
+    )
+    result.changes = [break_, overlay]
+    result.disposition_ledger = finalize_ledger(DispositionLedger(), result)
+
+    inverted = SeverityConfig(
+        abi_breaking=SeverityLevel.INFO,
+        potential_breaking=SeverityLevel.ERROR,
+        quality_issues=SeverityLevel.ERROR,
+        addition=SeverityLevel.ERROR,
+    )
+    audit = compute_disposition_audit(result, inverted)
+    # The exact shape that needs explaining: an effective finding in no count.
+    assert audit.detected_total == 1
+    assert audit.effective_total == 1
+    assert dict(audit.counts)["gating"] == 0
+    assert audit.policy_overlays == 1
+
+    assert audit.to_dict()["policy_overlays"] == 1
+    assert DispositionAudit.from_dict(audit.to_dict()).policy_overlays == 1
+
+    # …and every renderer that surfaces per-disposition counts says so.
+    assert "1 policy overlay(s)" in render_disposition_audit_note(audit)
+    assert any(
+        "Policy overlays" in line for line in render_disposition_audit_lines(audit)
+    )
+    assert any(
+        "policy overlay(s)" in line
+        for line in render_disposition_audit_comment_lines(audit)
+    )
+
+
+def test_an_audit_without_overlays_says_nothing_about_them() -> None:
+    """The negative control: the field is an explanation for an anomaly, so a
+    run with no overlays must not grow a `0 policy overlay(s)` row in every
+    view."""
+    from abicheck.report.disposition_audit import (
+        compute_disposition_audit,
+        render_disposition_audit_comment_lines,
+        render_disposition_audit_lines,
+        render_disposition_audit_note,
+    )
+
+    result, _change, ledger, _sev = _sweep_case(
+        "changes", None, False, None, False, False
+    )
+    result.disposition_ledger = ledger
+    audit = compute_disposition_audit(result)
+    assert audit.policy_overlays == 0
+    assert "policy overlay" not in render_disposition_audit_note(audit)
+    assert not any(
+        "Policy overlays" in line for line in render_disposition_audit_lines(audit)
+    )
+    assert not any(
+        "policy overlay" in line
+        for line in render_disposition_audit_comment_lines(audit)
+    )

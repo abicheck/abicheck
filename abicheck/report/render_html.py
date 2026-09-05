@@ -359,6 +359,9 @@ class SummaryTableData:
     effective_total: int | None = None
     disposition_counts: tuple[tuple[str, int], ...] = ()
     disposition_rules: tuple[str, ...] = ()
+    #: Diagnostics the gate can score that are not observations -- in the
+    #: effective total, in neither the detected total nor the counts.
+    policy_overlays: int = 0
     #: Names of detectors that did not run. Carried separately from the
     #: counts because it is the one audit fact that can be non-empty while
     #: every count is zero — exactly the case (a zero-delta comparison with a
@@ -407,6 +410,10 @@ def render_summary_table(data: SummaryTableData) -> str:
             if count and name != "gating"
         )
         detail = html.escape(detail)
+        if data.policy_overlays:
+            detail += (
+                f"{', ' if detail else ''}{data.policy_overlays} policy overlay(s)"
+            )
         if data.not_evaluated_detectors:
             listed = ", ".join(
                 html.escape(name)

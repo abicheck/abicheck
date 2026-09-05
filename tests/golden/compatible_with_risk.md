@@ -19,7 +19,6 @@
 | Evidence tiers | `elf` |
 | Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
 | Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
-| Coverage gap | Detector 'dwarf_layout_coherence' disabled: neither snapshot has a DWARF-vs-header-AST layout coherence mismatch |
 | Coverage gap | Detector 'pe' disabled: missing PE metadata |
 | Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
 | Coverage gap | Detector 'dwarf' disabled: no DWARF debug info on either side |
@@ -66,7 +65,7 @@
 | … unresolved relevance | 0 |
 | … deduplicated | 0 |
 
-**Not evaluated:** 11 detector(s) — `fingerprint_renames`, `kabi`, `dwarf_layout_coherence`, `pe`, `macho`, `dwarf`, … and 5 more
+**Not evaluated:** 10 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `dwarf`, `python_ext`, … and 4 more
 
 ---
 ## Legend
