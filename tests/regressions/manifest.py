@@ -987,7 +987,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "needed'; and a detector that never ran must read as "
             "`not_evaluated`, never as a real `changes_count: 0`."
         ),
-        fixed_by=(),
+        fixed_by=(1082,),
         seed_tests=("tests/test_disposition_audit.py",),
         axes={
             "application_point": (
