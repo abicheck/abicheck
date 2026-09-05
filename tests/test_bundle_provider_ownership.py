@@ -479,3 +479,52 @@ class TestLoadManifestRequiresLibraryForRequiredProvider:
         m = load_manifest(path)
         assert m.entries[0].library is None
         assert m.entries[0].optional_provider is True
+
+
+class TestValidateManifestEntriesShapeInvariants:
+    """`_validate_manifest_entries` (Codex review, fresh evidence, PR H
+    follow-up): a `ManifestEntry` constructed directly by a Python caller
+    (the typed `ScanRequest(bundle_manifest=...)` path) never goes through
+    `_parse_manifest_entry`'s raw-dict shape validation
+    (`_validate_manifest_entry_shape`/`_parse_template_instantiations`), so
+    a malformed entry silently expands to zero -- or the wrong -- match
+    targets in `_entry_targets` instead of raising. These invariants must
+    hold for a bare `ManifestEntry` object, not only for a raw manifest
+    dict `load_manifest` parses."""
+
+    def _validate(self, *entries: ManifestEntry) -> None:
+        from abicheck.bundle_manifest import _validate_manifest_entries
+
+        _validate_manifest_entries("<test>", list(entries))
+
+    def test_rejects_entry_with_no_selector(self) -> None:
+        # A bare ManifestEntry() has none of symbol/pattern/template set --
+        # _entry_targets would silently expand it to zero targets, reporting
+        # no unsatisfied entry at all rather than raising.
+        with pytest.raises(ValueError, match="exactly one of"):
+            self._validate(ManifestEntry())
+
+    def test_rejects_entry_with_two_selectors(self) -> None:
+        # symbol and pattern both set -- _entry_targets picks symbol only,
+        # silently discarding the pattern promise.
+        with pytest.raises(ValueError, match="exactly one of"):
+            self._validate(ManifestEntry(symbol="foo", pattern="bar*"))
+
+    def test_rejects_template_with_no_instantiations(self) -> None:
+        with pytest.raises(ValueError, match="non-empty"):
+            self._validate(ManifestEntry(template="acme::train_ops"))
+
+    def test_rejects_required_provider_with_no_library(self) -> None:
+        with pytest.raises(ValueError, match="requires a 'library'"):
+            self._validate(ManifestEntry(symbol="foo", optional_provider=False))
+
+    def test_accepts_well_formed_entries_of_every_shape(self) -> None:
+        self._validate(
+            ManifestEntry(symbol="foo"),
+            ManifestEntry(pattern="bar*"),
+            ManifestEntry(
+                template="acme::train_ops",
+                instantiations=({"T": "float"},),
+            ),
+            ManifestEntry(symbol="baz", library="libbaz.so", optional_provider=False),
+        )

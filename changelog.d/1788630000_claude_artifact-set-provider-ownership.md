@@ -46,13 +46,20 @@
   previously loaded silently and behaved exactly like the
   always-permissive `optional_provider: true` default, letting any
   matching library satisfy what was declared a required, named-provider
-  promise. The check lives in one shared
-  `_require_library_for_required_providers` helper, called from both
-  entry points -- but deliberately *not* from `_parse_manifest_entry`
-  itself, which is also reused by `manifest_entry_from_dict` to round-trip
-  an already-persisted `BundleFacts` manifest; rejecting there would have
-  broken backward compatibility with facts written before this check
-  existed.
+  promise. The check lives in one shared `_validate_manifest_entries`
+  helper, called from both entry points -- but deliberately *not* from
+  `_parse_manifest_entry` itself, which is also reused by
+  `manifest_entry_from_dict` to round-trip an already-persisted
+  `BundleFacts` manifest; rejecting there would have broken backward
+  compatibility with facts written before this check existed. The same
+  helper also validates a `ManifestEntry`'s shape directly (exactly one of
+  `symbol`/`pattern`/`template` set, and a non-empty `instantiations` for
+  a template entry) -- invariants `load_manifest`'s raw-dict parsing
+  already guaranteed, but that a directly-constructed
+  `ScanRequest(bundle_manifest=...)` could bypass entirely: a bare
+  `ManifestEntry()` previously expanded to zero match targets and reported
+  no unsatisfied entry at all, and an entry with two selectors set at once
+  silently dropped one promise.
 - **Security**: expected-provider matching (`optional_provider: false` +
   `library:`) now also recognizes a manifest entry naming the literal
   on-disk filename of a provider (e.g. a versioned real file behind a dev

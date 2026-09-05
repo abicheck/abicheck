@@ -185,6 +185,23 @@ class TestRunScanSetRejectsTypedApiBypass:
                 ScanRequest(binaries=[p1, p2], mode="audit", bundle_manifest=manifest)
             )
 
+    def test_rejects_entry_with_no_selector(self, tmp_path: Path) -> None:
+        # Codex review, fresh evidence, follow-up round: a bare
+        # ManifestEntry() has none of symbol/pattern/template set --
+        # _entry_targets silently expands it to zero match targets, so the
+        # scan would report no unsatisfied entry at all instead of raising.
+        from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+        from abicheck.service import ScanRequest, run_scan_set
+
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        manifest = InstantiationManifest(entries=(ManifestEntry(),))
+        with pytest.raises(ValueError, match="exactly one of"):
+            run_scan_set(
+                ScanRequest(binaries=[p1, p2], mode="audit", bundle_manifest=manifest)
+            )
+
     def test_required_provider_with_library_is_not_rejected_here(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
