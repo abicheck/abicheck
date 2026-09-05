@@ -425,14 +425,16 @@ class TestCompareTellsTheTwoAxesApart:
         )
         assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
 
-    def test_a_default_text_scan_still_reports_its_severity_gate(
+    def test_a_default_text_scan_has_no_structured_gate_to_read(
         self, tmp_path: Path
     ) -> None:
-        """`format: text` is the Action's *default* and scan writes no JSON
-        sidecar, so `_json_report_src` is empty and the severity query
-        answered nothing -- publishing ERROR for a severity-policy result on
-        the most common invocation there is (Codex review). The CLI prints
-        its own gate line on that path; the mapping now reads it.
+        """ADR-063 Track T8 retired `_severity_gate_exit`'s `sed` over the
+        rendered `severity gate: exit N ... blocking:` line, so a
+        `format: text` scan (the Action's default, no JSON sidecar) has no
+        structured gate axis to read. Exit 1 with nothing readable is the
+        honest "cannot tell" case, answered here with ERROR rather than a
+        guess reconstructed from prose. Use `format: json` to get the
+        labelled SEVERITY_ERROR.
         """
         bindir = tmp_path / "bin"
         bindir.mkdir()
@@ -457,7 +459,7 @@ class TestCompareTellsTheTwoAxesApart:
             },  # no INPUT_FORMAT -> the documented text default
             bindir,
         )
-        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+        assert outputs["verdict"] == "ERROR", outputs
 
     def _text_stub(self, tmp_path: Path, text: str, exit_code: int, to_file: bool):
         bindir = tmp_path / "bin"
@@ -477,12 +479,13 @@ class TestCompareTellsTheTwoAxesApart:
         stub.chmod(0o755)
         return bindir
 
-    def test_a_text_report_written_to_a_file_is_still_read(
+    def test_a_text_report_written_to_a_file_is_not_read_either(
         self, tmp_path: Path
     ) -> None:
-        """`format: text` with `output-file` leaves stdout empty, so a
-        stdout-only search published ERROR for a severity-policy result --
-        the same defect as the JSON-only search before it (Codex review).
+        """Sibling of the case above for the other place a rendered text
+        report can land: `output-file` writes the gate line to a file
+        instead of stdout. Neither location is a structured gate source, so
+        ADR-063 Track T8's removal must hold for both.
         """
         text = (
             "Baseline comparison\n"
@@ -500,7 +503,7 @@ class TestCompareTellsTheTwoAxesApart:
             },
             bindir,
         )
-        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+        assert outputs["verdict"] == "ERROR", outputs
 
     def _text_report_stub(self, tmp_path: Path, text: str, exit_code: int) -> Path:
         """A stub whose text report has *real* newlines and em-dash.
@@ -520,48 +523,61 @@ class TestCompareTellsTheTwoAxesApart:
         stub.chmod(0o755)
         return bindir
 
-    def test_a_text_summary_names_the_blocking_category(self, tmp_path: Path) -> None:
-        """The job summary's category lookup was JSON-only, so a scan on the
-        default text format printed the bare "severity-level issue" message
-        that lookup exists to avoid.
+    def test_the_blocking_category_is_named_from_the_structured_report(
+        self, tmp_path: Path
+    ) -> None:
+        """The job summary must name *which* category gated rather than
+        printing a bare "severity-level issue" message -- read from the JSON
+        report's own `severity.blocking_categories`.
+
+        Its rendered-text counterpart is gone with ADR-063 Track T8: an
+        identical gate line in prose has no structured axis to attribute
+        exit 1 to, so it stays ERROR. Both halves are asserted so the
+        removal isn't mistaken for a loss of the category lookup itself.
         """
+        outputs = self._scan_outputs(tmp_path, _report(coverage=0, severity_exit=1))
+        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+        assert "`addition` configured as `error`" in outputs["_summary"]
+
+        text_only = tmp_path / "text_only"
+        text_only.mkdir()
         bindir = self._text_report_stub(
-            tmp_path,
+            text_only,
             "Baseline comparison\n"
             "  severity gate: exit 1 \u2014 blocking: addition\n\n"
             "Verdict: COMPATIBLE\n",
             1,
         )
-        outputs = _run_action(
-            tmp_path,
+        text_outputs = _run_action(
+            text_only,
             {
                 "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_NEW_LIBRARY": _lib(text_only, "libnew.so"),
                 "INPUT_FORMAT": "text",
             },
             bindir,
         )
-        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
-        assert "`addition` configured as `error`" in outputs["_summary"]
+        assert text_outputs["verdict"] == "ERROR", text_outputs
+        assert "configured as `error`" not in text_outputs["_summary"], text_outputs
 
     def test_a_severity_exit_two_says_why_the_step_failed(self, tmp_path: Path) -> None:
         """`potential_breaking=error` gates at exit 2, which carries the
         API_BREAK label -- so the summary must say the severity policy is what
         failed the step, or it reads as though fail-on-api-break was ignored.
-        """
-        bindir = self._text_report_stub(
-            tmp_path,
-            "Baseline comparison\n"
-            "  severity gate: exit 2 \u2014 blocking: potential_breaking\n\n"
-            "Verdict: COMPATIBLE_WITH_RISK\n",
-            2,
+
+        `_severity_gate_categories` is JSON-only since ADR-063 Track T8, so
+        this needs a real JSON report; a rendered-text stub can no longer
+        name the blocking category at all (see the sibling classes above)."""
+        bindir = _stub_abicheck(
+            tmp_path, exit_code=2, report=_report(coverage=0, severity_exit=2)
         )
         outputs = _run_action(
             tmp_path,
             {
                 "INPUT_MODE": "scan",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "text",
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
             },
             bindir,
         )
@@ -622,9 +638,10 @@ class TestCompareTellsTheTwoAxesApart:
     def test_an_unparseable_report_keeps_the_established_verdict(
         self, tmp_path: Path
     ) -> None:
-        """The genuine "cannot tell": jq exits non-zero and prints nothing, so
-        the mapping must not read that as a zero severity contribution. The
-        stderr notice is what still identifies the axis here."""
+        """The genuine "cannot tell": the report query prints nothing, so the
+        mapping must not read that as a zero severity contribution. Since
+        ADR-063 Track T8 the stderr notice is not consulted either, so the
+        run keeps the verdict its exit code established."""
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=1,
@@ -682,8 +699,7 @@ class TestCompareTellsTheTwoAxesApart:
     def test_a_run_without_contract_evaluation_is_unchanged(
         self, tmp_path: Path
     ) -> None:
-        """No `--contract` means no ledger keys at all, which must
-        read as a contribution of 0 rather than as an unanswered question."""
+        """No `--contract` means no ledger keys, read as 0."""
         outputs = self._compare_outputs(
             tmp_path,
             {
@@ -839,11 +855,11 @@ class TestADemotedBreakStaysVisible:
         assert outputs["verdict"] == "COMPATIBLE", outputs
         assert outputs["_exit"] == 0, outputs["_stdout"]
 
-    def test_the_text_report_is_read_too(self, tmp_path: Path) -> None:
-        """`format: text` is the Action's documented default for scan and
-        writes no JSON sidecar -- a JSON-only reader would leave the most
-        common invocation on the wrong verdict, the same defect already fixed
-        twice for the severity-gate readers beside this one.
+    def test_the_text_report_is_not_read(self, tmp_path: Path) -> None:
+        """ADR-063 Track T8: a rendered `format: text` report is no longer
+        scraped for a verdict, so this run keeps the exit-0 dispatch's own
+        COMPATIBLE -- the demotion above is still surfaced whenever the
+        report is real JSON (every case in this class that passes `report=`).
         """
         outputs = self._outputs(
             tmp_path,
@@ -856,16 +872,13 @@ class TestADemotedBreakStaysVisible:
                 "Verdict: BREAKING\n"
             ),
         )
-        assert outputs["verdict"] == "BREAKING", outputs
+        assert outputs["verdict"] == "COMPATIBLE", outputs
         assert outputs["_exit"] == 0, outputs["_stdout"]
 
-    def test_a_compatible_text_verdict_does_not_match_its_own_prose(
-        self, tmp_path: Path
-    ) -> None:
-        """The renderers put an explanatory tail on the same line as the
-        label, and that tail can spell "breaking". Only uppercase-free filler
-        is allowed between `Verdict:` and the label, so the tail cannot be
-        read as the verdict.
+    def test_a_compatible_text_verdict_is_not_read_either(self, tmp_path: Path) -> None:
+        """Negative control: a rendered report whose explanatory tail spells
+        "BREAKING" was never allowed to become the verdict, and now no part
+        of the rendered report is consulted at all.
         """
         outputs = self._outputs(
             tmp_path,
@@ -1306,18 +1319,16 @@ class TestTheFailOnClaimTracksTheTier:
         assert "independently of" in summary, summary
 
 
-class TestTheReleaseTableVerdictIsRead:
-    """A directory/package compare reaches the text fallback with no JSON.
+class TestTheReleaseTableVerdictIsNotReconstructed:
+    """A directory/package compare can reach the verdict readers with no JSON.
 
     The stub `abicheck` these tests use never honors `--write` (it just
-    echoes a fixed report and exits), simulating the "no machine-readable
-    report was produced" case this fallback exists for — the real CLI's
-    own release-operand `--write` support (CLI cleanup phase two, PR E)
-    doesn't change that this fallback still has to work when JSON genuinely
-    isn't available. A markdown release compare's renderer writes the
-    verdict as a table row (`| **Verdict** | 💥 `BREAKING` |`), with no
-    colon. Matching only the colon form left every release compare
-    unescalated (Codex review).
+    echoes a fixed report and exits), simulating "no machine-readable report
+    was produced". Both markdown spellings of the verdict (the release
+    fan-out's table row and the compare header's colon form) used to be
+    scraped back into an escalation; ADR-063 Track T8 retires that, so all
+    three cases below publish the exit-2 dispatch's own API_BREAK
+    regardless of what the rendered report says.
     """
 
     def _summary(self, tmp_path: Path, verdict_line: str, exit_code: int) -> dict:
@@ -1349,24 +1360,22 @@ class TestTheReleaseTableVerdictIsRead:
             bindir,
         )
 
-    def test_the_table_row_escalates_the_published_verdict(self, tmp_path: Path) -> None:
-        outputs = self._summary(
-            tmp_path, "| **Verdict** | \U0001f4a5 `BREAKING` |", 2
-        )
-        assert outputs["verdict"] == "BREAKING", outputs
-
-    def test_the_colon_spelling_still_works(self, tmp_path: Path) -> None:
-        """The compare markdown header form, which the old pattern matched —
-        widening the pattern must not drop it."""
-        outputs = self._summary(tmp_path, "**Verdict:** \U0001f4a5 `BREAKING`", 2)
-        assert outputs["verdict"] == "BREAKING", outputs
-
-    def test_a_compatible_release_is_not_escalated(self, tmp_path: Path) -> None:
-        """Only a break may escalate; the looser pattern must not match a
-        `COMPATIBLE` row on some later word."""
-        outputs = self._summary(
-            tmp_path, "| **Verdict** | ✅ `COMPATIBLE` |", 2
-        )
+    @pytest.mark.parametrize(
+        "verdict_line",
+        [
+            "| **Verdict** | \U0001f4a5 `BREAKING` |",
+            "**Verdict:** \U0001f4a5 `BREAKING`",
+            "| **Verdict** | ✅ `COMPATIBLE` |",
+        ],
+        ids=["table-row-breaking", "colon-breaking", "table-row-compatible"],
+    )
+    def test_no_rendered_spelling_rewrites_the_exit_code_verdict(
+        self, tmp_path: Path, verdict_line: str
+    ) -> None:
+        """Every spelling the retired regex handled resolves the same way
+        now: exit 2 is the CLI's direct API_BREAK contract, and rendered
+        prose is no longer evidence that may outrank it."""
+        outputs = self._summary(tmp_path, verdict_line, 2)
         assert outputs["verdict"] == "API_BREAK", outputs
 
 
@@ -1415,25 +1424,18 @@ class TestThePromotedCrosscheckNoteNamesItsOwnMechanism:
 
 
 class TestCoverageGatedTrustsAReadableZero:
-    """`_coverage_gated()`'s unconditional final check must trust a readable
-    JSON report's own `contract_coverage_exit_contribution: 0` and stop
-    there -- not fall through to grepping stderr for the substring "Contract
-    coverage incomplete", which the notice contains regardless of whether
-    the effect clause reads "Accepted by contract.unresolved=warn" or
-    "Contributes N to..." (Codex review, P1, two rounds).
+    """`_coverage_gated()` answers from the JSON report's own
+    `contract_coverage_exit_contribution` and nothing else.
 
-    Round one: an earlier revision fell through unconditionally whenever the
-    JSON read "0", not only when the JSON was unreadable -- so a
-    `contract.unresolved=warn`-accepted run (report says 0, but the stderr
-    notice still names the axis, worded as accepted) still matched the grep
-    and set `FINAL_EXIT=1`, defeating the acceptance mechanism this feature
-    exists to provide. Real for both compare and scan, since both share
-    `_coverage_gated()`. Round two (below, `TestCoverageGatedFallbackIgnores
-    Accepted`): the fix above only covers the "readable JSON" branch -- the
-    genuine no-JSON-at-all fallback (a non-JSON directory/package `compare`
-    outside a `pull_request` event, this same PR's own P1 release fix) still
-    matched the bare substring regardless of the accepted wording, since the
-    grep itself never excluded it.
+    A `contract.unresolved=warn`-accepted run reports 0 there while its
+    stderr notice still names the axis (worded "Contract coverage
+    incomplete..." either way, differing only in an "Accepted by
+    contract.unresolved=warn" effect clause) -- a run that also consulted
+    stderr defeated the acceptance mechanism this feature exists to provide
+    (Codex review, P1). Real for both compare and scan, since both share
+    `_coverage_gated()`. ADR-063 Track T8 removed that stderr consultation
+    outright: absence of structured data means the axis cannot be claimed
+    to have fired. The last test below pins that.
     """
 
     @staticmethod
@@ -1504,12 +1506,13 @@ class TestCoverageGatedTrustsAReadableZero:
         assert outputs["_exit"] == 0, outputs["_stdout"]
         assert outputs["verdict"] == "COMPATIBLE", outputs
 
-    def test_an_unreadable_report_still_falls_back_to_the_stderr_notice(
+    def test_an_unreadable_report_is_not_attributed_to_this_axis(
         self, tmp_path: Path
     ) -> None:
-        """The genuine "cannot tell" case must keep working: no readable
-        JSON at all still consults stderr, and a real (non-accepted)
-        coverage-only exit 1 with no JSON must still gate the step."""
+        """ADR-063 Track T8: with no readable JSON, a coverage notice on
+        stderr is no longer evidence this axis fired. Exit 1 is still
+        honoured -- the exit code is the transport signal that stays -- but
+        it is not labelled COVERAGE_INCOMPLETE on a diagnostic line alone."""
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=1,
@@ -1531,23 +1534,25 @@ class TestCoverageGatedTrustsAReadableZero:
             bindir,
         )
         assert outputs["_exit"] == 1, outputs["_stdout"]
+        assert outputs["verdict"] != "COVERAGE_INCOMPLETE", outputs
 
 
-class TestCoverageGatedFallbackIgnoresAccepted:
-    """The genuine no-JSON-at-all stderr fallback must itself distinguish
-    the "Accepted by contract.unresolved=warn" wording from a real gate
-    (Codex review, P1, second round). Reached here via the stub `abicheck`
-    these tests use, which never honors `--write` (it just echoes a fixed
-    report and exits) -- since CLI cleanup phase two, PR E, the real CLI's
-    release-operand `--write` support means this path is no longer the
-    *only* way to reach a JSON-less release comparison in production (the
-    real tool now always produces one), but the fallback itself still has
-    to be correct for whenever a real `abicheck` genuinely fails to
-    produce readable JSON (a crash, an old pre-PR-E version, `extra-args`
-    overriding `--write` with something unreadable, ...). A single-file
-    operand always gets a secondary JSON regardless of format/PR-context
-    (see `PR_JSON` wiring), so this needs a real directory operand to
-    reach the genuine no-JSON path at all.
+class TestNoJsonMeansThisAxisIsNotGated:
+    """ADR-063 Track T8: the no-JSON-at-all stderr fallback is gone.
+
+    It used to distinguish the "Accepted by contract.unresolved=warn"
+    wording from a real contribution via a second `grep` over the same
+    notice (Codex review, P1, second round). Both wordings now reach the
+    same answer, because the notice is not consulted at all: with no
+    structured `contract_coverage_exit_contribution` to read, this axis
+    cannot be claimed to have fired.
+
+    Reached here via the stub `abicheck`, which never honors `--write` --
+    the real tool now always produces JSON for a release operand (CLI
+    cleanup phase two, PR E), so this is the residual "genuinely no
+    readable JSON" shape (a crash, an old pre-PR-E version, ...). A
+    single-file operand always gets a secondary JSON regardless of
+    format/PR-context, so this needs a real directory operand.
     """
 
     def _release_outputs(
@@ -1580,34 +1585,29 @@ class TestCoverageGatedFallbackIgnoresAccepted:
             bindir,
         )
 
-    def test_a_warn_accepted_gap_with_no_json_at_all_does_not_fail_the_step(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(
+        "effect_clause",
+        [
+            "Accepted by contract.unresolved=warn, so it contributes 0 to "
+            "the release exit code (ADR-049 contract-coverage axis).",
+            "Contributes 1 to the release exit code (ADR-049 contract-coverage axis).",
+        ],
+        ids=["warn-accepted", "genuine-contribution"],
+    )
+    def test_neither_stderr_wording_gates_a_no_json_release(
+        self, tmp_path: Path, effect_clause: str
     ) -> None:
+        """Both halves of the distinction the retired grep pair had to draw.
+        Neither wording gates: the Action's own exit may not be raised on a
+        diagnostic line no structured field corroborates. A run whose
+        coverage genuinely gated arrives here as exit 1, not exit 0 with a
+        notice."""
         outputs = self._release_outputs(
             tmp_path,
             exit_code=0,
             stderr=(
                 "Contract coverage incomplete for the selected --contract "
-                "domain in: liba.so. Accepted by contract.unresolved=warn, "
-                "so it contributes 0 to the release exit code (ADR-049 "
-                "contract-coverage axis)."
+                f"domain in: liba.so. {effect_clause}"
             ),
         )
         assert outputs["_exit"] == 0, outputs["_stdout"]
-
-    def test_a_genuinely_gated_no_json_release_still_fails_the_step(
-        self, tmp_path: Path
-    ) -> None:
-        """The inverse: no "Accepted by ..." clause at all -- a real
-        contribution -- must still gate the step through this same
-        fallback, unaffected by the exclusion above."""
-        outputs = self._release_outputs(
-            tmp_path,
-            exit_code=0,
-            stderr=(
-                "Contract coverage incomplete for the selected --contract "
-                "domain in: liba.so. Contributes 1 to the release exit "
-                "code (ADR-049 contract-coverage axis)."
-            ),
-        )
-        assert outputs["_exit"] == 1, outputs["_stdout"]

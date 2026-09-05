@@ -268,8 +268,8 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --show-only added --for
         self, tmp_path
     ):
         # Codex review, fresh evidence, PR #1016: `format: sarif` combined
-        # with a suppressed JSON sidecar (see _report_compat_verdict's own
-        # SARIF fallback) is well-formed JSON, but `_json_report_src`
+        # with a suppressed JSON sidecar is well-formed JSON, but
+        # `_json_report_src`
         # deliberately does NOT treat OUTPUT_FILE as reusable here -- an
         # earlier version of this fix widened `_json_report_src` itself,
         # which made `_can_reuse_primary_json` `cp` the bare SARIF document

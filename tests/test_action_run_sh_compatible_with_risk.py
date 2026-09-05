@@ -214,20 +214,24 @@ class TestCompareExitZeroReportsCompatibleWithRisk:
         assert "COMPATIBLE_WITH_RISK" in outputs["_summary"], outputs
 
 
-class TestFallbackTextReportsCompatibleWithRisk:
-    """P2 (Codex review, PR #1016): ``_report_compat_verdict``'s markdown/
-    text fallback -- used whenever no JSON report exists, which is exactly
-    what happens for a directory/package release compare (``--write`` is
-    rejected for that operand) or any ``extra-args: --write markdown=...``
-    that suppresses the JSON sidecar (``action/AGENTS.md``) -- only matched
-    ``API_BREAK``/``BREAKING``. A report the CLI itself classified
-    ``COMPATIBLE_WITH_RISK`` reached this fallback and matched nothing, so
-    ``_resolve_clean_exit_verdict`` silently kept its ``VERDICT=COMPATIBLE``
-    default even though the rendered report said otherwise. Mirrors
-    ``test_action_coverage_verdict.py``'s ``TestTheReleaseTableVerdictIsRead``
-    harness (a stub that ``cat``s a fixed report to stdout, no ``-o``, so
-    ``_text_report_content`` falls back to captured stdout) rather than a
-    second copy of it.
+class TestRenderedTextIsNeverReconstructedIntoAVerdict:
+    """ADR-063 Track T8: ``_report_compat_verdict`` used to end with a ``sed``
+    over the *rendered* markdown/text report's own ``Verdict:``/``**Verdict**``
+    line, reached whenever no JSON report exists -- a directory/package
+    release compare (``--write`` is rejected for that operand), or any
+    ``extra-args: --write markdown=...`` that suppresses the JSON sidecar
+    (``action/AGENTS.md``). That layer is retired: a verdict is read from the
+    structured ``run_outcome``/``verdict`` JSON contract or not at all, and
+    prose is never regex-scraped back into one.
+
+    So with no JSON anywhere, ``_report_compat_verdict`` prints nothing and
+    the verdict the ``case $ABICHECK_EXIT in ...`` dispatch derived from the
+    process exit code -- the transport-level signal the plan deliberately
+    keeps -- is published unchanged.
+
+    Same harness as before (a stub that ``cat``s a fixed rendered report to
+    stdout, no ``-o``), so these cases pin the *new* answer for exactly the
+    inputs that used to be reconstructed.
     """
 
     def _summary(self, tmp_path: Path, verdict_line: str, exit_code: int) -> dict:
@@ -253,53 +257,82 @@ class TestFallbackTextReportsCompatibleWithRisk:
             bindir,
         )
 
-    def test_the_colon_form_reports_risk_at_exit_zero(self, tmp_path: Path) -> None:
+    def test_the_colon_form_is_not_scraped_at_exit_zero(self, tmp_path: Path) -> None:
+        """Was ``COMPATIBLE_WITH_RISK`` via the rendered-prose regex; now the
+        exit-0 dispatch's own answer, because no JSON stated a verdict."""
         outputs = self._summary(
             tmp_path,
             "**Verdict:** ⚠️ `COMPATIBLE_WITH_RISK` "
             "— compatible but carries deployment risk",
             0,
         )
-        assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
+        assert outputs["verdict"] == "COMPATIBLE", outputs
         assert outputs["_exit"] == 0, outputs
 
-    def test_the_table_row_form_reports_risk_at_exit_zero(self, tmp_path: Path) -> None:
-        """The release fan-out's table-row spelling (no colon) must also be
-        recognised, same as the existing BREAKING/API_BREAK table-row case."""
+    def test_the_table_row_form_is_not_scraped_at_exit_zero(
+        self, tmp_path: Path
+    ) -> None:
+        """The release fan-out's table-row spelling (no colon) was the second
+        shape the retired regex matched; it is not reconstructed either."""
         outputs = self._summary(
             tmp_path, "| **Verdict** | ⚠️ `COMPATIBLE_WITH_RISK` |", 0
         )
-        assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
+        assert outputs["verdict"] == "COMPATIBLE", outputs
         assert outputs["_exit"] == 0, outputs
 
     def test_a_plain_compatible_report_is_unaffected(self, tmp_path: Path) -> None:
-        """Negative control: widening the fallback regex must not make a
-        plain COMPATIBLE report match on some later word."""
+        """Unchanged in both regimes: a clean exit-0 run publishes
+        COMPATIBLE."""
         outputs = self._summary(tmp_path, "**Verdict:** ✅ `COMPATIBLE`", 0)
         assert outputs["verdict"] == "COMPATIBLE", outputs
 
-    def test_breaking_table_row_still_escalates(self, tmp_path: Path) -> None:
-        """Negative control: the pre-existing BREAKING/API_BREAK fallback
-        match (exercised at exit 2 by test_action_coverage_verdict.py) must
-        keep working unchanged now that a third alternative was added."""
+    def test_a_breaking_table_row_no_longer_escalates_exit_two(
+        self, tmp_path: Path
+    ) -> None:
+        """The escalation this fallback fed is exactly what T8 retires: exit 2
+        is the CLI's direct, unambiguous API_BREAK contract, and a rendered
+        ``BREAKING`` table row is no longer evidence that outranks it. Only a
+        structured report field may escalate now (see
+        ``TestCompareExitZeroReportsCompatibleWithRisk`` for the JSON path
+        that still does)."""
         outputs = self._summary(tmp_path, "| **Verdict** | \U0001f4a5 `BREAKING` |", 2)
+        assert outputs["verdict"] == "API_BREAK", outputs
+
+    def test_a_json_report_still_escalates_exit_two(self, tmp_path: Path) -> None:
+        """Positive control for the half that stays: the same exit-2 run whose
+        *structured* report says BREAKING still escalates, so the assertion
+        above pins the removal of prose-scraping and not a loss of escalation
+        itself."""
+        report = {
+            "report_schema_version": "2.49",
+            "verdict": "BREAKING",
+            "changes": [],
+        }
+        bindir = _stub_abicheck(tmp_path, exit_code=2, report=report)
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
         assert outputs["verdict"] == "BREAKING", outputs
 
 
-class TestSarifFallbackReportsCompatibleWithRisk:
-    """Codex review, PR #1016, fresh evidence beyond the markdown-fallback
-    finding above: ``format: sarif`` combined with an ``extra-args --write
-    <non-json>=...`` suppresses the automatic JSON sidecar (``--write`` is a
-    single-valued CLI option -- the user's own ``--write`` wins and there is
-    no second slot for the Action's internal one), so ``_json_report_src``
-    had no JSON source at all and fell back to feeding the *SARIF* primary
-    report to the markdown/text-only regex, which cannot match SARIF's
-    ``runs[0].properties.abiVerdict`` encoding. Fixed by teaching
-    ``_json_report_src`` a deliberately last-resort branch that hands the
-    SARIF file itself (it is well-formed JSON) to ``_report_query``, and
-    teaching that query's ``compat_verdict`` case the SARIF property path.
-    ``format: html`` has the identical trigger but is NOT fixed (HTML isn't
-    JSON) -- see ``docs/contribute/known-gaps.md``.
+class TestSarifIsNeverReadForAVerdict:
+    """ADR-063 Track T8: ``format: sarif`` combined with an ``extra-args
+    --write <non-json>=...`` suppresses the automatic JSON sidecar
+    (``--write`` is a single-valued CLI option), leaving no abicheck-native
+    JSON anywhere. ``_report_compat_verdict`` used to reach into the SARIF
+    primary report's own ``runs[0].properties.abiVerdict`` for that case.
+    That fallback is retired with the rest of the boundary's verdict
+    reconstruction: SARIF is a rendering, not the structured
+    ``run_outcome``/``verdict`` contract, and no reader consults it for a
+    verdict any more.
     """
 
     def _sarif_report(self, verdict: str) -> dict:
@@ -339,41 +372,32 @@ class TestSarifFallbackReportsCompatibleWithRisk:
             bindir,
         )
 
-    def test_risk_verdict_is_recovered_from_the_sarif_primary_report(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(
+        "sarif_verdict", ["COMPATIBLE_WITH_RISK", "BREAKING", "API_BREAK"]
+    )
+    def test_no_sarif_verdict_is_reconstructed_at_exit_zero(
+        self, tmp_path: Path, sarif_verdict: str
     ) -> None:
-        outputs = self._run_sarif(tmp_path, verdict="COMPATIBLE_WITH_RISK")
-        assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
-        assert outputs["_exit"] == 0, outputs
-
-    def test_breaking_verdict_is_recovered_from_the_sarif_primary_report(
-        self, tmp_path: Path
-    ) -> None:
-        """Fresh evidence, same fix: before it, an exit-0 BREAKING-under-a-
-        demoting-severity-policy report would have been just as unreadable
-        from a SARIF primary as COMPATIBLE_WITH_RISK was -- both routes
-        through the same now-fixed reader."""
-        outputs = self._run_sarif(tmp_path, verdict="BREAKING")
-        assert outputs["verdict"] == "BREAKING", outputs
-
-    def test_plain_compatible_sarif_report_is_unaffected(self, tmp_path: Path) -> None:
-        """Negative control: the new SARIF fallback must not report a risk
-        where the SARIF document itself says COMPATIBLE."""
-        outputs = self._run_sarif(tmp_path, verdict="COMPATIBLE")
+        """Every verdict the retired SARIF fallback could recover -- the risk
+        tier it was added for, and the two break tiers it escalated on -- now
+        leaves the exit-0 dispatch's own COMPATIBLE untouched, because no
+        structured abicheck-native JSON report stated a verdict for this
+        run. Parametrized over all three rather than pinning the one
+        originally reported, so the assertion covers the class."""
+        outputs = self._run_sarif(tmp_path, verdict=sarif_verdict)
         assert outputs["verdict"] == "COMPATIBLE", outputs
+        assert outputs["_exit"] == 0, outputs
 
     def test_sarif_primary_with_a_working_json_sidecar_is_unaffected(
         self, tmp_path: Path
     ) -> None:
-        """Negative control: when the automatic JSON sidecar is NOT
-        suppressed (no conflicting extra-args --write), _json_report_src
-        must keep preferring it over the new, deliberately last-resort SARIF
-        branch -- the full abicheck-native JSON answers every query
-        (annotations, severity_exit, ...) that a bare SARIF document cannot.
-        The two payloads deliberately disagree (SARIF says BREAKING, the
-        native JSON sidecar says COMPATIBLE_WITH_RISK) so the assertion can
-        only pass if the sidecar, not the SARIF fallback, actually decided
-        the outcome."""
+        """The half that stays: when the automatic JSON sidecar is NOT
+        suppressed (no conflicting extra-args --write), the real
+        abicheck-native JSON report is read exactly as before. The two
+        payloads deliberately disagree (SARIF says BREAKING, the native JSON
+        sidecar says COMPATIBLE_WITH_RISK) so the assertion can only pass if
+        the sidecar decided the outcome -- and, since T8, the SARIF document
+        could not have decided it either way."""
         bindir = tmp_path / "bin"
         bindir.mkdir()
         sarif_payload = tmp_path / "sarif_payload.json"

@@ -95,6 +95,88 @@ their output/exit codes — run them with the normal fast test command
   (associative arrays, `readarray`, process substitution where a `<<<`
   here-string works instead).
 
+## How `run.sh` resolves the verdict it publishes
+
+Since ADR-063 Phase 6 (Track T8) there are exactly two sources, and no
+third:
+
+1. **The structured report.** `run_outcome` (ADR-063 D6,
+   `abicheck/policy/outcome.py`) first — `compatibility` for the verdict,
+   `gate` for the severity gate — then the legacy JSON fields
+   (`verdict`, `severity.exit_code`,
+   `contract_coverage_exit_contribution`, `analysis_assurance.status`) for
+   a report from an older abicheck.
+2. **The process exit code**, via the `case $ABICHECK_EXIT in ...`
+   dispatch, plus `_is_cli_error()`'s stderr check for a Click usage error
+   that produces no report at all. This is the *transport-level* fallback:
+   it answers "what did the invocation itself say" when there is no result
+   to read.
+
+Nothing else is consulted. `run.sh` used to re-derive these facts by
+regex-matching rendered output — a `sed` over a markdown/text report's
+`Verdict:`/`**Verdict**` line and its `severity gate: exit N ... blocking:`
+line, a SARIF `runs[0].properties.abiVerdict` lookup, and `grep`s over
+captured stderr for the contract-coverage and analysis-assurance floor
+notices — and all of that is gone. **Don't add a reader that parses a
+renderer's prose**: a renderer's wording is presentation, it drifts, and it
+carries values a PR author can influence. If the boundary needs a fact,
+give it a field in the structured report.
+
+The consequence to know when reading a failure report: a run whose report
+is genuinely unreadable (a crash, or an `extra-args --write` that
+suppressed the internal sidecar) gets the plain exit-code-derived verdict —
+no `SEVERITY_ERROR`/`COVERAGE_INCOMPLETE`/`ANALYSIS_INCOMPLETE` label and no
+escalation, since no structured evidence stated one. That is deliberate:
+absence of data is not evidence an axis fired.
+
+**Known, accepted limitation (Codex review, P1, fresh evidence):** a
+`scan --against` step whose own `extra-args` carries a non-JSON secondary
+(`--write text=...`) reaches exactly this "genuinely unreadable" case for
+the unconditional coverage/assurance/severity-category floors too — the
+CLI's `--write` option takes one `FORMAT=PATH` operand, Click keeps only
+the *last* occurrence of a repeated option, and `extra-args` is appended
+after the internal injection, so a second, JSON-targeted `--write` this
+script also appended would simply lose to the user's own and never
+execute. There is no way to recover a structured report in this specific
+combination without either silently discarding the user's explicit
+`--write` choice (wrong — the whole point of `_extra_args_has_write_flag`
+is not to do that) or unconditionally re-running the analysis a second
+time purely to obtain one (`_maybe_post_pr_comment` already accepts that
+cost, but only for the sticky-comment feature specifically, and only under
+its own narrower guards — doing it unconditionally for the floors would
+impose a second, potentially expensive analysis on every such run, a
+different and larger trade-off than this bug fix's scope). So this one
+combination is accepted, not fixed: the floors go blind exactly there, and
+the fix is on the caller's side (drop the non-JSON `--write`, or add
+`format: json`) rather than in this script.
+
+**This is why `compare`'s and `scan`'s own `--write json=$PR_JSON` sidecar
+injection is unconditional** (not gated on `pr-comment`, since Track T8):
+`_severity_gate_categories`/`_coverage_gated`/`_assurance_gated` all read
+that same JSON, and ADR-049's contract-coverage/analysis-assurance floors
+and the severity-category gate below are *unconditional* checks that no
+`fail-on-*` flag disables — they must not go blind just because a run's
+nominal `format:` is `text`/`markdown` or `pr-comment: false` was set. A
+prior revision of this sidecar injection was gated on `pr-comment` for
+`scan`, on the reasoning that its only consumer was the sticky PR comment;
+a Codex review (P1) on the PR that landed Track T8 found this false — with
+`format: text` (scan's default) and `pr-comment: false`, a coincident ABI
+break (which outranks those axes in the CLI's own max-fold) combined with
+`fail-on-breaking: false` left no JSON anywhere, silently disabling floors
+the AGENTS.md text right here already documented as unconditional. Don't
+re-gate that injection on anything but the effective format, whether the
+user's own `extra-args` already requested a `--write`, and whether
+`extra-args` carries an *effective* `--dry-run` (`_extra_args_has_dry_run_
+flag` — a dedicated `INPUT_DRY_RUN` is not the only way to request one,
+and injecting `--write`/`-o` alongside a real `--dry-run` is a CLI usage
+error, not merely redundant; `_maybe_post_pr_comment`'s own dry-run skip
+checks the same effective flag, for the identical reason) — see the
+injection's own comment in both mode branches for the exact conditions.
+
+`fail-on-breaking`/`fail-on-api-break` and friends are **step policy on top
+of** the published verdict. They decide whether the step fails; they never
+rewrite `$VERDICT`.
+
 ## Known sharp edge: requested vs. achieved depth
 
 An Action baseline generated with an explicit depth request (e.g.

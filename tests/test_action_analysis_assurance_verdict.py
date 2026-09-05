@@ -59,10 +59,10 @@ pytestmark = pytest.mark.skipif(
 )
 
 #: The exact wording `assurance_floor_diagnostic` (analysis_assurance.py)
-#: emits -- `_assurance_gated()` in run.sh greps for this substring on
-#: stderr, since (unlike the coverage ledger) the JSON report's own
-#: `analysis_assurance` block is not self-describing about whether the flag
-#: was even passed this run.
+#: emits. `_assurance_gated()` in run.sh used to grep for this substring on
+#: stderr when no JSON report was readable; ADR-063 Track T8 removed that
+#: fallback, so the line is now only ever inert text in these fixtures --
+#: which is exactly what several tests below assert.
 ASSURANCE_STDERR = (
     "Analysis assurance incomplete (status='partial') under "
     "--require-complete-analysis: header context asymmetric between old and "
@@ -82,9 +82,9 @@ ASSURANCE_BLOCK = {
 }
 
 #: `_assurance_gated()` requires this dedicated boolean input to be `true`
-#: before it will even look at the report or stderr -- the load-bearing
-#: check. Every test below that expects the axis to actually gate must pass
-#: this.
+#: before it will even look at the report -- the load-bearing check. Every
+#: test below that expects the axis to actually gate must pass this, and a
+#: readable JSON report whose `analysis_assurance.status` is not "complete".
 REQUIRE_COMPLETE_ANALYSIS_INPUT = {"INPUT_REQUIRE_COMPLETE_ANALYSIS": "true"}
 
 
@@ -405,9 +405,9 @@ class TestCompareMapsTheAssuranceExit:
 
 class TestHostileReportContentCannotExecute:
     """This diff touches the action/workflow trust boundary (``action/
-    run.sh``): the new ``_assurance_gated()`` stderr grep and the new
-    ``assurance_notes`` Python query both read content an ``abicheck``
-    invocation produced from its inputs, which can themselves come from a
+    run.sh``): the captured stderr and the ``assurance_notes`` Python query
+    both carry content an ``abicheck`` invocation produced from its own
+    inputs, which can themselves come from a
     PR (a header, a symbol name, a policy note) an attacker controls.
     Asserting the *text* of the shell/Python changes does not prove a
     hostile value can't cause a side effect when run.sh's own shell
@@ -465,7 +465,7 @@ class TestHostileReportContentCannotExecute:
         the dedicated input): stderr can contain content an attacker
         influences (a header/symbol name echoed back into some *other*,
         unrelated diagnostic), so `_assurance_gated()` must not trust
-        stderr as its sole signal -- it first requires the dedicated
+        stderr at all -- it first requires the dedicated
         `require-complete-analysis` input to be `true`, which
         attacker-controlled report/stderr content cannot forge (it isn't
         even read for this decision). Here the stderr line is the *exact*
@@ -498,26 +498,38 @@ class TestHostileReportContentCannotExecute:
         # with no diagnostic at all -- not a spoofed ANALYSIS_INCOMPLETE.
         assert outputs["verdict"] == "ERROR", outputs
 
-    def test_a_forged_stderr_line_cannot_spoof_the_diagnostic_either(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(
+        "stderr_text",
+        [
+            ASSURANCE_STDERR,
+            "some unrelated warning mentioning analysis assurance "
+            "incomplete and require-complete-analysis but not the real "
+            "diagnostic shape",
+            "",
+        ],
+        ids=["real-diagnostic", "near-miss-mention", "no-diagnostic"],
+    )
+    def test_no_stderr_text_gates_this_axis_without_a_json_report(
+        self, tmp_path: Path, stderr_text: str
     ) -> None:
-        """The exact substring `_assurance_gated()`'s stderr fallback
-        requires ("Analysis assurance incomplete ... under
-        --require-complete-analysis") must actually be present -- a
-        stderr line that merely *mentions* assurance/incompleteness must
-        not be mistaken for the real, code-emitted floor notice, even
-        when the flag genuinely was passed and there is no JSON report to
-        answer from instead (the one case where this fallback is
-        actually reached)."""
+        """ADR-063 Track T8: with no readable JSON report, stderr answers
+        nothing at all for this axis -- not even the *exact* substring the
+        retired fallback matched ("Analysis assurance incomplete ... under
+        --require-complete-analysis"), and even with the dedicated input
+        genuinely set.
+
+        Parametrized over the real code-emitted diagnostic, a near-miss that
+        merely mentions the same words, and no diagnostic whatsoever,
+        because the property is that none of them differ: the class this
+        closes is "a text channel deciding a published axis", not one
+        particular forged spelling. The structured
+        `analysis_assurance.status` is the only signal, so all three fall
+        through to the pre-existing catch-all."""
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=1,
             report=None,
-            stderr=(
-                "some unrelated warning mentioning analysis assurance "
-                "incomplete and require-complete-analysis but not the real "
-                "diagnostic shape"
-            ),
+            stderr=stderr_text,
         )
         outputs = _run_action(
             tmp_path,
