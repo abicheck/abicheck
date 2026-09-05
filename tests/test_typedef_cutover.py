@@ -916,3 +916,45 @@ class TestSharedIdOrderIsDeterministic:
         assert [c.old_value for c in changes] == ["int", "short"]
         assert [c.new_value for c in changes] == ["long", "char"]
         assert [c.disambiguator for c in changes] == ["tu-a", "tu-b"]
+
+
+class TestEqualCardinalityCollisionPairsAllSubstitutions:
+    """Regression coverage for Codex review, PR #1078, twentieth round --
+    mirrors ``tests.test_constant_cutover.
+    TestEqualCardinalityCollisionPairsAllSubstitutions`` exactly; see that
+    class's own docstring for the full account."""
+
+    def test_two_colliding_pairs_both_report_as_changed(self) -> None:
+        old_a = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_b = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        new_a = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        new_b = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(old_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("short")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                    OccurrenceId(new_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("char")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_BASE_CHANGED for c in changes)
+        assert {c.old_value for c in changes} == {"int", "short"}
+        assert {c.new_value for c in changes} == {"long", "char"}

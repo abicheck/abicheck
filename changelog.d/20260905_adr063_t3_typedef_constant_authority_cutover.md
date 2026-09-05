@@ -462,3 +462,21 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   runs of byte-identical input. Both now iterate in `old_ids`'s own
   (deterministic) encounter order instead, keeping the set only for O(1)
   membership checks (Codex review).
+- **A mixed removed/added colliding group now pairs every substitution it
+  can, not just the first.** `diff_constants`/`diff_typedefs` paired off
+  exactly one removed occurrence with one added occurrence as a single
+  `CONSTANT_CHANGED`/`TYPEDEF_BASE_CHANGED`, leaving every further pair to
+  fall through as an independent `CONSTANT_REMOVED`/`CONSTANT_ADDED` --
+  fabricating a removal-and-addition story for what equal cardinality on
+  both sides makes an equally valid multi-pair substitution (e.g. anonymous
+  `X=[1,2]` becoming `X=[3,4]`, previously one change plus a spurious
+  removal and addition). Both now loop the pairing while occurrences remain
+  on each side, the direct generalization of the tenth round's own
+  one-pair fix (Codex review).
+- **Fixed an unrelated, pre-existing broken doc link inherited via the
+  merge from `main`.** `docs/contribute/plans/cli-cleanup-phase-two.md`
+  linked `vision.md` with one directory level too many
+  (`../../../vision.md`, pointing outside `docs/` entirely); every sibling
+  page at the same depth correctly uses `../vision.md`. This broke the
+  `mkdocs build --strict` CI gate on every commit of this PR (and on
+  `main`) since the link was introduced.

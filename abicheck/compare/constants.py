@@ -560,7 +560,19 @@ def diff_constants(
         # `X=2` while a *different*, newly-added anonymous-scope `X=3` also
         # appears -- previously reported only one `CONSTANT_CHANGED` and
         # silently lost the independently provable `CONSTANT_ADDED`).
-        if removed_occurrences and added_occurrences:
+        # Every removed/added pair still available after the shared-identity
+        # pass is an independent substitution story, not just the first one
+        # (Codex review, PR #1078, twentieth round): pairing only once and
+        # letting every further residual fall through to the leftover loops
+        # below reported `X=[1,2]` -> `X=[3,4]` (equal cardinality, two
+        # substitutions) as one `CONSTANT_CHANGED` plus a fabricated
+        # `CONSTANT_REMOVED`/`CONSTANT_ADDED` pair, instead of two
+        # `CONSTANT_CHANGED`s. Pairing off as many removed/added occurrences
+        # as both sides have in common is the direct generalization of the
+        # tenth round's own one-pair fix -- exactly the excess beyond
+        # `min(len(removed), len(added))` is real leftover evidence, and no
+        # less.
+        while removed_occurrences and added_occurrences:
             # Prefers a pair with resolved value evidence on both sides
             # (Codex review, PR #1078, nineteenth round) over always taking
             # position 0: an unresolved occurrence (`_UNRESOLVED_MARKER`)
@@ -571,7 +583,8 @@ def diff_constants(
             # `is_fingerprint_comparison_unreliable`'s own reach (it
             # requires both values to be non-`None`). Falls back to
             # position 0 when no resolved pair exists, unchanged from
-            # before.
+            # before. Re-evaluated fresh each iteration since both lists
+            # shrink as pairs are consumed.
             removed_pos = next(
                 (
                     i

@@ -1138,3 +1138,53 @@ class TestSharedIdOrderIsDeterministic:
         assert [c.old_value for c in changes] == ["1", "5"]
         assert [c.new_value for c in changes] == ["2", "6"]
         assert [c.disambiguator for c in changes] == ["tu-a", "tu-b"]
+
+
+class TestEqualCardinalityCollisionPairsAllSubstitutions:
+    """Regression coverage for Codex review, PR #1078, twentieth round: a
+    mixed removed/added group with more than one pair left after the
+    shared-identity pass used to pair only the first removed/added pair as
+    a `CONSTANT_CHANGED`, leaving every further pair to fall through the
+    leftover loops as an independent `CONSTANT_REMOVED`/`CONSTANT_ADDED` --
+    fabricating a removal-and-addition story for what equal cardinality on
+    both sides makes an equally valid (and less alarming) multi-pair
+    substitution. Two anonymous-scoped `X` occurrences valued `1`/`2` on the
+    old side becoming `3`/`4` on the new side must report two
+    `CONSTANT_CHANGED`s, not one `CONSTANT_CHANGED` plus a fabricated
+    `CONSTANT_REMOVED`/`CONSTANT_ADDED` pair.
+    """
+
+    def test_two_colliding_pairs_both_report_as_changed(self) -> None:
+        old_a = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_b = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        new_a = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        new_b = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(old_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("3")
+                    ),
+                    OccurrenceId(new_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("4")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_CHANGED for c in changes)
+        assert {c.old_value for c in changes} == {"1", "2"}
+        assert {c.new_value for c in changes} == {"3", "4"}

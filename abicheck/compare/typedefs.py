@@ -435,14 +435,19 @@ def diff_typedefs(
                 added_occurrences.extend((value, i) for i in ids_for_value[:excess])
         if not removed_occurrences and not added_occurrences:
             continue
-        if removed_occurrences and added_occurrences:
-            # A genuine one-to-one substitution: consumes exactly one
-            # occurrence from each side, leaving any further residual
-            # occurrences to the loop below rather than folding them into
-            # this one ``TYPEDEF_BASE_CHANGED`` (Codex review, PR #1078,
-            # tenth round's constant-family sibling finding -- a mixed
-            # removed-and-added group can carry more than one independent
-            # piece of evidence).
+        # Every removed/added pair still available after the shared-identity
+        # pass is an independent substitution story, not just the first one
+        # (Codex review, PR #1078, twentieth round): pairing only
+        # `pop(0)`/`pop(0)` once and letting every further residual fall
+        # through to the leftover loops below reported `Alias={1,2}` ->
+        # `Alias={3,4}` (equal cardinality, two substitutions) as one
+        # `TYPEDEF_BASE_CHANGED` plus a fabricated `TYPEDEF_REMOVED`/
+        # `TYPEDEF_ADDED` pair, instead of two `TYPEDEF_BASE_CHANGED`s.
+        # Pairing off as many removed/added occurrences as both sides have
+        # in common is the direct generalization of the tenth round's own
+        # one-pair fix -- exactly the excess beyond `min(len(removed),
+        # len(added))` is real leftover evidence, and no less.
+        while removed_occurrences and added_occurrences:
             old_type, old_id = removed_occurrences.pop(0)
             new_type, new_id = added_occurrences.pop(0)
             changes.append(
