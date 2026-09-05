@@ -461,6 +461,27 @@ concepts:
       process-exit/stderr-text path, which PR #1062 extended again for
       evidence-contract errors. Tracked as track T8; the release fan-out's
       apply_release_gate_pack raw-string mirror is track T6.
+      **2026-09-05, T6 landed:** the raw-string mirror is gone. The fold
+      rule itself now lives once, in policy/gate_pack_fold.py's
+      fold_gate_pack_severity -- a leaf inward of both callers, which is the
+      shape that does not invert policy's permitted-import direction (policy
+      may not import the flat-root pack_application, which is why
+      release_gate_options.py takes a _GatePackApplication Protocol); both
+      apply_release_gate_pack and pack_application.apply_to_compare_config
+      call it. What is deliberately not collapsed is the two callers'
+      different fold *targets* (four raw optional strings before any
+      SeverityConfig exists vs. an already-resolved one) -- a real
+      distinction, since a release run must still separate "no severity
+      setting in effect" from "the default levels" -- which remains the P0
+      EffectiveGate/EffectiveEvaluationConfig target's job.
+      tests/test_gate_pack_fold.py states the shared primitive's contract as
+      invariants; tests/test_release_gate_pack_fold_parity.py now guards the
+      two surrounding shapes rather than two copies of the fold. T6's other
+      half landed with it: GateOptions.exit_code_scheme and
+      ResolvedCompareConfig.exit_code_scheme are derived properties rather
+      than settable fields, so the model can no longer express the
+      scheme-vs-severity disagreement both were already documented as
+      unable to have.
   sectioned_storage:
     primitive: complete
     producers: complete

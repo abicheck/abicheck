@@ -1469,7 +1469,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
             max_findings=req.max_findings,
             build_targets=req.build_targets,
             sev_config=gate.severity,
-            exit_code_scheme="severity" if gate.severity is not None else "legacy",
+            exit_code_scheme=gate.exit_code_scheme,
         )
     except _BudgetOverflow as exc:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.

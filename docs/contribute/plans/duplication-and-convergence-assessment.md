@@ -226,7 +226,7 @@ deletion**. Each row was verified against the implementation on
 | `stack_checker._run_abi_diff()`'s direct `dumper.dump()`×2 + `checker.compare()` | Shared per-library comparison operation | Remove the bypass and the generic-failure-to-`None` collapse; carry typed operational outcomes into stack analysis; keep dependency resolution/loadability as stack-specific |
 | `compare/typedefs.typedef_index_pair()` / `compare/constants.constant_index_pair()` runtime fidelity selectors — both build **IR-backed *and* legacy-backed** indexes on every comparison and let the legacy projection adjudicate | Canonical family data + a historical-input adapter at the load boundary | Stop rebuilding a legacy index for a current-format snapshot; a disagreement becomes an explicit consistency failure, not a silent fallback |
 | Writable legacy value + `*_fact` sibling pairs; current-runtime reliability flags | One canonical fact payload carrying observation-vs-inference, producer, scope, and positive-observation-vs-completeness | Remove dual writes and synchronization machinery once consumers migrate; historical decoding stays permanently in the import adapter |
-| `policy/release_gate_options.apply_release_gate_pack()` — folds pack severity into a 5-tuple of **raw strings**, mirroring `pack_application.apply_to_compare_config`'s fold over an already-resolved config | One shared effective-evaluation resolution (this plan's `EffectiveGate`/`EffectiveEvaluationConfig`), owned by a module `policy` is permitted to import — *not* by having `policy` call the flat-root `pack_application`, which is why the existing code takes a `_GatePackApplication` `Protocol` instead | Delete the mirrored raw-string application; `tests/test_release_gate_pack_fold_parity.py`'s parity property is the interim guard, not the destination |
+| ~~`policy/release_gate_options.apply_release_gate_pack()` — folds pack severity into a 5-tuple of **raw strings**, mirroring `pack_application.apply_to_compare_config`'s fold over an already-resolved config~~ **(the mirror is gone, T6, 2026-09-05)** | The fold rule itself now lives once in `policy/gate_pack_fold.py`'s `fold_gate_pack_severity` — a leaf inward of both callers, which is what let both call it without `policy` importing the flat-root `pack_application` (the `_GatePackApplication` `Protocol` stays for the same reason). The two callers' remaining difference is their fold *target*, not the rule | Done for the rule. Still open: the two runtime shapes themselves (four raw optional strings vs. an already-resolved `SeverityConfig`), which is this plan's `EffectiveGate`/`EffectiveEvaluationConfig` target — `tests/test_release_gate_pack_fold_parity.py` now guards those two shapes, and `tests/test_gate_pack_fold.py` states the shared primitive's own contract |
 | `action/run.sh`'s residual raw-exit-code/stderr-text verdict reconstruction | Structured `run_outcome`/`exit` reader | Retain only a small transport-level fallback for "no valid result because invocation failed"; `fail-on-*` stays explicit step policy and must not rewrite the reported verdict |
 | Four sibling `_exported_symbol_names()`-shaped implementations (`policy/depth_projection.py`, `buildsource/crosscheck_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, plus `diff_unnamed_types`'s own) | One canonical **raw export index** with explicitly named projections | Remove the equivalent local implementations — while preserving the real distinctions (versioned ELF exports, default versions, Mach-O spelling normalization, named PE exports, ordinal imports, *missing* versus *confirmed-empty* tables) as named views, not one universal set-of-strings helper |
 | Report semantics recomputed per format (alternate Markdown builders still consult `DiffResult`, filtering, policy, and recommendation helpers, reaching them through `render_markdown_document._reporter_markdown()`'s runtime `importlib` load of `..reporter_markdown` to dodge a cycle) | Shared **report preparation** producing evaluated facts once | Keep only view construction and rendering in format-specific code; layout/grouping/presentation filters stay legitimately per-format. `report/scoped_gate.py`'s own runtime load of `..reporter` is a *separate* dependency — scoped JSON construction, not Markdown — and has its own row below |
@@ -234,11 +234,17 @@ deletion**. Each row was verified against the implementation on
 
 Two adjacent findings that are not retirements but belong with them:
 
-- **`GateOptions.exit_code_scheme` is documented as purely derived but
+- ~~**`GateOptions.exit_code_scheme` is documented as purely derived but
   remains an independently constructible dataclass field beside
-  `severity`.** Make it a derived property, or enforce the invariant at
-  construction. The normal resolver supplies consistent values today; the
-  concern is that the *model* still permits disagreement.
+  `severity`.**~~ **Closed (T6, 2026-09-05):** it is a derived property now,
+  and so is `ResolvedCompareConfig.exit_code_scheme` beside its own
+  `severity_active` — the same defect, one object over. The concern was that
+  the *model* permitted disagreement even though the resolver never produced
+  one, and the concern was justified: two unit-test helpers
+  (`tests/test_config_review.py`, `tests/test_cov95_cli.py`) were
+  constructing a `GateOptions` carrying `exit_code_scheme=None` beside a real
+  `SeverityConfig`. Every site that re-spelled the `"severity" if ... else
+  "legacy"` derivation now calls one `gate_pack_fold.gate_exit_code_scheme`.
 - **`DumpResult`'s effective include paths can point into an
   already-deleted inferred-build directory.** Returning more paths is not a
   substitute for owning their lifetime: the shared extraction session must
@@ -449,11 +455,14 @@ own resolved gate object (`policy.release_gate_options.GateOptions`/
 raw scheme strings — closing this section's original "no equivalent typed
 object at all" premise (Codex review, PR #1050, fresh evidence). What
 remains: `GateOptions` is not itself `EffectiveGate`/
-`EffectiveEvaluationConfig`-shaped, and `apply_release_gate_pack()`'s own
-documentation still states it manually mirrors, rather than calls,
-`pack_application.apply_to_compare_config`'s identical fold logic,
-because the release fan-out has no `ResolvedCompareConfig`-shaped object
-of its own to fold packs onto.
+`EffectiveEvaluationConfig`-shaped. `apply_release_gate_pack()`'s manual
+mirror of `pack_application.apply_to_compare_config`'s fold logic closed
+under T6 (2026-09-05): both call one shared
+`policy/gate_pack_fold.fold_gate_pack_severity`. What that did *not* close
+is the reason the mirror existed — the release fan-out still has no
+`ResolvedCompareConfig`-shaped object of its own to fold packs onto, so the
+two callers still fold onto different runtime shapes around the one shared
+rule. That remains this section's target.
 
 **Target:** one runtime object,
 
@@ -1804,7 +1813,7 @@ track, the steps are ordered.
 | **T3 — Typedef/constant authority cutover** | Preserve the fidelity gate's four protected cases in the canonical model and the load-boundary adapter; then delete the runtime dual-index construction; extend the cohort guard to the selector and producers | `compare/typedefs.py`, `compare/constants.py`, `model/semantic_ir_legacy_adapter.py`, `scripts/semantic_ir_cutover.py` | nothing (T2 records it) |
 | **T4 — Dump request contract** | Fold `execute_dump_request`'s nine semantic kwargs into the typed request; split backend selection from fallback policy; give source-only dump an execution variant | `service_dump_pipeline.py`, `cli_dump_request.py`, `cli_buildsource.py`, `frontends/cli/dump_execute.py` | ~~T1~~ — satisfied (T1 landed 2026-09-05) |
 | **T5 — Direct-bypass migration** | Route `appcompat.check_appcompat()` and `stack_checker._run_abi_diff()` through the shared extraction/comparison workflow; shrink `CLI_CONTRACT_ALLOWLIST` accordingly | `appcompat.py`, `stack_checker.py`, `cli_stack.py`, `scripts/check_ai_readiness.py` | T4 for the dump half; the compare half is independent |
-| **T6 — Effective gate/policy convergence** | Collapse `apply_release_gate_pack`'s raw-string mirror of `pack_application.apply_to_compare_config` onto one shared fold **without inverting the dependency direction** — `policy/release_gate_options.py` deliberately consumes a `_GatePackApplication` `Protocol` rather than importing the flat-root `pack_application`, since `policy` may not import it (ADR-061; `policy/AGENTS.md`'s "Permitted imports"), so the shared fold belongs in an inward module both may import, or an outer layer invokes both halves — never a `policy → legacy root` call. Also make `GateOptions.exit_code_scheme` derived rather than independently constructible | `policy/release_gate_options.py`, `pack_application.py`, a new inward fold owner, `tests/test_release_gate_pack_fold_parity.py` | nothing |
+| **T6 — Effective gate/policy convergence** ✅ *(landed 2026-09-05; the shared fold and the derived scheme are done, the two runtime shapes remain P0's own job)* | Collapse `apply_release_gate_pack`'s raw-string mirror of `pack_application.apply_to_compare_config` onto one shared fold **without inverting the dependency direction** — `policy/release_gate_options.py` deliberately consumes a `_GatePackApplication` `Protocol` rather than importing the flat-root `pack_application`, since `policy` may not import it (ADR-061; `policy/AGENTS.md`'s "Permitted imports"), so the shared fold belongs in an inward module both may import, or an outer layer invokes both halves — never a `policy → legacy root` call. Also make `GateOptions.exit_code_scheme` derived rather than independently constructible | `policy/release_gate_options.py`, `pack_application.py`, a new inward fold owner, `tests/test_release_gate_pack_fold_parity.py` | nothing |
 | **T7 — Canonical export index** | One raw export index plus named projections (versioned ELF / default versions / Mach-O normalization / named PE / ordinal imports / missing-vs-empty); delete the five sibling implementations | `policy/depth_projection.py`, `buildsource/crosscheck_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, `diff_unnamed_types.py` | nothing |
 | **T8 — Action boundary** | Remove the residual raw-exit/stderr verdict reconstruction; keep only a transport-level no-result fallback; keep `fail-on-*` as step policy that never rewrites the verdict | `action/run.sh`, `action/` tests | nothing |
 | **T9 — Fact provenance and scope** | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, the import adapter | T2 for status recording; otherwise independent |

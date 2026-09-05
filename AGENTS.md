@@ -502,16 +502,27 @@ Core pipeline (in order of data flow):
      resolve_release_gate_options`, which ADR-064 landed 2026-09-02 —
      closing the "no `GateOptions`-shaped object of its own" gap this note
      used to describe) via `apply_release_gate_pack`, called once before
-     every downstream consumer reads the result. What remains open (see
-     that plan section for the exact scope): `apply_release_gate_pack`
-     itself mirrors, rather than calls, `pack_application.
-     apply_to_compare_config`'s identical fold logic, since the release
-     fan-out still has no `ResolvedCompareConfig`-shaped object of its own
-     to fold packs onto — deferred to the duplication-and-convergence-
-     assessment plan's own P0 `EffectiveGate`/`EffectiveEvaluationConfig`
-     target, not ADR-064's own `GateOptions` rewrite (already landed) or
-     its PR G2 (a different, unrelated deferred item — ADR-063 Track 4's
-     7B ledger entry has the full account). PR B's
+     every downstream consumer reads the result. The fold *rule* both sides
+     apply is shared, not mirrored, since track T6 (2026-09-05):
+     `policy/gate_pack_fold.py`'s `fold_gate_pack_severity` owns it and both
+     `apply_release_gate_pack` and `pack_application.
+     apply_to_compare_config` call it — a leaf inward of both, which is what
+     lets them share without `policy` importing the flat-root
+     `pack_application` (`release_gate_options.py`'s `_GatePackApplication`
+     `Protocol` exists for that same rule). The same module owns the one
+     `gate_exit_code_scheme` derivation every object that publishes a scheme
+     now uses, which is why `GateOptions.exit_code_scheme` and
+     `ResolvedCompareConfig.exit_code_scheme` are derived properties rather
+     than settable fields. What remains open (see that plan section for the
+     exact scope): the two callers still fold onto *different shapes* — four
+     raw optional strings before any `SeverityConfig` exists vs. an
+     already-resolved one — since the release fan-out still has no
+     `ResolvedCompareConfig`-shaped object of its own; deferred to the
+     duplication-and-convergence-assessment plan's own P0
+     `EffectiveGate`/`EffectiveEvaluationConfig` target, not ADR-064's own
+     `GateOptions` rewrite (already landed) or its PR G2 (a different,
+     unrelated deferred item — ADR-063 Track 4's 7B ledger entry has the
+     full account). PR B's
      other stated goal, the effective-config digest, has already landed for
      the native compare/release JSON path, the `--stat` JSON summary, and
      `scan --against` JSON -- non-JSON renderers (Markdown, review, SARIF,

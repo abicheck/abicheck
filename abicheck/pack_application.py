@@ -77,6 +77,10 @@ from .compatibility_evaluation_wiring import (
     load_selected_packs,
 )
 from .errors import PackManifestError
+from .policy.gate_pack_fold import (
+    GATE_SEVERITY_CATEGORIES,
+    fold_gate_pack_severity,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .policy_file import PolicyFile
@@ -421,25 +425,36 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
     a gate pack's severity would resolve, be reported, and then be scored
     under the legacy scheme that never reads it. There is no
     ``exit_code_scheme`` to fold any more -- ``resolved_cfg.exit_code_scheme``
-    is purely derived from ``severity_active`` (see
-    ``cli_helpers_compare.resolve_compare_config``'s own field docstring),
-    so setting ``severity_active`` here is the whole fold: the field
-    recomputes itself, with no separate three-tier precedence to
-    re-implement (the manual selector this docstring used to describe --
-    an explicit pack ``gate.exit_code_scheme`` outranking a pack severity
-    level outranking the pre-pack value -- no longer exists at all: a pack
-    asserting ``gate.exit_code_scheme`` is rejected at load time, see
+    is a property derived from ``severity_active`` (see
+    ``cli_helpers_compare.ResolvedCompareConfig``'s own docstring), so
+    setting ``severity_active`` here is the whole fold: the scheme recomputes
+    itself, with no separate three-tier precedence to re-implement (the
+    manual selector this docstring used to describe -- an explicit pack
+    ``gate.exit_code_scheme`` outranking a pack severity level outranking the
+    pre-pack value -- no longer exists at all: a pack asserting
+    ``gate.exit_code_scheme`` is rejected at load time, see
     ``compatibility_evaluation_wiring.GATE_PACK_FIELD_ROUTES``).
+
+    The per-category fold itself is
+    :func:`~abicheck.policy.gate_pack_fold.fold_gate_pack_severity`, the one
+    shared implementation the directory/package release fan-out's
+    ``policy.release_gate_options.apply_release_gate_pack`` also calls
+    (duplication-and-convergence-assessment T6). The two differ only in what
+    they fold *onto* -- an already-resolved ``SeverityConfig`` here, four raw
+    optional strings there -- which is why the shared function is written
+    over a plain per-category mapping rather than either runtime shape.
     """
     if not application.severity_levels:
         return resolved_cfg
-    severity = replace(resolved_cfg.severity, **application.severity_levels)
-    return replace(
-        resolved_cfg,
-        severity=severity,
-        severity_active=True,
-        exit_code_scheme="severity",
+    folded = fold_gate_pack_severity(
+        {
+            category: getattr(resolved_cfg.severity, category)
+            for category in GATE_SEVERITY_CATEGORIES
+        },
+        application.severity_levels,
     )
+    severity = replace(resolved_cfg.severity, **folded)
+    return replace(resolved_cfg, severity=severity, severity_active=True)
 
 
 #: Pack fields whose engine consumer only runs under contract evaluation,
