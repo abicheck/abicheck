@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from .policy.disposition_ledger import record_suppressed_change
+from .policy.disposition_ledger import Disposition, record_suppressed_change
 
 # Split out when this module reached the 2000-line hard cap (see each new
 # module's own docstring). `PipelineContext` is re-exported rather than
@@ -689,6 +689,51 @@ def _build_suppression_unknown_reachability_change(
         ),
         caused_by_type=change.symbol,
     )
+
+
+def _record_dropped_duplicates(
+    before: dict[int, Change],
+    after: list[Change],
+    ctx: PipelineContext,
+    step_name: str,
+) -> None:
+    """Record findings a step discarded outright as ``deduplicated``.
+
+    ADR-067 D1/D3: the raw total must count every atomically detected change,
+    including the ones an early collapse removed. ``DeduplicateAstDwarf`` and
+    ``DeduplicateCrossDetector`` run *before* ``FilterRedundant`` and simply
+    return a shorter list, so without this the detected total silently
+    undercounted by exactly the duplicates they folded away.
+
+    Deliberately generic rather than a patch to those two steps: any future
+    step that drops a finding is covered the same way, which is the failure
+    class -- a collapse with no audit record -- not the two instances of it.
+
+    A finding a step *moved* into one of the context's own side-output lists
+    is not a discard and is skipped here: it keeps the disposition its own
+    owner assigns (suppression records at the point it fires; the surface,
+    redundancy and opaque buckets are labelled when the ledger is closed over
+    the result). Since :meth:`DispositionLedger.record` is identity-keyed and
+    first-write-wins, mislabelling one here would be permanent.
+    """
+    ledger = ctx.disposition_ledger
+    if ledger is None:
+        return
+    survived = {id(c) for c in after}
+    for bucket in (
+        ctx.suppressed,
+        ctx.redundant,
+        ctx.opaque_filtered,
+        ctx.out_of_surface,
+    ):
+        survived.update(id(c) for c in bucket)
+    for key, change in before.items():
+        if key not in survived:
+            ledger.record(
+                change,
+                Disposition.DEDUPLICATED,
+                application_point=step_name,
+            )
 
 
 def _merge_findings_respecting_suppression(
@@ -1536,7 +1581,9 @@ class PostProcessingPipeline:
         # step author to remember it.
         kept_tracking_active = False
         for step in self.steps:
+            before = {id(c): c for c in changes}
             changes = step.run(changes, ctx)
+            _record_dropped_duplicates(before, changes, ctx, step.name)
             if step.name == FilterRedundant.name:
                 kept_tracking_active = True
             elif kept_tracking_active and ctx.kept is not changes:

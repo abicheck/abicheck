@@ -110,7 +110,7 @@ def to_stat(
         # counts -- a fully-suppressed comparison must not read as "no
         # changes".
         "disposition_audit_note": render_disposition_audit_note(
-            compute_disposition_audit(result)
+            compute_disposition_audit(result, severity_config)
         ),
     }
     if severity_config is not None:
@@ -1494,7 +1494,7 @@ def compute_review_digest(
             _rmd.ImpactedSymbol(symbol=c.symbol or "?", kind=c.kind.value)
             for c in impacted
         ),
-        disposition_audit=compute_disposition_audit(result),
+        disposition_audit=compute_disposition_audit(result, severity_config),
     )
 
 

@@ -8,9 +8,17 @@
   application points route through. Every report projection carries the
   resulting raw-versus-effective counts: the JSON report gains an additive
   top-level `disposition_audit` block, `--stat`'s one-line summary gains an
-  `[audit: N detected, M gating, …]` suffix, and the review digest and sticky
-  PR comment gain a disposition table/row. A fully suppressed comparison can no
-  longer read as "no changes".
+  `[audit: N detected, M gating, …]` suffix, the review digest and sticky PR
+  comment gain a disposition table/row, SARIF gains a run-level
+  `properties.dispositionAudit`, JUnit gains testsuite-level
+  `abicheck.detected_total`/`abicheck.effective_total`/
+  `abicheck.disposition.*` properties, and the HTML change-summary table gains
+  a raw-versus-effective footer row. A fully suppressed comparison can no
+  longer read as "no changes". `gating` means the gate the run was actually
+  scored on: with a `--severity-preset` (or a config `severity:` block) in
+  effect, the split follows `severity.gate_contribution_for_change` — the same
+  per-finding function the exit code folds — so a promoted addition reads
+  `gating` and a demoted break reads `non_gating`.
 - **Rule provenance in the suppression ledger.** Each
   `suppression.suppressed_changes[]` entry now records *which* rule hid the
   finding — its selector identity, the `--suppress` document's path, reason,

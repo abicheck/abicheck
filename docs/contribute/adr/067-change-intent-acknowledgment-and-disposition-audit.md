@@ -12,10 +12,13 @@ remains unimplemented. What S1 landed: one conserved disposition ledger
 application points record into
 (`abicheck/post_processing.py`, `abicheck/checker.py`,
 `abicheck/appcompat.py`); the raw-versus-effective counts and rule
-provenance in every scalar projection
+provenance in every scalar projection — JSON, `--stat` JSON, one-line,
+review digest, PR comment, SARIF, JUnit and HTML
 (`abicheck/report/disposition_audit.py`, `abicheck/reporter.py`,
 `abicheck/reporter_markdown.py`, `abicheck/report/render_text.py`,
-`abicheck/pr_comment_render.py`) under report schema 2.50; a
+`abicheck/pr_comment_render.py`, `abicheck/sarif.py`,
+`abicheck/junit_report.py`, `abicheck/html_report.py`) under report schema
+2.50; a
 `not_evaluated` detector state (`abicheck/detector_registry.py`,
 `abicheck/detectors.py`); and `abicheck/semver.py`'s release
 recommendation reading the conserved delta instead of the

@@ -2628,8 +2628,8 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
     {
         # Standalone application-compatibility (P0 item 6): dumps both
         # sides directly rather than through any of the other paths.
-        "abicheck/appcompat.py:1618:19:dumper.dump",
-        "abicheck/appcompat.py:1634:19:dumper.dump",
+        "abicheck/appcompat.py:1640:19:dumper.dump",
+        "abicheck/appcompat.py:1656:19:dumper.dump",
         # Scan baseline resolution (P0 item 4's baseline half): calls
         # `service.resolve_input()` directly rather than through
         # `service_input_resolution.resolve_side_snapshot`.

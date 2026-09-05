@@ -586,6 +586,7 @@ def _build_testsuite(
     ts.set("failures", str(failure_count))
     ts.set("errors", "0")
 
+    _add_disposition_audit_properties(ts, result, severity_config)
     _add_scoped_properties(ts, result)
 
     # G29 Phase 3 (ADR-052 follow-up): --report-mode root-cause adds
@@ -662,6 +663,50 @@ def _emit_missing_contract_testcases(
                 if entry is not None:
                     fail.set("rootCauseId", entry[0])
                     fail.set("rootCause", entry[1])
+
+
+def _add_disposition_audit_properties(
+    ts: ET.Element, result: DiffResult, severity_config: object | None = None
+) -> None:
+    """Append ADR-067 D3's raw-versus-effective counts as testsuite properties.
+
+    A JUnit consumer reads ``tests``/``failures``, which are the *effective*
+    numbers by construction -- a fully suppressed comparison reports zero
+    failures and would otherwise carry no trace that anything was detected at
+    all. These properties are that trace, in the one mechanism JUnit gives for
+    suite-level metadata; the per-disposition counts are emitted individually
+    so a dashboard can chart one without parsing a blob.
+
+    Its own ``<properties>`` element rather than sharing
+    :func:`_add_scoped_properties`': that block is emitted only under
+    ``--used-by``/``--required-symbol(s)`` scoping, and these counts are owed
+    unconditionally. Multiple ``<properties>`` children are valid JUnit XML.
+    """
+    from .report.disposition_audit import compute_disposition_audit
+
+    audit = compute_disposition_audit(result, severity_config)
+    props = ET.SubElement(ts, "properties")
+
+    def _prop(name: str, value: str) -> None:
+        p = ET.SubElement(props, "property")
+        p.set("name", name)
+        p.set("value", value)
+
+    _prop("abicheck.detected_total", str(audit.detected_total))
+    _prop("abicheck.effective_total", str(audit.effective_total))
+    for name, count in audit.counts:
+        _prop(f"abicheck.disposition.{name}", str(count))
+    for rule, count in audit.rules:
+        _prop(
+            f"abicheck.disposition_rule.{rule.rule_id or 'rule'}",
+            f"{count} finding(s); reason={rule.reason or 'none'}; "
+            f"intent={rule.intent}; source={rule.source_file or 'inline'}",
+        )
+    if audit.not_evaluated_detectors:
+        _prop(
+            "abicheck.not_evaluated_detectors",
+            ",".join(d.name for d in audit.not_evaluated_detectors),
+        )
 
 
 def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:

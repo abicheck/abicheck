@@ -195,6 +195,24 @@ class TestHundredSuppressedRemovals:
         assert "0 gating" in comment
         assert "bulk internal churn" in comment
 
+        from abicheck.html_report import generate_html_report
+        from abicheck.junit_report import to_junit_xml
+        from abicheck.sarif import to_sarif
+
+        audit = to_sarif(result)["runs"][0]["properties"]["dispositionAudit"]
+        assert audit["detected_total"] == 100
+        assert audit["effective_total"] == 0
+        assert audit["rules"][0]["reason"] == "bulk internal churn"
+
+        junit = to_junit_xml(result)
+        assert 'name="abicheck.detected_total" value="100"' in junit
+        assert 'name="abicheck.effective_total" value="0"' in junit
+        assert 'name="abicheck.disposition.suppressed" value="100"' in junit
+
+        html = generate_html_report(result)
+        assert "100 detected" in html and "0 gating" in html
+        assert "bulk internal churn" in html
+
 
 # ---------------------------------------------------------------------------
 # Conservation across the application points (the class-level invariant)
@@ -470,6 +488,150 @@ def test_ledger_for_a_hand_built_result_still_reconciles() -> None:
     assert conservation_holds(ledger)
     # Cached, not rebuilt per call — two consumers must not see two ledgers.
     assert ledger_for(result) is ledger
+
+
+class TestGatingFollowsTheResolvedGate:
+    """`gating` means "contributes to *this run's* gate", which is the
+    severity-aware answer whenever a severity configuration is in effect
+    (ADR-064 resolves it in the front end, after `compare()` has run).
+
+    Both directions matter and are independent claims: a category promoted to
+    `error` gates something the raw verdict calls compatible, and a category
+    demoted to `warning`/`info` stops gating something the raw verdict calls
+    a break.
+    """
+
+    @staticmethod
+    def _config(**levels):
+        from abicheck.policy.severity import SeverityConfig, SeverityLevel
+
+        return SeverityConfig(
+            **{category: SeverityLevel(level) for category, level in levels.items()}
+        )
+
+    def test_an_addition_promoted_to_error_reads_gating(self) -> None:
+        old, new = _snapshots(added=2)
+        result = compare(old, new)
+        assert compute_disposition_audit(result).effective_total == 0
+
+        promoted = compute_disposition_audit(result, self._config(addition="error"))
+        assert promoted.effective_total == 2
+        assert dict(promoted.counts)[Disposition.NON_GATING.value] == 0
+
+    def test_a_break_demoted_to_info_reads_non_gating(self) -> None:
+        old, new = _snapshots(removed=2)
+        result = compare(old, new)
+        assert compute_disposition_audit(result).effective_total == 2
+
+        demoted = compute_disposition_audit(result, self._config(abi_breaking="info"))
+        assert demoted.effective_total == 0
+        assert dict(demoted.counts)[Disposition.NON_GATING.value] == 2
+
+    def test_the_gate_never_moves_a_suppressed_finding(self) -> None:
+        """A severity configuration decides what *gates*; it cannot revive a
+        finding a rule withheld (D2: one change, one terminal disposition)."""
+        old, new = _snapshots(removed=2)
+        result = compare(
+            old,
+            new,
+            SuppressionList(
+                [Suppression(symbol_pattern=".*", reason="w", allow_public_break=True)]
+            ),
+        )
+        for config in (None, self._config(abi_breaking="error")):
+            audit = compute_disposition_audit(result, config)
+            assert dict(audit.counts)[Disposition.SUPPRESSED.value] == 2
+            assert audit.detected_total == 2
+            assert audit.effective_total == 0
+
+    def test_applying_a_gate_twice_is_idempotent(self) -> None:
+        old, new = _snapshots(removed=1, added=1)
+        result = compare(old, new)
+        config = self._config(addition="error")
+        first = compute_disposition_audit(result, config)
+        second = compute_disposition_audit(result, config)
+        assert first == second
+        assert first.detected_total == 2
+
+
+def test_early_deduplication_is_counted_not_dropped() -> None:
+    """`DeduplicateAstDwarf`/`DeduplicateCrossDetector` run before
+    `FilterRedundant` and simply return a shorter list. A finding they fold
+    away is still a detected change, so it must appear in the raw total under
+    the `deduplicated` disposition — otherwise `detected_total` silently
+    undercounts exactly the collapses the audit exists to expose.
+
+    Driven through the pipeline itself with a duplicate pair rather than
+    through a hand-called step, and asserted against the *step's own* output
+    length, which is an oracle independent of the ledger.
+    """
+    from abicheck.checker_types import Change
+    from abicheck.post_processing import DEFAULT_PIPELINE
+
+    duplicates = [
+        Change(kind=ChangeKind.FUNC_REMOVED, symbol="dup", description="a"),
+        Change(kind=ChangeKind.FUNC_REMOVED, symbol="dup", description="b"),
+    ]
+    old, new = _snapshots()
+    ledger = DispositionLedger()
+    ctx = DEFAULT_PIPELINE.run(list(duplicates), old, new, disposition_ledger=ledger)
+    dropped = len(duplicates) - len(ctx.kept)
+    if dropped == 0:  # pragma: no cover - defends the fixture, not the code
+        pytest.skip("this pair was not collapsed by any early dedup step")
+    assert ledger.counts()[Disposition.DEDUPLICATED.value] == dropped
+    assert ledger.detected_total == dropped
+
+
+def test_a_pipeline_step_can_never_drop_a_finding_unrecorded() -> None:
+    """The class-level statement of the same invariant: for *any* step in the
+    default pipeline, a finding that leaves `changes` without landing in one
+    of the context's own buckets is recorded, so the ledger plus the buckets
+    always account for every input change."""
+    from abicheck.checker_types import Change
+    from abicheck.post_processing import DEFAULT_PIPELINE
+
+    inputs = [
+        Change(kind=ChangeKind.FUNC_REMOVED, symbol=f"sym{i}", description="x")
+        for i in range(4)
+    ] + [
+        Change(kind=ChangeKind.FUNC_REMOVED, symbol="sym0", description="dup"),
+    ]
+    old, new = _snapshots()
+    ledger = DispositionLedger()
+    ctx = DEFAULT_PIPELINE.run(list(inputs), old, new, disposition_ledger=ledger)
+    accounted = {id(c) for c in ctx.kept}
+    for bucket in (
+        ctx.suppressed,
+        ctx.redundant,
+        ctx.opaque_filtered,
+        ctx.out_of_surface,
+    ):
+        accounted.update(id(c) for c in bucket)
+    accounted.update(ledger._seen_ids)
+    assert {id(c) for c in inputs} <= accounted
+
+
+def test_opaque_downgrades_are_not_labelled_deduplicated() -> None:
+    """`redundant_changes` concatenates two populations, split at
+    `redundant_count`. An opaque-handle downgrade was excluded from the
+    verdict on its own merits — calling it `deduplicated` would claim it was
+    folded into a finding that does not exist."""
+    from abicheck.checker_types import Change, DiffResult
+
+    collapsed = Change(kind=ChangeKind.FUNC_REMOVED, symbol="a", description="")
+    opaque = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="H", description="")
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libfoo",
+        redundant_changes=[collapsed, opaque],
+        redundant_count=1,
+    )
+    ledger = ledger_for(result)
+    assert ledger.record_for(collapsed).disposition is Disposition.DEDUPLICATED
+    assert ledger.record_for(opaque).disposition is Disposition.NON_GATING
+    assert ledger.record_for(opaque).application_point == "opaque_downgrade"
+    assert conservation_holds(ledger)
 
 
 # ---------------------------------------------------------------------------

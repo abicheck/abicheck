@@ -336,6 +336,27 @@ class DispositionLedger:
             counts[record.disposition.value] += 1
         return counts
 
+    def apply_gate(self, result: DiffResult, severity_config: object) -> None:
+        """Re-label the evaluated records against the *resolved* gate.
+
+        Touches only ``gating``/``non_gating`` records: a suppressed,
+        out-of-contract, unresolved or deduplicated finding never reached the
+        gate at all, so no severity configuration can change its disposition
+        (D2 -- one change, one terminal disposition). Idempotent, so a second
+        projection asking for the same ledger cannot double-apply it.
+        """
+        for index, (record, change) in enumerate(zip(self._records, self._anchors)):
+            if record.disposition not in (Disposition.GATING, Disposition.NON_GATING):
+                continue
+            self._records[index] = replace(
+                record,
+                disposition=_kept_disposition(
+                    change,  # type: ignore[arg-type]
+                    result,
+                    severity_config,
+                ),
+            )
+
     def resolve_verdict_classes(self, result: DiffResult) -> None:
         """Fill in the verdict class of every record that had none.
 
@@ -349,11 +370,15 @@ class DispositionLedger:
         and it is what makes ``suppressed_gating_records`` (hence
         ``semver.recommend_release``'s conserved delta) answerable at all.
         """
+        verdict_of = getattr(result, "_effective_verdict_for_change", None)
+        if not callable(verdict_of):
+            return  # a duck-typed stand-in with no verdict to read
         for index, (record, change) in enumerate(zip(self._records, self._anchors)):
             if record.verdict_class is not None:
                 continue
-            verdict = result._effective_verdict_for_change(change)  # type: ignore[arg-type]
-            self._records[index] = replace(record, verdict_class=verdict.value)
+            self._records[index] = replace(
+                record, verdict_class=verdict_of(change).value
+            )
 
     def record_for(self, change: object) -> DispositionRecord | None:
         """The record for *change*, or ``None`` if it was never recorded."""
@@ -455,8 +480,22 @@ def _verdict_class_of(change: object) -> str | None:
     return None
 
 
-def _kept_disposition(change: Change, result: DiffResult) -> Disposition:
-    """The terminal disposition of a change that survived into ``changes``."""
+def _kept_disposition(
+    change: Change, result: DiffResult, severity_config: object | None = None
+) -> Disposition:
+    """The terminal disposition of a change that survived into ``changes``.
+
+    ``gating`` means *contributes to this run's gate*, and the answer to that
+    is ``severity.gate_contribution_for_change`` — the identical per-finding
+    function ``compute_exit_code``/``compute_gate_decision`` fold, so this
+    cannot become a second gate algorithm. With no severity configuration in
+    effect (*severity_config* ``None``) it returns the finding's own legacy
+    verdict exit code, which is what an ordinary ``compare`` is scored on;
+    with one, a category configured ``error`` gates and one configured
+    ``warning``/``info`` does not — so ``severity.addition: error`` correctly
+    reads ``gating`` for a lone addition, and ``abi_breaking: info`` correctly
+    reads ``non_gating`` for a break the run lets through.
+    """
     from ..contract_gating import contract_relevance_of, is_evaluated
     from ..contract_relevance_types import ContractRelevance
 
@@ -476,8 +515,47 @@ def _kept_disposition(change: Change, result: DiffResult) -> Disposition:
             )
             else Disposition.OUT_OF_CONTRACT
         )
-    verdict = result._effective_verdict_for_change(change)
-    return Disposition.GATING if verdict in _GATING_VERDICTS else Disposition.NON_GATING
+    from .severity import gate_contribution_for_change
+
+    # Read through ``getattr``, like every other finding-shaped input this
+    # module takes: several report paths (the HTML characterization goldens'
+    # own builders, for one) hand the renderers a duck-typed stand-in rather
+    # than a real ``DiffResult``, and an audit that raised on one of those
+    # would be a projection deciding whether a report can be produced at all.
+    kind_sets_of = getattr(result, "_effective_kind_sets", None)
+    contribution = gate_contribution_for_change(
+        change,
+        severity_config,  # type: ignore[arg-type]
+        policy=getattr(result, "policy", None),
+        kind_sets=kind_sets_of() if callable(kind_sets_of) else None,
+        policy_file=getattr(result, "policy_file", None),
+    )
+    return Disposition.GATING if contribution > 0 else Disposition.NON_GATING
+
+
+def record_kept_change(
+    ledger: DispositionLedger | None,
+    change: Change,
+    result: DiffResult,
+    *,
+    application_point: str,
+) -> None:
+    """Record a change that a caller *kept*, with its real gate disposition.
+
+    The counterpart of :func:`record_suppressed_change` for a call site that
+    produces a finding after ``compare()`` has already closed the ledger — the
+    consumer overlay is the one such site today. Recording both branches is
+    what keeps D1's raw-total conservation true there: adding a suppression
+    rule must move a finding between dispositions, never change how many were
+    detected.
+    """
+    if ledger is None:
+        return
+    ledger.record(
+        change,
+        _kept_disposition(change, result),
+        application_point=application_point,
+    )
 
 
 def _record_bucket(
@@ -490,7 +568,11 @@ def _record_bucket(
         ledger.record(change, disposition, application_point=application_point)
 
 
-def finalize_ledger(ledger: DispositionLedger, result: DiffResult) -> DispositionLedger:
+def finalize_ledger(
+    ledger: DispositionLedger,
+    result: DiffResult,
+    severity_config: object | None = None,
+) -> DispositionLedger:
     """Close *ledger* over *result*, labelling every not-yet-recorded change.
 
     The suppression application points have already recorded their own
@@ -501,18 +583,44 @@ def finalize_ledger(ledger: DispositionLedger, result: DiffResult) -> Dispositio
     (a ``DiffResult`` assembled by a caller other than ``checker.compare``).
     After it returns, the per-disposition counts sum to the detected total.
     """
-    for change in result.changes:
+
+    # Every bucket read defensively, for the same reason ``_kept_disposition``
+    # reads its inputs that way: a report path may hand a projection a
+    # duck-typed stand-in for a ``DiffResult``, and a missing audit bucket is
+    # "this caller has none", not an error worth failing a report over.
+    def _bucket(name: str) -> list[Change]:
+        return list(getattr(result, name, None) or [])
+
+    for change in _bucket("changes"):
         ledger.record(
             change,
-            _kept_disposition(change, result),
+            _kept_disposition(change, result, severity_config),
             application_point="verdict",
         )
+    # ``redundant_changes`` is two different populations concatenated, split at
+    # ``redundant_count`` (``checker.compare``: ``redundant + opaque_filtered``,
+    # with the count covering only the first half). They are not the same
+    # disposition: a display-dedup finding really was collapsed into another
+    # one, while an opaque-handle downgrade is a compatible change excluded
+    # from the verdict on its own merits -- calling that "deduplicated" would
+    # claim it was folded into a finding that does not exist.
+    redundant = _bucket("redundant_changes")
+    redundant_count = getattr(result, "redundant_count", len(redundant))
     _record_bucket(
-        ledger, result.redundant_changes, Disposition.DEDUPLICATED, "redundancy_filter"
+        ledger,
+        redundant[:redundant_count],
+        Disposition.DEDUPLICATED,
+        "redundancy_filter",
     )
     _record_bucket(
         ledger,
-        result.out_of_surface_changes,
+        redundant[redundant_count:],
+        Disposition.NON_GATING,
+        "opaque_downgrade",
+    )
+    _record_bucket(
+        ledger,
+        _bucket("out_of_surface_changes"),
         Disposition.OUT_OF_CONTRACT,
         "surface_scope",
     )
@@ -522,11 +630,11 @@ def finalize_ledger(ledger: DispositionLedger, result: DiffResult) -> Dispositio
     # disposition, and the application point below is what names the mechanism.
     _record_bucket(
         ledger,
-        result.reconciled_changes,
+        _bucket("reconciled_changes"),
         Disposition.NON_GATING,
         "build_context_reconciliation",
     )
-    for change in result.suppressed_changes:
+    for change in _bucket("suppressed_changes"):
         ledger.record_suppression(
             change, rule=None, application_point="unrecorded_suppression"
         )
@@ -534,7 +642,9 @@ def finalize_ledger(ledger: DispositionLedger, result: DiffResult) -> Dispositio
     return ledger
 
 
-def ledger_for(result: DiffResult) -> DispositionLedger:
+def ledger_for(
+    result: DiffResult, severity_config: object | None = None
+) -> DispositionLedger:
     """The conserved ledger for *result* — the one accessor every consumer uses.
 
     Returns the ledger ``checker.compare`` built (with per-rule provenance
@@ -543,11 +653,21 @@ def ledger_for(result: DiffResult) -> DispositionLedger:
     ``DiffResult`` produced by any other caller still reconciles. Never
     ``None``: a report projection must be able to state D3's counts
     unconditionally.
+
+    *severity_config* is the run's resolved severity configuration, which
+    ``checker.compare()`` never sees — the gate is resolved by the front end
+    (ADR-064), strictly later. Passing it here is the audit *learning* the
+    gate the run was actually scored on, applied once to the one shared
+    ledger so every projection agrees; it is not a renderer changing a gate,
+    and it can only ever move a finding between ``gating`` and
+    ``non_gating`` (:meth:`DispositionLedger.apply_gate`).
     """
     existing = getattr(result, "disposition_ledger", None)
     if isinstance(existing, DispositionLedger):
+        if severity_config is not None:
+            existing.apply_gate(result, severity_config)
         return existing
-    ledger = finalize_ledger(DispositionLedger(), result)
+    ledger = finalize_ledger(DispositionLedger(), result, severity_config)
     # Attached, not only returned: a later recording call site (the consumer
     # overlay, whose suppressions happen after ``compare()`` returned) must
     # reach the *same* ledger every projection will read, and two callers

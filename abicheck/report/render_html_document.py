@@ -141,6 +141,12 @@ def _summary_table_from_mapping(d: Mapping[str, Any]) -> SummaryTableData:
         total_changed=d["total_changed"],
         total_added=d["total_added"],
         suppressed_count=d["suppressed_count"],
+        detected_total=d.get("detected_total"),
+        effective_total=d.get("effective_total"),
+        disposition_counts=tuple(
+            (name, count) for name, count in d.get("disposition_counts") or ()
+        ),
+        disposition_rules=tuple(d.get("disposition_rules") or ()),
     )
 
 

@@ -198,7 +198,7 @@ def to_stat_json(
     }
     # ADR-067 D3: a compact view may collapse detail; it may not omit the
     # raw-versus-effective counts.
-    _add_disposition_audit(d, result)
+    _add_disposition_audit(d, result, severity_config)
     _add_check_identity(d, result)
     gate = gate_decision_for_result(result, severity_config)
     if gate is not None:
@@ -537,7 +537,7 @@ def _to_json_leaf(
     }
     # ADR-067 D3: a compact view may collapse detail; it may not omit the
     # raw-versus-effective counts.
-    _add_disposition_audit(d, result)
+    _add_disposition_audit(d, result, severity_config)
     _add_check_identity(d, result)
     gate = gate_decision_for_result(result, severity_config)
     if gate is not None:
@@ -767,7 +767,7 @@ def _to_json_root_cause(
     if result.pattern_modulations:
         d["pattern_modulations"] = result.pattern_modulations
     _add_suppression(d, result)
-    _add_disposition_audit(d, result)
+    _add_disposition_audit(d, result, severity_config)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(
@@ -1053,7 +1053,7 @@ def _add_detectors(d: dict[str, object], result: DiffResult) -> None:
             # ADR-067 D3: "did not run" is a different statement from "ran
             # and found nothing", and `changes_count: 0` cannot tell them
             # apart on its own.
-            "not_evaluated": det.not_evaluated,
+            "not_evaluated": getattr(det, "not_evaluated", False),
         }
         for det in result.detector_results
         if det.changes_count > 0 or det.coverage_gap is not None
@@ -1242,7 +1242,7 @@ def to_json(
         severity_config=severity_config,
     )
     _add_suppression(d, result)
-    _add_disposition_audit(d, result)
+    _add_disposition_audit(d, result, severity_config)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(

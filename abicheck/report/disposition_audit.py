@@ -132,9 +132,19 @@ class DispositionAudit:
         )
 
 
-def compute_disposition_audit(result: DiffResult) -> DispositionAudit:
-    """Resolve *result*'s audit facts. Decides nothing; reads the ledger."""
-    ledger = ledger_for(result)
+def compute_disposition_audit(
+    result: DiffResult, severity_config: object | None = None
+) -> DispositionAudit:
+    """Resolve *result*'s audit facts. Decides nothing; reads the ledger.
+
+    *severity_config*, when the caller has one, is what makes ``gating`` mean
+    the gate this run was actually scored on rather than the raw verdict
+    class — ``checker.compare()`` never sees the resolved severity
+    configuration (ADR-064 resolves it in the front end, strictly later). It
+    is applied to the run's one shared ledger, so passing it in one
+    projection and not another cannot make two views disagree.
+    """
+    ledger = ledger_for(result, severity_config)
     counts = ledger.counts()
     return DispositionAudit(
         detected_total=ledger.detected_total,
@@ -143,13 +153,17 @@ def compute_disposition_audit(result: DiffResult) -> DispositionAudit:
         rules=ledger.rules(),
         not_evaluated_detectors=tuple(
             NotEvaluatedDetector(name=det.name, reason=det.coverage_gap)
-            for det in result.detector_results
+            # ``getattr`` for the same reason the ledger reads its inputs
+            # that way: a report path may hand this a duck-typed stand-in.
+            for det in getattr(result, "detector_results", None) or ()
             if getattr(det, "not_evaluated", False)
         ),
     )
 
 
-def add_disposition_audit(d: dict[str, object], result: DiffResult) -> None:
+def add_disposition_audit(
+    d: dict[str, object], result: DiffResult, severity_config: object | None = None
+) -> None:
     """Attach the ``disposition_audit`` block to a JSON report (schema 2.50).
 
     Unconditional and unsuppressible by construction: it is derived from the
@@ -157,7 +171,9 @@ def add_disposition_audit(d: dict[str, object], result: DiffResult) -> None:
     so a rule cannot remove its own audit record (the same structural pattern
     ADR-049 Phase 5's coverage ledger uses).
     """
-    d["disposition_audit"] = compute_disposition_audit(result).to_dict()
+    d["disposition_audit"] = compute_disposition_audit(
+        result, severity_config
+    ).to_dict()
 
 
 def render_disposition_audit_note(audit: DispositionAudit) -> str:

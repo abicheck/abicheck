@@ -23,12 +23,12 @@
     },
     {
       "path": "abicheck/appcompat.py",
-      "baseline_lines": 1832,
+      "baseline_lines": 1854,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1818 -> 1832 (ADR-067 C-S1, scalar disposition audit): the consumer-overlay suppression pass -- one of the four application points ADR-067 enumerates -- now records the finding it withholds into the run's conserved disposition ledger through the same `policy.disposition_ledger.record_suppressed_change` primitive the other four call sites use. The added lines are that one call plus the comment recording why an overlay built from a raw `missing_symbols` string needs no second record type. There is no responsibility to move: the suppression decision itself already lives here, and the ledger it now feeds is a `policy/` leaf.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1818 -> 1832 (ADR-067 C-S1, scalar disposition audit): the consumer-overlay suppression pass -- one of the four application points ADR-067 enumerates -- now records the finding it withholds into the run's conserved disposition ledger through the same `policy.disposition_ledger.record_suppressed_change` primitive the other four call sites use. The added lines are that one call plus the comment recording why an overlay built from a raw `missing_symbols` string needs no second record type. There is no responsibility to move: the suppression decision itself already lives here, and the ledger it now feeds is a `policy/` leaf. Raised again 1832 -> 1854 (Codex review on PR #1082): the consumer overlay now records into the ledger on *both* branches, not only when a suppression rule fires -- recording one side only made adding a matching rule change the *detected* total instead of moving the finding between dispositions, which is precisely the conservation ADR-067 D1 requires.",
       "review_by": "2026-11-30"
     },
     {
@@ -913,12 +913,12 @@
     },
     {
       "path": "abicheck/junit_report.py",
-      "baseline_lines": 1160,
+      "baseline_lines": 1205,
       "target": "report",
       "rule": "no_growth",
       "category": "legacy_report_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1160 -> 1205 (ADR-067 D3, Codex review on PR #1082): a testsuite-level `<properties>` block carrying the raw-versus-effective counts. D3 names JUnit explicitly, and a JUnit consumer reads `tests`/`failures`, which are the *effective* numbers by construction -- a fully suppressed comparison reports zero failures and otherwise carried no trace that anything was detected. Its own properties element rather than an extension of `_add_scoped_properties`, which is emitted only under `--used-by` scoping while these counts are owed unconditionally.",
       "review_by": "2026-11-30"
     },
     {
@@ -963,12 +963,12 @@
     },
     {
       "path": "abicheck/post_processing.py",
-      "baseline_lines": 1627,
+      "baseline_lines": 1674,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1606 -> 1627 (ADR-067 C-S1): `ApplySuppression.apply()` and `_merge_findings_respecting_suppression()` -- two of the five suppression application points -- now record each withheld finding, with the matched rule, through the shared `policy.disposition_ledger.record_suppressed_change` primitive, and `Pipeline.run` threads the ledger through. The recording logic itself is in that `policy/` leaf; what is added here is the call at each point plus the pipeline parameter.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1606 -> 1627 (ADR-067 C-S1): `ApplySuppression.apply()` and `_merge_findings_respecting_suppression()` -- two of the five suppression application points -- now record each withheld finding, with the matched rule, through the shared `policy.disposition_ledger.record_suppressed_change` primitive, and `Pipeline.run` threads the ledger through. The recording logic itself is in that `policy/` leaf; what is added here is the call at each point plus the pipeline parameter. Raised again 1627 -> 1674 (Codex review on PR #1082): `Pipeline.run` now records any finding a step discards outright as `deduplicated` (`_record_dropped_duplicates`). `DeduplicateAstDwarf`/`DeduplicateCrossDetector` run before `FilterRedundant` and simply return a shorter list, so the detected total silently undercounted by exactly the duplicates they folded away. Written once at the pipeline level rather than patched into those two steps, which is what makes it cover the failure class (a collapse with no audit record) rather than its two instances.",
       "review_by": "2026-11-30"
     },
     {
@@ -1043,12 +1043,12 @@
     },
     {
       "path": "abicheck/sarif.py",
-      "baseline_lines": 1284,
+      "baseline_lines": 1292,
       "target": "report",
       "rule": "no_growth",
       "category": "legacy_report_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1284 -> 1292 (ADR-067 D3, Codex review on PR #1082): a run-level `properties.dispositionAudit` block. D3 names SARIF explicitly, and the existing `changeCount`/`suppressedCount` pair answers neither \"how many were detected\" nor \"how many gated\". Run-level, since it is a property of the comparison -- SARIF's own per-result `suppressions` array already carries the per-finding half.",
       "review_by": "2026-11-30"
     },
     {

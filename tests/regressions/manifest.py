@@ -693,7 +693,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "Only castxml's own `artificial=\"1\"` marker is read "
+                    'Only castxml\'s own `artificial="1"` marker is read '
                     "(`Function.is_compiler_generated`); the direct-clang "
                     "L2 backend never emits an implicit declaration as a "
                     "`Function` at all (its AST walk skips `isImplicit` "
@@ -997,7 +997,17 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                 "filter_pattern_synthetic",
                 "consumer_overlay",
             ),
-            "projection": ("json", "stat-json", "one-line", "review-digest", "pr-comment"),
+            "projection": (
+                "json",
+                "stat-json",
+                "one-line",
+                "review-digest",
+                "pr-comment",
+                "sarif",
+                "junit",
+                "html",
+            ),
+            "gate": ("legacy-verdict", "severity-preset"),
         },
         known_gaps=(
             KnownGap(

@@ -813,7 +813,7 @@ def _baseline_summary(
             # comment above records: "did not run" and "ran, found nothing"
             # are different statements, and `changes_count: 0` cannot tell
             # them apart.
-            "not_evaluated": det.not_evaluated,
+            "not_evaluated": getattr(det, "not_evaluated", False),
         }
         for det in getattr(diff, "detector_results", None) or []
         if det.changes_count > 0 or det.coverage_gap is not None

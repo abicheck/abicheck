@@ -343,6 +343,16 @@ class SummaryTableData:
     total_changed: int
     total_added: int
     suppressed_count: int
+    #: ADR-067 D3's raw-versus-effective counts, already resolved: the
+    #: detected total, the gating total, ``(disposition, count)`` pairs, and
+    #: one already-formatted line per rule that produced a disposition. Plain
+    #: values only, because this struct round-trips through a
+    #: ``ReportDocument`` mapping. Empty tuple / ``None`` for a caller that
+    #: has no audit to supply (several tests build this struct directly).
+    detected_total: int | None = None
+    effective_total: int | None = None
+    disposition_counts: tuple[tuple[str, int], ...] = ()
+    disposition_rules: tuple[str, ...] = ()
 
 
 def render_summary_table(data: SummaryTableData) -> str:
@@ -370,6 +380,31 @@ def render_summary_table(data: SummaryTableData) -> str:
             f"<tr><td colspan='4' style='color:#6a1b9a; font-size:0.85em; padding:6px 12px;'>"
             f"ℹ️ {data.suppressed_count} change(s) suppressed by suppression file</td></tr>"
         )
+
+    # ADR-067 D3: the category table above counts what is *displayed*, so it
+    # reads "nothing happened" for a comparison whose findings were all
+    # suppressed or scoped out. These rows are the raw-versus-effective
+    # statement every projection owes, in the same table a reader is already
+    # looking at.
+    if data.detected_total is not None:
+        # Skipping the gating entry: it is already the headline number, and
+        # repeating it in the detail reads as two different findings.
+        detail = ", ".join(
+            f"{count} {name.replace('_', ' ')}"
+            for name, count in data.disposition_counts
+            if count and name != "gating"
+        )
+        rows.append(
+            f"<tr style='border-top:1px solid #e0e0e0;'>"
+            f"<td colspan='4' style='font-size:0.85em; padding:6px 12px;'>"
+            f"🔎 {data.detected_total} detected · {data.effective_total} gating"
+            f"{f' · {html.escape(detail)}' if detail else ''}</td></tr>"
+        )
+        for line in data.disposition_rules:
+            rows.append(
+                f"<tr><td colspan='4' style='color:#6a1b9a; font-size:0.8em; "
+                f"padding:2px 24px;'>{html.escape(line)}</td></tr>"
+            )
 
     body = "\n".join(rows)
     return f"""<div class='summary-section'>

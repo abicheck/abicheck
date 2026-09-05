@@ -34,7 +34,11 @@ from .checker_policy import ChangeKind, ReachabilityState, Verdict, compute_verd
 from .diff_helpers import make_change
 from .impact.engine import assess_change
 from .model import AbiSnapshot, Visibility
-from .policy.disposition_ledger import ledger_for, record_suppressed_change
+from .policy.disposition_ledger import (
+    ledger_for,
+    record_kept_change,
+    record_suppressed_change,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -1493,6 +1497,12 @@ def scope_diff_to_app(
         # fields just set above.
         overlay_change.impact_assessment = assess_change(overlay_change)
         if suppression is None:
+            record_kept_change(
+                ledger_for(diff),
+                overlay_change,
+                diff,
+                application_point="consumer_overlay",
+            )
             breaking_for_app.append(overlay_change)
             continue
         # evaluate() (not the cheaper is_suppressed) so a broad rule whose
@@ -1528,6 +1538,18 @@ def scope_diff_to_app(
             )
             suppressed_missing.add(sym)
             continue
+        # Recorded on *both* branches, not only when a rule fires (ADR-067
+        # D1): the overlay is an atomically detected consumer finding either
+        # way, so recording it only when suppressed would make adding a
+        # matching rule change the *detected* total rather than move the
+        # finding between dispositions -- exactly the conservation the audit
+        # exists to make checkable.
+        record_kept_change(
+            ledger_for(diff),
+            overlay_change,
+            diff,
+            application_point="consumer_overlay",
+        )
         breaking_for_app.append(overlay_change)
         # outcome.withheld_unknown_rule is never set here: overlay_change is
         # always constructed with reachability_state=PROVEN_REACHABLE above

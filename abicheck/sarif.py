@@ -49,6 +49,7 @@ from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
 from abicheck.policy.gate_decision import gate_decision_for_result
+from abicheck.report.disposition_audit import compute_disposition_audit
 from abicheck.report.render_json import render_mapping_as_json
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import (
@@ -1056,6 +1057,18 @@ def to_sarif(
                     "library": result.library,
                     "changeCount": len(changes),
                     "suppressedCount": result.suppressed_count,
+                    # ADR-067 D3: the raw-versus-effective counts belong in
+                    # every projection, SARIF included -- `changeCount` is the
+                    # *displayed* result set and `suppressedCount` covers one
+                    # disposition, so neither answers "how many changes were
+                    # detected, and how many actually gated". Run-level
+                    # properties rather than per-result ones: this is a
+                    # property of the comparison, and SARIF's own per-result
+                    # `suppressions` array above already carries the
+                    # per-finding half.
+                    "dispositionAudit": compute_disposition_audit(
+                        result, severity_config
+                    ).to_dict(),
                     **(
                         {"severityGate": severity_gate}
                         if severity_gate is not None
