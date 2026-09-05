@@ -35,7 +35,7 @@ from .checker_policy import ChangeKind, Verdict, compute_verdict, effective_cate
 from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
 from .model import AbiSnapshot, Function, Variable
-from .model.elf_facts import ElfMetadata
+from .model.elf_facts import ElfMetadata, SymbolBinding
 
 if TYPE_CHECKING:
     from .policy_file import PolicyFile
@@ -242,6 +242,15 @@ class ProviderEntry:
     # (Codex review). Defaults to True for the few synthetic ProviderEntry
     # construction sites that have no real per-symbol version data.
     is_default: bool = True
+    # ELF symbol binding (STB_GLOBAL/STB_WEAK/STB_GNU_UNIQUE/...). A WEAK or
+    # UNIQUE definition is ordinary C++ vague linkage (inline function/
+    # template instantiation COMDAT) -- every DSO that emits the same
+    # definition is *expected* to carry an identical weak copy, deduplicated
+    # by the dynamic linker at load time; it is not two libraries disputing
+    # ownership of a symbol the way two GLOBAL definitions are. Defaults to
+    # GLOBAL for synthetic construction sites with no real per-symbol
+    # binding data (Codex review, PR H).
+    binding: SymbolBinding = SymbolBinding.GLOBAL
 
 
 @dataclass(frozen=True)

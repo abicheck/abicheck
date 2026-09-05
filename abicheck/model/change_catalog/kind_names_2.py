@@ -254,6 +254,16 @@ KIND_NAMES_2: tuple[tuple[str, str, str | None], ...] = (
         "G38 Phase 4: a sibling library's import resolves by name to a -- provider's export (the same C-linkage match BUNDLE_INTRA_DEP_ -- SIGNATURE_CHANGED uses), but neither side has DWARF/header evidence -- for that exact symbol, so agreement can be neither confirmed nor -- denied. RISK, distinct from both \"no change\" (evidence agrees) and -- the confirmed BREAKING BUNDLE_INTRA_DEP_SIGNATURE_CHANGED (evidence -- disagrees). See abicheck/bundle_signature_evidence.py.",
     ),
     (
+        "BUNDLE_DUPLICATE_PROVIDER",
+        "bundle_duplicate_provider",
+        "PR H (CLI cleanup phase two, ADR-056): the same default-visibility -- symbol name is exported by 2+ libraries in one --artifact-set audit. -- Which library a consumer resolves against then depends on load order -- / symbol interposition, not a declared contract. RISK -- an audit has -- no old side to say whether this is new or long-standing. Linker- -- synthesized per-object boilerplate (_edata/_end/...) is excluded. See -- abicheck/bundle_detectors.py:_detect_duplicate_providers.",
+    ),
+    (
+        "BUNDLE_MANIFEST_ENTRY_UNSATISFIED",
+        "bundle_manifest_entry_unsatisfied",
+        "PR H (CLI cleanup phase two, ADR-056): the audit-mode (no old side) -- sibling of BUNDLE_MANIFEST_INSTANTIATION_REMOVED -- an opt-in -- scan --artifact-set --manifest ownership promise (missing entirely, or -- matched but provided by a library other than the one the manifest -- names) is unsatisfied by this one declared set. RISK, not BREAKING: -- there is no diff to confirm a regression, only that the promise does -- not hold right now. See abicheck/bundle_detectors.py:_detect_manifest_ownership.",
+    ),
+    (
         "CTOR_EXPLICIT_ADDED",
         "ctor_explicit_added",
         "── Explicit specifier transitions on constructors / conversion ops ─ -- Source-level contract: an `explicit` specifier added to a previously- -- implicit converting constructor invalidates user code that depended on -- implicit conversion (e.g. `Foo f = 42;` or pass-by-value at call site). -- Removing `explicit` is the dual; existing code keeps compiling, but -- implicit conversion may now select a different overload and cause -- behavioral drift. Neither change alters the mangled name.",

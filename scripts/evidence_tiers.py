@@ -247,6 +247,11 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "bundle_manifest_instantiation_removed": "L0",
     "bundle_provider_changed": "L0",
     "bundle_soname_skew": "L0",
+    # PR H (CLI cleanup phase two): both read exported-symbol data from
+    # BundleSnapshot alone, the same L0 evidence every other bundle_* kind
+    # above rests on.
+    "bundle_duplicate_provider": "L0",
+    "bundle_manifest_entry_unsatisfied": "L0",
     # G38 Phase 3: pairs BundleFacts (derived from ElfMetadata alone, the
     # same L0 evidence every other bundle_* kind above rests on).
     "bundle_variant_coverage_regressed": "L0",

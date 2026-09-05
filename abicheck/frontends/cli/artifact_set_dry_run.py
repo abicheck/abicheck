@@ -135,12 +135,21 @@ def render_artifact_set_dry_run(
         "attribution) -- they are not per-member-scoped inputs.",
     )
     result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
+    manifest = getattr(req, "bundle_manifest", None)
     result.add(
         "Consumer/contract scoping",
         "audit checks: always run per member (pattern pre-scan + "
         "intra-version cross-source)",
         "cross-library bundle audit: will run over the whole set "
-        "(resolution graph, unresolved intra-dependency detection)",
+        "(resolution graph, unresolved intra-dependency detection, "
+        "duplicate-provider ownership ambiguity)",
+        (
+            f"--manifest: {len(manifest.entries)} expected-provider "
+            f"{'entry' if len(manifest.entries) == 1 else 'entries'} will "
+            "be checked against this set"
+        )
+        if manifest is not None
+        else "--manifest: not given -- no expected-provider ownership check",
         "compatibility comparison: will NOT run (--artifact-set is "
         "audit-only, no old side)",
     )

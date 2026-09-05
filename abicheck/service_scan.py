@@ -64,6 +64,7 @@ from .workflows.scan_subprocess import (
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
+    from .bundle_manifest import InstantiationManifest
     from .environment_matrix import EnvironmentMatrix
     from .policy_file import PolicyFile
     from .suppression import SuppressionList
@@ -254,6 +255,7 @@ class ScanRequest:
     build_targets: tuple[str, ...] = field(default=(), kw_only=True)
     severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
     # No exit_code_scheme field any more -- PR G2 deleted the manual selector.
+    bundle_manifest: InstantiationManifest | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -1732,6 +1734,10 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     # flags only mean anything with --against" guard -- req.mode is already forced to "audit" above, so this always
     # applies here (unlike run_scan, where it's conditional on baseline/mode).
     _reject_comparison_only_fields(req)
+    if req.bundle_manifest is not None:
+        # P2 (Codex review): a direct ScanRequest(bundle_manifest=...) bypasses load_manifest()'s own validation.
+        from .bundle_manifest import _validate_manifest_entries
+        _validate_manifest_entries(Path("<typed-api>"), list(req.bundle_manifest.entries))
 
     from .workflows.plan import scan_bazel_scoping_failure  # ADR-063 Phase 4
 
@@ -1845,7 +1851,8 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         # AGENTS.md's exit code table).
         with _deadline.deadline_scope(remaining):
             audit = audit_bundle(
-                libraries, bundle_system_providers=req.bundle_system_providers
+                libraries, bundle_system_providers=req.bundle_system_providers,
+                manifest=req.bundle_manifest,
             )
     except _deadline.DeadlineExceeded:
         return ScanSetResult(
