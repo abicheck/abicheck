@@ -452,9 +452,14 @@ A documentation review of the evidence-adequacy story across this ADR,
 [ADR-064](064-canonical-gate-algorithm-and-exit-decision.md) found the four
 already-real distinctions those ADRs draw individually — a stripped binary
 is a first-class, valid input (this ADR's whole premise: D2's optional
-layers never make a lower layer mandatory); a failed extractor is an
-explicit `FAILED` fact, never an empty surface substituted for it
-(ADR-063's `FactStatus`); a capability that does not apply to the requested
+layers never make a lower layer mandatory); a failed extraction is recorded
+as an explicit failure, never silently substituted with an empty surface
+that would read as a clean absence — the repository has two separate,
+non-unified channels for this, both real: this ADR's own
+`ExtractorRecord.status` (`ok`/`partial`/`failed`/`skipped`,
+`buildsource/model.py`) for a build/source extractor's provenance ledger,
+and the model-level `FactStatus.FAILED` (ADR-063, `model/availability.py`)
+for an atomic fact; a capability that does not apply to the requested
 task is `NOT_APPLICABLE`, not `UNKNOWN` (ADR-049's relevance vocabulary);
 and assurance/policy may block a run on missing evidence without that
 missing evidence *becoming* a fabricated ABI finding (ADR-064's
@@ -466,7 +471,7 @@ schema, and does not revisit any of the four ADRs' own decisions:
 | Situation | Required meaning |
 |---|---|
 | No debug info supplied (L1 absent — a stripped binary keeps its L0 exported-symbol table regardless) | Layout/vtable checks this ADR's L1 layer would answer are `unverified`/skipped; valid symbol-table (L0) and header-declaration (L2) results remain fully reported — this ADR's D2 (`Add new evidence layers without renumbering L0/L1/L2`) is exactly what keeps a lower layer's absence from disabling an upper one |
-| A requested extraction failed (e.g. `--sources` given but the build could not be replayed) | The failure is reported as a real, visible failure (`FactStatus.FAILED`, ADR-063 Phase 5) — never silently downgraded to "no evidence found" and never substituted with an empty surface that would read as a clean absence |
+| A requested extraction failed (e.g. `--sources` given but the build could not be replayed) | The failure is reported as a real, visible failure — `ExtractorRecord.status="failed"` (this ADR's own build/source provenance ledger, `buildsource/model.py`) for this specific example, or `FactStatus.FAILED` (ADR-063, `model/availability.py`) for an atomic model-level fact, depending on which layer detected the failure — never silently downgraded to "no evidence found" and never substituted with an empty surface that would read as a clean absence |
 | A capability does not apply to the task at hand (e.g. a layout check against a header-only library with no compiled artifact on either side) | `FactStatus.NOT_APPLICABLE` (`model/availability.py`: "the family is meaningless for this artifact kind... not a gap, nothing is missing") — a distinct axis from ADR-049's `ContractRelevance.NOT_APPLICABLE`, which is a *per-finding* value answering whether an already-produced, non-entity-scoped finding (SONAME, deployment) belongs to the declared contract, not whether a capability produced a finding at all. Since no layout finding exists in the header-only case, there is nothing for `ContractRelevance`/`CompatibilityEvaluationStatus` to be attributed to. Also a distinct state from "incomplete evidence for a capability that does apply," which stays `UNKNOWN_UNRESOLVED`/`UNKNOWN_UNPROVEN` |
 | Policy/assurance requires evidence the run does not have | The run's `analysis_assurance` axis (ADR-064) may block or downgrade the *run's own confidence*, and contract-coverage floors (ADR-049 Phase 7) may raise a clean exit to a non-zero one — but neither of those effects may manufacture a `ChangeKind` finding no detector actually observed; a low-assurance run without a real break stays "no findings, low assurance," never "a break, because evidence was thin" |
 
