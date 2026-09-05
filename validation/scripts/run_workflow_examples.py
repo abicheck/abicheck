@@ -121,6 +121,49 @@ def _change_kinds(report: dict) -> list[str]:
     return kinds
 
 
+def check_json_variant(
+    step,
+    *,
+    base_returncode: int,
+    json_returncode: int,
+    json_stdout: str,
+    json_command: str,
+) -> list[str]:
+    """Check the machine-readable rerun of a documented command.
+
+    The exit-code comparison is against the *plain* run rather than the
+    step's declared expectation, because that is the real invariant: the
+    JSON variant is the same command with only a format flag appended, so it
+    must gate identically whatever the declared code is (and a step may
+    declare none at all). Recording the code without checking it would let a
+    regression that keeps the payload right but returns the wrong exit code
+    pass -- and the machine-readable path is precisely the one a consumer's
+    CI gates on.
+    """
+    failures: list[str] = []
+    if json_returncode != base_returncode:
+        failures.append(
+            f"{json_command}: exit code {json_returncode}, but the same command "
+            f"without {' '.join(step.json_variant)} exited {base_returncode} -- "
+            "a format flag must not change gating"
+        )
+    try:
+        payload = json.loads(json_stdout)
+    except json.JSONDecodeError as exc:
+        failures.append(f"{json_command}: output is not JSON ({exc})")
+        return failures
+
+    expected = dict(step.expect_json)
+    want_kinds = expected.pop("change_kinds", None)
+    failures.extend(_check_json(payload, expected))
+    if want_kinds is not None and isinstance(payload, dict):
+        got = _change_kinds(payload)
+        missing_kinds = [k for k in want_kinds if k not in got]
+        if missing_kinds:
+            failures.append(f"change_kinds: missing {missing_kinds} (got {got})")
+    return failures
+
+
 def run_workflow(
     workflow: workflow_examples.Workflow, *, timeout: int
 ) -> dict[str, object]:
@@ -188,21 +231,15 @@ def run_workflow(
                 json_proc = _run(json_argv, scratch, timeout)
                 record["json_command"] = json_command
                 record["json_exit_code"] = json_proc.returncode
-                try:
-                    payload = json.loads(json_proc.stdout)
-                except json.JSONDecodeError as exc:
-                    step_failures.append(f"{json_command}: output is not JSON ({exc})")
-                else:
-                    expected = dict(step.expect_json)
-                    want_kinds = expected.pop("change_kinds", None)
-                    step_failures.extend(_check_json(payload, expected))
-                    if want_kinds is not None and isinstance(payload, dict):
-                        got = _change_kinds(payload)
-                        missing_kinds = [k for k in want_kinds if k not in got]
-                        if missing_kinds:
-                            step_failures.append(
-                                f"change_kinds: missing {missing_kinds} (got {got})"
-                            )
+                step_failures.extend(
+                    check_json_variant(
+                        step,
+                        base_returncode=proc.returncode,
+                        json_returncode=json_proc.returncode,
+                        json_stdout=json_proc.stdout,
+                        json_command=json_command,
+                    )
+                )
 
             if step_failures:
                 record["failures"] = step_failures
@@ -279,6 +316,19 @@ def main(argv: list[str] | None = None) -> int:
         workflows = [w for w in workflows if w.id in wanted]
     if not workflows:
         print("ERROR: no workflow examples found", file=sys.stderr)
+        return 1
+
+    # A `--require` id that names nothing in the selected set is a usage
+    # error, not a no-op. Silently ignoring it defeats the flag's entire
+    # purpose: a misspelling, a renamed workflow, or a positional selection
+    # that excludes the required id would let a run where every workflow
+    # skipped still exit 0 -- the zero-work pass `--require` exists to stop.
+    unknown_required = sorted(set(args.require) - {w.id for w in workflows})
+    if unknown_required:
+        print(
+            f"ERROR: --require names workflow(s) not in this run: {unknown_required}",
+            file=sys.stderr,
+        )
         return 1
 
     results = [run_workflow(w, timeout=args.timeout) for w in workflows]

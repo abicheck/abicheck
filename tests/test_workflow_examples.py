@@ -316,3 +316,134 @@ def test_the_compare_release_workflow_declares_the_backend_its_command_needs():
     uses_header = any("--header" in step.run for step in workflow.steps)
     assert uses_header
     assert "castxml" in workflow.requires
+
+
+@pytest.mark.parametrize(
+    ("selection", "required"),
+    [
+        pytest.param([], ["compare-relase"], id="misspelled"),
+        pytest.param([], ["never-existed"], id="unknown"),
+        pytest.param(
+            ["compare-release"], ["something-else"], id="excluded-by-selection"
+        ),
+        pytest.param(
+            ["compare-release"], ["compare-release", "typo"], id="one-of-several-bad"
+        ),
+    ],
+)
+def test_require_rejects_an_id_that_names_nothing_in_the_run(
+    capsys, selection: list[str], required: list[str]
+):
+    """A `--require` id matching no selected workflow is a usage error.
+
+    Silently ignoring it defeats the flag entirely: a misspelling, a renamed
+    workflow, or a positional selection that excludes the required id would
+    let a run where every workflow skipped still exit 0 -- the zero-work
+    pass `--require` exists to stop. Checked across all four ways the id can
+    fail to match, not just a typo.
+    """
+    runner = _load_runner()
+    argv = [*selection, *[arg for r in required for arg in ("--require", r)]]
+    assert runner.main(argv) == 1
+    assert "--require names workflow(s) not in this run" in capsys.readouterr().err
+
+
+def test_require_accepts_an_id_that_is_in_the_run():
+    """Negative control: the rejection must not fire on a valid id, or the
+    flag would be unusable rather than merely toothless."""
+    runner = _load_runner()
+    workflow_id = WORKFLOW_IDS[0]
+    assert runner.main([workflow_id, "--require", workflow_id]) in (0, 1)
+
+
+# --------------------------------------------------------------------------
+# The machine-readable rerun. `json_variant` re-runs the *same* documented
+# command with only a format flag appended, so it must gate identically --
+# the exit code was recorded but never checked, which would let a regression
+# that keeps the payload right but returns the wrong code pass, on precisely
+# the path a consumer's CI gates on.
+# --------------------------------------------------------------------------
+
+
+def _json_step(**overrides):
+    defaults = {
+        "name": "compare",
+        "run": "abicheck compare a.so b.so",
+        "argv": ("abicheck", "compare", "a.so", "b.so"),
+        "exit_code": 4,
+        "json_variant": ("--format", "json"),
+        "expect_json": {"verdict": "BREAKING", "change_kinds": ["func_removed"]},
+    }
+    return workflow_examples.Step(**{**defaults, **overrides})
+
+
+PAYLOAD = '{"verdict": "BREAKING", "changes": [{"kind": "func_removed"}]}'
+
+
+@pytest.mark.parametrize("base,json_code", [(4, 0), (4, 1), (0, 4), (2, 4), (0, 1)])
+def test_a_json_variant_that_gates_differently_is_reported(base: int, json_code: int):
+    runner = _load_runner()
+    failures = runner.check_json_variant(
+        _json_step(),
+        base_returncode=base,
+        json_returncode=json_code,
+        json_stdout=PAYLOAD,
+        json_command="abicheck compare a.so b.so --format json",
+    )
+    assert any("must not change gating" in f for f in failures)
+
+
+@pytest.mark.parametrize("code", [0, 1, 2, 4, 64])
+def test_a_matching_exit_code_is_not_reported(code: int):
+    """Negative control across every exit code this CLI uses: the check must
+    compare the two runs, not hard-code a value."""
+    runner = _load_runner()
+    failures = runner.check_json_variant(
+        _json_step(exit_code=code),
+        base_returncode=code,
+        json_returncode=code,
+        json_stdout=PAYLOAD,
+        json_command="cmd",
+    )
+    assert failures == []
+
+
+def test_the_exit_code_check_applies_when_the_step_declares_none():
+    """The invariant is "the same command gates the same", which holds even
+    for a step with no declared `exit_code` -- comparing against the
+    declaration instead would silently skip those steps."""
+    runner = _load_runner()
+    failures = runner.check_json_variant(
+        _json_step(exit_code=None),
+        base_returncode=4,
+        json_returncode=0,
+        json_stdout=PAYLOAD,
+        json_command="cmd",
+    )
+    assert any("must not change gating" in f for f in failures)
+
+
+def test_a_wrong_payload_is_still_reported_alongside_a_matching_exit_code():
+    runner = _load_runner()
+    failures = runner.check_json_variant(
+        _json_step(),
+        base_returncode=4,
+        json_returncode=4,
+        json_stdout='{"verdict": "COMPATIBLE", "changes": []}',
+        json_command="cmd",
+    )
+    assert any("verdict" in f for f in failures)
+    assert any("change_kinds" in f for f in failures)
+
+
+def test_non_json_output_is_reported_and_stops_payload_checks():
+    runner = _load_runner()
+    failures = runner.check_json_variant(
+        _json_step(),
+        base_returncode=4,
+        json_returncode=4,
+        json_stdout="Usage: abicheck compare [OPTIONS]",
+        json_command="cmd",
+    )
+    assert any("not JSON" in f for f in failures)
+    assert not any("verdict" in f for f in failures)
