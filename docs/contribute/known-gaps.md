@@ -5571,8 +5571,8 @@ looked like the obvious fix and wasn't.
   > `ScanRequest.build_config` — `cli_dump_request.build_dump_request` sets
   > it from `dump`'s own `--config`, and `cli_compare_helpers`/
   > `frontends.cli.commands.compare`'s inline `--old/new-sources` embed path
-  > (its own nested `ctx.invoke(dump_cmd, ...)`) sets it from `compare`'s
-  > resolved `cfg_path` too. `workflows.plan.SidePlan.build_config` carries
+  > (its own nested `ctx.invoke(dump_cmd, ...)`) sets it from `compare`'s own
+  > raw `--config` value too. `workflows.plan.SidePlan.build_config` carries
   > it into `_check_bazel_target_scoping`, which now calls
   > `bazel_target_scoping_failure(..., build_config=side.build_config, ...)`
   > instead of always passing `None` for `dump`/`compare` — so the shared
@@ -5586,7 +5586,37 @@ looked like the obvious fix and wasn't.
   > only widens what the pre-flight resolution (and therefore `--dry-run`)
   > can see. The `--dry-run` `build.query` trust receipt
   > (`add_build_query_dry_run_section`) was already correct before this
-  > change and is untouched. Verified via `tests/test_analysis_plan.py`'s
+  > change and is untouched.
+  >
+  > **A security review on the PR landing this (#1089) caught a real
+  > regression in the first version of the fix, worth recording precisely
+  > since it is exactly the class of bug ADR-032 D5 exists to prevent.** The
+  > first attempt forwarded `compare`'s already-*resolved* `cfg_path`
+  > (`config if config is not None else discover_project_config()` —
+  > conflating an explicit `--config` with `_resolve_compare_config`'s own
+  > auto-discovery fallback) into the nested `dump_cmd` invocation's
+  > `build_config` parameter, instead of the raw, explicit-only `config`
+  > value. `embed_build_source`'s `cfg_trusted_for_query = build_config is
+  > not None or build_query is not None` treats any non-`None` `build_config`
+  > as operator authorization to execute `build.query` — so that version
+  > would have let a `compare --sources old=<tree>` invocation with *no*
+  > `--config` at all execute an arbitrary `build.query` command from a
+  > `.abicheck.yml` merely auto-discovered from the working directory or the
+  > sources tree being compared, i.e. from content a reviewed PR's own
+  > checkout can control. Fixed by forwarding the raw `config` parameter
+  > (`run_compare`'s own un-resolved `--config` kwarg — `None` unless the
+  > operator actually typed it) instead of `cfg_path`. Verified via
+  > `tests/test_compare_inline_embed_config_trust.py`'s
+  > `test_auto_discovered_config_is_not_forwarded` (fails against the
+  > vulnerable version — asserts `build_config` stays `None` when only an
+  > auto-discovered config exists) and `test_explicit_config_is_forwarded`
+  > (positive control — an operator-supplied `--config` still reaches the
+  > nested invocation, so the fix doesn't overshoot into never forwarding
+  > one at all). `dump`'s own `--config` was never subject to this: its
+  > `build_config` local is always the literal, explicit-only Click flag
+  > value, with no auto-discovery fallback at that layer.
+  >
+  > Verified via `tests/test_analysis_plan.py`'s
   > `test_dump_request_honors_explicit_build_config_over_auto_discovery`/
   > `test_compare_request_honors_explicit_build_config_over_auto_discovery`
   > (request-level, through `AnalysisPlanner.resolve` directly) and

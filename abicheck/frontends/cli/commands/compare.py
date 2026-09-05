@@ -293,13 +293,21 @@ def _embed_inline_source_side(
     the non-inline path already threads the same label correctly.
 
     ``build_config`` (CLI cleanup phase two, Block 7 -- PR C's tail):
-    ``compare``'s own resolved ``--config`` path (explicit or auto-discovered),
-    forwarded to the nested ``ctx.invoke(dump_cmd, ...)`` below's own
-    ``build_config`` parameter -- without this, the nested invocation always
-    resolved it as ``None``, so its own pre-flight bazel-target-scoping check
-    (``workflows.plan.AnalysisPlanner.resolve``) could only ever see whatever
-    ``.abicheck.yml`` auto-discovery found at this side's ``--sources`` tree,
-    never the config an explicit ``compare --config`` actually names.
+    ``compare``'s own raw ``--config`` value -- ``None`` unless the operator
+    explicitly passed it -- forwarded to the nested ``ctx.invoke(dump_cmd,
+    ...)`` below's own ``build_config`` parameter, exactly the same explicit-
+    only value a direct ``dump --config`` invocation would carry. Without
+    this, the nested invocation always resolved it as ``None``, so its own
+    pre-flight bazel-target-scoping check (``workflows.plan.AnalysisPlanner.
+    resolve``) could only ever see whatever ``.abicheck.yml`` auto-discovery
+    found at this side's ``--sources`` tree, never the config an explicit
+    ``compare --config`` actually names. **Must stay the raw, explicit-only
+    value, never `compare`'s own auto-discovery fallback**
+    (`_resolve_compare_config`'s resolved ``cfg_path``) -- `embed_build_source`
+    treats a non-``None`` ``build_config`` as operator-authorized to execute
+    `build.query` (ADR-032 D5); forwarding an auto-discovered path here would
+    let an untrusted, PR-controlled ``.abicheck.yml`` in the sources tree
+    authorize its own subprocess execution.
 
     ``depth`` is ``compare``'s own (unmodified) ``--depth`` string, used only
     to reproduce ``dump_cmd``'s ``--depth source`` + ``--ast-frontend hybrid``

@@ -1787,7 +1787,7 @@ def run_compare(
             debuginfod=debuginfod, debuginfod_url=debuginfod_url,
             collect_mode=collect_mode, depth=depth,
             include_labels=include_labels,
-            include_dependencies=include_dependencies, build_config=cfg_path,
+            include_dependencies=include_dependencies, build_config=config,
         )
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
