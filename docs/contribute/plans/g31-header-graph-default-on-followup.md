@@ -44,10 +44,12 @@ low-risk (additive kinds/examples/docs, opt-in perf gate).
 **What shipped.** The L2 header-only semantic graph (and its include-file
 extension) is now always built whenever headers are parsed for a
 single-library `dump`/`compare` — no flag required. `--header-graph`/
-`--header-graph-includes` remain as hidden (`hidden=True`, absent from
-`--help`), deprecated no-op shims on `compare` and `dump`: passing either
-prints a one-line deprecation note to stderr and otherwise changes nothing.
-Directory/package (set-input) `compare` still does not build the graph (the
+`--header-graph-includes` were kept for a while as hidden (`hidden=True`,
+absent from `--help`), deprecated no-op shims on `compare` and `dump`
+(passing either printed a one-line deprecation note to stderr and otherwise
+changed nothing) — **CLI cleanup H1 has since removed both flags outright**;
+passing either is now a plain usage error. Directory/package (set-input)
+`compare` still does not build the graph (the
 per-library fan-out never routed through the attach step, before or after
 this change); a raw `--old-sources`/`--new-sources`/`--old-build-info`/
 `--new-build-info` tree on `compare` also still does not (the inline-embed
@@ -69,9 +71,10 @@ same already-hashed inputs, and the full snapshot (including
 `True`/`True` except through the internal `_skip_header_graph_attach` knob
 used by the buildsource-embed recursion — see the
 `# TODO(header-graph-phase-D)` comment there), `run_dump`. `abicheck/cli_options.py`
-— `header_graph_options` (the shared, now-hidden decorator) and
+used to re-export `header_graph_options` (the shared, hidden decorator) and
 `warn_deprecated_header_graph_flags` (the deprecation-note helper both
-`compare` and `dump` call). `abicheck/cli_resolve.py` —
+`compare` and `dump` called) — both removed outright by CLI cleanup H1.
+`abicheck/cli_resolve.py` —
 `_EVIDENCE_SET_INPUT_FLAGS` (documents which `compare` input combinations
 structurally never reach the graph-attach step, unchanged by Phase A other
 than no longer needing a `UsageError` for an explicit flag that no longer

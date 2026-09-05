@@ -529,7 +529,6 @@ def _resolve_side_snapshot_impl(
                 public_headers,
                 public_header_dirs,
                 changed_paths=changed_paths,
-                allow_build_query=bool(allow_build_query),
                 build_config=_gated_build_config,
                 build_query=_gated_build_query,
                 build_compile_db=build_compile_db,
@@ -579,7 +578,6 @@ def embed_side_build_source(
     public_header_dirs: list[Path],
     *,
     changed_paths: tuple[str, ...] = (),
-    allow_build_query: bool = False,
     build_config: Path | None = None,
     build_query: str | None = None,
     build_compile_db: str | None = None,
@@ -603,12 +601,11 @@ def embed_side_build_source(
     ``SnapshotError`` here
     (Codex review).
 
-    *changed_paths*/*allow_build_query* (PR 3A, dump/scan resolver
-    convergence): optional pass-throughs to ``embed_build_source``, defaulted
-    to their existing no-op values so every pre-existing caller (``compare``,
-    ``dump``'s typed pipeline) is unaffected — only ``scan``'s candidate-side
-    resolution passes non-default values, for its POI-focused L4 replay
-    scoping and its CLI-resolved trusted-build-query permission.
+    *changed_paths* (PR 3A, dump/scan resolver convergence): an optional
+    pass-through to ``embed_build_source``, defaulted to its existing no-op
+    value so every pre-existing caller (``compare``, ``dump``'s typed
+    pipeline) is unaffected — only ``scan``'s candidate-side resolution
+    passes a non-default value, for its POI-focused L4 replay scoping.
 
     *build_config*/*build_query*/*build_compile_db* (Codex review, fresh
     evidence): the identical build inputs the caller already resolved for
@@ -720,7 +717,6 @@ def embed_side_build_source(
             build_targets=side.build_targets,
             collect_mode=evidence.collect_mode,
             changed_paths=changed_paths,
-            allow_build_query=allow_build_query,
             extractor=(
                 source_extractor
                 if source_extractor is not None

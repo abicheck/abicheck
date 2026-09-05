@@ -19,9 +19,9 @@ the 2000-line hard cap.
 Bundles ``release_options`` (directory/package release-comparison knobs),
 ``debug_resolution_options`` (ADR-021a separate-debug-file resolution),
 ``adr027_compare_options``, ``app_usage_scope_options``,
-``build_source_dump_options``, ``header_graph_options`` (+ its deprecated-flag
-warning helper), and ``evidence_options`` (the ADR-037 D3 canonical name for
-the pre-existing ``build_source_compare_options`` alias, kept here too) --
+``build_source_dump_options``, and ``evidence_options`` (the ADR-037 D3
+canonical name for the pre-existing ``build_source_compare_options`` alias,
+kept here too) --
 every stacked-decorator option group that adds no edge back into the
 CLI-registration import cycle, mirroring why ``apply_compare_profile``/
 ``_profile_targets_set_input`` stayed behind in :mod:`abicheck.cli_options`
@@ -340,16 +340,6 @@ def build_source_dump_options(func: F) -> F:
         "context, source=+source replay & call graph.",
     )(func)
     func = click.option(
-        "--allow-build-query",
-        "allow_build_query",
-        is_flag=True,
-        default=False,
-        hidden=True,  # deprecated no-op (ADR-032 amended): build query is now automatic
-        help="Deprecated and ignored. Build-system queries now run automatically "
-        "when --sources is given (abicheck infers and runs cmake/make/bazel "
-        "itself); no flag is needed. Kept as a no-op for backward compatibility.",
-    )(func)
-    func = click.option(
         "--config",
         "build_config",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -397,69 +387,6 @@ def build_source_dump_options(func: F) -> F:
         "build's exact flags (scope it with --compile-db-filter).",
     )(func)
     return func
-
-
-def header_graph_options(func: F) -> F:
-    """The shared, deprecated ``--header-graph``/``--header-graph-includes`` pair.
-
-    G29 Phase A: the L2 header-only semantic graph
-    (:func:`~abicheck.buildsource.header_graph.build_header_only_graph`) — and
-    its include-file extension — is now always built whenever headers are
-    available (``--depth headers`` or deeper), for both ``compare`` and
-    ``dump``. These two flags are no longer opt-in toggles; they are kept as
-    *hidden*, inert no-op shims (``hidden=True`` — absent from ``--help`` and
-    from ``tests/test_cli_contract.py``'s ``_OPTION_SET_SNAPSHOT``) purely so
-    an existing script/CI invocation that still passes ``--header-graph``
-    doesn't hard-fail with "no such option". Passing either flag prints a
-    one-line deprecation note to stderr and otherwise changes nothing — the
-    graph is built identically whether or not the flag is given. Planned
-    removal: two minor releases after this change ships (track in
-    CHANGELOG.md). Shared by ``compare`` and ``dump`` so the two flags' spelling
-    can never drift between them. Applied bottom-up, so listed in reverse of
-    display.
-    """
-    func = click.option(
-        "--header-graph-includes",
-        "header_graph_includes_deprecated",
-        is_flag=True,
-        default=False,
-        hidden=True,
-        help="Deprecated, no-op: the include-file graph pass is now always run "
-        "alongside --header-graph's replacement (always-on L2 header graph). "
-        "Planned removal: two minor releases out.",
-    )(func)
-    func = click.option(
-        "--header-graph",
-        "header_graph_deprecated",
-        is_flag=True,
-        default=False,
-        hidden=True,
-        help="Deprecated, no-op: the L2 header-only semantic graph (ADR-041 "
-        "addendum) is now always built for --depth headers and above. Planned "
-        "removal: two minor releases out.",
-    )(func)
-    return func
-
-
-def warn_deprecated_header_graph_flags(
-    header_graph_deprecated: bool, header_graph_includes_deprecated: bool
-) -> None:
-    """Emit a deprecation note for the inert ``--header-graph``/``-includes`` shim.
-
-    Called from ``compare``/``dump_cmd`` bodies (not the Click callback
-    itself, so it runs after Click has finished parsing) whenever either
-    flag was passed on the command line. Behavior is identical either way —
-    this is purely a stderr note, per the "hidden shim must not control
-    behavior" policy (AGENTS.md deprecation convention).
-    """
-    if header_graph_deprecated or header_graph_includes_deprecated:
-        click.echo(
-            "Note: --header-graph/--header-graph-includes are deprecated "
-            "no-ops — the L2 header-only semantic graph is now always built "
-            "for --depth headers and above. Planned removal: two minor "
-            "releases out.",
-            err=True,
-        )
 
 
 def evidence_options(func: F) -> F:

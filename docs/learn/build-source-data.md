@@ -363,8 +363,9 @@ sources:
 - **`query_build_system` (automatic when `--sources` is given):** if no compile
   DB exists, abicheck **detects the build system and runs its own fixed query**
   (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, `bazel aquery`, or a GNU Make
-  dry-run `make -B -n -k -w`) to emit flags/exports — no `--allow-build-query` flag
-  (that flag is deprecated to a no-op). Make dry-run evidence is reduced confidence
+  dry-run `make -B -n -k -w`) to emit flags/exports — no opt-in flag needed
+  (the old `--allow-build-query` was always a no-op and has since been
+  removed outright). Make dry-run evidence is reduced confidence
   because it is a transcript scrape rather than an authoritative target graph;
   prefer a real compile DB (`bear -- make` → `--build-info`) when available. It
   also runs an
@@ -508,9 +509,10 @@ An explicit `--config` is the **only** way to authorize executing a
 `build.query` — the CLI has no `--build-query`/`--build-compile-db` flag, so
 there is no command-line-only route to running an arbitrary command. An
 auto-discovered `.abicheck.yml` is never trusted to execute its query (it may
-be attacker-controlled); its non-executing settings are still honoured. The old
-`--allow-build-query` gate is a deprecated no-op, and a trusted query still
-never runs `make all` / `cmake --build`.
+be attacker-controlled); its non-executing settings are still honoured. No
+separate opt-in flag exists (the old `--allow-build-query` was always a
+no-op and has since been removed outright), and a trusted query still never
+runs `make all` / `cmake --build`.
 
 ### Time & resource model and recommended defaults
 

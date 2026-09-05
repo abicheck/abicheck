@@ -210,7 +210,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--sources",
                 "--compile-db-filter",
                 "--config",
-                "--allow-build-query",
             ],
         },
         {

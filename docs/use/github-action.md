@@ -189,7 +189,7 @@ clang); without it the scan degrades gracefully and L0–L2 stay authoritative.
 | `build-info` | scan, dump | Out-of-tree L3 context: a build dir, a `compile_commands.json`, or a collected evidence pack. |
 | `compile-db` | scan (dump folds into `build-info`) | Explicit `compile_commands.json` path. |
 | `build-config` | scan, dump | Trusted `.abicheck.yml`; its `build.query` runs automatically (operator-supplied = trusted). |
-| `allow-build-query` | dump only | Dump-mode-only opt-in for `--dump-manifest`'s external-extractor build-system query action — a real gate there. Ignored for scan mode (CLI audit PR 5/5): scan's own `build.query` already auto-runs whenever `build-config` is given together with an explicitly pinned `depth`, no separate opt-in needed. |
+| `allow-build-query` | — | Deprecated and ignored (the `--allow-build-query` dump flag it fed was always a no-op and has since been removed outright). Kept registered only for back-compat with an existing workflow that still sets it. |
 | `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, or `source`. Maps to `--depth`. Omit in scan mode for `auto` (risk-driven). |
 | `against` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). Maps to `--against`. Omit it (and `abi-baseline`) on a step to run a single-build hygiene lint instead — `scan` already runs audit-only whenever no baseline is given. |
 | `since` | scan | Focus the scan on files changed vs a git ref (e.g. `origin/main`). |
