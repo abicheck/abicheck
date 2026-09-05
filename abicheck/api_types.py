@@ -219,6 +219,12 @@ class InputSpec:
     # the filter selects, exactly as the three CLI-side layers already do
     # via `build_context.source_matches_filter`.
     compile_db_filter: str | None = None
+    # CLI cleanup phase two, Block 7 (PR C's tail): this side's explicit
+    # ``--config`` (mirrors ``ScanRequest.build_config``). `None` preserves
+    # prior behavior. Lets `workflows.plan`'s pre-flight bazel-scoping check
+    # see the same explicit config `embed_build_source` already honors at
+    # real-execution time -- see `docs/contribute/known-gaps.md`'s "PR C".
+    build_config: Path | None = None
 
     @classmethod
     def of(
@@ -239,6 +245,7 @@ class InputSpec:
         public_header_dirs: Iterable[Path | str] | None = None,
         follow_linker_scripts: bool = True,
         compile_db_filter: str | None = None,
+        build_config: Path | str | None = None,
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
@@ -257,6 +264,7 @@ class InputSpec:
             public_header_dirs=_path_tuple(public_header_dirs),
             follow_linker_scripts=follow_linker_scripts,
             compile_db_filter=compile_db_filter,
+            build_config=Path(build_config) if build_config is not None else None,
         )
 
 

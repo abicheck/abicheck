@@ -246,6 +246,7 @@ def _embed_inline_source_side(
     debuginfod_url: str | None = None,
     include_labels: dict[Path, str] | None = None,
     include_dependencies: bool = False,
+    build_config: Path | None = None,
 ) -> tuple[Path, Path | None, Path | None]:
     """Resolve one side's ``--sources`` into the input ``compare`` should read.
 
@@ -290,6 +291,15 @@ def _embed_inline_source_side(
     snapshot silently lost its label, leaving that side's extraction contract
     fingerprinted as if the support root were unlabeled/external even though
     the non-inline path already threads the same label correctly.
+
+    ``build_config`` (CLI cleanup phase two, Block 7 -- PR C's tail):
+    ``compare``'s own resolved ``--config`` path (explicit or auto-discovered),
+    forwarded to the nested ``ctx.invoke(dump_cmd, ...)`` below's own
+    ``build_config`` parameter -- without this, the nested invocation always
+    resolved it as ``None``, so its own pre-flight bazel-target-scoping check
+    (``workflows.plan.AnalysisPlanner.resolve``) could only ever see whatever
+    ``.abicheck.yml`` auto-discovery found at this side's ``--sources`` tree,
+    never the config an explicit ``compare --config`` actually names.
 
     ``depth`` is ``compare``'s own (unmodified) ``--depth`` string, used only
     to reproduce ``dump_cmd``'s ``--depth source`` + ``--ast-frontend hybrid``
@@ -428,6 +438,7 @@ def _embed_inline_source_side(
         pdb_path=pdb_path,
         sources=dump_sources,
         build_info=dump_build_info,
+        build_config=build_config,
         _resolved_collect_mode=collect_mode,
         output=out,
         debug_roots=debug_roots,

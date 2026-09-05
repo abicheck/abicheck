@@ -5565,6 +5565,39 @@ looked like the obvious fix and wasn't.
   the same pre-existing, already-documented `_SCAN_KNOWN_DIVERGENT_FRONTENDS`
   signature, unchanged); `mypy`/`ruff` clean on the touched modules.
 
+  > **Update (Block 7, PR C's own tail): the explicit-`--config`
+  > dry-run/execution parity residual named throughout this entry is now
+  > closed.** `api_types.InputSpec` gained a `build_config` field mirroring
+  > `ScanRequest.build_config` — `cli_dump_request.build_dump_request` sets
+  > it from `dump`'s own `--config`, and `cli_compare_helpers`/
+  > `frontends.cli.commands.compare`'s inline `--old/new-sources` embed path
+  > (its own nested `ctx.invoke(dump_cmd, ...)`) sets it from `compare`'s
+  > resolved `cfg_path` too. `workflows.plan.SidePlan.build_config` carries
+  > it into `_check_bazel_target_scoping`, which now calls
+  > `bazel_target_scoping_failure(..., build_config=side.build_config, ...)`
+  > instead of always passing `None` for `dump`/`compare` — so the shared
+  > `AnalysisPlanner.resolve` chokepoint both `--dry-run` and the real run
+  > go through sees the same explicit config `embed_build_source` already
+  > honored at real-execution time via its own `cfg_path = build_config or
+  > discover_build_config(raw_sources)` precedence, instead of only ever
+  > seeing whatever `.abicheck.yml` auto-discovery found at `sources`. Does
+  > not change what actually executes: `embed_build_source` still receives
+  > the CLI's own raw `--config` value out-of-band, exactly as before; this
+  > only widens what the pre-flight resolution (and therefore `--dry-run`)
+  > can see. The `--dry-run` `build.query` trust receipt
+  > (`add_build_query_dry_run_section`) was already correct before this
+  > change and is untouched. Verified via `tests/test_analysis_plan.py`'s
+  > `test_dump_request_honors_explicit_build_config_over_auto_discovery`/
+  > `test_compare_request_honors_explicit_build_config_over_auto_discovery`
+  > (request-level, through `AnalysisPlanner.resolve` directly) and
+  > `tests/test_bazel_root_targets.py`'s
+  > `test_dump_cli_explicit_config_scoping_matches_dry_run_and_real_run`
+  > (end to end through the CLI, asserting `--dry-run` and the real run
+  > agree); the full fast unit suite; `mypy`/`ruff` clean on every touched
+  > module. Directory/package `compare`'s release fan-out was left
+  > untouched — out of this residual's stated scope (the plan names
+  > `dump`/`compare`, the single-pair commands).
+
 - **Lambda-closure churn survives at the *function* level after the type-level
   fix — investigated, deliberately not patched (oneTBB flow-graph report,
   fresh evidence).** `name_classification._ANONYMOUS_TYPE_MARKERS` did not

@@ -545,6 +545,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         include_labels=_resolved_include_labels,
         resolved_collect_mode=_resolved_collect_mode,
         compile_db_filter=compile_db_filter,
+        build_config=build_config,
     )
     # `resolve_dump_request` runs no castxml/clang and writes nothing, so
     # hoisting it above the branch keeps `--dry-run` inside its own "cheap,

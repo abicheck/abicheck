@@ -166,6 +166,11 @@ class SidePlan:
     #: ``collect_inline_pack``) still runs whenever real headers are present,
     #: regardless of collect mode.
     headers: tuple[Path, ...] = ()
+    #: ``InputSpec.build_config`` verbatim (CLI cleanup phase two, Block 7 --
+    #: PR C's tail) -- this side's explicit ``--config`` path, when one was
+    #: given. ``None`` means no explicit config, matching every pre-existing
+    #: caller/request (the field did not exist before this).
+    build_config: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -204,6 +209,7 @@ def _side_plan(
         gcc_path=gcc_path,
         resolved_collect_mode=resolved_collect_mode,
         headers=side.headers,
+        build_config=side.build_config,
     )
 
 
@@ -225,13 +231,17 @@ def _discovered_config_build_targets(
     discover_build_config(raw_sources)`` precedence exactly: an explicit
     *build_config* path (``scan``'s own ``ScanRequest.build_config`` /
     ``dump``/``compare``'s ``--config``) wins outright; otherwise falls back
-    to auto-discovering one at *sources*. ``dump``/``compare`` have no
-    request-level seam for the explicit half today -- no ``build_config``
-    field exists on :class:`~abicheck.api_types.InputSpec`/
-    :class:`~abicheck.api_types.DumpRequest`/
-    :class:`~abicheck.api_types.CompareRequest` (see this module's own
-    "Also not landed" status entry) -- so their own call sites always pass
-    *build_config* as ``None`` and get the auto-discovery half only.
+    to auto-discovering one at *sources*. CLI cleanup phase two, Block 7 (PR
+    C's tail): ``dump``/``compare`` now have this request-level seam too --
+    :class:`~abicheck.api_types.InputSpec.build_config`, threaded from
+    ``cli_dump_request.build_dump_request`` and from ``compare``'s inline
+    ``--old/new-sources`` embed path's nested ``dump_cmd`` invocation, into
+    :attr:`SidePlan.build_config` -- so a call site that resolves its
+    explicit ``--config`` onto the request/``InputSpec`` it builds gets the
+    same explicit path honored here that ``embed_build_source`` already
+    honors at real-execution time. A caller that still leaves it unset (e.g.
+    a bare typed-API request with no ``build_config``) keeps the
+    auto-discovery-only behavior, unchanged from before this field existed.
     Discovering and parsing a ``.abicheck.yml`` is a pure, deterministic,
     non-executing read (no subprocess, no ambiguity to raise on), so it fits
     the same side-effect-free constraint every other :data:`_CHECKS` entry
@@ -519,6 +529,7 @@ def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
         side.build_info,
         side.build_targets,
         sources=side.sources,
+        build_config=side.build_config,
         headers_present=bool(effective_headers),
     )
 

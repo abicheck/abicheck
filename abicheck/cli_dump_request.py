@@ -109,6 +109,7 @@ def build_dump_request(
     include_labels: dict[Path, str] | None,
     resolved_collect_mode: str | None = None,
     compile_db_filter: str | None = None,
+    build_config: Path | None = None,
 ) -> DumpRequest:
     """One :class:`DumpRequest` describing this ``abicheck dump`` invocation.
 
@@ -148,6 +149,19 @@ def build_dump_request(
     ``compile_db_filter_scope_error`` refusal ``dump_cmd`` already raises
     directly, and so the object records the filter that would actually
     narrow the header parse were the real run migrated onto it.
+
+    *build_config* is ``dump``'s own ``--config`` value, forwarded onto
+    :attr:`~abicheck.api_types.InputSpec.build_config` verbatim (CLI cleanup
+    phase two, Block 7 -- PR C's tail) so the resolved request's own
+    ``workflows.plan.AnalysisPlanner.resolve`` pre-flight check sees the
+    same explicit config ``embed_build_source`` already honors at
+    real-execution time, instead of only ever seeing whatever
+    ``.abicheck.yml`` auto-discovery finds at ``sources``. This does not
+    change how the real run itself resolves ``build_config`` -- ``dump_cmd``
+    still passes its own raw value into ``execute_dump_request``/
+    ``embed_build_source`` out-of-band, exactly as before this field
+    existed; this only closes the gap between what the pre-flight check (and
+    therefore ``--dry-run``) sees and what execution does.
     """
     from .api_types import DumpRequest, InputSpec
 
@@ -166,6 +180,7 @@ def build_dump_request(
             dump_manifest=dump_manifest,
             compile=compile_context,
             compile_db_filter=compile_db_filter,
+            build_config=build_config,
         ),
         lang=lang,
         frontend=header_backend,
