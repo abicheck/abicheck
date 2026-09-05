@@ -257,7 +257,7 @@ moved on `main` between #1073 and `d1a486bb`:
 
 | Landed | What shipped |
 |---|---|
-| **C-S1, the scalar disposition audit** ([#1082](https://github.com/abicheck/abicheck/pull/1082)) | One conserved ledger (`policy/disposition_ledger.py`) all five suppression application points route through — a fifth turned up beyond the four C-S1 named; raw-vs-effective counts and rule provenance in *every* projection (JSON, `--stat`, review digest, PR comment, SARIF, JUnit, HTML, all Markdown modes); `not_evaluated` detectors; report schema 2.52. Includes this plan's one named behavior fix: `recommend_release` reads the conserved ledger, so a fully suppressed break is `major`/`review`, not "no bump needed" |
+| **C-S1, the scalar disposition audit** ([#1082](https://github.com/abicheck/abicheck/pull/1082)) | One conserved ledger (`policy/disposition_ledger.py`) all five suppression application points route through — a fifth turned up beyond the four C-S1 named; raw-vs-effective counts and rule provenance in *every* projection (JSON, `--stat`, review digest, PR comment, SARIF, JUnit, HTML, all Markdown modes); `not_evaluated` detectors; an additive report-schema bump (read the current number from `schemas/__init__.py`'s `REPORT_SCHEMA_VERSION`, not from here). Includes this plan's one named behavior fix: `recommend_release` reads the conserved ledger, so a fully suppressed break is `major`/`review`, not "no bump needed" |
 | **A-S2, scope acquisition and completeness** ([#1079](https://github.com/abicheck/abicheck/pull/1079)) | `RunOutcome.scope` plus two `0`/`1` `ExitDecision` folds; per-member acquisition states in a `comparison_scope` block; `--on-incomplete-scope warn\|block`; zero completed comparisons exits `1` as `no_comparison_completed` instead of a silent `NO_CHANGE`/`0`; degraded stranded members marked and skipped rather than diffed as ELF-only stand-ins; exit `8` now requires a *proven* removal (the NEW side's capture must have asserted `inventory_complete`). Landed **ahead of A-S1**, which is now A's next slice |
 
 One consequence worth acting on: **D-S1 (`--used-by` enrichment) is no longer
@@ -369,41 +369,40 @@ the `allow_build_query` boundary this section states preserved in both. No
 semantic change; `--help-all` and `docs/reference/cli-reference.md`
 regenerated.
 
-**Block 2 — scalar disposition audit.** C-S1 plus G-S1's first slice, scoped
-to single-pair `compare` — so it needs A/E's S0 field contract in writing, but
-not their slices finished (tier 2 above).
-Start by opening the four suppression application points C-S1 enumerates and
-deciding, per call shape, converge-or-cover: `post_processing
-.ApplySuppression.apply()`, `checker._filter_suppressed_changes()`,
-`checker._filter_pattern_synthetic()`, `appcompat.py`'s consumer overlay.
-Everything else this block owes — ledger fields, rule provenance, which
-projections carry the counts, the detector state, the fixture — is C-S1's and
-G's "Report invariants" list; do not re-derive it here. One correction this
-plan adds, because it is a behavior change and needs its own migration note:
-`semver.recommend_release` reads `result.verdict`/`result.changes`, i.e. the
-post-suppression list, so a suppressed break currently becomes "no bump
-needed" — it must read the conserved delta instead.
+**Block 2 — scalar disposition audit — done (#1082).** C-S1 plus G-S1's first
+slice, scoped to single-pair `compare`. The inventory found **five**
+suppression application points, not the four C-S1 enumerates — the fifth is
+`post_processing._merge_findings_respecting_suppression` — and all five now
+record through one primitive, `policy/disposition_ledger.py`'s
+`record_suppressed_change`. The audit's report half is
+`report/disposition_audit.py` (`compute_*`/`render_*` pair), carried by every
+projection (JSON, `--stat` JSON, one-line, review digest, PR comment, SARIF,
+JUnit, HTML, all Markdown modes) under an additive report-schema bump; read
+the current number from `schemas/__init__.py`'s `REPORT_SCHEMA_VERSION` rather
+than from any copy here, which is how the "2.50" this note first carried went
+stale within a day. `DetectorRegistry` records `not_evaluated`.
 
-> **Landed.** All five suppression application points (the four C-S1
-> enumerates plus `post_processing._merge_findings_respecting_suppression`,
-> found during the inventory) now record through one primitive,
-> `policy/disposition_ledger.py`'s `record_suppressed_change`; the audit's
-> report half is `report/disposition_audit.py` (`compute_*`/`render_*` pair),
-> carried by the JSON, `--stat` JSON, one-line, review-digest and PR-comment
-> projections under report schema 2.50; `DetectorRegistry` records
-> `not_evaluated`; and `semver.recommend_release` reads the conserved delta,
-> with the migration note in the changelog fragment. Bundle/aggregate/consumer
-> parity is S2 and is deliberately untouched.
+The one correction this plan contributed, a behavior change with its own
+migration note, also landed: `semver.recommend_release` read
+`result.verdict`/`result.changes`, i.e. the *post*-suppression list, so a
+suppressed break reported "no bump needed"; it now reads the conserved delta.
 
-**Block 3 — release-path scope and completeness.** A-S1 and A-S2 as they
-apply to the release fan-out, *in that order*: the completeness model comes
-first, the pairing rewrite follows it. Concretely, this block adds the
-acquisition states and the completeness axis (A-S2's `RunOutcome`/
-`ExitDecision` work), then makes `cli_compare_release_pairwise.py`'s
-zero-matched-pairs path a no-comparison outcome instead of `NO_CHANGE`/exit 0,
-and stops `cli_compare_release._resolve_stranded_library` persisting a
-degraded ELF-only snapshot unmarked. **`_match_release_keys`'s set difference
-is not the opening move**: A-S4 is its deletion gate, and it is deleted once
+Bundle/aggregate/consumer parity is C-S2 and is deliberately untouched — that
+is the next slice here.
+
+**Block 3 — release-path scope and completeness — A-S2 done (#1079), A-S1 is
+the live slice.** A-S1 and A-S2 as they apply to the release fan-out, in that
+order — the completeness model first, the pairing rewrite after it. **A-S2
+landed**, ahead of A-S1: the acquisition states and the completeness axis on
+`RunOutcome`/`ExitDecision`, `--on-incomplete-scope warn|block`,
+`cli_compare_release_pairwise.py`'s zero-matched-pairs path now a
+`no_comparison_completed` outcome exiting `1` instead of `NO_CHANGE`/exit `0`,
+`cli_compare_release._resolve_stranded_library`'s degraded member marked and
+skipped rather than persisted as an unmarked ELF-only stand-in, and exit `8`
+requiring a *proven* removal. **What remains is A-S1**: selection by target
+identity and variant coordinates, with the `--dry-run` plan view.
+**`_match_release_keys`'s set difference is still not the opening move**:
+A-S4 is its deletion gate, and it is deleted once
 every removal finding flows from proven inventory completeness — replacing it
 before the shared model exists would be one more release-local approximation
 of the behavior it is meant to fix (Codex review on #1073, agreeing with the
