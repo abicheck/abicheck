@@ -211,6 +211,7 @@ SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
 def _bundle_composition_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     # v1 predates the marker; a v1 section *carrying* one would still open in
     # a pre-S2 reader that ignores it, so it is refused, not migrated (Codex).
+    """Composition v1 -> v2: supply the empty ``degraded_members`` map v1 predates."""
     if payload.get("degraded_members"):
         raise ValueError(
             f"{BUNDLE_COMPOSITION_SECTION_KIND!r} section v1 carries a non-empty "

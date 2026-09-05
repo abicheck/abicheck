@@ -86,6 +86,7 @@ def json_scope_fields(
 
 
 def markdown_scope_lines(terms: ComparisonScopeTerms) -> list[str]:
+    """The Markdown lines for the section, empty when the driver built no record."""
     return (
         [] if terms.section is None else render_comparison_scope_markdown(terms.section)
     )

@@ -88,6 +88,7 @@ def _release_md_changed_libraries(
     old_map: dict[str, Path],
     new_map: dict[str, Path],
 ) -> list[str]:  # Markdown sections listing removed/added libraries.
+    """The Markdown lines listing each library whose comparison reported changes."""
     lines: list[str] = []
     if removed_keys:
         lines += ["", "## ⚠️ Removed Libraries", ""]

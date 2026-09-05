@@ -157,5 +157,6 @@ def _write_release_summary_file(
 
 
 def _write_text(path: Path, text: str) -> None:
+    """Write *text* through the caller-supplied writer (keeps this module out of the CLI import cycle)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")

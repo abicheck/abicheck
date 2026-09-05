@@ -148,6 +148,7 @@ def build_comparison_scope_section(
 
 
 def _unchecked_rows(section: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The member rows the unchecked list renders, from the section's own ``members``."""
     members = section.get("members")
     if not isinstance(members, list):
         return []

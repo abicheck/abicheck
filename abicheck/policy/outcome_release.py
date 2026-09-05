@@ -103,6 +103,7 @@ def run_outcome_dict_for_release(
     exit_block = exit_decision if isinstance(exit_decision, Mapping) else {}
 
     def _int_contribution(key: str) -> int:
+        """A fold participant as ``0``/``1``, tolerating an absent attribute."""
         raw = exit_block.get(key, 0)
         return raw if isinstance(raw, int) and not isinstance(raw, bool) else 0
 

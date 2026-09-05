@@ -135,10 +135,12 @@ class SideInventory:
     provenance: str
 
     def to_dict(self) -> dict[str, Any]:
+        """The JSON shape of this value."""
         return {"completeness": self.completeness.value, "provenance": self.provenance}
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SideInventory:
+        """Parse the JSON shape :meth:`to_dict` produces."""
         return cls(
             completeness=InventoryCompleteness(data["completeness"]),
             provenance=str(data.get("provenance", "")),
@@ -162,9 +164,11 @@ class MemberAcquisition:
 
     @property
     def name(self) -> str:
+        """The display name (the on-disk filename when known), else the member key."""
         return self.display_name or self.member
 
     def to_dict(self) -> dict[str, Any]:
+        """The JSON shape of this value."""
         return {
             "member": self.member,
             "name": self.name,
@@ -176,6 +180,7 @@ class MemberAcquisition:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> MemberAcquisition:
+        """Parse the JSON shape :meth:`to_dict` produces."""
         member = str(data["member"])
         name = str(data.get("name", member))
         return cls(
@@ -209,6 +214,7 @@ class ScopeAcquisitionRecord:
     schema_version: str = field(default=SCOPE_ACQUISITION_SCHEMA_VERSION)
 
     def __post_init__(self) -> None:
+        """Reject a record naming the same member twice."""
         seen: set[str] = set()
         for m in self.members:
             if m.member in seen:
@@ -229,6 +235,7 @@ class ScopeAcquisitionRecord:
 
     @property
     def completed_members(self) -> tuple[MemberAcquisition, ...]:
+        """Members whose comparison completed (``available``)."""
         return tuple(m for m in self.members if m.state is AcquisitionState.AVAILABLE)
 
     @property
@@ -250,11 +257,13 @@ class ScopeAcquisitionRecord:
 
     @property
     def out_of_scope_members(self) -> tuple[MemberAcquisition, ...]:
+        """Members deliberately unselected by this run (``out_of_scope``)."""
         return tuple(
             m for m in self.members if m.state is AcquisitionState.OUT_OF_SCOPE
         )
 
     def members_in(self, state: AcquisitionState) -> tuple[MemberAcquisition, ...]:
+        """Every member currently in *state*, in record order."""
         return tuple(m for m in self.members if m.state is state)
 
     def counts(self) -> dict[str, int]:
@@ -302,6 +311,7 @@ class ScopeAcquisitionRecord:
     # -- codec ------------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
+        """The JSON shape of this value."""
         return {
             "schema_version": self.schema_version,
             "selection": self.selection,
@@ -313,6 +323,7 @@ class ScopeAcquisitionRecord:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> ScopeAcquisitionRecord:
+        """Parse the JSON shape :meth:`to_dict` produces."""
         raw_members = data.get("members", [])
         if not isinstance(raw_members, list):
             raise ValueError("scope acquisition record: 'members' must be a list")

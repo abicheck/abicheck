@@ -144,6 +144,7 @@ class StrandedLibraryResolution:
 
     @property
     def degraded(self) -> bool:
+        """Whether the full dump failed and this snapshot is the ELF-only stand-in."""
         return self.failure is not None
 
 
@@ -157,6 +158,7 @@ def release_inventory_evidence(
     """S2's inventory-proof rule, in one place."""
 
     def _side(stored: bool) -> SideInventory:
+        """One side's inventory proof from whether it is a stored package (or a direct file pair)."""
         if direct_pair:
             return SideInventory(
                 InventoryCompleteness.UNPROVEN, _DIRECT_PAIR_PROVENANCE
