@@ -46,7 +46,6 @@ are questions about the comparison, not about a constant.
 
 from __future__ import annotations
 
-from collections import Counter
 from typing import TYPE_CHECKING, Protocol
 
 from ..diff_helpers import make_change
@@ -238,32 +237,57 @@ def diff_constants(
     here already carries, just extended to a membership change instead of a
     value change.
 
-    **Two further gaps in the collision path itself** (Codex review, PR
-    #1078, ninth round), both closed by rebuilding the collision comparison
-    around ``collections.Counter`` instead of sorted-list equality:
+    **Several further gaps in the collision path itself**, across three
+    Codex review rounds (PR #1078, ninth/tenth/eleventh):
 
-    1. A colliding group that grew (or shrank) by a value *already present*
-       in the group (e.g. a second anonymous-namespace ``X=1`` alongside an
-       existing ``X=1``) has sorted lists of different length that a naive
-       representative pick could still read as a value *change* --
-       reporting ``CONSTANT_CHANGED`` (an API break) for what is a purely
-       compatible addition (or an incompatible-severity-wise-irrelevant
-       removal). ``Counter`` subtraction (``new - old`` / ``old - new``)
-       answers "net added" and "net removed" directly, so a pure
-       addition/removal inside the group is now classified as
-       ``CONSTANT_ADDED``/``CONSTANT_REMOVED``, and only a group with both
-       a net addition and a net removal is reported as ``CONSTANT_CHANGED``.
-    2. The per-name legacy fallback (``constants.get(name)``) reflects only
-       *one* raw value per bare name -- whichever occurrence's own parse
-       happened to win that same collision upstream -- so applying it to
-       *every* unresolved occurrence in a colliding group risked
-       misattributing one occurrence's legacy text to a different
-       occurrence, either masking a real difference (both compare equal to
-       the same borrowed text) or fabricating one (the borrowed text
-       differs between sides for reasons unrelated to the actual
-       occurrence). The collision path no longer consults the fallback at
-       all -- an unresolved occurrence inside a colliding group is
-       represented by an internal sentinel, never a borrowed value.
+    1. (Ninth round) A colliding group that grew (or shrank) by a value
+       *already present* in the group (e.g. a second anonymous-namespace
+       ``X=1`` alongside an existing ``X=1``) has sorted lists of different
+       length that a naive representative pick could still read as a value
+       *change* -- reporting ``CONSTANT_CHANGED`` (an API break) for what
+       is a purely compatible addition. Fixed (initially via
+       ``collections.Counter`` subtraction, later folded into the
+       occurrence-level bookkeeping below) so a pure addition/removal
+       inside the group is classified as ``CONSTANT_ADDED``/
+       ``CONSTANT_REMOVED``, and only a group with both a net addition and
+       a net removal is reported as ``CONSTANT_CHANGED``.
+    2. (Ninth round) The per-name legacy fallback (``constants.get(name)``)
+       reflects only *one* raw value per bare name -- whichever
+       occurrence's own parse happened to win that same collision upstream
+       -- so applying it to *every* unresolved occurrence in a colliding
+       group risked misattributing one occurrence's legacy text to a
+       different occurrence. The collision path never consults the
+       fallback at all -- an unresolved occurrence inside a colliding group
+       is represented by an internal sentinel, never a borrowed value.
+    3. (Tenth round) A *mixed* group (both a net removal and a net addition
+       at once, e.g. a stable ``X=1`` becoming ``X=2`` while a different,
+       newly-added anonymous-scope ``X=3`` also appears) used to pick one
+       representative pair and emit a single ``CONSTANT_CHANGED``, silently
+       dropping the independently provable residual ``CONSTANT_ADDED``/
+       ``CONSTANT_REMOVED``. Fixed by pairing off exactly one removed value
+       with one added value as that one ``CONSTANT_CHANGED``, then
+       reporting every other leftover value as its own finding.
+    4. (Eleventh round) The ninth/tenth rounds' own fix converted a
+       ``Counter`` difference to a ``set`` for iteration, which introduced
+       two further defects: iteration order (and therefore which colliding
+       value became the ``CONSTANT_CHANGED`` pairing, and therefore the
+       *outcome* of the ``is_fingerprint_comparison_unreliable`` gate on
+       it) depended on ``PYTHONHASHSEED``, so the identical comparison
+       could alternate between passing and failing across runs; and
+       converting to a ``set`` collapsed repeated values to one entry,
+       silently dropping every additional identical removal/addition
+       beyond the first (three colliding ``X=1`` occurrences shrinking to
+       one must report the loss of *two* occurrences, not one). Fixed by
+       replacing the ``Counter``/``set`` machinery entirely with
+       occurrence-level bookkeeping (``old_by_value``/``new_by_value``,
+       plain ``dict``s grouping each side's own entities by value in
+       insertion order) -- deterministic regardless of hash seed, exact on
+       multiplicity, and each removed/added occurrence keeps its own real
+       entity_id rather than every finding for the name sharing a single
+       id computed once from ``old_ids[0]``/``new_ids[0]`` (a third,
+       related eleventh-round finding: that shared id misattributed a
+       residual finding to whichever entity happened to occupy that
+       position, not the occurrence that actually changed).
     """
     changes: list[Change] = []
     old_values = _values(old_index)
@@ -327,21 +351,33 @@ def diff_constants(
             )
             continue
         # A colliding group on at least one side (Codex review, PR #1078,
-        # ninth round, closing two gaps the eighth round's own fix still
-        # had). Compared by full multiset *count*, via `Counter`, not a
-        # sorted list: a sorted-list equality check cannot distinguish "a
-        # value was added as a duplicate of one already present" from "a
-        # value was added at all" the way `Counter` subtraction can, so a
-        # colliding group that grew by one already-present value (e.g. a
-        # second anonymous-namespace `X=1` alongside an existing `X=1`)
-        # used to fall through the multiset-equality check (the sorted
-        # lists differ in length) into the value-*change* branch below with
-        # a coincidentally-equal representative pair, reporting
-        # `CONSTANT_CHANGED` (an API break) for what is actually a pure,
-        # compatible addition. `Counter` subtraction (`new - old`/
-        # `old - new`) answers "which values are net-added" and
-        # "net-removed" directly, so a pure addition/removal inside the
-        # group is now classified as such.
+        # ninth/tenth/eleventh rounds). Compared occurrence-by-occurrence,
+        # not by a bare value `Counter`: a `Counter` alone answers "how many
+        # of each value" but cannot say *which entity* carried a specific
+        # removed or added occurrence, and converting its difference to a
+        # `set` for iteration (an earlier version of this fix) made both
+        # the choice of which colliding value pairs into one
+        # `CONSTANT_CHANGED` and, through it, the `is_fingerprint_
+        # comparison_unreliable` verdict depend on `PYTHONHASHSEED` (string
+        # hashing) -- the identical comparison could alternate between
+        # passing and failing across runs (eleventh round). `set` also
+        # collapsed repeated values to one entry, silently dropping every
+        # additional identical removal/addition beyond the first
+        # (eleventh round's second finding: three colliding `X=1`
+        # occurrences shrinking to one must report the loss of *two*
+        # occurrences, not one).
+        #
+        # `old_by_value`/`new_by_value` group each side's own entities by
+        # value in insertion order (a plain ``dict``, not a ``set`` --
+        # deterministic regardless of hash seed, and matching the same
+        # `SemanticIR`'s own occurrence order every run). For each value,
+        # the excess count on one side over the other is exactly that many
+        # removed/added *occurrences*, each still carrying its own real
+        # entity_id -- fixing the third finding too (an emitted residual
+        # finding used to be stamped with a single id shared across every
+        # finding for the name, misattributing it to whichever entity
+        # happened to be `old_ids[0]`/`new_ids[0]`, not the occurrence that
+        # actually changed).
         #
         # This path also does not use `_value_or_legacy`'s per-name
         # fallback at all: `AbiSnapshot.constants` retains only ONE raw
@@ -356,36 +392,45 @@ def diff_constants(
         # sentinel is deliberately less informative than the single-entity
         # fallback, but never fabricates a per-occurrence value this
         # function cannot actually attribute.
-        old_multiset: Counter[str] = Counter(
-            v if (v := _value(old_index, i)) is not None else _UNRESOLVED_MARKER
-            for i in old_ids
-        )
-        new_multiset: Counter[str] = Counter(
-            v if (v := _value(new_index, i)) is not None else _UNRESOLVED_MARKER
-            for i in new_ids
-        )
-        if old_multiset == new_multiset:
+        old_by_value: dict[str, list[EntityId]] = {}
+        for i in old_ids:
+            v = _value(old_index, i)
+            old_by_value.setdefault(
+                v if v is not None else _UNRESOLVED_MARKER, []
+            ).append(i)
+        new_by_value: dict[str, list[EntityId]] = {}
+        for i in new_ids:
+            v = _value(new_index, i)
+            new_by_value.setdefault(
+                v if v is not None else _UNRESOLVED_MARKER, []
+            ).append(i)
+        removed_occurrences: list[tuple[str, EntityId]] = []
+        for value, ids_for_value in old_by_value.items():
+            excess = len(ids_for_value) - len(new_by_value.get(value, ()))
+            if excess > 0:
+                removed_occurrences.extend((value, i) for i in ids_for_value[:excess])
+        added_occurrences: list[tuple[str, EntityId]] = []
+        for value, ids_for_value in new_by_value.items():
+            excess = len(ids_for_value) - len(old_by_value.get(value, ()))
+            if excess > 0:
+                added_occurrences.extend((value, i) for i in ids_for_value[:excess])
+        if not removed_occurrences and not added_occurrences:
             continue
-        removed_values = set(old_multiset - new_multiset)
-        added_values = set(new_multiset - old_multiset)
         # A mixed group (both a net removal and a net addition) carries more
         # than one independent piece of evidence -- pairing off exactly one
-        # removed value with one added value as a single "value changed"
-        # story, then reporting whatever is *left over* in either set as its
-        # own `CONSTANT_REMOVED`/`CONSTANT_ADDED`, rather than collapsing
-        # every mixed `Counter` difference into one `CONSTANT_CHANGED` that
-        # silently drops the rest (Codex review, PR #1078, tenth round: e.g.
-        # a stable-identity `X=1` becoming `X=2` while a *different*,
-        # newly-added anonymous-scope `X=3` also appears -- `removed={1}`,
-        # `added={2, 3}` -- previously reported only one `CONSTANT_CHANGED`
-        # and silently lost the independently provable `CONSTANT_ADDED`).
-        if removed_values and added_values:
-            removed_key = next(iter(removed_values))
-            added_key = next(iter(added_values))
-            old_val = _unresolved_to_none(removed_key)
-            new_val = _unresolved_to_none(added_key)
-            removed_values.discard(removed_key)
-            added_values.discard(added_key)
+        # removed occurrence with one added occurrence as a single "value
+        # changed" story, then reporting whatever is *left over* as its own
+        # `CONSTANT_REMOVED`/`CONSTANT_ADDED`, rather than collapsing every
+        # mixed difference into one `CONSTANT_CHANGED` that silently drops
+        # the rest (tenth round: e.g. a stable-identity `X=1` becoming
+        # `X=2` while a *different*, newly-added anonymous-scope `X=3` also
+        # appears -- previously reported only one `CONSTANT_CHANGED` and
+        # silently lost the independently provable `CONSTANT_ADDED`).
+        if removed_occurrences and added_occurrences:
+            removed_value, removed_id = removed_occurrences.pop(0)
+            added_value, added_id = added_occurrences.pop(0)
+            old_val = _unresolved_to_none(removed_value)
+            new_val = _unresolved_to_none(added_value)
             unreliable = (
                 old_val is not None
                 and new_val is not None
@@ -401,27 +446,28 @@ def diff_constants(
                         new=repr(new_val),
                         old_value=old_val,
                         new_value=new_val,
-                        entity_id=eid,
+                        entity_id=producer_entity_id(removed_id)
+                        or producer_entity_id(added_id),
                     )
                 )
-        for leftover_old in removed_values:
+        for leftover_old_value, leftover_old_id in removed_occurrences:
             changes.append(
                 make_change(
                     ChangeKind.CONSTANT_REMOVED,
                     symbol=name,
                     name=name,
-                    old_value=_unresolved_to_none(leftover_old),
-                    entity_id=eid,
+                    old_value=_unresolved_to_none(leftover_old_value),
+                    entity_id=producer_entity_id(leftover_old_id),
                 )
             )
-        for leftover_new in added_values:
+        for leftover_new_value, leftover_new_id in added_occurrences:
             changes.append(
                 make_change(
                     ChangeKind.CONSTANT_ADDED,
                     symbol=name,
                     name=name,
-                    new_value=_unresolved_to_none(leftover_new),
-                    entity_id=eid,
+                    new_value=_unresolved_to_none(leftover_new_value),
+                    entity_id=producer_entity_id(leftover_new_id),
                 )
             )
 

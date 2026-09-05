@@ -49,7 +49,6 @@ about a typedef.
 from __future__ import annotations
 
 import re
-from collections import Counter
 from typing import TYPE_CHECKING, Protocol
 
 from ..diff_helpers import make_change, typedef_side_trusts_qualified
@@ -217,6 +216,20 @@ def diff_typedefs(
     shares the alias -- the same ambiguity a flat legacy map's own
     bare-name key collision already accepts, just without this fix's
     additional failure mode of silently declaring "unchanged".
+
+    **That sorted-list comparison itself had three further gaps**, mirroring
+    ``compare.constants.diff_constants``'s identical, more fully-documented
+    history (Codex review, PR #1078, tenth/eleventh rounds; see that
+    function's own docstring for the full account): a colliding group that
+    grew or shrank by an already-present value read as a spurious
+    ``TYPEDEF_BASE_CHANGED`` instead of a pure (untracked, for typedefs)
+    addition or a ``TYPEDEF_REMOVED``; a mixed group could lose an
+    independently provable residual removal; and converting a value
+    difference to a ``set`` for iteration made both which colliding value
+    became the representative pair and repeated-value multiplicity itself
+    depend on ``PYTHONHASHSEED``/silently collapse. All three are closed by
+    the identical occurrence-level (``old_by_value``/``new_by_value``,
+    plain ``dict``s, not ``Counter``/``set``) bookkeeping used there.
     """
     changes: list[Change] = []
     old_aliases = _aliases(old_index)
@@ -281,37 +294,49 @@ def diff_typedefs(
                 )
             )
             continue
-        old_multiset: Counter[str] = Counter(_underlying(old_index, i) for i in old_ids)
-        new_multiset: Counter[str] = Counter(_underlying(new_index, i) for i in new_ids)
-        if old_multiset == new_multiset:
+        # Occurrence-level bookkeeping, not a bare value `Counter`/`set`
+        # (Codex review, PR #1078, eleventh round -- mirroring
+        # ``compare.constants.diff_constants``'s identical fix, see that
+        # function's own docstring for the full three-defect account): a
+        # `Counter` alone cannot attribute a removed/added value back to
+        # the specific entity that carried it, and converting its
+        # difference to a `set` for iteration made both the choice of
+        # which colliding value pairs into one ``TYPEDEF_BASE_CHANGED`` and
+        # multiplicity itself (repeated identical values collapsed to one)
+        # depend on `PYTHONHASHSEED`/silently lose evidence.
+        # `old_by_value`/`new_by_value` group each side's own entities by
+        # value in insertion order (deterministic, unlike a `set`); the
+        # excess count for a value on one side over the other is exactly
+        # that many removed/added occurrences, each keeping its own real
+        # entity_id.
+        old_by_value: dict[str, list[EntityId]] = {}
+        for i in old_ids:
+            old_by_value.setdefault(_underlying(old_index, i), []).append(i)
+        new_by_value: dict[str, list[EntityId]] = {}
+        for i in new_ids:
+            new_by_value.setdefault(_underlying(new_index, i), []).append(i)
+        removed_occurrences: list[tuple[str, EntityId]] = []
+        for value, ids_for_value in old_by_value.items():
+            excess = len(ids_for_value) - len(new_by_value.get(value, ()))
+            if excess > 0:
+                removed_occurrences.extend((value, i) for i in ids_for_value[:excess])
+        added_occurrences: list[tuple[str, EntityId]] = []
+        for value, ids_for_value in new_by_value.items():
+            excess = len(ids_for_value) - len(old_by_value.get(value, ()))
+            if excess > 0:
+                added_occurrences.extend((value, i) for i in ids_for_value[:excess])
+        if not removed_occurrences and not added_occurrences:
             continue
-        # `Counter` subtraction, not sorted-list equality (Codex review, PR
-        # #1078, tenth round): a colliding group that grew or shrank by a
-        # value *already present* in the group (e.g. a second
-        # anonymous-namespace ``Alias=int`` alongside an existing
-        # ``Alias=int``) has sorted lists of different length, which the
-        # previous representative-pick logic could still read as a value
-        # *change* -- reporting ``TYPEDEF_BASE_CHANGED`` (breaking) for what
-        # is either a pure, untracked-and-compatible addition (typedef
-        # additions have no ``ChangeKind`` at all -- see this alias's own
-        # `new_ids is None`/`new_alias_keys` handling above, which never
-        # visits a new-only alias either) or a pure removal.
-        # `removed`/`added` (only positive-count entries survive
-        # subtraction) answer "net removed" and "net added" directly:
-        removed_values = set(old_multiset - new_multiset)
-        added_values = set(new_multiset - old_multiset)
-        if removed_values and added_values:
+        if removed_occurrences and added_occurrences:
             # A genuine one-to-one substitution: consumes exactly one
-            # value from each side, leaving any further residual counts to
-            # the loops below rather than folding them into this one
-            # ``TYPEDEF_BASE_CHANGED`` (Codex review, PR #1078, tenth
-            # round's constant-family sibling finding -- a mixed
+            # occurrence from each side, leaving any further residual
+            # occurrences to the loop below rather than folding them into
+            # this one ``TYPEDEF_BASE_CHANGED`` (Codex review, PR #1078,
+            # tenth round's constant-family sibling finding -- a mixed
             # removed-and-added group can carry more than one independent
             # piece of evidence).
-            old_type = next(iter(removed_values))
-            new_type = next(iter(added_values))
-            removed_values.discard(old_type)
-            added_values.discard(new_type)
+            old_type, old_id = removed_occurrences.pop(0)
+            new_type, new_id = added_occurrences.pop(0)
             changes.append(
                 make_change(
                     ChangeKind.TYPEDEF_BASE_CHANGED,
@@ -319,30 +344,30 @@ def diff_typedefs(
                     name=bare_alias,
                     old_value=old_type,
                     new_value=new_type,
-                    entity_id=eid,
+                    entity_id=producer_entity_id(old_id) or producer_entity_id(new_id),
                     description=(
                         f"Typedef base type changed: {bare_alias}{qualified_suffix}"
                     ),
                 )
             )
-        for leftover_old in removed_values:
+        for leftover_old_value, leftover_old_id in removed_occurrences:
             # A pure removal within a colliding group: the alias itself
             # still exists on the new side (via another colliding member),
-            # but this specific value no longer does.
+            # but this specific occurrence no longer does.
             changes.append(
                 make_change(
                     ChangeKind.TYPEDEF_REMOVED,
                     symbol=bare_alias,
                     name=bare_alias,
-                    old_value=leftover_old,
-                    entity_id=eid,
+                    old_value=leftover_old_value,
+                    entity_id=producer_entity_id(leftover_old_id),
                     description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                 )
             )
-        # `added_values`' own leftovers are a pure addition -- deliberately
-        # unreported, the same as a brand-new alias in `new_aliases` that
-        # never appears in `old_aliases` at all: typedef additions carry no
-        # `ChangeKind` and are always compatible.
+        # `added_occurrences`' own leftovers are a pure addition --
+        # deliberately unreported, the same as a brand-new alias in
+        # `new_aliases` that never appears in `old_aliases` at all: typedef
+        # additions carry no `ChangeKind` and are always compatible.
     return changes
 
 

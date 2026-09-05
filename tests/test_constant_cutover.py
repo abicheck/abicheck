@@ -614,14 +614,14 @@ class TestDetectorBehavior:
         by_kind = {c.kind: c for c in changes}
         assert set(by_kind) == {ChangeKind.CONSTANT_CHANGED, ChangeKind.CONSTANT_ADDED}
         assert by_kind[ChangeKind.CONSTANT_CHANGED].old_value == "1"
-        # Which of "2"/"3" becomes the CHANGED's representative pairing and
-        # which becomes the residual ADDED is an implementation-internal
-        # (set-iteration-order) detail -- what must hold is that both
-        # values are accounted for somewhere, and neither is dropped.
-        assert {
-            by_kind[ChangeKind.CONSTANT_CHANGED].new_value,
-            by_kind[ChangeKind.CONSTANT_ADDED].new_value,
-        } == {"2", "3"}
+        # Since the eleventh round's occurrence-level (dict-ordered, not
+        # `set`-ordered) rewrite, which value pairs into the ``CHANGED``
+        # finding is deterministic -- the first-encountered added value in
+        # insertion order ("2", from `stable_new`, listed first) -- rather
+        # than depending on `PYTHONHASHSEED`. Both values are accounted
+        # for regardless.
+        assert by_kind[ChangeKind.CONSTANT_CHANGED].new_value == "2"
+        assert by_kind[ChangeKind.CONSTANT_ADDED].new_value == "3"
 
     def test_a_mixed_group_reports_both_the_change_and_the_residual_removal(
         self,
@@ -660,14 +660,94 @@ class TestDetectorBehavior:
             ChangeKind.CONSTANT_REMOVED,
         }
         assert by_kind[ChangeKind.CONSTANT_CHANGED].new_value == "2"
-        # Which of "1"/"4" becomes the CHANGED's representative pairing and
-        # which becomes the residual REMOVED is an implementation-internal
-        # (set-iteration-order) detail -- what must hold is that both
-        # values are accounted for somewhere, and neither is dropped.
-        assert {
-            by_kind[ChangeKind.CONSTANT_CHANGED].old_value,
-            by_kind[ChangeKind.CONSTANT_REMOVED].old_value,
-        } == {"1", "4"}
+        # Since the eleventh round's occurrence-level (dict-ordered, not
+        # `set`-ordered) rewrite, which value pairs into the ``CHANGED``
+        # finding is deterministic -- the first-encountered removed value
+        # in insertion order ("1", from `stable_old`, listed first) --
+        # rather than depending on `PYTHONHASHSEED`. Both values are
+        # accounted for regardless.
+        assert by_kind[ChangeKind.CONSTANT_CHANGED].old_value == "1"
+        assert by_kind[ChangeKind.CONSTANT_REMOVED].old_value == "4"
+
+    def test_three_colliding_occurrences_shrinking_to_one_reports_two_removals(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, eleventh round: three anonymous-scoped
+        occurrences all sharing ``X=1`` on the old side, only one on the
+        new side -- the loss of *two* occurrences, not one. Converting the
+        multiset difference to a ``set`` (an earlier version of this fix)
+        collapsed the repeated value to a single entry, silently dropping
+        the second removal."""
+        first_old = entity_id_for_constant((), "X")
+        second_old = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        third_old = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        new_id = entity_id_for_constant((), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(third_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_REMOVED for c in changes)
+        assert all(c.old_value == "1" for c in changes)
+
+    def test_residual_findings_carry_the_contributing_entitys_own_id(self) -> None:
+        """Codex review, PR #1078, eleventh round: the residual
+        ``CONSTANT_ADDED`` for a newly-added anonymous-scope ``X=2``
+        alongside an unchanged, real-backend-identified ``X=1`` must carry
+        *that new occurrence's own* entity_id -- not a single id reused
+        across every finding for the name, which would misattribute the
+        addition to the pre-existing declaration."""
+        stable_old = entity_id_for_constant((Namespace("ns"),), "X")
+        stable_new = entity_id_for_constant((Namespace("ns"),), "X")
+        added_new = entity_id_for_constant((Namespace("ns2"),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(added_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_ADDED
+        assert change.new_value == "2"
+        assert change.entity_id == added_new
+        assert change.entity_id != stable_old
+        assert change.entity_id != stable_new
 
 
 # -- end to end, through the real detector entry point ---------------------

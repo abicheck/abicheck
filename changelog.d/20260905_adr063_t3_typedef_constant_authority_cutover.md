@@ -214,3 +214,25 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   `SemanticIrAuthorityError` for any name with no corresponding
   `SemanticIR` occurrence, closing the reverse direction the original
   one-way check left open.
+- **A colliding group's `CONSTANT_CHANGED`/`TYPEDEF_BASE_CHANGED` pairing is
+  now deterministic, preserves exact multiplicity, and attributes each
+  finding to the entity that actually produced it.** The previous rounds'
+  own fix converted a `Counter` multiset difference to a `set` for
+  iteration, which introduced three further defects (Codex review, PR
+  #1078, eleventh round): which colliding value paired into the `CHANGED`
+  finding — and, through it, the outcome of the
+  `is_fingerprint_comparison_unreliable` gate applied to that pairing —
+  depended on `PYTHONHASHSEED`, so the identical comparison could
+  alternate between passing and failing across runs; converting to a `set`
+  collapsed repeated identical values to one entry, silently dropping
+  every additional identical removal/addition beyond the first (three
+  colliding `X=1` occurrences shrinking to one reported only one removal,
+  not two); and every emitted finding for a name shared a single
+  `entity_id` computed once from `old_ids[0]`/`new_ids[0]`, misattributing
+  a residual finding to whichever entity happened to occupy that position
+  rather than the occurrence that actually changed. `compare.constants.
+  diff_constants` and `compare.typedefs.diff_typedefs` both now group each
+  side's own entities by value in a plain, insertion-ordered `dict`
+  (`old_by_value`/`new_by_value`) instead of a `Counter`/`set`, so pairing
+  order is deterministic and reproducible, multiplicity is exact, and
+  every finding carries the specific occurrence's own entity_id.

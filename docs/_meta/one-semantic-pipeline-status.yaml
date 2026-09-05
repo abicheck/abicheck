@@ -530,6 +530,33 @@ concepts:
       iterates the sidecar's own keys, raising
       `errors.SemanticIrAuthorityError` for any name with no corresponding
       `SemanticIR` occurrence.
+
+      **An eleventh round found three further defects in the ninth/tenth
+      rounds' own `Counter`-based collision fix, in both families.**
+      Converting a `Counter` multiset difference to a `set` for iteration
+      -- done to pick the one removed/added value pairing into a
+      `CHANGED` finding -- has two failure modes: `set` iteration order
+      depends on `PYTHONHASHSEED` (string hashing), so which value paired
+      into the `CHANGED` finding, and therefore the outcome of the
+      `is_fingerprint_comparison_unreliable` gate applied to that specific
+      pairing, could differ between runs of the identical comparison; and
+      converting to a `set` collapses repeated identical values to one
+      entry, so three colliding occurrences sharing one value shrinking to
+      one occurrence reported only one removal, silently dropping the
+      second. Separately, every finding emitted for a colliding name
+      shared a single `entity_id` computed once from
+      `old_ids[0]`/`new_ids[0]`, so a residual `CONSTANT_ADDED`/
+      `CONSTANT_REMOVED` was attributed to whichever entity happened to
+      occupy that position, not the occurrence that actually changed.
+      Fixed in both `compare/constants.py` and `compare/typedefs.py` by
+      replacing the `Counter`/`set` machinery entirely with
+      occurrence-level bookkeeping: `old_by_value`/`new_by_value` group
+      each side's own entities by value in a plain, insertion-ordered
+      `dict` (deterministic regardless of hash seed, matching the same
+      `SemanticIR`'s own occurrence order every run), so the excess count
+      for a value on one side over the other is exactly that many
+      removed/added *occurrences*, each still carrying its own real
+      entity_id.
   public_surface:
     primitive: complete
     producers: complete

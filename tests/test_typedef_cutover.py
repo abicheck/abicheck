@@ -307,6 +307,49 @@ class TestDetectorBehavior:
         assert change.symbol == "Alias"
         assert change.old_value == "int"
 
+    def test_three_colliding_occurrences_shrinking_to_one_reports_two_removals(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, eleventh round (typedef-family sibling
+        of the identical constant-family finding): three anonymous-scoped
+        occurrences all sharing ``Alias=int`` on the old side, only one on
+        the new side -- the loss of *two* occurrences, not one. Converting
+        the multiset difference to a ``set`` (an earlier version of this
+        fix) collapsed the repeated value to a single entry, silently
+        dropping the second removal."""
+        first_old = entity_id_for_typedef((), "Alias")
+        second_old = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        third_old = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        new_id = entity_id_for_typedef((), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(second_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(third_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_REMOVED for c in changes)
+        assert all(c.old_value == "int" for c in changes)
+
     def test_removal_change_and_no_op(self) -> None:
         changes = _run(
             _ir_backed({"gone": "int", "moved": "int", "same": "int"}),
