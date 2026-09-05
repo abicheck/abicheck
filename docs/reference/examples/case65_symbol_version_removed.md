@@ -156,4 +156,4 @@ abidiff v1.xml v2.xml
 - `v2.h`
 - `v2.map`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Symbol version node removed](by-rule/symbol-version-node-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Symbol version node removed](by-rule/symbol-version-node-removed.md)._

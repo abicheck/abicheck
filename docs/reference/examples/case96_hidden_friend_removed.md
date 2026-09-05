@@ -138,4 +138,4 @@ This case is a pure header/API-contract break, which only an L2
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Hidden friend removed](by-rule/hidden-friend-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Hidden friend removed](by-rule/hidden-friend-removed.md)._

@@ -105,4 +105,4 @@ each other, not a binary against its own headers).
 
 - `snapshot.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Audit accidental export](by-rule/audit-accidental-export.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Exported symbol is not public API](by-rule/audit-accidental-export.md)._

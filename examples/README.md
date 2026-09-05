@@ -1,4 +1,33 @@
-# ABI Scenario Catalog
+# `examples/` — workflow examples and the calibration catalog
+
+This directory holds two different things, for two different audiences.
+
+## 1. Workflow examples — start here if you want to *use* abicheck
+
+`workflows/<task>/` is a small, curated, task-oriented walkthrough: a tiny
+purpose-built project, the real `abicheck` command you would run, and what
+the output means.
+
+| Workflow | Task |
+|---|---|
+| [`workflows/compare-release/`](workflows/compare-release/README.md) | Did my next release break anything for existing consumers? |
+
+Each one carries a `workflow.yaml` stating the commands, the expected exit
+code, and the expected verdict; `validation/scripts/run_workflow_examples.py`
+executes exactly those documented commands in CI, so a walkthrough cannot rot
+into something that no longer works. See
+[`docs/contribute/catalog-coverage.md`](../docs/contribute/catalog-coverage.md)
+for progress against the full planned set.
+
+## 2. The calibration catalog — `case*/`
+
+Everything below is calibration material: one case per compatibility
+mechanism, driving the FP-rate, tier-accuracy, mutation, and full-catalog
+gates. It is an encyclopedia of ABI pitfalls, not a tutorial — the published,
+navigable version is the
+[Compatibility Catalog](../docs/reference/examples/index.md), which indexes
+the same cases by rule, scenario kind, ecosystem, operation, evidence level,
+language, and verdict.
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
 This directory contains **197 cases** (192 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:

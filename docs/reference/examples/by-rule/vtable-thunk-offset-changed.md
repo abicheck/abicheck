@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `vtable-thunk-offset-changed`. [← back to all rules](index.md)
 
+> A this-adjusting thunk's offset changes, so dispatch through a secondary base adjusts the object pointer incorrectly.
+
 ## Canonical demonstration
 
 - [case172_vtable_thunk_offset_changed](../case172_vtable_thunk_offset_changed.md) — Vtable Thunk Offset Changed (detected from a stripped binary) (🔴 BREAKING)

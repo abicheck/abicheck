@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `virtual-dispatch-contract-removed`. [← back to all rules](index.md)
 
+> A type stops dispatching virtually, so consumer overrides that were previously called through the vtable are silently bypassed.
+
 ## Canonical demonstration
 
 _No single-library case demonstrates this rule alone yet — referenced only by the scenario(s) below._

@@ -145,4 +145,4 @@ mismatch, whether or not it happens to segfault on this particular run.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Vtt slot count changed](by-rule/vtt-slot-count-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: VTT slot count changed](by-rule/vtt-slot-count-changed.md)._

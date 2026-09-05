@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `calling-convention-changed`. [← back to all rules](index.md)
 
+> A function changes calling convention, so existing callers pass arguments and clean up the stack in a way the new code does not expect.
+
 ## Canonical demonstration
 
 - [case64_calling_convention_changed](../case64_calling_convention_changed.md) — Calling Convention Changed (🔴 BREAKING)

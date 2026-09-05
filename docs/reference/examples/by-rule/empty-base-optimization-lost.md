@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `empty-base-optimization-lost`. [← back to all rules](index.md)
 
+> A previously empty base gains state, so the empty-base optimization no longer applies and the derived object grows and shifts.
+
 ## Canonical demonstration
 
 - [case140_empty_base_optimization_lost](../case140_empty_base_optimization_lost.md) — Empty Base Optimization Lost (base subobject moved) (🔴 BREAKING)

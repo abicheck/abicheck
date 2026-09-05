@@ -26,6 +26,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_DIR = Path(__file__).resolve().parent.parent
 
 # Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
@@ -188,3 +190,41 @@ def test_rule_slug_unique_outside_confirmed_variant_families():
                 f"{slug}: {v} shares this slug but variant_of doesn't point at "
                 f"the canonical case {canonical[0]!r}"
             )
+
+
+def test_a_scenario_with_no_related_rules_is_rejected():
+    """A scenario *is* several rules composed into one problem, so a scenario
+    with no `related_rules` is a contradiction the data should not be able to
+    express. Left unchecked, `.get(name, [])` emits an empty list for a
+    newly-classified scenario nobody added to RELATED_RULES, and the case
+    silently belongs to no rule family while every gate passes.
+
+    Checked by removing each scenario's mapping in turn, not one of them.
+    """
+    gen = _load_gen()
+    gt = _load_ground_truth()
+    scenarios = [
+        name for name, entry in gt["taxonomy"].items() if entry["entity"] == "scenario"
+    ]
+    assert scenarios
+    for name in scenarios:
+        saved = gen.RELATED_RULES.pop(name)
+        try:
+            with pytest.raises(ValueError, match="no related_rules"):
+                gen.build_taxonomy(gt)
+        finally:
+            gen.RELATED_RULES[name] = saved
+
+
+def test_a_related_rules_key_naming_no_scenario_is_rejected():
+    """The mirror: a mapping key left behind by a rename, removal, or
+    reclassification is dead configuration that looks like coverage."""
+    gen = _load_gen()
+    gt = _load_ground_truth()
+    for stale in ("case999_renamed_away", "case01_symbol_removal"):
+        gen.RELATED_RULES[stale] = ["exported-function-removed"]
+        try:
+            with pytest.raises(ValueError, match="name no scenario case"):
+                gen.build_taxonomy(gt)
+        finally:
+            del gen.RELATED_RULES[stale]

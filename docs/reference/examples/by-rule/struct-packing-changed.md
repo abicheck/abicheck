@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `struct-packing-changed`. [← back to all rules](index.md)
 
+> A struct's explicit packing changes, changing every member offset and the type's overall size.
+
 ## Canonical demonstration
 
 - [case56_struct_packing_changed](../case56_struct_packing_changed.md) — Struct Packing Changed (pragma pack) (🔴 BREAKING)

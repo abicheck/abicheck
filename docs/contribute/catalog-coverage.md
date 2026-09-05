@@ -6,10 +6,12 @@ Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the ca
 
 ## Rule coverage
 
-- **177 distinct compatibility rules** in total -- **160** demonstrated by at least one rule-entity case (across **167 rule-entity cases**), plus **17** named only in a scenario's own `related_rules` (a generic mechanism no single-library case demonstrates alone yet).
-- **5 of the rule-entity-backed rules** have a demonstrated *variant* beyond their canonical case -- a genuine robustness demonstration under a different condition (5 variant cases total -- see the per-family breakdown below); these are robustness demonstrations of an already-counted rule, not additional rules.
-- **2 of the rule-entity-backed rules** also have a *duplicate* -- the same demonstration restated with no distinguishing condition (2 duplicate cases total); these don't add robustness coverage and are candidates for eventual removal, not a variant to keep. (A family can appear in both this count and the variant count above if it has one of each.)
-- **153 rule-entity-backed rules** have exactly one demonstrated case so far, with no variant or duplicate yet.
+Every rule named below is defined in `examples/catalog_rules.yaml`, the canonical rule registry (a repository file, not a published page). A slug used by a case but missing from that file (or defined there but used by no case) fails `scripts/gen_catalog_taxonomy.py` and `tests/test_catalog_taxonomy.py` -- which is what stops a typo, a synonym, or an accidental rename from silently becoming one more "distinct compatibility rule" in the headline below.
+
+- **177 distinct compatibility rules** in total -- **160** demonstrated by at least one rule-entity case (across **167 rule-entity cases**), plus **17** named only in a scenario's own `related_rules` (a generic mechanism no single-library case demonstrates alone yet). The two are **not** equivalent coverage: a referenced-only rule has a definition and a scenario that composes it, but no case that isolates it.
+- **5 of the demonstrated rules** have a *variant* beyond their canonical case -- a genuine robustness demonstration under a different condition (5 variant cases total -- see the per-family breakdown below); these are robustness demonstrations of an already-counted rule, not additional rules.
+- **2 of the demonstrated rules** also have a *duplicate* -- the same demonstration restated with no distinguishing condition (2 duplicate cases total); these don't add robustness coverage and are candidates for eventual removal, not a variant to keep. (A family can appear in both this count and the variant count above if it has one of each.)
+- **153 demonstrated rules** have exactly one case so far, with no variant or duplicate yet.
 
 | Rule | Canonical case | Variant case(s) | Duplicate case(s) |
 |---|---|---|---|
@@ -20,6 +22,30 @@ Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the ca
 | `inline-function-outlined` | `case16_inline_to_non_inline` | `case47_inline_to_outlined` |  |
 | `public-api-gains-internal-dependency` | `case160_public_api_internal_dep_added` | `case190_public_inline_function_references_internal_constant` |  |
 | `symbol-version-node-removed` | `case65_symbol_version_removed` | `case139_symbol_version_node_removed` |  |
+
+### Referenced-only rules
+
+17 rules the catalog names but does not yet isolate in a case of its own. Each is a real compatibility mechanism a scenario composes; adding a rule-entity case whose `rule_slug` is one of these promotes it to *demonstrated* automatically, with no registry edit.
+
+| Rule | Composed by |
+|---|---|
+| `audit-public-not-exported` | `case150_xcheck_export_public_pair` |
+| `compatible-type-added` | `case108_task_class_removed`, `case109_flow_graph_policy_renames`, `case191_header_only_graph_field_type`, `case78_task_arena_attach_tag` |
+| `constructor-overload-ambiguity` | `case111_enumerable_thread_specific_lambda_ambiguity` |
+| `empty-tag-type-gains-state` | `case94_empty_tag_gained_state` |
+| `exported-type-removed` | `case107_task_scheduler_init_removed`, `case108_task_class_removed`, `case78_task_arena_attach_tag`, `case82_sycl_overload_set_removed` |
+| `header-build-context-mismatch` | `case148_xcheck_header_build_mismatch` |
+| `internal-declaration-identity-reconciled` | `case197_header_graph_identity_reconciled` |
+| `internal-declaration-moved-reconciled` | `case196_header_graph_move_reconciled` |
+| `internal-declaration-renamed-reconciled` | `case194_header_graph_rename_reconciled` |
+| `internal-symbol-required-by-public-api` | `case192_call_graph_break_survives_suppression` |
+| `odr-type-variant` | `case149_xcheck_odr_variant` |
+| `overload-set-removed` | `case82_sycl_overload_set_removed` |
+| `public-class-representation-changed` | `case126_sycl_device_impl_ptr` |
+| `public-integer-model-width-changed` | `case112_lp64_ilp64` |
+| `symbol-export-namespace-changed` | `case176_kabi_symbol_namespace_changed` |
+| `symbol-type-signature-hash-changed` | `case175_kabi_crc_changed` |
+| `virtual-dispatch-contract-removed` | `case108_task_class_removed` |
 
 ## Scenario coverage
 
@@ -47,8 +73,8 @@ Every case, rule or scenario, tagged with the real-world ecosystem it models (`g
 
 **1 workflow example** so far, out of the 8 task-oriented workflows Phase 5 of the examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) targets: compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions.
 
-| Workflow |
-|---|
-| `compare-release` |
+| Workflow | Task | Platforms | Executed steps |
+|---|---|---|---|
+| `compare-release` | Did my next release break anything for existing consumers? | linux, macos | 3 |
 
-Reported here as its real, current count (derived from `examples/workflows/`'s own subdirectories) rather than a static placeholder, so this page states all five dimensions the plan tracks, not just the ones already implemented.
+Each row is a `workflow.yaml` that `validation/scripts/run_workflow_examples.py` runs end to end -- the documented commands themselves, in a scratch copy, checked against the exit code and the verdict/change kinds the walkthrough claims. A directory without that contract is a hard error rather than a free point of coverage.

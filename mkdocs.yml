@@ -243,7 +243,7 @@ nav:
   # by rule (which atomic compatibility proposition — canonical, duplicate,
   # or variant — the taxonomy in docs/contribute/plans/examples-catalog-split.md
   # groups it under), or by ecosystem (which real-world project it models).
-  - Examples:
+  - Compatibility Catalog:
     - All Cases: reference/examples/index.md
     - By Verdict:
       - "BREAKING": reference/examples/by-verdict/breaking.md
@@ -258,13 +258,34 @@ nav:
       - Addition: reference/examples/by-category/addition.md
       - Quality: reference/examples/by-category/quality.md
       - No Change: reference/examples/by-category/no_change.md
+      - Bundle (Multi-library): reference/examples/by-category/bundle.md
     - By Rule: reference/examples/by-rule/index.md
+    - By Scenario Kind:
+      - Case study: reference/examples/by-scenario/case-study.md
+      - Project topology: reference/examples/by-scenario/project-topology.md
+      - Capability demonstration: reference/examples/by-scenario/capability.md
     - By Ecosystem:
       - Generic: reference/examples/by-ecosystem/generic.md
       - oneTBB: reference/examples/by-ecosystem/onetbb.md
       - SYCL: reference/examples/by-ecosystem/sycl.md
       - oneMKL: reference/examples/by-ecosystem/onemkl.md
       - Linux kernel: reference/examples/by-ecosystem/linux-kernel.md
+    - By Operation:
+      - Compare: reference/examples/by-operation/compare.md
+      - Audit: reference/examples/by-operation/audit.md
+    - By Evidence Level:
+      - L0 — binary only: reference/examples/by-evidence/l0.md
+      - L1 — + debug info: reference/examples/by-evidence/l1.md
+      - L2 — + headers: reference/examples/by-evidence/l2.md
+      - L3 — + build evidence: reference/examples/by-evidence/l3.md
+      - L4 — + source replay: reference/examples/by-evidence/l4.md
+      - L5 — + source graph: reference/examples/by-evidence/l5.md
+      - Not currently detectable: reference/examples/by-evidence/none.md
+    - By Language:
+      - C: reference/examples/by-language/c.md
+      - "C++": reference/examples/by-language/cpp.md
+      - Python: reference/examples/by-language/python.md
+      - No committed sources: reference/examples/by-language/none.md
   # Contributor-facing docs. Internal planning artifacts (implementation plans,
   # backlog, roadmap audits, archived status notes) stay in the repo under
   # docs/contribute/ but are intentionally kept out of the published nav — see

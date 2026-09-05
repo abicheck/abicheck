@@ -135,4 +135,4 @@ to hand either tool for this case.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Inline function removed](by-rule/inline-function-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Inline function removed](by-rule/inline-function-removed.md)._

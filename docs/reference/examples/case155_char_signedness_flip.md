@@ -129,4 +129,4 @@ directly localizes the cause to the signedness flag flip.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Char signedness flip](by-rule/char-signedness-flip.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Plain char signedness flipped](by-rule/char-signedness-flip.md)._

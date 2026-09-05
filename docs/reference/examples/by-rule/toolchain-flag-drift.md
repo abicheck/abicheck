@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `toolchain-flag-drift`. [← back to all rules](index.md)
 
+> The release is built with different ABI-relevant toolchain flags than its predecessor, changing generated code without any source change.
+
 ## Canonical demonstration
 
 - [case103_toolchain_flag_drift](../case103_toolchain_flag_drift.md) — Toolchain Flag Drift (🟢 COMPATIBLE)

@@ -151,4 +151,4 @@ abidiff v1.xml v2.xml
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: No unique address](by-rule/no-unique-address.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: no_unique_address applied or removed](by-rule/no-unique-address.md)._

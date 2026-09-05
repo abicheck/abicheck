@@ -128,4 +128,4 @@ the macro-removal fact at all.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public macro removed](by-rule/public-macro-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public macro removed](by-rule/public-macro-removed.md)._

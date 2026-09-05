@@ -1,0 +1,51 @@
+# Executable contract for this workflow example (Phase 5 of the
+# examples/catalog split). `validation/scripts/run_workflow_examples.py`
+# copies the directory to a scratch tree, runs each `run:` line below as a
+# real shell command, and checks what it claims.
+#
+# Every `run:` line must appear verbatim in this directory's README.md
+# (whitespace-normalized) -- that is the whole point: without it this file
+# is a second copy of the walkthrough, free to keep passing while the
+# documented commands rot. `tests/test_workflow_examples.py` enforces it in
+# the fast lane, with no compiler needed.
+id: compare-release
+task: Did my next release break anything for existing consumers?
+platforms:
+  - linux
+  - macos
+requires:
+  - gcc
+  # The compare step passes --header, which goes through the default CastXML
+  # AST backend. Declaring it here is what makes a host without CastXML report
+  # an honest skip instead of a failure that looks like an ABI regression --
+  # and what lets a CI lane that just installed CastXML turn that skip back
+  # into a failure with `--require compare-release`.
+  - castxml
+  # The tool under test. Declaring it is not ceremony: without it a host
+  # without abicheck on PATH reports a launch failure per step instead of an
+  # honest skip.
+  - abicheck
+steps:
+  - name: build-v1
+    run: gcc -shared -fPIC -g v1/mathutils.c -o libmathutils_v1.so
+  - name: build-v2
+    run: gcc -shared -fPIC -g v2/mathutils.c -o libmathutils_v2.so
+  - name: compare
+    run: >-
+      abicheck compare libmathutils_v1.so libmathutils_v2.so
+      --header old=v1/mathutils.h --header new=v2/mathutils.h
+    expect:
+      exit_code: 4
+      stdout_contains:
+        - BREAKING
+        - func_removed
+    # Re-run the identical command with a machine-readable format so the
+    # verdict and change kinds can be asserted structurally rather than by
+    # grepping prose. The documented command above is still what runs first.
+    json_variant:
+      - --format
+      - json
+    expect_json:
+      verdict: BREAKING
+      change_kinds:
+        - func_removed

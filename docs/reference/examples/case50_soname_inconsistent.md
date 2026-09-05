@@ -146,4 +146,4 @@ readelf -d libfoo_v2.so | grep SONAME
 - `bad.c`
 - `good.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Soname inconsistent](by-rule/soname-inconsistent.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: SONAME inconsistent with the release](by-rule/soname-inconsistent.md)._

@@ -185,4 +185,4 @@ echo "exit: $?"   # → 0 — abidiff misses this change entirely
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Noexcept change](by-rule/noexcept-change.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: noexcept specification changed](by-rule/noexcept-change.md)._

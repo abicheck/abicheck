@@ -135,4 +135,4 @@ either tool for this case.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public typedef removed](by-rule/public-typedef-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public typedef removed](by-rule/public-typedef-removed.md)._

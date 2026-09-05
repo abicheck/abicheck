@@ -121,4 +121,4 @@ abicheck's own object-only mode does. Only a header-aware comparison
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Class became final](by-rule/class-became-final.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Class became final](by-rule/class-became-final.md)._

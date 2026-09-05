@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `symbol-export-namespace-changed`. [← back to all rules](index.md)
 
+> Exported symbols move to a different namespace or version scope, so the names existing binaries import no longer exist.
+
 ## Canonical demonstration
 
 _No single-library case demonstrates this rule alone yet — referenced only by the scenario(s) below._

@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `inline-function-outlined`. [← back to all rules](index.md)
 
+> A previously header-inline function becomes an exported out-of-line symbol, so old and new consumers can disagree on which body runs.
+
 ## Canonical demonstration
 
 - [case16_inline_to_non_inline](../case16_inline_to_non_inline.md) — Inline → Non-inline (ODR / Symbol Appearance) (🟢 COMPATIBLE)

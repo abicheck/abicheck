@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `public-class-representation-changed`. [← back to all rules](index.md)
 
+> A published class changes how it is represented -- its size, its layout, or how it is passed -- for every consumer holding one.
+
 ## Canonical demonstration
 
 _No single-library case demonstrates this rule alone yet — referenced only by the scenario(s) below._

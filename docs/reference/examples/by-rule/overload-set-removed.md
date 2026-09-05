@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `overload-set-removed`. [← back to all rules](index.md)
 
+> An entire overload family is withdrawn, so every consumer call spelled against any of its members breaks.
+
 ## Canonical demonstration
 
 _No single-library case demonstrates this rule alone yet — referenced only by the scenario(s) below._

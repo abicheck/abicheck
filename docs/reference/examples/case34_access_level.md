@@ -162,4 +162,4 @@ echo "exit: $?"
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Access level](by-rule/access-level.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Member access level changed](by-rule/access-level.md)._

@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `language-linkage-changed`. [← back to all rules](index.md)
 
+> A declaration moves between C and C++ linkage, changing whether its symbol is mangled and therefore what existing binaries import.
+
 ## Canonical demonstration
 
 - [case66_language_linkage_changed](../case66_language_linkage_changed.md) — Language Linkage Changed (extern "C" removed) (🔴 BREAKING)

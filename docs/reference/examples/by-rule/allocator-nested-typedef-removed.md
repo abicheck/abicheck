@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `allocator-nested-typedef-removed`. [← back to all rules](index.md)
 
+> An allocator-like template drops a nested typedef the standard library contract requires, breaking generic code that names it.
+
 ## Canonical demonstration
 
 - [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) — Allocator Nested-Typedef Removed (🔴 BREAKING)

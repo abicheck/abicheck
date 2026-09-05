@@ -149,4 +149,4 @@ not installed here).
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline namespace version bumped](by-rule/inline-namespace-version-bumped.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline namespace version bumped](by-rule/inline-namespace-version-bumped.md)._

@@ -140,4 +140,4 @@ reproduces with a minimal two-instantiation example.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Missing template instantiation](by-rule/missing-template-instantiation.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Explicit template instantiation missing](by-rule/missing-template-instantiation.md)._

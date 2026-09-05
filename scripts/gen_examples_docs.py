@@ -18,6 +18,7 @@ import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # identical sibling-import guard for the identical reason.
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+import catalog_rule_registry  # noqa: E402
 import example_catalog  # noqa: E402
 
 EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
@@ -111,6 +113,13 @@ CATEGORY_META = {
         "label": "No Change",
         "blurb": "Identical ABI/API — sanity-check baselines.",
     },
+    "bundle": {
+        "label": "Bundle (Multi-library)",
+        "blurb": (
+            "Multi-library release cohorts (ADR-023) — the break is between "
+            "libraries in one bundle, not inside any single one."
+        ),
+    },
 }
 
 VERDICT_ORDER = [
@@ -120,7 +129,15 @@ VERDICT_ORDER = [
     "COMPATIBLE",
     "NO_CHANGE",
 ]
-CATEGORY_ORDER = ["breaking", "api_break", "risk", "addition", "quality", "no_change"]
+CATEGORY_ORDER = [
+    "breaking",
+    "api_break",
+    "risk",
+    "addition",
+    "quality",
+    "no_change",
+    "bundle",
+]
 
 # Normalize platform ids from ground_truth.json to their canonical user-facing
 # spelling. ground_truth.json uses lowercase ids so it can match Python platform
@@ -149,6 +166,81 @@ ECOSYSTEM_LABEL = {
     "linux-kernel": "Linux kernel",
 }
 ECOSYSTEM_ORDER = ["generic", "onetbb", "sycl", "onemkl", "linux-kernel"]
+
+# The remaining taxonomy dimensions the catalog navigates by. Each is a
+# *view* over the same 197 cases, never a directory a case lives under --
+# rule/ecosystem/language/evidence/topology are independent, and only one
+# dimension can ever own a filesystem path (the argument that produced this
+# plan's corrected Phase 4 model; see example_catalog.py's docstring).
+SCENARIO_KIND_ORDER = ["case-study", "project-topology", "capability"]
+SCENARIO_KIND_BLURB = {
+    "case-study": (
+        "A real project's own compatibility incident, modeled end to end "
+        "(oneTBB, SYCL, oneMKL, the Linux kernel)."
+    ),
+    "project-topology": (
+        "A multi-library release cohort: the break is in how the libraries "
+        "relate, not inside any one of them."
+    ),
+    "capability": (
+        "A demonstration of what a particular evidence source or analysis "
+        "capability can and cannot prove."
+    ),
+}
+
+OPERATION_ORDER = ["compare", "audit"]
+OPERATION_LABEL = {"compare": "Compare", "audit": "Audit"}
+OPERATION_BLURB = {
+    "compare": (
+        "Cases exercising an old-vs-new comparison — `abicheck compare`, the "
+        "default operation."
+    ),
+    "audit": (
+        "Cases exercising a single-release audit — one artifact scanned "
+        "against its own headers and export table, with no baseline."
+    ),
+}
+
+EVIDENCE_ORDER = ["L0", "L1", "L2", "L3", "L4", "L5", "none"]
+EVIDENCE_LABEL = {
+    "L0": "L0 — binary only",
+    "L1": "L1 — + debug info",
+    "L2": "L2 — + headers",
+    "L3": "L3 — + build evidence",
+    "L4": "L4 — + source replay",
+    "L5": "L5 — + source graph",
+    "none": "Not currently detectable",
+}
+EVIDENCE_BLURB = {
+    "L0": "Detectable from the shipped binary's symbol table alone.",
+    "L1": "Needs debug information on top of the binary.",
+    "L2": "Needs the public headers parsed alongside the binary.",
+    "L3": "Needs the build's own configuration and flags.",
+    "L4": "Needs the sources replayed through a source-level ABI extraction.",
+    "L5": "Needs the derived semantic source graph.",
+    "none": (
+        "No evidence tier currently reaches this case's canonical verdict — "
+        "a known detector gap, kept in the catalog as calibration."
+    ),
+}
+
+LANGUAGE_ORDER = ["c", "cpp", "python", "none"]
+LANGUAGE_LABEL = {
+    "c": "C",
+    "cpp": "C++",
+    "python": "Python",
+    "none": "No committed sources",
+}
+LANGUAGE_BLURB = {
+    "c": "Cases whose committed fixtures include C sources.",
+    "cpp": "Cases whose committed fixtures include C++ sources.",
+    "python": "Cases whose committed fixtures include Python sources.",
+    "none": (
+        "Cases that ship a committed snapshot or evidence fixture rather "
+        "than compilable sources — the language is the one the fixture "
+        "models, not one this catalog can read off a file extension."
+    ),
+}
 RELATION_TYPE_LABEL = {
     "duplicate": "Duplicate",
     "variant": "Variant",
@@ -173,11 +265,34 @@ def _short_title(title: str) -> str:
     return stripped or title
 
 
+@lru_cache(maxsize=1)
+def _rule_registry() -> dict[str, catalog_rule_registry.RuleDefinition]:
+    """The canonical rule registry (examples/catalog_rules.yaml), loaded once.
+
+    It, not this module, owns each rule's reader-facing title and its
+    one-sentence definition -- so the by-rule pages say what a rule *means*
+    rather than only de-kebab-casing its slug.
+    """
+    return catalog_rule_registry.load_registry()
+
+
 def _slug_title(slug: str) -> str:
     """A rule_slug (e.g. "exported-function-removed") as a reader-facing
-    sentence-case title ("Exported function removed")."""
+    title -- the registry's own `title` when it defines one, else a
+    sentence-cased spelling of the slug itself (so an as-yet-unregistered
+    slug still renders; `catalog_rule_registry.validate_registry` is what
+    turns that state into an error, in one place)."""
+    entry = _rule_registry().get(slug)
+    if entry and entry.title:
+        return entry.title
     words = slug.replace("-", " ")
     return words[:1].upper() + words[1:]
+
+
+def _slug_definition(slug: str) -> str:
+    """The registry's one-sentence definition of a rule, or "" if none."""
+    entry = _rule_registry().get(slug)
+    return entry.definition if entry else ""
 
 
 @dataclass
@@ -217,6 +332,12 @@ class Case:
     relation_type: str | None = None
     relation_axis: str | None = None
     related_rules: list[str] = field(default_factory=list)
+    # Multi-library bundle cases (ADR-023) additionally record a per-library
+    # expected verdict; the bundle-level `expected` above is the cohort
+    # verdict. Empty for every single-library case.
+    library_assertions: dict[str, object] = field(default_factory=dict)
+    languages: list[str] = field(default_factory=list)
+    min_evidence: str = "none"
 
 
 def _read_case(name: str, meta: dict, taxonomy: dict) -> Case:
@@ -253,6 +374,9 @@ def _read_case(name: str, meta: dict, taxonomy: dict) -> Case:
         ecosystem=taxonomy.get("ecosystem", "generic"),
         rule_slug=taxonomy.get("rule_slug"),
         variant_of=taxonomy.get("variant_of"),
+        library_assertions=dict(meta.get("library_assertions") or {}),
+        languages=list(taxonomy.get("languages") or []),
+        min_evidence=str(meta.get("min_evidence") or "none"),
         relation_type=taxonomy.get("relation_type"),
         relation_axis=taxonomy.get("relation_axis"),
         related_rules=list(taxonomy.get("related_rules") or []),
@@ -388,10 +512,51 @@ def _source_links(case: Case) -> str:
     files = sorted(
         p.name for p in case_dir.iterdir() if p.is_file() and p.name != "README.md"
     )
-    if not files:
+    # Multi-library bundle cases (and a few build-mode cases) ship their
+    # sources under per-side subdirectories rather than as flat files; a
+    # files-only listing renders those cases as though they shipped nothing
+    # but a CMakeLists.txt.
+    subdirs = sorted(p.name for p in case_dir.iterdir() if p.is_dir())
+    if not files and not subdirs:
         return ""
-    lines = [f"- `{f}`" for f in files]
+    lines = [f"- `{d}/`" for d in subdirs] + [f"- `{f}`" for f in files]
     return "## Source files\n\n" + "\n".join(lines) + "\n"
+
+
+def _library_assertions(case: Case) -> str:
+    """Per-library expected verdicts for a multi-library bundle case.
+
+    A bundle case's own `expected` is the *cohort* verdict; several bundle
+    cases additionally pin what each library in the cohort is expected to
+    report on its own, which is the whole point of the case (a cohort can
+    break while every individual library passes). Rendered here rather than
+    left in ground_truth.json, since it is the one part of a bundle case a
+    single-library page shape has nowhere to put.
+    """
+    if not case.library_assertions:
+        return ""
+    lines = [
+        "## Per-library expectations\n\n",
+        "The bundle-level verdict above is the cohort's. Each library in "
+        "the cohort is separately expected to report:\n\n",
+        "| Library | Verdict | Detected `ChangeKind`s |\n",
+        "|---------|---------|------------------------|\n",
+    ]
+    for library, expected in sorted(case.library_assertions.items()):
+        if not isinstance(expected, dict):
+            # Unknown shape: render it rather than dropping it, so a future
+            # bundle case that pins something else is visible on its page
+            # instead of silently missing from it.
+            lines.append(f"| `{library}` | {expected} | — |\n")
+            continue
+        verdict = expected.get("verdict")
+        info = VERDICT_META.get(str(verdict))
+        verdict_cell = f"{info['icon']} {info['label']}" if info else str(verdict)
+        kinds = expected.get("expected_kinds") or []
+        kinds_cell = ", ".join(f"`{k}`" for k in kinds) or "— (no findings)"
+        lines.append(f"| `{library}` | {verdict_cell} | {kinds_cell} |\n")
+    lines.append("\n")
+    return "".join(lines)
 
 
 def _provenance_notes(case: Case) -> str:
@@ -411,7 +576,7 @@ def _provenance_notes(case: Case) -> str:
 def _render_case_page(case: Case) -> str:
     body = case.body.replace("__CASE__", case.name)
     see_also = [
-        "[Examples overview](index.md)",
+        "[Compatibility Catalog](index.md)",
         f"[All {VERDICT_META[case.verdict]['label']} cases]"
         f"(by-verdict/{VERDICT_META[case.verdict]['slug']}.md)",
         f"[Category: {CATEGORY_META[case.category]['label']}](by-category/{case.category}.md)",
@@ -432,6 +597,7 @@ def _render_case_page(case: Case) -> str:
         "\n",
         body.rstrip() + "\n\n",
         "---\n\n",
+        _library_assertions(case),
         _provenance_notes(case),
         _source_links(case),
         "\n",
@@ -471,12 +637,18 @@ def _render_index(cases: list[Case]) -> str:
     counts = _verdict_counts(cases)
     lines = [
         WARNING,
-        "# Examples & Case Encyclopedia\n\n",
-        f"This catalog covers **{len(cases)} cases** demonstrating real-world "
-        "ABI/API change scenarios for C/C++ shared libraries. Most cases are a "
-        "minimal compilable v1/v2 pair plus a consumer (`app.c`/`app.cpp`) that "
-        "demonstrates the actual runtime effect; some build-mode cases ship only "
-        "the v1/v2 sources plus a per-side `compile_commands.json`.\n\n",
+        "# Compatibility Catalog\n\n",
+        f"The calibration catalog: **{len(cases)} cases** demonstrating "
+        "real-world ABI/API change scenarios for C/C++ shared libraries. Most "
+        "cases are a minimal compilable v1/v2 pair plus a consumer "
+        "(`app.c`/`app.cpp`) that demonstrates the actual runtime effect; some "
+        "build-mode cases ship only the v1/v2 sources plus a per-side "
+        "`compile_commands.json`, and the multi-library bundle cases (ADR-023) "
+        "ship a whole release cohort.\n\n",
+        "> **Looking for how to *use* abicheck on your own library?** Start "
+        "with the task-oriented [workflow examples](../../start/first-check.md) "
+        "instead. The catalog below is calibration and reference material -- "
+        "one page per compatibility mechanism -- not a tutorial.\n\n",
         "Use this catalog to:\n\n",
         "- Learn **what kinds of changes break ABI** vs. which are safe.\n"
         "- See the **runtime failure mode** for each break (crash, wrong output, silent corruption…).\n"
@@ -533,28 +705,68 @@ def _render_index(cases: list[Case]) -> str:
     by_eco: dict[str, list[Case]] = defaultdict(list)
     for c in cases:
         by_eco[c.ecosystem].append(c)
-    bundle_by_eco = _bundle_cases_by_ecosystem()
-    lines.append(
-        "> Ecosystem counts also include the multi-library bundle scenarios "
-        "(ADR-023) that this page's own headline and **All cases** table "
-        "don't -- those cases have no single verdict/category and no "
-        "generated page of their own (see `examples/README.md` for their "
-        "own index), so they're deliberately excluded above but included "
-        "here to match the taxonomy and "
-        "[catalog-coverage.md](../../contribute/catalog-coverage.md).\n\n"
-    )
     lines.append("| Ecosystem | Cases |\n")
     lines.append("|-----------|-------|\n")
     for eco in ECOSYSTEM_ORDER:
-        n = len(by_eco.get(eco, [])) + len(bundle_by_eco.get(eco, []))
+        n = len(by_eco.get(eco, []))
         lines.append(f"| [{ECOSYSTEM_LABEL[eco]}](by-ecosystem/{eco}.md) | {n} |\n")
+    lines.append("\n## Browse by scenario kind\n\n")
+    # Derived, never written down: this page is compared against this same
+    # generator, so a hardcoded count would be blessed by `--check` and go
+    # stale the first time a case is added or reclassified.
+    rule_case_count = sum(1 for c in cases if c.entity == "rule")
+    lines.append(
+        "A *scenario* composes several rules into one realistic problem. "
+        f"The other {rule_case_count} cases are atomic rules — see "
+        "**Browse by rule** above.\n\n"
+    )
+    lines.append("| Scenario kind | Cases | What it is |\n")
+    lines.append("|---------------|-------|------------|\n")
+    for kind in SCENARIO_KIND_ORDER:
+        n = sum(1 for c in cases if c.scenario_kind == kind)
+        lines.append(
+            f"| [{SCENARIO_KIND_LABEL[kind]}](by-scenario/{kind}.md) | {n} "
+            f"| {SCENARIO_KIND_BLURB[kind]} |\n"
+        )
+    lines.append("\n## Browse by operation\n\n")
+    lines.append("| Operation | Cases | What it is |\n")
+    lines.append("|-----------|-------|------------|\n")
+    for operation in OPERATION_ORDER:
+        n = sum(1 for c in cases if c.operation == operation)
+        lines.append(
+            f"| [{OPERATION_LABEL[operation]}](by-operation/{operation}.md) "
+            f"| {n} | {OPERATION_BLURB[operation]} |\n"
+        )
+    lines.append("\n## Browse by evidence level\n\n")
+    lines.append(
+        "The weakest evidence source that reaches this case's verdict — "
+        "see [Evidence and detectability](../../learn/evidence-and-detectability.md).\n\n"
+    )
+    lines.append("| Evidence | Cases | What it needs |\n")
+    lines.append("|----------|-------|---------------|\n")
+    for tier in EVIDENCE_ORDER:
+        n = sum(1 for c in cases if c.min_evidence == tier)
+        lines.append(
+            f"| [{EVIDENCE_LABEL[tier]}](by-evidence/{tier.lower()}.md) | {n} "
+            f"| {EVIDENCE_BLURB[tier]} |\n"
+        )
+    lines.append("\n## Browse by language\n\n")
+    lines.append("| Language | Cases |\n")
+    lines.append("|----------|-------|\n")
+    for language in LANGUAGE_ORDER:
+        n = sum(
+            1
+            for c in cases
+            if (language in c.languages) or (language == "none" and not c.languages)
+        )
+        lines.append(
+            f"| [{LANGUAGE_LABEL[language]}](by-language/{language}.md) | {n} |\n"
+        )
     lines.append("\n## All cases\n\n")
     lines.append(
-        "> **Gaps in the numbering are expected.** Some case numbers "
-        "(e.g. 84, 90–93) are **multi-library bundle cases** that are not part "
-        "of this single-library catalog; they are documented in the repository "
-        "under `examples/` and indexed in `examples/README.md`. The list below "
-        "is sorted by case number.\n\n"
+        "> Every case in `examples/ground_truth.json`, including the "
+        "multi-library bundle cases (ADR-023), sorted by case number. Gaps "
+        "in the numbering are retired cases, not missing pages.\n\n"
     )
     lines.append("| Case | Title | Verdict | Category |\n")
     lines.append("|------|-------|---------|----------|\n")
@@ -569,24 +781,15 @@ def _render_group_index(
     cases: list[Case],
     *,
     backlink: str = "../index.md",
-    extra_unlinked: list[tuple[str, str]] = (),
 ) -> str:
-    """`extra_unlinked` is for multi-library bundle cases (ADR-023) that
-    belong in this group's taxonomy but have no generated `../<name>.md`
-    page of their own (`_load_cases()` excludes them, different
-    ground-truth shape, no single verdict/category) -- rendered as
-    unlinked, verdict/category-less rows rather than silently omitted
-    (a Codex review found the ecosystem view disagreeing with
-    ground_truth.json/catalog-coverage.md the same way the by-rule view
-    did before RuleFamily.bundle_scenarios)."""
-    total = len(cases) + len(extra_unlinked)
+    total = len(cases)
     lines = [
         WARNING,
         f"# {title}\n\n",
         blurb + "\n\n",
         f"_{total} case(s)._ [← back to all examples]({backlink})\n\n",
     ]
-    if not cases and not extra_unlinked:
+    if not cases:
         lines.append("_No cases in this group._\n")
         return "".join(lines)
     lines.append("| Case | Title | Verdict | Category |\n")
@@ -599,8 +802,6 @@ def _render_group_index(
             f"| {vinfo['icon']} {vinfo['label']} "
             f"| {CATEGORY_META[c.category]['label']} |\n"
         )
-    for name, title_ in sorted(extra_unlinked):
-        lines.append(f"| `{name}` (bundle) | {title_} | — | — |\n")
     return "".join(lines)
 
 
@@ -621,61 +822,13 @@ class RuleFamily:
     duplicates: list[Case]
     variants: list[Case]  # (case, axis) pairs kept as Case; axis on case.relation_axis
     scenarios: list[Case]
-    # Multi-library bundle scenarios (ADR-023) that compose this rule too --
-    # kept separate from `scenarios` because bundle cases use a different
-    # ground-truth shape (no single `expected` verdict) and never get a
-    # generated case page of their own (`_load_cases()` excludes them), so
-    # there's no `../<name>.md` to link to. (name, short_title) pairs, not
-    # `Case` objects -- a Codex review found the original cut left these
-    # relationships (e.g. case90/92/93 -> exported-function-removed) visible
-    # in ground_truth.json and the coverage report but silently absent here.
-    bundle_scenarios: list[tuple[str, str]]
-
-
-def _bundle_case_entries() -> list[tuple[str, dict]]:
-    """(case_name, taxonomy_entry) for every multi-library bundle case --
-    the one taxonomy scan `_bundle_scenario_related_rules`/
-    `_bundle_cases_by_ecosystem` both build on, since `_load_cases()`
-    deliberately excludes bundle cases (see its own docstring) before any
-    Case-based grouping runs."""
-    data = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
-    verdicts: dict[str, dict] = data["verdicts"]
-    taxonomy: dict[str, dict] = data.get("taxonomy") or {}
-    return [
-        (name, taxonomy.get(name) or {})
-        for name, meta in verdicts.items()
-        if meta.get("category") == "bundle" or meta.get("bundle") is True
-    ]
-
-
-def _bundle_scenario_related_rules() -> dict[str, list[tuple[str, str]]]:
-    """rule_slug -> [(bundle_case_name, short_title), ...] for every
-    multi-library bundle case's own `related_rules`."""
-    out: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for name, entry in _bundle_case_entries():
-        for slug in entry.get("related_rules") or []:
-            out[slug].append((name, _case_title(name)))
-    return out
-
-
-def _bundle_cases_by_ecosystem() -> dict[str, list[tuple[str, str]]]:
-    """ecosystem -> [(bundle_case_name, short_title), ...] for every
-    multi-library bundle case -- the ecosystem-view counterpart of
-    `_bundle_scenario_related_rules` (a Codex review found the ecosystem
-    pages/index undercounting the same way the by-rule pages did before
-    that fix)."""
-    out: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for name, entry in _bundle_case_entries():
-        eco = entry.get("ecosystem", "generic")
-        out[eco].append((name, _case_title(name)))
-    return out
 
 
 def _build_rule_families(cases: list[Case]) -> dict[str, RuleFamily]:
     families: dict[str, RuleFamily] = {}
 
     def _get(slug: str) -> RuleFamily:
-        return families.setdefault(slug, RuleFamily(slug, None, [], [], [], []))
+        return families.setdefault(slug, RuleFamily(slug, None, [], [], []))
 
     for c in cases:
         if c.entity != "rule" or not c.rule_slug:
@@ -692,8 +845,6 @@ def _build_rule_families(cases: list[Case]) -> dict[str, RuleFamily]:
             continue
         for slug in c.related_rules:
             _get(slug).scenarios.append(c)
-    for slug, bundles in _bundle_scenario_related_rules().items():
-        _get(slug).bundle_scenarios.extend(bundles)
     return families
 
 
@@ -703,6 +854,9 @@ def _render_rule_family_page(fam: RuleFamily) -> str:
         f"# Rule: {_slug_title(fam.slug)}\n\n",
         f"_Canonical rule slug:_ `{fam.slug}`. [← back to all rules](index.md)\n\n",
     ]
+    definition = _slug_definition(fam.slug)
+    if definition:
+        lines.append(f"> {definition}\n\n")
     if fam.canonical is not None:
         c = fam.canonical
         vinfo = VERDICT_META[c.verdict]
@@ -742,16 +896,6 @@ def _render_rule_family_page(fam: RuleFamily) -> str:
         for c in sorted(fam.scenarios, key=lambda c: _case_sort_key(c.name)):
             lines.append(f"- [{c.name}](../{c.name}.md) — {_short_title(c.title)}\n")
         lines.append("\n")
-    if fam.bundle_scenarios:
-        lines.append(
-            "## Used by multi-library bundle scenarios\n\n"
-            "_ADR-023 bundle cases aren't part of this single-library "
-            "catalog (see `examples/README.md`), so these aren't linked "
-            "pages here — see the case's own README under `examples/`._\n\n"
-        )
-        for name, title in sorted(fam.bundle_scenarios):
-            lines.append(f"- `{name}` — {title}\n")
-        lines.append("\n")
     return "".join(lines)
 
 
@@ -765,8 +909,8 @@ def _render_by_rule_index(families: dict[str, RuleFamily]) -> str:
         "[Rule coverage](../../../contribute/catalog-coverage.md) for the "
         "aggregate counts this table is drawn from. "
         "[← back to all examples](../index.md)\n\n",
-        "| Rule | Canonical case | Duplicate(s) | Variant(s) | Scenario(s) | Bundle scenario(s) |\n",
-        "|---|---|---|---|---|---|\n",
+        "| Rule | Canonical case | Duplicate(s) | Variant(s) | Scenario(s) |\n",
+        "|---|---|---|---|---|\n",
     ]
     for slug in sorted(families):
         fam = families[slug]
@@ -782,13 +926,9 @@ def _render_by_rule_index(families: dict[str, RuleFamily]) -> str:
         scenario_cell = (
             ", ".join(f"[{c.name}](../{c.name}.md)" for c in fam.scenarios) or "—"
         )
-        bundle_cell = (
-            ", ".join(f"`{name}`" for name, _title in sorted(fam.bundle_scenarios))
-            or "—"
-        )
         lines.append(
             f"| [`{slug}`]({slug}.md) | {canonical_cell} | {dup_cell} | "
-            f"{var_cell} | {scenario_cell} | {bundle_cell} |\n"
+            f"{var_cell} | {scenario_cell} |\n"
         )
     return "".join(lines)
 
@@ -945,14 +1085,15 @@ def _load_cases() -> list[Case]:
     taxonomy_block: dict[str, dict] = data.get("taxonomy") or {}
     cases = []
     for name, meta in data["verdicts"].items():
-        # Bundle cases (ADR-023) are multi-library and use a different
-        # ground-truth shape (expected=null, per-library verdicts under
-        # library_assertions, bundle-level verdict under
-        # canonical aggregate expected verdict). They have their own README files
-        # but don't map onto the per-case verdict-page generator; skip
-        # them here. The bundle index belongs in a follow-up doc page.
-        if meta.get("category") == "bundle" or meta.get("bundle") is True:
-            continue
+        # Multi-library bundle cases (ADR-023) used to be excluded here, on
+        # the belief that they had no single `expected` verdict. They do --
+        # every one carries a cohort-level `expected` and `category:
+        # "bundle"`, and some additionally carry per-library
+        # `library_assertions`, which the case page renders as an extra
+        # table. Excluding them left the public catalog claiming 192 cases
+        # while ground_truth.json and catalog-coverage.md counted 197, and
+        # forced a whole parallel "unlinked bundle row" code path through
+        # the by-rule and by-ecosystem views.
         if meta["expected"] not in VERDICT_META:
             raise ValueError(f"{name}: unknown verdict {meta['expected']!r}")
         if meta["category"] not in CATEGORY_META:
@@ -987,6 +1128,10 @@ def _write_tree(out_dir: Path, cases: list[Case]) -> None:
     (out_dir / "by-category").mkdir()
     (out_dir / "by-rule").mkdir()
     (out_dir / "by-ecosystem").mkdir()
+    (out_dir / "by-scenario").mkdir()
+    (out_dir / "by-operation").mkdir()
+    (out_dir / "by-evidence").mkdir()
+    (out_dir / "by-language").mkdir()
 
     _write(out_dir / "index.md", _render_index(cases))
 
@@ -1020,7 +1165,6 @@ def _write_tree(out_dir: Path, cases: list[Case]) -> None:
             ),
         )
 
-    bundle_by_ecosystem = _bundle_cases_by_ecosystem()
     for eco in ECOSYSTEM_ORDER:
         info_label = ECOSYSTEM_LABEL[eco]
         _write(
@@ -1029,7 +1173,49 @@ def _write_tree(out_dir: Path, cases: list[Case]) -> None:
                 title=f"{info_label} cases",
                 blurb=f"Cases modeling the {info_label} ecosystem.",
                 cases=by_ecosystem.get(eco, []),
-                extra_unlinked=bundle_by_ecosystem.get(eco, []),
+            ),
+        )
+
+    # The remaining taxonomy dimensions, each a view over the same cases.
+    for kind in SCENARIO_KIND_ORDER:
+        _write(
+            out_dir / "by-scenario" / f"{kind}.md",
+            _render_group_index(
+                title=f"{SCENARIO_KIND_LABEL[kind]} scenarios",
+                blurb=SCENARIO_KIND_BLURB[kind],
+                cases=[c for c in cases if c.scenario_kind == kind],
+            ),
+        )
+    for operation in OPERATION_ORDER:
+        _write(
+            out_dir / "by-operation" / f"{operation}.md",
+            _render_group_index(
+                title=f"{OPERATION_LABEL[operation]} cases",
+                blurb=OPERATION_BLURB[operation],
+                cases=[c for c in cases if c.operation == operation],
+            ),
+        )
+    for tier in EVIDENCE_ORDER:
+        _write(
+            out_dir / "by-evidence" / f"{tier.lower()}.md",
+            _render_group_index(
+                title=f"{EVIDENCE_LABEL[tier]}",
+                blurb=EVIDENCE_BLURB[tier],
+                cases=[c for c in cases if c.min_evidence == tier],
+            ),
+        )
+    for language in LANGUAGE_ORDER:
+        _write(
+            out_dir / "by-language" / f"{language}.md",
+            _render_group_index(
+                title=f"{LANGUAGE_LABEL[language]} cases",
+                blurb=LANGUAGE_BLURB[language],
+                cases=[
+                    c
+                    for c in cases
+                    if (language in c.languages)
+                    or (language == "none" and not c.languages)
+                ],
             ),
         )
 

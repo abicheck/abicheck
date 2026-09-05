@@ -119,4 +119,4 @@ echo "exit: $?"   # → 12 (= 4 | 8: ABI change detected + breaking change)
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported function removed](by-rule/exported-function-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported function removed](by-rule/exported-function-removed.md)._

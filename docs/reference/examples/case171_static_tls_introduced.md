@@ -143,4 +143,4 @@ fact above, not whether this particular run happens to fail.
 - `v1.c`
 - `v2.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Static tls introduced](by-rule/static-tls-introduced.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Static TLS model introduced](by-rule/static-tls-introduced.md)._

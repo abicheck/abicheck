@@ -147,4 +147,4 @@ behavior it enables, is unique to abicheck's L5 evidence layer (ADR-044).
 - `old.abi.json`
 - `suppress.yaml`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

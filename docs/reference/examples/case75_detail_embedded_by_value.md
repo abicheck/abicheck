@@ -145,4 +145,4 @@ without moving the public type's ABI.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Detail embedded by value](by-rule/detail-embedded-by-value.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal type embedded by value](by-rule/detail-embedded-by-value.md)._

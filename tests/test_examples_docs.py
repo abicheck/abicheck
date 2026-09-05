@@ -43,6 +43,10 @@ def _load_generator_module():
     return module
 
 
+def _ground_truth() -> dict:
+    return json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
+
+
 def _ground_truth_cases() -> list[str]:
     data = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
     return sorted(data["verdicts"].keys())
@@ -200,54 +204,85 @@ def test_build_rule_families_groups_canonical_duplicate_variant_and_scenarios() 
     assert fam.scenarios == [scenario]
 
 
-def test_build_rule_families_includes_bundle_scenarios() -> None:
-    """A multi-library bundle case (ADR-023) composing a rule via its own
-    taxonomy `related_rules` must still show up on that rule's family page,
-    even though bundle cases are excluded from `_load_cases()`/the `cases`
-    list entirely (different ground-truth shape, no generated case page) --
-    a Codex review found the original cut silently dropped this
-    relationship, disagreeing with both ground_truth.json and the coverage
-    report. Real ground_truth.json data: case90/92/93 all compose
-    exported-function-removed via a multi-library bundle scenario."""
+BUNDLE_CASES = {
+    "case84_bundle_soname_skew",
+    "case90_bundle_intra_dep_removed",
+    "case91_bundle_intra_signature_drift",
+    "case92_bundle_provider_changed",
+    "case93_bundle_manifest_drift",
+}
+
+
+def test_every_ground_truth_case_including_bundles_gets_a_page() -> None:
+    """The public catalog covers all 197 cases, bundles included.
+
+    The generator used to skip the five multi-library bundle cases
+    (ADR-023) on the belief that they carried no single `expected` verdict.
+    They do, so the exclusion left the public catalog claiming 192 cases
+    while ground_truth.json and catalog-coverage.md counted 197, and forced
+    a parallel "unlinked bundle row" path through the by-rule and
+    by-ecosystem views. This asserts the general property -- every verdict
+    entry becomes a case -- not just that the five known bundles are back.
+    """
     mod = _load_generator_module()
-    families = mod._build_rule_families([])
+    cases = {c.name for c in mod._load_cases()}
+    expected = set(_ground_truth()["verdicts"])
+    assert cases == expected
+    assert BUNDLE_CASES <= cases
+
+
+def test_bundle_cases_are_linked_like_any_other_case() -> None:
+    """A bundle case composing a rule appears on that rule's family page as
+    a real link, not an unlinked row. Real data: case90/92/93 all compose
+    exported-function-removed."""
+    mod = _load_generator_module()
+    families = mod._build_rule_families(mod._load_cases())
     fam = families["exported-function-removed"]
-    bundle_names = {name for name, _title in fam.bundle_scenarios}
-    assert "case90_bundle_intra_dep_removed" in bundle_names
-    assert "case92_bundle_provider_changed" in bundle_names
-    assert "case93_bundle_manifest_drift" in bundle_names
-    # Never rendered as a dangling link -- bundle cases have no case page.
-    page = mod._render_rule_family_page(fam)
-    assert "](../case90_bundle_intra_dep_removed.md)" not in page
-    assert "`case90_bundle_intra_dep_removed`" in page
-
-
-def test_ecosystem_view_includes_bundle_cases() -> None:
-    """The ecosystem index/pages must count multi-library bundle cases too
-    (all five are ecosystem: generic in the real taxonomy), even though
-    `_load_cases()` excludes them entirely -- a Codex review found the
-    'generic' ecosystem page reporting 179 cases while
-    catalog-coverage.md (which reads the taxonomy directly) reports 184,
-    the same class of bug the by-rule bundle-scenario fix above closed."""
-    mod = _load_generator_module()
-    bundle_by_eco = mod._bundle_cases_by_ecosystem()
-    generic_bundles = {name for name, _title in bundle_by_eco["generic"]}
-    assert generic_bundles == {
-        "case84_bundle_soname_skew",
+    scenario_names = {c.name for c in fam.scenarios}
+    assert {
         "case90_bundle_intra_dep_removed",
-        "case91_bundle_intra_signature_drift",
         "case92_bundle_provider_changed",
         "case93_bundle_manifest_drift",
-    }
-    rendered = mod._render_group_index(
-        title="Generic cases",
-        blurb="Cases modeling the Generic ecosystem.",
-        cases=[],
-        extra_unlinked=bundle_by_eco["generic"],
-    )
-    assert "_5 case(s)._" in rendered
-    assert "](../case84_bundle_soname_skew.md)" not in rendered
-    assert "`case84_bundle_soname_skew` (bundle)" in rendered
+    } <= scenario_names
+    page = mod._render_rule_family_page(fam)
+    assert "](../case90_bundle_intra_dep_removed.md)" in page
+    assert "(bundle)" not in page
+
+
+def test_bundle_cases_render_their_per_library_expectations() -> None:
+    """A bundle case's cohort verdict is not the whole story: the per-library
+    `library_assertions` are the point of the case (the cohort can break
+    while every library passes on its own), and a single-library page shape
+    has nowhere else to put them."""
+    mod = _load_generator_module()
+    by_name = {c.name: c for c in mod._load_cases()}
+    for name in sorted(BUNDLE_CASES):
+        case = by_name[name]
+        rendered = mod._render_case_page(case)
+        if not case.library_assertions:
+            assert "## Per-library expectations" not in rendered
+            continue
+        assert "## Per-library expectations" in rendered
+        for library in case.library_assertions:
+            assert f"`{library}`" in rendered
+
+
+def test_ecosystem_view_counts_every_case_in_that_ecosystem() -> None:
+    """The by-ecosystem pages must agree with the taxonomy's own counts --
+    the property that failed when bundle cases were excluded from
+    `_load_cases()` but present in `ground_truth.json["taxonomy"]`."""
+    mod = _load_generator_module()
+    gt = _ground_truth()
+    taxonomy = gt["taxonomy"]
+    cases = mod._load_cases()
+    for eco in mod.ECOSYSTEM_ORDER:
+        from_taxonomy = {
+            name
+            for name, entry in taxonomy.items()
+            if entry.get("ecosystem", "generic") == eco
+        }
+        from_cases = {c.name for c in cases if c.ecosystem == eco}
+        assert from_cases == from_taxonomy, eco
 
 
 def test_by_rule_index_lists_every_family_including_scenario_only_slugs() -> None:

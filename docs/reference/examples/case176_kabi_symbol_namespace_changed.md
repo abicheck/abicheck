@@ -115,4 +115,4 @@ fixture pair.
 - `v1.symvers`
 - `v2.symvers`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: Linux kernel](by-ecosystem/linux-kernel.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: Linux kernel](by-ecosystem/linux-kernel.md)._

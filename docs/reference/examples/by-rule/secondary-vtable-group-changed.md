@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `secondary-vtable-group-changed`. [← back to all rules](index.md)
 
+> A secondary vtable under multiple inheritance changes shape, so dispatch through a non-primary base lands on the wrong slot.
+
 ## Canonical demonstration
 
 - [case174_secondary_vtable_group_changed](../case174_secondary_vtable_group_changed.md) — Secondary Vtable Group Changed (🔴 BREAKING)

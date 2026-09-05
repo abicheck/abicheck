@@ -170,4 +170,4 @@ echo "exit: $?"   # → 12 (ABI change + breaking)
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual methods](by-rule/virtual-methods.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual function set changed](by-rule/virtual-methods.md)._

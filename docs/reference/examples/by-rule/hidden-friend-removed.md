@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `hidden-friend-removed`. [← back to all rules](index.md)
 
+> A hidden friend function is withdrawn, so consumer code that found it by argument-dependent lookup no longer compiles.
+
 ## Canonical demonstration
 
 - [case96_hidden_friend_removed](../case96_hidden_friend_removed.md) — Hidden Friend Operator Removed (🟠 API_BREAK)

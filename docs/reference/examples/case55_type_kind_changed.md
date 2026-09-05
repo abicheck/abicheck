@@ -132,4 +132,4 @@ abidiff v1.xml v2.xml
 - `good.c`
 - `good.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Type kind changed](by-rule/type-kind-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Type kind changed](by-rule/type-kind-changed.md)._

@@ -109,4 +109,4 @@ one pass over the binary.
 - `v1.c`
 - `v2.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Relro weakened](by-rule/relro-weakened.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: RELRO hardening weakened](by-rule/relro-weakened.md)._

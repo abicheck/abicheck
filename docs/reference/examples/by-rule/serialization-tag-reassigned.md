@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `serialization-tag-reassigned`. [← back to all rules](index.md)
 
+> A persisted type or message tag is reassigned to a different meaning, so old and new data are silently misinterpreted.
+
 ## Canonical demonstration
 
 - [case81_serialization_tag_reassigned](../case81_serialization_tag_reassigned.md) — Serialization Tag ID Reassigned (🔴 BREAKING)

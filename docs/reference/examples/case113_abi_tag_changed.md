@@ -137,4 +137,4 @@ the same underlying mechanism down to one symbol.
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Abi tag changed](by-rule/abi-tag-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: ABI tag changed](by-rule/abi-tag-changed.md)._

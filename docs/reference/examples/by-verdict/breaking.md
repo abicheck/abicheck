@@ -3,7 +3,7 @@
 
 ABI breaks: existing consumers will fail at runtime.
 
-_107 case(s)._ [← back to all examples](../index.md)
+_111 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -68,11 +68,15 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case80_pimpl_shared_to_unique](../case80_pimpl_shared_to_unique.md) | Pimpl Alias Switched from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
 | [case81_serialization_tag_reassigned](../case81_serialization_tag_reassigned.md) | Serialization Tag ID Reassigned | 🔴 BREAKING | Breaking |
 | [case82_sycl_overload_set_removed](../case82_sycl_overload_set_removed.md) | SYCL Overload Set Removed (DPC++ Build Withdrawn) | 🔴 BREAKING | Breaking |
+| [case84_bundle_soname_skew](../case84_bundle_soname_skew.md) | Multi-Library Bundle SONAME Skew | 🔴 BREAKING | Bundle (Multi-library) |
 | [case85_internal_template_signature_changed](../case85_internal_template_signature_changed.md) | Internal Template Signature Changed | 🔴 BREAKING | Breaking |
 | [case86_tag_struct_renamed](../case86_tag_struct_renamed.md) | Tag Struct Renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
 | [case87_default_template_arg_changed](../case87_default_template_arg_changed.md) | Default Template Argument Changed | 🔴 BREAKING | Breaking |
 | [case88_cpo_kind_changed](../case88_cpo_kind_changed.md) | CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
 | [case89_inline_accessor_renamed_pimpl_member](../case89_inline_accessor_renamed_pimpl_member.md) | Inline Accessor References Renamed Pimpl Member | 🔴 BREAKING | Breaking |
+| [case90_bundle_intra_dep_removed](../case90_bundle_intra_dep_removed.md) | Bundle — Intra-Bundle Removed Symbol | 🔴 BREAKING | Bundle (Multi-library) |
+| [case91_bundle_intra_signature_drift](../case91_bundle_intra_signature_drift.md) | Bundle — Intra-Bundle extern-C Signature Drift | 🔴 BREAKING | Bundle (Multi-library) |
+| [case93_bundle_manifest_drift](../case93_bundle_manifest_drift.md) | Bundle — Instantiation Manifest Drift | 🔴 BREAKING | Bundle (Multi-library) |
 | [case94_empty_tag_gained_state](../case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
 | [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
 | [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | API Depends on Consumer Environment | 🔴 BREAKING | Breaking |

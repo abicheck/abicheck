@@ -29,10 +29,28 @@ the output) — not calibration fixtures a gate scores. Consequently:
   classification** — the "examples-ground-truth" AI-readiness check and
   every other gate that walks `case*` directories deliberately never sees
   this tree (it filters on the `case` name prefix).
+- **Every workflow directory must carry a `workflow.yaml`** — the
+  executable contract (schema in `scripts/workflow_examples.py`) naming its
+  commands, expected exit code, expected output substrings, and expected
+  verdict/change kinds. A directory without one is a hard error, not a
+  free point of workflow coverage; it used to be exactly that, when the
+  coverage report counted subdirectories.
+- **A `run:` command runs with no shell** (`shlex.split`, `shell=False`);
+  a pipe, redirect, `&&`, glob or variable is rejected at manifest load
+  rather than handed to the program as a literal argument. Keep a
+  documented command a single program invocation.
+- **Every `run:` command in that manifest must appear verbatim in the
+  workflow's own README** (whitespace-normalized). This is the rule that
+  keeps the contract from becoming a second copy of the walkthrough, able
+  to pass forever against commands the README no longer shows. Enforced by
+  `workflow_examples.readme_drift`, in the fast lane
+  (`tests/test_workflow_examples.py`) and again in the runner.
 - Verify every command and every excerpted output block against a real run
-  before writing it down — see `compare-release/README.md` for the
-  pattern (a real `gcc`+`abicheck compare` invocation, output excerpted,
-  not paraphrased).
+  before writing it down — `validation/scripts/run_workflow_examples.py`
+  does exactly that in CI (scratch copy, real shell, real `abicheck`), and
+  the `workflow-examples` job in `examples-validation.yml` gates it. See
+  `compare-release/README.md` + `compare-release/workflow.yaml` for the
+  pattern.
 - Link out to the relevant `docs/use/*.md`/`docs/learn/*.md` page for
   anything beyond that one task — a workflow example teaches "how do I run
   this", not "how does this work" (that's the docs' job, see
@@ -149,7 +167,20 @@ case181) or `entity: scenario` with `operation: audit` (case147-151)), `operatio
 (`compare` vs. `audit`), `ecosystem`, `topics`,
 `languages`, `scope`, `artifact_shape`, `validation_owner`,
 `related_rules`, and `rule_slug`/`variant_of`/`relation_type`/
-`relation_axis`. See
+`relation_axis`.
+
+**Every rule slug — a `rule_slug` or a `related_rules` entry — must resolve
+to an entry in [`catalog_rules.yaml`](catalog_rules.yaml)**, the canonical
+rule registry: one hand-authored title and definition per rule, all 177 of
+them. `scripts/catalog_rule_registry.py` joins it against the taxonomy to
+derive each rule's canonical case, variants, duplicates, composing
+scenarios and demonstrated-vs-referenced-only status (all *derived*, never
+restated in the YAML, so they cannot go stale). Both directions are
+enforced — a slug with no definition, and a definition no case uses — by
+`gen_catalog_taxonomy.py` and `tests/test_catalog_rule_registry.py`. Before
+the registry these were unvalidated free-text strings that
+`docs/contribute/catalog-coverage.md` counted as distinct compatibility
+rules, so a typo or a synonym silently became one more "rule". See
 [`docs/contribute/plans/examples-catalog-split.md`](../docs/contribute/plans/examples-catalog-split.md)
 for the full rationale and remaining phases.
 
@@ -208,8 +239,16 @@ consumer that counts cases.
 1. Pick the next free `caseNN` number.
 2. Write `v1/`, `v2/`, `app.c|cpp`, and a README.
 3. Add the expected verdict to `ground_truth.json`.
-4. Run `python scripts/gen_examples_docs.py` and commit the regenerated
+4. Run `python scripts/gen_catalog_taxonomy.py`. If it reports an unknown
+   rule slug, add the rule to `catalog_rules.yaml` with a title and a
+   one-sentence definition (or fix the spelling). If the case is a
+   scenario, an ecosystem case study, a bundle, or a capability
+   demonstration, add its number to the matching set in that generator —
+   every other case defaults to a generic rule, silently.
+5. Run `python scripts/gen_examples_docs.py` and commit the regenerated
    `docs/reference/examples/caseNN_*.md` **and** the refreshed `README.md` catalog
    (its headline/distribution/case-index regions are generated from
    `ground_truth.json`; don't hand-edit them).
-5. Validate with `pytest tests/test_abi_examples.py -k caseNN -m integration`.
+6. Run `python scripts/gen_catalog_coverage_report.py` and commit
+   `docs/contribute/catalog-coverage.md`.
+7. Validate with `pytest tests/test_abi_examples.py -k caseNN -m integration`.
