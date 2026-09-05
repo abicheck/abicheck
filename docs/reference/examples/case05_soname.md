@@ -125,6 +125,8 @@ readelf -d libfoo_v2.so | grep SONAME   # → (SONAME) Library soname: [libv2.so
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.c`
 

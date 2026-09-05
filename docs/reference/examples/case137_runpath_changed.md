@@ -106,6 +106,8 @@ to check it against their environment.
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.c`
 

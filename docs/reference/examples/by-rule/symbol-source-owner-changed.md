@@ -9,9 +9,7 @@ _Canonical rule slug:_ `symbol-source-owner-changed`. [← back to all rules](in
 
 - [case162_symbol_source_owner_changed](../case162_symbol_source_owner_changed.md) — Exported Symbol's Declaring File Moved (🟡 COMPATIBLE_WITH_RISK)
 
-## Used by multi-library bundle scenarios
+## Used by scenarios
 
-_ADR-023 bundle cases aren't part of this single-library catalog (see `examples/README.md`), so these aren't linked pages here — see the case's own README under `examples/`._
-
-- `case92_bundle_provider_changed` — Bundle — Symbol Provider Migration
+- [case92_bundle_provider_changed](../case92_bundle_provider_changed.md) — Bundle — Symbol Provider Migration
 

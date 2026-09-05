@@ -143,6 +143,8 @@ readelf --version-info libfoo_v2.so
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.c`
 - `libfoo.map`

@@ -114,6 +114,8 @@ reserves space for future extensions; Wayland protocol structs use
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.c`
 

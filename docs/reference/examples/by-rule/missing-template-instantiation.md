@@ -9,9 +9,7 @@ _Canonical rule slug:_ `missing-template-instantiation`. [← back to all rules]
 
 - [case79_missing_template_instantiation](../case79_missing_template_instantiation.md) — Missing Template Instantiation in Shipped Binary (🔴 BREAKING)
 
-## Used by multi-library bundle scenarios
+## Used by scenarios
 
-_ADR-023 bundle cases aren't part of this single-library catalog (see `examples/README.md`), so these aren't linked pages here — see the case's own README under `examples/`._
-
-- `case93_bundle_manifest_drift` — Bundle — Instantiation Manifest Drift
+- [case93_bundle_manifest_drift](../case93_bundle_manifest_drift.md) — Bundle — Instantiation Manifest Drift
 

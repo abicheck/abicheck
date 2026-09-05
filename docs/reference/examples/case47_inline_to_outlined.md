@@ -134,6 +134,8 @@ abidiff v1.xml v2.xml
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.cpp`
 

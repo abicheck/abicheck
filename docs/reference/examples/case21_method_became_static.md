@@ -139,6 +139,8 @@ shape here.
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.cpp`
 

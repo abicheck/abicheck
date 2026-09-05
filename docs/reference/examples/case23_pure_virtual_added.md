@@ -132,6 +132,8 @@ Became pure virtual: direct instantiation causes SIGABRT
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.cpp`
 

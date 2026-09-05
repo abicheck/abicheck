@@ -127,6 +127,8 @@ old-side binding for the symbol is confined to an internal/private node.
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.c`
 

@@ -113,6 +113,8 @@ non-standard paths in `DT_RPATH`/`DT_RUNPATH`. Debian's lintian reports
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.c`
 

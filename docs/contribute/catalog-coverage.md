@@ -6,7 +6,7 @@ Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the ca
 
 ## Rule coverage
 
-Every rule named below is defined in [`examples/catalog_rules.yaml`](../../examples/catalog_rules.yaml), the canonical rule registry. A slug used by a case but missing from that file (or defined there but used by no case) fails `scripts/gen_catalog_taxonomy.py` and `tests/test_catalog_taxonomy.py` -- which is what stops a typo, a synonym, or an accidental rename from silently becoming one more "distinct compatibility rule" in the headline below.
+Every rule named below is defined in `examples/catalog_rules.yaml`, the canonical rule registry (a repository file, not a published page). A slug used by a case but missing from that file (or defined there but used by no case) fails `scripts/gen_catalog_taxonomy.py` and `tests/test_catalog_taxonomy.py` -- which is what stops a typo, a synonym, or an accidental rename from silently becoming one more "distinct compatibility rule" in the headline below.
 
 - **177 distinct compatibility rules** in total -- **160** demonstrated by at least one rule-entity case (across **167 rule-entity cases**), plus **17** named only in a scenario's own `related_rules` (a generic mechanism no single-library case demonstrates alone yet). The two are **not** equivalent coverage: a referenced-only rule has a definition and a scenario that composes it, but no case that isolates it.
 - **5 of the demonstrated rules** have a *variant* beyond their canonical case -- a genuine robustness demonstration under a different condition (5 variant cases total -- see the per-family breakdown below); these are robustness demonstrations of an already-counted rule, not additional rules.

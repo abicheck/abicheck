@@ -135,9 +135,9 @@ def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
     lines = [
         "## Rule coverage",
         "",
-        "Every rule named below is defined in "
-        "[`examples/catalog_rules.yaml`](../../examples/catalog_rules.yaml), "
-        "the canonical rule registry. A slug used by a case but missing from "
+        "Every rule named below is defined in `examples/catalog_rules.yaml`, "
+        "the canonical rule registry (a repository file, not a published "
+        "page). A slug used by a case but missing from "
         "that file (or defined there but used by no case) fails "
         "`scripts/gen_catalog_taxonomy.py` and "
         "`tests/test_catalog_taxonomy.py` -- which is what stops a typo, a "

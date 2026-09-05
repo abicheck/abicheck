@@ -113,6 +113,8 @@ echo "exit: $?"   # → 4 (abidiff's convention: any ABI change, including a
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.c`
 

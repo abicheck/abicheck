@@ -134,6 +134,8 @@ indistinguishable from removing one function and adding an unrelated one.
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.cpp`
 

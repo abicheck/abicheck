@@ -106,6 +106,8 @@ interposability for codegen freedom.
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.c`
 

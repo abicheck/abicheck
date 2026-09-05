@@ -122,6 +122,8 @@ without breaking callers.
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.c`
 

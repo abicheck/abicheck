@@ -111,6 +111,8 @@ readelf -dW libfoo_v2.so | grep NEEDED   # adds libm.so.6, libc.so.6
 
 ## Source files
 
+- `new/`
+- `old/`
 - `CMakeLists.txt`
 - `app.c`
 
