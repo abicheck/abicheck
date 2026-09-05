@@ -217,15 +217,27 @@ def producer_entity_id(entity_id: EntityId) -> EntityId | None:
 
 def producer_occurrence_disambiguator(occurrence_id: OccurrenceId) -> str | None:
     """*occurrence_id*'s own disambiguator for ``Change.disambiguator``, or
-    ``None`` when it carries none or its ``entity_id`` is synthetic (Codex
-    review, PR #1078, seventeenth round) -- ``entity_id`` alone cannot
-    distinguish two genuine ODR/multi-TU occurrences that legitimately
-    share one identity, which is exactly what ``OccurrenceId.disambiguator``
-    exists for. An empty disambiguator normalizes to ``None`` here, matching
-    ``OccurrenceId``'s own convention; a synthetic ``entity_id`` yields
-    ``None`` too, mirroring :func:`producer_entity_id`."""
-    if producer_entity_id(occurrence_id.entity_id) is None:
-        return None
+    ``None`` when it carries none (Codex review, PR #1078, seventeenth
+    round) -- ``entity_id`` alone cannot distinguish two genuine ODR/multi-TU
+    occurrences that legitimately share one identity, which is exactly what
+    ``OccurrenceId.disambiguator`` exists for. An empty disambiguator
+    normalizes to ``None`` here, matching ``OccurrenceId``'s own convention.
+
+    **Deliberately not gated on** :func:`producer_entity_id` (Codex review,
+    PR #1078, eighteenth round, fresh evidence): an earlier version of this
+    function returned ``None`` whenever ``entity_id`` was synthetic, on the
+    reasoning that entity_id and disambiguator should travel together as one
+    trust unit. That broke ``compare.typedefs._bare_typedef_side_index``'s
+    bare-alias projection, which deliberately wraps a *real* occurrence's
+    identity in a fresh, synthetic per-alias-collision ``EntityId`` while
+    still carrying that occurrence's own real ``disambiguator`` forward --
+    the synthetic wrapper means "don't stamp this fabricated scope onto a
+    durable ``Change.entity_id``", not "this occurrence's own disambiguator
+    evidence is untrustworthy". Unlike ``entity_id`` (an external identity
+    reference callers may treat as a real declaration pointer),
+    ``disambiguator`` is purely an internal dedup discriminator with no such
+    trust requirement, so gating it the same way only threw away real
+    evidence for no safety benefit."""
     return occurrence_id.disambiguator or None
 
 

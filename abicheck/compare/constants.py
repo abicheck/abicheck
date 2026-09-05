@@ -372,9 +372,7 @@ def diff_constants(
                         name=name,
                         old_value=old_value,
                         entity_id=producer_entity_id(old_id.entity_id),
-                        disambiguator=producer_occurrence_disambiguator(
-                            old_id
-                        ),
+                        disambiguator=producer_occurrence_disambiguator(old_id),
                     )
                 )
             continue
@@ -464,9 +462,7 @@ def diff_constants(
                     old_value=old_val,
                     new_value=new_val,
                     entity_id=producer_entity_id(shared_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(
-                        shared_id
-                    ),
+                    disambiguator=producer_occurrence_disambiguator(shared_id),
                 )
             )
         # A colliding group on at least one side (Codex review, PR #1078,
@@ -586,9 +582,7 @@ def diff_constants(
                     name=name,
                     old_value=_unresolved_to_none(leftover_old_value),
                     entity_id=producer_entity_id(leftover_old_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(
-                        leftover_old_id
-                    ),
+                    disambiguator=producer_occurrence_disambiguator(leftover_old_id),
                 )
             )
         for leftover_new_value, leftover_new_id in added_occurrences:
@@ -599,9 +593,7 @@ def diff_constants(
                     name=name,
                     new_value=_unresolved_to_none(leftover_new_value),
                     entity_id=producer_entity_id(leftover_new_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(
-                        leftover_new_id
-                    ),
+                    disambiguator=producer_occurrence_disambiguator(leftover_new_id),
                 )
             )
 
@@ -629,9 +621,7 @@ def diff_constants(
                     name=name,
                     new_value=new_value,
                     entity_id=producer_entity_id(new_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(
-                        new_id
-                    ),
+                    disambiguator=producer_occurrence_disambiguator(new_id),
                 )
             )
     return changes

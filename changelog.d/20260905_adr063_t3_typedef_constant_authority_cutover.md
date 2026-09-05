@@ -368,3 +368,35 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   question -- every occurrence of a kind is written from the same parse
   pass, so a producer that resolves even one has no such ambiguity left, and
   a specific missing name is then a real disagreement, not this gap.
+
+- **A dedup key including `disambiguator` no longer collides two occurrence
+  findings on their public `report_finding_id` (schema 2.3).** The
+  seventeenth round's `Change.disambiguator` field fixed `_dedup_exact`'s
+  own collision, but `report_finding_id` -- the stable per-finding
+  fingerprint report consumers key waivers and cross-run correlation on --
+  never looked at it either, so two now-surviving ODR-duplicate findings
+  with otherwise-identical kind/symbol/values/description still collided on
+  this id (Codex review, PR #1078, eighteenth round). `report_finding_id`
+  now appends `disambiguator` **only when set**, so it hashes identically
+  for every pre-existing finding (always `None`) -- unconditionally joining
+  it would have rehashed every finding id this function has ever produced,
+  the same universal-rehash cost a prior round explicitly declined to pay
+  for a narrower risk (`docs/contribute/plans/public-contract-default.md`'s
+  "delimiter" finding).
+- **The bare-alias typedef projection no longer drops a real occurrence's
+  own disambiguator.** `compare.typedefs._bare_typedef_side_index` wraps
+  each real IR entity in a fresh, synthetic per-alias-collision `EntityId`
+  to keep bare-alias collisions distinct, but discarded the *source*
+  occurrence's own `OccurrenceId.disambiguator` in the process -- so two
+  ODR-duplicate occurrences projected through this bare-key path (a side
+  forced into bare-key mode by the *other* side predating schema v25)
+  collapsed right back together in `_dedup_exact`, silently dropping one of
+  two real removals (Codex review, PR #1078, eighteenth round). The
+  projection now carries the source disambiguator forward onto the new
+  `OccurrenceId`. Closing this also meant loosening
+  `producer_occurrence_disambiguator`'s own gate: it used to return `None`
+  whenever the occurrence's `entity_id` was synthetic (mirroring
+  `producer_entity_id`'s "don't stamp a fabricated identity onto a durable
+  reference" rule), but `disambiguator` is a purely internal dedup
+  discriminator, never an external identity reference -- gating it the same
+  way only threw away real evidence for no safety benefit.

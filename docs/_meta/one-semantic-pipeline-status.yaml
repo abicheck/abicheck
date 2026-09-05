@@ -682,6 +682,26 @@ concepts:
       has none of that kind". The check now only runs this direction once
       `SemanticIR` resolves *some* occurrence of the kind in question, since
       every occurrence of a kind comes from the same parse pass.
+
+      **An eighteenth round found two further gaps.** First,
+      `report_finding_id` (schema 2.3's stable per-finding fingerprint)
+      never looked at `disambiguator` either, so two ODR-duplicate findings
+      that now legitimately survive `_dedup_exact` still collided on this
+      separate, consumer-facing id. Fixed the same conditional way: appended
+      only when set, so every pre-existing finding still hashes identically
+      (unconditional appending would have rehashed every id this function
+      has ever produced, the same cost a prior round explicitly declined to
+      pay for a narrower risk). Second,
+      `compare.typedefs._bare_typedef_side_index` wraps each real IR entity
+      in a fresh synthetic `EntityId` for bare-alias-collision safety, but
+      dropped the *source* occurrence's own `disambiguator` in the process
+      -- so an ODR-duplicate pair projected through this bare-key path
+      collapsed right back together downstream. Fixed by carrying the
+      source disambiguator onto the new `OccurrenceId`, which also required
+      loosening `producer_occurrence_disambiguator`'s own gate: it no longer
+      returns `None` for a synthetic `entity_id`, since `disambiguator` is a
+      purely internal dedup discriminator, never an external identity
+      reference the way `entity_id` is.
   public_surface:
     primitive: complete
     producers: complete

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 from hypothesis import given, strategies as st
 
+from abicheck.checker_policy import ChangeKind
 from abicheck.compare.typedefs import diff_typedefs, typedef_index_pair
 from abicheck.model import AbiSnapshot
 from abicheck.model.fact import Fact
@@ -549,6 +550,53 @@ class TestTypedefIndexPair:
             is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
         )
         assert changes == []
+
+    def test_bare_projection_preserves_odr_duplicate_disambiguators(self) -> None:
+        """Codex review, PR #1078, eighteenth round: the OLD side is
+        pre-v25 with no ``Alias`` at all; the NEW side carries a real,
+        qualified IR with *two* ODR/multi-TU occurrences of the identical
+        ``ns::Alias`` entity (same ``EntityId``, distinguished only by
+        ``OccurrenceId.disambiguator``), both with the same value. An
+        earlier version of the bare-alias projection dropped the source
+        occurrence's own disambiguator when wrapping it in a fresh,
+        collision-safe synthetic identity, so both bare-projected
+        occurrences collapsed right back together in
+        ``diff_filtering._dedup_exact`` -- silently reporting only one of
+        the two real removals."""
+        from abicheck.diff_filtering import _dedup_exact
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        # A genuinely pre-v25 side (non-empty bare `typedefs`, no
+        # `typedefs_qualified`) forces the whole comparison into bare-key
+        # mode, exactly like the other bare-mode tests in this class.
+        old = _snap(typedefs={"Placeholder": "x"}, ast_producer="")
+        new = _snap(
+            typedefs_qualified={"ns::Alias": "int"},
+            semantic_ir=SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            ),
+        )
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs={"Placeholder": "x"}, new_typedefs={}
+        )
+        changes = diff_typedefs(
+            new_index,
+            old_index,
+            exclude_stdlib_namespaces=False,
+            suppress_removed=False,
+            is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
+        )
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_REMOVED for c in changes)
+        assert {c.disambiguator for c in changes} == {"tu-a", "tu-b"}
+        assert len(_dedup_exact(changes)) == 2
 
     def test_an_unrenderable_anonymous_scope_is_used_but_invisible_to_aliasing(
         self,

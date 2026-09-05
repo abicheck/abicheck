@@ -304,9 +304,7 @@ def diff_typedefs(
                             name=bare_alias,
                             old_value=_underlying(old_index, rotated_id),
                             entity_id=producer_entity_id(rotated_id.entity_id),
-                            disambiguator=producer_occurrence_disambiguator(
-                                rotated_id
-                            ),
+                            disambiguator=producer_occurrence_disambiguator(rotated_id),
                         )
                     )
                 continue
@@ -324,9 +322,7 @@ def diff_typedefs(
                         name=bare_alias,
                         old_value=_underlying(old_index, removed_id),
                         entity_id=producer_entity_id(removed_id.entity_id),
-                        disambiguator=producer_occurrence_disambiguator(
-                            removed_id
-                        ),
+                        disambiguator=producer_occurrence_disambiguator(removed_id),
                         description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                     )
                 )
@@ -383,9 +379,7 @@ def diff_typedefs(
                     old_value=old_type,
                     new_value=new_type,
                     entity_id=producer_entity_id(shared_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(
-                        shared_id
-                    ),
+                    disambiguator=producer_occurrence_disambiguator(shared_id),
                     description=(
                         f"Typedef base type changed: {bare_alias}{qualified_suffix}"
                     ),
@@ -469,9 +463,7 @@ def diff_typedefs(
                     name=bare_alias,
                     old_value=leftover_old_value,
                     entity_id=producer_entity_id(leftover_old_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(
-                        leftover_old_id
-                    ),
+                    disambiguator=producer_occurrence_disambiguator(leftover_old_id),
                     description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                 )
             )
@@ -585,8 +577,20 @@ def _bare_typedef_side_index(
             leaf_name=bare_alias,
             extra=SYNTHETIC_IDENTITY_EXTRA,
         )
-        occurrences[OccurrenceId(bare_id)] = CanonicalEntity(
-            canonical_spelling=Fact.present(_underlying(ir_index, occurrence_id))
+        # Carries the *source* occurrence's own disambiguator forward
+        # (Codex review, PR #1078, eighteenth round) -- the synthetic
+        # `bare_id` above only fabricates a distinguishing *scope* for the
+        # bare-alias collision; it says nothing about whether the original
+        # occurrence's own ODR/multi-TU disambiguator evidence is real.
+        # Dropping it here (an earlier version left the disambiguator empty)
+        # meant two same-valued ODR-duplicate occurrences projected through
+        # this bare-key path collapsed right back together in
+        # `diff_filtering._dedup_exact`, which this whole projection exists
+        # to feed correctly.
+        occurrences[OccurrenceId(bare_id, occurrence_id.disambiguator)] = (
+            CanonicalEntity(
+                canonical_spelling=Fact.present(_underlying(ir_index, occurrence_id))
+            )
         )
     # A bare alias this side's own *typedefs* map carries but the real IR
     # doesn't cover at all still needs representation -- delegate to the
