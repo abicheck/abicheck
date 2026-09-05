@@ -1630,9 +1630,12 @@ def check_appcompat(
     inside ``compare``'s own pipeline), call :func:`scope_diff_to_app` directly
     instead of re-dumping/re-comparing through this wrapper.
     """
-    # Run standard library comparison
-    from .dumper import dump
-    from .dumper_clang_streaming import suppress_streaming_prune
+    # Run standard library comparison, routed through the Tier-2 `service`
+    # module (T5 direct-bypass migration; ADR-037 D1/D10.1) rather than
+    # `dumper.dump()`/`checker.compare()` directly. Lazy import avoids a
+    # service→cli→appcompat import cycle.
+    from . import service
+    from .errors import ValidationError
 
     # Resolve per-side headers: old_headers/new_headers override shared headers
     _old_h = old_headers if old_headers is not None else (headers or [])
@@ -1640,44 +1643,32 @@ def check_appcompat(
     _old_inc = old_includes if old_includes is not None else (includes or [])
     _new_inc = new_includes if new_includes is not None else (includes or [])
 
-    # public-header set for provenance tagging (ADR-024/ADR-015). Neither
-    # call below goes through `service.run_dump`'s dependency-scope wrapper,
-    # so there is no later post-hoc filter to retain what the opt-in
-    # streaming pruner would drop -- suppressed here the same way a
-    # full/unscoped request is elsewhere (Codex review, PR #840, thread
-    # bdSMk).
-    with suppress_streaming_prune():
-        old_snap = dump(
-            so_path=old_lib_path,
-            headers=_old_h,
-            extra_includes=_old_inc,
-            version=old_version,
-            compiler="c++" if lang == "c++" else "cc",
-            lang="c" if lang == "c" else None,
-            public_headers=list(_old_h),
-            # _old_inc/_new_inc are this caller's own genuine, explicit -I
-            # list (never auto-derived) -- mirror perform_elf_dump's/
-            # _dump_elf's own public_include_search_dirs wiring so a
-            # declaration reached through an explicit include root is
-            # promoted to PUBLIC_HEADER here too, not just on the CLI's
-            # compare/dump/scan frontends.
-            public_include_search_dirs=list(_old_inc),
-        )
-        new_snap = dump(
-            so_path=new_lib_path,
-            headers=_new_h,
-            extra_includes=_new_inc,
-            version=new_version,
-            compiler="c++" if lang == "c++" else "cc",
-            lang="c" if lang == "c" else None,
-            public_headers=list(_new_h),
-            public_include_search_dirs=list(_new_inc),
-        )
+    old_fmt = service.detect_binary_format(old_lib_path)
+    new_fmt = service.detect_binary_format(new_lib_path)
+    if old_fmt is None or new_fmt is None:
+        bad = old_lib_path if old_fmt is None else new_lib_path
+        raise ValidationError(f"Unrecognised binary format for {bad}")
 
-    # Route through the Tier-2 service (lazy import avoids a
-    # service→cli→appcompat import cycle); ADR-037 D1.
-    from .service import compare_snapshots
-    diff = compare_snapshots(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file, scope_to_public_surface=scope_to_public_surface)
+    # `run_dump`'s dependency-scope wrapper defaults `include_dependencies`
+    # to True: suppresses the streaming pruner (this call's own pre-migration
+    # `suppress_streaming_prune()`) and tags `dependency_scope`, unlike a
+    # direct `dumper.dump()` call. `public_include_search_dirs` is this
+    # caller's own genuine, explicit -I list (never auto-derived), same as
+    # `_dump_elf`'s own wiring, so an explicit include root promotes its
+    # declarations to PUBLIC_HEADER here too.
+    old_snap = service.run_dump(
+        old_lib_path, old_fmt, _old_h, _old_inc, old_version, lang,
+        public_headers=list(_old_h),
+        public_include_search_dirs=list(_old_inc),
+    )
+    new_snap = service.run_dump(
+        new_lib_path, new_fmt, _new_h, _new_inc, new_version, lang,
+        public_headers=list(_new_h),
+        public_include_search_dirs=list(_new_inc),
+    )
+
+    # Route through the Tier-2 service; ADR-037 D1.
+    diff = service.compare_snapshots(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file, scope_to_public_surface=scope_to_public_surface)
 
     scoped = scope_diff_to_app(
         diff, app_path, old_lib_path, new_lib_path,

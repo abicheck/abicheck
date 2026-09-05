@@ -243,14 +243,14 @@ three positions this plan used to hold are explicitly revised by the vision:
 
 | Item | State | Blocked on |
 |---|---|---|
-| **H1 hidden-shim deletion** | Half done (#1080): `--allow-build-query`/`--header-graph`/`--header-graph-includes` deleted. `--btf`/`--ctf`/`--dwarf` still open | Nothing |
+| **H1 hidden-shim deletion** | **Done** — #1080 (`--allow-build-query`, `--header-graph`, `--header-graph-includes`) and #1087 (`--btf`/`--ctf`/`--dwarf`) | — |
 | **PR H** — `scan --artifact-set` member-identity manifest form | Open; syntax, cost/dry-run and audit-mode ownership all done | Nothing (last piece of PR H) |
 | **PR I** — live/stored operand driver; one evaluation/gate/report/dry-run path across all four operand shapes | Open; classification, flag deletion and stored/stored execution done | A shared gate/report object; overlaps vision A-S4 |
 | **PR J** — per-library header/compile-context topology in `BundleSpec`; `--max-json-object-nodes` → a calibrated `--resource-limit` | Open; `--manifest` rename and `--bundle-system-providers`/`--bundle-cohort` → `.abicheck.yml` done | G42 provider resolution (topology); a real bytes-per-node calibration (resource limit) |
-| **PR C tail** — `dump`/`compare` explicit-`--config` dry-run/execution parity | Open, narrow | Nothing |
+| **PR C tail** — `dump`/`compare` explicit-`--config` dry-run/execution parity | Closed — `InputSpec.build_config` seam landed | — |
 | `scan --artifact-set` bundle-topology config read | Open | Its own resolver still separate from `ResolvedCompareConfig`'s merge point |
 | `contract=public` default flip | Open | `EntityId`-based public closure (ADR-063 Phase 2), **not** a string heuristic |
-| PR 0/0B, PR 1, 1b, 2, A, B, C (binary formats), D, E, F, G1, G2 | Done / closed by decision | — |
+| PR 0/0B, PR 1, 1b, 2, A, B, C (binary formats), C tail (config parity), D, E, F, G1, G2 | Done / closed by decision | — |
 
 **Two vision blocks this section pointed at have since landed**, which is what
 moved on `main` between #1073 and `d1a486bb`:
@@ -270,18 +270,21 @@ landed. **Do not re-open any of them.**
 
 ### H1 — hidden inert shims and duplicate spellings
 
-**Half done ([#1080](https://github.com/abicheck/abicheck/pull/1080), merged
-2026-09-05):** `--allow-build-query`, `--header-graph` and
-`--header-graph-includes` are gone from `dump` and `compare` — all three now
-exit `64` with `No such option`, and the genuinely dead `allow_build_query`
-parameter came out of `collect_inline_pack`/`embed_build_source` and the CLI
-call chain with them, while the live programmatic gate stayed (the boundary
-this section drew held up). The Action's `allow-build-query` input stays
-registered for back-compat but is no longer forwarded.
+**DONE — all six spellings, in two slices.**
+[#1080](https://github.com/abicheck/abicheck/pull/1080) deleted
+`--allow-build-query`, `--header-graph` and `--header-graph-includes` from
+`dump` and `compare`, taking the genuinely dead `allow_build_query` parameter
+out of `collect_inline_pack`/`embed_build_source` and the CLI call chain with
+them while the live programmatic gate stayed (the boundary this section drew
+held up); the Action's `allow-build-query` input stays registered for
+back-compat but is no longer forwarded.
+[#1087](https://github.com/abicheck/abicheck/pull/1087) closed the residual —
+`--btf`/`--ctf`/`--dwarf` are gone from every site, and `--debug-format
+{btf,ctf,dwarf}` is the only selector left. Each of the six now exits `64`
+with `No such option`.
 
-**Still open: `--btf` / `--ctf` / `--dwarf`**, at the three sites the bullet
-below names — verified still present on `main` at `d1a486bb`. Everything else
-in this section is history, kept for the boundary it records.
+This section is kept as history, for the boundary it records (which engine
+parameters were *not* CLI concerns) — not as open work.
 
 Each of these was `hidden=True`, which is the deprecation window this
 repository says it does not run:
@@ -306,7 +309,7 @@ repository says it does not run:
   `True` direction but load-bearing as the ADR-037 D4 level-implies-query
   guard — neither is a CLI concern, so neither moves here (Codex review on
   #1073, verified against the call sites).
-- **`--btf` / `--ctf` / `--dwarf` — STILL OPEN.** Hidden duplicate spellings of
+- ~~`--btf` / `--ctf` / `--dwarf`~~ **(deleted, #1087)** — hidden duplicate spellings of
   `--debug-format {btf,ctf,dwarf}`, which the option's own help text already
   calls their supersession. **Declared twice**: `debug_resolution_options`
   (`frontends/cli/options/release.py`, reached by `compare`) *and* inline on
@@ -317,21 +320,20 @@ repository says it does not run:
   which the contract gate keys on, and the `--help-all` grouping in
   `frontends/cli/help.py` (which also still lists `--allow-build-query`).
 
-**Six spellings, not four** — three deleted, three left. Each has to be tested
-on *every* command that declares it: the three remaining debug aliases are on
-`compare` and `dump` separately.
-
-Acceptance: each remaining spelling exits `64` with `No such option` on
-every command that declares it today; the canonical replacement behaves
-identically; `build.query`'s explicit-`--config` trust gate
-is unchanged; `--help-all` and `docs/reference/cli-reference.md` regenerated.
-This slice depends on nothing in the vision rollout and must not wait for it.
+**Six spellings, not four** — the count this section was corrected to during
+review, and all six are now gone. The acceptance it set was met on both
+slices: every spelling exits `64` with `No such option` on every command that
+declared it, the canonical replacement behaves identically,
+`build.query`'s explicit-`--config` trust gate is unchanged, and `--help-all`
+plus `docs/reference/cli-reference.md` were regenerated.
 
 ### Parallel work blocks an agent can start now
 
-Seven blocks, each with a disjoint primary file set. **Four can start
-immediately** (tier 0 and tier 1 below); the other three have a real
-dependency and are listed with it rather than as free parallelism. The tiers
+Eight blocks, each with a disjoint primary file set. **Three of them are now
+done** (1, 2, and A-S2's half of 3) and one more closed in `main` as PR C's
+tail (the former block 7); of the rest, **E-S1/S2 (5), A-S1 (3) and D-S1 (8)
+can start immediately**, and the other two are listed with the dependency
+that holds them rather than as free parallelism. The tiers
 are the owning plan's own global order — *A and E first under one integration
 owner, then C's audit half with G's first reporting slice, then B/D/F* — not a
 re-sequencing of it (Codex review on #1073). **The requirements for every block live in the workstream
@@ -342,8 +344,7 @@ checklist: where the two ever disagree, `vision-api-abi-evolution.md` wins.
 
 | # | Block | Start | Owning workstream | Primary files | Shared types |
 |---|---|---|---|---|---|
-| 1 | H1 hidden-shim deletion | **Tier 0 — now** (half done, #1080; three debug aliases left) | this plan (H1 above) | `frontends/cli/options/release.py`, `frontends/cli/commands/dump.py`, `options/inventory.py`, `help.py` | No |
-| 7 | Explicit-`--config` dry-run/execution parity | **Tier 0 — now** (untouched) | this plan (PR C tail) | `cli_dump_request.py`, `cli_compare*` config discovery | No |
+| 1 | H1 hidden-shim deletion | **DONE** (#1080 + #1087 — all six spellings) | this plan (H1 above) | `frontends/cli/options/release.py`, `frontends/cli/commands/dump.py`, `options/inventory.py`, `help.py` | No |
 | 3 | Release-path scope & completeness | **A-S2 DONE (#1079)**; A-S1 selection is the live slice | A-S1 (deletion gate A-S4) | `cli_compare_release*`, `workflows/`, `policy/outcome.py` | **Yes — integration owner** |
 | 5 | Per-dimension comparability + failed evidence | **Tier 1 — now** (untouched) | E-S1/S2 | `comparability.py`, `analysis_assurance.py`, `workflows/plan.py` | **Yes — integration owner** |
 | 2 | Scalar disposition audit | **DONE (#1082)**; C-S2's multi-member parity is the next slice | C-S1 + G-S1 | `policy/`, `report/`, `checker.py`, `semver.py` | No |
@@ -351,8 +352,9 @@ checklist: where the two ever disagree, `vision-api-abi-evolution.md` wins.
 | 4 | Header-only capture and comparison | Tier 3 — after E-S1 (untouched) | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `service_dump_pipeline.py`, `workflows/artifact/` | No |
 | 6 | `scan --artifact-set` member-identity manifest | Tier 3 — needs A-S3's component inventory (untouched) | this plan (PR H, last piece) | `cli_scan*`, a member-identity schema that does not exist yet | Indirectly (A's inventory) |
 
-Tier 0 is outside the vision sequence entirely — pure interface hygiene with
-no shared model behind it. Tier 1 is the owning plan's own first pair, and the
+Tier 0 was outside the vision sequence entirely — pure interface hygiene with
+no shared model behind it — and is now empty, both its blocks having landed.
+Tier 1 is the owning plan's own first pair, and the
 two blocks in it are the ones its integration owner reviews; they are
 independent of each other (A touches the release/outcome path, E the
 comparability/assurance path). Tier 2's *scalar* half can begin as soon as
@@ -360,12 +362,12 @@ A/E's S0 field contract is written down — it does not need those slices
 finished — but starting it before that vocabulary exists is how two ledgers
 get invented. Tier 3 consumes upstream fields and should not start earlier.
 
-**Block 1 — H1 hidden-shim deletion.** Exactly the slice above, with the
-`allow_build_query` boundary it states. Deliverable: four spellings exit `64`,
-`warn_deprecated_header_graph_flags` and its two call sites gone,
-`--help-all` and `docs/reference/cli-reference.md` regenerated
-(`python scripts/gen_cli_reference.py`). No semantic change, no changelog
-fragment beyond the removal note.
+**Block 1 — H1 hidden-shim deletion — done.** Landed as #1080 (three
+spellings, `warn_deprecated_header_graph_flags` and its two call sites, the
+dead `allow_build_query` parameter) and #1087 (the three debug aliases), with
+the `allow_build_query` boundary this section states preserved in both. No
+semantic change; `--help-all` and `docs/reference/cli-reference.md`
+regenerated.
 
 **Block 2 — scalar disposition audit.** C-S1 plus G-S1's first slice, scoped
 to single-pair `compare` — so it needs A/E's S0 field contract in writing, but
@@ -463,16 +465,25 @@ behind A; extending a canonical schema explicitly is fine, inventing a second
 manifest format is not. ADR-056 D2's safety boundary — no implicit
 positional-directory dispatch — stands unchanged either way.
 
-**Block 7 — explicit-`--config` dry-run/execution parity (PR C's tail).**
-Config discovery is closed for `scan` in both cases and for `dump`/`compare`'s
-auto-discovery case; the residual is `dump`/`compare` with an *explicit*
-`--config`, where what `--dry-run` projects and what execution resolves can
-still differ. The full account is the "Configuration discovery (PR C's tail)"
-bullet under "Re-verified, unchanged, still open" — read it first, it is
-narrower than it sounds and has already been re-litigated once. `build.query`
-executes only from an explicit `--config` (ADR-032 D5) and that must remain
-true through whatever this block changes; the trust receipt in `--dry-run` is
-part of the parity, not an optional extra.
+**Block 7 — explicit-`--config` dry-run/execution parity (PR C's tail) —
+closed.** Config discovery was closed for `scan` in both cases and for
+`dump`/`compare`'s auto-discovery case; the residual — `dump`/`compare` with
+an *explicit* `--config`, where what `--dry-run` projected and what
+execution resolved could still differ — is closed too:
+`api_types.InputSpec.build_config` is the request-level seam
+`dump`/`compare` previously lacked (mirroring `ScanRequest.build_config`),
+threaded through `cli_dump_request.build_dump_request` and compare's inline
+`--old/new-sources` embed path's nested `dump_cmd` invocation into
+`workflows.plan.SidePlan.build_config`, which the pre-flight
+bazel-target-scoping check now honors exactly as `embed_build_source`'s own
+`cfg_path = build_config or discover_build_config(...)` precedence does at
+real-execution time. `build.query` still executes only from an explicit
+`--config` (ADR-032 D5), unchanged — this field only widens what the shared
+pre-flight resolution can see, never what executes; the `--dry-run` trust
+receipt (`add_build_query_dry_run_section`) was already correct and is
+untouched. See "Configuration discovery (PR C's tail)" under "Re-verified,
+unchanged, still open" for the full prior account, and
+`docs/contribute/known-gaps.md`'s "PR C" entry.
 
 **Blocked, deliberately not on this list.** ~~`--used-by`'s enrichment
 rewrite (D-S1) needs block 2's disposition model first~~ — **unblocked
@@ -484,10 +495,10 @@ ADR-063 Phase 2's `EntityId` closure, not a string heuristic. PR I's
 evaluation/gate/report unification needs a shared gate/report object that no
 block above creates.
 
-Blocks 2, 3, 4 and 5 are behavior changes: each needs a changelog fragment, a
+Blocks 3, 4, 5 and 8 are behavior changes: each needs a changelog fragment, a
 migration note, and its invariant stated in `tests/regressions/manifest.py` as
-a bug class rather than a single reproducer. Blocks 1, 6 and 7 need a
-changelog fragment only where they touch `abicheck/**/*.py`.
+a bug class rather than a single reproducer (block 2 already met that bar).
+Block 6 needs a changelog fragment only where it touches `abicheck/**/*.py`.
 
 ## Problem
 
@@ -5373,21 +5384,20 @@ the agreement so a future pass does not re-derive them as new:
   migration — every persisted identity carrier (flat entities, source-graph
   nodes, surface-graph nodes, consumer-graph nodes, proof-path references,
   impact ids), not one regex per graph format.
-- **Configuration discovery (PR C's tail) — corrected precisely 2026-09-04,
-  third pass, after this bullet was wrong in both directions across two
-  earlier corrections.** The full mechanism (`12492deb`'s auto-discovery
-  fix, the precedence rule, the per-call-site rollout across `dump`/
-  `compare`/`scan`) is maintained once, in
+- **Configuration discovery (PR C's tail) — closed.** The full mechanism
+  (`12492deb`'s auto-discovery fix, the precedence rule, the per-call-site
+  rollout across `dump`/`compare`/`scan`) is maintained once, in
   `docs/contribute/known-gaps.md` and `docs/contribute/plans/
-  one-semantic-pipeline.md`'s Phase 4 section — not restated here, so this
-  plan can't drift from that account the way it just did. **This plan's
-  own status, precisely:** closed for `scan` (both the auto-discovery and
-  explicit-`--config` cases — `ScanRequest` carries `build_config` as a
-  real field); closed for `dump`/`compare`'s auto-discovery case only —
-  their explicit-`--config` case is a real, narrower, still-open residual
-  of PR C's own tail, since `dump`/`compare` have no `build_config` field
-  on `InputSpec` at the request level at all. PR C's row above reflects
-  this precisely rather than either "fully open" or "fully done".
+  one-semantic-pipeline.md`'s Phase 4 section — not restated here. **This
+  plan's own status, precisely:** closed for `scan` (both the auto-discovery
+  and explicit-`--config` cases — `ScanRequest` carries `build_config` as a
+  real field); now closed for `dump`/`compare`'s explicit-`--config` case
+  too — `InputSpec.build_config` is the matching request-level field,
+  threaded from `cli_dump_request.build_dump_request` and from compare's
+  inline `--old/new-sources` embed path's nested `dump_cmd` invocation into
+  `workflows.plan.SidePlan.build_config`, which the pre-flight
+  bazel-target-scoping check consults exactly as `embed_build_source` does
+  at real-execution time. PR C's row above reflects this as fully done.
 - **The ADR-061 move is directionally right and carries one visible debt.**
   #972 put the new command in `frontends/cli/commands/` instead of a new flat
   `cli_compare_bundle_facts.py`, which is exactly ADR-061's direction — but

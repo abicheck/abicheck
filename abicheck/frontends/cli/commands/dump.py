@@ -117,7 +117,6 @@ def _load_dump_manifest_or_reject(
 def _resolve_and_check_dump_debug_format(
     so_path: Path | None,
     debug_format_opt: str | None,
-    debug_format: str | None,
 ) -> str | None:
     """Resolve the effective debug format and reject the usage error it implies.
 
@@ -132,7 +131,7 @@ def _resolve_and_check_dump_debug_format(
     from ....cli_dump_helpers import check_dump_debug_format_error
     from ....workflows.extraction import normalize_binary_input as _peek_binary_format
 
-    effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
+    effective_debug_format = resolve_dump_debug_format(debug_format_opt)
     _, dry_run_binary_fmt = _peek_binary_format(so_path)
     debug_format_error = check_dump_debug_format_error(
         effective_debug_format, dry_run_binary_fmt
@@ -188,14 +187,7 @@ def _resolve_and_check_dump_debug_format(
                    "Writes nothing; incompatible with -o/--output.")
 @click.option("--debug-format", "debug_format_opt",
               type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
-              help="Force the ELF debug format (auto=pick best available). "
-                   "Supersedes the individual --btf/--ctf/--dwarf flags.")
-@click.option("--btf", "debug_format", flag_value="btf", default=None, hidden=True,
-              help="Force BTF debug format (ELF only).")
-@click.option("--ctf", "debug_format", flag_value="ctf", hidden=True,
-              help="Force CTF debug format (ELF only).")
-@click.option("--dwarf", "debug_format", flag_value="dwarf", hidden=True,
-              help="Force DWARF debug format (ELF only).")
+              help="Force the ELF debug format (auto=pick best available).")
 # ── Build context capture (ADR-020a) ──────────────────────────────────────────
 # The L2 compile database comes from --build-info, whose operand is already
 # "a build dir, a compile_commands.json, or a pre-captured pack" -- the same
@@ -240,7 +232,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
              dwarf_only: bool, dry_run: bool,
              debug_format_opt: str | None,
-             debug_format: str | None,
              compile_db_filter: str | None,
              debug_roots: tuple[Path, ...],
              debuginfod: bool, debuginfod_url: str | None,
@@ -495,7 +486,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # that echo and the so_path reassignment (a no-op re-validation once
     # this has already passed).
     effective_debug_format = _resolve_and_check_dump_debug_format(
-        so_path, debug_format_opt, debug_format,
+        so_path, debug_format_opt,
     )
 
     # CLI cleanup phase two, PR 3A blocker 5: one `DumpRequest` describing this
@@ -545,6 +536,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         include_labels=_resolved_include_labels,
         resolved_collect_mode=_resolved_collect_mode,
         compile_db_filter=compile_db_filter,
+        build_config=build_config,
     )
     # `resolve_dump_request` runs no castxml/clang and writes nothing, so
     # hoisting it above the branch keeps `--dry-run` inside its own "cheap,
@@ -554,6 +546,32 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # pins the two in agreement), so this raises no error the real path did
     # not already raise -- it raises the same ones from one place.
     _resolved = resolve_dump_request_for_cli(_dump_request)
+
+    # ADR-063 Track T4: attach a dry-run-safe *preview* of the execution
+    # options onto the resolved request, so `--dry-run` can render what the
+    # real run below would pass to `execute_dump_request` -- see
+    # `dry_run_build_context_preview`'s own docstring for the one accepted
+    # imprecision vs. the real run's `_resolve_build_context_flags`.
+    from ....service_dump_pipeline import DumpExecutionOptions
+    from ..dump_build_context_preview import (
+        add_execution_options_dry_run_section,
+        dry_run_build_context_preview,
+    )
+
+    _preview_flags, _preview_matched = dry_run_build_context_preview(
+        compile_db_path, headers, compile_db_filter
+    ) or ([], False)
+    _resolved = dataclasses.replace(
+        _resolved,
+        execution_options=DumpExecutionOptions(
+            build_config=build_config,
+            allow_build_query=True,
+            legacy_compile_db_tokens=tuple(_preview_flags),
+            legacy_compile_db_matched=_preview_matched,
+            seed_collect_mode=_resolved.collect_mode,
+            source_frontend_from_folded_context=True,
+        ),
+    )
 
     if dry_run:
         from ....cli_buildsource_helpers import _is_inputs_pack_dir
@@ -594,6 +612,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             collect_mode=collect_mode, build_info=build_info,
             build_config=build_config,
         )
+        # ADR-063 Track T4: the execution-options preview attached onto
+        # `_resolved` above, rendered as its own section.
+        add_execution_options_dry_run_section(_dry_result, _resolved)
         emit_dry_run(_dry_result)
 
     # Source-only dump (no binary) for the parallel-baseline flow.
@@ -653,7 +674,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     so_path, binary_fmt = _normalize_binary_input(so_path)
     if effective_debug_format is not None and binary_fmt in ("pe", "macho"):
         raise click.BadParameter(
-            f"--{effective_debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
+            f"--debug-format {effective_debug_format} is only supported for ELF "
+            f"binaries, not {binary_fmt.upper()}."
         )
 
     # ADR-063 Phase 1: both binary formats now execute through the identical
@@ -704,8 +726,32 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         _dump_request,
         input=dataclasses.replace(_dump_request.input, path=so_path),
     )
+    # ADR-063 Track T4: the real (raise/echo-capable) `DumpExecutionOptions`
+    # -- unlike `_resolved`'s own dry-run-safe preview above -- attached
+    # directly onto the request this run actually executes, so
+    # `execute_dump_cli_run` picks it up as `execute_dump_request`'s default
+    # `options` rather than this call site threading the nine values through
+    # as separate keyword parameters.
     _exec_resolved = dataclasses.replace(
-        resolve_dump_request_for_cli(_exec_request), requested_depth=None,
+        resolve_dump_request_for_cli(_exec_request),
+        requested_depth=None,
+        execution_options=DumpExecutionOptions(
+            build_config=build_config,
+            allow_build_query=True,
+            legacy_compile_db_tokens=tuple(build_context_flags),
+            legacy_compile_db_matched=compile_db_matched,
+            # Codex review, two real regressions on the original ELF
+            # migration: `perform_elf_dump` always forwarded its own
+            # resolved collect mode to the L2 seed (running a zero-config
+            # inferred build query for a `--sources` tree with no compile
+            # database) and always replayed L4 source through the L3
+            # fold's own compiler once it applied -- both must be
+            # preserved here, exactly as `scan`'s own candidate resolution
+            # already does. Applies identically to PE/Mach-O, which shares
+            # this same tail.
+            seed_collect_mode=_resolved.collect_mode,
+            source_frontend_from_folded_context=True,
+        ),
     )
     from ....workflows.extraction import (
         dump_manifest_header_roots,
@@ -717,17 +763,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         _exec_resolved,
         notify=_click_notify,
         build_config=build_config,
-        legacy_compile_db_tokens=tuple(build_context_flags),
-        legacy_compile_db_matched=compile_db_matched,
-        # Codex review, two real regressions on the original ELF migration:
-        # `perform_elf_dump` always forwarded its own resolved collect mode
-        # to the L2 seed (running a zero-config inferred build query for a
-        # `--sources` tree with no compile database) and always replayed L4
-        # source through the L3 fold's own compiler once it applied -- both
-        # must be preserved here, exactly as `scan`'s own candidate
-        # resolution already does. Applies identically to PE/Mach-O, which
-        # shares this same tail.
-        seed_collect_mode=_resolved.collect_mode,
         stamp_provenance=_stamp_provenance,
         write_snapshot_output=_write_snapshot_output_fn,
         git_tag=git_tag, build_id=build_id, no_git=no_git,

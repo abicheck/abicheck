@@ -45,7 +45,7 @@ def test_onedpl_example_spec_parses() -> None:
     from abicheck.probe_harness import load_probe_spec
 
     spec_path = (
-        Path(__file__).resolve().parent.parent / "examples" / "probes" / "onedpl.yaml"
+        Path(__file__).resolve().parent.parent / "catalog" / "probes" / "onedpl.yaml"
     )
     spec = load_probe_spec(spec_path)
     assert spec.name == "onedpl"

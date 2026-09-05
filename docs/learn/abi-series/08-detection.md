@@ -144,7 +144,7 @@ Every family in the
 has a *minimum evidence* level — `L0` binary, `L1` +debug info, `L2`
 +headers, `L3` +build data, `L4` +sources — below which no tool can see it,
 and the per-case minimums are machine-readable in
-[`examples/ground_truth.json`](https://github.com/abicheck/abicheck/blob/main/examples/ground_truth.json)
+[`catalog/ground_truth.json`](https://github.com/abicheck/abicheck/blob/main/catalog/ground_truth.json)
 (`min_evidence`). The family-by-family table lives with the level-by-level
 walk-through, in
 [What Each Level Sees § Reference: which input proves which family](../what-each-level-sees.md#reference-which-input-proves-which-family);

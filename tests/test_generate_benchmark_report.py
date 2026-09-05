@@ -95,7 +95,7 @@ def test_diff_against_doc_reports_missing_heading() -> None:
 
 def test_diff_against_doc_flags_case_count_drift_against_real_doc() -> None:
     """Regression guard for the exact bug this tool exists to catch: the doc's
-    heading case-count silently falling behind examples/ground_truth.json."""
+    heading case-count silently falling behind catalog/ground_truth.json."""
     text = gbr.DOC_PATH.read_text(encoding="utf-8")
     table = gbr.parse_doc_table(text)
     assert table is not None

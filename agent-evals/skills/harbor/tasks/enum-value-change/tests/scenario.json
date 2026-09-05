@@ -4,16 +4,16 @@
   ],
   "architectures": [],
   "category": "A",
-  "digest": "sha256:4c2175d8ef8536bd16e8df42332946b9f52f65076f77adeb6ac072bf7ada3d90",
+  "digest": "sha256:9b1f4718f44cae89127b8eab87bb816e8eb3f73b269c59c06799a61b869f5b05",
   "expected": {
     "kinds": [
       "enum_member_value_changed"
     ],
     "min_evidence": "L1",
-    "resolved_from": "examples/ground_truth.json",
+    "resolved_from": "catalog/ground_truth.json",
     "verdict": "BREAKING"
   },
-  "inputs": "examples/case08_enum_value_change",
+  "inputs": "catalog/cases/case08_enum_value_change",
   "invocation": {},
   "platforms": [
     "linux"
@@ -21,8 +21,8 @@
   "prompt": "Someone reordered an enum in a public header. What does that do to programs already linked against this library?",
   "roots": [
     "agent-evals/skills/scenarios.yaml",
-    "examples/case08_enum_value_change",
-    "examples/ground_truth.json"
+    "catalog/cases/case08_enum_value_change",
+    "catalog/ground_truth.json"
   ],
   "skill": "check-abi-compatibility",
   "status": "ready"

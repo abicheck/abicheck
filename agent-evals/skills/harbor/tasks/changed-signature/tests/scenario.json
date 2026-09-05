@@ -4,16 +4,16 @@
   ],
   "architectures": [],
   "category": "A",
-  "digest": "sha256:17dcc3bf0b7bb66dc5021729ee77b21ce85acfcd5717de12cad79989e408e081",
+  "digest": "sha256:48191272e7389709f1dd6c09eab48f8d343fe25c2744e0fc2a77345cc95ad39b",
   "expected": {
     "kinds": [
       "func_params_changed"
     ],
     "min_evidence": "L1",
-    "resolved_from": "examples/ground_truth.json",
+    "resolved_from": "catalog/ground_truth.json",
     "verdict": "BREAKING"
   },
-  "inputs": "examples/case02_param_type_change",
+  "inputs": "catalog/cases/case02_param_type_change",
   "invocation": {},
   "platforms": [
     "linux"
@@ -21,8 +21,8 @@
   "prompt": "Does this change break existing consumers of the library, or only require a recompile?",
   "roots": [
     "agent-evals/skills/scenarios.yaml",
-    "examples/case02_param_type_change",
-    "examples/ground_truth.json"
+    "catalog/cases/case02_param_type_change",
+    "catalog/ground_truth.json"
   ],
   "skill": "check-abi-compatibility",
   "status": "ready"

@@ -834,6 +834,16 @@ def compare_release_cmd(
                                 library=old_path.name,
                                 version="",
                                 elf=extraction.parse_elf_metadata(old_path),
+                                # ADR-065 D8: this snapshot carries no header/
+                                # DWARF evidence at all -- every downstream
+                                # detector that special-cases elf_only_mode
+                                # (diff_symbols.py, diff_types.py, diff_vtable_
+                                # layout.py, bundle_signature_evidence.py,
+                                # confidence.py) must see the same reduced
+                                # evidence tier every other ELF-only snapshot
+                                # declares, not silently read as a fully-dumped
+                                # one on a later comparison against it.
+                                elf_only_mode=True,
                             ),
                             failure=f"ELF-only degraded capture: {exc}",
                         )

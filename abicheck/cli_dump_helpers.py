@@ -113,17 +113,15 @@ def __getattr__(name: str) -> Any:
 
 def resolve_dump_debug_format(
     debug_format_opt: str | None,
-    debug_format: str | None,
 ) -> str | None:
-    """Reconcile --debug-format selector with legacy --btf/--ctf/--dwarf flags.
+    """Normalize the --debug-format selector to the extraction layer's form.
 
-    The selector supersedes the legacy flags whenever it is given: an explicit
-    "auto" returns to auto-detection (None) even if a legacy flag is also
-    present; only when the selector is absent do the legacy flags apply.
+    An explicit "auto" (case-insensitive) returns to auto-detection (``None``);
+    any other value is returned verbatim; an absent selector is also ``None``.
     """
-    if debug_format_opt is not None:
-        return None if debug_format_opt.lower() == "auto" else debug_format_opt
-    return debug_format
+    if debug_format_opt is None:
+        return None
+    return None if debug_format_opt.lower() == "auto" else debug_format_opt
 
 
 def check_dump_debug_format_error(
@@ -136,14 +134,13 @@ def check_dump_debug_format_error(
     resolving the binary format, as a plain string instead of raising --
     shared with ``dump --dry-run``, which previously never ran this check at
     all (it only existed in the real path, after the dry-run branch), so a
-    ``--dwarf``/``--btf``/``--ctf``/``--debug-format`` dump of a PE/Mach-O
-    binary reported dry-run success on an invocation the real run would
-    immediately reject.
+    ``--debug-format`` dump of a PE/Mach-O binary reported dry-run success on
+    an invocation the real run would immediately reject.
     """
     if effective_debug_format is not None and binary_fmt in ("pe", "macho"):
         return (
-            f"--{effective_debug_format} is only supported for ELF binaries, "
-            f"not {binary_fmt.upper()}."
+            f"--debug-format {effective_debug_format} is only supported for "
+            f"ELF binaries, not {binary_fmt.upper()}."
         )
     return None
 

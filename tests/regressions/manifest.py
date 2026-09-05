@@ -1068,6 +1068,44 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="storage.legacy_availability_collapse",
+        invariant=(
+            "A legacy document's per-declaration fact must never be read "
+            "as a confirmed, positively-observed value on the strength of "
+            "a whole-snapshot/producer-level reliability flag alone when a "
+            "finer-grained availability signal already recorded on that "
+            "same document (e.g. per-declaration provenance) is silent "
+            "about that exact declaration -- the coarser signal may "
+            "confirm, but may never override, the absence the finer one "
+            "reports."
+        ),
+        fixed_by=(1091,),
+        seed_tests=("tests/test_deprecation_family_facts.py",),
+        axes={"ast_producer": ("hybrid", "castxml")},
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Closes the gap only for the seven fields gated by "
+                    "`AbiSnapshot.fact_provenance` (the legacy-hybrid "
+                    "backfill blocker, ADR-063 T9 / duplication-and-"
+                    "convergence-assessment Phase 6 item 4). The sibling "
+                    "gap for DWARF's own per-translation-unit vtable "
+                    "coverage (`RecordType.vtable_fact` reading a genuine "
+                    "`PRESENT` for a class whose virtuals live in a TU "
+                    "only the other side's debug info covers) is a "
+                    "different evidentiary shape -- no per-declaration "
+                    "signal exists to consult at all, DWARF's own extractor "
+                    "cannot see the gap either -- and remains open, "
+                    "tracked in that same plan document rather than here."
+                ),
+                reference=(
+                    "docs/contribute/plans/"
+                    "duplication-and-convergence-assessment.md -- T9"
+                ),
+            ),
+        ),
+    ),
 )
 
 

@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Keep examples/README.md's "Current Validation Status" table honest.
+"""Keep catalog/README.md's "Current Validation Status" table honest.
 
 The table's "Result" column is hand-typed prose summarizing the latest
 gcc/clang/runtime/release/stripped/build-source validator runs and the full
@@ -74,7 +74,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import example_catalog  # noqa: E402
 
-README = REPO_DIR / "examples" / "README.md"
+README = REPO_DIR / "catalog" / "README.md"
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 
 # Rows whose Scope column (4th cell) is a plain "<N> catalog cases" count that
@@ -261,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit 1 if examples/README.md's table would change; do not write.",
+        help="Exit 1 if catalog/README.md's table would change; do not write.",
     )
     args = parser.parse_args(argv)
 
@@ -313,12 +313,12 @@ def main(argv: list[str] | None = None) -> int:
             text = _replace_result_cell(text, label, new_result)
 
     if not changed:
-        print("examples/README.md validation-status table is in sync.")
+        print("catalog/README.md validation-status table is in sync.")
         return 0
 
     if args.check:
         print(
-            "examples/README.md's validation-status table is stale. "
+            "catalog/README.md's validation-status table is stale. "
             "Run `python scripts/check_examples_validation_status_sync.py "
             "<same --flags as CI>` (without --check) to refresh it:\n",
             file=sys.stderr,
@@ -328,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     README.write_text(text, encoding="utf-8")
-    print("Updated examples/README.md:\n")
+    print("Updated catalog/README.md:\n")
     for entry in changed:
         print(entry)
     return 0

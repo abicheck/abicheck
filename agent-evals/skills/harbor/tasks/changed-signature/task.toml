@@ -12,7 +12,7 @@ name = "abicheck"
 
 [metadata]
 category = "A"
-coverage_note = "examples/ground_truth.json"
+coverage_note = "catalog/ground_truth.json"
 generated_from = "agent-evals/skills/scenarios.yaml"
 
 [verifier]

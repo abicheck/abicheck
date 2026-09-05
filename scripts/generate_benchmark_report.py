@@ -301,7 +301,7 @@ def diff_against_doc(
     if doc_table["case_count"] != gt_count:
         drift.append(
             f"doc heading says 'all {doc_table['case_count']} cases' but "
-            f"examples/ground_truth.json currently has {gt_count} cases"
+            f"catalog/ground_truth.json currently has {gt_count} cases"
         )
 
     missing_rows = set(LANE_DOC_LABELS) - set(doc_table["rows"])

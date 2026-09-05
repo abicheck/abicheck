@@ -56,6 +56,10 @@ SECTION_ORDER: tuple[str, ...] = (
     "Build query (trust)",
     "Tools and frontends",
     "Configuration and value origins",
+    # ADR-063 Track T4 ("Dump request contract"): `dump --dry-run`'s own
+    # execution-options preview (`cli_dump_helpers.render_dump_dry_run`).
+    # No other command populates this section today.
+    "Execution options",
     "Consumer/contract scoping",
     "Output and exit-code behavior",
 )

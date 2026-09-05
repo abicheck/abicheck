@@ -177,36 +177,14 @@ def debug_resolution_options(func: F) -> F:
     compose, not a copy to drift (ADR-037 D3).
     """
     func = click.option(
-        "--dwarf",
-        "debug_format",
-        flag_value="dwarf",
-        hidden=True,
-        help="Force DWARF debug format for both sides (ELF only).",
-    )(func)
-    func = click.option(
-        "--ctf",
-        "debug_format",
-        flag_value="ctf",
-        hidden=True,
-        help="Force CTF debug format for both sides (ELF only).",
-    )(func)
-    func = click.option(
-        "--btf",
-        "debug_format",
-        flag_value="btf",
-        default=None,
-        hidden=True,
-        help="Force BTF debug format for both sides (ELF only).",
-    )(func)
-    func = click.option(
         "--debug-format",
         "debug_format_opt",
         type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False),
         default=None,
         hidden=True,
         help="Force the ELF debug format for both sides (auto=pick best available). "
-        "Supersedes the individual --btf/--ctf/--dwarf flags. Demoted to the "
-        "debug.format config key (ADR-040 L2); this flag still overrides it.",
+        "Demoted to the debug.format config key (ADR-040 L2); this flag still "
+        "overrides it.",
     )(func)
     func = click.option(
         "--debuginfod-url",

@@ -29,7 +29,7 @@ compiled ``v1``/``v2`` binaries, so the corpus is validated in the fast lane by
 
 Run ``python scripts/gen_l3l4l5_examples.py`` to (re)write the committed
 fixtures; ``--check`` fails if they drift. The per-case ``expected_kinds`` live
-in ``examples/ground_truth.json`` (the catalog's single source of truth); this
+in ``catalog/ground_truth.json`` (the catalog's single source of truth); this
 script only owns the fixture *bytes*.
 """
 
@@ -72,7 +72,7 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     mark_source_edges_extractor_coverage,
 )
 
-EXAMPLES = example_catalog.EXAMPLES_DIR
+EXAMPLES = example_catalog.CASES_DIR
 
 
 # ---------------------------------------------------------------------------

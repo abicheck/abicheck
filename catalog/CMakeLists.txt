@@ -273,7 +273,7 @@ function(abicheck_add_bundle_case CASE_NAME)
 
   # CMAKE_CURRENT_SOURCE_DIR resolves to the case's own subdirectory
   # because abicheck_add_bundle_case is invoked from
-  # examples/<case>/CMakeLists.txt via add_subdirectory().
+  # cases/<case>/CMakeLists.txt via add_subdirectory().
   set(_case_src ${CMAKE_CURRENT_SOURCE_DIR})
   set(_old_out ${CMAKE_BINARY_DIR}/${CASE_NAME}/old)
   set(_new_out ${CMAKE_BINARY_DIR}/${CASE_NAME}/new)
@@ -362,13 +362,23 @@ endfunction()
 
 
 # ---------------------------------------------------------------------------
-# Include all case subdirectories
+# Include all case subdirectories (Phase 4 of the examples/catalog split:
+# cases now live under cases/caseNN_*/, not directly below this file).
 # ---------------------------------------------------------------------------
-file(GLOB _case_dirs RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} case*)
+file(GLOB _case_dirs RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/cases ${CMAKE_CURRENT_SOURCE_DIR}/cases/case*)
 list(SORT _case_dirs)
 foreach(_dir IN LISTS _case_dirs)
-  if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${_dir}
-     AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/CMakeLists.txt)
-    add_subdirectory(${_dir})
+  if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cases/${_dir}
+     AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/cases/${_dir}/CMakeLists.txt)
+    # Explicit binary-dir argument keeps each case's own CMAKE_CURRENT_BINARY_DIR
+    # directly under CMAKE_BINARY_DIR/${_dir} (matching pre-Phase-4 behavior),
+    # rather than mirroring the source tree's new cases/ nesting into
+    # CMAKE_BINARY_DIR/cases/${_dir}. Several v1/v2 libraries are built with
+    # NO_SONAME (to avoid spurious soname_changed diffs in abicheck's own
+    # analysis), so their consumer app's DT_NEEDED entry is a literal relative
+    # path computed from the app target's own build directory -- an extra
+    # source-tree nesting level makes that path one "../" short and breaks
+    # runtime loading (a real regression a full example-matrix CI run caught).
+    add_subdirectory(cases/${_dir} ${_dir})
   endif()
 endforeach()

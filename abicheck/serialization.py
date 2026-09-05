@@ -1088,6 +1088,11 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         clang_deprecation_facts_reliable_value=clang_deprecation_facts_reliable_value,
         clang_restrict_facts_reliable_value=clang_restrict_facts_reliable_value,
         castxml_var_access_facts_reliable_value=castxml_var_access_facts_reliable_value,
+        # T9 / ADR-063 Phase 6 item 4 (legacy-hybrid backfill blocker): the
+        # raw per-declaration provenance map, same source as the
+        # `AbiSnapshot.fact_provenance` field constructed further below --
+        # read here too since this call happens before that field exists.
+        fact_provenance=dict(d.get("fact_provenance", {})),
     )
 
     # ADR-050 D1 (schema v12) — profile/scope fingerprints. Missing key (every

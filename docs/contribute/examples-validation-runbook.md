@@ -132,7 +132,7 @@ print(
 PY
 ```
 
-The exact count comes from `examples/ground_truth.json`; automation must not
+The exact count comes from `catalog/ground_truth.json`; automation must not
 hard-code a historic count. When this runbook was added, the proven result was
 `181/181 COVERED`. As of this writing that is `180` direct + `1` known-gap-oracle
 (`case111`) — a case only qualifies for known-gap-oracle provenance when its
@@ -166,7 +166,7 @@ own declared `source_smoke` oracle proved the canonical verdict; see
 
 ## Agent checklist
 
-1. Read `examples/ground_truth.json`; it defines scope and ownership.
+1. Read `catalog/ground_truth.json`; it defines scope and ownership.
 2. Use the smallest owner runner while iterating.
 3. Before claiming full-catalog success, obtain every artifact above.
 4. Record commit SHA, tool versions, commands, exit codes, and artifact paths.

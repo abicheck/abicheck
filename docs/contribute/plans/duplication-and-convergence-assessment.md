@@ -1850,11 +1850,11 @@ track, the steps are ordered.
 | ~~**T2 — Ledger/status-model change**~~ ✅ **done (2026-09-05)** | Added the `introduced → wired → authoritative → retired` ladder and a separate `investigated_declined` disposition to `docs/_meta/one-semantic-pipeline-status.yaml` + `scripts/pipeline_status_ledger.py`'s field/enum validation; re-audited every concept row against it. Shipped as ledger `schema_version: 2` with the cross-field rules and the re-audit described under "The four-state status model" above | `scripts/pipeline_status_ledger.py`, the ledger, `tests/` | nothing |
 | ~~**T3 — Typedef/constant authority cutover**~~ ✅ **done (2026-09-05)** | Deleted the runtime dual-index construction: `typedef_index_pair`/`constant_index_pair` now decide each side of a comparison independently, reading a side's real `SemanticIR` directly whenever it has one (never both-or-neither — a Codex review round found the first both-or-neither cut would starve an IR-carrying side of its own real evidence whenever the *other* side lacked one) and falling back to the legacy adapter's projection of that side's own flat collection only when it has none; the identity half of the old fidelity gate (a real IR disagreeing with its own `typedef_entity_ids`/`constant_entity_ids` sidecar) moved to the canonical model's load boundary (`AbiSnapshot.__post_init__`, and re-run explicitly after `serialization.snapshot_from_dict` decodes a stored IR — a second Codex finding, since that decode bypasses `__post_init__`), now a hard `SemanticIrAuthorityError` rather than a silent fallback. A related fix in the same PR: `diff_constants` was silently dropping a constant addition/removal whenever its value was `Fact.unsupported()`, since only now reachable with the dual-index gate gone (Codex finding). The old gate's name/value equality half against the legacy alias/value collections is deliberately *not* preserved anywhere — requiring it would make a populated legacy collection an accidental prerequisite of `SemanticIR`-only construction, the opposite of authority transfer | `compare/typedefs.py`, `compare/constants.py`, `model/semantic_ir_legacy_adapter.py`, `model/snapshot.py`, `errors.py`, `serialization.py`, `scripts/semantic_ir_cutover.py` | nothing (T2 records it) |
 | **T4 — Dump request contract** ◐ *(partial, 2026-09-05: see note below)* | Fold `execute_dump_request`'s nine semantic kwargs into the typed request; split backend selection from fallback policy; give source-only dump an execution variant | `service_dump_pipeline.py`, `cli_dump_request.py`, `cli_buildsource.py`, `frontends/cli/dump_execute.py` | ~~T1~~ — satisfied (T1 landed 2026-09-05) |
-| **T5 — Direct-bypass migration** | Route `appcompat.check_appcompat()` and `stack_checker._run_abi_diff()` through the shared extraction/comparison workflow; shrink `CLI_CONTRACT_ALLOWLIST` accordingly | `appcompat.py`, `stack_checker.py`, `cli_stack.py`, `scripts/check_ai_readiness.py` | T4 for the dump half; the compare half is independent |
+| ~~**T5 — Direct-bypass migration**~~ ✅ **done (2026-09-05)** | Routed `appcompat.check_appcompat()` and `stack_checker._run_abi_diff()` through `service.run_dump`/`service.compare_snapshots` instead of calling `dumper.dump()`/`checker.compare()` directly; removed `appcompat.check_appcompat()`'s two entries from `CLI_CONTRACT_ALLOWLIST` (`stack_checker.py` was never itself in that list -- it isn't one of the front-end modules the `cli-contract` gate scans). No `cli_stack.py` change was needed: `_run_abi_diff()`'s return type and failure semantics (`DiffResult \| None`, `ProfileMismatchError`/`ScopeMismatchError` still propagate) are unchanged | `appcompat.py`, `stack_checker.py`, `scripts/check_ai_readiness.py` | T4 for the dump half; the compare half is independent |
 | **T6 — Effective gate/policy convergence** ✅ *(landed 2026-09-05; the shared fold and the derived scheme are done, the two runtime shapes remain P0's own job)* | Collapse `apply_release_gate_pack`'s raw-string mirror of `pack_application.apply_to_compare_config` onto one shared fold **without inverting the dependency direction** — `policy/release_gate_options.py` deliberately consumes a `_GatePackApplication` `Protocol` rather than importing the flat-root `pack_application`, since `policy` may not import it (ADR-061; `policy/AGENTS.md`'s "Permitted imports"), so the shared fold belongs in an inward module both may import, or an outer layer invokes both halves — never a `policy → legacy root` call. Also make `GateOptions.exit_code_scheme` derived rather than independently constructible | `policy/release_gate_options.py`, `pack_application.py`, a new inward fold owner, `tests/test_release_gate_pack_fold_parity.py` | nothing |
 | **T7 — Canonical export index** | One raw export index plus named projections (versioned ELF / default versions / Mach-O normalization / named PE / ordinal imports / missing-vs-empty); delete the five sibling implementations | `policy/depth_projection.py`, `buildsource/crosscheck_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, `diff_unnamed_types.py` | nothing |
 | **T8 — Action boundary** | Remove the residual raw-exit/stderr verdict reconstruction; keep only a transport-level no-result fallback; keep `fail-on-*` as step policy that never rewrites the verdict | `action/run.sh`, `action/` tests | nothing |
-| **T9 — Fact provenance and scope** (first slice landed 2026-09-05 — see note below the table) | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, the import adapter | ~~T2~~ — satisfied (T2 landed 2026-09-05, so the ladder and `investigated_declined` are available to record this work's status); otherwise independent |
+| **T9 — Fact provenance and scope** (first and second slices landed 2026-09-05 — see notes below the table) | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, `storage/fact_backfill.py`, the import adapter | ~~T2~~ — satisfied (T2 landed 2026-09-05, so the ladder and `investigated_declined` are available to record this work's status); otherwise independent |
 | **T10 — Shared report preparation** | Compute evaluated findings/outcomes once ahead of format-specific construction; remove **both** runtime cycle escape hatches, which are distinct sites with distinct fixes: `render_markdown_document._reporter_markdown()`'s `..reporter_markdown` load (the Markdown cycle) and `report/scoped_gate.py`'s `..reporter` load (scoped-JSON construction, whose cycle exists only because `apply_scoped_gate` mutates an already-built payload); give consumer scoping an explicit finalization boundary instead of mutating shared changes | `report/render_markdown_document.py`, `report/render_markdown_alternate.py`, `report/scoped_gate.py`, `reporter_markdown.py`, `appcompat.py`'s `scope_diff_to_app` | T5's appcompat half for the scoping item |
 
 **T4 status note (2026-09-05, stated precisely rather than as a blanket
@@ -1863,24 +1863,38 @@ the PR that landed this slice, correctly, caught an earlier draft of this
 row overclaiming):** `execute_dump_request`'s own nine keyword parameters
 are folded into one typed `service_dump_pipeline.DumpExecutionOptions`,
 passed as a single `options=` argument — that part of item 1 is done.
-**Not done**, and still fully open: `DumpExecutionOptions` is not a field
-on `DumpRequest` or `ResolvedDumpRequest` — it is assembled at the
-`execute_dump_request` call boundary itself
-(`frontends/cli/dump_execute.py`'s `execute_dump_cli_run`, which still
-takes the nine values as its own separate parameters and only builds the
-typed object immediately before calling `execute_dump_request`). So the
-*resolved plan* `dump --dry-run` renders from still cannot represent any of
-these nine values — a caller inspecting a `ResolvedDumpRequest` has no way
-to see what a real execution would pass. Closing that gap (folding the
-values into the typed request/resolved-request model itself, not just into
-one options value at the final call) is unstarted, as are item 1's other
-two clauses (splitting backend selection from fallback policy; a
-source-only dump execution variant).
+
+**Follow-up (2026-09-05): item 1's remaining gap is now closed too.**
+`ResolvedDumpRequest` gained its own `execution_options:
+DumpExecutionOptions | None` field, so a caller resolves and *attaches*
+its `DumpExecutionOptions` onto the request itself rather than only ever
+assembling one fresh at `execute_dump_request`'s own call boundary;
+`execute_dump_request`'s own `options=None` now falls back to
+`resolved.execution_options` before falling back to a bare
+`DumpExecutionOptions()`. `frontends/cli/dump_execute.py`'s
+`execute_dump_cli_run`/`execute_and_write_dump_cli_run` no longer take the
+nine values as separate parameters at all — the `dump` CLI
+(`frontends/cli/commands/dump.py`) attaches a dry-run-safe *preview*
+(`frontends.cli.dump_build_context_preview.dry_run_build_context_preview`, a new silent/
+non-raising sibling of `_resolve_build_context_flags` that also returns
+the derived legacy compile-db flags) onto its `--dry-run` resolution, and
+the real (raise/echo-capable) values onto the request it actually
+executes. `dump --dry-run` now renders an "Execution options" section
+from the preview (`cli_dump_helpers.render_dump_dry_run`) — the gap this
+note used to describe ("a caller inspecting a `ResolvedDumpRequest` has no
+way to see what a real execution would pass") no longer holds.
+
+**Still open, unstarted:** item 1's other two clauses — splitting backend
+selection from fallback policy, and a source-only dump execution variant
+(`execute_dump_request` still raises `ValidationError` for a binary-less
+`InputSpec.path is None` request; producing that snapshot is still
+`cli_buildsource.dump_source_only`'s own separate pipeline, per that
+function's own docstring reference).
 
 **Recommended first wave (fully parallel, no shared files):** ~~T1~~ (done),
 ~~T2~~ (done), T6, T7, T8. **Second wave:** ~~T3~~ (done), T4, T9 (each large
-enough to be its own multi-PR effort). **Third wave:** T5, T10, once T4/T5's
-shared surfaces settle.
+enough to be its own multi-PR effort). **Third wave:** ~~T5~~ (done), T10,
+once T4/T5's shared surfaces settle.
 
 **T9's first slice (2026-09-05): the PDB `vtable` fabrication is closed;
 the rest of the item's scope is not.** `Fact[T]` gained a `producer: str |
@@ -1914,14 +1928,51 @@ genuinely `PRESENT`, for a class whose virtuals live in a TU only the
 `producer`/`UNSUPPORTED` cannot express this, since DWARF genuinely can
 capture the family; the gap is per-TU *scope*, which is the
 observed-vs-inferred / positive-observation-vs-completeness half of this
-item's own stated scope, still unimplemented. Also untouched: the
-legacy-hybrid backfill blocker holding the seven `fact_provenance`-gated
-case-(a) fields (5B's own fourth-through-seventh-slice finding), and the
-shared analysis accounting for declined comparisons (`observed changes` /
+item's own stated scope, still unimplemented. Also untouched: the shared
+analysis accounting for declined comparisons (`observed changes` /
 `evaluated requirements` / `unresolved requirements` / `unsupported
 requirements`) this item's own text calls for. Each remains real,
 scoped, separately-actionable work — recorded here rather than implied
 closed by the row above.
+
+**T9's second slice (2026-09-05): the legacy-hybrid backfill blocker is
+closed too.** `storage/fact_backfill.py`'s `CaseAFactRule` gained a fifth,
+optional field, `fact_provenance_kind` (`"type"`/`"enum"`/`"field"`/
+`"func"`/`"var"`) — additive, defaulting to `None`, so every pre-existing
+rule and call site is unaffected. Set on the seven rules the "legacy-hybrid
+backfill blocker" note above named (`RecordType.deprecated`,
+`EnumType.deprecated`/`is_scoped`, `Function.deprecated`,
+`Variable.deprecated`, `TypeField.deprecated`/`default`), it makes
+`apply_case_a_fact_backfill` consult the document's own per-declaration
+`AbiSnapshot.fact_provenance` map — passed through from `serialization.py`'s
+existing `d.get("fact_provenance", {})` — whenever the document's
+`ast_producer` is exactly `"hybrid"`: a declaration with no recorded
+provenance entry (probed namespace-qualified first, falling back to the
+former bare key only when this document's own side has no other declaration
+sharing that bare name — the same shape `fact_provenance.
+resolved_fact_producer` already applies at compare time) downgrades the
+claim to `NOT_COLLECTED`, following the module's own pre-existing
+"downgrade the claim, never the value" rule (a real non-resting legacy
+value is left untouched either way). This is exactly the correction the
+5B investigation described as blocked: `clang_deprecation_facts_reliable`
+reads `True` unconditionally for a hybrid producer, so only a real
+per-declaration provenance lookup — not that flag — can tell "neither
+backend's merge ever recorded looking here" apart from "confirmed,
+genuinely resting-default" on a document predating this fact family's own
+schema version. Verified against the full fast unit suite (no regressions,
+including the exact end-to-end scenario the original investigation's
+attempted fix broke,
+`test_dumper_hybrid.py::TestNamespaceQualifiedMerging::
+test_legacy_bare_keyed_hybrid_baseline_still_detects_transition` — which,
+on inspection, never exercises this JSON-load-time code path at all, since
+it constructs its snapshot in-memory rather than through
+`snapshot_from_dict`) plus a new, dedicated test class,
+`tests/test_deprecation_family_facts.py::TestLegacyHybridProvenanceBackfill`,
+covering the qualified-key, bare-key-fallback (both unambiguous and
+ambiguous), mangled-name-keyed, value-preserving, and non-hybrid-producer-
+unaffected shapes directly. Still open, unchanged by this slice: the DWARF
+per-TU completeness gap and the shared declined-comparison accounting
+named above.
 
 ## Acceptance tests
 

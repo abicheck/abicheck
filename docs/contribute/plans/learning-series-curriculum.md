@@ -24,7 +24,7 @@ Parts 0–7 plus the detection capstone, the five-minute on-ramp, glossary,
 cheat sheet, and 26 deep dives — ~10,400 lines), their `mkdocs.yml` nav
 placement, `docs/_meta/topics.yaml` ownership, and — for the coverage
 matrix — the tool track (`docs/use/`, `docs/integration/scenarios/`,
-`docs/reference/`), the example catalog (`examples/ground_truth.json` owns
+`docs/reference/`), the example catalog (`catalog/ground_truth.json` owns
 its count), and `docs/contribute/usecase-registry.yaml`.
 
 ---

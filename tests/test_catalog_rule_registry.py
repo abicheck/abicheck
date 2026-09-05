@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""examples/catalog_rules.yaml is the canonical compatibility-rule registry:
+"""catalog/catalog_rules.yaml is the canonical compatibility-rule registry:
 every rule slug the catalog's taxonomy names resolves to a definition there,
 and every definition there is used by at least one case.
 

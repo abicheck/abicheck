@@ -21,7 +21,7 @@
   "roots": [
     "agent-evals/skills/fixtures/contract-coverage-incomplete",
     "agent-evals/skills/scenarios.yaml",
-    "examples/ground_truth.json"
+    "catalog/ground_truth.json"
   ],
   "skill": "check-abi-compatibility",
   "status": "ready"

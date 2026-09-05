@@ -203,7 +203,7 @@ def _isolated_examples_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """
     empty = tmp_path / "_no_examples"
     empty.mkdir()
-    monkeypatch.setattr(dc, "EXAMPLES", empty)
+    monkeypatch.setattr(dc, "CASES", empty)
     no_scenarios = tmp_path / "_no_scenarios"
     no_scenarios.mkdir()
     monkeypatch.setattr(dc, "SCENARIOS", no_scenarios)
@@ -223,19 +223,19 @@ def test_retired_surfaces_scans_example_case_readmes(
     """
     monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
     (tmp_path / "docs").mkdir()
-    examples = tmp_path / "examples"
-    (examples / "case999_demo").mkdir(parents=True)
-    (examples / "case999_demo" / "README.md").write_text(
+    cases = tmp_path / "catalog" / "cases"
+    (cases / "case999_demo").mkdir(parents=True)
+    (cases / "case999_demo" / "README.md").write_text(
         "# Case 999\n\nRun `abicheck dump lib.so --source-abi-cache /tmp/c`.\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(dc, "EXAMPLES", examples)
+    monkeypatch.setattr(dc, "CASES", cases)
     f = dc.Findings()
     dc._check_retired_surfaces(f)
     assert len(f.warnings) == 1, f.warnings
     # Keyed repo-relative, so an allowlist entry is unambiguous about which
     # tree it exempts -- a docs-relative key could never spell this path.
-    assert "examples/case999_demo/README.md" in f.warnings[0][1]
+    assert "catalog/cases/case999_demo/README.md" in f.warnings[0][1]
 
 
 def test_retired_surfaces_ignores_non_case_example_files(
@@ -246,12 +246,12 @@ def test_retired_surfaces_ignores_non_case_example_files(
     # a case page.
     monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
     (tmp_path / "docs").mkdir()
-    examples = tmp_path / "examples"
-    examples.mkdir()
-    (examples / "README.md").write_text(
+    cases = tmp_path / "catalog" / "cases"
+    cases.mkdir(parents=True)
+    (cases / "README.md").write_text(
         "Historic note: `--source-abi-cache` used to exist.\n", encoding="utf-8"
     )
-    monkeypatch.setattr(dc, "EXAMPLES", examples)
+    monkeypatch.setattr(dc, "CASES", cases)
     f = dc.Findings()
     dc._check_retired_surfaces(f)
     assert f.warnings == []
@@ -381,17 +381,17 @@ def test_example_case_readmes_are_swept_for_operands_too(
     # case README is the generator source for a published page.
     monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
     (tmp_path / "docs").mkdir()
-    examples = tmp_path / "examples"
-    (examples / "case999_demo").mkdir(parents=True)
-    (examples / "case999_demo" / "README.md").write_text(
+    cases = tmp_path / "catalog" / "cases"
+    (cases / "case999_demo").mkdir(parents=True)
+    (cases / "case999_demo" / "README.md").write_text(
         "```bash\nabicheck compare a.json b.json scope.show_redundant: true\n```\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(dc, "EXAMPLES", examples)
+    monkeypatch.setattr(dc, "CASES", cases)
     f = dc.Findings()
     dc._check_config_keys_as_cli_operands(f)
     assert len(f.warnings) == 1, f.warnings
-    assert "examples/case999_demo/README.md" in f.warnings[0][1]
+    assert "catalog/cases/case999_demo/README.md" in f.warnings[0][1]
 
 
 def test_the_real_repo_has_no_config_key_operands() -> None:

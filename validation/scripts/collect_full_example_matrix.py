@@ -31,7 +31,7 @@ if str(REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
-EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+EXAMPLES_DIR = example_catalog.CASES_DIR
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 SCHEMA_VERSION = "full_example_matrix.v2"
 

@@ -44,7 +44,6 @@ from .cli_compare_fold import (
 )
 from .cli_compare_options import (
     _cli_flag,
-    _merge_cli_debug_format,
     _NormalizedCompareOptions,
     _param_from_cli,
     _reject_bundle_facts_out_for_single_pair,
@@ -56,7 +55,7 @@ from .cli_compare_options import (
     _warn_force_public_ignored,
     echo_coverage_warnings,
 )
-from .cli_dump_helpers import resolve_dump_depth
+from .cli_dump_helpers import resolve_dump_debug_format, resolve_dump_depth
 from .cli_helpers_compare import (
     # The ADR-043 scoped-gating family lives there (this module is at the
     # file-size cap); re-exported so ``cli_compare_helpers._verdict_exit_code``
@@ -123,7 +122,6 @@ def _resolve_compare_config(
     severity_preset_from_profile: bool = False,
     scope_public_headers: bool,
     debug_format_opt: str | None,
-    debug_format: str | None,
     dwarf_only: bool,
     debuginfod: bool,
     debuginfod_url: str | None,
@@ -162,12 +160,10 @@ def _resolve_compare_config(
         # ADR-040 Lever 2: debug-resolution demoted to config.
         # ``--debug-format``/``--debuginfod-url`` default to None (absent ⇒
         # config wins); the is_flags need the COMMANDLINE-source gate so their
-        # default ``False`` doesn't mask a configured ``True``. A typed legacy
-        # --btf/--ctf/--dwarf must also beat config, so fold it into the CLI value.
-        cli_debug_format=_merge_cli_debug_format(
-            debug_format_opt, debug_format,
-            legacy_from_cli=_param_from_cli("debug_format"),
-        ),
+        # default ``False`` doesn't mask a configured ``True``. ``--debug-format``
+        # already defaults to None (distinct from any real value), so no such
+        # gate is needed here.
+        cli_debug_format=resolve_dump_debug_format(debug_format_opt),
         cli_dwarf_only=_cli_flag("dwarf_only", dwarf_only),
         cli_debuginfod=_cli_flag("debuginfod", debuginfod),
         cli_debuginfod_url=debuginfod_url,
@@ -233,7 +229,6 @@ def _normalize_compare_options(
     old_headers_only: tuple[Path, ...],
     new_headers_only: tuple[Path, ...],
     debug_format_opt: str | None,
-    debug_format: str | None,
     demangle: bool | None,
     fmt: str,
     report_mode: str,
@@ -253,16 +248,9 @@ def _normalize_compare_options(
     if depth == "binary":
         headers, old_headers_only, new_headers_only = (), (), ()
 
-    # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
-    # flags. The selector supersedes the legacy flags whenever it is given:
-    # an explicit "auto" returns to auto-detection (None) even if a legacy flag
-    # is also present; only when the selector is absent do the legacy flags apply.
-    if debug_format_opt is not None:
-        effective_debug_format = (
-            None if debug_format_opt.lower() == "auto" else debug_format_opt
-        )
-    else:
-        effective_debug_format = debug_format
+    # An explicit "auto" returns to auto-detection (None); any other value is
+    # passed through verbatim.
+    effective_debug_format = resolve_dump_debug_format(debug_format_opt)
 
     demangle_resolved = _resolve_demangle(fmt, demangle)
 
@@ -697,7 +685,7 @@ def _embed_inline_source_sides(
     debuginfod: bool, debuginfod_url: str | None,
     collect_mode: str, depth: str | None,
     include_labels: dict[Path, str] | None,
-    include_dependencies: bool,
+    include_dependencies: bool, build_config: Path | None = None,
 ) -> tuple[Path, Path | None, Path | None, Path, Path | None, Path | None]:
     """Dump each raw source/build-dir side inline, returning the rewritten inputs.
 
@@ -790,7 +778,7 @@ def _embed_inline_source_sides(
         debuginfod=debuginfod, debuginfod_url=debuginfod_url,
         collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
         depth=depth, include_labels=include_labels,
-        include_dependencies=include_dependencies,
+        include_dependencies=include_dependencies, build_config=build_config,
     )
     new_input, new_sources, new_build_info = _embed_inline_source_side(
         ctx, input_path=new_input, sources=new_sources,
@@ -809,7 +797,7 @@ def _embed_inline_source_sides(
         pdb_path=new_pdb_path or pdb_path,
         collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
         depth=depth, include_labels=include_labels,
-        include_dependencies=include_dependencies,
+        include_dependencies=include_dependencies, build_config=build_config,
     )
     return (
         old_input, old_sources, old_build_info,
@@ -1343,7 +1331,6 @@ def run_compare(
     post_manifest_path: Path | None,
     report_mode: str,
     debug_format_opt: str | None,
-    debug_format: str | None,
     debug_roots: tuple[Path, ...],
     debug_roots_old: tuple[Path, ...],
     debug_roots_new: tuple[Path, ...],
@@ -1437,7 +1424,6 @@ def run_compare(
         severity_preset_from_profile="severity_preset" in _injected,
         scope_public_headers=scope_public_headers,
         debug_format_opt=debug_format_opt,
-        debug_format=debug_format,
         dwarf_only=dwarf_only,
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
@@ -1696,7 +1682,7 @@ def run_compare(
         depth=depth,
         headers=headers,
         old_headers_only=old_headers_only, new_headers_only=new_headers_only,
-        debug_format_opt=debug_format_opt, debug_format=debug_format,
+        debug_format_opt=debug_format_opt,
         demangle=demangle, fmt=fmt,
         report_mode=report_mode,
         old_sources=old_sources, new_sources=new_sources,
@@ -1787,7 +1773,7 @@ def run_compare(
             debuginfod=debuginfod, debuginfod_url=debuginfod_url,
             collect_mode=collect_mode, depth=depth,
             include_labels=include_labels,
-            include_dependencies=include_dependencies,
+            include_dependencies=include_dependencies, build_config=config,
         )
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text

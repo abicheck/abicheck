@@ -21,7 +21,7 @@ out of sync with each other and with the code:
 
 | Ownership kind | What it means | Example |
 |---|---|---|
-| **Fact owner** | Where the exact, machine-checked value lives | `ChangeKind` registry, CLI `help=` text, JSON Schema, `examples/ground_truth.json` |
+| **Fact owner** | Where the exact, machine-checked value lives | `ChangeKind` registry, CLI `help=` text, JSON Schema, `catalog/ground_truth.json` |
 | **Narrative owner** | Where a topic is explained in full, for a human | `learn/evidence-and-detectability.md` |
 | **Task owner** | Where one practical user workflow is described | `use/scan-levels.md` |
 | **View owner** | Where a fact is shown again in a different shape | a generated reference table, a one-paragraph quickstart summary, a case-index row |

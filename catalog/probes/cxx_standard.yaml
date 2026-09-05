@@ -7,10 +7,10 @@
 # source-incompatible bump even though the binary surface is unchanged.
 #
 # Usage:
-#   abicheck probe run examples/probes/cxx_standard.yaml \
+#   abicheck probe run catalog/probes/cxx_standard.yaml \
 #       --library stddemo --version 1.0 --out std-1.0.json
 #   # ...drop the cxx14 configuration for the next release, then:
-#   abicheck probe run examples/probes/cxx_standard.yaml \
+#   abicheck probe run catalog/probes/cxx_standard.yaml \
 #       --library stddemo --version 2.0 --out std-2.0.json
 #   abicheck compare libstddemo.so.1 libstddemo.so.2 \
 #       --probe-matrix-old std-1.0.json --probe-matrix-new std-2.0.json

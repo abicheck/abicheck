@@ -980,7 +980,7 @@ Adding the example fixture is not just the `caseNNN_*` directory. Per
 `examples-readme-sync` AI-readiness checks, `tests/test_examples_docs.py`)
 a new case requires, in the same PR:
 - the case directory with its own `README.md`;
-- an entry in `examples/ground_truth.json`;
+- an entry in `catalog/ground_truth.json`;
 - `examples/README.md`'s catalog (verdict distribution, case-index row)
   kept in sync with `ground_truth.json`;
 - `python scripts/gen_examples_docs.py` re-run, committing the resulting

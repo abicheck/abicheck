@@ -811,3 +811,57 @@ def test_dot_abicheck_yml_build_targets_dry_run_parity(tmp_path: Path):
     )
     assert result.exit_code == 64, result.output
     assert "pre-captured Bazel aquery" in result.output
+
+
+def test_dump_cli_explicit_config_scoping_matches_dry_run_and_real_run(
+    tmp_path: Path,
+):
+    """CLI cleanup phase two, Block 7 (PR C's tail): an explicit ``--config``
+    naming a file *other* than the one auto-discovery would find at
+    ``--sources`` must scope the pre-flight bazel-target check by the named
+    file's ``build.targets:``, identically for ``--dry-run`` and the real
+    run -- both resolve through the identical ``InputSpec.build_config`` ->
+    ``AnalysisPlanner.resolve`` chokepoint. Before this field existed, both
+    could only ever see whatever ``.abicheck.yml`` auto-discovery found at
+    ``--sources`` (here, nothing at all -- the tree has no ``.abicheck.yml``
+    of its own), so neither would have rejected this combination even though
+    the explicitly named config declares ``build.targets:``."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.cpp").write_text("int f() { return 0; }\n", encoding="utf-8")
+    # Deliberately no `.abicheck.yml` under `src/` -- auto-discovery at
+    # `--sources` would find nothing, so only the explicit `--config` can
+    # supply `build.targets:` here.
+    explicit_cfg = tmp_path / "explicit.yml"
+    explicit_cfg.write_text(
+        "build:\n  system: bazel\n  targets:\n    - //:from_explicit_config\n",
+        encoding="utf-8",
+    )
+    aquery = tmp_path / "aquery.json"
+    aquery.write_text(
+        json.dumps({"actions": [], "pathFragments": [], "artifacts": [], "targets": []})
+    )
+
+    runner = CliRunner()
+    common_args = [
+        "dump",
+        "--sources", str(src),
+        "--build-info", str(aquery),
+        "--config", str(explicit_cfg),
+    ]
+
+    dry_run_result = runner.invoke(main, [*common_args, "--dry-run"])
+    assert dry_run_result.exit_code == 64, dry_run_result.output
+    assert "pre-captured Bazel aquery" in dry_run_result.output
+    assert "//:from_explicit_config" in dry_run_result.output
+
+    real_run_result = runner.invoke(
+        main, [*common_args, "-o", str(tmp_path / "out.json")]
+    )
+    assert real_run_result.exit_code == 64, real_run_result.output
+    assert "pre-captured Bazel aquery" in real_run_result.output
+    assert "//:from_explicit_config" in real_run_result.output

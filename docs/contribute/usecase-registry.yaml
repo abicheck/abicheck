@@ -40,7 +40,7 @@ use_cases:
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
       tests: [tests/test_changekind_completeness.py]
-      examples: [examples/ground_truth.json]
+      examples: [catalog/ground_truth.json]
 
   - id: UC-CHANGE-semver-recommendation
     axis: change_class
@@ -77,16 +77,16 @@ use_cases:
     name: Pure-C shared library (extern "C", SONAME-versioned)
     status: complete
     evidence:
-      examples: [examples/ground_truth.json]
-    note: 35 pure-C example pairs (examples/case*/v1.c).
+      examples: [catalog/ground_truth.json]
+    note: 35 pure-C example pairs (catalog/cases/case*/v1.c).
 
   - id: UC-ARCH-cpp-library
     axis: archetype
     name: C++ library (templates, vtables, inline namespaces)
     status: complete
     evidence:
-      examples: [examples/ground_truth.json]
-    note: 52 C++ example pairs (examples/case*/v1.cpp).
+      examples: [catalog/ground_truth.json]
+    note: 52 C++ example pairs (catalog/cases/case*/v1.cpp).
 
   - id: UC-ARCH-plugin
     axis: archetype
@@ -187,7 +187,7 @@ use_cases:
       end-to-end through compare: real BTF bytes → parse_btf_from_bytes →
       layout detectors → BREAKING, with a CTF mirror scenario
       (parse_ctf_from_bytes). A committed BTF-blob example
-      (examples/case121_kernel_btf_struct_field_added) carries v1.btf/v2.btf and
+      (catalog/cases/case121_kernel_btf_struct_field_added) carries v1.btf/v2.btf and
       a ground_truth.json entry; resolve_input now ingests bare BTF/CTF blobs by
       magic so `abicheck compare a.btf b.btf` works toolchain-free. A real
       `.BTF`-section fixture is validated via `gcc -gbtf`
@@ -196,7 +196,7 @@ use_cases:
     evidence:
       modules: [abicheck/btf_metadata.py, abicheck/ctf_metadata.py, abicheck/service.py]
       tests: [tests/test_btf_metadata.py, tests/test_workflow_kernel_accel.py, tests/test_btf_integration.py]
-      examples: [examples/case121_kernel_btf_struct_field_added]
+      examples: [catalog/cases/case121_kernel_btf_struct_field_added]
       docs: [docs/use/kernel-btf.md]
 
   - id: UC-ARCH-sycl
@@ -213,7 +213,7 @@ use_cases:
     evidence:
       modules: [abicheck/sycl_metadata.py, abicheck/diff_sycl.py]
       tests: [tests/test_diff_sycl.py, tests/test_workflow_kernel_accel.py]
-      examples: [examples/case82_sycl_overload_set_removed]
+      examples: [catalog/cases/case82_sycl_overload_set_removed]
       docs: [docs/use/kernel-btf.md]
 
   - id: UC-ARCH-static-lib
@@ -257,7 +257,7 @@ use_cases:
     status: complete
     evidence:
       modules: [abicheck/elf_metadata.py]
-      examples: [examples/ground_truth.json]
+      examples: [catalog/ground_truth.json]
 
   - id: UC-PLAT-windows-pe
     axis: platform
@@ -325,7 +325,7 @@ use_cases:
     status: complete
     evidence:
       tests: [tests/test_reporter.py]
-      examples: [examples/ground_truth.json]
+      examples: [catalog/ground_truth.json]
 
   - id: UC-WF-appcompat
     axis: workflow
@@ -402,7 +402,7 @@ use_cases:
     evidence:
       modules: [abicheck/bundle.py, abicheck/diff_cpp_patterns.py]
       tests: [tests/test_bundle.py, tests/test_cpp_pattern_detectors.py]
-      examples: [examples/case84_bundle_soname_skew]
+      examples: [catalog/cases/case84_bundle_soname_skew]
 
   - id: UC-WF-oneshot-deep
     axis: workflow
@@ -567,7 +567,7 @@ use_cases:
     evidence:
       modules: [abicheck/probe_harness.py, abicheck/diff_build_config.py, abicheck/elf_metadata.py]
       tests: [tests/test_probe_harness.py, tests/test_probe_examples.py, tests/test_elf_object_surface.py]
-      examples: [examples/probes/onedpl.yaml, examples/probes/cxx_standard.yaml, examples/probes/feature_macro.yaml]
+      examples: [catalog/probes/onedpl.yaml, catalog/probes/cxx_standard.yaml, catalog/probes/feature_macro.yaml]
 
   # ── reporting ─────────────────────────────────────────────────────────────
   - id: UC-REP-json
@@ -764,7 +764,7 @@ use_cases:
     name: libstdc++ dual ABI flip (_GLIBCXX_USE_CXX11_ABI)
     status: complete
     evidence:
-      examples: [examples/case104_glibcxx_dual_abi_flip]
+      examples: [catalog/cases/case104_glibcxx_dual_abi_flip]
 
   - id: UC-TC-flag-drift
     axis: toolchain
@@ -772,7 +772,7 @@ use_cases:
     status: complete
     evidence:
       modules: [abicheck/diff_build_config.py]
-      examples: [examples/case103_toolchain_flag_drift]
+      examples: [catalog/cases/case103_toolchain_flag_drift]
 
   - id: UC-TC-modern-cxx-types
     axis: toolchain
@@ -780,7 +780,7 @@ use_cases:
     status: complete
     evidence:
       modules: [abicheck/diff_integer_model.py, abicheck/diff_char8t.py, abicheck/diff_bit_int.py, abicheck/diff_atomic.py]
-      examples: [examples/case112_lp64_ilp64]
+      examples: [catalog/cases/case112_lp64_ilp64]
 
   - id: UC-TC-header-scope-robustness
     axis: toolchain
@@ -836,7 +836,7 @@ use_cases:
       `--probe-matrix old=... --probe-matrix new=...`; the finding reaches the verdict and
       the JSON/SARIF output (proven in tests/test_probe_examples.py).
     evidence:
-      examples: [examples/case98_cxx_standard_floor_raised, examples/probes/cxx_standard.yaml]
+      examples: [catalog/cases/case98_cxx_standard_floor_raised, catalog/probes/cxx_standard.yaml]
       tests: [tests/test_probe_examples.py, tests/test_diff_build_config.py]
 
   # ── workflow: real-world validation corpus (field-eval G17) ────────────────
@@ -1074,11 +1074,11 @@ use_cases:
       modules: [abicheck/buildsource/crosscheck.py, scripts/gen_g20_fixtures.py]
       tests: [tests/test_g20_catalog.py]
       examples:
-        - examples/case143_audit_accidental_export
-        - examples/case144_audit_private_header_leak
-        - examples/case145_audit_unversioned_export
-        - examples/case146_audit_rtti_for_internal
-        - examples/case147_scan_depth_ladder
+        - catalog/cases/case143_audit_accidental_export
+        - catalog/cases/case144_audit_private_header_leak
+        - catalog/cases/case145_audit_unversioned_export
+        - catalog/cases/case146_audit_rtti_for_internal
+        - catalog/cases/case147_scan_depth_ladder
     next_steps: >
       ADR-035 D8 (G20.1). DONE: the Phase 0 `ground_truth.json` v4 schema
       (`mode: audit`, canonical `expected_kinds`, `provider_assertions`,
@@ -1107,12 +1107,12 @@ use_cases:
       modules: [abicheck/buildsource/crosscheck.py]
       tests: [tests/test_xcheck_scenarios.py, tests/test_g20_catalog.py]
       examples:
-        - examples/case148_xcheck_header_build_mismatch
-        - examples/case149_xcheck_odr_variant
-        - examples/case150_xcheck_export_public_pair
-        - examples/case151_xcheck_provider_matrix
+        - catalog/cases/case148_xcheck_header_build_mismatch
+        - catalog/cases/case149_xcheck_odr_variant
+        - catalog/cases/case150_xcheck_export_public_pair
+        - catalog/cases/case151_xcheck_provider_matrix
     next_steps: >
-      ADR-035 D4 (G20.2). DONE: four `examples/caseNN` cases whose finding is
+      ADR-035 D4 (G20.2). DONE: four `catalog/cases/caseNN` cases whose finding is
       invisible/ambiguous to any single source and resolves only by crosschecking
       two — `header_build_context_mismatch` (L2 macros vs L3 flags),
       `odr_type_variant` (L4 layout vs layout), the bidirectional
