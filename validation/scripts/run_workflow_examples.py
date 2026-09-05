@@ -70,12 +70,19 @@ def _tree_signature(root: Path) -> dict[str, int]:
     }
 
 
-def _run(command: str, cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+def _run(
+    argv: list[str] | tuple[str, ...], cwd: Path, timeout: int
+) -> subprocess.CompletedProcess[str]:
+    """Run one documented command with no shell involved.
+
+    `workflow_examples` rejects any `run:` line carrying a shell
+    metacharacter, so `shlex.split` reproduces exactly what a reader typing
+    that line into their terminal would get -- without granting a committed
+    manifest the injection surface `shell=True` would.
+    """
     return subprocess.run(
-        command,
+        list(argv),
         cwd=cwd,
-        shell=True,  # noqa: S602 - the command is repository-authored, and
-        # running it exactly as a reader would type it is the whole point.
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -150,7 +157,7 @@ def run_workflow(
 
         for step in workflow.steps:
             started = time.monotonic()
-            proc = _run(step.run, scratch, timeout)
+            proc = _run(step.argv, scratch, timeout)
             record = {
                 "name": step.name,
                 "command": step.run,
@@ -176,8 +183,9 @@ def run_workflow(
                     step_failures.append(f"stdout unexpectedly contains {needle!r}")
 
             if step.json_variant:
-                json_command = " ".join([step.run, *step.json_variant])
-                json_proc = _run(json_command, scratch, timeout)
+                json_argv = (*step.argv, *step.json_variant)
+                json_command = " ".join(json_argv)
+                json_proc = _run(json_argv, scratch, timeout)
                 record["json_command"] = json_command
                 record["json_exit_code"] = json_proc.returncode
                 try:

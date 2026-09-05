@@ -28,6 +28,8 @@ artifact).
 
 from __future__ import annotations
 
+import re
+import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,6 +51,17 @@ _STEP_KEYS = frozenset(
 _EXPECT_KEYS = frozenset({"exit_code", "stdout_contains", "stdout_excludes"})
 _MANIFEST_KEYS = frozenset({"id", "task", "platforms", "requires", "steps"})
 
+# A `run:` command is executed with `shell=False` after `shlex.split`, so no
+# shell ever interprets it. That is a deliberate choice, not an oversight: a
+# committed manifest is repository-authored, but "repository-authored" is
+# exactly the trust level `check_ai_readiness.py`'s own banned-imports gate
+# declines to grant `subprocess(..., shell=True)` anywhere under `abicheck/`,
+# and there is no reason for this runner to hold itself to a weaker bar. A
+# command that genuinely needs a pipe, a redirect or a variable is rejected
+# here rather than silently mis-executed as a literal argument -- if a
+# workflow ever needs one, that is a deliberate decision to make then.
+_SHELL_METACHARACTERS = re.compile(r"[|&;<>$`(){}\[\]*?~\n]|\|\|")
+
 
 class ManifestError(Exception):
     """A `workflow.yaml` that does not satisfy the schema above."""
@@ -58,6 +71,7 @@ class ManifestError(Exception):
 class Step:
     name: str
     run: str
+    argv: tuple[str, ...] = ()
     exit_code: int | None = None
     stdout_contains: tuple[str, ...] = ()
     stdout_excludes: tuple[str, ...] = ()
@@ -147,6 +161,21 @@ def load(directory: Path) -> Workflow:
         command = str(entry.get("run") or "").strip()
         if not command:
             raise ManifestError(f"{manifest}: step {name!r} needs a `run` command")
+        metacharacter = _SHELL_METACHARACTERS.search(command)
+        if metacharacter:
+            raise ManifestError(
+                f"{manifest}: step {name!r} contains the shell metacharacter "
+                f"{metacharacter.group()!r}. Commands run with shell=False; "
+                "see _SHELL_METACHARACTERS."
+            )
+        try:
+            argv = shlex.split(command)
+        except ValueError as exc:
+            raise ManifestError(
+                f"{manifest}: step {name!r}: cannot parse `run` ({exc})"
+            ) from exc
+        if not argv:
+            raise ManifestError(f"{manifest}: step {name!r}: `run` parses to nothing")
         expect = entry.get("expect") or {}
         if not isinstance(expect, dict):
             raise ManifestError(
@@ -168,6 +197,7 @@ def load(directory: Path) -> Workflow:
             Step(
                 name=name,
                 run=command,
+                argv=tuple(argv),
                 exit_code=expect.get("exit_code"),
                 stdout_contains=tuple(expect.get("stdout_contains") or ()),
                 stdout_excludes=tuple(expect.get("stdout_excludes") or ()),

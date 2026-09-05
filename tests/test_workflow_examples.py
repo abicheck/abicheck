@@ -174,3 +174,42 @@ def test_command_normalization_survives_readme_formatting(
     about -- but a genuinely different command still must not match."""
     normalized = workflow_examples.normalize_command(documented)
     assert (workflow_examples.normalize_command(declared) in normalized) is expected
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "abicheck compare a.so b.so | tee out.txt",
+        "abicheck compare a.so b.so > report.json",
+        "abicheck compare a.so b.so && echo done",
+        "abicheck compare $LIB_OLD $LIB_NEW",
+        "abicheck compare a.so b.so; rm -rf /",
+        "abicheck compare *.so",
+        "abicheck compare `cat old` b.so",
+    ],
+)
+def test_a_command_needing_a_shell_is_rejected(tmp_path: Path, command: str):
+    """Commands run with `shell=False`, so a manifest line needing a shell
+    must fail loudly at load rather than being handed to the program as a
+    literal argument -- and the runner never gets `shell=True`'s injection
+    surface in the first place."""
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text("# demo\n", encoding="utf-8")
+    (directory / "workflow.yaml").write_text(
+        "id: demo\n"
+        "task: Does it work?\n"
+        "platforms: [linux]\n"
+        f"steps: [{{name: a, run: '{command}'}}]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(workflow_examples.ManifestError, match="metacharacter"):
+        workflow_examples.load(directory)
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_every_step_parses_to_a_real_argv(directory: Path):
+    workflow = workflow_examples.load(directory)
+    for step in workflow.steps:
+        assert step.argv
+        assert " ".join(step.argv) == workflow_examples.normalize_command(step.run)

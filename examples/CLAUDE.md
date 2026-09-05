@@ -35,6 +35,10 @@ the output) — not calibration fixtures a gate scores. Consequently:
   verdict/change kinds. A directory without one is a hard error, not a
   free point of workflow coverage; it used to be exactly that, when the
   coverage report counted subdirectories.
+- **A `run:` command runs with no shell** (`shlex.split`, `shell=False`);
+  a pipe, redirect, `&&`, glob or variable is rejected at manifest load
+  rather than handed to the program as a literal argument. Keep a
+  documented command a single program invocation.
 - **Every `run:` command in that manifest must appear verbatim in the
   workflow's own README** (whitespace-normalized). This is the rule that
   keeps the contract from becoming a second copy of the walkthrough, able
