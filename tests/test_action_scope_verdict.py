@@ -342,3 +342,68 @@ class TestScopeMemberNamesCannotForgeTheSummary:
         # No line of the summary was fabricated by the name: every backtick
         # on that line is one the template wrote, so they still pair up.
         assert line.count("`") % 2 == 0
+
+
+class TestOperationalFailureIsNeverWaivedAsABreak:
+    """Codex review, twentieth round: a release/bundle-facts run floors its
+    exit at 4 for an operational failure (a library that failed to extract
+    or compare) with `run_outcome.operational` naming it. The Action must
+    take its non-waivable ERROR path for that, not map exit 4 to a
+    `BREAKING` that `fail-on-breaking: false` waives into a green check
+    for a corrupted current artifact."""
+
+    @staticmethod
+    def _report(operational: str) -> dict:
+        report = _release_report(
+            incomplete_scope=0, no_comparison=0, unchecked=["libbad.so"]
+        )
+        report["run_outcome"]["operational"] = operational
+        report["run_outcome"]["compatibility"] = "NO_CHANGE"
+        report["exit"]["code"] = 4
+        report["exit"]["reasons"] = ["operational_error"]
+        report["exit"]["operational_error_contribution"] = (
+            4 if operational != "none" else 0
+        )
+        return report
+
+    @pytest.mark.parametrize("fail_on_breaking", ["true", "false"])
+    def test_extraction_error_at_exit_4_fails_the_step(
+        self, tmp_path: Path, fail_on_breaking: str
+    ) -> None:
+        bindir = _stub_abicheck(
+            tmp_path, exit_code=4, report=self._report("extraction_error")
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                "INPUT_FAIL_ON_BREAKING": fail_on_breaking,
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "ERROR", outputs
+        assert outputs["_exit"] == 1, outputs
+        assert "operational failure" in outputs["_stdout"], outputs
+
+    def test_a_plain_break_at_exit_4_is_still_waivable(self, tmp_path: Path) -> None:
+        """Control: with `operational: none`, exit 4 stays the compatibility
+        verdict `fail-on-breaking: false` may waive, exactly as before."""
+        bindir = _stub_abicheck(tmp_path, exit_code=4, report=self._report("none"))
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                "INPUT_FAIL_ON_BREAKING": "false",
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "BREAKING", outputs
+        assert outputs["_exit"] == 0, outputs

@@ -102,6 +102,7 @@ from .frontends.cli.options import (
     secondary_output_options,
 )
 from .model import AbiSnapshot
+from .model.scope_acquisition import AcquisitionState
 from .pack_application import resolve_bundle_policy_file
 from .report.comparison_scope import comparison_scope_terms
 from .workflows.release_scope import (
@@ -699,12 +700,6 @@ def compare_release_cmd(
             # complete) -- what exit 8, the verdict bump, and the Markdown
             # removed/added sections read; the raw set difference stays in
             # the record and is reported as `unmatched_old`/`unmatched_new`.
-            for key in sorted(set(old_unclassified) | set(new_unclassified)):
-                reason = old_unclassified.get(key) or new_unclassified[key]
-                library_results.append(
-                    {"library": key, "verdict": "failed", "reason": reason}
-                )
-                click.echo(f"Failed: {key}: {reason}", err=True)
             scope_record = build_release_scope_record(
                 old_map,
                 new_map,
@@ -714,6 +709,25 @@ def compare_release_cmd(
                 old_failed=old_unclassified,
                 new_failed=new_unclassified,
             )
+            # A member --dso-only could not classify is this run's own
+            # acquisition failure: an operational `ERROR` library result
+            # (the same rank a failed extraction takes, floored at exit 4
+            # under either --on-incomplete-scope policy), unless D9 narrowed
+            # it out of scope -- then it is listed on the record only (Codex
+            # review, twentieth round).
+            scope_states = {m.member: m.state for m in scope_record.members}
+            for key in sorted(set(old_unclassified) | set(new_unclassified)):
+                reason = old_unclassified.get(key) or new_unclassified[key]
+                if scope_states.get(key) is AcquisitionState.OUT_OF_SCOPE:
+                    continue
+                library_results.append(
+                    {"library": key, "verdict": "ERROR", "error": reason}
+                )
+                if _RELEASE_VERDICT_ORDER.get("ERROR", 0) > _RELEASE_VERDICT_ORDER.get(
+                    worst_verdict, 0
+                ):
+                    worst_verdict = "ERROR"
+                click.echo(f"Failed: {key}: {reason}", err=True)
             scope_terms = comparison_scope_terms(scope_record, on_incomplete_scope)
             removed_keys = [m.member for m in scope_record.proven_removed_members]
             added_keys = [m.member for m in scope_record.proven_added_members]

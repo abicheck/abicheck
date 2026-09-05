@@ -2845,6 +2845,19 @@ _severity_gate_categories() {
 # `case $ABICHECK_EXIT in ...` dispatch established from the process exit
 # code is published unchanged. A verdict is stated by the report or not at
 # all -- it is never guessed from prose.
+# Prints `run_outcome.operational` and succeeds when it names a current-run
+# operational failure (anything but `none`/absent and ADR-065 D7's own
+# `no_comparison_completed`, which the scope axis already reports); fails
+# otherwise. Read from the report, never inferred from the exit code.
+_operational_failure_status() {
+  local _op
+  _op=$(_report_query "$(_json_report_src)" run_outcome operational 2>/dev/null || true)
+  case "$_op" in
+    ""|none|no_comparison_completed) return 1 ;;
+    *) echo "$_op"; return 0 ;;
+  esac
+}
+
 _report_compat_verdict() {
   local _src _answer _operational
   _src=$(_json_report_src)
@@ -3343,7 +3356,19 @@ else
         fi
         ;;
       2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
-      4) VERDICT="BREAKING" ;;
+      4)
+        # A release/bundle-facts run floors its exit at 4 for an operational
+        # failure too (a library that failed to extract or compare, ADR-065
+        # D1) -- `run_outcome.operational` names it. That is not (only) a
+        # compatibility break and must not be waived by fail-on-breaking:
+        # false (Codex review), so it takes the non-waivable ERROR path.
+        if _op=$(_operational_failure_status); then
+          VERDICT="ERROR"
+          echo "::error::abicheck reports an operational failure (run_outcome.operational: $_op): at least one library failed to extract or compare, so exit code 4 is not a plain compatibility verdict and is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
+        else
+          VERDICT="BREAKING"
+        fi
+        ;;
       8) VERDICT="REMOVED_LIBRARY" ;;
       *) VERDICT="ERROR" ;;
     esac

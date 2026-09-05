@@ -375,10 +375,15 @@ class TestDsoOnlyUnclassifiedIsFailed:
         assert scope["completeness"] == "incomplete"
         assert _removal_findings(doc) == []
         by_name = {lib["library"].split("-")[0]: lib for lib in doc["libraries"]}
-        assert by_name["libnoelf.so"]["verdict"] == "failed"
+        # Codex review, twentieth round: an in-scope member this run could
+        # not classify is an operational `ERROR`, floored at 4 under either
+        # policy -- never a warn-accepted gap beside a healthy sibling.
+        assert by_name["libnoelf.so"]["verdict"] == "ERROR"
         assert by_name["libdso.so"]["verdict"] == "NO_CHANGE"
         assert "libwin.dll" not in by_name
-        assert code == (1 if policy == "block" else 0)
+        assert doc["run_outcome"]["operational"] == "extraction_error"
+        assert doc["exit"]["operational_error_contribution"] == 4
+        assert code == 4
 
     def test_fully_classified_stored_pair_stays_proven(self, tmp_path: Path) -> None:
         """Control: every declared member classifies, so the proof stands
@@ -466,7 +471,10 @@ class TestFailedMemberIsNeverAProvenRemoval:
         assert [n.split("-")[0] for n in scope["unchecked"]] == ["libnoelf.so"]
         assert scope["counts"]["failed"] == 1
         assert _removal_findings(doc) == []
-        assert code == 0
+        # Never exit 8 -- but the classification failure itself is this
+        # run's operational error (Codex review, twentieth round).
+        assert doc["run_outcome"]["operational"] == "extraction_error"
+        assert code == 4
 
 
 class TestExplicitManifestNeverFallsBackToTheStoredOne:
