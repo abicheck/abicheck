@@ -287,6 +287,13 @@ def test_disposition_counts_conserve_the_detected_total(shape, make_rules) -> No
     assert conservation_holds(ledger)
     assert sum(ledger.counts().values()) == ledger.detected_total
 
+    # Scope of this oracle, stated so a later reader does not over-read it:
+    # equality holds because none of these shapes produce an *early* collapse
+    # (a duplicate a pre-`FilterRedundant` step discards reaches no bucket at
+    # all, and is counted by the ledger alone -- see
+    # `test_early_deduplication_is_counted_not_dropped`). The claim here is
+    # the one that matters for a report reader: everything that survived to a
+    # bucket is counted exactly once, in exactly one disposition.
     independent_total = (
         len(result.changes)
         + len(result.suppressed_changes)
