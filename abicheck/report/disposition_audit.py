@@ -179,7 +179,7 @@ def compute_disposition_audit(
 def add_disposition_audit(
     d: dict[str, object], result: DiffResult, severity_config: object | None = None
 ) -> None:
-    """Attach the ``disposition_audit`` block to a JSON report (schema 2.50).
+    """Attach the ``disposition_audit`` block to a JSON report (schema 2.51).
 
     Unconditional and unsuppressible by construction: it is derived from the
     conserved ledger rather than from the post-disposition ``changes`` list,

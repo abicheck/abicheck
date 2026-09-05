@@ -676,6 +676,11 @@ class TestEmbeddedManifestForEmptyVariant:
             manifest=manifest,
             filesystem_aliases={},
             library_filenames={},
+            # ADR-065 D2: the capture asserts its (empty) inventory is the
+            # whole release, so NEW's members are proven additions and the
+            # bundle graph -- and this promise -- reaches them; without the
+            # assertion the promise is withheld, never manufactured (S2).
+            inventory_complete=True,
         )
         old_pkg = tmp_path / "old_pkg"
         store = DirectoryObjectStore(old_pkg)

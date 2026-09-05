@@ -38,6 +38,7 @@ workflow in workflows" -- the same reasoning that already moved
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -46,6 +47,14 @@ if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..policy_file import PolicyFile
     from .suppression import SuppressionList
+from ..errors import ProfileMismatchError, ScopeMismatchError
+from .release_scope import (
+    build_stored_baseline_scope_record,
+    mismatch_kind,
+    out_of_scope_provider_names,
+    restrict_bundle_facts,
+    scope_manifest_to_members,
+)
 
 
 def compare_stored_bundle_facts_pair(
@@ -232,7 +241,29 @@ def compare_stored_bundle_facts_pair(
     }
 
     per_library_results: list[DiffResult] = []
+    # ADR-065 D8: a member whose capture degraded to an ELF-only snapshot
+    # is *failed* on that side -- its stored snapshot is not evidence of
+    # what the library declared, so diffing it would read every real
+    # declaration as an addition/removal. Skipped here and named in
+    # `analysis_errors` below; the graph-level bundle analysis still sees
+    # the member's ELF facts, which the degraded capture does carry.
+    degraded_notes = [
+        f"{key}: {side} side was captured degraded ({reason}); per-library "
+        "comparison skipped (ADR-065 D8)"
+        for key in matched_keys
+        for side, facts in (("OLD", old_facts), ("NEW", new_facts))
+        for reason in (facts.degraded_members.get(key),)
+        if reason is not None
+    ]
+    degraded_keys = {
+        key
+        for key in matched_keys
+        if key in old_facts.degraded_members or key in new_facts.degraded_members
+    }
+    not_comparable: dict[str, tuple[str, str]] = {}
     for key in matched_keys:
+        if key in degraded_keys:
+            continue
         raw_old = old_facts.per_library_snapshots[key]
         raw_new = new_facts.per_library_snapshots[key]
         # Codex review, PR #1060, round 6: the floor half of the same
@@ -247,14 +278,23 @@ def compare_stored_bundle_facts_pair(
         # no-op ceiling on evidence that was already at or below the
         # requested rung, so the comparison would proceed on binary-only
         # facts as if headers-level evidence had genuinely backed it.
-        enforce_requested_depth(depth, ((f"old:{key}", raw_old), (f"new:{key}", raw_new)))
-        diff = compare_snapshots(
-            projected_old_snapshots[key],
-            projected_new_snapshots[key],
-            suppress,
-            policy=policy,
-            policy_file=policy_file,
+        enforce_requested_depth(
+            depth, ((f"old:{key}", raw_old), (f"new:{key}", raw_new))
         )
+        # ADR-050 D2 per member (Codex review, thirtieth round): a pair
+        # whose extraction contracts disagree is `not_comparable` on the
+        # record; the sibling comparisons survive, as in the fan-out.
+        try:
+            diff = compare_snapshots(
+                projected_old_snapshots[key],
+                projected_new_snapshots[key],
+                suppress,
+                policy=policy,
+                policy_file=policy_file,
+            )
+        except (ProfileMismatchError, ScopeMismatchError) as exc:
+            not_comparable[key] = (mismatch_kind(exc), str(exc))
+            continue
         if depth is not None:
             # Codex review, PR #1060, round 10: service_compare_pipeline.
             # resolve_compare_request() stamps DiffResult.requested_depth
@@ -290,13 +330,64 @@ def compare_stored_bundle_facts_pair(
         if manifest_path is not None
         else (old_facts.manifest or new_facts.manifest)
     )
-    new_bundle_snapshot = bundle_snapshot_from_facts(new_facts)
-    return compare_bundle_from_facts(
-        old_facts,
+    # ADR-065 S2: the record first, so the bundle graph below sees matched
+    # members and proven removals/additions only (D2; Codex review) and
+    # the skipped member is `failed` on the record for the dispatcher's
+    # completeness axis (a nonempty `per_library` alone read a partially
+    # unchecked bundle as complete).
+    scope_record = build_stored_baseline_scope_record(
+        old_facts.per_library_snapshots,
+        new_facts.per_library_snapshots,
+        compared=[
+            key
+            for key in matched_keys
+            if key not in degraded_keys and key not in not_comparable
+        ],
+        not_comparable={k: msg for k, (_kind, msg) in not_comparable.items()},
+        degraded={
+            key: (
+                old_facts.degraded_members[key]
+                if key in old_facts.degraded_members
+                else new_facts.degraded_members[key]
+            )
+            for key in sorted(degraded_keys)
+        },
+        old_provenance="stored bundle-facts capture that made no complete-inventory assertion",
+        new_provenance="stored bundle-facts capture that made no complete-inventory assertion",
+        old_complete=old_facts.inventory_complete,
+        new_complete=new_facts.inventory_complete,
+        # An unmatched degraded member is `failed` on its own side (Codex
+        # review, twenty-ninth round): never a proven removal/addition, and
+        # dropped with the member before the bundle graph is rebuilt.
+        old_failed={
+            k: f"OLD side was captured degraded ({v}); comparison skipped (ADR-065 D8)"
+            for k, v in old_facts.degraded_members.items()
+            if k not in new_facts.per_library_snapshots
+        },
+        new_failed={
+            k: f"NEW side was captured degraded ({v}); comparison skipped (ADR-065 D8)"
+            for k, v in new_facts.degraded_members.items()
+            if k not in old_facts.per_library_snapshots
+        },
+    )
+    # ADR-065 D2 (Codex review): a promise only an excluded member could
+    # answer is withheld, not reported as manifest drift.
+    manifest, manifest_note = scope_manifest_to_members(manifest, scope_record)
+    new_bundle_snapshot = bundle_snapshot_from_facts(
+        restrict_bundle_facts(new_facts, scope_record)
+    )
+    result = compare_bundle_from_facts(
+        # The scoped effective manifest even when None (fully withheld), so
+        # the fallback to `old_facts.manifest` cannot re-enforce a stored
+        # manifest an explicit one replaced (CodeRabbit review).
+        replace(restrict_bundle_facts(old_facts, scope_record), manifest=manifest),
         new_bundle_snapshot,
         per_library_results,
         manifest=manifest,
-        system_providers=system_providers,
+        system_providers=[
+            *(system_providers or ()),
+            *out_of_scope_provider_names(scope_record),
+        ],
         cohorts=cohorts,
         policy=policy,
         policy_file=policy_file,
@@ -310,3 +401,13 @@ def compare_stored_bundle_facts_pair(
         old_signature_evidence=dict(projected_old_snapshots),
         new_signature_evidence=dict(projected_new_snapshots),
     )
+    result.analysis_errors.extend(degraded_notes)
+    result.analysis_errors.extend(
+        f"{key}: not comparable ({msg}); per-library comparison skipped (ADR-050 D2)"
+        for key, (_kind, msg) in sorted(not_comparable.items())
+    )
+    if manifest_note is not None:
+        result.analysis_errors.append(manifest_note)
+    result.scope_record = scope_record
+    result.not_comparable_members = dict(not_comparable)
+    return result

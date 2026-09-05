@@ -67,6 +67,7 @@ _VERDICT_EMOJI = {
     "COMPATIBLE": "✅",
     "NO_CHANGE": "✅",
     "ERROR": "🛑",
+    "unsupported": "🚫",
 }
 
 
@@ -139,6 +140,10 @@ def _header(model: CommentModel) -> tuple[str, str]:
     b, r, s = model.counts
     if model.removed_libraries:
         return "❌", "LIBRARY REMOVED"
+    if model.no_comparison_completed:
+        # ADR-065 D7: nothing was compared, so no bucket below can speak
+        # for the scope -- never "No ABI changes".
+        return "🛑", "No comparison completed"
     if b:
         # A finding is only accurately reported as "ABI BREAKING" when the
         # Breaking bucket holds a genuine abi_breaking/potential_breaking
@@ -169,6 +174,11 @@ def _header(model: CommentModel) -> tuple[str, str]:
         # happen — every mode populates breaking_categories) — fall back to
         # the conservative default rather than under-stating a red check.
         return "❌", "ABI BREAKING"
+    if model.scope_blocking:
+        # ADR-065 D6 under `--on-incomplete-scope block`: the scope axis
+        # turned the check red on its own, ahead of merely-advisory review
+        # findings, for the same reason the coverage/assurance axes do.
+        return "🛑", "Comparison scope incompletely checked"
     if model.has_incomplete and model.incomplete_blocking:
         # A hard evidence-policy failure fails the run the same way a
         # genuine break does (ADR-033 D7 / a gated coverage risk), so it
@@ -198,6 +208,10 @@ def _header(model: CommentModel) -> tuple[str, str]:
         return "⚠️", "Review recommended"
     if model.has_incomplete:
         return "⚠️", "Analysis coverage reduced"
+    if model.scope_notice is not None:
+        # `warn` (the default): the compared members are clean, but the
+        # headline may only say so for them, never for the whole scope.
+        return "⚠️", "Compared members clean; scope incompletely checked"
     if s:
         return "✅", "No compatibility impact detected"
     return "✅", "No ABI changes"
@@ -427,6 +441,32 @@ def _library_notes(model: CommentModel) -> list[str]:
     if model.added_libraries:
         listed = ", ".join(f"`{_esc(x)}`" for x in model.added_libraries)
         out += [f"> ➕ New libraries: {listed}", ""]
+    if model.scope_notice is not None:
+        out += [f"> 🧭 {_esc(model.scope_notice)}", ""]
+    unmatched_old = [x for x in model.unmatched_old if x not in model.removed_libraries]
+    unmatched_new = [x for x in model.unmatched_new if x not in model.added_libraries]
+    if unmatched_old or unmatched_new:
+        # Each member carries its own acquisition state (a failed OLD
+        # acquisition is not "the NEW inventory is unproven"; Codex review);
+        # the trailing rule is the one D2 statement true of all of them.
+        def _named(x: str) -> str:
+            state = model.unmatched_states.get(x)
+            return f"`{_esc(x)}`" + (
+                f" ({_esc(state.replace('_', ' '))})" if state else ""
+            )
+
+        parts = []
+        if unmatched_old:
+            parts.append("OLD-only " + ", ".join(_named(x) for x in unmatched_old))
+        if unmatched_new:
+            parts.append("NEW-only " + ", ".join(_named(x) for x in unmatched_new))
+        out += [
+            "> ↔️ Unmatched libraries (present on one side only; a removal or "
+            "addition needs the lacking side's inventory proven complete, and a "
+            "failed acquisition is never one -- see the comparison scope, "
+            "ADR-065 D2): " + "; ".join(parts),
+            "",
+        ]
     return out
 
 

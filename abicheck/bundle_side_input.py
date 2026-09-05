@@ -89,7 +89,7 @@ and PR I's tracking in ``docs/contribute/plans/cli-cleanup-phase-two.md``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -406,12 +406,20 @@ def compare_release_against_bundle_facts(
     from .bundle_facts import compare_bundle_from_facts
     from .bundle_manifest import load_manifest
     from .bundle_models import BundleSignatureEvidence
+    from .errors import (
+        IncompatibleSnapshotSchemaError,
+        ProfileMismatchError,
+        ScopeMismatchError,
+        SnapshotError,
+        UnsupportedArtifactError,
+    )
     from .package import discover_shared_libraries
     from .serialization import load_bundle_facts
     from .workflows.bundle_facts_library_overrides import (
         validate_matched_library_overrides,
     )
     from .workflows.extraction import build_match_map
+    from .workflows.release_scope import mismatch_kind
 
     old_facts = load_bundle_facts(old_facts_path, max_json_object_nodes=max_json_object_nodes)
 
@@ -450,9 +458,30 @@ def compare_release_against_bundle_facts(
 
     per_library_results: list[DiffResult] = []
     new_signature_evidence: dict[str, BundleSignatureEvidence] = {}
+    # ADR-065 D8: a member the capture recorded as degraded (its dump
+    # failed; the stored snapshot is an ELF-only stand-in) is *failed*, not
+    # evidence -- diffing it would read every real declaration on NEW as an
+    # addition. Skipped here, named below, and gated through `scope_record`.
+    degraded: dict[str, str] = {
+        key: reason
+        for key, reason in old_facts.degraded_members.items()
+        if key in new_map
+    }
+    compared: list[str] = []
+    # ADR-065 D6: a NEW artifact this build cannot analyze at all is
+    # `unsupported` on the scope record (the live fan-out's own per-member
+    # rule), not a generic error that escapes before any record exists.
+    unsupported: dict[str, str] = {}
+    # ADR-065 D1: a NEW artifact whose extraction *fails* (a damaged
+    # snapshot file, an unreadable binary) is `failed` on the record, the
+    # same per-member handling the native fan-out applies -- never an
+    # exception that escapes before the record exists and discards every
+    # sibling's completed comparison (Codex review).
+    failed: dict[str, str] = {}
+    not_comparable: dict[str, tuple[str, str]] = {}
     for key, old_snapshot in old_facts.per_library_snapshots.items():
         new_path = new_map.get(key)
-        if new_path is None:
+        if new_path is None or key in degraded:
             continue
         # Per-library overrides win over the uniform fallback -- a library
         # absent from a given override map still falls back to that map's
@@ -463,20 +492,37 @@ def compare_release_against_bundle_facts(
         lib_headers = (per_library_headers or {}).get(key, headers)
         lib_includes = (per_library_includes or {}).get(key, includes)
         lib_compile = (per_library_compile or {}).get(key, compile)
-        new_snapshot = service.resolve_input(
-            new_path,
-            headers=lib_headers,
-            includes=lib_includes,
-            version=new_version,
-            lang=lang,
-            lang_explicit=lang_explicit,
-            header_backend=header_backend,
-            compile=lib_compile,
-            include_dependencies=include_dependencies,
-        )
-        diff = service.compare_snapshots(
-            old_snapshot, new_snapshot, suppress, policy=policy, policy_file=policy_file
-        )
+        try:
+            new_snapshot = service.resolve_input(
+                new_path,
+                headers=lib_headers,
+                includes=lib_includes,
+                version=new_version,
+                lang=lang,
+                lang_explicit=lang_explicit,
+                header_backend=header_backend,
+                compile=lib_compile,
+                include_dependencies=include_dependencies,
+            )
+        except (IncompatibleSnapshotSchemaError, UnsupportedArtifactError) as exc:
+            unsupported[key] = str(exc)
+            continue
+        except (SnapshotError, OSError, ValueError) as exc:
+            failed[key] = str(exc)
+            continue
+        # ADR-050 D2 per member (Codex review, thirtieth round): a pair
+        # whose extraction contracts disagree is `not_comparable` on the
+        # record, and the key counts as compared only once the diff ran --
+        # the fan-out's own per-library rule, never an escape that discards
+        # every sibling's completed comparison.
+        try:
+            diff = service.compare_snapshots(
+                old_snapshot, new_snapshot, suppress, policy=policy, policy_file=policy_file
+            )
+        except (ProfileMismatchError, ScopeMismatchError) as exc:
+            not_comparable[key] = (mismatch_kind(exc), str(exc))
+            continue
+        compared.append(key)
         per_library_results.append(diff)
         new_signature_evidence[key] = BundleSignatureEvidence.from_snapshot(new_snapshot)
 
@@ -486,17 +532,86 @@ def compare_release_against_bundle_facts(
     # StoredBundleFactsInput/resolve_bundle_side, which would reload and
     # re-parse the identical file from disk a second time for no benefit.
     from .bundle import build_bundle_snapshot
+    from .workflows.release_scope import (
+        build_stored_baseline_scope_record,
+        bundle_analysis_members,
+        out_of_scope_provider_names,
+        restrict_bundle_facts,
+        scope_manifest_to_members,
+    )
 
-    manifest = load_manifest(manifest_path) if manifest_path is not None else None
-    new_bundle_snapshot = build_bundle_snapshot(new_map)
-    return compare_bundle_from_facts(
-        old_facts,
+    scope_record = build_stored_baseline_scope_record(
+        old_facts.per_library_snapshots,
+        new_map,
+        compared=compared,
+        degraded=degraded,
+        old_provenance="stored bundle-facts capture that made no complete-inventory assertion",
+        new_provenance="live directory/archive listing: no declared inventory",
+        new_single_artifact=not new_dir.is_dir(),
+        unsupported=unsupported,
+        failed=failed,
+        not_comparable={k: msg for k, (_kind, msg) in not_comparable.items()},
+        old_complete=old_facts.inventory_complete,
+        # An OLD-only degraded member is `failed` on OLD, never `not_supplied`
+        # (Codex review, twenty-ninth round).
+        old_failed={
+            k: f"OLD side was captured degraded ({v}); comparison skipped (ADR-065 D8)"
+            for k, v in old_facts.degraded_members.items()
+            if k not in new_map
+        },
+    )
+    # ADR-065 D2: the bundle graph sees matched members and proven
+    # removals/additions only (Codex review) -- see bundle_analysis_members.
+    bundle_members = bundle_analysis_members(scope_record)
+    # ADR-065 D2 (Codex review): a promise only an excluded member could
+    # answer is withheld, not reported as manifest drift.
+    manifest, manifest_note = scope_manifest_to_members(
+        load_manifest(manifest_path) if manifest_path is not None else old_facts.manifest,
+        scope_record,
+    )
+    new_bundle_snapshot = build_bundle_snapshot(
+        {k: v for k, v in new_map.items() if k in bundle_members}
+    )
+    result = compare_bundle_from_facts(
+        # `manifest=` is the resolved, scoped manifest even when it is None
+        # (fully withheld): compare_bundle_from_facts's own fallback to
+        # `old_facts.manifest` must not re-enforce a stored manifest an
+        # explicit one already replaced (CodeRabbit review).
+        replace(restrict_bundle_facts(old_facts, scope_record), manifest=manifest),
         new_bundle_snapshot,
         per_library_results,
         manifest=manifest,
-        system_providers=system_providers,
+        system_providers=[
+            *(system_providers or ()),
+            *out_of_scope_provider_names(scope_record),
+        ],
         cohorts=cohorts,
         policy=policy,
         policy_file=policy_file,
         new_signature_evidence=dict(new_signature_evidence),
     )
+    result.analysis_errors.extend(
+        f"{key}: OLD side was captured degraded ({reason}); per-library "
+        "comparison skipped (ADR-065 D8)"
+        for key, reason in sorted(degraded.items())
+    )
+    result.analysis_errors.extend(
+        f"{key}: NEW artifact is unsupported by this build ({reason}); "
+        "per-library comparison skipped (ADR-065 D6)"
+        for key, reason in sorted(unsupported.items())
+    )
+    result.analysis_errors.extend(
+        f"{key}: NEW artifact failed extraction ({reason}); per-library "
+        "comparison skipped (ADR-065 D1)"
+        for key, reason in sorted(failed.items())
+    )
+    result.analysis_errors.extend(
+        f"{key}: not comparable ({msg}); per-library comparison skipped (ADR-050 D2)"
+        for key, (_kind, msg) in sorted(not_comparable.items())
+    )
+    if manifest_note is not None:
+        result.analysis_errors.append(manifest_note)
+    result.scope_record = scope_record
+    result.extraction_failures = dict(failed)
+    result.not_comparable_members = dict(not_comparable)
+    return result

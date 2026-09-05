@@ -1,10 +1,19 @@
 # ADR-065: Comparison Scope, Member Selection, and Input Completeness
 
 **Date:** 2026-09-05
-**Status:** Proposed — not implemented. Design record for the vision's
-"partial matrices" and "scope-sensitive analysis" decisions
-(`vision.md`); no code, schema, CLI flag, or default changes with this
-document. Implementation is sequenced in
+**Status:** Proposed — S2 implemented (2026-09-05): the acquisition record
+(`abicheck/model/scope_acquisition.py`), the completeness axis on
+`RunOutcome`/`ExitDecision` (`abicheck/policy/outcome.py`,
+`abicheck/policy/exit_decision.py`, `abicheck/policy/scope_completeness.py`),
+the release fan-out's per-member record and `no comparison completed`
+outcome (`abicheck/workflows/release_scope.py`, `abicheck/cli_compare_release.py`),
+the degraded stranded-library marker (`BundleFacts.degraded_members`), and
+the `comparison_scope` report section (`abicheck/report/comparison_scope.py`),
+with `--on-incomplete-scope warn|block` as the D6 setting; exit `8` now
+requires D2's completeness proof (migration note in
+`docs/reference/exit-codes.md`). S0/S1/S3/S4 remain open. Design record for
+the vision's "partial matrices" and "scope-sensitive analysis" decisions
+(`vision.md`). Implementation is sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
 (workstream "Comparison scope and completeness"), which also carries the
 existing-versus-missing assessment this ADR's Context summarizes.
@@ -120,6 +129,33 @@ existing `BUNDLE_LIBRARY_REMOVED`/`_ADDED` kinds and
 proven-complete state of the relevant side rather than of a raw set
 difference.
 
+**Clarification (2026-09): completeness evidence is a concrete receipt, not
+an implicit claim.** A component-removal finding produced under D2's
+completeness rule should carry the receipt that justified it, not merely a
+boolean "completeness was proven" — otherwise a reviewer (or a later
+re-evaluation, ADR-066) has no way to check *what* established completeness
+without re-deriving it from the raw inputs. The receipt names, per finding:
+the **side** the completeness claim is about (old or new — D2's rule is
+symmetric, but each finding's own completeness evidence is one-sided); the
+**selected boundary** the claim covers (the analysis boundary from D1 —
+completeness for "this package" is not completeness for "this release
+matrix" containing it); the **inventory source** (a package manifest, a
+resolved project plan's expected-member list, or an explicit user
+completeness assertion — D1's three provenance kinds); the **inventory
+identity** (a stable identifier/digest for the specific inventory document
+consulted, so two runs claiming completeness from two different, silently
+inconsistent manifests are distinguishable); the **acquisition coverage**
+(which members that inventory named were actually resolved to an
+`available` acquisition state, versus `expected_not_produced`/`failed` —
+completeness is never proven while a named member's own acquisition status
+is unknown); and, when applicable, the **explicit user completeness
+assertion** itself (a caller can assert "this side's package is complete"
+without a machine-readable manifest — D1's third inventory-source kind —
+and that assertion is itself part of the receipt, not indistinguishable
+from a manifest-derived proof). No schema is fixed by this clarification;
+the shape above states what a future implementation's per-finding
+completeness data must be able to answer, not a JSON field list.
+
 ### D3 — Ambiguity is a diagnostic, never a guess
 
 When a candidate could pair with more than one baseline member (or vice
@@ -192,6 +228,48 @@ completeness policy says. A permissive completeness setting can downgrade
 "compatibility checked". This applies to the release fan-out, the Action's
 `new_target`/dry-run baseline-unavailable paths, and any future selected
 comparison alike.
+
+**Clarification (2026-09):** "no comparison completed" is scoped to the
+*requested operation*, not to "zero binary-pair diffs ran" specifically — a
+documentation review found the acceptance-test wording below ("a run with
+zero valid comparisons reports `no comparison completed`") reads, out of
+context, as if it could apply to a case D2 already resolves the other way.
+Consider: an old package has three libraries, the new package intentionally
+has zero — every one of the three is `unmatched`, and D2's symmetric rule
+resolves each to a genuine *removal* finding once the new side's inventory
+is proven complete (an empty package is a completely-inventoried package,
+same as a full one). Zero binary pairs ran, but a real, evidence-backed
+package-inventory comparison completed and established three removals —
+that is success at the requested question ("did this package's component
+set stay the same"), never "no comparison completed". D7's own trigger
+condition is narrower and orthogonal to this: it fires when the run could
+not establish *any* answer at all for the requested scope — no complete
+inventory on either side to reason from, every selected member `ambiguous`
+or `failed`, or (the dry-run/baseline-unavailable case) no baseline to
+compare against in the first place. State each of the three outcomes'
+reporting independently, since none is a variant of another:
+
+- *Successful planning* — a `--dry-run` plan view enumerated the expected
+  set. It never claims compatibility, and it never reports
+  `no comparison completed` either, because no comparison was attempted at
+  all — D7's trigger condition presupposes an attempted comparison, and a
+  pure planning view is not one.
+- *Baseline initialization* — a `new_target`, first-ever-baseline run.
+  This **does** report `no comparison completed`, exactly as D7's base
+  text already requires (unchanged by this clarification): it is an
+  honest, expected first-run state, not a failure, but it is not exempted
+  from that label — there is genuinely no prior baseline to compare
+  against.
+- *Successful compatibility analysis with zero binary-level diffs* — the
+  three-removals case above, or a matrix where every selected member
+  matched with no findings. This is a real, complete answer, so it must
+  **not** report `no comparison completed`.
+
+The acceptance test above should be read with this distinction already
+applied: "zero valid comparisons" there means zero *established answers* of
+any kind for the requested scope, not merely zero binary pairs — it does
+not relax D7's existing `new_target`/dry-run reporting requirement in any
+way.
 
 ### D8 — Failed extraction is a failed member, persisted as such
 

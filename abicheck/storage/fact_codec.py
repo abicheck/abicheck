@@ -55,6 +55,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
 )
+from .guards import provenance_text
 
 if TYPE_CHECKING:
     pass
@@ -215,6 +216,19 @@ def _encode_one(fact_dict: dict[str, Any] | None) -> None:
     status = fact_dict.get("status")
     if isinstance(status, FactStatus):
         fact_dict["status"] = status.value
+    # T9 (duplication-and-convergence-assessment Phase 6 item 4): `dataclasses.
+    # asdict()` already put a `"producer": None` key into every fact dict here
+    # (the overwhelming majority, since only PDB's vtable_fact/
+    # vptr_offset_bits_fact sets one today) -- dropped rather than left as an
+    # explicit null, matching this codec's own established sparse-field
+    # convention (a document predating this field simply lacks the key, and
+    # `decode_fact` already reads a missing key as `None`) and keeping every
+    # pre-existing persisted document/fixture byte-for-byte unchanged unless
+    # it actually carries a producer. Symmetric with `storage/
+    # semantic_ir_codec.py`'s own `_fact_to_dict`, which applies the identical
+    # omit-when-unset rule for the same reason.
+    if fact_dict.get("producer") is None:
+        fact_dict.pop("producer", None)
 
 
 def decode_fact(
@@ -250,6 +264,30 @@ def decode_fact(
         status=FactStatus(raw["status"]),
         value=raw.get("value"),
         diagnostics=tuple(raw.get("diagnostics") or ()),
+        # T9 (duplication-and-convergence-assessment Phase 6 item 4):
+        # additive, unversioned field -- a document predating it simply has
+        # no "producer" key, and `raw.get(...)` already reads that as
+        # `None`, the identical default every pre-existing `Fact[...]`
+        # construction site already carries. No schema-version gate needed
+        # (unlike `value`/`diagnostics`' own siblings above, whose *absence*
+        # can mean something at an older schema version): `producer` was
+        # never required for correctness, only ever additional attribution.
+        # Codex review: rejected rather than coerced if not a string, the
+        # same discipline every other provenance-shaped field in this
+        # package already applies (`fact_availability.py`'s own
+        # `producer`/`recipe`/`scope`, `semantic_ir_codec.py`'s entity
+        # `producer`) -- `str(7)` and `str("7")` would otherwise
+        # deserialize identically, letting a malformed/hand-edited
+        # document's producer claim look like real attribution. `None`
+        # (absent key, or an explicit JSON `null`) is the field's own,
+        # legitimate "no attribution recorded" value and is passed through
+        # rather than into `provenance_text`, which rejects non-str
+        # unconditionally and would raise on this legitimate case.
+        producer=(
+            None
+            if raw.get("producer") is None
+            else provenance_text(raw["producer"], "fact producer")
+        ),
     )
 
 

@@ -32,20 +32,29 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .bundle_facts_validation import (
+    require_degraded_members_known,
+    validated_degraded_members,
+    validated_inventory_complete,
+)
 from .dto import (
     BUNDLE_COMPOSITION_SECTION_KIND,
     SectionDTO,
     bundle_composition_from_dto,
 )
-from .import_bundle_facts import _manifest_entry_for_export
+from .import_bundle_facts import _LIBRARY_NAME_KEY, _manifest_entry_for_export
 
 __all__ = [
+    "read_variant_composition_degraded_members",
+    "read_variant_composition_inventory_complete",
     "read_variant_composition_library_filenames",
     "read_variant_composition_manifest_payload",
 ]
 
 
-def _read_variant_composition(root: str | Path, variant_id: str) -> dict[str, Any] | None:
+def _read_variant_composition(
+    root: str | Path, variant_id: str
+) -> dict[str, Any] | None:
     """*variant_id*'s own decoded `BUNDLE_COMPOSITION_SECTION_KIND` payload,
     `None` if genuinely absent (no readable variant, no section). Shared by
     the two readers below; a decode failure once the section is *present*
@@ -98,6 +107,68 @@ def read_variant_composition_manifest_payload(
             _manifest_entry_for_export(entry) for entry in raw_manifest["provides"]
         ],
     }
+
+
+def read_variant_composition_degraded_members(
+    root: str | Path, variant_id: str
+) -> dict[str, str]:
+    """*variant_id*'s own composition `degraded_members` mapping (bundle
+    key -> capture failure reason; ADR-065 D8), `{}` if absent -- the
+    marker a stored package preserves so a later comparison records the
+    member `failed` instead of diffing its ELF-only stand-in."""
+    composition = _read_variant_composition(root, variant_id)
+    if composition is None:
+        return {}
+    degraded = validated_degraded_members(composition.get("degraded_members", {}))
+    if not degraded:
+        return {}
+    # Decision-bearing, so validated like every other reader of the marker
+    # (Codex review): a hand-edited or directly constructed package whose
+    # marker names no member of this variant would otherwise be re-keyed
+    # away by the fan-out and vanish, leaving the package read as complete.
+    require_degraded_members_known(
+        degraded,
+        _variant_member_keys(root, variant_id, composition),
+        what=f"{root}: variant {variant_id!r} composition",
+    )
+    return degraded
+
+
+def _variant_member_keys(
+    root: str | Path, variant_id: str, composition: dict[str, Any]
+) -> set[str]:
+    """The bundle keys the selected variant actually stores: every stored
+    artifact's own recorded library name -- never the composition's own
+    ``library_filenames`` keys, which sit in the same untrusted payload as
+    the marker and would let a hand-edited package vouch for itself (Codex
+    review); *composition* is accepted only so a caller can pass the
+    payload it already decoded."""
+    from ..project_snapshot_store import read_artifact_ref, read_variant_ref
+
+    del composition
+    keys: set[str] = set()
+    for artifact_id in read_variant_ref(root, variant_id).artifact_ids:
+        name = read_artifact_ref(root, artifact_id).native_identity.get(
+            _LIBRARY_NAME_KEY
+        )
+        if isinstance(name, str):
+            keys.add(name)
+    return keys
+
+
+def read_variant_composition_inventory_complete(
+    root: str | Path, variant_id: str
+) -> bool:
+    """Whether *variant_id*'s composition carries the capture's own
+    ``inventory_complete`` assertion (ADR-065 D2), ``False`` if absent or
+    unasserted -- the one thing that lets a comparison against this
+    package prove a removal or an addition. Being a stored package proves
+    nothing by itself: a document imported without the assertion stays
+    unproven here exactly as it is when compared directly (Codex review)."""
+    composition = _read_variant_composition(root, variant_id)
+    if composition is None:
+        return False
+    return validated_inventory_complete(composition.get("inventory_complete", False))
 
 
 def read_variant_composition_library_filenames(

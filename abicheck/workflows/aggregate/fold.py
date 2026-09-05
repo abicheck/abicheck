@@ -207,23 +207,11 @@ class AggregateResult:
 
     @property
     def contract_coverage_targets(self) -> tuple[str, ...]:
-        """Targets whose contract coverage was incomplete.
-
-        Chiefly the *why* behind :attr:`contract_coverage_exit`, so a reader
-        is not left with a bare exit ``1`` and no target to look at — but not
-        *only* that. A target that accepted incomplete coverage via
-        ``contract.unresolved=warn`` contributes ``0`` while still listing
-        real failures, and deriving this from the contribution alone dropped
-        it from the aggregate entirely: ``incomplete_targets: []`` and no
-        diagnostic, for a matrix in which a contract domain never closed
-        (Codex review, fresh evidence). ``warn`` accepts incomplete assurance;
-        ADR-049 Section 6.2 is explicit that it does not hide it, and an
-        aggregate that omits the target hides it.
-
-        Which of these gated is still readable per target, from each entry's
-        own ``contract_coverage_exit`` — so no reader loses the narrower
-        question by this answering the broader one.
-        """
+        """Targets whose contract coverage was incomplete -- the *why*
+        behind :attr:`contract_coverage_exit`, plus every target that
+        accepted incomplete coverage via ``contract.unresolved=warn``
+        (contribution ``0``): ADR-049 Section 6.2 accepts incomplete
+        assurance without hiding it (Codex review)."""
         gated = list(self._gated)
         return tuple(
             sorted(
@@ -251,6 +239,28 @@ class AggregateResult:
             sorted(t.target_id for t in gated if t.analysis_assurance_exit > 0)
         )
 
+    @property
+    def scope_completeness_exit(self) -> int:
+        """ADR-065's scope-completeness contribution, the third orthogonal
+        floor: a release that exited ``1`` for an incomplete scope under
+        ``block`` (or no completed comparison) otherwise fed this aggregate
+        a green ``0`` (Codex review)."""
+        return max((t.scope_completeness_exit for t in self._gated), default=0)
+
+    @property
+    def scope_completeness_targets(self) -> tuple[str, ...]:
+        """Targets whose comparison scope was incomplete -- the *why* behind
+        :attr:`scope_completeness_exit`, plus every target that accepted the
+        gap under ``warn`` (contribution ``0``): the
+        :attr:`contract_coverage_targets` rule (Codex review)."""
+        return tuple(
+            sorted(
+                t.target_id
+                for t in self._gated
+                if t.scope_completeness_incomplete or t.scope_completeness_exit > 0
+            )
+        )
+
     def exit_code(self) -> int:
         """The single CI gate exit code.
 
@@ -263,10 +273,11 @@ class AggregateResult:
         (:attr:`contract_coverage_exit`), and P0.4's orthogonal
         analysis-assurance contribution of ``1`` when any target's evidence
         was incomplete under ``--require-complete-analysis``
-        (:attr:`analysis_assurance_exit`). All fold with ``max``, so every
-        ``1``-valued axis can raise a clean ``0`` and none can lower a real
-        break's ``2``/``4``. ``64`` / malformed-input errors are raised as
-        :class:`AggregateError`, never returned here.
+        (:attr:`analysis_assurance_exit`), and ADR-065's scope-completeness
+        contribution (:attr:`scope_completeness_exit`). All fold with
+        ``max``, so every ``1``-valued axis can raise a clean ``0`` and none
+        can lower a real break's ``2``/``4``. ``64`` / malformed-input errors
+        are raised as :class:`AggregateError`, never returned here.
         """
         gated = list(self._gated)
         code = max((t.gate.exit_code for t in gated if t.gate is not None), default=0)
@@ -274,6 +285,7 @@ class AggregateResult:
             code = max(code, COVERAGE_INCOMPLETE_EXIT)
         code = max(code, self.contract_coverage_exit)
         code = max(code, self.analysis_assurance_exit)
+        code = max(code, self.scope_completeness_exit)
         # ``fail`` fails the gate on *any* unexpected report — including one that
         # is unreadable/verdictless (so has no gate to contribute above) — since
         # the policy is "no target outside the expected set is tolerated".
@@ -291,41 +303,16 @@ class AggregateResult:
     # --- profile matrix (status-review item 5) ------------------------------
     @property
     def profile_matrix(self) -> tuple[ProfileMatrixEntry, ...]:
-        """Group every expected target sharing a :attr:`TargetReport.base_target`
-        (the same logical target checked under different profiles) into one
-        entry each. Only targets whose ``target_id`` is ``check_id``-shaped
-        (carries a parseable ``profile_id``) participate — a target with no
-        profile encoding has nothing to group by, so it is silently excluded
-        here (it is still fully represented in :attr:`targets`). Empty when
-        no target in this result carries a ``profile_id`` (the common
-        single-profile case), not an error. ``unexpected_targets`` are not
-        grouped — a not-in-manifest report is a different axis entirely.
-
-        A run plan can carry *more than one* check for the same
-        (base_target, profile) pair — the same target checked under one
-        profile at two different baseline channels or requested depths
-        (e.g. ``libfoo@linux-gcc14#release@headers`` and
-        ``libfoo@linux-gcc14#release@build``). All of a profile's checks are
-        combined worst-verdict-wins (Codex review) rather than keying by
-        profile_id alone, which would let a later, cleaner check silently
-        overwrite an earlier, breaking one for the same profile. When one of
-        a profile's *required* checks is unavailable while another did
-        report, the unavailable one is never silently dropped either (Codex
-        review) — it surfaces in ``incomplete_profiles`` alongside whatever
-        verdict the completed check(s) contributed, rather than letting an
-        incomplete profile read as flatly "clean"; an unavailable *optional*
-        check does not, so this stays consistent with
-        :attr:`AggregateResult.coverage` (also required-only). A profile
-        whose analyzed verdict is compatible but whose gate is still
-        blocking (e.g. an ``addition: error`` policy) is not "affected" by
-        the verdict but is by the gate (Codex review) — either makes it
-        ``affected``. A profile with *zero* analyzed checks at all (every
-        check unavailable, whether required or optional) lands in
-        ``unanalyzed_profiles`` instead of being silently folded into
-        "clean" (Codex review) — an optional-only profile that never
-        reported is not a coverage failure, but it was never actually
-        checked either, so calling it "clean" would claim confidence this
-        result does not have.
+        """One entry per :attr:`TargetReport.base_target` (the same logical
+        target checked under different profiles); only ``check_id``-shaped
+        targets participate, and ``unexpected_targets`` are never grouped.
+        A profile's several checks (different channels/depths) combine
+        worst-verdict-wins; an unavailable *required* check surfaces in
+        ``incomplete_profiles`` rather than being dropped, an optional one
+        does not (consistent with :attr:`coverage`); a compatible verdict
+        under a still-blocking gate is ``affected``; a profile with zero
+        analyzed checks lands in ``unanalyzed_profiles``, never "clean"
+        (all Codex review).
         """
         by_target = self._reports_by_target_and_profile()
 
@@ -338,6 +325,7 @@ class AggregateResult:
             unanalyzed = []
             contract_incomplete = []
             analysis_incomplete = []
+            scope_incomplete = []
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
                 reports = reports_by_profile[pid]
@@ -357,6 +345,11 @@ class AggregateResult:
                 # evidence still needs profile-level attribution here.
                 if any(r.analysis_assurance_exit > 0 for r in reports):
                     analysis_incomplete.append(pid)
+                if any(
+                    r.scope_completeness_incomplete or r.scope_completeness_exit > 0
+                    for r in reports
+                ):
+                    scope_incomplete.append(pid)
                 verdicts = [
                     r.compatibility_verdict
                     for r in reports
@@ -382,6 +375,7 @@ class AggregateResult:
                     unanalyzed_profiles=tuple(unanalyzed),
                     contract_incomplete_profiles=tuple(contract_incomplete),
                     analysis_incomplete_profiles=tuple(analysis_incomplete),
+                    scope_incomplete_profiles=tuple(scope_incomplete),
                     verdict_by_profile=verdict_by_profile,
                 )
             )
@@ -481,6 +475,7 @@ class AggregateResult:
 
         lines.extend(self._render_contract_coverage_lines())
         lines.extend(self._render_analysis_assurance_lines())
+        lines.extend(self._render_scope_completeness_lines())
         lines.extend(self._render_profile_matrix_lines())
         lines.extend(render_finding_matrix_lines(self.finding_matrix))
 
@@ -535,26 +530,37 @@ class AggregateResult:
 
         return out
 
-    def _render_analysis_assurance_lines(self) -> list[str]:
-        """P0.4's analysis-assurance block, the exact sibling of
-        :meth:`_render_contract_coverage_lines` for the other orthogonal
-        exit-floor axis. Simpler than that one: there is no
-        ``contract.unresolved=warn``-shaped "accepted, listed but not
-        gated" state for this axis -- a target's contribution is a plain
-        satisfied/not floor, so only the incomplete-target list and the
-        contribution itself are worth stating."""
-        out: list[str] = []
-        incomplete = self.analysis_assurance_targets
-        if incomplete:
-            out.append("")
-            out.append("Analysis assurance:")
-            out.append(f"  incomplete on {', '.join(incomplete)}")
-            out.append(
-                f"  contributes {self.analysis_assurance_exit} to the exit code "
-                "(P0.4 analysis-assurance axis)"
-            )
+    @staticmethod
+    def _render_floor_axis_lines(
+        title: str, incomplete: tuple[str, ...], contribution: int, axis: str
+    ) -> list[str]:
+        """One exit-floor axis block: its incomplete targets and contribution."""
+        if not incomplete:
+            return []
+        return [
+            "",
+            f"{title}:",
+            f"  incomplete on {', '.join(incomplete)}",
+            f"  contributes {contribution} to the exit code ({axis})",
+        ]
 
-        return out
+    def _render_analysis_assurance_lines(self) -> list[str]:
+        """P0.4's analysis-assurance block."""
+        return self._render_floor_axis_lines(
+            "Analysis assurance",
+            self.analysis_assurance_targets,
+            self.analysis_assurance_exit,
+            "P0.4 analysis-assurance axis",
+        )
+
+    def _render_scope_completeness_lines(self) -> list[str]:
+        """ADR-065's scope-completeness block."""
+        return self._render_floor_axis_lines(
+            "Comparison scope",
+            self.scope_completeness_targets,
+            self.scope_completeness_exit,
+            "ADR-065 scope-completeness axis",
+        )
 
     def _render_profile_matrix_lines(self) -> list[str]:
         """The per-base-target profile matrix, empty when no profiles ran."""
@@ -630,6 +636,10 @@ class AggregateResult:
             line += (
                 f" [analysis assurance incomplete on "
                 f"{', '.join(entry.analysis_incomplete_profiles)}]"
+            )
+        if entry.scope_incomplete_profiles:
+            line += (
+                f" [scope incomplete on {', '.join(entry.scope_incomplete_profiles)}]"
             )
         return line
 
@@ -750,27 +760,22 @@ class AggregateResult:
                 "blocking_targets": list(self.blocking_targets),
                 "coverage_blocking": self.coverage_blocking,
             },
-            # ADR-049 Phase 7's orthogonal axis, reported as its own block
-            # rather than folded into "coverage" above: that one is about
-            # whether every required *target reported*, this one about whether
-            # a target that did report had the evidence to close its selected
-            # contract domain. Both contribute 1 and they are not the same
-            # question, so a consumer must be able to tell which raised the
-            # exit ("Reports identify whether exit 1 comes from contract
-            # coverage, gate severity, or aggregate required-target
-            # coverage" -- plan Section 7).
+            # The three orthogonal floors (ADR-049 Phase 7 contract coverage,
+            # P0.4 analysis assurance, ADR-065 scope completeness) are their
+            # own blocks, not folded into "coverage" above: each answers a
+            # different question and each contributes 1, so a consumer must
+            # be able to tell which axis raised the exit (plan Section 7).
             "contract_coverage": {
                 "exit_contribution": self.contract_coverage_exit,
                 "incomplete_targets": list(self.contract_coverage_targets),
             },
-            # P0.4's own orthogonal axis, the exact sibling of
-            # "contract_coverage" above for the same reason: a different
-            # question ("was this target's own evidence complete under
-            # --require-complete-analysis?"), also contributing 1, so a
-            # consumer must be able to tell which axis raised the exit.
             "analysis_assurance": {
                 "exit_contribution": self.analysis_assurance_exit,
                 "incomplete_targets": list(self.analysis_assurance_targets),
+            },
+            "scope_completeness": {
+                "exit_contribution": self.scope_completeness_exit,
+                "incomplete_targets": list(self.scope_completeness_targets),
             },
             # CLI cleanup phase two, PR 2: the resolved gate policy this run
             # actually applied, and where it came from -- expectation and the

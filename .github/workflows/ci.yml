@@ -202,8 +202,16 @@ jobs:
     # cost (coverage-collecting suite + slow/hypothesis tests + uploads)
     # grows with the whole test suite, so a fixed budget with days-old
     # headroom keeps re-drifting to zero as tests are added anywhere in the
-    # fast lane. 30 restores real headroom over the ~20m1s observed here.
-    timeout-minutes: 30
+    # fast lane. 30 restored real headroom over the ~20m1s observed there --
+    # and the same drift then reached the *Windows* leg: on 2026-09-05 its
+    # main-suite step measured 27m12s on main (stored ProjectSnapshot
+    # package compares cost 30-225s each on that runner, under a second on
+    # Linux -- the slowest-25 report is dominated by them), and PR #1079,
+    # which adds end-to-end coverage of exactly that path, was cancelled at
+    # 29m19s with 99% of the suite passed. 45 restores headroom over that
+    # 27-29m; the per-platform cost of the stored-package path is a
+    # separate, unowned investigation, not something a test budget fixes.
+    timeout-minutes: 45
     permissions:
       contents: read
       id-token: write

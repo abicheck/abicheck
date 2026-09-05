@@ -208,7 +208,8 @@ class TestCompareBundleSidesParity:
         )
         assert direct.bundle_findings == stored_stored.bundle_findings
         assert any(
-            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED for f in direct.bundle_findings
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            for f in direct.bundle_findings
         )
         # via_sides itself must still resolve cleanly (no exception) even
         # though its "live" side is unparseable -- confirming the mixed
@@ -388,21 +389,19 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         )
         assert captured_kwargs["include_dependencies"] is True
 
-    def test_scope_mismatch_error_propagates_uncaught(
+    def test_scope_mismatch_is_recorded_per_member_not_raised(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """``compare_snapshots()`` raises ``ScopeMismatchError`` when a
         matched pair's ``dependency_scope`` disagrees (both sides
-        header-derived) -- this function must let it propagate uncaught,
-        not swallow or translate it, since ``workflows/AGENTS.md``'s own
-        rule is that error types are the contract and the *CLI* layer is
-        the one place that translates them (Codex review, PR #1060, round
-        12 -- found on this function's stored/stored sibling, but this
-        function shares the identical ``service.compare_snapshots()``
-        chokepoint and so the identical failure mode)."""
+        header-derived). Since ADR-065 S2 this driver records that member
+        `not_comparable` (`failed` on the scope record, ADR-050 D2) exactly
+        as the native fan-out's per-library handler does, so a sibling's
+        completed comparison and the structured scope result survive
+        instead of the exception escaping to a global refusal (Codex
+        review, thirtieth round); the CLI still exits 16 on it."""
         import abicheck.package as package_mod
         import abicheck.service as service_mod
-        from abicheck.errors import ScopeMismatchError
 
         facts_path = self._old_facts(tmp_path)
         new_dir = tmp_path / "new"
@@ -430,10 +429,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         # service.compare_snapshots() is deliberately left real here -- it's
         # the function under test for this scenario, not a collaborator to
         # stub out.
-
-        # The OLD side's own facts were captured from a plain-ELF fixture
-        # (no from_headers/dependency_scope at all) -- reload and mutate it
-        # so both sides carry an explicit, disagreeing dependency_scope.
+        from abicheck.model.scope_acquisition import AcquisitionState
         from abicheck.serialization import load_bundle_facts, save_bundle_facts
 
         facts = load_bundle_facts(facts_path)
@@ -441,8 +437,16 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         facts.per_library_snapshots["libcore.so"].dependency_scope = "filtered"
         save_bundle_facts(facts, facts_path)
 
-        with pytest.raises(ScopeMismatchError):
-            compare_release_against_bundle_facts(facts_path, new_dir)
+        result = compare_release_against_bundle_facts(facts_path, new_dir)
+        assert result.per_library == []
+        kind, message = result.not_comparable_members["libcore.so"]
+        assert kind == "scope_mismatch" and "dependency" in message.lower()
+        record = result.scope_record
+        assert record is not None
+        (member,) = [m for m in record.members if m.member == "libcore.so"]
+        assert member.state is AcquisitionState.FAILED
+        assert member.reason.startswith("not comparable: ")
+        assert any("not comparable" in m for m in result.analysis_errors)
 
     def test_policy_file_is_forwarded_to_per_library_compare(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -493,7 +497,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         assert captured["policy_file"] is None
 
         # Given: forwarded verbatim to every matched library's own compare.
-        pf = PolicyFile(overrides={ChangeKind.FUNC_VISIBILITY_CHANGED: VerdictEnum.BREAKING})
+        pf = PolicyFile(
+            overrides={ChangeKind.FUNC_VISIBILITY_CHANGED: VerdictEnum.BREAKING}
+        )
         compare_release_against_bundle_facts(facts_path, new_dir, policy_file=pf)
         assert captured["policy_file"] is pf
 
@@ -533,7 +539,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         )
         captured: dict[str, object] = {}
 
-        def _fake_compare_snapshots(old, new, suppress=None, *, policy, policy_file=None):
+        def _fake_compare_snapshots(
+            old, new, suppress=None, *, policy, policy_file=None
+        ):
             captured["suppress"] = suppress
             return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
 
@@ -591,7 +599,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         )
 
         pf = PolicyFile()
-        result = compare_release_against_bundle_facts(facts_path, new_dir, policy_file=pf)
+        result = compare_release_against_bundle_facts(
+            facts_path, new_dir, policy_file=pf
+        )
         assert result.policy_file is pf
 
     def test_policy_file_override_genuinely_demotes_a_real_verdict(

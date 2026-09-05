@@ -42,12 +42,14 @@ from __future__ import annotations
 
 import hashlib
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
 from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
 from .junit_coverage_warnings import append_coverage_warnings_suite
+from .report.junit_scope import append_scope_suite
 from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_show_only
 from .reporter_markdown import _root_cause_key_and_display
 
@@ -1102,6 +1104,7 @@ def to_junit_xml_multi(
     severity_config: SeverityConfig | None = None,
     error_libraries: list[dict[str, object]] | None = None,
     report_mode: str = "full",
+    comparison_scope: Mapping[str, object] | None = None,
 ) -> str:
     """Convert multiple DiffResults to a JUnit XML string (compare-release).
 
@@ -1112,7 +1115,7 @@ def to_junit_xml_multi(
     ``<testsuite>`` with a single ``<error>`` testcase so CI dashboards
     reflect the failure.
 
-    *report_mode*: see :func:`to_junit_xml`.
+    *report_mode*: see :func:`to_junit_xml`. *comparison_scope*: ADR-065's section (``report.junit_scope``).
     """
     root = ET.Element("testsuites")
     root.set("name", "abicheck")
@@ -1132,12 +1135,6 @@ def to_junit_xml_multi(
         root.append(ts)
         total_tests += int(ts.get("tests", "0"))
         total_failures += int(ts.get("failures", "0"))
-        # Per result, not once for the document: each library carries its own
-        # contract context, so a multi-library run can have one uncheckable
-        # comparison beside several closed ones. Wiring only the single-result
-        # renderer left a multi-result document reporting errors="0" with no
-        # coverage suite at all, so a consumer could read an uncheckable
-        # comparison as having no coverage errors (Codex review).
         coverage_errors = _append_coverage_suite(root, result)
         total_tests += coverage_errors
         total_errors += coverage_errors
@@ -1153,6 +1150,9 @@ def to_junit_xml_multi(
         total_tests += 1
         total_errors += 1
 
+    scope_tests, scope_errors = append_scope_suite(root, comparison_scope)
+    total_tests += scope_tests
+    total_errors += scope_errors
     root.set("tests", str(total_tests))
     root.set("failures", str(total_failures))
     root.set("errors", str(total_errors))

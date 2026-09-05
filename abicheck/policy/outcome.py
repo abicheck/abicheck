@@ -61,7 +61,8 @@ against a raw integer or literal -- see
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -73,6 +74,8 @@ __all__ = [
     "PolicyGateDecision",
     "RunOutcome",
     "RUN_OUTCOME_SCHEMA_VERSION",
+    "run_outcome_scope_required",
+    "ScopeCompleteness",
     "TargetLifecycle",
     "analysis_assurance_dict",
     "fold_gate_and_operational",
@@ -87,7 +90,31 @@ __all__ = [
 #: ``run_outcome`` report key) -- the same self-contained-sub-object
 #: convention ``analysis_assurance.ANALYSIS_ASSURANCE_SCHEMA_VERSION`` and
 #: ``buildsource.model.BUILD_SOURCE_PACK_VERSION`` already use.
-RUN_OUTCOME_SCHEMA_VERSION = "1.0"
+#:
+#: ``1.1`` (ADR-065 S2): the decision-bearing ``scope`` axis and the
+#: ``no_comparison_completed`` operational status. A ``1.0`` block (no
+#: ``scope``) still reads through :meth:`RunOutcome.from_dict`, which
+#: backfills ``complete`` -- true of every ``1.0`` writer, all of which
+#: described one pair.
+RUN_OUTCOME_SCHEMA_VERSION = "1.1"
+
+
+#: Pre-``scope`` ``run_outcome`` versions (``0.x``/``1``/``1.0``): textually
+#: the published schema's own exemption pattern, so the readers agree.
+_RUN_OUTCOME_SCOPELESS_VERSIONS = re.compile(r"^(0(\.[0-9]+)*|1(\.0+)?)$")
+
+
+def run_outcome_scope_required(schema_version: object) -> bool:
+    """Whether a block stamped *schema_version* must carry ``scope`` (ADR-065
+    D6): every version but the pre-axis pattern above. An absent stamp is a
+    pre-axis writer; a present unparseable or non-string one is required,
+    never read as predating the axis (Codex review)."""
+    if schema_version is None:
+        return False
+    return not (
+        isinstance(schema_version, str)
+        and _RUN_OUTCOME_SCOPELESS_VERSIONS.match(schema_version) is not None
+    )
 
 
 class PolicyGateDecision(str, Enum):
@@ -165,6 +192,12 @@ class OperationalStatus(str, Enum):
     #: ``compare-release``'s own ``verdict: "ERROR"`` sentinel -- a library
     #: failed to dump/extract/compare.
     EXTRACTION_ERROR = "extraction_error"
+    #: ADR-065 D7: the selected scope produced no valid comparison at all
+    #: (a release fan-out with zero matched pairs, or one whose every
+    #: selected member failed/was unsupported). Never success, whatever the
+    #: completeness policy says -- a permissive ``warn`` setting can
+    #: downgrade *missing members* to a warning, never *nothing compared*.
+    NO_COMPARISON_COMPLETED = "no_comparison_completed"
 
 
 def operational_status_exit_code(operational: OperationalStatus) -> int:
@@ -215,6 +248,29 @@ class TargetLifecycle(str, Enum):
     NEW_TARGET = "new_target"
 
 
+class ScopeCompleteness(str, Enum):
+    """ADR-065 D6's completeness axis: was every *selected, expected*
+    member of the comparison scope actually compared?
+
+    Independent of :class:`PolicyGateDecision` (what the compared members
+    showed) and of :class:`OperationalStatus` (whether the run itself
+    failed): a matrix with one clean pair and one unsupported or unmatched
+    selected member reads ``INCOMPLETE`` while its gate reads ``NONE`` --
+    an incompletely checked scope, never a clean pass, and never an ABI
+    finding either. ``COMPLETE`` is the fixed value for every scalar
+    comparison (the one pair it ran is the whole scope) and for a release
+    whose every selected member reached a completed comparison. The
+    per-member evidence behind ``INCOMPLETE`` lives in the typed
+    :class:`~abicheck.model.scope_acquisition.ScopeAcquisitionRecord`;
+    whether it *blocks* is :mod:`abicheck.policy.scope_completeness`'s
+    question, folded into :class:`~abicheck.policy.exit_decision.
+    ExitDecision` exactly like ADR-049 Phase 7's coverage axis.
+    """
+
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+
+
 @dataclass(frozen=True)
 class RunOutcome:
     """One report's independent-axis outcome (ADR-063 D6).
@@ -230,6 +286,13 @@ class RunOutcome:
     ``None`` for a writer that has no ``AnalysisAssurance`` rollup of its
     own to report (every synthetic builder; ``scan``'s own writers, which
     predate this axis's wiring into the scan pipeline).
+
+    ``scope`` (ADR-065 D6) defaults to :attr:`ScopeCompleteness.COMPLETE`:
+    every pre-existing constructor site is a scalar comparison or a
+    synthetic report whose scope is the one pair it describes, so the
+    default states what was already true rather than a new claim. Only the
+    release fan-out (``outcome_release.run_outcome_dict_for_release``)
+    computes it from a real acquisition record.
     """
 
     compatibility: Verdict | None
@@ -237,6 +300,7 @@ class RunOutcome:
     gate: PolicyGateDecision
     operational: OperationalStatus
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING
+    scope: ScopeCompleteness = ScopeCompleteness.COMPLETE
 
     def exit_code_contribution(self) -> int:
         """This outcome's own contribution to the shared 0/1/2/4 scheme --
@@ -254,6 +318,7 @@ class RunOutcome:
             "gate": self.gate.value,
             "operational": self.operational.value,
             "lifecycle": self.lifecycle.value,
+            "scope": self.scope.value,
         }
 
     @classmethod
@@ -287,6 +352,15 @@ class RunOutcome:
             )
         except ValueError:
             lifecycle = TargetLifecycle.EXISTING
+        # A pre-1.1 block reads an absent `scope` as COMPLETE (every such
+        # writer described the one pair it ran); later ones must carry it.
+        required = run_outcome_scope_required(data.get("schema_version"))
+        try:
+            scope = ScopeCompleteness(data.get("scope"))
+        except ValueError:
+            if required:
+                return None
+            scope = ScopeCompleteness.COMPLETE
         compatibility: Verdict | None = None
         compat_raw = data.get("compatibility")
         if isinstance(compat_raw, str):
@@ -300,6 +374,7 @@ class RunOutcome:
             gate=gate,
             operational=operational,
             lifecycle=lifecycle,
+            scope=scope,
         )
 
 
@@ -695,81 +770,6 @@ def run_outcome_dict_for_scan(
         assurance=scan_report_assurance_block(report),
         member_compatibility_verdict=getattr(worst_member, "value", None),
         lifecycle=lifecycle,
-    ).to_dict()
-
-
-def run_outcome_dict_for_release(
-    compatibility_verdict: str | None, exit_decision: object
-) -> dict[str, Any]:
-    """Build the ``run_outcome`` dict for a directory/package release
-    comparison's own summary JSON (``cli_compare_release_helpers.
-    _format_release_json``, ``cli_compare_release_matrix.
-    _write_release_summary_file``) -- both claim ``run_outcome`` per the
-    "every JSON report" contract (``docs/use/output-formats.md``) but never
-    actually built one (Codex review).
-
-    *compatibility_verdict* is deliberately **not** the release's own
-    reported ``worst_verdict`` -- that string can legitimately be the
-    ``"ERROR"``/``"not_comparable"`` operational sentinels
-    ``_RELEASE_VERDICT_ORDER`` ranks above every real verdict, correct for
-    the release's *reported* verdict but would erase a real, already-
-    completed compatibility result from this separate axis. Callers pass
-    the worst real ``Verdict`` among the release's library/global results
-    with the two sentinels excluded instead -- ``cli_compare_release_
-    helpers._release_completed_compatibility_verdict(...)`` for a native
-    writer, :func:`worst_real_verdict` for the legacy-report backfill -- or
-    ``None`` when no real result was observed at all (``compatibility``
-    stays unknown, never the dishonest floor ``"NO_CHANGE"``); either way
-    this only ever parses a real ``Verdict`` or ``None``, both handled by
-    ``Verdict(...)``'s own ``ValueError`` below.
-
-    *exit_decision* is the release's own already-computed ``exit`` block
-    (``policy.exit_decision_precedence.resolve_release_exit_decision_for_
-    report(...).to_dict()``) -- read, never recomputed.
-
-    ``gate`` is derived from ``compatibility_contribution``, with one
-    escalation: ``removed_required_library_contribution`` (exit 8) folds in
-    as :attr:`PolicyGateDecision.ABI_BREAKING`, mirroring ``buildsource.
-    check_report._escalate_removed_library_severity``. ``operational``
-    reads ``not_comparable_contribution`` (preferred) then ``operational_
-    error_contribution`` (:attr:`OperationalStatus.EXTRACTION_ERROR` --
-    ``verdict: 'ERROR'`` means a library failed to dump/extract/compare).
-    The remaining ``ExitDecision`` contributions are always ``0`` for a
-    release decision and are not consulted.
-    """
-    exit_block = exit_decision if isinstance(exit_decision, Mapping) else {}
-
-    def _int_contribution(key: str) -> int:
-        raw = exit_block.get(key, 0)
-        return raw if isinstance(raw, int) and not isinstance(raw, bool) else 0
-
-    compat_exit_code = _int_contribution("compatibility_contribution")
-    if _int_contribution("removed_required_library_contribution") != 0:
-        compat_exit_code = policy_gate_decision_exit_code(
-            PolicyGateDecision.ABI_BREAKING
-        )
-    if compat_exit_code not in _GATE_EXIT_CODE.values():
-        compat_exit_code = 0
-    gate = policy_gate_decision_for_exit_code(compat_exit_code)
-
-    operational = OperationalStatus.NONE
-    if _int_contribution("not_comparable_contribution") != 0:
-        operational = OperationalStatus.NOT_COMPARABLE
-    elif _int_contribution("operational_error_contribution") != 0:
-        operational = OperationalStatus.EXTRACTION_ERROR
-
-    compatibility: Verdict | None
-    try:
-        compatibility = Verdict(compatibility_verdict)
-    except ValueError:
-        compatibility = None
-
-    return RunOutcome(
-        compatibility=compatibility,
-        assurance=None,
-        gate=gate,
-        operational=operational,
-        lifecycle=TargetLifecycle.EXISTING,
     ).to_dict()
 
 

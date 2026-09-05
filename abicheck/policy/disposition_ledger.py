@@ -675,7 +675,7 @@ class DispositionLedger:
         return sum(1 for r in self._records if r.policy_overlay)
 
     def to_dict(self) -> dict[str, object]:
-        """The JSON ``disposition_audit`` block (report schema 2.50)."""
+        """The JSON ``disposition_audit`` block (report schema 2.51)."""
         return {
             "detected_total": self.detected_total,
             "effective_total": self.effective_total,

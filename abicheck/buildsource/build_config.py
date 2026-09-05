@@ -141,8 +141,8 @@ class BuildConfig:
 
     All fields are optional; an absent file yields the all-defaults config. The
     ``build:`` / ``sources:`` blocks drive inline build/source collection
-    (``system`` is advisory; ``query`` runs only with an explicit config +
-    ``--allow-build-query``; ``compile_db`` is where it lands).
+    (``system`` is advisory; ``query`` runs only with an explicit ``--config``;
+    ``compile_db`` is where it lands).
 
     ADR-037 D4 adds the project-contract blocks consumed by ``compare`` — the
     settings that are stable, reviewed-in-a-PR properties rather than per-run

@@ -862,7 +862,7 @@ def merge_compile_config(
     the project's ``compile:`` block for L2 the same way ``embed_build_source``
     honors its other non-executable settings for L3-L5 (Codex review). Only the
     non-executable ``compile:`` block is read here; ``build.query`` still requires
-    an explicit trusted ``--config`` + ``--allow-build-query`` (ADR-032 D5).
+    an explicit trusted ``--config`` (ADR-032 D5).
 
     A parse error is fail-loud for an **explicit** ``--config`` (``ClickException``)
     — otherwise an L2-only dump/scan with no ``--sources`` would silently drop the
@@ -1410,11 +1410,9 @@ from .frontends.cli.options.release import (  # noqa: E402
     build_source_dump_options as build_source_dump_options,
     debug_resolution_options as debug_resolution_options,
     evidence_options as evidence_options,
-    header_graph_options as header_graph_options,
     release_options as release_options,
     variant_kwargs_from_context as variant_kwargs_from_context,
     variant_options as variant_options,
-    warn_deprecated_header_graph_flags as warn_deprecated_header_graph_flags,
 )
 
 

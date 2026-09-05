@@ -221,6 +221,23 @@ topics:
     allowed_summaries:
       - learn/template-heavy-libraries.md
 
+  comparison-scope-completeness:
+    canonical_page: use/multi-binary.md
+    fact_sources:
+      - abicheck/model/scope_acquisition.py
+      - abicheck/policy/scope_completeness.py
+      - abicheck/policy/outcome.py
+      - abicheck/policy/exit_decision.py
+      - abicheck/workflows/release_scope.py
+      - abicheck/report/comparison_scope.py
+      - abicheck/frontends/cli/options/release.py
+      - action/run.sh
+    reference_page: reference/exit-codes.md
+    allowed_summaries:
+      - use/github-action.md
+      - reference/github-action-inputs.md
+      - contribute/adr/065-comparison-scope-selection-and-completeness.md
+
   cli-surface:
     canonical_page: use/cli-usage.md
     fact_sources:

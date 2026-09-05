@@ -14,40 +14,28 @@
 # limitations under the License.
 
 """The `ProjectSnapshot` package's per-section DTO envelope — ADR-062 Phase 1
-(A1.1's "reads and writes the D6 layout"), landed jointly with ADR-063's own
-Phase 8 (`one-semantic-pipeline.md`), which requires this joint landing to
-satisfy its D8 constraint: *every DTO is a distinct, versioned class from the
-domain `SemanticIR`/`Fact[T]`/`EntityId` objects, with an explicit
-`to_dto()`/`from_dto()` (never `asdict`/a 500-line mirror deserializer) and a
-migration adapter per DTO version.*
+(A1.1's "reads and writes the D6 layout"), landed jointly with ADR-063 Phase 8
+(`one-semantic-pipeline.md`), whose D8 constraint it satisfies: *every DTO is
+a distinct, versioned class from the domain `SemanticIR`/`Fact[T]`/`EntityId`
+objects, with an explicit `to_dto()`/`from_dto()` (never `asdict`/a 500-line
+mirror deserializer) and a migration adapter per DTO version.*
 
-**Why this is a thin envelope, not a generic mirror of every domain type.**
-D8's own text is explicit about what it forbids: a *second, generic*
-identity/availability scheme invented at the storage layer, and an `asdict`-
-shaped deserializer that silently drifts from the domain object it mirrors
-(the whole-document `asdict()` deep copy ADR-062's Context names as the
-defect this format replaces). It does not ask for a hand-written mirror of
-every field on every domain dataclass — that would itself be exactly the
-"second representation kept in sync by hand" this plan's own Governing
-Invariant elsewhere warns against. Each concrete section type owns its own
-explicit, field-by-field encoding already: `semantic_ir_codec.py`'s
-`semantic_ir_to_document`/`semantic_ir_from_document` is the first of these
-(ADR-063 Phase 6, extracted to a pure object<->document pair for this module
-to build on rather than duplicated here). `SectionDTO` below is the one
-*shared* piece all of those encodings plug into: a versioned envelope a
-writer stores as one content-addressed D7 object and a reader can recognize
-and migrate before trusting the payload underneath it.
+A thin envelope, not a generic mirror of every domain type: D8 forbids a
+*second, generic* identity/availability scheme at the storage layer and an
+`asdict`-shaped deserializer that drifts from the domain object it mirrors,
+not a hand-written mirror of every field (that would be the "second
+representation kept in sync by hand" the plan warns against). Each concrete
+section type owns its own explicit encoding already (`semantic_ir_codec.py`
+was the first); `SectionDTO` is the one *shared* piece they plug into: a
+versioned envelope a writer stores as one content-addressed D7 object and a
+reader can recognize and migrate before trusting the payload underneath.
 
-A migration adapter is a plain function
-`Callable[[Mapping[str, Any]], Mapping[str, Any]]` keyed by the DTO version
-it accepts, registered per section kind (`_MIGRATIONS`) — there is
-deliberately no generic "diff two dataclasses" machinery, because a real
-migration is domain-specific by nature (rename a field, split one field into
-two, change a value's unit) and a generic differ cannot express any of those
-safely. `migrate_section_dto` walks the registered chain from a stored
-version up to the section's current version, one registered step at a time,
-so a version this build does not recognize the far side of (no chain reaches
-it) is refused rather than silently accepted.
+A migration adapter is a plain `Callable[[Mapping], Mapping]` keyed by the
+DTO version it accepts, registered per section kind (`_MIGRATIONS`); there is
+deliberately no generic "diff two dataclasses" machinery, since a real
+migration is domain-specific (rename, split, change a unit).
+`migrate_section_dto` walks the chain one registered step at a time, so a
+version this build cannot reach is refused rather than silently accepted.
 """
 
 from __future__ import annotations
@@ -180,11 +168,7 @@ BUILD_SECTION_KIND = "build"
 PROVENANCE_SECTION_KIND = "provenance"
 
 #: Section kinds `legacy_section_to_dto`/`legacy_section_from_dto` must
-#: refuse -- each has its own dedicated codec instead of the generic
-#: pass-through envelope those two functions provide. As of the third 8B
-#: slice this is every entry in `SECTION_SCHEMA_VERSIONS`; the generic pair
-#: stays defined below as the fallback a future, not-yet-specialized
-#: section kind would use.
+#: refuse (each has a dedicated codec); every `SECTION_SCHEMA_VERSIONS` entry today.
 _SPECIALIZED_SECTION_KINDS = frozenset(
     {
         SEMANTIC_IR_SECTION_KIND,
@@ -208,29 +192,48 @@ _SPECIALIZED_SECTION_KINDS = frozenset(
 #: under, independent of every other axis.
 SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
     SEMANTIC_IR_SECTION_KIND: 1,
-    # ADR-063 Phase 8's full D8 split: every `storage.legacy_sections
-    # .LEGACY_SECTION_KINDS` entry starts at version 1, the same way
-    # `SEMANTIC_IR_SECTION_KIND` did before it shipped its own first real
-    # producer — each is its own independent axis from here on, so a future
-    # `"binary"` schema change never forces a bump on `"declarations"`.
+    # ADR-063 Phase 8's full D8 split: every `LEGACY_SECTION_KINDS` entry is
+    # its own independent axis from version 1 on, so a future `"binary"`
+    # schema change never forces a bump on `"declarations"`.
     **{kind: 1 for kind in LEGACY_SECTION_KINDS},
-    # ADR-063 Track C 8B: the two variant-level section kinds, independent
-    # of every axis above for the identical reason.
-    BUNDLE_COMPOSITION_SECTION_KIND: 1,
+    # ADR-063 Track C 8B: the two variant-level kinds, independent likewise.
+    # Composition v2 (ADR-065 D8) adds the decision-bearing `degraded_members`
+    # map; a composition with none is still *written* at v1 (see
+    # `bundle_composition_to_dto`) so a pre-S2 reader keeps opening it.
+    BUNDLE_COMPOSITION_SECTION_KIND: 2,
     BASELINE_SET_SECTION_KIND: 1,
 }
 
+
+def _bundle_composition_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Composition v1 -> v2: supply the empty ``degraded_members`` map v1
+    predates. A v1 section *carrying* a marker would still open in a pre-S2
+    reader that ignores it, so it is refused, not migrated (Codex); so is a
+    present non-mapping (``null``, a list) -- only absent or ``{}`` is v1."""
+    if "degraded_members" in payload:
+        raw = payload["degraded_members"]  # frozen: a MappingProxyType, not a dict
+        if not isinstance(raw, Mapping):
+            raise ValueError(
+                f"{BUNDLE_COMPOSITION_SECTION_KIND!r} section v1 'degraded_members' "
+                f"must be a mapping, got {type(raw).__name__}"
+            )
+        if raw:
+            raise ValueError(
+                f"{BUNDLE_COMPOSITION_SECTION_KIND!r} section v1 carries a non-empty "
+                "'degraded_members' marker, which requires section version 2 (ADR-065 D8)"
+            )
+    return {**payload, "degraded_members": {}}
+
+
 #: Per-section-kind migration chains, keyed by the DTO version a step reads
-#: *from* — `{1: step_from_1_to_2, 2: step_from_2_to_3, ...}`. Empty for
-#: every section kind today: none has shipped a second version yet, so there
-#: is nothing yet to migrate from. The registry exists now, ahead of a real
-#: version 2, so the *pattern* — one small, reviewed function per version
-#: bump, chained rather than replaced — is established before it is needed,
-#: the same way `StorageVersions`' own axes were reserved ahead of a
-#: producer that fills them.
+#: *from* — `{1: step_from_1_to_2, 2: step_from_2_to_3, ...}`: one small,
+#: reviewed function per version bump, chained rather than replaced.
 _MIGRATIONS: Mapping[
     str, Mapping[int, Callable[[Mapping[str, Any]], Mapping[str, Any]]]
-] = {kind: {} for kind in SECTION_SCHEMA_VERSIONS}
+] = {
+    **{kind: {} for kind in SECTION_SCHEMA_VERSIONS},
+    BUNDLE_COMPOSITION_SECTION_KIND: {1: _bundle_composition_v1_to_v2},
+}
 
 
 def _freeze(value: Any) -> Any:
@@ -506,28 +509,25 @@ def bundle_composition_to_dto(payload: Mapping[str, Any]) -> SectionDTO:
     `manifest`, `filesystem_aliases`, `library_filenames` -- as a
     `SectionDTO` (ADR-063 Track C 8B).
 
-    ADR-062's D8 vocabulary is scoped to a single `ArtifactRef`'s own
-    sections; none of these four facts names one particular library, so this
-    is a new, independent section kind rather than a squeeze into one of
-    D8's eight. `storage.import_bundle_facts.import_bundle_facts` attaches
-    the resulting object to the `VariantRef` that owns every per-library
-    `ArtifactRef` the same bundle produced, the same way
-    `variant_fingerprint` alone would already be a `VariantRef.captured`
-    coordinate if it stood alone.
-
-    There is nothing to encode beyond the version stamp, for the same
-    reason `legacy_section_to_dto` gives: `bundle_manifest.manifest_to_dict()`/
-    `bundle_facts_serialization.bundle_facts_to_dict()` already produce this
-    payload as flat JSON, and `storage/` may not import either module to
-    re-derive it (`storage/AGENTS.md`, "Permitted imports") -- the caller
-    hands this function the already-produced sub-mapping, the same
-    "storage takes an already-serialized document" contract `import_v1.py`'s
-    own module docstring establishes for the whole legacy document.
+    None of these facts names one library, so this is its own section kind
+    (not one of ADR-062 D8's per-`ArtifactRef` ones), attached by
+    `import_bundle_facts` to the owning `VariantRef`. Nothing to encode
+    beyond the version stamp, for `legacy_section_to_dto`'s reason.
     """
+    degraded = payload.get("degraded_members")
+    if degraded:
+        return SectionDTO(
+            section_kind=BUNDLE_COMPOSITION_SECTION_KIND,
+            section_schema_version=SECTION_SCHEMA_VERSIONS[
+                BUNDLE_COMPOSITION_SECTION_KIND
+            ],
+            payload=payload,
+        )
+    # No degraded member: v1 shape (key dropped) so a pre-S2 reader still opens it.
     return SectionDTO(
         section_kind=BUNDLE_COMPOSITION_SECTION_KIND,
-        section_schema_version=SECTION_SCHEMA_VERSIONS[BUNDLE_COMPOSITION_SECTION_KIND],
-        payload=payload,
+        section_schema_version=1,
+        payload={k: v for k, v in payload.items() if k != "degraded_members"},
     )
 
 

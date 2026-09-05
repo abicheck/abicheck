@@ -36,7 +36,9 @@
   `suppression.suppressed_changes[]` entry now records *which* rule hid the
   finding — its selector identity, the `--suppress` document's path, reason,
   label and expiry — instead of computing that and dropping it. Report schema
-  bumped to `2.50` (additive only), then `2.51` for `disposition_audit`'s
+  bumped to `2.51` (additive only; renumbered from a conflicting `2.50` when
+  ADR-065 S2 claimed that version first for its `comparison_scope` block),
+  then `2.52` for `disposition_audit`'s
   `policy_overlays` count -- findings policy generated *about* another
   finding (a withheld-suppression advisory) appear in the effective total but
   in neither the raw total nor the per-disposition counts, and this states

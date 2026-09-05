@@ -86,7 +86,11 @@ def _write_facts(
         ),
         functions=[fn],
     )
-    kwargs = {} if variant_fingerprint is None else {"variant_fingerprint": variant_fingerprint}
+    kwargs = (
+        {}
+        if variant_fingerprint is None
+        else {"variant_fingerprint": variant_fingerprint}
+    )
     facts = capture_bundle_facts({"libcore.so": snapshot}, **kwargs)
     path = tmp_path / name
     save_bundle_facts(facts, path)
@@ -99,15 +103,20 @@ class TestBundleCompareOperandRouting:
     ) -> None:
         """Both sides classify as stored and reach the driver (no early
         rejection) -- proven by getting past every option check straight to
-        the "nothing was compared" failure, not a click.UsageError about an
-        unsupported flag."""
+        the driver's own zero-pair D7 outcome, not a click.UsageError about
+        an unsupported flag."""
         old_path = _write_stub(tmp_path, "old.bundlefacts.json")
         new_path = _write_stub(tmp_path, "new.bundlefacts.json")
 
         code, out = _invoke("compare", str(old_path), str(new_path), "--format", "json")
 
         assert code != 64
-        assert "nothing was compared" in out
+        # ADR-065 D7 (Codex review, thirtieth round): a zero-pair run with a
+        # scope record renders like the fan-out's and exits 1, never a clean 0.
+        assert code == 1
+        document = json.loads(out[out.index("{") :])
+        assert document["run_outcome"]["operational"] == "no_comparison_completed"
+        assert document["comparison_scope"]["no_comparison_completed"] is True
 
     def test_live_old_input_against_stored_new_input_is_rejected(
         self, tmp_path: Path
@@ -273,10 +282,12 @@ class TestStoredPairEarlyRejections:
         TestStoredPairEndToEnd for the actual projection behavior."""
         old_path, new_path = self._both_stored(tmp_path)
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "--depth", "binary")
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--depth", "binary"
+        )
 
         assert code != 64
-        assert "nothing was compared" in out
+        assert "no comparison completed" in out  # reached the driver (D7)
 
     def test_depth_headers_is_not_rejected(self, tmp_path: Path) -> None:
         """--depth headers is the other value reachable for stored/stored
@@ -287,15 +298,19 @@ class TestStoredPairEarlyRejections:
         above."""
         old_path, new_path = self._both_stored(tmp_path)
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "--depth", "headers")
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--depth", "headers"
+        )
 
         assert code != 64
-        assert "nothing was compared" in out
+        assert "no comparison completed" in out  # reached the driver (D7)
 
     def test_compiler_is_rejected(self, tmp_path: Path) -> None:
         old_path, new_path = self._both_stored(tmp_path)
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "--compiler", "clang++")
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--compiler", "clang++"
+        )
 
         assert code == 64
         assert "--compiler" in out
@@ -348,7 +363,7 @@ class TestStoredPairEarlyRejections:
         code, out = _invoke("compare", str(old_path), str(new_path))
 
         assert code != 64
-        assert "nothing was compared" in out
+        assert "no comparison completed" in out  # reached the driver (D7)
 
     def test_ambient_project_config_include_dirs_is_not_treated_as_explicit_include(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -366,7 +381,7 @@ class TestStoredPairEarlyRejections:
         code, out = _invoke("compare", str(old_path), str(new_path))
 
         assert code != 64
-        assert "nothing was compared" in out
+        assert "no comparison completed" in out  # reached the driver (D7)
 
     def test_explicit_config_with_compile_block_is_rejected(
         self, tmp_path: Path
@@ -399,7 +414,7 @@ class TestStoredPairEarlyRejections:
         )
 
         assert code != 64
-        assert "nothing was compared" in out
+        assert "no comparison completed" in out  # reached the driver (D7)
 
     def test_ambient_malformed_config_is_rejected_not_a_raw_traceback(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -539,7 +554,13 @@ class TestStoredPairEndToEnd:
         )
 
         code, out = _invoke(
-            "compare", str(old_path), str(new_path), "--depth", "binary", "--format", "json"
+            "compare",
+            str(old_path),
+            str(new_path),
+            "--depth",
+            "binary",
+            "--format",
+            "json",
         )
 
         assert code == 0
@@ -561,7 +582,9 @@ class TestStoredPairEndToEnd:
             tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
         )
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "--depth", "headers")
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--depth", "headers"
+        )
 
         assert code != 0
         assert code != 64  # a real ValidationError, not a Click usage error
@@ -675,16 +698,21 @@ class TestStoredPairEndToEnd:
         save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), old_path)
         save_bundle_facts(capture_bundle_facts({"libcore.so": new_snapshot}), new_path)
 
-        code, out = _invoke(
-            "compare", str(old_path), str(new_path), "--format", "json"
-        )
+        code, out = _invoke("compare", str(old_path), str(new_path), "--format", "json")
 
         assert code == 16
         assert "not comparable" in out
         start = out.index("{")
         document = json.loads(out[start:])
         assert document["mode"] == "bundle_facts"
-        assert document["verdict"] is None
-        assert document["not_comparable"] is True
-        assert document["reason"]["kind"] == "scope_mismatch"
-        assert "message" in document["reason"]
+        # Since ADR-065 S2 the refusal is recorded per member on the
+        # ordinary document (the fan-out's own shape) rather than a
+        # separate envelope: the run's verdict is `not_comparable`, the
+        # operational axis says so, and the member carries its kind.
+        assert document["verdict"] == "not_comparable"
+        assert document["run_outcome"]["operational"] == "not_comparable"
+        assert document["run_outcome"]["compatibility"] is None
+        member = document["not_comparable_members"]["libcore.so"]
+        assert member["kind"] == "scope_mismatch"
+        assert "message" in member
+        assert document["comparison_scope"]["counts"]["failed"] == 1

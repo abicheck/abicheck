@@ -56,7 +56,6 @@ def embed_build_source(
     sources: Path | None,
     *,
     build_config: Path | None = None,
-    allow_build_query: bool = False,
     clang_bin: str = "clang",
     collect_mode: str = "source-target",
     build_query: str | None = None,
@@ -192,7 +191,6 @@ def embed_build_source(
             sources=raw_sources,
             build_info=raw_build_info,
             build_config=cfg,
-            allow_build_query=allow_build_query,
             build_config_trusted_for_query=cfg_trusted_for_query,
             # A build.compile_db is an *explicit* L3 input (its miss must surface,
             # not fall through to inference) when it came from the CLI

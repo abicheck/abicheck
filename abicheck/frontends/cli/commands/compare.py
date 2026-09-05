@@ -55,7 +55,6 @@ from ....cli_options import (
     debug_resolution_options,
     env_matrix_option,
     evidence_options,
-    header_graph_options,
     include_dependencies_option,
     lang_option,
     normalize_sided_options,
@@ -546,7 +545,6 @@ def _embed_inline_source_side(
               help="Additional directory to search for shared libraries (with --follow-deps).")
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
-@header_graph_options  # hidden deprecated no-op shim (shared with `dump`)
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3); --show-filtered stays inline
 @click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
               help="List findings excluded by --scope-public-headers (audit trail).")
@@ -713,17 +711,6 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # and the exit-code matrix — identical while the single typed signature lives
     # only on run_compare (no duplicated 56-line parameter list; CodeFactor).
     from ....cli_compare_helpers import run_compare
-    from ....cli_options import warn_deprecated_header_graph_flags
-
-    # G29 Phase A: --header-graph/--header-graph-includes are hidden, inert
-    # no-op shims (header_graph_options) — pop them out of kwargs before
-    # forwarding to run_compare (whose typed signature no longer carries
-    # them; the graph is now unconditional) and just emit the deprecation
-    # note if either was passed.
-    warn_deprecated_header_graph_flags(
-        kwargs.pop("header_graph_deprecated", False),
-        kwargs.pop("header_graph_includes_deprecated", False),
-    )
 
     # ADR-040 Lever 1: translate the side-aware --header/--include/--sources/
     # --build-info tuples back into the per-side kwargs run_compare consumes.

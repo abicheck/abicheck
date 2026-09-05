@@ -400,3 +400,128 @@ class TestRecordTypeResolvedBasesMethods:
         rec = RecordType(name="D", kind="struct")
         assert rec.resolved_bases() == []
         assert rec.resolved_virtual_bases() == []
+
+
+class TestFactProducer:
+    """T9 (duplication-and-convergence-assessment.md Phase 6 item 4):
+    ``Fact.producer`` — which backend asserted this fact, when known.
+
+    Additive and optional: every classmethod defaults it to ``None``, so
+    every pre-existing call site (the overwhelming majority) is unaffected
+    unless it opts in.
+    """
+
+    @pytest.mark.parametrize(
+        "ctor",
+        [
+            lambda: Fact.present([], producer="dwarf"),
+            lambda: Fact.partial([], producer="dwarf"),
+            lambda: Fact.not_collected(producer="dwarf"),
+            lambda: Fact.unsupported(producer="dwarf"),
+            lambda: Fact.failed("boom", producer="dwarf"),
+            lambda: Fact.not_applicable(producer="dwarf"),
+        ],
+        ids=[
+            "present",
+            "partial",
+            "not_collected",
+            "unsupported",
+            "failed",
+            "not_applicable",
+        ],
+    )
+    def test_every_constructor_accepts_and_stores_producer(self, ctor) -> None:
+        f = ctor()
+        assert f.producer == "dwarf"
+
+    def test_default_producer_is_none_and_unaffected_by_the_new_field(self) -> None:
+        """Every existing classmethod call site that does not pass
+        ``producer=`` keeps behaving exactly as before this field existed."""
+        assert Fact.present(["a"]).producer is None
+        assert Fact.not_collected().producer is None
+        assert Fact.unsupported().producer is None
+
+    def test_producer_is_not_a_diagnostic(self) -> None:
+        """``producer`` is its own field, not smuggled into ``diagnostics``
+        — a reader can access it directly without parsing free text."""
+        f = Fact.unsupported("some diagnostic", producer="pdb")
+        assert f.diagnostics == ("some diagnostic",)
+        assert f.producer == "pdb"
+
+    def test_producer_participates_in_equality_like_every_other_field(self) -> None:
+        """Documented consequence, not a bug: `Fact` is itself a field on
+        `RecordType`/etc, so two otherwise-identical facts differing only
+        in `producer` are unequal, the same as differing in `diagnostics`
+        already was before this field existed."""
+        assert Fact.unsupported(producer="pdb") != Fact.unsupported(producer="dwarf")
+        assert Fact.unsupported(producer="pdb") == Fact.unsupported(producer="pdb")
+
+    def test_round_trips_through_the_storage_codec(self) -> None:
+        from abicheck.storage.fact_codec import decode_fact
+
+        original = Fact.unsupported("pdb never captures this", producer="pdb")
+        encoded = dataclasses.asdict(original)
+        encoded["status"] = encoded["status"].value
+        decoded = decode_fact(encoded, schema_version=999)
+        assert decoded == original
+        assert decoded is not None
+        assert decoded.producer == "pdb"
+
+    def test_a_document_predating_the_field_decodes_producer_as_none(self) -> None:
+        """Additive, unversioned: a raw dict with no ``"producer"`` key
+        (every document persisted before this field existed) must still
+        decode cleanly, with ``producer`` reading its ordinary default."""
+        from abicheck.storage.fact_codec import decode_fact
+
+        raw = {"status": "unsupported", "value": None, "diagnostics": []}
+        decoded = decode_fact(raw, schema_version=999)
+        assert decoded is not None
+        assert decoded.producer is None
+
+    def test_a_non_string_producer_is_rejected_not_coerced(self) -> None:
+        """A malformed/hand-edited document's non-string ``producer`` (e.g.
+        an int) must not silently pass through as if it were real
+        attribution -- the same discipline every other provenance-shaped
+        field in `storage/` already applies (Codex review, PR #1075)."""
+        from abicheck.storage.fact_codec import decode_fact
+
+        raw = {"status": "unsupported", "value": None, "diagnostics": [], "producer": 7}
+        with pytest.raises(TypeError):
+            decode_fact(raw, schema_version=999)
+
+    def test_encode_fact_fields_omits_an_unset_producer(self) -> None:
+        """``encode_fact_fields`` must not turn every existing
+        ``"producer": None`` `dataclasses.asdict()` writes in -- the
+        overwhelming majority of facts, since only PDB's own vtable facts
+        set one today -- into a persisted ``"producer": null`` key.
+        Confirmed regression: this test fails without the fix
+        (`tests/test_g20_catalog.py::test_fixtures_match_generator` caught
+        it against the committed example fixtures, whose serialized
+        `snapshot.abi.json` files would otherwise drift on every save for
+        an unrelated reason)."""
+        from abicheck.storage.fact_codec import encode_fact_fields
+
+        d: dict[str, object] = {
+            "types": [
+                {
+                    "vtable_fact": dataclasses.asdict(Fact.not_collected()),
+                }
+            ]
+        }
+        encode_fact_fields(d)
+        vtable_fact = d["types"][0]["vtable_fact"]  # type: ignore[index]
+        assert "producer" not in vtable_fact
+
+    def test_encode_fact_fields_keeps_a_set_producer(self) -> None:
+        from abicheck.storage.fact_codec import encode_fact_fields
+
+        d: dict[str, object] = {
+            "types": [
+                {
+                    "vtable_fact": dataclasses.asdict(Fact.unsupported(producer="pdb")),
+                }
+            ]
+        }
+        encode_fact_fields(d)
+        vtable_fact = d["types"][0]["vtable_fact"]  # type: ignore[index]
+        assert vtable_fact["producer"] == "pdb"

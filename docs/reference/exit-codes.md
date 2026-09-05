@@ -70,6 +70,48 @@ library`'s exit `8` is checked ahead of the coverage-only fallback, so a
 removed library's own signal is never masked by an unrelated coverage gap
 (and a real verdict-based `2`/`4` still wins outright over both, unchanged).
 
+## The completeness axis (ADR-065 D6/D7, directory/package `compare` only)
+
+Two more orthogonal `0`/`1` contributions, folded with `max` exactly like the
+contract-coverage axis above (a clean `0` becomes `1`; a `2`/`4` is never
+lowered; no finding's decision is rewritten):
+
+- **`incomplete_scope`** — a *selected, expected* member of the comparison
+  scope never reached a completed comparison: it had no counterpart on the
+  other side and that side's inventory is not proven complete
+  (`not_supplied`), this build cannot analyze it (`unsupported`), or its
+  extraction failed (`failed`). Contributes `0` under the default
+  `--on-incomplete-scope warn` and `1` under `--on-incomplete-scope block`.
+  Under `warn` the run still reports the scope as incomplete: the JSON
+  `run_outcome.scope` reads `incomplete`, the `comparison_scope` block names
+  every unchecked member and why, and the Markdown/PR-comment views say the
+  verdict covers the compared members only.
+- **`no_comparison_completed`** — the selected scope produced no valid
+  comparison at all (zero matched pairs, or every selected member
+  failed/unsupported). Contributes `1` under **either** setting: a
+  permissive policy can downgrade missing members, never "nothing compared".
+
+Both appear in the report's `exit` block (`incomplete_scope_contribution`,
+`no_comparison_completed_contribution`) and, when they decide the code, in
+`exit.reasons`. A scalar `compare` never sets either.
+
+**Migration note (exit `8`).** Before ADR-065 S2, `--fail-on-removed-library`
+exited `8` on the raw old-minus-new filename set difference, so a partial
+local build compared against a full baseline read as "N libraries removed".
+Exit `8` now requires the removal to be *proven*: the NEW side's inventory
+must be proven complete (a stored `ProjectSnapshot` package or bundle-facts
+document whose capture asserted `inventory_complete`; a package without the
+assertion, a live directory, or an extracted archive cannot prove absence). An
+unmatched library under an unproven inventory is reported as an incomplete
+scope instead — exit `0` under `warn`, `1` under `block` — and the JSON key
+`unmatched_old` keeps listing it. When NEW is *named as a single file* (not a
+directory or archive that happens to hold one member) with exactly one OLD
+counterpart and NEW's inventory is unproven, the run is a current-artifact
+comparison (D9): the other OLD members are `out_of_scope` and the scope is
+complete. A one-member NEW directory is not narrowed: its unmatched OLD
+members stay unchecked, so `block` still gates — discovered cardinality is
+never read as intent.
+
 **Without `--contract` there is no selected domain, so the
 contribution is always `0`** and every other exit code below is unchanged.
 
@@ -303,7 +345,8 @@ below, plus a dedicated code for removed libraries:
 | `0` | All libraries compatible (no API/ABI break) |
 | `2` | Worst verdict is `API_BREAK` |
 | `4` | Worst verdict is `BREAKING`, **or** an operational `ERROR` (a library failed to dump/extract/compare) |
-| `8` | A library was removed between releases and `--fail-on-removed-library` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. |
+| `1` | No compatibility break, but the completeness axis contributed (ADR-065): `--on-incomplete-scope block` with an incompletely checked scope, or a run that completed no comparison at all (under either setting). Also the contract-coverage axis's own floor, as for single-pair `compare`. |
+| `8` | A library was **proven** removed between releases (NEW's inventory is proven complete — a stored `ProjectSnapshot` package or bundle-facts document whose capture asserted `inventory_complete`; ADR-065 D2) and `--fail-on-removed-library` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. An unmatched library under an unproven inventory never exits `8`; see the completeness axis above. |
 | `16` | `not_comparable` (ADR-050 D2) — at least one library's OLD/NEW DSOs were not extracted under a comparable profile/scope contract. Takes precedence over **every** other outcome in the release, including `8` (removed-library) and a genuine `ERROR`: a not_comparable result means the comparison couldn't establish what changed at all, so it dominates in both the legacy and severity-aware schemes. Identical code to native `compare`'s own `16`. |
 
 On the release path the severity-aware code (`0/1/2/4`) replaces the
@@ -475,11 +518,30 @@ Phase 7), and the exit code is the worst contribution across them:
   was still incomplete (a contract-coverage gap). Both can independently
   produce exit `1`, for unrelated reasons, and `aggregate` records which one
   fired rather than merging them into one undifferentiated `1`.
+- **analysis_assurance** — reads back each analyzed target's own
+  `analysis_assurance_exit_contribution` (`--require-complete-analysis`; see
+  "Analysis-assurance contribution" above) and folds it with `max` the same way (aggregate
+  schema `1.5`); `aggregate` never recomputes it. A target whose own evidence
+  was incomplete under that flag aggregates to `1` on this axis alone,
+  independently of contract coverage and of the completeness axis below.
+- **scope_completeness** — reads back each analyzed target's own
+  completeness-axis contributions (the `exit` block's
+  `incomplete_scope_contribution` and `no_comparison_completed_contribution`;
+  see "The completeness axis" above) and folds their `max` the same way
+  (aggregate schema `1.8`); `aggregate` never recomputes them. A release that
+  exited `1` because a selected member went unchecked under
+  `--on-incomplete-scope block`, or because it completed no comparison at
+  all, therefore aggregates to `1` as well — its `run_outcome.gate` and
+  `operational` axes read `none` for that case, so without this axis the
+  target read green. Reported as its own `scope_completeness` block and a
+  per-target `scope_completeness_exit`, and named per profile as
+  `scope_incomplete_profiles`, so an exit of `1` stays attributable to
+  exactly one axis.
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
+| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; a target's own analysis assurance was incomplete under `--require-complete-analysis`; a release target's comparison scope gated (`--on-incomplete-scope block`, or no comparison completed); **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
@@ -538,11 +600,13 @@ the JSON output's `effective_policy` block, including which source
 appears for a direct Python-API caller of `aggregate()` forcing a value
 (there is no CLI spelling for it). The `--format json` output is versioned
 (`aggregate_schema_version` — see `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION`
-for the current value) and carries the four axes
-separately under `gate` / `coverage` / `compatibility` / `contract_coverage`
-— the last is `{"exit_contribution": 0, "incomplete_targets": []}`-shaped and
-present even when no target used `--contract` (an empty
-`incomplete_targets` list, not an omitted block).
+for the current value) and carries the six axes
+separately under `gate` / `coverage` / `compatibility` / `contract_coverage` /
+`analysis_assurance` / `scope_completeness` — the last three are
+`{"exit_contribution": 0, "incomplete_targets": []}`-shaped and present even
+when no target used `--contract`/`--require-complete-analysis` or every
+release target checked its whole scope (an empty `incomplete_targets` list,
+not an omitted block).
 
 When targets are checked under several toolchain profiles (report ids of the
 form `target@profile#channel@depth`), two additional reporting-only blocks

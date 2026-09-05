@@ -31,7 +31,7 @@ import pytest
 
 from abicheck.bundle_facts import (
     BUNDLE_FACTS_ARTIFACT_TYPE,
-    BUNDLE_FACTS_SCHEMA_VERSION,
+    BUNDLE_FACTS_BASE_SCHEMA_VERSION,
     BundleFacts,
     capture_bundle_facts,
 )
@@ -119,7 +119,10 @@ class TestBundleFactsArtifactTypeDiscriminator:
         assert loaded.schema_version == 1  # preserved on the in-memory object
 
         rewritten = bundle_facts_to_dict(loaded)
-        assert rewritten["schema_version"] == BUNDLE_FACTS_SCHEMA_VERSION
+        # A clean document declares the base version (ADR-065 D8): still
+        # never the preserved 1, which predates the artifact_type marker.
+        assert rewritten["schema_version"] == BUNDLE_FACTS_BASE_SCHEMA_VERSION
+        assert rewritten["schema_version"] >= 2
         assert rewritten["artifact_type"] == BUNDLE_FACTS_ARTIFACT_TYPE
 
     def test_missing_artifact_type_defaults_to_current_on_a_true_v1_document(

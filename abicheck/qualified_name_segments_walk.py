@@ -60,7 +60,25 @@ __all__ = [
 #: declaration provenance and, transitively, any later header-origin/
 #: dependency-scoping decision that reads it (Codex review, fresh evidence).
 _PAYLOAD_FIELD_EXCLUSIONS: frozenset[str] = frozenset(
-    {"deprecated", "default", "value", "source_location", "source_header"}
+    {
+        "deprecated",
+        "default",
+        "value",
+        "source_location",
+        "source_header",
+        # T9 (duplication-and-convergence-assessment Phase 6 item 4):
+        # `model.fact.Fact[T]`'s own `producer` field names a backend
+        # (``"pdb"``/``"dwarf"``/``"castxml"``/...), never identity-bearing
+        # C++ spelling or a filesystem path -- the same shape as
+        # `deprecated`/`default` above, not the `value` field this walk
+        # exists to rewrite for a `Fact[str]` sibling. Excluded here, same
+        # as those, so a producer string coincidentally shaped like a
+        # closure marker is never rewritten (Codex review, PR #1075: this
+        # field's addition made both structural `Fact` recognizers below
+        # stop matching at all until their own field-name sets were
+        # updated too).
+        "producer",
+    }
 )
 
 
@@ -102,6 +120,7 @@ def _collect_strings(value: object, out: list[str]) -> None:
             "status",
             "value",
             "diagnostics",
+            "producer",
         }
         for f in fields:
             if (
@@ -221,7 +240,7 @@ def _walk_rewrite_strings(
             type(value).__name__ == "Fact"
             and is_frozen
             and {f.name for f in _dataclasses.fields(value)}
-            == {"status", "value", "diagnostics"}
+            == {"status", "value", "diagnostics", "producer"}
             and not _legacy_sibling_is_payload_excluded(field_name)
         )
         replacements: dict[str, object] = {}

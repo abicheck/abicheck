@@ -295,7 +295,7 @@ The action installs Python, castxml, and abicheck, runs the comparison, sets the
 | `0` | `NO_CHANGE` / `COMPATIBLE` / `COMPATIBLE_WITH_RISK` | No binary ABI break. `COMPATIBLE_WITH_RISK` still wants a deployment review (a new dependency, a raised runtime floor) |
 | `2` | `API_BREAK` | Source-level break. Consumers must recompile; existing binaries still run |
 | `4` | `BREAKING` | Binary ABI break. Existing binaries will crash or misbehave. A multi-library release also exits `4` when one library fails to dump or compare |
-| `8` | any | A library vanished from a multi-library release and `--fail-on-removed-library` is set; under the default scheme, only when no `2`/`4` already applies |
+| `8` | any | A library was **proven** removed from a multi-library release (NEW's inventory proven complete, ADR-065) and `--fail-on-removed-library` is set; under the default scheme, only when no `2`/`4` already applies. An unmatched library under an unproven inventory is an incomplete scope instead (exit `0`, or `1` with `--on-incomplete-scope block`; a run that completed no comparison exits `1`) |
 | `64` | usage error | Bad flags or inputs |
 
 `--severity-preset` (or a `severity:` block in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level finding in the addition/quality categories. Opt-in `--contract` adds an orthogonal axis that raises a clean `0` to `1` when the declared contract's evidence is incomplete. `scan`, `deps compare`, and `compat` add per-command codes. Full matrix: [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine: [CI Gating](https://abicheck.github.io/abicheck/use/ci-gating/).
