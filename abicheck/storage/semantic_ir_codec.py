@@ -101,13 +101,27 @@ def _mapping(raw: Any, field_name: str) -> Mapping[str, Any]:
 
 
 def _fact_to_dict(fact: Fact[Any]) -> dict[str, Any]:
-    """One ``Fact``'s wire form: status value, JSON-native value, diagnostics."""
+    """One ``Fact``'s wire form: status value, JSON-native value, diagnostics.
+
+    ``producer`` (T9, duplication-and-convergence-assessment Phase 6 item 4)
+    is included whenever the in-memory ``Fact`` carries one; omitted rather
+    than written as ``null`` when it doesn't, since this codec's own
+    convention elsewhere (``CanonicalEntity.producer``, ``_entity_to_dict``
+    below) is to omit an unset provenance field rather than persist an
+    explicit null for it. Without this, a typed caller attaching a producer
+    to a semantic-IR-consumed ``Fact`` (e.g. to retain the source of a fact
+    backfilled during a hybrid merge) would have it silently dropped on the
+    next encode-then-decode round trip -- Codex review, PR #1075.
+    """
     value = fact.value
-    return {
+    result: dict[str, Any] = {
         "status": fact.status.value,
         "value": list(value) if isinstance(value, tuple) else value,
         "diagnostics": list(fact.diagnostics),
     }
+    if fact.producer is not None:
+        result["producer"] = fact.producer
+    return result
 
 
 def _fact_value(raw: Any, field_name: str, *, as_tuple: bool) -> Any:
@@ -160,6 +174,19 @@ def _fact_from_dict(raw: Any, *, as_tuple: bool, field_name: str) -> Fact[Any]:
         # value, which is the whole reason diagnostics are persisted.
         diagnostics=diagnostics_from(
             required_field(data, "diagnostics", "semantic_ir fact")
+        ),
+        # Optional, unlike the three fields above: a document predating T9
+        # simply has no "producer" key at all (this writer only emits one
+        # when the in-memory Fact carries one -- see _fact_to_dict), and
+        # `None` is this field's own legitimate "no attribution recorded"
+        # default -- not a truncation the way a missing "diagnostics" would
+        # be. Rejected rather than coerced if present but not a string, the
+        # same discipline this codec's own entity-level `producer` already
+        # applies just below.
+        producer=(
+            None
+            if data.get("producer") is None
+            else provenance_text(data["producer"], f"semantic_ir {field_name} producer")
         ),
     )
 

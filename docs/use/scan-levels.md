@@ -216,9 +216,9 @@ When a source-level depth needs build evidence and no compile DB exists,
 `abicheck` **detects the build system and runs the query
 itself** for CMake (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`), Bazel
 (`bazel aquery`), and Make (`make -B -n -k -w`) — no flag, no manual build step.
-The old `--allow-build-query` flag is no longer needed for `--sources`-driven
-auto-querying (it is now a deprecated no-op): asking for a source-level scan *is*
-the request to collect build evidence.
+No `--allow-build-query` flag is needed for `--sources`-driven auto-querying —
+that flag was always a no-op and has since been removed outright: asking for
+a source-level scan *is* the request to collect build evidence.
 
 Make is queried with a fixed dry-run command (`make -B -n -k -w`) and the transcript
 is scraped as reduced-confidence L3 evidence. This lets Make/EPICS-style projects

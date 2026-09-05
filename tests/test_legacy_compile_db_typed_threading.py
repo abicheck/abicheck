@@ -235,11 +235,13 @@ class TestTypedApiThreadsTheLegacyMatch:
         """The actual proof: the legacy match's flags, computed exactly the
         way `dump_cmd` computes them today
         (`cli_helpers_compare._resolve_build_context_flags`), threaded
-        through `execute_dump_request(..., legacy_compile_db_tokens=...)`,
+        through `execute_dump_request(..., options=DumpExecutionOptions(
+        legacy_compile_db_tokens=...))`,
         make the typed path resolve the identical header-AST evidence the
         real CLI run already does."""
         from abicheck.cli_helpers_compare import _resolve_build_context_flags
         from abicheck.service_dump_pipeline import (
+            DumpExecutionOptions,
             execute_dump_request,
             resolve_dump_request,
         )
@@ -259,7 +261,7 @@ class TestTypedApiThreadsTheLegacyMatch:
         request = self._request(so_path, header, compile_db)
         result = execute_dump_request(
             resolve_dump_request(request),
-            legacy_compile_db_tokens=tuple(legacy_flags),
+            options=DumpExecutionOptions(legacy_compile_db_tokens=tuple(legacy_flags)),
         )
         fields = [
             f.name for t in result.snapshot.types if t.name == "S" for f in t.fields
@@ -279,6 +281,7 @@ class TestTypedApiThreadsTheLegacyMatch:
         `-D` on top of it."""
         from abicheck.api_types import DumpRequest, InputSpec
         from abicheck.service_dump_pipeline import (
+            DumpExecutionOptions,
             execute_dump_request,
             resolve_dump_request,
         )
@@ -345,7 +348,7 @@ class TestTypedApiThreadsTheLegacyMatch:
         # up on top of the fold's own result.
         stacked = execute_dump_request(
             resolve_dump_request(request),
-            legacy_compile_db_tokens=("-DFOO=1",),
+            options=DumpExecutionOptions(legacy_compile_db_tokens=("-DFOO=1",)),
         )
         assert stacked.effective_compile_context is not None
         stacked_flags = _rendered(stacked.effective_compile_context)

@@ -35,6 +35,42 @@ empty/``None`` value — ``Fact.present(None)``/``Fact.present([])`` — not a
 distinct status. That is the *one* legitimate way to spell "present,
 empty"; a bare sentinel construction a reader could mistake for "not
 collected" is not offered.
+
+``producer`` (ADR-063 Phase 6 / T9, duplication-and-convergence-assessment
+Phase 6 item 4) is the fourth field: which backend actually asserted this
+particular ``Fact``, when that is known. It exists to close a gap
+``FactStatus`` alone cannot: two different *reasons* a fact reads
+``NOT_COLLECTED``/``UNSUPPORTED`` are otherwise indistinguishable from the
+status alone — "this producer was never invoked for this artifact" (a
+run-shape fact, says nothing about the producer's own capability) versus
+"this producer exists and ran, but structurally cannot express this
+family at all" (a producer-capability fact, true on every future run of
+the same producer too). ``Fact.unsupported(..., producer=...)`` is how a
+producer that *knows* it never captures a given family states that
+explicitly and per-record, rather than leaving every record's sibling to
+fall back to the ambiguous default a public dataclass constructor
+resolves an omitted field to (see ``bridge_legacy_and_fact`` — an omitted
+field and an ``UNSUPPORTED``-from-producer-incapability field must not
+collapse onto the same status, because a caller constructing the same
+dataclass by hand for a test or through the typed API legitimately means
+something else entirely by omitting the field: see
+``compare/vtable_evidence.py``'s own account of the PDB vtable
+fabrication this closes). ``producer=None`` (the default) means exactly
+what it always meant before this field existed: no per-fact producer
+attribution recorded, which is the overwhelming majority of existing
+``Fact[...]`` construction sites and stays behaviorally unchanged.
+``producer`` is not itself a *scope* or *completeness* claim — see this
+field's own real caller in ``pdb_model.py`` for the one family (record
+vtable evidence) this closes today, and T9's own tracked scope in
+``docs/contribute/plans/duplication-and-convergence-assessment.md``
+(Phase 6 item 4) for what remains open: the observed-vs-inferred axis and
+the positive-observation-vs-completeness axis for fields where a
+producer's own per-translation-unit coverage (not its blanket capability)
+is what's ambiguous — e.g. DWARF's own ``Fact.present([])`` for a class
+whose virtuals live in a TU only the *other* side's debug info covers,
+which ``producer`` alone cannot resolve (the producer genuinely can
+express the family; the gap is per-TU completeness, not per-producer
+capability).
 """
 
 from __future__ import annotations
@@ -261,6 +297,13 @@ class Fact(Generic[T]):
     status: FactStatus
     value: T | None = None
     diagnostics: tuple[str, ...] = field(default_factory=tuple)
+    #: Which backend asserted this fact, when known (one of
+    #: ``model.fact_registry_schema.KNOWN_PRODUCING_BACKENDS``, e.g.
+    #: ``"pdb"``/``"dwarf"``/``"castxml"``) — see this class's own
+    #: docstring, "producer", for why this exists and what it does not
+    #: attempt to answer. ``None`` (the default) means no per-fact producer
+    #: attribution was recorded, unchanged from before this field existed.
+    producer: str | None = field(default=None, kw_only=True)
 
     def __bool__(self) -> bool:
         raise TypeError(
@@ -290,39 +333,69 @@ class Fact(Generic[T]):
         return default
 
     @classmethod
-    def present(cls, value: T, *diagnostics: str) -> Fact[T]:
+    def present(
+        cls, value: T, *diagnostics: str, producer: str | None = None
+    ) -> Fact[T]:
         """Usable evidence — including a confirmed-empty/None value."""
-        return cls(status=FactStatus.PRESENT, value=value, diagnostics=diagnostics)
+        return cls(
+            status=FactStatus.PRESENT,
+            value=value,
+            diagnostics=diagnostics,
+            producer=producer,
+        )
 
     @classmethod
-    def partial(cls, value: T, *diagnostics: str) -> Fact[T]:
+    def partial(
+        cls, value: T, *diagnostics: str, producer: str | None = None
+    ) -> Fact[T]:
         """Usable evidence covering only part of the requested scope."""
-        return cls(status=FactStatus.PARTIAL, value=value, diagnostics=diagnostics)
+        return cls(
+            status=FactStatus.PARTIAL,
+            value=value,
+            diagnostics=diagnostics,
+            producer=producer,
+        )
 
     @classmethod
-    def not_collected(cls, *diagnostics: str) -> Fact[T]:
+    def not_collected(cls, *diagnostics: str, producer: str | None = None) -> Fact[T]:
         """The producer was never invoked for this family."""
-        return cls(status=FactStatus.NOT_COLLECTED, value=None, diagnostics=diagnostics)
+        return cls(
+            status=FactStatus.NOT_COLLECTED,
+            value=None,
+            diagnostics=diagnostics,
+            producer=producer,
+        )
 
     @classmethod
-    def unsupported(cls, *diagnostics: str) -> Fact[T]:
+    def unsupported(cls, *diagnostics: str, producer: str | None = None) -> Fact[T]:
         """This producer cannot express this family at all."""
-        return cls(status=FactStatus.UNSUPPORTED, value=None, diagnostics=diagnostics)
+        return cls(
+            status=FactStatus.UNSUPPORTED,
+            value=None,
+            diagnostics=diagnostics,
+            producer=producer,
+        )
 
     @classmethod
-    def failed(cls, reason: str, *more_diagnostics: str) -> Fact[T]:
+    def failed(
+        cls, reason: str, *more_diagnostics: str, producer: str | None = None
+    ) -> Fact[T]:
         """The producer was invoked and errored."""
         return cls(
             status=FactStatus.FAILED,
             value=None,
             diagnostics=(reason, *more_diagnostics),
+            producer=producer,
         )
 
     @classmethod
-    def not_applicable(cls, *diagnostics: str) -> Fact[T]:
+    def not_applicable(cls, *diagnostics: str, producer: str | None = None) -> Fact[T]:
         """The family is meaningless for this artifact kind."""
         return cls(
-            status=FactStatus.NOT_APPLICABLE, value=None, diagnostics=diagnostics
+            status=FactStatus.NOT_APPLICABLE,
+            value=None,
+            diagnostics=diagnostics,
+            producer=producer,
         )
 
 

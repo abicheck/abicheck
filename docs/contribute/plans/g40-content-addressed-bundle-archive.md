@@ -12,11 +12,11 @@ generated: false
 `BundleArchiveReader`), `abicheck/storage/bundle_archive_cd_guard.py`,
 `abicheck/storage/bundle_archive_json_guard.py`, and
 `abicheck/bundle_facts.py`'s `write_bundle_facts_archive()`/
-`read_bundle_facts_archive()` ship the design below on the
-`claude/g40-bundle-archive-impl` branch, verified against several rounds
-of review (the "Codex review, fresh evidence, verified against the real
-implementation in PR #869" annotations throughout this document, added as
-the implementation and this plan were revised together). This document now
+`read_bundle_facts_archive()` ship the design below — merged to `main` via
+PR #869, verified against several rounds of review (the "Codex review,
+fresh evidence, verified against the real implementation in PR #869"
+annotations throughout this document, added as the implementation and this
+plan were revised together). This document now
 also serves as a retrospective design record for that implementation, not
 only a forward-looking proposal — where a section still reads as
 prescriptive ("must", "should"), that reflects a requirement the shipped
@@ -53,10 +53,20 @@ separate storage-architecture project on the scale of
 or [G32](g32-comparability-contract-and-multi-tu-manifest.md) (multi-TU
 manifest)", not a sub-step of making the bundle layer stored-data-capable.
 This document was originally that separate scope as a design-only proposal.
-Per the "Status" note above, the design has since been implemented on the
-`claude/g40-bundle-archive-impl` branch (PR #869) — not yet merged to
-`main`. No code changes ship with **this** plan-document PR; the
-implementation itself is tracked and reviewed separately in PR #869.
+Per the "Status" note above, the design has since been implemented and
+merged to `main` (PR #869). No code changes ship with **this**
+plan-document PR; the implementation itself was tracked and reviewed
+separately in PR #869. This archive format is a sibling of, not the same
+layout as, ADR-062's own content-addressed sectioned storage: this G40
+container is `BundleFacts`/baseline-set-scoped (`bundle_facts.py`'s
+`write_bundle_facts_archive()`/`read_bundle_facts_archive()`), while
+ADR-062/063's own Track 1 reconciliation (2026-09-04) unified the *object
+model* two independently-landed `BundleFacts`/baseline-set persistence
+paths used, onto `abicheck/storage/import_bundle_facts.py`/
+`import_baseline_set.py`'s sectioned representation — a separate layout
+question from this file's own container-format one. `bundle_facts_store.py`
+does reuse this module's `bundle_archive_json_guard` primitive, but that is
+sharing a leaf utility, not the same storage track.
 
 ## Problem
 

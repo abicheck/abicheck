@@ -64,8 +64,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--format",
         "--frontend-context",
         "--header",
-        "--header-graph",
-        "--header-graph-includes",
         "--help",
         "--help-all",
         "--include",

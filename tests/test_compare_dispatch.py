@@ -831,13 +831,10 @@ def test_embed_inline_source_hybrid_not_rejected_below_depth_source(
     assert called["n"] == 1  # inline dump ran normally, no rejection
 
 
-def test_header_graph_deprecated_flag_is_inert_with_raw_sources(tmp_path: Path) -> None:
-    """G29 Phase A: --header-graph is now a hidden, deprecated no-op — passing
-    it alongside a raw --old-sources tree no longer raises a rejection (there
-    is no user request to reject any more; the L2 graph is always attempted
-    where it structurally can be, and silently skipped on this inline-embed
-    path either way, flag or not). The compare still runs to completion and
-    the deprecation note reaches stderr."""
+def test_header_graph_flag_is_removed(tmp_path: Path) -> None:
+    """CLI cleanup H1: --header-graph (a hidden, deprecated no-op — G29 Phase
+    A's L2 header-only semantic graph is always attempted regardless) is now
+    gone outright rather than silently accepted."""
     old, new = _breaking_pair()
     old_f = _write_snap(tmp_path / "old.json", old)
     new_f = _write_snap(tmp_path / "new.json", new)
@@ -851,10 +848,9 @@ def test_header_graph_deprecated_flag_is_inert_with_raw_sources(tmp_path: Path) 
             "--header-graph",
         ],
     )
-    out = (result.output or "") + (result.stderr or "")
-    assert "deprecated" in out.lower()
-    assert "not supported" not in out
-    assert result.exit_code in (0, 2, 4), out
+    assert result.exit_code == 64, result.output
+    assert "No such option" in result.output
+    assert "--header-graph" in result.output
 
 
 def test_compare_source_tree_on_snapshot_input_is_ignored(tmp_path: Path) -> None:
@@ -1188,26 +1184,25 @@ class TestCompareDispatch:
         assert code != 0
         assert "not supported for directory/package" in (out + err)
 
-    def test_header_graph_deprecated_flag_is_harmless_on_set_inputs(
+    def test_header_graph_flags_are_removed_on_set_inputs(
         self, tmp_path: Path
     ) -> None:
-        """G29 Phase A: --header-graph/--header-graph-includes are hidden,
-        deprecated no-ops now — unlike the other evidence flags above, they
-        are no longer rejected on a directory/package compare (there's
-        nothing left to reject: the per-library fan-out never built the L2
-        graph for either flag value)."""
+        """CLI cleanup H1: --header-graph/--header-graph-includes are gone
+        outright now, so a directory/package compare rejects them the same
+        way any other unknown option is rejected — a usage error, not a
+        deprecation note."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
-        _code, out, err = _invoke(
+        code, out, err = _invoke(
             "compare", str(old_dir), str(new_dir),
             "--header-graph", "--header-graph-includes",
         )
-        assert "not supported for directory/package" not in (out + err)
-        assert "deprecated" in (out + err).lower()
+        assert code == 64, (out, err)
+        assert "No such option" in (out + err)
 
     def test_used_by_rejected_on_set_inputs(self, tmp_path: Path) -> None:
         # The release fan-out has no per-app scoping; a directory/package

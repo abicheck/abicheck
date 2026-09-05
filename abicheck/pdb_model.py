@@ -117,6 +117,34 @@ def _record_from_layout(
         is_union=is_union,
         source_location=getattr(layout, "decl_file", None),
         entity_id=record_entity_id(name, known_record_names),
+        # ADR-063 Track 4 5B final closure / T9 (duplication-and-
+        # convergence-assessment Phase 6 item 4): the PDB layout view
+        # never captures vtable-entry or vptr-offset data at all -- not
+        # "didn't run for this record", but a structural incapability of
+        # this producer, true for every record it ever builds. Leaving
+        # this omitted resolved through `RecordType.__post_init__`'s
+        # `bridge_legacy_and_fact` to `Fact.not_collected()`, the
+        # identical status a hand-constructed/typed-API `RecordType`
+        # omitting `vtable=` gets to mean "no virtuals" -- the exact
+        # ambiguity that made a direct `FactStatus` pre-check unsafe in
+        # `compare/vtable_evidence.py` (round 2 landed, round 3 reverted;
+        # see that module's own docstring). `Fact.unsupported()` is the
+        # status ``FactStatus`` already reserves for exactly this shape
+        # ("this producer cannot express this family at all... a
+        # different producer might") and is never the status a typed-API
+        # omission resolves to, so it is unambiguous where
+        # `Fact.not_collected()` was not. `producer="pdb"` records which
+        # backend made the capability claim, for diagnostics and any
+        # future per-producer accounting -- not itself what makes the
+        # decline safe (the status is).
+        vtable_fact=Fact.unsupported(
+            "PDB layout evidence never captures vtable entries",
+            producer="pdb",
+        ),
+        vptr_offset_bits_fact=Fact.unsupported(
+            "PDB layout evidence never captures vptr offset",
+            producer="pdb",
+        ),
     )
 
 

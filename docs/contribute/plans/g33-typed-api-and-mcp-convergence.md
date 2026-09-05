@@ -20,9 +20,17 @@
 deferred structural half — the CLI now shares one resolution with the typed
 and MCP paths; Phase 5 gave `dump` the typed request `compare` had, and with
 it the MCP parity it was blocking); Phase 6 is a standing constraint, not
-work. One piece of follow-up is named and tracked rather than folded into a
-closed phase: the native `dump` CLI still resolves its own inputs — see
-Phase 5's "Deliberately not done here"
+work. **Update (2026-09, since G33 Phase 5 landed):** the one piece of
+follow-up this document named as open — "the native `dump` CLI still
+resolves its own inputs rather than building a `DumpRequest`" — is done:
+`abicheck/cli_dump_request.py` builds a real `DumpRequest` from `dump_cmd`'s
+Click parameters, and `--dry-run` renders from
+`resolve_dump_request`'s `ResolvedDumpRequest`; the real ELF run executes
+through the same shared `execute_dump_request` pipeline `compare`'s
+implicit-dump operand and `scan`'s candidate resolution already use (see
+ADR-063's own Phase 1/module-map account for PE/Mach-O's later migration
+onto the identical executor). See Phase 5's "Deliberately not done here"
+below for the historical record of what this migration needed first.
 **Normative decision:** [ADR-055](../adr/055-typed-request-result-completeness-and-schema-registry.md)
 (Accepted — implemented)
 **Related:** ADR-037 (G22, CLI consolidation — done), ADR-049 (contract relevance,
@@ -497,11 +505,10 @@ phase's "Structural half" note), and Phase 5's `abi_dump`/`abi_scan` parity is
 **done** (see its own note, including why the phase's original framing of what
 it was copying was wrong).
 
-One follow-up is deliberately left open rather than closed by assertion: the
-native `dump` CLI does not yet build a `DumpRequest`, so `dump` has the
-*shape* `compare` got in Phase 2 without the CLI having adopted it. Phase 5's
-"Deliberately not done here" records what that migration needs first — a real
-seam in `dump_cmd` separating evidence resolution from its provenance/dry-run
-presentation layer, the way `resolve`/`classify` was found for `compare`. It
-is not a regression and blocks nothing in this plan; it is where a `dump`-side
-Phase 2 would start.
+The one follow-up this document once left open rather than closed by
+assertion — the native `dump` CLI not yet building a `DumpRequest`, so
+`dump` had the *shape* `compare` got in Phase 2 without the CLI having
+adopted it — is now done (see the Status line above): `cli_dump_request.py`
+found the seam in `dump_cmd` (separating evidence resolution from its
+provenance/dry-run presentation layer, the way `resolve`/`classify` was
+found for `compare`) and built on it.

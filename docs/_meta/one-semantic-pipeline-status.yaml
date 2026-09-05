@@ -200,6 +200,13 @@ concepts:
       method" from "I established the complete set of virtual methods."
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 4 /
       track T9.
+      **2026-09-05 T9 first-slice correction (supersedes the "still
+      reachable"/"still open" claims above about the PDB-driven fabrication
+      specifically):** that path is now closed. See this concept's own
+      `investigated_declined` entry below for what closed it and what
+      remains open (the DWARF per-TU completeness gap and the seven
+      case-(a) fields are unaffected by this correction -- those remain
+      exactly as open as stated above).
     investigated_declined:
       - item: >-
           FactStatus gating for the vtable/TYPE_VTABLE_CHANGED cluster
@@ -209,21 +216,27 @@ concepts:
           reverted.
         decided: "2026-09-04"
         leaves_open: >-
-          The implementation consolidation. The PDB-driven
-          fabricated-finding path that closure documents is still
-          reachable, and the authority transfer has not happened: FactStatus
-          alone is insufficient here by construction, since the model must
-          also carry observed-vs-inferred, producer and observation scope,
-          and positive-observation-vs-completeness before a detector can
-          distinguish "I observed this virtual method" from "I established
-          the complete set of virtual methods". The seven case-(a) fields
-          still on the fact_provenance mechanism are a separate, blocked
-          item (no safe conversion without a legacy-hybrid load-path fix),
-          not a decline.
+          The implementation consolidation -- narrowed by T9's first slice
+          (2026-09-05): the PDB-driven fabricated-finding path this decline
+          documented is now closed (Fact[T] gained a producer field;
+          pdb_model.py stamps every PDB record's vtable_fact/
+          vptr_offset_bits_fact as an explicit Fact.unsupported(...,
+          producer="pdb") instead of omitting them; vtable_transition_is_
+          evidenced declines outright on either side's vtable_fact.status
+          is FactStatus.UNSUPPORTED, never on NOT_COLLECTED/FAILED, so the
+          leaf-class regression this decline also protects is unaffected).
+          What remains open: the DWARF per-translation-unit completeness
+          gap (a producer-capability signal cannot express a per-TU scope
+          gap -- DWARF genuinely can capture this family, unlike PDB), and
+          the seven case-(a) fields still on the fact_provenance mechanism
+          (a separate, blocked item -- no safe conversion without a
+          legacy-hybrid load-path fix, not a decline).
         tracked_as: >-
           duplication-and-convergence-assessment.md Phase 6 item 4 / track
           T9; the full three-round reasoning lives once, canonically, in
-          diff_types_vtable.py's own module docstring.
+          diff_types_vtable.py's own module docstring, and the T9 first
+          slice's own reasoning lives in compare/vtable_evidence.py's "T9
+          closure" docstring note.
   identity:
     primitive: complete
     producers: partial
@@ -1165,6 +1178,23 @@ concepts:
       does not yet mean equivalent requests execute under the same resolved
       semantics. Tracked as duplication-and-convergence-assessment.md
       Phase 6 item 3 / track T4.
+      **2026-09-05 T4 first item, partially landed:** execute_dump_request's
+      nine out-of-band semantic kwargs are folded into one typed
+      service_dump_pipeline.DumpExecutionOptions, passed as a single
+      options= keyword at that one call boundary -- reaching
+      execute_dump_request now means stating one nameable execution plan,
+      not nine independently-passed values. Codex review on the landing PR
+      correctly flagged that this alone overclaims "folded into the typed
+      request": DumpExecutionOptions is not a field of DumpRequest or
+      ResolvedDumpRequest, and frontends/cli/dump_execute.py's
+      execute_dump_cli_run still takes the nine values as its own separate
+      parameters, assembling the typed object only immediately before
+      calling execute_dump_request -- so dump --dry-run's rendered
+      ResolvedDumpRequest still cannot represent any of these nine values.
+      Folding them into the typed request/resolved-request model itself
+      remains open, along with evaluation_config (still None on every real
+      instance) and T4's other two items (splitting backend selection from
+      fallback policy; a source-only dump execution variant).
   run_outcome:
     primitive: complete
     producers: complete

@@ -349,6 +349,21 @@ class TestExecutionConsumesTheResolvedPlan:
         def _fake_execute_dump_request(resolved, **kwargs):
             seen["resolved"] = resolved
             seen.update(kwargs)
+            # ADR-063 Track T4: `execute_dump_request`'s nine semantic
+            # kwargs are folded into one `DumpExecutionOptions`, so the
+            # individual fields the assertions below check are flattened
+            # back out here rather than making every call site below reach
+            # into `seen["options"]` itself.
+            options = kwargs.get("options")
+            if options is not None:
+                seen["build_config"] = options.build_config
+                seen["allow_build_query"] = options.allow_build_query
+                seen["legacy_compile_db_tokens"] = options.legacy_compile_db_tokens
+                seen["legacy_compile_db_matched"] = options.legacy_compile_db_matched
+                seen["seed_collect_mode"] = options.seed_collect_mode
+                seen["source_frontend_from_folded_context"] = (
+                    options.source_frontend_from_folded_context
+                )
             from abicheck.model import AbiSnapshot
             from abicheck.service_dump_pipeline import DumpResult
 

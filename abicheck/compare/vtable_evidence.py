@@ -64,19 +64,41 @@ lookups became parameters; no behavior changed for ``diff_types_vtable``'s
 own existing callers.
 
 **ADR-063 Track 4, 5B final closure: whether a direct ``FactStatus``
-pre-check belongs here.** Attempted, found to regress real detection
-coverage, reverted -- this function's heuristic is unchanged from before
-that closure. See ``diff_types_vtable.py``'s own module docstring (its
-"Track 4, 5B final closure" section) for the full three-round account and
-the still-open PDB fabrication gap it describes -- the canonical writeup,
-not repeated here.
+pre-check belongs here.** Attempted (round 2), found to regress real
+detection coverage (round 3 reverted it) -- a blanket "not is_present"
+pre-check cannot tell PDB's own structural non-evidence apart from a
+hand-constructed/typed-API ``RecordType`` omitting ``vtable=`` (both
+resolve to ``NOT_COLLECTED``). See ``diff_types_vtable.py``'s own module
+docstring (its "Track 4, 5B final closure" section) for the full
+three-round account.
+
+**T9 closure (duplication-and-convergence-assessment.md Phase 6 item 4,
+this revision): the PDB fabrication that closure left open is now closed,
+narrower than round 2's attempt.** Round 2's mistake was checking
+``not is_present`` — a status a hand-built fixture's own omission
+convention can produce too. The fix is not a broader status check; it is
+a *narrower and more precise* one, gated on ``FactStatus.UNSUPPORTED``
+specifically (see :func:`vtable_transition_is_evidenced`'s own body) —
+the one status ``model/fact.py`` already reserves for "this producer
+cannot express this family at all," which a public dataclass's own
+omission-resolution path (``bridge_legacy_and_fact``) never produces on
+its own; only an explicit ``Fact.unsupported()`` construction does. The
+other half of the fix is at the producer boundary, not here:
+``pdb_model.py``'s ``_record_from_layout`` now constructs every PDB
+record's ``vtable_fact``/``vptr_offset_bits_fact`` as an explicit
+``Fact.unsupported(..., producer="pdb")`` instead of omitting the field
+and falling back to the ambiguous default. Together, this closes the
+reachable, confirmed fabrication round 2 found (an apparent vtable
+transition read off a PDB-derived side) while leaving every existing
+``NOT_COLLECTED`` caller — including the leaf-class regression round 3's
+revert protects — on the exact heuristic this module already had.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
-from ..model import Function, RecordType, resolved_fact_value
+from ..model import FactStatus, Function, RecordType, resolved_fact_value
 
 OwnerClassOf = Callable[[Function], "str | None"]
 NamespaceSuffixSpellings = Callable[[str], "list[str]"]
@@ -220,6 +242,34 @@ def vtable_transition_is_evidenced(
     chains) -- see AGENTS.md's evidence-provider entry -- not a cleverer
     reading of the fields already here.
     """
+    if (
+        t_old.vtable_fact is not None
+        and t_old.vtable_fact.status is FactStatus.UNSUPPORTED
+    ) or (
+        t_new.vtable_fact is not None
+        and t_new.vtable_fact.status is FactStatus.UNSUPPORTED
+    ):
+        # ADR-063 Track 4 5B final closure / T9: `UNSUPPORTED` is not the
+        # generic "not is_present" pre-check round 2 landed and round 3
+        # reverted (see the module docstring's "5B final closure" note) --
+        # it is the one status a producer's own structural incapability
+        # explicitly claims (`Fact.unsupported()`, e.g. `pdb_model.py`'s
+        # PDB-derived records), and a hand-constructed/typed-API
+        # `RecordType` omitting `vtable=` never resolves to it (that
+        # omission backfills to `NOT_COLLECTED` via `bridge_legacy_and_fact`
+        # -- see model/fact.py's own "producer" docstring). So gating here,
+        # specifically on `UNSUPPORTED` and nowhere else, closes the real,
+        # reachable PDB fabrication (an apparent vtable transition read off
+        # a side that can never report vtable evidence at all, whether via
+        # the size/base fallback below or via the owned-virtual-function
+        # fallback -- PE/PDB also never set `Function.is_virtual` for a
+        # confirmed reason, so that stream is equally untrustworthy from an
+        # `UNSUPPORTED` side) without reintroducing the regression round 3
+        # found: `NOT_COLLECTED` (a hand-built fixture's own "no virtuals"
+        # convention, or any other producer's genuine non-evidence) is
+        # untouched and keeps falling through to the heuristics below,
+        # exactly as before this check existed.
+        return False
     old_vtable = resolved_fact_value(t_old.vtable_fact, [])
     new_vtable = resolved_fact_value(t_new.vtable_fact, [])
     if old_vtable and new_vtable:

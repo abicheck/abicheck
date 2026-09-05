@@ -12,26 +12,39 @@ per-field front-end wiring (`abicheck/compatibility_evaluation_config.py`,
 Phase 2's identity primitive (`abicheck/finding_identity.py`) is fully
 wired — `diff_filtering.py`'s cross-detector dedup key resolves through
 `resolve_change_identity`, and `diff_symbols.py`'s own old/new function and
-variable matching joins through `SymbolIdentityIndex`. Phase 3's shadow
-evaluator (`abicheck/contract_evaluation.py`) is stamped onto findings
-under `compare --contract-evaluation`, in all three domains — `exports`
-gained its evidence provider (`abicheck/export_surface.py`), so it no
-longer raises. Phase 4 persists the evidence ledger and contract context
-and replays/re-evaluates from it (`abicheck/contract_evidence_collect.py`,
-`contract_context.py`, `contract_replay.py`); Phase 5 routes both the
-`compare` CLI and the MCP `abi_compare` tool through one resolved config
-(`abicheck/cli_compare_receipt.py`, `mcp_compare_receipt.py`), adds the
-unsuppressible coverage ledger (`contract_coverage_ledger.py`) and applies
-`--pack` manifests (`pack_application.py`); Phase 6 selects the evidence
-domain (`compare --contract public|exports|all`). Phase 7's coverage-exit
-slice landed (`abicheck/contract_coverage_exit.py`). **Still open:** making
-the contract decision authoritative (the evaluator still runs *after*
-`verdict`, over the final `kept` list, so it changes no verdict, finding,
-or exit code), flipping `--contract-evaluation` on by default, and
-`aggregate` folding the coverage ledger into its own axis — see
-`docs/contribute/plans/public-contract-default.md`'s "Work breakdown" for
-per-phase detail.
-**Verified:** main@2e43d53 on 2026-08-04
+variable matching joins through `SymbolIdentityIndex`. Phase 3's evaluator
+(`abicheck/contract_evaluation.py`) is stamped onto findings under
+`compare --contract` (the standalone `--contract-evaluation` switch was
+later removed — naming a domain, including `auto`, is now itself the
+request; see `cli_options.resolve_contract_evaluation`), in all three
+domains — `exports` gained its evidence provider
+(`abicheck/export_surface.py`), so it no longer raises. Phase 4 persists
+the evidence ledger and contract context and replays/re-evaluates from it
+(`abicheck/contract_evidence_collect.py`, `contract_context.py`,
+`contract_replay.py`); Phase 5 routes the `compare` CLI through one
+resolved config (`abicheck/cli_compare_receipt.py`; the MCP `abi_compare`
+tool this phase originally also routed, and `mcp_compare_receipt.py`, no
+longer exist — the MCP server was retired, see
+[ADR-021](021-mcp-security-model.md)), adds the unsuppressible coverage
+ledger (`contract_coverage_ledger.py`) and applies `--pack` manifests
+(`pack_application.py`); Phase 6 selects the evidence domain
+(`compare --contract public|exports|all`). Phase 7's coverage-exit slice
+landed (`abicheck/contract_coverage_exit.py`), **and (2026-09-02) the
+contract decision is now authoritative, not shadow, when `--contract` is
+given**: `abicheck/contract_pipeline.py`'s `ContractEvaluationStage` runs
+*before* `checker._compute_verdict_for`, so a finding labelled
+`PROVEN_OUT_OF_CONTRACT` is excluded from scoring rather than merely
+annotated after the fact — every call site that computes or recomputes a
+verdict (including the `--surface-metrics`/`--pattern-verdicts` follow-on
+passes) routes through the same stage. `aggregate` already folds the
+coverage ledger into its own exit axis
+(`workflows/aggregate/fold.py`'s `contract_coverage_exit`). **Still
+open:** flipping `--contract` (a resolved contract mode) on by default for
+every run — see `docs/contribute/plans/public-contract-default.md`'s
+"Work breakdown" for per-phase detail. Without `--contract`,
+`contract_evaluation` stays `False` and `compare()`'s behavior is
+unchanged, same as before Phase 7.
+**Verified:** main@12a5c927 on 2026-09-05
 **Decision maker:** napetrov
 
 ## Context
@@ -792,4 +805,61 @@ to audit.
    snapshots, packages, and downstream report consumers.
 8. Flip the default only after zero unexplained public-break losses, reviewed
    false-positive deltas, and an acceptable measured unresolved rate.
-9. Keep `contract=all` and `--no-scope-public-headers` as the forensic rollback.
+9. Keep `contract=all` and `--no-scope-public-headers` as the forensic
+   rollback.
+
+## Amendment (2026-09, clarification): declared, observed, and consumed
+surfaces coexist — no universal priority
+
+A documentation review against `vision.md`'s explicit separation of
+*declared contract*, *observed evolution*, and *known-consumer impact*
+found that `docs/contribute/plans/public-contract-default.md`'s §4.3
+evidence ranking ("Any authoritative in-contract evidence wins") collapses
+three genuinely distinct facts into one relevance decision: a project may
+explicitly document that a helper is unsupported (a **declared** fact), the
+binary may nonetheless export it (an **observed** fact), and a real
+`--used-by` consumer may import it anyway (a **consumed** fact). §4.3's
+current design lets the third fact override the first — an undocumented
+export a known consumer imports resolves straight to `IN_CONTRACT`,
+scoring against ordinary compatibility policy exactly as if it had been
+declared public all along.
+
+This amendment states, without changing any already-implemented behavior
+(nothing here revisits an already-shipped `CompatibilityEvaluationStatus`
+computation), the target design this ADR's own future work should converge
+on: **the three facts stay three facts.** A finding's contract-relevance
+decision should be able to state all three simultaneously (e.g. "declared
+not-public" + "binary exports it" + "a known consumer imports it") rather
+than the last one winning and erasing the first two. What the *policy layer*
+then does with a known-consumer-imports-an-undeclared-export situation —
+treat it as a real risk to flag, downgrade the finding's severity, or leave
+it out-of-contract but visible — is a policy decision (this ADR's own
+"detector fact → contract relevance → compatibility decision → gate
+decision" pipeline, unchanged), not a relevance-classification one. Folding
+consumer evidence into the relevance verdict itself is what erases the
+distinction the vision draws; the fix is to let policy consume all three
+facts explicitly instead.
+
+**`--used-by`: enrichment beside the global result, not a gate replacement.**
+The corollary this amendment names for `--used-by`/`--required-symbol[s]`
+specifically (workstream item "D" of the plan above) is that scoped
+evidence should sit *beside* the whole-comparison result as an additional,
+labeled fact — "this finding also affects the following named consumers" —
+rather than replacing or overriding the global contract/gate decision the
+way §4.3's current ranking effectively does when a `--used-by` import is
+present. A caller that scopes a run to known consumers should get a richer
+report, not a *different* verdict for the same underlying binary fact.
+Migrating `--used-by` from its current gate-affecting role to a pure
+enrichment role is compatibility-sensitive (a run relying on today's
+`--used-by`-driven `IN_CONTRACT` promotion would see its exit code change)
+and needs its own migration note and deprecation window when implemented —
+not attempted by this amendment, which is a clarification of target design
+only. See [ADR-005](005-application-compat-check.md) (application
+compatibility, the original consumer-facing check this generalizes),
+[ADR-047](047-github-actions-integration-model.md) (the Actions/project
+lifecycle surface that would carry a migration note),
+[ADR-052](052-unified-impact-assessment-model.md) (report-level impact
+attribution, the natural home for a "beside the global result" enrichment
+block), and [ADR-057](057-consumer-graph-and-impact-join.md) (the consumer
+graph the `--used-by` scoping already reads) for where this change, if
+picked up, intersects each of their own status.

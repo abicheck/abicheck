@@ -1270,9 +1270,10 @@ if [[ "$MODE" == "dump" ]]; then
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
   add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
   add_single_flag "--depth" "${INPUT_DEPTH:-}"
-  if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
-    CMD+=(--allow-build-query)
-  fi
+  # `allow-build-query` (the `--allow-build-query` dump flag it fed) is a
+  # deprecated no-op removed outright in CLI cleanup H1 -- the input stays
+  # registered in action.yml for back-compat, but nothing is forwarded to
+  # the CLI for it any more.
 
   # dry-run performs no analysis and writes nothing, so it is mutually
   # exclusive with -o/--output on the CLI -- skip the output file entirely

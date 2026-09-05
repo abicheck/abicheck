@@ -289,3 +289,89 @@ class TestPayloadTextIsNeverCorrupted:
         out: list[str] = []
         _collect_strings(rec, out)
         assert _closure("x.h", 7, 1) not in out
+
+
+class TestFactProducerFieldIsRecognizedAndExcluded:
+    """T9 (duplication-and-convergence-assessment Phase 6 item 4, Codex
+    review PR #1075): ``model.fact.Fact`` gained a fourth field,
+    ``producer``. Both structural ``Fact`` recognizers here (this module's
+    own ``is_fact``/``is_fact_value_field``) match on an *exact* field-name
+    set, so the new field silently broke recognition entirely until both
+    sets were updated -- ``qualified_name_fact``/``source_header_fact``
+    stopped being renumbered/protected at all, since ``type(value).__name__
+    == "Fact"`` no longer matched. This pins both halves: recognition still
+    works, and ``producer`` itself (a backend name, never identity-bearing
+    text or a path) is never collected or rewritten, the same as
+    ``deprecated``/``default``/``source_header``.
+    """
+
+    def test_qualified_name_fact_with_a_producer_is_still_renumbered(self) -> None:
+        rec = replace_with_fact_sync(
+            _record(
+                f"raii_guard<{_closure('x.h', 5, 1)}>",
+                qualified=f"ns::raii_guard<{_closure('x.h', 5, 1)}>",
+            ),
+        )
+        from abicheck.model import Fact
+
+        rec = replace(
+            rec, qualified_name_fact=Fact.present(rec.qualified_name, producer="dwarf")
+        )
+        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
+        renumber_anonymous_closure_identities(snap)
+        renumbered = snap.types[0]
+        assert "#1)" in renumbered.qualified_name
+        assert renumbered.qualified_name_fact is not None
+        assert renumbered.qualified_name_fact.value == renumbered.qualified_name
+        # The producer attribution itself is untouched -- not identity
+        # text, never rewritten.
+        assert renumbered.qualified_name_fact.producer == "dwarf"
+
+    def test_a_producer_matching_the_marker_syntax_is_untouched(self) -> None:
+        """A producer string coincidentally shaped like a closure marker
+        (implausible in practice, but this walk is structural/import-free
+        and must not rewrite it regardless) is never rewritten -- the
+        identical discipline `source_header`'s own test above pins."""
+        from abicheck.model import Fact
+
+        marker_producer = _closure("x.h", 1, 1)
+        closure_type = f"raii_guard<{_closure('x.h', 5, 1)}>"
+        rec = replace(
+            _record(closure_type, qualified=f"ns::{closure_type}"),
+            qualified_name_fact=Fact.present(
+                f"ns::{closure_type}", producer=marker_producer
+            ),
+        )
+        snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
+        renumber_anonymous_closure_identities(snap)
+        renumbered = snap.types[0]
+        assert "#1)" in renumbered.qualified_name
+        assert renumbered.qualified_name_fact is not None
+        assert renumbered.qualified_name_fact.producer == marker_producer
+
+    def test_collect_strings_excludes_producer_too(self) -> None:
+        """Uses ``qualified_name_fact``, not ``source_header_fact`` --
+        CodeRabbit review: ``source_header``'s whole ``_fact`` sibling is
+        already skipped as a unit (``_legacy_sibling_is_payload_excluded``),
+        so a producer placed there would pass even if ``"producer"`` were
+        removed from ``_PAYLOAD_FIELD_EXCLUSIONS`` entirely -- a tautological
+        test. ``qualified_name_fact`` is not whole-field-excluded (only its
+        own ``value`` gets special handling), so this walk genuinely reaches
+        ``Fact.producer`` and this pin actually depends on the exclusion."""
+        from abicheck.model import Fact, FactStatus, RecordType
+
+        rec = RecordType(
+            name="X",
+            kind="class",
+            size_bits=8,
+            qualified_name="X",
+            qualified_name_fact=Fact(
+                status=FactStatus.PRESENT,
+                value="X",
+                diagnostics=(),
+                producer=_closure("x.h", 7, 1),
+            ),
+        )
+        out: list[str] = []
+        _collect_strings(rec, out)
+        assert _closure("x.h", 7, 1) not in out

@@ -149,28 +149,21 @@ class TestDumpNativeBinary:
             assert "header_graph" not in captured
             assert "header_graph_includes" not in captured
 
-    def test_dump_pe_header_graph_deprecated_flags_are_inert(
+    def test_dump_pe_header_graph_deprecated_flags_are_removed(
         self, tmp_path: Path
     ) -> None:
-        """The hidden --header-graph/--header-graph-includes shim still
-        parses (doesn't error as an unknown option) and just warns, on PE
-        dump the same as ELF."""
-        from abicheck.model import AbiSnapshot
-
+        """CLI cleanup H1: --header-graph/--header-graph-includes are gone
+        outright now (a usage error), on PE dump the same as ELF."""
         pe_file = tmp_path / "test.dll"
         pe_file.write_bytes(_make_pe_bytes())
-        mock_snap = AbiSnapshot(library="test.dll", version="1.0", platform="pe")
 
-        with patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"), \
-             patch("abicheck.service_dump_native._dump_pe", return_value=mock_snap):
-            runner = CliRunner()
-            result = runner.invoke(main, [
-                "dump", str(pe_file), "--version", "1.0",
-                "--header-graph", "--header-graph-includes",
-            ])
-            assert result.exit_code == 0, result.output
-            combined = (result.output + (result.stderr or "")).lower()
-            assert "deprecated" in combined
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "dump", str(pe_file), "--version", "1.0",
+            "--header-graph", "--header-graph-includes",
+        ])
+        assert result.exit_code == 64, result.output
+        assert "No such option" in result.output
 
     def test_dump_pe_to_file(self, tmp_path: Path) -> None:
         """PE dump with --output writes JSON file."""
