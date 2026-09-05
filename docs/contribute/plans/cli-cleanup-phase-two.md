@@ -243,7 +243,7 @@ three positions this plan used to hold are explicitly revised by the vision:
 
 | Item | State | Blocked on |
 |---|---|---|
-| **H1 hidden-shim deletion** (new below) | Not started | Nothing |
+| **H1 hidden-shim deletion** | Half done (#1080): `--allow-build-query`/`--header-graph`/`--header-graph-includes` deleted. `--btf`/`--ctf`/`--dwarf` still open | Nothing |
 | **PR H** — `scan --artifact-set` member-identity manifest form | Open; syntax, cost/dry-run and audit-mode ownership all done | Nothing (last piece of PR H) |
 | **PR I** — live/stored operand driver; one evaluation/gate/report/dry-run path across all four operand shapes | Open; classification, flag deletion and stored/stored execution done | A shared gate/report object; overlaps vision A-S4 |
 | **PR J** — per-library header/compile-context topology in `BundleSpec`; `--max-json-object-nodes` → a calibrated `--resource-limit` | Open; `--manifest` rename and `--bundle-system-providers`/`--bundle-cohort` → `.abicheck.yml` done | G42 provider resolution (topology); a real bytes-per-node calibration (resource limit) |
@@ -252,24 +252,47 @@ three positions this plan used to hold are explicitly revised by the vision:
 | `contract=public` default flip | Open | `EntityId`-based public closure (ADR-063 Phase 2), **not** a string heuristic |
 | PR 0/0B, PR 1, 1b, 2, A, B, C (binary formats), D, E, F, G1, G2 | Done / closed by decision | — |
 
+**Two vision blocks this section pointed at have since landed**, which is what
+moved on `main` between #1073 and `d1a486bb`:
+
+| Landed | What shipped |
+|---|---|
+| **C-S1, the scalar disposition audit** ([#1082](https://github.com/abicheck/abicheck/pull/1082)) | One conserved ledger (`policy/disposition_ledger.py`) all five suppression application points route through — a fifth turned up beyond the four C-S1 named; raw-vs-effective counts and rule provenance in *every* projection (JSON, `--stat`, review digest, PR comment, SARIF, JUnit, HTML, all Markdown modes); `not_evaluated` detectors; report schema 2.52. Includes this plan's one named behavior fix: `recommend_release` reads the conserved ledger, so a fully suppressed break is `major`/`review`, not "no bump needed" |
+| **A-S2, scope acquisition and completeness** ([#1079](https://github.com/abicheck/abicheck/pull/1079)) | `RunOutcome.scope` plus two `0`/`1` `ExitDecision` folds; per-member acquisition states in a `comparison_scope` block; `--on-incomplete-scope warn\|block`; zero completed comparisons exits `1` as `no_comparison_completed` instead of a silent `NO_CHANGE`/`0`; degraded stranded members marked and skipped rather than diffed as ELF-only stand-ins; exit `8` now requires a *proven* removal (the NEW side's capture must have asserted `inventory_complete`). Landed **ahead of A-S1**, which is now A's next slice |
+
+One consequence worth acting on: **D-S1 (`--used-by` enrichment) is no longer
+blocked** — it was waiting on exactly the disposition model C-S1 shipped.
+
 Everything else this file used to track (`--exit-code-scheme`,
 `--old-bundle-facts`, the compare provider/cohort switches, bare compare
 `--manifest`, the release fan-out's `GateOptions`, the shared gate-pack fold) is
 landed. **Do not re-open any of them.**
 
-### H1 — hidden inert shims and duplicate spellings (new, unblocked)
+### H1 — hidden inert shims and duplicate spellings
 
-Four surfaces still contradict this plan's own no-alias stance and #770's
-precedent. Each is `hidden=True` today, which is the deprecation window this
+**Half done ([#1080](https://github.com/abicheck/abicheck/pull/1080), merged
+2026-09-05):** `--allow-build-query`, `--header-graph` and
+`--header-graph-includes` are gone from `dump` and `compare` — all three now
+exit `64` with `No such option`, and the genuinely dead `allow_build_query`
+parameter came out of `collect_inline_pack`/`embed_build_source` and the CLI
+call chain with them, while the live programmatic gate stayed (the boundary
+this section drew held up). The Action's `allow-build-query` input stays
+registered for back-compat but is no longer forwarded.
+
+**Still open: `--btf` / `--ctf` / `--dwarf`**, at the three sites the bullet
+below names — verified still present on `main` at `d1a486bb`. Everything else
+in this section is history, kept for the boundary it records.
+
+Each of these was `hidden=True`, which is the deprecation window this
 repository says it does not run:
 
-- `--header-graph`, `--header-graph-includes`
+- ~~`--header-graph`, `--header-graph-includes`~~ **(deleted, #1080)**
   (`abicheck/frontends/cli/options/release.py`, `header_graph_options`) — inert
   no-ops since the L2 header graph became always-on; passing either prints a
   stderr note and changes nothing. Delete both plus
   `warn_deprecated_header_graph_flags` and its two `compare`/`dump_cmd` call
   sites.
-- `dump --allow-build-query` (same module) — a deprecated no-op; an explicit
+- ~~`dump --allow-build-query`~~ **(deleted, #1080)** — a deprecated no-op; an explicit
   `--config` has been the only authorizer since PR F. **Delete the CLI option
   and `dump_cmd`'s own always-`False` local only.** The engine-side
   `allow_build_query` parameters are *not* part of this slice and must stay:
@@ -283,7 +306,7 @@ repository says it does not run:
   `True` direction but load-bearing as the ADR-037 D4 level-implies-query
   guard — neither is a CLI concern, so neither moves here (Codex review on
   #1073, verified against the call sites).
-- `--btf` / `--ctf` / `--dwarf` — hidden duplicate spellings of
+- **`--btf` / `--ctf` / `--dwarf` — STILL OPEN.** Hidden duplicate spellings of
   `--debug-format {btf,ctf,dwarf}`, which the option's own help text already
   calls their supersession. **Declared twice**: `debug_resolution_options`
   (`frontends/cli/options/release.py`, reached by `compare`) *and* inline on
@@ -294,12 +317,11 @@ repository says it does not run:
   which the contract gate keys on, and the `--help-all` grouping in
   `frontends/cli/help.py` (which also still lists `--allow-build-query`).
 
-**Six spellings, not four**, and each has to be tested on *every* command that
-declares it — `--header-graph`/`--header-graph-includes` on `compare` and
-`dump`, `--allow-build-query` on `dump`, and the three debug aliases on
+**Six spellings, not four** — three deleted, three left. Each has to be tested
+on *every* command that declares it: the three remaining debug aliases are on
 `compare` and `dump` separately.
 
-Acceptance: each of the six spellings exits `64` with `No such option` on
+Acceptance: each remaining spelling exits `64` with `No such option` on
 every command that declares it today; the canonical replacement behaves
 identically; `build.query`'s explicit-`--config` trust gate
 is unchanged; `--help-all` and `docs/reference/cli-reference.md` regenerated.
@@ -320,13 +342,14 @@ checklist: where the two ever disagree, `vision-api-abi-evolution.md` wins.
 
 | # | Block | Start | Owning workstream | Primary files | Shared types |
 |---|---|---|---|---|---|
-| 1 | H1 hidden-shim deletion | **Tier 0 — now** | this plan (H1 above) | `frontends/cli/options/release.py`, `frontends/cli/commands/dump.py`, `options/inventory.py`, `help.py` | No |
-| 7 | Explicit-`--config` dry-run/execution parity | **Tier 0 — now** | this plan (PR C tail) | `cli_dump_request.py`, `cli_compare*` config discovery | No |
-| 3 | Release-path scope & completeness | **Tier 1 — now** | A-S1/S2 (deletion gate A-S4) | `cli_compare_release*`, `workflows/`, `policy/outcome.py` | **Yes — integration owner** |
-| 5 | Per-dimension comparability + failed evidence | **Tier 1 — now** | E-S1/S2 | `comparability.py`, `analysis_assurance.py`, `workflows/plan.py` | **Yes — integration owner** |
-| 2 | Scalar disposition audit | Tier 2 — after A/E's field contract (S0) is agreed | C-S1 + G-S1 | `policy/`, `report/`, `checker.py`, `semver.py` | No |
-| 4 | Header-only capture and comparison | Tier 3 — after E-S1 | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `service_dump_pipeline.py`, `workflows/artifact/` | No |
-| 6 | `scan --artifact-set` member-identity manifest | Tier 3 — needs A-S3's component inventory | this plan (PR H, last piece) | `cli_scan*`, a member-identity schema that does not exist yet | Indirectly (A's inventory) |
+| 1 | H1 hidden-shim deletion | **Tier 0 — now** (half done, #1080; three debug aliases left) | this plan (H1 above) | `frontends/cli/options/release.py`, `frontends/cli/commands/dump.py`, `options/inventory.py`, `help.py` | No |
+| 7 | Explicit-`--config` dry-run/execution parity | **Tier 0 — now** (untouched) | this plan (PR C tail) | `cli_dump_request.py`, `cli_compare*` config discovery | No |
+| 3 | Release-path scope & completeness | **A-S2 DONE (#1079)**; A-S1 selection is the live slice | A-S1 (deletion gate A-S4) | `cli_compare_release*`, `workflows/`, `policy/outcome.py` | **Yes — integration owner** |
+| 5 | Per-dimension comparability + failed evidence | **Tier 1 — now** (untouched) | E-S1/S2 | `comparability.py`, `analysis_assurance.py`, `workflows/plan.py` | **Yes — integration owner** |
+| 2 | Scalar disposition audit | **DONE (#1082)**; C-S2's multi-member parity is the next slice | C-S1 + G-S1 | `policy/`, `report/`, `checker.py`, `semver.py` | No |
+| 8 | `--used-by` enriches instead of replacing the gate | **Newly unblocked** by #1082 | D-S1 | `appcompat.py`, `impact/`, `report/` | No |
+| 4 | Header-only capture and comparison | Tier 3 — after E-S1 (untouched) | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `service_dump_pipeline.py`, `workflows/artifact/` | No |
+| 6 | `scan --artifact-set` member-identity manifest | Tier 3 — needs A-S3's component inventory (untouched) | this plan (PR H, last piece) | `cli_scan*`, a member-identity schema that does not exist yet | Indirectly (A's inventory) |
 
 Tier 0 is outside the vision sequence entirely — pure interface hygiene with
 no shared model behind it. Tier 1 is the owning plan's own first pair, and the
@@ -451,9 +474,11 @@ executes only from an explicit `--config` (ADR-032 D5) and that must remain
 true through whatever this block changes; the trust receipt in `--dry-run` is
 part of the parity, not an optional extra.
 
-**Blocked, deliberately not on this list.** `--used-by`'s enrichment
-rewrite (D-S1) needs block 2's disposition model first, or per-consumer rows
-land beside counts that still do not reconcile. History and versioning policy
+**Blocked, deliberately not on this list.** ~~`--used-by`'s enrichment
+rewrite (D-S1) needs block 2's disposition model first~~ — **unblocked
+2026-09-05**: #1082 shipped that model, and the audit already follows the
+*scoped* gate under `--used-by`, so the per-consumer rows now have counts that
+reconcile to land beside. It is block 8 above. History and versioning policy
 (B) need blocks 2, 3 and 5. The `contract=public` default flip needs
 ADR-063 Phase 2's `EntityId` closure, not a string heuristic. PR I's
 evaluation/gate/report unification needs a shared gate/report object that no
