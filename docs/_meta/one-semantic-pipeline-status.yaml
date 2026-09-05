@@ -38,7 +38,10 @@
 #
 # Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
-# as of base commit bfb40222 (Track 4's 7B ledger/plan-table drift fix --
+# as of base commit bbce489e (the base this 2026-09-05 re-assessment update
+# built on -- PR #1062, the --exit-code-scheme removal, is an ancestor of it,
+# so this receipt covers the implementation the re-assessment inspected).
+# bbce489e carries forward bfb40222 (Track 4's 7B ledger/plan-table drift fix --
 # updating the run_outcome concept's removal_gate to describe the landed
 # release-fan-out investigation and its parity test -- was built on and
 # merges this content forward), which itself carries forward 2a88a5bd (the
@@ -72,8 +75,8 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 1
-as_of_commit: bfb40222
-as_of_date: "2026-09-03"
+as_of_commit: bbce489e
+as_of_date: "2026-09-05"
 
 concepts:
   facts:

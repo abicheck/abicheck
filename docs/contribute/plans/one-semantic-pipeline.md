@@ -173,59 +173,37 @@ work it does not itself schedule. The six sub-phases below close that gap.
 
 ### 2026-09-05 re-assessment of this extension (accepted)
 
-A second external review, of `main` at the merge of PR #1062 (the
-`--exit-code-scheme` removal), re-checked the six sub-phases below against
-the implementation rather than against their own completion labels. It was
-reviewed and **accepted** on 2026-09-05; its full text, the retirement
-table it produced, and the parallel-track decomposition now live in
-[duplication-and-convergence-assessment.md](duplication-and-convergence-assessment.md)'s
-"2026-09-05 re-assessment" section and its Phase 6, since that plan already
-owns cross-cutting retirement work. Read the two together. Four findings
-bear directly on the table below and are recorded here so this document
-does not restate a status the re-assessment corrected:
+A second external review, of `main` at the merge of PR #1062, re-checked the
+six sub-phases below against the implementation rather than against their
+own completion labels. It was reviewed and **accepted** on 2026-09-05.
+**Its findings, reasoning, retirement table, and parallel-track
+decomposition are owned by
+[duplication-and-convergence-assessment.md](duplication-and-convergence-assessment.md)**
+("2026-09-05 re-assessment" and Phase 6), which already owns cross-cutting
+retirement work — read it there rather than a second copy here.
 
-1. **`investigated_declined` is not `retired`.** Several rows below close a
-   consolidation item on the grounds that no currently-identifiable finding
-   justifies it. That is a valid answer for a *behavioral* change and an
-   invalid one for an *implementation* consolidation — "no current bug
-   found" can justify preserving behavior, never a second implementation of
-   that behavior. The status ladder is
-   `introduced → wired → authoritative → retired`, with
-   `investigated_declined` as a separate disposition that leaves the
-   removal gate **open**. 5B's `vtable`/`TYPE_VTABLE_CHANGED` closure is the
-   sharpest case: the investigation is complete, but the PDB-driven
-   fabricated-finding path is still reachable and the authority transfer has
-   not happened.
-2. **6B's landed cohorts are fidelity gates, not authority transfers.**
-   `compare/typedefs.typedef_index_pair` and
-   `compare/constants.constant_index_pair` construct **both** the IR-backed
-   and the legacy-backed index on every comparison, and use the IR only when
-   the legacy projection agrees with it in names, values, identities, and
-   ordering. The legacy representation still adjudicates. The cutover
-   completes when a current-format snapshot no longer causes a legacy index
-   to be built at all, and a disagreement becomes an explicit consistency
-   failure rather than a silent fallback.
-3. **4B is unread, not unwired — and the row below already says so for
-   dump.** The re-assessment confirms that correction and extends it: both
-   `execute_dump_request` and `resolve_compare_request` build and enrich a
-   `ResolvedExecutionContext`, but compare classification still separately
-   loads suppression and policy, applies pack contributions, prepares source
-   evidence, resolves gate settings, and computes assurance. The remaining
-   work is authority, not construction. `execute_dump_request`'s nine
-   out-of-band semantic kwargs are the concrete blocker: reaching the same
-   function does not yet mean equivalent requests execute under the same
-   resolved semantics.
-4. **7B's Action half is partially migrated.** `_report_compat_verdict()`
-   and `_severity_gate_exit()` already prefer `run_outcome`'s structured
-   fields; the residual is the raw-process-exit/stderr-text path, which
-   PR #1062 extended again for evidence-contract errors.
+Its governing correction, which applies to how every row below is closed:
+**"no current bug found" can justify preserving behavior, never a second
+implementation of that behavior.** `investigated_declined` is therefore a
+separate disposition on the `introduced → wired → authoritative → retired`
+ladder, and it leaves a removal gate **open**.
 
-The re-assessment also found the *architecture guard* insufficient as
-evidence of authority: `scripts/semantic_ir_cutover.py`'s module-level "no
-legacy attribute read" rule is satisfied by the typedef selector while the
-legacy projection still decides. Each cohort's guard must cover the whole
-dependency path — callers, adapters, selectors, producers — and the
-legacy-*writer* retirement condition, not just the detector module.
+What that means for this table specifically — the rows it corrects, and
+which track closes each:
+
+| Row | Correction | Track |
+|---|---|---|
+| 2B/6B | The landed typedef and constant cohorts are *fidelity gates*, not authority transfers: both indexes are built every comparison and the legacy projection adjudicates | T3 |
+| 4B | Unread, not unwired, on both the dump and compare paths | T4 |
+| 5B | The `vtable` "final closure" is an investigated decline of a behavioral change; the PDB fabrication path and the authority transfer are still open | T9 |
+| 7B | `action/run.sh` is partially migrated — the residual is the raw exit/stderr path | T8 |
+
+One finding bears on this plan's own guardrail design rather than on a row:
+`scripts/semantic_ir_cutover.py`'s module-level "no legacy attribute read"
+rule is *satisfied by* the typedef selector while the legacy projection
+still decides, so it is not evidence of authority. Each cohort's guard must
+cover the whole dependency path — callers, adapters, selectors, producers —
+and the legacy-*writer* retirement condition.
 
 **Adopted sub-phases** — each slots after the parent phase it extends in
 the numbering, and each starts at status `not_started`. This table is the
