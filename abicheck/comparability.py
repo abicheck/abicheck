@@ -229,6 +229,92 @@ _PLATFORM_IDENTITY_FIELDS = frozenset({"target_triple", "pointer_width", "endian
 # surface as a RISK finding, not a reason to refuse a verdict outright.
 _BUILD_CONTEXT_FIELDS = frozenset({"language_standard", "macro_ops"})
 
+# E-S2 (docs/contribute/plans/cli-cleanup-phase-two.md, Block 5) -- the
+# per-dimension comparability vocabulary. ``ComparabilityMismatch`` used to
+# carry only a single coarse ``kind`` ("scope" | "profile" |
+# "dependency_scope"), so a GCC-vs-Clang pair with a genuinely narrow mismatch
+# (say, only ``macro_ops`` differing) was reported exactly as untrustworthy as
+# one where every axis diverged -- "wholly refused or wholly trusted", per
+# that plan's own words. ``ComparabilityMismatch.dimensions`` names which of
+# these five report-facing axes the *specific* detected mismatch leaves
+# unverified; a dimension absent from the set stays as trustworthy as it was
+# before the mismatch was found. This module only ever populates dimensions
+# ADR-050's contract can actually speak to (declaration/layout/runtime, from
+# the header-declared-surface and compile-context fingerprints) -- it never
+# claims authority over ``symbol`` (the binary's own exported-symbol-table
+# identity, L0/L1, wholly independent of header/compile-context evidence) or
+# ``source`` (L4/L5 build-source-graph evidence, a separate comparability
+# axis this module's contract does not cover at all).
+COMPARABILITY_DIMENSIONS = frozenset(
+    {"symbol", "declaration", "layout", "runtime", "source"}
+)
+
+#: Which :data:`COMPARABILITY_DIMENSIONS` a differing ``profile_fields`` key
+#: leaves unverified. A field can affect more than one dimension (e.g.
+#: ``compiler_family`` bears on both struct layout and calling-convention/
+#: runtime behavior); union across every actually-differing field is what
+#: :func:`_dimensions_for_fields` computes.
+_PROFILE_FIELD_DIMENSIONS: dict[str, frozenset[str]] = {
+    "compiler_family": frozenset({"layout", "runtime"}),
+    "compiler_version": frozenset({"layout", "runtime"}),
+    "abi_dialect": frozenset({"layout", "runtime"}),
+    # A raised/lowered language standard can gate which declarations exist
+    # at all (e.g. a C++17-only member) as well as change layout (e.g.
+    # inline variables, [[no_unique_address]]).
+    "language_standard": frozenset({"declaration", "layout"}),
+    "target_triple": frozenset({"layout", "runtime"}),
+    "pointer_width": frozenset({"layout", "runtime"}),
+    "endianness": frozenset({"runtime"}),
+    # Macro state / pass-through flags can gate declarations (macro-guarded
+    # APIs) and change layout (conditional fields, packing pragmas).
+    "macro_ops": frozenset({"declaration", "layout"}),
+    "pass_through_flags": frozenset({"declaration", "layout"}),
+    "include_sequence": frozenset({"declaration"}),
+    "header_sequence": frozenset({"declaration"}),
+    # A DPC++ device/host frontend-context split changes both which
+    # declarations the frontend sees and their runtime (device vs. host)
+    # semantics (ADR-050 D5).
+    "frontend_context_kind": frozenset({"declaration", "runtime"}),
+}
+#: Every dimension any recognized profile field can affect -- the
+#: conservative fallback for a profile mismatch this module cannot attribute
+#: to specific fields (an opaque/unauthenticated fingerprint).
+_ALL_PROFILE_DIMENSIONS: frozenset[str] = frozenset().union(
+    *_PROFILE_FIELD_DIMENSIONS.values()
+)
+
+#: :data:`_PROFILE_FIELD_DIMENSIONS`'s counterpart for ``scope_fields`` keys.
+#: The declared-header-set/public-header-directory axis only ever bears on
+#: which declarations exist to compare -- never runtime behavior, and layout
+#: only insofar as an undeclared type has no layout facts to compare at all
+#: (folded into "declaration" here, not double-counted as "layout").
+_SCOPE_FIELD_DIMENSIONS: dict[str, frozenset[str]] = {
+    "headers": frozenset({"declaration"}),
+    "public_header_dirs": frozenset({"declaration"}),
+    "translation_units": frozenset({"declaration"}),
+}
+_ALL_SCOPE_DIMENSIONS: frozenset[str] = frozenset().union(
+    *_SCOPE_FIELD_DIMENSIONS.values()
+)
+
+#: A dependency-scoping mode mismatch (filtered vs. unfiltered) changes which
+#: declarations were even parsed, which in turn removes any layout evidence
+#: for whatever was filtered out on one side.
+_DEPENDENCY_SCOPE_DIMENSIONS: frozenset[str] = frozenset({"declaration", "layout"})
+
+
+def _dimensions_for_fields(
+    fields: Sequence[str] | set[str], mapping: dict[str, frozenset[str]]
+) -> frozenset[str]:
+    """Union of ``mapping[field]`` over every *fields* entry, skipping any key
+    *mapping* doesn't recognize (an unrecognized field's own caller is
+    responsible for falling back to the conservative "affects everything"
+    set -- see ``_ALL_PROFILE_DIMENSIONS``/``_ALL_SCOPE_DIMENSIONS`` above)."""
+    result: frozenset[str] = frozenset()
+    for field in fields:
+        result |= mapping.get(field, frozenset())
+    return result
+
 
 def manifest_tu_scope_field(dump_manifest: Any) -> str:
     """JSON-serializable, order-preserving encoding of every ``--dump-manifest``
@@ -714,10 +800,28 @@ class ComparabilityMismatch:
     """Returned by :func:`check_contracts_comparable` in ``diagnostic=True``
     mode instead of raising — describes the one mismatch that would
     otherwise have raised (scope is checked first, so a scope mismatch
-    shadows a co-occurring profile one, same as the raising path)."""
+    shadows a co-occurring profile one, same as the raising path).
+
+    ``kind``/``reason`` are unchanged (ADR-050 D2's original two fields --
+    ``kind`` is what ``_MISMATCH_ERRORS`` keys the raised exception type on,
+    and every existing caller of the raising path is unaffected). ``dimensions``
+    is E-S2's addition (Block 5,
+    ``docs/contribute/plans/cli-cleanup-phase-two.md``): the subset of
+    :data:`COMPARABILITY_DIMENSIONS` this specific mismatch leaves unverified.
+    A caller in ``diagnostic=True`` mode can use it to keep trusting
+    conclusions on a dimension the mismatch never touched -- e.g. an
+    intentional GCC-vs-Clang ``macro_ops`` divergence marks only
+    ``{"declaration", "layout"}`` unverified, leaving ``symbol``-dimension
+    (exported binary identity) conclusions untouched -- rather than the
+    previous all-or-nothing ``assurance: none``. Consuming this into the diff
+    pipeline's own per-finding assurance (rather than merely exposing it on
+    the mismatch descriptor) is E-S2's own next slice, not this one -- see
+    that plan section's own status note.
+    """
 
     kind: str  # "scope" | "profile" | "dependency_scope"
     reason: str
+    dimensions: frozenset[str] = frozenset()
 
 
 def _check_dependency_scope_comparable(
@@ -782,7 +886,9 @@ def _check_dependency_scope_comparable(
         "the same declared surface. Regenerate both snapshots with the same "
         "mode: pass --include-system-declarations on both sides, or on neither."
     )
-    return ComparabilityMismatch(kind="dependency_scope", reason=reason)
+    return ComparabilityMismatch(
+        kind="dependency_scope", reason=reason, dimensions=_DEPENDENCY_SCOPE_DIMENSIONS
+    )
 
 
 #: Every key set :func:`compute_extraction_contract` may have hashed a
@@ -946,6 +1052,11 @@ def _check_scope_fingerprint_comparable(
         # scope_fingerprint, so nothing reasoned from those fields
         # explains the real mismatch (Codex review, PR #641 follow-up,
         # sixth P1) -- see _fingerprint_matches_fields's own docstring.
+        # Opaque/unauthenticated fingerprint: no specific scope_fields key
+        # can be trusted to explain the mismatch, so every dimension this
+        # axis can ever affect is reported unverified (see
+        # _ALL_SCOPE_DIMENSIONS's own docstring) -- the same fail-closed
+        # default the rest of this branch already applies to `kind`/`reason`.
         return ComparabilityMismatch(
             kind="scope",
             reason=(
@@ -955,6 +1066,7 @@ def _check_scope_fingerprint_comparable(
                 "scope_fingerprint — the comparison cannot be verified "
                 "safe."
             ),
+            dimensions=_ALL_SCOPE_DIMENSIONS,
         )
 
     # Waiving the scope mismatch must fall through to the profile check, not
@@ -965,6 +1077,22 @@ def _check_scope_fingerprint_comparable(
     # gate, is what keeps that true.
     if _scope_mismatch_is_additive(old_contract, new_contract):
         return None
+    # An unrecognized scope_fields key differing (checked first, since it can
+    # never be attributed to a specific known dimension) falls back to the
+    # same conservative "affects everything this axis can affect" set as the
+    # opaque-fingerprint branch above; otherwise dimensions are exactly the
+    # ones the actually-differing recognized fields map to.
+    if _unknown_differing_keys(
+        old_contract.scope_fields, new_contract.scope_fields, SCOPE_FIELD_KEYS
+    ):
+        scope_dimensions = _ALL_SCOPE_DIMENSIONS
+    else:
+        scope_dimensions = _dimensions_for_fields(
+            _differing_keys(
+                old_contract.scope_fields, new_contract.scope_fields, SCOPE_FIELD_KEYS
+            ),
+            _SCOPE_FIELD_DIMENSIONS,
+        )
     return ComparabilityMismatch(
         kind="scope",
         reason=(
@@ -974,6 +1102,7 @@ def _check_scope_fingerprint_comparable(
             "drift between the two extraction runs, not a real API "
             "change."
         ),
+        dimensions=scope_dimensions,
     )
 
 
