@@ -51,7 +51,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Protocol
 
-from ..diff_helpers import make_change
+from ..diff_helpers import make_change, typedef_side_trusts_qualified
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.identity import EntityId, EntityKind
 from ..model.semantic_ir_index import SemanticIRIndex
@@ -350,7 +350,36 @@ def typedef_index_pair(
     carried. Deciding per side removes that failure mode entirely, since a
     side's own real ``SemanticIR`` is now always preferred over any
     reconstruction of it, on either side, independently.
+
+    **One exception where per-side independence would itself fabricate a
+    change** (Codex review, PR #1078, second round): a real ``SemanticIR``
+    always renders under its own fully *qualified* name
+    (:func:`~abicheck.model.semantic_ir_legacy_adapter.render_display_name`
+    walks the whole ``ScopePath``). ``_typedef_diff_maps`` sometimes
+    resolves *bare*-keyed maps instead -- specifically when one side
+    predates schema v25's ``typedefs_qualified`` field (which also means it
+    predates v38's ``SemanticIR``, so that side is already on the legacy
+    path regardless) -- to keep both sides comparable at the coarser
+    granularity the older side can express at all
+    (``diff_helpers.typedef_side_trusts_qualified``). Deciding the *other*
+    side purely per-side would key it under its own real, qualified names
+    while the schema-incompatible side is keyed bare, e.g. ``"ns::Alias"``
+    on one side against ``"Alias"`` on the other for the identical
+    declaration -- a projection mismatch masquerading as a removal, not a
+    real one. So the two decisions are layered, not independent of each
+    other: this function first asks whether *both* sides trust qualified
+    naming (the same predicate `_typedef_diff_maps` uses); only when they do
+    does each side separately decide whether to trust its own real
+    ``SemanticIR`` or its own legacy projection. When either side does not
+    trust qualified naming, both sides render through the legacy adapter
+    (over the already bare-keyed *old_typedefs*/*new_typedefs*), matching
+    what every pre-T3 comparison already did in that narrower case.
     """
+    if not (typedef_side_trusts_qualified(old) and typedef_side_trusts_qualified(new)):
+        return (
+            SemanticIRIndex(legacy_typedef_ir(old, old_typedefs)),
+            SemanticIRIndex(legacy_typedef_ir(new, new_typedefs)),
+        )
     return _typedef_side_index(old, old_typedefs), _typedef_side_index(
         new, new_typedefs
     )

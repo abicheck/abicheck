@@ -383,11 +383,14 @@ def typedef_diff_maps(
     pre-v25 snapshot with real typedefs) so that comparison path is
     unaffected.
     """
-    old_trusts_qualified = bool(old.typedefs_qualified) or not old.typedefs
-    new_trusts_qualified = bool(new.typedefs_qualified) or not new.typedefs
-    if old_trusts_qualified and new_trusts_qualified:
+    if typedef_side_trusts_qualified(old) and typedef_side_trusts_qualified(new):
         return old.typedefs_qualified, new.typedefs_qualified
     return old.typedefs, new.typedefs
+
+
+def typedef_side_trusts_qualified(snapshot: AbiSnapshot) -> bool:
+    """One side of `typedef_diff_maps`'s trust rule, split out (Codex review, PR #1078) for `compare.typedefs.typedef_index_pair` to reuse."""
+    return bool(snapshot.typedefs_qualified) or not snapshot.typedefs
 
 
 def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:

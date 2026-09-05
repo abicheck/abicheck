@@ -324,28 +324,29 @@ class TestTypedefIndexPair:
         for eid_ in new_index.entities_of_kind(EntityKind.TYPEDEF):
             assert producer_entity_id(eid_) is None
 
-    def test_the_ir_side_is_not_starved_by_an_incomplete_legacy_map_on_the_other_side(
+    def test_the_ir_side_is_not_starved_when_both_sides_trust_qualified_naming(
         self,
     ) -> None:
-        """The concrete regression this independence closes (Codex review,
-        PR #1078): a stored pre-v38 baseline (no ``SemanticIR``, real flat
-        ``typedefs``) compared against a snapshot that carries a real IR but
-        whose own flat legacy map (as resolved by this comparison) is
-        incomplete relative to it. Under the old both-or-neither rule, the
-        IR-carrying side would have been discarded in favor of that
-        incomplete legacy map, fabricating a removal for a typedef the real
-        IR still has. Deciding per side means the IR-carrying side is never
-        starved this way."""
-        eid = entity_id_for_typedef((), "Alias")
-        old = _snap(typedefs={"Alias": "int"}, ast_producer="")
-        # `new` carries a real IR with "Alias" still present, but this
-        # comparison's own resolved legacy map for it is empty -- exactly
-        # what `_typedef_diff_maps` would compute for a snapshot whose flat
-        # typedefs/typedefs_qualified were never populated even though its
-        # SemanticIR was.
-        new = _snap(semantic_ir=_typedef_ir({eid: "int"}))
+        """The concrete regression per-side independence closes (Codex
+        review, PR #1078, first round): a stored baseline with no
+        ``SemanticIR`` but real, *qualified-trusted* flat typedefs, compared
+        against a live snapshot that carries a real IR -- and, as every real
+        producer does, the identical content in its own flat
+        ``typedefs_qualified`` too. Under the old both-or-neither rule the
+        live side's real IR would have been discarded in favor of a legacy
+        reconstruction of it purely because the old side lacked IR; deciding
+        per side means it never is."""
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old = _snap(typedefs_qualified={"ns::Alias": "int"}, ast_producer="")
+        new = _snap(
+            typedefs_qualified={"ns::Alias": "int"},
+            semantic_ir=_typedef_ir({eid: "int"}),
+        )
         old_index, new_index = typedef_index_pair(
-            old, new, old_typedefs={"Alias": "int"}, new_typedefs={}
+            old,
+            new,
+            old_typedefs={"ns::Alias": "int"},
+            new_typedefs={"ns::Alias": "int"},
         )
         changes = diff_typedefs(
             old_index,
@@ -355,6 +356,52 @@ class TestTypedefIndexPair:
             is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
         )
         assert changes == []
+        # The real IR ran for `new`: its identity is a genuine producer one.
+        for eid_ in new_index.entities_of_kind(EntityKind.TYPEDEF):
+            assert producer_entity_id(eid_) is not None
+
+    def test_bare_mode_uses_the_legacy_adapter_for_both_sides_even_with_real_ir(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, second round: when the OLD side does not
+        trust qualified naming (a genuinely pre-v25/pre-v38 baseline, which
+        also means it carries no ``SemanticIR`` at all), the whole
+        comparison operates in *bare*-keyed mode -- and a real ``SemanticIR``
+        on the other side, which always renders under its own fully
+        *qualified* name, must not be used directly there either: doing so
+        would key that side under ``"ns::Alias"`` while the bare-mode old
+        side is keyed under ``"Alias"``, fabricating a removal out of a pure
+        naming-granularity mismatch rather than a real one. Both sides must
+        render through the legacy adapter over the comparison's own
+        bare-keyed maps instead, exactly as every pre-T3 comparison already
+        did in this narrower case."""
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old = _snap(typedefs={"Alias": "int"}, ast_producer="")
+        # `new` carries a real, qualified-named IR *and* the matching
+        # `typedefs_qualified` a real producer would also populate -- but
+        # `_typedef_diff_maps` still resolves the *bare* maps for both
+        # sides here, since `old` cannot express qualified names at all.
+        new = _snap(
+            typedefs_qualified={"ns::Alias": "int"},
+            typedefs={"Alias": "int"},
+            semantic_ir=_typedef_ir({eid: "int"}),
+        )
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs={"Alias": "int"}, new_typedefs={"Alias": "int"}
+        )
+        changes = diff_typedefs(
+            old_index,
+            new_index,
+            exclude_stdlib_namespaces=False,
+            suppress_removed=False,
+            is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
+        )
+        assert changes == []
+        # The adapter ran for `new`, not its real IR: its identity is
+        # synthetic, and it is keyed bare ("Alias"), not qualified.
+        for eid_ in new_index.entities_of_kind(EntityKind.TYPEDEF):
+            assert producer_entity_id(eid_) is None
+            assert render_display_name(eid_) == "Alias"
 
     def test_an_unrenderable_anonymous_scope_is_used_but_invisible_to_aliasing(
         self,

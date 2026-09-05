@@ -49,6 +49,28 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   disagreed with its own `SemanticIR` loaded without the new check ever
   running (Codex review). `snapshot_from_dict` now re-runs it explicitly
   right after decoding.
+- **A per-side-independent typedef comparison no longer mixes bare and
+  qualified key spaces.** When one side does not trust qualified typedef
+  naming (a genuinely pre-v25 baseline, which also predates `SemanticIR`
+  entirely), `typedef_index_pair` now renders *both* sides through the
+  legacy adapter over the comparison's own bare-keyed maps, even when the
+  other side carries a real `SemanticIR` — which always renders under its
+  own fully qualified name (Codex review: using it directly there would key
+  that side as e.g. `"ns::Alias"` against the bare-mode side's `"Alias"`
+  for the identical declaration, fabricating a removal out of a naming
+  granularity mismatch). Per-side independence still applies whenever both
+  sides trust qualified naming, which is the common case.
+- **A constant value hidden behind an unsupported fact is no longer
+  compared as unchanged.** `diff_constants` now falls back to each
+  snapshot's own flat `AbiSnapshot.constants` raw text — the same text the
+  legacy declaration parser always populated, independently of
+  `SemanticIR`'s cross-backend-safety decision — when the canonical
+  `SemanticIR` value is `Fact.unsupported()`, gated through the existing
+  `is_fingerprint_comparison_unreliable` predicate like any other
+  fingerprint comparison (Codex review: without this, a real edit to a
+  clang compound initializer or a `constexpr bool` aliased to a
+  `True`/`False`-named identifier between two same-backend snapshots
+  produced no finding at all).
 - **A `SemanticIR` disagreeing, by identity, with its own legacy sidecar is
   now a hard, loud failure instead of a silently-absorbed fallback.** The
   one piece of the old fidelity gate still worth checking once the IR is

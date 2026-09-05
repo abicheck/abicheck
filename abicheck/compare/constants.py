@@ -103,22 +103,29 @@ def _value(index: SemanticIRIndex, entity_id: EntityId) -> str | None:
     Unlike a typedef's unresolved-chain placeholder (``"?"``, a real string
     both backends agree on), a constant carries no legacy sentinel for this
     case -- the raw fingerprint text a ``Fact.unsupported()`` occurrence
-    would need to compare against is not retained on the fact at all.
-    Since ADR-063 Track T3 made ``SemanticIR`` the sole comparison-time
-    source for this cohort, ``diff_constants`` genuinely reaches this
-    ``None`` for a real clang compound-initializer/bool-literal constant --
-    it is no longer routed around by falling back to the legacy adapter's
-    always-a-raw-string projection first. ``diff_constants`` skips only the
-    *value comparison* (``CONSTANT_CHANGED``) when either side's value is
-    unsupported this way -- fabricating a value comparison against an
-    evidence gap is exactly what this codebase's "weaker evidence narrows
-    conclusions" principle (AGENTS.md) forbids, a documented limitation
-    this family already accepted (see this module's own docstring, "except
-    clang's own compound-initializer value"). A membership change
-    (``CONSTANT_ADDED``/``CONSTANT_REMOVED``) is unaffected: whether a
-    constant exists at all does not depend on whether its value can be
-    rendered, so those findings still fire with a ``None`` old/new value
-    text (Codex review, PR #1078).
+    would need to compare against is not retained *on the ``Fact`` itself*
+    at all. Since ADR-063 Track T3 made ``SemanticIR`` the sole
+    comparison-time source for this cohort, ``diff_constants`` genuinely
+    reaches this ``None`` for a real clang compound-initializer/bool-literal
+    constant -- it is no longer routed around by falling back to the legacy
+    adapter's always-a-raw-string projection first. This function's own
+    caller, ``diff_constants``, does not simply give up here the way it
+    once did: the identical raw text is still available from each
+    snapshot's own flat ``AbiSnapshot.constants`` map (the same producer's
+    *legacy* declaration parser populates it independently of the
+    ``SemanticIR`` normalizer's cross-backend-safety decision), so
+    ``diff_constants`` falls back to that map for a *value comparison*
+    specifically, gated through the existing
+    *is_fingerprint_comparison_unreliable* predicate the same way any other
+    fingerprint comparison is (Codex review, PR #1078, second round --
+    silently treating "value incomparable" as "value unchanged" is exactly
+    what this codebase's "weaker evidence narrows conclusions" principle
+    (AGENTS.md) forbids). A membership change
+    (``CONSTANT_ADDED``/``CONSTANT_REMOVED``) needs no such fallback to
+    fire at all: whether a constant exists does not depend on whether its
+    value can be rendered (Codex review, PR #1078, first round) -- the
+    fallback there only makes the finding's own old/new value text more
+    informative.
     """
     spelling = index.fact(entity_id, "canonical_spelling")
     if spelling is not None and spelling.is_present and spelling.value is not None:
@@ -133,9 +140,13 @@ def diff_constants(
     new_index: SemanticIRIndex,
     *,
     is_fingerprint_comparison_unreliable: _ReliabilityPredicate,
+    old_constants: dict[str, str],
+    new_constants: dict[str, str],
 ) -> list[Change]:
     """Detect constant additions, removals, and value changes, reading only
-    through the two indexes.
+    through the two indexes -- plus, for a value comparison specifically,
+    each snapshot's own flat ``AbiSnapshot.constants`` map as a same-backend
+    fallback when the canonical ``SemanticIR`` value is unsupported.
 
     An addition or removal fires regardless of whether the constant's own
     value can be rendered (``_value`` returning ``None`` for a
@@ -145,11 +156,33 @@ def diff_constants(
     membership check too for an unsupported old-side value, silently
     dropping a real removal).
 
+    **The value comparison itself falls back to *constants* when
+    ``_value`` returns ``None``** (Codex review, PR #1078, second round):
+    ``Fact.unsupported()`` means the canonical ``SemanticIR`` spelling is
+    not a *cross-backend*-comparable value (a clang compound-initializer
+    fingerprint or Python-bool-derived literal spelling, see
+    ``extract/semantic_normalizer.py``) -- it does not mean the raw text is
+    unavailable. The same producer's *legacy* declaration parser
+    (``dumper_clang.py``'s own ``parse_constants()``) still populates
+    ``AbiSnapshot.constants`` with that identical raw text, independently
+    of the ``SemanticIR`` normalizer's cross-backend-safety decision, and a
+    *same-run, same-backend* comparison of two such fingerprints is exactly
+    what *is_fingerprint_comparison_unreliable* already exists to gate
+    (``diff_default_value_reliability.
+    constant_value_fingerprint_comparison_unreliable``) -- this function
+    already checked that predicate before this fix, it simply had nothing
+    to check it against once the canonical value went missing. Without this
+    fallback, a real edit to a compound initializer or a `constexpr bool`
+    aliased to a `True`/`False`-named identifier between two same-backend
+    header snapshots produced no finding at all, even though the pre-T3
+    legacy-only path (always ``Fact.present(value)``, never ``unsupported``)
+    caught it. Membership (``CONSTANT_ADDED``/``CONSTANT_REMOVED``) reports
+    the same fallback value too, purely for a more informative
+    old_value/new_value -- it never gates *whether* that finding fires.
+
     *is_fingerprint_comparison_unreliable* is the comparison-level decision
-    the caller already makes (``diff_default_value_reliability.
-    constant_value_fingerprint_comparison_unreliable``, closed over both
-    snapshots) -- injected for the same reason ``diff_typedefs``'s own
-    ``is_non_abi_surface_type`` is.
+    the caller already makes, closed over both snapshots -- injected for
+    the same reason ``diff_typedefs``'s own ``is_non_abi_surface_type`` is.
 
     Behavior is identical to the pre-cutover ``diff_symbols._diff_constants``,
     including which two spellings a ``CONSTANT_CHANGED`` finding carries
@@ -159,6 +192,15 @@ def diff_constants(
     changes: list[Change] = []
     old_values = _values(old_index)
     new_values = _values(new_index)
+
+    def _value_or_legacy(
+        index: SemanticIRIndex,
+        entity_id: EntityId,
+        name: str,
+        constants: dict[str, str],
+    ) -> str | None:
+        value = _value(index, entity_id)
+        return value if value is not None else constants.get(name)
 
     for name, old_id in old_values.items():
         new_id = new_values.get(name)
@@ -179,13 +221,13 @@ def diff_constants(
                     ChangeKind.CONSTANT_REMOVED,
                     symbol=name,
                     name=name,
-                    old_value=_value(old_index, old_id),
+                    old_value=_value_or_legacy(old_index, old_id, name, old_constants),
                     entity_id=eid,
                 )
             )
             continue
-        old_val = _value(old_index, old_id)
-        new_val = _value(new_index, new_id)
+        old_val = _value_or_legacy(old_index, old_id, name, old_constants)
+        new_val = _value_or_legacy(new_index, new_id, name, new_constants)
         if old_val is None or new_val is None or new_val == old_val:
             continue
         if is_fingerprint_comparison_unreliable(old_val, new_val):
@@ -213,7 +255,7 @@ def diff_constants(
                 ChangeKind.CONSTANT_ADDED,
                 symbol=name,
                 name=name,
-                new_value=_value(new_index, new_id),
+                new_value=_value_or_legacy(new_index, new_id, name, new_constants),
                 entity_id=producer_entity_id(new_id),
             )
         )

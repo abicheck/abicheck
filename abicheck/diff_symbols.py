@@ -1876,10 +1876,14 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         old_index,
         new_index,
         is_fingerprint_comparison_unreliable=(
-            lambda old_value, new_value: constant_value_fingerprint_comparison_unreliable(
-                old, new, old_value, new_value
+            lambda old_value, new_value: (
+                constant_value_fingerprint_comparison_unreliable(
+                    old, new, old_value, new_value
+                )
             )
         ),
+        old_constants=old.constants,
+        new_constants=new.constants,
     )
 
 

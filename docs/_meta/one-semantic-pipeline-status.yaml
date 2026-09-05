@@ -373,7 +373,19 @@ concepts:
       for itself and reads it directly; a side with none reads through the
       legacy adapter's projection of its own flat collection. The two
       shapes are matched by rendered alias name, not by EntityId, so mixing
-      an IR-backed side with a legacy-adapted one is safe. A current-format
+      an IR-backed side with a legacy-adapted one is safe -- EXCEPT for one
+      exception a second Codex round found: when one side does not trust
+      qualified typedef naming (pre-v25, which also predates SemanticIR),
+      `typedef_index_pair` renders BOTH sides through the legacy adapter
+      over the comparison's own bare-keyed maps, since a real SemanticIR
+      always renders fully qualified and using it directly there would key
+      one side "ns::Alias" against the other's bare "Alias", fabricating a
+      removal. A third Codex round found `diff_constants` still silently
+      compared a value as unchanged when its canonical SemanticIR spelling
+      was Fact.unsupported() on both sides (real for a same-backend
+      compound-initializer/bool-literal edit) -- fixed by falling back to
+      each snapshot's own flat `AbiSnapshot.constants` raw text, gated
+      through the existing fingerprint-unreliability predicate. A current-format
       snapshot's IR disagreeing, by identity, with its own
       `typedef_entity_ids`/`constant_entity_ids` sidecar is no longer a
       case this selector can even reach: it is caught earlier, at snapshot

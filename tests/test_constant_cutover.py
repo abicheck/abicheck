@@ -66,6 +66,8 @@ def _run(old_index, new_index, **kw):
         old_index,
         new_index,
         is_fingerprint_comparison_unreliable=kw.get("unreliable", _never_unreliable),
+        old_constants=kw.get("old_constants", {}),
+        new_constants=kw.get("new_constants", {}),
     )
 
 
@@ -180,13 +182,16 @@ class TestDetectorBehavior:
         )
         assert changes == []
 
-    def test_unsupported_fact_yields_no_comparable_value(self) -> None:
+    def test_unsupported_fact_yields_no_comparable_value_with_no_legacy_fallback(
+        self,
+    ) -> None:
         """A ``Fact.unsupported()`` occurrence (the clang compound-
         initializer-fingerprint/bool-literal case, see ``extract/
-        semantic_normalizer.py``) carries no value text -- defensively
-        skipped rather than compared against ``None``. Unreachable from the
-        real ``constant_index_pair`` gate in practice (see that function's
-        own docstring), exercised directly here as the defensive floor."""
+        semantic_normalizer.py``) carries no value text on the ``Fact``
+        itself -- skipped rather than compared against ``None`` when there
+        is also no ``AbiSnapshot.constants`` fallback text to use instead
+        (see ``test_a_same_backend_value_change_hidden_by_an_unsupported_
+        fact_is_still_caught`` for the case where there is one)."""
         unsupported = SemanticIRIndex(
             SemanticIR(
                 occurrences={
@@ -199,6 +204,62 @@ class TestDetectorBehavior:
         assert _run(unsupported, unsupported) == []
         assert _run(unsupported, _ir_backed({"X": "1"})) == []
         assert _run(_ir_backed({"X": "1"}), unsupported) == []
+
+    def test_a_same_backend_value_change_hidden_by_an_unsupported_fact_is_still_caught(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, second round: two same-backend snapshots
+        both carrying "X" with an unsupported canonical spelling (e.g. a
+        clang compound-initializer fingerprint that genuinely changed) must
+        still report ``CONSTANT_CHANGED`` by falling back to each
+        snapshot's own flat ``AbiSnapshot.constants`` raw text -- the same
+        text the pre-T3 legacy-only path always compared directly, before
+        ``SemanticIR`` authority made ``_value`` reach ``None`` for this
+        case at all."""
+        eid = entity_id_for_constant((), "X")
+        unsupported_ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.unsupported("not comparable")
+                )
+            }
+        )
+        old_index = SemanticIRIndex(unsupported_ir)
+        new_index = SemanticIRIndex(unsupported_ir)
+        (change,) = _run(
+            old_index,
+            new_index,
+            old_constants={"X": "expr:aaaaaaaaaaaaaaaa"},
+            new_constants={"X": "expr:bbbbbbbbbbbbbbbb"},
+        )
+        assert change.kind is ChangeKind.CONSTANT_CHANGED
+        assert change.old_value == "expr:aaaaaaaaaaaaaaaa"
+        assert change.new_value == "expr:bbbbbbbbbbbbbbbb"
+
+    def test_the_legacy_fallback_still_defers_to_the_unreliable_predicate(
+        self,
+    ) -> None:
+        """The fallback value comparison is still gated through
+        *is_fingerprint_comparison_unreliable* exactly like any other
+        fingerprint comparison -- it does not bypass that safety check."""
+        eid = entity_id_for_constant((), "X")
+        unsupported_ir = SemanticIR(
+            occurrences={
+                OccurrenceId(eid): CanonicalEntity(
+                    canonical_spelling=Fact.unsupported("not comparable")
+                )
+            }
+        )
+        old_index = SemanticIRIndex(unsupported_ir)
+        new_index = SemanticIRIndex(unsupported_ir)
+        changes = _run(
+            old_index,
+            new_index,
+            old_constants={"X": "expr:aaaaaaaaaaaaaaaa"},
+            new_constants={"X": "expr:bbbbbbbbbbbbbbbb"},
+            unreliable=lambda old_value, new_value: True,
+        )
+        assert changes == []
 
     def test_a_newly_added_unsupported_fact_is_still_reported_as_an_addition(
         self,
