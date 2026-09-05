@@ -242,6 +242,21 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
     return lines
 
 
+def render_disposition_audit_section(audit: DispositionAudit | None) -> list[str]:
+    """The Markdown *section* every report mode appends (D3).
+
+    A heading plus :func:`render_disposition_audit_lines`, so the full,
+    leaf and root-cause views carry the identical block the review digest
+    does rather than three near-copies. ``None`` renders nothing, which is
+    what a document produced before this block existed round-trips to.
+    """
+    if audit is None:
+        return []
+    # Leading blank line: this section is appended after whatever the mode
+    # rendered last, which is not guaranteed to end in one.
+    return ["", "## Disposition audit", "", *render_disposition_audit_lines(audit)]
+
+
 def render_disposition_audit_comment_lines(audit: DispositionAudit) -> list[str]:
     """The sticky PR comment's form: one blockquote line of counts, plus the
     rules that account for the difference.

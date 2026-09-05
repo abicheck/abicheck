@@ -40,6 +40,21 @@
 - **enum_member_value_changed**: Enum member value changed: Color::GREEN (`1` → `5`)
   > Old binaries use stale numeric values; logic comparisons and switch statements silently break.
 
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 1 |
+| Effective (gating) | 1 |
+| … non gating | 0 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 14 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `dwarf_layout_coherence`, `long_double`, `pe`, … and 8 more
+
 ---
 ## Legend
 

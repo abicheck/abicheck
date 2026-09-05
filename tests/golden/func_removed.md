@@ -40,6 +40,21 @@
 - **func_removed**: Public function removed: helper (`helper`)
   > Old binaries call a symbol that no longer exists; dynamic linker will refuse to load or crash at call site.
 
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 1 |
+| Effective (gating) | 1 |
+| … non gating | 0 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 14 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `dwarf_layout_coherence`, `long_double`, `pe`, … and 8 more
+
 ---
 ## Legend
 

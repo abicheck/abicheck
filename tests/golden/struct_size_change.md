@@ -44,6 +44,21 @@
 - **type_field_added_compatible**: Field added: Point::z
   > Field appended without changing existing offsets; old code works but won't initialize the new field.
 
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 2 |
+| Effective (gating) | 1 |
+| … non gating | 1 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 13 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `dwarf_layout_coherence`, `long_double`, `pe`, … and 7 more
+
 ---
 ## Legend
 

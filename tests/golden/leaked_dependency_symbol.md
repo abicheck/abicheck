@@ -39,6 +39,21 @@
 
 - **symbol_leaked_from_dependency_changed**: Symbol '_ZNSt6thread8_M_startEv' was removed but appears to originate from 'libstdc++.so.6' (a dependency of this library). This is a real ABI change — the library is leaking dependency symbols into its public ABI surface. Consider applying -fvisibility=hidden.
 
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 1 |
+| Effective (gating) | 0 |
+| … non gating | 1 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 11 detector(s) — `fingerprint_renames`, `kabi`, `dwarf_layout_coherence`, `pe`, `macho`, `dwarf`, … and 5 more
+
 ---
 ## Legend
 

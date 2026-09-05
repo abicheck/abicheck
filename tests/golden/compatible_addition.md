@@ -40,6 +40,21 @@
 - **func_added**: New public function: helper (`helper`)
   > New function available; existing binaries are unaffected.
 
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 1 |
+| Effective (gating) | 0 |
+| … non gating | 1 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 14 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `dwarf_layout_coherence`, `long_double`, `pe`, … and 8 more
+
 ---
 ## Legend
 

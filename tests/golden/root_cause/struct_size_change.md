@@ -21,6 +21,21 @@
 > ⚠️ Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata
 > ⚠️ No binary metadata available; verdict is based on header analysis only
 
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 2 |
+| Effective (gating) | 1 |
+| … non gating | 1 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 13 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `dwarf_layout_coherence`, `long_double`, `pe`, … and 7 more
+
 ## Root Causes (2)
 
 ### `Point` (1 finding)

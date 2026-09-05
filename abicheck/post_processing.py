@@ -691,6 +691,26 @@ def _build_suppression_unknown_reachability_change(
     )
 
 
+def _record_grouped_child(
+    change: Change,
+    ctx: PipelineContext,
+    *,
+    application_point: str = "grouped_into_parent_finding",
+) -> None:
+    """Record a finding folded into another one as ``deduplicated``.
+
+    Not ``suppressed``: no user rule acted on it. The distinction is
+    load-bearing rather than cosmetic -- ``semver.recommend_release`` reads
+    the ledger's suppressed-and-gating records to say "a major-class break was
+    waived", and a grouped child is not a waiver.
+    """
+    if ctx.disposition_ledger is None:
+        return
+    ctx.disposition_ledger.record(
+        change, Disposition.DEDUPLICATED, application_point=application_point
+    )
+
+
 def _record_dropped_duplicates(
     before: dict[int, Change],
     after: list[Change],
@@ -786,6 +806,16 @@ def _merge_findings_respecting_suppression(
                 )
         key = (c.kind, c.symbol)
         if key in seen_keys:
+            # ADR-067 D1: a late finding a *second* detector produced for an
+            # entity already reported is still an observed change, and it is
+            # dropped here rather than moved to any bucket -- so it is
+            # recorded, in both the suppressed and unsuppressed paths, or
+            # adding a suppression rule would change the detected total
+            # instead of moving the finding between dispositions. It never
+            # reaches ``Pipeline.run``'s own dropped-finding sweep either:
+            # these objects are created *by* the step, so they are not in the
+            # snapshot that sweep diffs against.
+            _record_grouped_child(c, ctx, application_point="merge_late_findings")
             continue
         changes.append(c)
         seen_keys.add(key)
@@ -1067,6 +1097,15 @@ class DetectCppPatterns:
         Mutates ``changes`` in place (via slice assignment) and appends the
         removed entries to ``ctx.suppressed``.
 
+        ADR-067 D2: they are recorded as ``deduplicated`` -- *grouped into a
+        parent finding* -- not as ``suppressed``. No user rule hid them; the
+        list they land in is an implementation detail of (a) and (b) below,
+        and labelling them ``suppressed`` would make an ordinary ISA-tier
+        grouping look to ``semver.recommend_release`` like a waived major
+        break and turn a PATCH recommendation into MAJOR/REVIEW. Recorded
+        here rather than left to the ledger's own closing pass, which cannot
+        tell the two apart from the bucket alone.
+
         Two reasons to use ``ctx.suppressed`` (not ``ctx.redundant``):
         (a) ``compare()`` computes verdict on ``kept + redundant`` —
             redundant items still drive the verdict. Putting the
@@ -1090,6 +1129,7 @@ class DetectCppPatterns:
             if ch.kind == ChangeKind.FUNC_REMOVED and any(
                 _matches_suppression_key(ch.symbol, key) for key in suppressed_keys
             ):
+                _record_grouped_child(ch, ctx)
                 ctx.suppressed.append(ch)
                 continue
             to_keep.append(ch)

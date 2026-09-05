@@ -53,6 +53,21 @@
 - **symbol_version_required_added**: New symbol version requirement: GLIBC_2.34 (from libc.so.6)
 - **runtime_floor_raised**: Runtime floor raised for libc.so.6: GLIBC_2.5 → GLIBC_2.34 (required by: (no import evidence captured))
 
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 2 |
+| Effective (gating) | 0 |
+| … non gating | 2 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 11 detector(s) — `fingerprint_renames`, `kabi`, `dwarf_layout_coherence`, `pe`, `macho`, `dwarf`, … and 5 more
+
 ---
 ## Legend
 

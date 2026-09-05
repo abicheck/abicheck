@@ -213,6 +213,20 @@ class TestHundredSuppressedRemovals:
         assert "100 detected" in html and "0 gating" in html
         assert "bulk internal churn" in html
 
+        # Every Markdown mode, not only the digest: `--report-mode` is a
+        # presentation choice, and D3's counts are not presentation.
+        from abicheck.reporter_markdown import (
+            _to_markdown_leaf,
+            _to_markdown_root_cause,
+            to_markdown,
+        )
+
+        for render in (to_markdown, _to_markdown_leaf, _to_markdown_root_cause):
+            text = render(result)
+            assert "| Detected (raw) | 100 |" in text, render.__name__
+            assert "| Effective (gating) | 0 |" in text, render.__name__
+            assert "bulk internal churn" in text, render.__name__
+
 
 # ---------------------------------------------------------------------------
 # Conservation across the application points (the class-level invariant)
@@ -640,6 +654,105 @@ def test_opaque_downgrades_are_not_labelled_deduplicated() -> None:
     assert conservation_holds(ledger)
 
 
+def test_a_grouped_child_is_deduplicated_not_suppressed() -> None:
+    """`DetectCppPatterns._suppress_grouped_children` folds per-symbol
+    removals into one grouped finding by parking them in `suppressed_changes`
+    -- a list choice forced by how the pipeline computes the verdict, not a
+    user suppression. Labelling them `suppressed` would make an ordinary
+    ISA-tier grouping look like a waived major break.
+    """
+    from abicheck.checker_types import Change
+    from abicheck.post_processing import DetectCppPatterns, PipelineContext
+
+    old, new = _snapshots()
+    children = [
+        Change(kind=ChangeKind.FUNC_REMOVED, symbol=f"foo_avx{i}", description="x")
+        for i in range(2)
+    ]
+    ledger = DispositionLedger()
+    ctx = PipelineContext(old=old, new=new, disposition_ledger=ledger)
+    changes = list(children)
+    DetectCppPatterns._suppress_grouped_children(changes, {"foo_avx0", "foo_avx1"}, ctx)
+    assert changes == []
+    assert ctx.suppressed == children
+    for child in children:
+        record = ledger.record_for(child)
+        assert record is not None
+        assert record.disposition is Disposition.DEDUPLICATED
+        # …and no rule is attributed, because none fired.
+        assert record.rule is None
+    assert ledger.counts()[Disposition.SUPPRESSED.value] == 0
+
+
+def test_grouping_children_does_not_recommend_a_major_release() -> None:
+    """The consequence that makes the disposition above load-bearing: the
+    release recommendation reads *suppressed-and-gating* records, so a
+    grouped child mislabelled `suppressed` would turn a PATCH into
+    MAJOR/REVIEW."""
+    from abicheck.checker_types import Change, DiffResult
+    from abicheck.post_processing import DetectCppPatterns, PipelineContext
+    from abicheck.semver import recommend_release
+
+    old, new = _snapshots()
+    children = [Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo_avx", description="x")]
+    ledger = DispositionLedger()
+    ctx = PipelineContext(old=old, new=new, disposition_ledger=ledger)
+    changes = list(children)
+    DetectCppPatterns._suppress_grouped_children(changes, {"foo_avx"}, ctx)
+
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libfoo",
+        suppressed_changes=list(ctx.suppressed),
+        suppressed_count=len(ctx.suppressed),
+    )
+    result.disposition_ledger = finalize_ledger(ledger, result)
+    rec = recommend_release(result)
+    assert rec.bump is not SemverBump.MAJOR
+    assert "suppressed" not in rec.rationale
+
+
+def test_a_late_duplicate_finding_is_conserved_with_and_without_a_rule() -> None:
+    """`_merge_findings_respecting_suppression` drops a late finding whose
+    `(kind, symbol)` is already present. That drop is invisible to
+    `Pipeline.run`'s own sweep (these objects are created *by* the step, so
+    they are not in the snapshot it diffs against), so it is recorded here --
+    in both branches, or adding a rule would change the detected total
+    instead of moving the finding between dispositions.
+    """
+    from abicheck.checker_types import Change
+    from abicheck.post_processing import (
+        PipelineContext,
+        _merge_findings_respecting_suppression,
+    )
+
+    old, new = _snapshots()
+    totals = {}
+    for label, rules in (
+        ("no rule", None),
+        (
+            "matching rule",
+            SuppressionList(
+                [Suppression(symbol="dup", reason="w", allow_public_break=True)]
+            ),
+        ),
+    ):
+        ledger = DispositionLedger()
+        ctx = PipelineContext(
+            old=old, new=new, suppression=rules, disposition_ledger=ledger
+        )
+        existing = [
+            Change(kind=ChangeKind.FUNC_REMOVED, symbol="dup", description="first")
+        ]
+        late = [
+            Change(kind=ChangeKind.FUNC_REMOVED, symbol="dup", description="second")
+        ]
+        _merge_findings_respecting_suppression(existing, late, ctx)
+        totals[label] = ledger.detected_total
+    assert totals["no rule"] == totals["matching rule"] == 1
+
+
 # ---------------------------------------------------------------------------
 # not_evaluated detectors
 # ---------------------------------------------------------------------------
@@ -663,6 +776,39 @@ class TestNotEvaluatedDetectors:
         assert not_run, "this evidence-free pair must leave detectors unevaluated"
         assert all(d.coverage_gap for d in not_run)
         assert all(d.changes_count == 0 and not d.enabled for d in not_run)
+
+    def test_a_new_only_dwarf_comparison_is_not_evaluated(self) -> None:
+        """The old side carrying no debug info means there is no baseline to
+        compare a new-side layout against — the detector's own documented
+        skip. Reporting that as `enabled=True, changes_count=0` presents an
+        unperformed comparison as a performed one that found nothing."""
+        from abicheck.model.dwarf_facts import DwarfMetadata
+
+        old, new = _snapshots(removed=1)
+        new.dwarf = DwarfMetadata(has_dwarf=True)
+        result = compare(old, new)
+        dwarf = {d.name: d for d in result.detector_results}["dwarf"]
+        assert dwarf.not_evaluated is True
+        assert dwarf.changes_count == 0
+        assert "baseline" in (dwarf.coverage_gap or "")
+
+    def test_an_old_only_dwarf_comparison_is_evaluated(self) -> None:
+        """The mirror case is *not* the same claim: the old side has layout
+        evidence and the new side lost it, which the detector reports as a
+        real `DWARF_INFO_MISSING` finding. That is an evaluated comparison
+        disclosing a loss of evidence, so the gate must stay open for it."""
+        from abicheck.model.dwarf_facts import DwarfMetadata
+
+        old, new = _snapshots()
+        old.dwarf = DwarfMetadata(has_dwarf=True)
+        result = compare(old, new)
+        dwarf = {d.name: d for d in result.detector_results}["dwarf"]
+        assert dwarf.not_evaluated is False
+        assert dwarf.enabled is True
+        assert any(
+            c.kind is ChangeKind.DWARF_INFO_MISSING
+            for c in result.changes + result.suppressed_changes
+        )
 
     def test_a_detector_that_ran_is_never_marked_not_evaluated(self) -> None:
         old, new = _snapshots(removed=1)

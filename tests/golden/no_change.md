@@ -36,6 +36,21 @@
 > **Policy**: `strict_abi`
 
 _No ABI changes detected._
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 0 |
+| Effective (gating) | 0 |
+| … non gating | 0 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 14 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `dwarf_layout_coherence`, `long_double`, `pe`, … and 8 more
+
 ---
 ## Legend
 
