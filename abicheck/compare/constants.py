@@ -46,6 +46,7 @@ are questions about the comparison, not about a constant.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING, Protocol
 
 from ..diff_helpers import make_change
@@ -76,6 +77,24 @@ class _ReliabilityPredicate(Protocol):
     injection reasoning."""
 
     def __call__(self, old_value: str, new_value: str) -> bool: ...
+
+
+#: Sentinel for "this occurrence's value could not be established" inside a
+#: colliding group's ``Counter`` multiset (``diff_constants``, Codex review,
+#: PR #1078, ninth round) -- a reserved, unlikely-to-collide string rather
+#: than typedefs' bare ``"?"`` (``compare.typedefs._UNRESOLVED_TYPE_
+#: SENTINEL``), since a constant's own raw value text is arbitrary source
+#: content and a real constant literally spelled ``"?"`` is not implausible
+#: the way an underlying-type spelling of ``"?"`` would be.
+_UNRESOLVED_MARKER = "\x00<abicheck-constant-unresolved>"
+
+
+def _unresolved_to_none(value: str) -> str | None:
+    """*value* unless it is :data:`_UNRESOLVED_MARKER`, in which case
+    ``None`` -- the public shape a ``Change``'s ``old_value``/``new_value``
+    already uses for "no recoverable value text", same as a whole-name
+    ``CONSTANT_ADDED``/``CONSTANT_REMOVED`` for an unsupported fact."""
+    return None if value == _UNRESOLVED_MARKER else value
 
 
 def _values(index: SemanticIRIndex) -> dict[str, list[EntityId]]:
@@ -218,6 +237,33 @@ def diff_constants(
     changed remains ambiguous" acceptance every other colliding-group case
     here already carries, just extended to a membership change instead of a
     value change.
+
+    **Two further gaps in the collision path itself** (Codex review, PR
+    #1078, ninth round), both closed by rebuilding the collision comparison
+    around ``collections.Counter`` instead of sorted-list equality:
+
+    1. A colliding group that grew (or shrank) by a value *already present*
+       in the group (e.g. a second anonymous-namespace ``X=1`` alongside an
+       existing ``X=1``) has sorted lists of different length that a naive
+       representative pick could still read as a value *change* --
+       reporting ``CONSTANT_CHANGED`` (an API break) for what is a purely
+       compatible addition (or an incompatible-severity-wise-irrelevant
+       removal). ``Counter`` subtraction (``new - old`` / ``old - new``)
+       answers "net added" and "net removed" directly, so a pure
+       addition/removal inside the group is now classified as
+       ``CONSTANT_ADDED``/``CONSTANT_REMOVED``, and only a group with both
+       a net addition and a net removal is reported as ``CONSTANT_CHANGED``.
+    2. The per-name legacy fallback (``constants.get(name)``) reflects only
+       *one* raw value per bare name -- whichever occurrence's own parse
+       happened to win that same collision upstream -- so applying it to
+       *every* unresolved occurrence in a colliding group risked
+       misattributing one occurrence's legacy text to a different
+       occurrence, either masking a real difference (both compare equal to
+       the same borrowed text) or fabricating one (the borrowed text
+       differs between sides for reasons unrelated to the actual
+       occurrence). The collision path no longer consults the fallback at
+       all -- an unresolved occurrence inside a colliding group is
+       represented by an internal sentinel, never a borrowed value.
     """
     changes: list[Change] = []
     old_values = _values(old_index)
@@ -258,63 +304,113 @@ def diff_constants(
                 )
             )
             continue
-        old_vals = sorted(
-            v
-            for i in old_ids
-            if (v := _value_or_legacy(old_index, i, name, old_constants)) is not None
-        )
-        new_vals = sorted(
-            v
-            for i in new_ids
-            if (v := _value_or_legacy(new_index, i, name, new_constants)) is not None
-        )
-        if old_vals == new_vals and len(old_ids) == len(new_ids):
-            continue
-        if old_vals == new_vals:
-            # The comparable values agree, but the group's own membership
-            # does not (Codex review, PR #1078, eighth round): filtering
-            # out unsupported (``None``) values before comparing lost this
-            # entirely -- an unsupported-valued occurrence appearing or
-            # disappearing under a colliding name produced an identical
-            # filtered value list on both sides, so a proven removal (or
-            # addition) inside the group was silently read as "unchanged".
-            # Reported with no recoverable value text, the same way a
-            # whole-name CONSTANT_ADDED/CONSTANT_REMOVED already tolerates
-            # one -- which specific occurrence changed is exactly as
-            # ambiguous here as it is for any other colliding group.
-            old_val = None
-            new_val = None
-        elif not old_vals or not new_vals:
-            # Mirrors the single-entity `old_val is None or new_val is None`
-            # skip: nothing comparable survived on at least one side, and
-            # the group's own membership is unchanged (handled above), so
-            # there is truly nothing to compare.
-            continue
-        else:
-            old_val = old_vals[0]
-            new_val = new_vals[0]
-            if len(old_ids) > 1 or len(new_ids) > 1:
-                # Ambiguous group: report one value present only on the
-                # old side and one present only on the new side, rather
-                # than an arbitrary representative pair that might
-                # coincidentally agree even though the multiset as a whole
-                # differs.
-                old_val = next((v for v in old_vals if v not in new_vals), old_val)
-                new_val = next((v for v in new_vals if v not in old_vals), new_val)
+        if len(old_ids) == 1 and len(new_ids) == 1:
+            # The common, non-colliding case: preserved exactly as before
+            # any collision handling existed.
+            old_val = _value_or_legacy(old_index, old_ids[0], name, old_constants)
+            new_val = _value_or_legacy(new_index, new_ids[0], name, new_constants)
+            if old_val is None or new_val is None or new_val == old_val:
+                continue
             if is_fingerprint_comparison_unreliable(old_val, new_val):
                 continue
-        changes.append(
-            make_change(
-                ChangeKind.CONSTANT_CHANGED,
-                symbol=name,
-                name=name,
-                old=repr(old_val),
-                new=repr(new_val),
-                old_value=old_val,
-                new_value=new_val,
-                entity_id=eid,
+            changes.append(
+                make_change(
+                    ChangeKind.CONSTANT_CHANGED,
+                    symbol=name,
+                    name=name,
+                    old=repr(old_val),
+                    new=repr(new_val),
+                    old_value=old_val,
+                    new_value=new_val,
+                    entity_id=eid,
+                )
             )
+            continue
+        # A colliding group on at least one side (Codex review, PR #1078,
+        # ninth round, closing two gaps the eighth round's own fix still
+        # had). Compared by full multiset *count*, via `Counter`, not a
+        # sorted list: a sorted-list equality check cannot distinguish "a
+        # value was added as a duplicate of one already present" from "a
+        # value was added at all" the way `Counter` subtraction can, so a
+        # colliding group that grew by one already-present value (e.g. a
+        # second anonymous-namespace `X=1` alongside an existing `X=1`)
+        # used to fall through the multiset-equality check (the sorted
+        # lists differ in length) into the value-*change* branch below with
+        # a coincidentally-equal representative pair, reporting
+        # `CONSTANT_CHANGED` (an API break) for what is actually a pure,
+        # compatible addition. `Counter` subtraction (`new - old`/
+        # `old - new`) answers "which values are net-added" and
+        # "net-removed" directly, so a pure addition/removal inside the
+        # group is now classified as such.
+        #
+        # This path also does not use `_value_or_legacy`'s per-name
+        # fallback at all: `AbiSnapshot.constants` retains only ONE raw
+        # value per bare name -- whichever occurrence's parse happened to
+        # win that same collision upstream -- so applying it to *every*
+        # unresolved occurrence in a colliding group would misattribute one
+        # occurrence's legacy text to a different occurrence entirely,
+        # potentially making two genuinely different unresolvable
+        # occurrences look identical (a false "unchanged") or crediting an
+        # unrelated occurrence's edit to one that didn't change. Reading
+        # `_value` directly and falling back to the `_UNRESOLVED_MARKER`
+        # sentinel is deliberately less informative than the single-entity
+        # fallback, but never fabricates a per-occurrence value this
+        # function cannot actually attribute.
+        old_multiset: Counter[str] = Counter(
+            v if (v := _value(old_index, i)) is not None else _UNRESOLVED_MARKER
+            for i in old_ids
         )
+        new_multiset: Counter[str] = Counter(
+            v if (v := _value(new_index, i)) is not None else _UNRESOLVED_MARKER
+            for i in new_ids
+        )
+        if old_multiset == new_multiset:
+            continue
+        removed = old_multiset - new_multiset
+        added = new_multiset - old_multiset
+        if removed and not added:
+            old_val = _unresolved_to_none(next(iter(removed)))
+            changes.append(
+                make_change(
+                    ChangeKind.CONSTANT_REMOVED,
+                    symbol=name,
+                    name=name,
+                    old_value=old_val,
+                    entity_id=eid,
+                )
+            )
+        elif added and not removed:
+            new_val = _unresolved_to_none(next(iter(added)))
+            changes.append(
+                make_change(
+                    ChangeKind.CONSTANT_ADDED,
+                    symbol=name,
+                    name=name,
+                    new_value=new_val,
+                    entity_id=eid,
+                )
+            )
+        else:
+            old_val = _unresolved_to_none(next(iter(removed)))
+            new_val = _unresolved_to_none(next(iter(added)))
+            if (
+                old_val is not None
+                and new_val is not None
+                and is_fingerprint_comparison_unreliable(old_val, new_val)
+            ):
+                continue
+            changes.append(
+                make_change(
+                    ChangeKind.CONSTANT_CHANGED,
+                    symbol=name,
+                    name=name,
+                    old=repr(old_val),
+                    new=repr(new_val),
+                    old_value=old_val,
+                    new_value=new_val,
+                    entity_id=eid,
+                )
+            )
 
     for name, new_ids in new_values.items():
         if name in old_values:

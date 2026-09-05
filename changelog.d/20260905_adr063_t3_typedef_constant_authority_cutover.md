@@ -158,3 +158,25 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   colliding entities match the sidecar's recorded id — since the sidecar
   itself, built by a plain `dict` comprehension over the same colliding
   key, can only ever reflect one of them.
+- **A colliding constant group's own addition/removal is no longer
+  misclassified as a value change, and a shared per-name legacy fallback
+  can no longer be misattributed across occurrences within one.**
+  `compare.constants.diff_constants`'s collision path is now built around
+  `collections.Counter` multiset subtraction instead of sorted-list
+  equality (Codex review, PR #1078, ninth round). A colliding group that
+  grew or shrank by a value already present elsewhere in the group (e.g. a
+  second anonymous-namespace `X=1` alongside an existing `X=1`) used to
+  read as a value *change* under sorted-list comparison, reporting
+  `CONSTANT_CHANGED` (an API break) for what is a purely compatible
+  addition — `Counter` subtraction now classifies a pure net-addition or
+  net-removal as `CONSTANT_ADDED`/`CONSTANT_REMOVED`, reserving
+  `CONSTANT_CHANGED` for a group with both a net addition and a net
+  removal. Separately, the per-name legacy fallback text
+  (`AbiSnapshot.constants.get(name)`) reflects only *one* raw value per bare
+  name — whichever occurrence's own parse happened to win that same
+  collision upstream — so applying it to every unresolved occurrence in a
+  colliding group risked masking a real difference (both sides coincide on
+  borrowed text) or fabricating one (the borrowed text differs between
+  sides for reasons unrelated to either occurrence's own value); the
+  collision path no longer consults it at all, representing an unresolved
+  occurrence with an internal sentinel instead.
