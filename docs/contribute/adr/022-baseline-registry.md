@@ -12,8 +12,14 @@ non-goal going forward — nothing under those names remains in the tree, and
 none of it is "waiting to be rebuilt." The git-native backend (default per
 the original decision below), OCI backend, signing/verification,
 `.abicheck.yml` registry config, auto-detection, and the retention/`baseline
-gc` command were never implemented, and per ADR-043 D4's non-goal, no
-future phase is expected to pick them up. What a user needs this for today
+gc` command were never implemented; per ADR-043 D4's non-goal, no future
+phase is expected to pick them up *to close out this ADR's original phase
+list* — but see the amendment below, which keeps them available as a
+generic, registry-driven distribution mechanism for non-CI consumers if
+concrete demand for one ever appears; the non-goal is against resurrecting
+the ADR's command-group/phase-list framing, not against ever building a
+git-native/OCI/signing backend for a real, named use case. What a user
+needs this for today
 is a plain JSON snapshot compared via `scan --against OLD` (ADR-043 D4's
 replacement column), plus the CI-facing baseline lifecycle ADR-047/G30 owns
 — see the amendment below. Treat this ADR as a design record, not current

@@ -6,8 +6,14 @@ contract decision became authoritative** (`contract_pipeline.py`'s
 `ContractEvaluationStage` runs before `checker._compute_verdict_for`, not
 after `verdict`) — the "still open" items in this document that predate
 that change (framed as "flipping the evaluator to run before the verdict")
-are done; only the *default* flip (making `--contract` apply without being
-asked for) remains open. The MCP `abi_compare`/`mcp_server.py`/
+are done. This does **not** mean the *default* flip (making `--contract`
+apply without being asked for) is the only remaining item: Phase 6 below
+documents two unresolved relevance defects that can lose a known public
+break (a template-instantiated-parameter seed mismatch, and an
+unresolved `ambiguous_namespaced_leaf` identity gap) and two explicitly
+uncovered measurement lanes (`package`, `real_binaries`) — those stay open
+prerequisites alongside the flip, not items the "authoritative" milestone
+already closed. The MCP `abi_compare`/`mcp_server.py`/
 `mcp_compare_receipt.py` references in this document's history below are
 historical — the MCP server was later retired in full (see
 [ADR-021](../adr/021-mcp-security-model.md)); do not read them as a
