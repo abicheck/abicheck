@@ -423,6 +423,29 @@ block 2 — it is the one E/C overlap, and two blocks adding it is a conflict.
 `--require-complete-analysis` keeps its spelling; only its meaning becomes
 task-relative.
 
+> **Partially landed (data model only).** `ComparabilityMismatch` now
+> carries a real `dimensions: frozenset[str]` field (`symbol`, `declaration`,
+> `layout`, `runtime`, `source`) alongside the unchanged `kind`/`reason`,
+> computed from the specific `scope_fields`/`profile_fields` that actually
+> differ for a given mismatch rather than a coarse per-`kind` guess (see
+> `abicheck/comparability.py`'s `COMPARABILITY_DIMENSIONS`/
+> `_PROFILE_FIELD_DIMENSIONS`/`_SCOPE_FIELD_DIMENSIONS`, and
+> `tests/test_comparability_dimensions.py`). This module's own contract
+> (scope/profile/dependency-scope fingerprints) only ever populates
+> `declaration`/`layout`/`runtime` — it never claims authority over `symbol`
+> (binary export-table identity, wholly independent of header/compile-context
+> evidence) or `source` (a separate, L4/L5 axis). **Still open, and
+> deliberately not attempted in this slice:** consuming `dimensions` into the
+> diff pipeline's own per-finding assurance and the report (so a report can
+> read `layout: unverified` beside a still-trusted `declaration` conclusion,
+> replacing today's single report-wide `assurance: none`) — that is a
+> `checker.py`/`DiffResult`/report-schema change, not a `comparability.py`
+> one, and needs its own report-schema bump under `report/AGENTS.md`'s
+> invariants. The failed-evidence half of this block (E-S1's `FAILED`
+> toolchain identity on a compiler-probe failure, and preserving an
+> earlier-proven change through an incomplete later stage) is untouched by
+> this slice.
+
 **Block 6 — `scan --artifact-set` member-identity manifest (PR H's last
 piece).** Syntax refinement, cost/dry-run, and audit-mode ownership all
 landed (see PR 5's own section); what remains is a manifest form that names
