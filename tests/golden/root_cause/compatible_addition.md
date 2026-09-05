@@ -13,6 +13,7 @@
 > ⚠️ Detector 'long_double' disabled: missing ELF metadata on one side
 > ⚠️ Detector 'pe' disabled: missing PE metadata
 > ⚠️ Detector 'macho' disabled: missing Mach-O metadata
+> ⚠️ Detector 'dwarf' disabled: no DWARF debug info on either side
 > ⚠️ Detector 'python_ext' disabled: missing CPython extension metadata
 > ⚠️ Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered)
 > ⚠️ Detector 'sycl' disabled: missing SYCL metadata

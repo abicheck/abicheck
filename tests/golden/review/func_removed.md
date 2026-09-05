@@ -9,6 +9,7 @@
 > ⚠️ Detector 'long_double' disabled: missing ELF metadata on one side
 > ⚠️ Detector 'pe' disabled: missing PE metadata
 > ⚠️ Detector 'macho' disabled: missing Mach-O metadata
+> ⚠️ Detector 'dwarf' disabled: no DWARF debug info on either side
 > ⚠️ Detector 'python_ext' disabled: missing CPython extension metadata
 > ⚠️ Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered)
 > ⚠️ Detector 'sycl' disabled: missing SYCL metadata
@@ -26,6 +27,20 @@
 | 🔒 Filtered (internal/private) | 0 |
 
 **Release recommendation:** `major` version bump · SONAME `not_determined`
+
+**Disposition audit:**
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 1 |
+| Effective (gating) | 1 |
+| … non gating | 0 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 14 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `dwarf_layout_coherence`, `long_double`, `pe`, … and 8 more
 
 **Top impacted symbols:**
 
