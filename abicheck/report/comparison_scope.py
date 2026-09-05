@@ -175,23 +175,26 @@ def comparison_scope_notice(section: Mapping[str, Any]) -> str | None:
         f"{m.get('name')} ({_STATE_LABEL.get(str(m.get('state')), m.get('state'))})"
         for m in rows
     )
+    # D7 first: a zero-comparison run fails under either policy (its own
+    # contribution is always 1), so attributing it to `block` would name a
+    # policy the user may not have selected (Codex review). Only a partial
+    # scope's failure is the D6 policy's doing.
     if section.get("no_comparison_completed"):
         lead = "No comparison completed"
         if names:
             lead += f"; unchecked: {names}"
-    else:
-        lead = f"Comparison scope incompletely checked; unchecked: {names}"
-    blocking = int(section.get("incomplete_scope_exit_contribution") or 0) or int(
-        section.get("no_comparison_completed_exit_contribution") or 0
-    )
+        return (
+            lead
+            + " -- never a clean pass, under either --on-incomplete-scope policy (ADR-065 D7)"
+        )
+    lead = f"Comparison scope incompletely checked; unchecked: {names}"
+    blocking = int(section.get("incomplete_scope_exit_contribution") or 0)
     policy = section.get("policy", "warn")
     tail = (
         " -- fails the run (--on-incomplete-scope block)"
         if blocking
         else f" -- accepted as a warning (--on-incomplete-scope {policy})"
     )
-    if section.get("no_comparison_completed") and not blocking:
-        tail = " -- never a clean pass"
     return lead + tail
 
 

@@ -924,3 +924,73 @@ class TestExplicitNullMarkerIsRejected:
         del d["degraded_members"]
         d["schema_version"] = 2
         assert bundle_facts_from_dict(d).degraded_members == {}
+
+
+class TestNoticeAttributesTheFailureToTheRightPolicy:
+    """`comparison_scope_notice` names `--on-incomplete-scope block` only
+    when the D6 policy is what fails the run. A zero-comparison run (D7)
+    fails under either policy through its own contribution, so it is never
+    attributed to `block`, which the user may not have selected (Codex
+    review, seventeenth round)."""
+
+    @staticmethod
+    def _record(states: list[AcquisitionState]) -> ScopeAcquisitionRecord:
+        from abicheck.model.scope_acquisition import MemberAcquisition
+
+        return ScopeAcquisitionRecord(
+            tuple(
+                MemberAcquisition(f"lib{i}.so", s, True, True, "why")
+                for i, s in enumerate(states)
+            ),
+            SideInventory(InventoryCompleteness.UNPROVEN, "t"),
+            SideInventory(InventoryCompleteness.UNPROVEN, "t"),
+            "all_expected",
+        )
+
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    @pytest.mark.parametrize(
+        "states",
+        [
+            [AcquisitionState.FAILED],
+            [AcquisitionState.UNSUPPORTED, AcquisitionState.NOT_SUPPLIED],
+            [AcquisitionState.FAILED, AcquisitionState.OUT_OF_SCOPE],
+        ],
+        ids=["failed", "unsupported+not_supplied", "failed+out_of_scope"],
+    )
+    def test_no_comparison_is_never_blamed_on_block(
+        self, policy: str, states: list[AcquisitionState]
+    ) -> None:
+        from abicheck.report.comparison_scope import (
+            comparison_scope_notice,
+            comparison_scope_terms,
+        )
+
+        terms = comparison_scope_terms(self._record(states), policy)
+        assert terms.section is not None
+        assert terms.section["no_comparison_completed"] is True
+        assert terms.section["no_comparison_completed_exit_contribution"] == 1
+        notice = comparison_scope_notice(terms.section)
+        assert notice is not None
+        assert notice.startswith("No comparison completed")
+        assert "never a clean pass" in notice and "D7" in notice
+        assert "(--on-incomplete-scope block)" not in notice
+        assert "accepted as a warning" not in notice
+
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    def test_partial_scope_names_the_policy_that_decided(self, policy: str) -> None:
+        from abicheck.report.comparison_scope import (
+            comparison_scope_notice,
+            comparison_scope_terms,
+        )
+
+        record = self._record([AcquisitionState.AVAILABLE, AcquisitionState.FAILED])
+        terms = comparison_scope_terms(record, policy)
+        assert terms.section is not None
+        notice = comparison_scope_notice(terms.section)
+        assert notice is not None
+        assert notice.startswith("Comparison scope incompletely checked")
+        assert "never a clean pass" not in notice
+        if policy == "block":
+            assert notice.endswith("fails the run (--on-incomplete-scope block)")
+        else:
+            assert notice.endswith("accepted as a warning (--on-incomplete-scope warn)")
