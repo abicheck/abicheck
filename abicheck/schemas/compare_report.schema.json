@@ -1172,7 +1172,9 @@
         "evidence_contract_error_contribution",
         "budget_overflow_contribution",
         "not_comparable_contribution",
-        "removed_required_library_contribution"
+        "removed_required_library_contribution",
+        "incomplete_scope_contribution",
+        "no_comparison_completed_contribution"
       ],
       "properties": {
         "code": {
@@ -1190,10 +1192,12 @@
               "contract_coverage",
               "analysis_assurance",
               "promoted_crosscheck",
-              "clean"
+              "clean",
+              "incomplete_scope",
+              "no_comparison_completed"
             ]
           },
-          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"scoped_gate\" replaces \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping is in effect (see compatibility_contribution). \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code."
+          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"incomplete_scope\"/\"no_comparison_completed\" (schema 2.50, ADR-065 S2) only ever appear on a directory/package release report. \"scoped_gate\" replaces \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping is in effect (see compatibility_contribution). \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code."
         },
         "compatibility_contribution": {
           "type": "integer",
@@ -1239,9 +1243,23 @@
           "type": "integer",
           "const": 0,
           "description": "schema 2.47 (ADR-064): a directory/package release comparison's removed-required-library dominant axis. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "incomplete_scope_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.50 (ADR-065 S2): a directory/package release comparison's incomplete-scope fold participant (0/1, folded with max like contract_coverage_contribution; 1 only under the block completeness policy). Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "no_comparison_completed_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.50 (ADR-065 S2, D7): a directory/package release comparison whose selected scope produced no valid comparison (0/1 fold participant, under every completeness policy). Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
         }
       },
       "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."
+    },
+    "comparison_scope": {
+      "$ref": "#/$defs/comparison_scope",
+      "description": "Schema 2.50 (ADR-065 S2). Present only on a directory/package release report; see $defs/comparison_scope."
     },
     "effective_config_digest": {
       "type": "string",
@@ -1276,6 +1294,7 @@
         "gate.severity.potential_breaking",
         "gate.severity.quality_issues",
         "gate.severity.addition",
+        "gate.on_incomplete_scope",
         "assurance.require_evidence",
         "suppressions",
         "packs"
@@ -1308,6 +1327,7 @@
         "gate.severity.potential_breaking": { "type": "string" },
         "gate.severity.quality_issues": { "type": "string" },
         "gate.severity.addition": { "type": "string" },
+        "gate.on_incomplete_scope": { "type": "string", "description": "ADR-065 D6 (schema 2.50): the --on-incomplete-scope policy (warn/block) a directory/package release resolved, empty for a scalar comparison, to which the policy does not apply. Two otherwise identical incomplete releases exit 0 and 1 under the two values, so the digest tells them apart." },
         "assurance.require_evidence": { "type": "string" },
         "suppressions": { "type": "string" },
         "packs": { "type": "string" }
@@ -1517,7 +1537,8 @@
             "budget_overflow",
             "not_comparable",
             "evidence_contract_error",
-            "extraction_error"
+            "extraction_error",
+            "no_comparison_completed"
           ]
         },
         "lifecycle": {
@@ -1527,6 +1548,269 @@
             "bootstrap",
             "new_target"
           ]
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "incomplete"
+          ],
+          "description": "schema 2.50 (ADR-065 D6): the completeness axis -- whether every selected, expected member of the comparison scope reached a completed comparison. Optional only for a run_outcome schema_version 1.0 (or earlier) block (every one of which described a scalar/synthetic report whose scope was the one pair it named, and which a reader backfills as complete); required from run_outcome schema_version 1.1 on (the version that introduced it), so a 1.1 block can never omit the decision-bearing axis and be re-read as complete (Codex review). incomplete is only ever produced by a directory/package release report, whose comparison_scope block carries the per-member evidence."
+        }
+      },
+      "if": {
+        "description": "A run_outcome schema version that predates the scope axis (0.x, 1, 1.0): scope may be omitted and reads as complete. Any other version (1.1 on) must carry it (ADR-065 D6; policy.outcome.run_outcome_scope_required is the same rule).",
+        "properties": {
+          "schema_version": {
+            "pattern": "^(0(\\.[0-9]+)*|1(\\.0+)?)$"
+          }
+        }
+      },
+      "else": {
+        "required": [
+          "scope"
+        ]
+      }
+    },
+    "comparison_scope": {
+      "type": "object",
+      "description": "Schema 2.50 (ADR-065 S2): the per-member comparison-scope record of a directory/package release report (report.comparison_scope.build_comparison_scope_section over model.scope_acquisition.ScopeAcquisitionRecord) -- which expected members reached a completed comparison, which did not and why, and what the completeness axis contributed to the exit code. Only a release report (the native fan-out, the stored/stored and stored/live drivers) carries it; a scalar compare report never does, since its scope is the one pair it named. The two *_exit_contribution fields are the same numbers the report's exit block (when present) folds under incomplete_scope_contribution / no_comparison_completed_contribution; the stored drivers, which emit no exit block, carry them only here (the aggregate reads either).",
+      "required": [
+        "schema_version",
+        "completeness",
+        "policy",
+        "incomplete_scope_exit_contribution",
+        "no_comparison_completed",
+        "no_comparison_completed_exit_contribution",
+        "selection",
+        "selection_reason",
+        "old_inventory",
+        "new_inventory",
+        "counts",
+        "members",
+        "unchecked",
+        "out_of_scope",
+        "proven_removed",
+        "proven_added"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "description": "model.scope_acquisition.SCOPE_ACQUISITION_SCHEMA_VERSION (\"1.0\")."
+        },
+        "completeness": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "incomplete"
+          ],
+          "description": "ADR-065 D6: incomplete when any selected, expected member did not reach a completed comparison (any member in an unchecked state), or when no comparison completed at all. The same value run_outcome.scope carries."
+        },
+        "policy": {
+          "type": "string",
+          "enum": [
+            "warn",
+            "block"
+          ],
+          "description": "The resolved --on-incomplete-scope policy."
+        },
+        "incomplete_scope_exit_contribution": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ],
+          "description": "ADR-065 D6: 1 when the scope is incomplete under policy block, else 0 (warn accepts the gap: it stays listed, contributes 0)."
+        },
+        "no_comparison_completed": {
+          "type": "boolean",
+          "description": "ADR-065 D7: no selected member reached a completed comparison."
+        },
+        "no_comparison_completed_exit_contribution": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ],
+          "description": "ADR-065 D7: 1 whenever no_comparison_completed is true, under either policy -- a run that compared nothing is never a clean pass."
+        },
+        "selection": {
+          "type": "string",
+          "enum": [
+            "direct_pair",
+            "all_expected",
+            "current_artifact"
+          ],
+          "description": "How the scope was selected: direct_pair (two files, the one pair), all_expected (every library discovered on either side), current_artifact (ADR-065 D9: NEW was named as exactly one artifact with one OLD counterpart; the other OLD members are out of scope)."
+        },
+        "selection_reason": {
+          "type": "string"
+        },
+        "old_inventory": {
+          "type": "object",
+          "required": [
+            "completeness",
+            "provenance"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "completeness": {
+              "type": "string",
+              "enum": [
+                "proven",
+                "unproven"
+              ],
+              "description": "ADR-065 D2: proven only when this side's inventory is declared complete by a source of record (a stored ProjectSnapshot package); a live directory/archive listing, a bundle-facts capture, or a stored package with a member --dso-only could not classify is unproven, and an unmatched counterpart on the other side is then never a removal/addition."
+            },
+            "provenance": {
+              "type": "string",
+              "description": "Human-readable statement of where this side's inventory came from and why it is or is not proven."
+            }
+          }
+        },
+        "new_inventory": {
+          "type": "object",
+          "required": [
+            "completeness",
+            "provenance"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "completeness": {
+              "type": "string",
+              "enum": [
+                "proven",
+                "unproven"
+              ],
+              "description": "ADR-065 D2: proven only when this side's inventory is declared complete by a source of record (a stored ProjectSnapshot package); a live directory/archive listing, a bundle-facts capture, or a stored package with a member --dso-only could not classify is unproven, and an unmatched counterpart on the other side is then never a removal/addition."
+            },
+            "provenance": {
+              "type": "string",
+              "description": "Human-readable statement of where this side's inventory came from and why it is or is not proven."
+            }
+          }
+        },
+        "counts": {
+          "type": "object",
+          "description": "Members per acquisition state, every state present (zeros included) so the partition can be checked against members.",
+          "required": [
+            "available",
+            "expected_not_produced",
+            "failed",
+            "not_supplied",
+            "unsupported",
+            "out_of_scope",
+            "ambiguous"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "available": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "expected_not_produced": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "not_supplied": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unsupported": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "out_of_scope": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ambiguous": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "member",
+              "name",
+              "state",
+              "old_present",
+              "new_present",
+              "reason"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "member": {
+                "type": "string",
+                "description": "The match key (release fan-out key or stored-baseline library key) this row is about."
+              },
+              "name": {
+                "type": "string",
+                "description": "The display name (the library file name when it differs from the key; the key itself otherwise)."
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "available",
+                  "expected_not_produced",
+                  "failed",
+                  "not_supplied",
+                  "unsupported",
+                  "out_of_scope",
+                  "ambiguous"
+                ],
+                "description": "ADR-065 D1 acquisition state: available (a completed comparison), expected_not_produced, failed (extraction/classification failed, or a stored capture marked degraded), not_supplied (no counterpart on the other side; a removal/addition only when that side's inventory is proven), unsupported (this build cannot analyze the artifact), out_of_scope (deliberately unselected, D9), ambiguous."
+              },
+              "old_present": {
+                "type": "boolean"
+              },
+              "new_present": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "description": "The evidence behind the state; empty for a plain available member."
+              }
+            }
+          },
+          "description": "Every expected member on either side, sorted by key."
+        },
+        "unchecked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Display names of the members that did not reach a completed comparison, excluding a proven removal/addition (which the record already answered for)."
+        },
+        "out_of_scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Display names of the deliberately unselected members (D9)."
+        },
+        "proven_removed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "ADR-065 D2: OLD-only not_supplied members whose absence NEW's proven-complete inventory establishes -- the set --fail-on-removed-library's exit 8 reads."
+        },
+        "proven_added": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "ADR-065 D2: NEW-only not_supplied members whose novelty OLD's proven-complete inventory establishes."
         }
       }
     },

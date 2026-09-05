@@ -19,6 +19,7 @@ import pytest
 
 from abicheck.bundle import _compute_resolution_graph, compare_bundle
 from abicheck.bundle_facts import (
+    BUNDLE_FACTS_BASE_SCHEMA_VERSION,
     BUNDLE_FACTS_SCHEMA_VERSION,
     BundleFacts,
     bundle_snapshot_from_facts,
@@ -462,7 +463,7 @@ class TestBundleFactsSerialization:
 
         round_tripped = bundle_facts_from_dict(bundle_facts_to_dict(facts))
 
-        assert round_tripped.schema_version == BUNDLE_FACTS_SCHEMA_VERSION
+        assert round_tripped.schema_version == BUNDLE_FACTS_BASE_SCHEMA_VERSION
         assert round_tripped.variant_fingerprint == "cpu"
         assert set(round_tripped.per_library_snapshots) == {"libcore.so", "libalgo.so"}
         assert round_tripped.per_library_snapshots["libcore.so"].elf is not None
@@ -537,17 +538,16 @@ class TestBundleFactsSerialization:
 
 # ---------------------------------------------------------------------------
 # Schema-version rejection (Codex review, fresh evidence): a container
-# schema_version newer than this reader's own must be rejected outright,
-# mirroring snapshot_from_dict()'s hard rejection of a too-new snapshot.
+# schema_version newer than this reader's own must be rejected outright.
 # ---------------------------------------------------------------------------
 
 
 class TestBundleFactsSchemaVersionRejection:
     def test_current_schema_version_round_trips(self) -> None:
         facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
-        d = bundle_facts_to_dict(facts)
-        assert d["schema_version"] == BUNDLE_FACTS_SCHEMA_VERSION
-        assert bundle_facts_from_dict(d).schema_version == BUNDLE_FACTS_SCHEMA_VERSION
+        d = bundle_facts_to_dict(facts)  # clean: base version (ADR-065 D8)
+        assert d["schema_version"] == BUNDLE_FACTS_BASE_SCHEMA_VERSION
+        assert bundle_facts_from_dict(d).schema_version == d["schema_version"]
 
     def test_newer_schema_version_is_rejected(self) -> None:
         import pytest

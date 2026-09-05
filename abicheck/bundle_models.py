@@ -36,6 +36,7 @@ from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
 from .model import AbiSnapshot, Function, Variable
 from .model.elf_facts import ElfMetadata, SymbolBinding
+from .model.scope_acquisition import ScopeAcquisitionRecord
 
 if TYPE_CHECKING:
     from .policy_file import PolicyFile
@@ -681,6 +682,33 @@ class BundleDiffResult:
     #: findings had no effect on `BUNDLE_*` findings). ``None`` (the
     #: default): behavior is unchanged from before this field existed.
     policy_file: PolicyFile | None = None
+    #: ADR-065 S2 (declared after the pre-existing ``policy_file`` tail, so a
+    #: positional caller of this published result type keeps binding it --
+    #: Codex review): the acquisition record a stored-baseline driver
+    #: (`bundle_side_input`/`workflows.bundle_stored_pair_compare`) builds
+    #: for its members -- a degraded (D8) member is `failed` here, so the
+    #: dispatcher's completeness axis gates on it instead of reading a
+    #: clean `per_library` list as a fully checked scope. `None` for the
+    #: live `compare_bundle` path, whose own fan-out owns its record.
+    scope_record: ScopeAcquisitionRecord | None = None
+    #: ADR-065 D1 (Codex review): matched members whose NEW artifact failed
+    #: extraction *in this run* (a damaged snapshot file, an unreadable
+    #: binary), keyed by member with the reason -- the stored-live driver's
+    #: counterpart of the native fan-out's per-library ``ERROR`` result.
+    #: Distinct from a stored capture's own D8 ``degraded`` marker (a
+    #: recorded past failure the scope axis governs): a current-run failure
+    #: is an operational error, so a consumer floors the exit on it under
+    #: either ``--on-incomplete-scope`` policy. Empty for every other path.
+    extraction_failures: dict[str, str] = field(default_factory=dict)
+    #: ADR-050 D2 x ADR-065 (Codex review): matched members whose two
+    #: snapshots were not extracted under a comparable profile/scope
+    #: contract, keyed by member -> ``(kind, message)`` with *kind* one of
+    #: ``profile_mismatch``/``scope_mismatch`` -- the stored drivers'
+    #: counterpart of the fan-out's per-library ``not_comparable`` verdict,
+    #: recorded per member (`failed` on the scope record) so a sibling's
+    #: completed comparison survives; a consumer exits 16 on it, ranked
+    #: above ``ERROR``, exactly as the fan-out does. Empty otherwise.
+    not_comparable_members: dict[str, tuple[str, str]] = field(default_factory=dict)
 
     @property
     def bundle_verdict(self) -> Verdict:

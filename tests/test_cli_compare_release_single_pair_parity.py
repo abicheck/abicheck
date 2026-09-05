@@ -180,6 +180,11 @@ class TestReleaseSummaryEffectiveConfigNeverDivergesFromSinglePair:
         )
         release_fields = json.loads(release_out)["effective_config_fields"]
 
+        # `gate.on_incomplete_scope` (ADR-065 D6) is the one release-only
+        # axis: a scalar comparison's single pair is the whole scope, so it
+        # records "" where a release records its resolved policy.
+        assert single_fields.pop("gate.on_incomplete_scope") == ""
+        assert release_fields.pop("gate.on_incomplete_scope") == "warn"
         assert release_fields == single_fields, (
             f"release-summary effective_config_fields diverged from the "
             f"identical single-pair compare on axis {axis_name!r}"

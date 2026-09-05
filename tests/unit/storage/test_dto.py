@@ -306,6 +306,25 @@ class TestBundleCompositionDTO:
         }
         dto = bundle_composition_to_dto(payload)
         assert dto.section_kind == BUNDLE_COMPOSITION_SECTION_KIND
+        # No degraded member: written at v1 so a pre-S2 reader still opens
+        # it; read back, the v1 -> v2 migration supplies the empty map.
+        assert dto.section_schema_version == 1
+        reloaded = SectionDTO.from_dict(dto.to_dict())
+        assert bundle_composition_from_dto(reloaded) == {
+            **payload,
+            "degraded_members": {},
+        }
+
+    def test_a_degraded_member_round_trips_at_v2(self) -> None:
+        payload = {
+            "variant_fingerprint": "default",
+            "manifest": None,
+            "filesystem_aliases": {},
+            "library_filenames": {"liba.so": "liba.so.1"},
+            "degraded_members": {"liba.so": "ELF-only: dump failed"},
+        }
+        dto = bundle_composition_to_dto(payload)
+        assert dto.section_schema_version == 2
         reloaded = SectionDTO.from_dict(dto.to_dict())
         assert bundle_composition_from_dto(reloaded) == payload
 

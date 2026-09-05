@@ -1235,7 +1235,11 @@ class TestCompareReleaseCommand:
             "markdown",
         )
         assert result.exit_code == 0
-        assert "Removed Libraries" in result.output
+        # ADR-065 D2: a live directory cannot prove `libgone` removed, so the
+        # Markdown carries the scope section naming it, not "Removed".
+        assert "Removed Libraries" not in result.output
+        assert "Comparison Scope" in result.output
+        assert "libgone.json" in result.output
 
 
 # ── compare --used-by: app-scoped exit codes + output (ADR-043 folds appcompat) ─

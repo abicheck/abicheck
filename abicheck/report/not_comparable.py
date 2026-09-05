@@ -16,8 +16,10 @@ from ..policy.outcome import (
     PolicyGateDecision,
     RunOutcome,
     policy_gate_decision_for_exit_code as policy_gate_decision_for_exit_code,  # re-exported, same reason
-    run_outcome_dict_for_release as run_outcome_dict_for_release,  # re-exported, same reason (cli_compare_release*.py)
     run_outcome_dict_for_scan as run_outcome_dict_for_scan,  # re-exported, same reason (cli_scan.py)
+)
+from ..policy.outcome_release import (
+    run_outcome_dict_for_release as run_outcome_dict_for_release,  # re-exported, same reason (cli_compare_release*.py)
 )
 from .document import ReportDocument
 from .render_json import render_json

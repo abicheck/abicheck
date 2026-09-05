@@ -168,7 +168,7 @@ def bundle_facts_to_dict(
     member of a possibly-large ``BundleFacts`` has already been converted
     and retained in one combined document (Codex review) -- raise from the
     callback to abort before the next snapshot is converted."""
-    from .bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE, BUNDLE_FACTS_SCHEMA_VERSION
+    from .bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE, document_schema_version
     from .bundle_manifest import manifest_to_dict
     from .serialization import snapshot_to_dict
 
@@ -181,13 +181,23 @@ def bundle_facts_to_dict(
 
     return {
         "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
-        "schema_version": BUNDLE_FACTS_SCHEMA_VERSION,
+        # 2 for a clean document, 3 once `degraded_members` carries a
+        # decision-bearing marker (ADR-065 D8) -- see `document_schema_version`.
+        "schema_version": document_schema_version(facts),
         "variant_fingerprint": facts.variant_fingerprint,
         "per_library_snapshots": per_library_snapshots,
         "filesystem_aliases": {
             name: list(aliases) for name, aliases in facts.filesystem_aliases.items()
         },
         "library_filenames": dict(facts.library_filenames),
+        # ADR-065 D8: `{}` when nothing degraded (a pre-S2 reader still
+        # loads that document); non-empty only under schema_version 3 above,
+        # which a pre-S2 reader rejects rather than misreads.
+        "degraded_members": dict(facts.degraded_members),
+        # ADR-065 D2: the capture's own complete-inventory assertion; a
+        # reader that predates it ignores the key and, as before, proves
+        # nothing from this document.
+        "inventory_complete": facts.inventory_complete,
         "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
     }
 
@@ -218,8 +228,11 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     from .bundle_manifest import manifest_from_dict
     from .serialization import snapshot_from_dict
     from .storage.bundle_facts_validation import (
+        require_degraded_marker_version,
         validated_alias_map,
+        validated_degraded_members,
         validated_filename_map,
+        validated_inventory_complete,
         validated_variant_fingerprint,
     )
 
@@ -318,6 +331,14 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
             f"{type(raw_snapshots).__name__}"
         )
     raw_manifest = d.get("manifest")
+    degraded_members = validated_degraded_members(d.get("degraded_members", {}))
+    # An absent key is a v1 document (the legacy rule above), *not* the
+    # current version the int(...) default supplied: a pre-S2 reader
+    # defaults the same document to its own maximum and ignores the marker
+    # (Codex review).
+    require_degraded_marker_version(
+        degraded_members, schema_version if "schema_version" in d else 1
+    )
     return BundleFacts(
         schema_version=schema_version,
         variant_fingerprint=validated_variant_fingerprint(
@@ -328,6 +349,10 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         },
         filesystem_aliases=validated_alias_map(d.get("filesystem_aliases", {})),
         library_filenames=validated_filename_map(d.get("library_filenames", {})),
+        degraded_members=degraded_members,
+        inventory_complete=validated_inventory_complete(
+            d.get("inventory_complete", False)
+        ),
         manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )
 

@@ -130,6 +130,7 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "gate.severity.potential_breaking",
     "gate.severity.quality_issues",
     "gate.severity.addition",
+    "gate.on_incomplete_scope",
     "assurance.require_evidence",
     "suppressions",
     "packs",
@@ -165,7 +166,9 @@ def _json_list(items: Any) -> str:
     `("api;detail",)` and `("api", "detail")` to the identical
     `"api;detail"`, even though a namespace/selector pattern is an
     arbitrary string that can legally contain the delimiter)."""
-    return json.dumps(sorted(str(item) for item in (items or ())), separators=(",", ":"))
+    return json.dumps(
+        sorted(str(item) for item in (items or ())), separators=(",", ":")
+    )
 
 
 def _namespaces_str(namespaces: Any) -> str:
@@ -214,6 +217,16 @@ def _builtin_policy_base_str(name: Any) -> str:
         return _identity_str(builtin_policy_identity(name_str))
     except ValueError:
         return name_str
+
+
+def _on_incomplete_scope_str(result: Any) -> str:
+    """ADR-065 D6's ``--on-incomplete-scope`` policy (``warn``/``block``)
+    for a directory/package release, read off *result*; ``""`` for a
+    scalar comparison, whose one pair is the whole scope and to which the
+    policy does not apply. Two otherwise identical incomplete releases
+    exit ``0`` and ``1`` under the two values, so the digest must tell
+    them apart (Codex review)."""
+    return str(getattr(result, "on_incomplete_scope", "") or "")
 
 
 def _gate_scope_str(result: Any) -> str:
@@ -276,7 +289,9 @@ def _packs_str(*pack_groups: Any) -> str:
     sha256 are far more constrained than a namespace pattern, but the same
     injectivity argument applies uniformly rather than being special-cased
     away for "probably safe" inputs."""
-    identities = {_identity_str(identity) for group in pack_groups for identity in group or ()}
+    identities = {
+        _identity_str(identity) for group in pack_groups for identity in group or ()
+    }
     return _json_list(identities)
 
 
@@ -470,9 +485,7 @@ def effective_config_fields_from_full_config(
         "policy.surface_metrics": str(
             bool(getattr(result, "surface_metrics_enabled", False))
         ),
-        "policy.env_matrix": str(
-            getattr(result, "env_matrix_source_sha256", "") or ""
-        ),
+        "policy.env_matrix": str(getattr(result, "env_matrix_source_sha256", "") or ""),
         "policy.reconcile_build_context": str(
             bool(getattr(result, "reconcile_build_context_enabled", False))
         ),
@@ -500,6 +513,7 @@ def effective_config_fields_from_full_config(
             severity_config, "quality_issues"
         ),
         "gate.severity.addition": _severity_field(severity_config, "addition"),
+        "gate.on_incomplete_scope": _on_incomplete_scope_str(result),
         "assurance.require_evidence": str(
             bool(getattr(assurance, "require_evidence", True))
         ),
@@ -554,9 +568,7 @@ def effective_config_fields_from_diff_result(
         "policy.surface_metrics": str(
             bool(getattr(result, "surface_metrics_enabled", False))
         ),
-        "policy.env_matrix": str(
-            getattr(result, "env_matrix_source_sha256", "") or ""
-        ),
+        "policy.env_matrix": str(getattr(result, "env_matrix_source_sha256", "") or ""),
         "policy.reconcile_build_context": str(
             bool(getattr(result, "reconcile_build_context_enabled", False))
         ),
@@ -586,6 +598,7 @@ def effective_config_fields_from_diff_result(
             severity_config, "quality_issues"
         ),
         "gate.severity.addition": _severity_field(severity_config, "addition"),
+        "gate.on_incomplete_scope": _on_incomplete_scope_str(result),
         "assurance.require_evidence": "",
         "suppressions": str(getattr(result, "suppression_source_sha256", "") or ""),
         "packs": "",

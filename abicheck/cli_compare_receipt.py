@@ -794,6 +794,7 @@ def _release_summary_effective_config_block(
     suppress: Path | None = None,
     pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
+    on_incomplete_scope: str = "",
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
     (the primary release JSON and ``--output-dir``'s ``summary.json``
@@ -870,6 +871,7 @@ def _release_summary_effective_config_block(
         ),
         scope_to_public_surface=scope_public_headers,
         scope_to_public_surface_requested=scope_public_headers,
+        on_incomplete_scope=on_incomplete_scope,  # ADR-065 D6: warn/block exit differently
     )
     ec_scheme = gate_exit_code_scheme(severity_config is not None)
     ec_fields = effective_config_fields(

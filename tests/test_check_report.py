@@ -48,6 +48,7 @@ _CLEAN_EXIT_BLOCK = {
     "crosscheck_promotion_contribution": 0, "operational_error_contribution": 0,
     "evidence_contract_error_contribution": 0, "budget_overflow_contribution": 0,
     "not_comparable_contribution": 0, "removed_required_library_contribution": 0,
+    "incomplete_scope_contribution": 0, "no_comparison_completed_contribution": 0,
 }
 
 

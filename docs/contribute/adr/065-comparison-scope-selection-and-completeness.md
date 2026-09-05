@@ -1,10 +1,19 @@
 # ADR-065: Comparison Scope, Member Selection, and Input Completeness
 
 **Date:** 2026-09-05
-**Status:** Proposed — not implemented. Design record for the vision's
-"partial matrices" and "scope-sensitive analysis" decisions
-(`vision.md`); no code, schema, CLI flag, or default changes with this
-document. Implementation is sequenced in
+**Status:** Proposed — S2 implemented (2026-09-05): the acquisition record
+(`abicheck/model/scope_acquisition.py`), the completeness axis on
+`RunOutcome`/`ExitDecision` (`abicheck/policy/outcome.py`,
+`abicheck/policy/exit_decision.py`, `abicheck/policy/scope_completeness.py`),
+the release fan-out's per-member record and `no comparison completed`
+outcome (`abicheck/workflows/release_scope.py`, `abicheck/cli_compare_release.py`),
+the degraded stranded-library marker (`BundleFacts.degraded_members`), and
+the `comparison_scope` report section (`abicheck/report/comparison_scope.py`),
+with `--on-incomplete-scope warn|block` as the D6 setting; exit `8` now
+requires D2's completeness proof (migration note in
+`docs/reference/exit-codes.md`). S0/S1/S3/S4 remain open. Design record for
+the vision's "partial matrices" and "scope-sensitive analysis" decisions
+(`vision.md`). Implementation is sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
 (workstream "Comparison scope and completeness"), which also carries the
 existing-versus-missing assessment this ADR's Context summarizes.

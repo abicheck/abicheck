@@ -114,6 +114,7 @@ from .pr_comment_render import (
     render_comment as render_comment,
 )
 from .pr_comment_scan import from_scan
+from .report.comparison_scope import comparison_scope_notice
 
 POST_MODES = ("always", "changes", "never")
 
@@ -804,8 +805,30 @@ def _from_release(
         categories,
         severities,
     )
-    removed = report.get("unmatched_old")
-    added = report.get("unmatched_new")
+    unmatched_old = report.get("unmatched_old")
+    unmatched_new = report.get("unmatched_new")
+    # ADR-065 S2: with a comparison_scope block, "removed"/"added" are the
+    # inventory-proven sets (D2); a pre-S2 report has only the raw set
+    # difference, which it already called removed/added.
+    scope = report.get("comparison_scope")
+    if isinstance(scope, dict):
+        removed = scope.get("proven_removed")
+        added = scope.get("proven_added")
+        scope_notice = comparison_scope_notice(scope)
+        scope_blocking = bool(
+            _as_int(scope.get("incomplete_scope_exit_contribution"))
+            or _as_int(scope.get("no_comparison_completed_exit_contribution"))
+        )
+        no_comparison_completed = bool(scope.get("no_comparison_completed"))
+        unmatched_states = {
+            str(m.get("name")): str(m.get("state"))
+            for m in scope.get("members") or []
+            if isinstance(m, dict) and m.get("name") and m.get("state")
+        }
+    else:
+        removed, added = unmatched_old, unmatched_new
+        scope_notice, scope_blocking, no_comparison_completed = None, False, False
+        unmatched_states = {}
     incomplete, incomplete_blocking = _release_contract_coverage_findings(report)
     return CommentModel(
         mode="release",
@@ -827,6 +850,16 @@ def _from_release(
         if isinstance(removed, list)
         else [],
         added_libraries=[str(x) for x in added] if isinstance(added, list) else [],
+        unmatched_old=[str(x) for x in unmatched_old]
+        if isinstance(unmatched_old, list)
+        else [],
+        unmatched_new=[str(x) for x in unmatched_new]
+        if isinstance(unmatched_new, list)
+        else [],
+        scope_notice=scope_notice,
+        scope_blocking=scope_blocking,
+        no_comparison_completed=no_comparison_completed,
+        unmatched_states=unmatched_states,
     )
 
 
@@ -879,4 +912,7 @@ def should_post(model: CommentModel, on: str) -> bool:
         model.total_changes > 0
         or bool(model.removed_libraries)
         or bool(model.added_libraries)
+        # ADR-065: an incompletely checked scope is a change to what the
+        # comment can claim, so it posts under --on=changes too.
+        or model.scope_notice is not None
     )

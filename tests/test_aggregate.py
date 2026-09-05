@@ -778,7 +778,7 @@ class TestRendering:
         that updates `aggregate_report.schema.json`, its published mirror,
         and the docs (CodeRabbit review).
         """
-        assert AGGREGATE_SCHEMA_VERSION == "1.7"
+        assert AGGREGATE_SCHEMA_VERSION == "1.8"
 
     def test_json_schema_shape(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
@@ -955,7 +955,7 @@ class TestProfileMatrix:
                 "incomplete_profiles": [],
                 "unanalyzed_profiles": [],
                 "contract_incomplete_profiles": [],
-                "analysis_incomplete_profiles": [],
+                **{k: [] for k in ("analysis_incomplete_profiles", "scope_incomplete_profiles")},
                 "verdict_by_profile": {
                     "linux-clang20": "COMPATIBLE",
                     "linux-gcc14": "BREAKING",

@@ -309,43 +309,45 @@ class TestBug5PieDetection:
 # ===========================================================================
 
 class TestBug6RemovedLibraryVerdict:
-    """Removed library must not produce NO_CHANGE verdict."""
+    """A *proven* removed library must not produce NO_CHANGE (ADR-065 D2).
 
-    def test_removed_library_not_no_change(self, tmp_path: Path):
+    Before ADR-065 S2 the raw old-minus-new set difference was read as a
+    removal; now a live directory cannot prove one (its unmatched member is
+    the scope axis's business), so the bug-6 invariant is stated against
+    the one proof S2 has -- a stored ProjectSnapshot NEW package."""
+
+    def _old_dir(self, tmp_path: Path) -> Path:
         old_dir = tmp_path / "old"
-        new_dir = tmp_path / "new"
         old_dir.mkdir()
-        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.so.json", _snap(library="libfoo.so"))
+        _write_snap(old_dir / "libbar.so.json", _snap(library="libbar.so"))
+        return old_dir
 
-        # old has libfoo + libbar, new only has libbar → libfoo is removed
-        snap_foo = _snap(library="libfoo.so")
-        snap_bar = _snap(library="libbar.so")
-        _write_snap(old_dir / "libfoo.json", snap_foo)
-        _write_snap(old_dir / "libbar.json", snap_bar)
-        _write_snap(new_dir / "libbar.json", snap_bar)
+    def test_unproven_unmatched_library_is_unchecked_not_removed(self, tmp_path: Path):
+        from test_release_scope_completeness import _write
 
-        result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", "json",
-        )
-        d = json.loads(result.output)
-        assert d["verdict"] != "NO_CHANGE"
-
-    def test_removed_library_verdict_is_at_least_risk(self, tmp_path: Path):
-        old_dir = tmp_path / "old"
+        old_dir = self._old_dir(tmp_path)
         new_dir = tmp_path / "new"
-        old_dir.mkdir()
-        new_dir.mkdir()
+        _write(new_dir, "libbar.so.json", _snap(library="libbar.so"))
+        result = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        d = json.loads(result.stdout)
+        assert d["verdict"] == "NO_CHANGE"
+        assert d["comparison_scope"]["proven_removed"] == []
+        # A one-member NEW *directory* is a partial release, not a
+        # current-artifact request: the unmatched member is unchecked.
+        assert d["comparison_scope"]["unchecked"] == ["libfoo.so.json"]
+        assert d["comparison_scope"]["out_of_scope"] == []
+        assert d["run_outcome"]["scope"] == "incomplete"
 
-        snap_foo = _snap(library="libfoo.so")
-        snap_bar = _snap(library="libbar.so")
-        _write_snap(old_dir / "libfoo.json", snap_foo)
-        _write_snap(old_dir / "libbar.json", snap_bar)
-        _write_snap(new_dir / "libbar.json", snap_bar)
+    def test_proven_removed_library_verdict_is_at_least_risk(self, tmp_path: Path):
+        from test_release_scope_completeness import _write_stored_package
 
-        result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", "json",
-        )
+        old_dir = self._old_dir(tmp_path)
+        new_pkg = tmp_path / "new_pkg"
+        _write_stored_package(new_pkg, {"libbar.so": _snap(library="libbar.so")})
+        result = _invoke("compare", str(old_dir), str(new_pkg), "-j", "1", "--format", "json")
         d = json.loads(result.output)
+        assert d["comparison_scope"]["proven_removed"] == ["libfoo.so.json"]
         assert d["verdict"] == "COMPATIBLE_WITH_RISK"
 
     def test_added_library_no_verdict_elevation(self, tmp_path: Path):

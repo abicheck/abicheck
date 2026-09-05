@@ -49,7 +49,12 @@ from typing import TYPE_CHECKING, Any
 from . import qualified_name_segments
 from .clang_layout_tool import attach_clang_layout
 from .dumper_scoping import wrap_run_dump_with_dependency_scope
-from .errors import AbicheckError, SnapshotError, ValidationError
+from .errors import (
+    AbicheckError,
+    SnapshotError,
+    UnsupportedArtifactError,
+    ValidationError,
+)
 from .header_utils import (
     cache_relevant_operand_paths,
     deferred_token_dirs,
@@ -475,7 +480,7 @@ def _run_dump_uncached(
             skip_header_graph=_skip_header_graph_attach or symbols_only,
             public_include_search_dirs=_public_include_search_dirs,
         )
-    raise ValidationError(f"Unsupported binary format: {binary_fmt}")
+    raise UnsupportedArtifactError(f"Unsupported binary format: {binary_fmt}")
 
 
 def _finish_native_snapshot(

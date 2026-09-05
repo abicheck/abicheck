@@ -1,0 +1,1162 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""ADR-065 S2, third file: what a *selection* may and may not conclude.
+
+The release manifest is enforced over the retained bundle members only
+(D2), `--dso-only` over a stored side records an unclassifiable member as
+`failed` rather than narrowing the scope (D1/D2), and a `failed` member is
+never a proven removal/addition however complete the other side's
+inventory is. Split out of ``tests/test_release_scope_bundle.py`` once that
+file crossed the architecture gate's 1200-line test-file cap; shares that
+file's helpers rather than copying them.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+from test_release_scope_bundle import _lib, _removal_findings
+from test_release_scope_completeness import (
+    _facts_file,
+    _invoke_json,
+    _write,
+    _write_stored_package,
+)
+
+from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+from abicheck.model import AbiSnapshot
+from abicheck.model.scope_acquisition import (
+    UNCHECKED_STATES,
+    AcquisitionState,
+    InventoryCompleteness,
+    ScopeAcquisitionRecord,
+    SideInventory,
+)
+from abicheck.workflows.release_scope import (
+    ReleaseInventoryEvidence,
+    build_release_scope_record,
+    build_stored_baseline_scope_record,
+    bundle_analysis_members,
+)
+
+# ---------------------------------------------------------------------------
+# The release manifest is enforced over the retained members only (D2)
+# ---------------------------------------------------------------------------
+
+
+def _manifest(*entries: tuple[str, str | None]) -> InstantiationManifest:
+    """``(symbol, pinned_provider_or_None)`` entries."""
+    return InstantiationManifest(
+        entries=tuple(
+            ManifestEntry(symbol=sym, library=lib, optional_provider=lib is None)
+            for sym, lib in entries
+        )
+    )
+
+
+def _write_stored_package_with_manifest(
+    root: Path, libraries: dict[str, AbiSnapshot], manifest: InstantiationManifest
+) -> None:
+    from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
+    from abicheck.bundle_facts_store import write_bundle_facts_package
+    from abicheck.project_snapshot_store import (
+        DirectoryObjectStore,
+        write_project_manifest,
+    )
+
+    facts = capture_bundle_facts(libraries, variant_fingerprint="gcc13")
+    facts = BundleFacts(
+        variant_fingerprint=facts.variant_fingerprint,
+        per_library_snapshots=facts.per_library_snapshots,
+        library_filenames={name: name for name in facts.per_library_snapshots},
+        manifest=manifest,
+    )
+    store = DirectoryObjectStore(root)
+    write_project_manifest(root, write_bundle_facts_package(facts, store=store))
+
+
+def _manifest_findings(doc: dict[str, object]) -> list[str]:
+    findings = doc.get("bundle_findings") or []
+    assert isinstance(findings, list)
+    return [
+        str(f["symbol"])
+        for f in findings
+        if isinstance(f, dict)
+        and str(f.get("kind", "")).startswith("bundle_manifest_instantiation_")
+    ]
+
+
+class TestManifestScopedToRetainedMembers:
+    """`scope_manifest_to_members`: once any expected member is absent from
+    the bundle graph, only a promise pinned to a retained provider stays
+    decidable; every other promise is withheld and named (Codex review,
+    eighth round)."""
+
+    @staticmethod
+    def _record(
+        other: AcquisitionState, *, new_proven: bool = False
+    ) -> ScopeAcquisitionRecord:
+        from abicheck.model.scope_acquisition import MemberAcquisition
+
+        return ScopeAcquisitionRecord(
+            (
+                MemberAcquisition("libkept.so", AcquisitionState.AVAILABLE, True, True),
+                MemberAcquisition(
+                    "libother.so",
+                    other,
+                    other is not AcquisitionState.EXPECTED_NOT_PRODUCED,
+                    other is not AcquisitionState.NOT_SUPPLIED,
+                    "why",
+                    display_name="libother.so.2",
+                ),
+            ),
+            SideInventory(InventoryCompleteness.UNPROVEN, "t"),
+            SideInventory(
+                InventoryCompleteness.PROVEN
+                if new_proven
+                else InventoryCompleteness.UNPROVEN,
+                "t",
+            ),
+            "all_expected",
+        )
+
+    @pytest.mark.parametrize("new_proven", [False, True])
+    @pytest.mark.parametrize("other", list(AcquisitionState))
+    def test_withheld_iff_a_member_is_absent_from_the_graph(
+        self, other: AcquisitionState, new_proven: bool
+    ) -> None:
+        from abicheck.workflows.release_scope import scope_manifest_to_members
+
+        record = self._record(other, new_proven=new_proven)
+        manifest = _manifest(
+            ("any_fn", None),
+            ("kept_fn", "libkept.so"),
+            ("kept_versioned_fn", "libkept.so.3"),
+            ("other_fn", "libother.so.2"),
+        )
+        scoped, note = scope_manifest_to_members(manifest, record)
+        graph_complete = bundle_analysis_members(record) == {
+            "libkept.so",
+            "libother.so",
+        }
+        if graph_complete:
+            assert scoped is manifest and note is None
+            return
+        assert scoped is not None
+        assert [e.symbol for e in scoped.entries] == ["kept_fn", "kept_versioned_fn"]
+        assert note is not None
+        assert "any_fn" in note and "other_fn" in note and "libother.so.2" in note
+        # Nothing pinned to a retained member: the manifest is withheld whole.
+        scoped_none, note_none = scope_manifest_to_members(
+            _manifest(("any_fn", None), ("other_fn", "libother.so")), record
+        )
+        assert scoped_none is None and note_none is not None
+
+    def test_no_manifest_or_no_record_is_the_identity(self) -> None:
+        from abicheck.workflows.release_scope import scope_manifest_to_members
+
+        manifest = _manifest(("any_fn", None))
+        assert scope_manifest_to_members(
+            None, self._record(AcquisitionState.FAILED)
+        ) == (None, None)
+        assert scope_manifest_to_members(manifest, None) == (manifest, None)
+
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    def test_narrowed_live_new_does_not_fabricate_manifest_drift(
+        self, tmp_path: Path, policy: str
+    ) -> None:
+        """A stored OLD package with an embedded manifest against NEW named
+        as one current artifact (D9 narrowing): the promise the unselected
+        member provides is withheld, not `BUNDLE_MANIFEST_INSTANTIATION_REMOVED`."""
+        old = tmp_path / "old_pkg"
+        _write_stored_package_with_manifest(
+            old,
+            {
+                "libcore.so": _lib("libcore.so", exports=("core_fn",)),
+                "libalgo.so": _lib("libalgo.so", exports=("algo_fn",)),
+            },
+            _manifest(("core_fn", None)),
+        )
+        new = tmp_path / "new"
+        _write(new, "libalgo.so.json", _lib("libalgo.so", exports=("algo_fn",)))
+        code, doc = _invoke_json(
+            "compare",
+            str(old),
+            str(new / "libalgo.so.json"),
+            "-j",
+            "1",
+            "--on-incomplete-scope",
+            policy,
+        )
+        assert _manifest_findings(doc) == []
+        assert doc["verdict"] != "BREAKING"
+        errors = doc.get("bundle_analysis_errors") or []
+        assert any("core_fn" in e and "withheld" in e for e in errors), errors
+        # D9 narrowing is a deliberate selection: complete under either policy.
+        assert doc["comparison_scope"]["completeness"] == "complete"
+        assert doc["comparison_scope"]["out_of_scope"] == ["libcore.so-libcore.so"]
+        assert code == 0
+
+    def test_proven_new_inventory_still_enforces_the_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        """Control: with NEW a proven-complete stored package that dropped
+        the provider, the removal is proven and the promise is enforced."""
+        old = tmp_path / "old_pkg"
+        libs = {
+            "libcore.so": _lib("libcore.so", exports=("core_fn",)),
+            "libalgo.so": _lib("libalgo.so", exports=("algo_fn",)),
+        }
+        _write_stored_package_with_manifest(old, libs, _manifest(("core_fn", None)))
+        new = tmp_path / "new_pkg"
+        _write_stored_package(new, {"libalgo.so": libs["libalgo.so"]})
+        code, doc = _invoke_json("compare", str(old), str(new), "-j", "1")
+        assert "core_fn" in _manifest_findings(doc)
+        assert doc["comparison_scope"]["completeness"] == "complete"
+        assert not doc.get("bundle_analysis_errors")
+
+    def test_stored_pair_driver_withholds_too(self, tmp_path: Path) -> None:
+        """The stored/stored driver: OLD's captured manifest promises a
+        symbol only the member degraded on NEW provides."""
+        from abicheck.workflows.bundle_stored_pair_compare import (
+            compare_stored_bundle_facts_pair,
+        )
+
+        libs = {
+            "libcore.so": _lib("libcore.so", exports=("core_fn",)),
+            "libalgo.so": _lib("libalgo.so", exports=("algo_fn",)),
+        }
+        old = _facts_file(
+            tmp_path,
+            "old.bundlefacts.json",
+            libs,
+            manifest=_manifest(("core_fn", None)),
+        )
+        new = _facts_file(
+            tmp_path,
+            "new.bundlefacts.json",
+            {**libs, "libcore.so": _lib("libcore.so")},
+            degraded={"libcore.so": "dump failed"},
+        )
+        result = compare_stored_bundle_facts_pair(old, new)
+        kinds = {f.kind.value for f in result.bundle_findings}
+        assert not any(k.startswith("bundle_manifest_instantiation_") for k in kinds)
+        assert any("core_fn" in e and "withheld" in e for e in result.analysis_errors)
+
+
+# ---------------------------------------------------------------------------
+# --dso-only over a stored side: unclassifiable is failed, never narrowed (D1/D2)
+# ---------------------------------------------------------------------------
+
+
+class TestDsoOnlyUnclassifiedIsFailed:
+    """`--dso-only` excludes a stored member whose kind or ELF metadata it
+    cannot read. That exclusion is an acquisition failure: recorded
+    `failed`, and the side's inventory proof withheld, so the other side's
+    copy is never a proven removal/addition (Codex review, ninth round)."""
+
+    @staticmethod
+    def _libs() -> dict[str, AbiSnapshot]:
+        from dataclasses import replace
+
+        return {
+            "libdso.so": _lib("libdso.so", exports=("dso_fn",)),
+            # Declared ELF (no platform stated) but carrying no ELF section.
+            "libnoelf.so": AbiSnapshot(library="libnoelf.so", version="1"),
+            # Confirmed not a DSO: silently outside the selection.
+            "libwin.dll": replace(
+                AbiSnapshot(library="libwin.dll", version="1"), platform="pe"
+            ),
+        }
+
+    def test_classification_names_the_unreadable_member(self, tmp_path: Path) -> None:
+        from abicheck.workflows.release_package import (
+            classify_dso_only_package_map,
+            dso_only_package_map,
+            resolve_release_package_map,
+        )
+
+        pkg = tmp_path / "pkg"
+        _write_stored_package(pkg, self._libs())
+        resolved = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        assert len(resolved) == 3
+        cls = classify_dso_only_package_map(resolved)
+        assert set(cls.members) == {"libdso.so"}
+        assert set(cls.unclassified) == {"libnoelf.so"}
+        assert "ELF metadata" in cls.unclassified["libnoelf.so"]
+        assert dso_only_package_map(resolved) == cls.members
+
+    @pytest.mark.parametrize("side", ["old", "new"])
+    def test_record_marks_it_failed_and_withholds_the_proof(self, side: str) -> None:
+        from abicheck.workflows.release_scope import release_inventory_evidence
+
+        unclassified = {"libx.so": "--dso-only could not read it"}
+        evidence = release_inventory_evidence(
+            old_stored=True,
+            new_stored=True,
+            old_complete=True,
+            new_complete=True,
+            old_unclassified=unclassified if side == "old" else None,
+            new_unclassified=unclassified if side == "new" else None,
+        )
+        lacking = evidence.old if side == "old" else evidence.new
+        proven = evidence.new if side == "old" else evidence.old
+        assert lacking.completeness is InventoryCompleteness.UNPROVEN
+        assert "libx.so" in lacking.provenance
+        assert proven.completeness is InventoryCompleteness.PROVEN
+        # libx.so classified fine on the other side, libok.so on both.
+        maps = {"libok.so": Path("libok.so"), "libx.so": Path("libx.so")}
+        record = build_release_scope_record(
+            {"libok.so": maps["libok.so"]} if side == "old" else maps,
+            maps if side == "old" else {"libok.so": maps["libok.so"]},
+            ["libok.so"],
+            [{"library": "libok.so", "verdict": "NO_CHANGE"}],
+            evidence,
+            old_failed=unclassified if side == "old" else None,
+            new_failed=unclassified if side == "new" else None,
+        )
+        by_key = {m.member: m for m in record.members}
+        assert by_key["libx.so"].state is AcquisitionState.FAILED
+        assert (by_key["libx.so"].old_present, by_key["libx.so"].new_present) == (
+            True,
+            True,
+        )
+        assert side.upper() in by_key["libx.so"].reason
+        assert record.proven_removed_members == ()
+        assert record.proven_added_members == ()
+        assert [m.member for m in record.unchecked_members] == ["libx.so"]
+        assert by_key["libok.so"].state is AcquisitionState.AVAILABLE
+
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    def test_stored_pair_dso_only_never_fabricates_a_removal(
+        self, tmp_path: Path, policy: str
+    ) -> None:
+        libs = self._libs()
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        _write_stored_package(
+            old, {**libs, "libnoelf.so": _lib("libnoelf.so", exports=("x",))}
+        )
+        _write_stored_package(new, libs)
+        code, doc = _invoke_json(
+            "compare",
+            str(old),
+            str(new),
+            "-j",
+            "1",
+            "--dso-only",
+            "--fail-on-removed-library",
+            "--on-incomplete-scope",
+            policy,
+        )
+        scope = doc["comparison_scope"]
+        assert scope["new_inventory"]["completeness"] == "unproven"
+        assert "libnoelf.so" in scope["new_inventory"]["provenance"]
+        assert scope["old_inventory"]["completeness"] == "proven"
+        assert scope["proven_removed"] == []
+        assert scope["counts"]["failed"] == 1
+        assert [n.split("-")[0] for n in scope["unchecked"]] == ["libnoelf.so"]
+        assert scope["completeness"] == "incomplete"
+        assert _removal_findings(doc) == []
+        by_name = {lib["library"].split("-")[0]: lib for lib in doc["libraries"]}
+        # Codex review, twentieth round: an in-scope member this run could
+        # not classify is an operational `ERROR`, floored at 4 under either
+        # policy -- never a warn-accepted gap beside a healthy sibling.
+        assert by_name["libnoelf.so"]["verdict"] == "ERROR"
+        assert by_name["libdso.so"]["verdict"] == "NO_CHANGE"
+        assert "libwin.dll" not in by_name
+        assert doc["run_outcome"]["operational"] == "extraction_error"
+        assert doc["exit"]["operational_error_contribution"] == 4
+        assert code == 4
+
+    def test_fully_classified_stored_pair_stays_proven(self, tmp_path: Path) -> None:
+        """Control: every declared member classifies, so the proof stands
+        and a DSO the proven NEW side dropped is a real removal."""
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        libs = {k: v for k, v in self._libs().items() if k != "libnoelf.so"}
+        _write_stored_package(
+            old, {**libs, "libgone.so": _lib("libgone.so", exports=("g",))}
+        )
+        _write_stored_package(new, libs)
+        code, doc = _invoke_json(
+            "compare",
+            str(old),
+            str(new),
+            "-j",
+            "1",
+            "--dso-only",
+            "--fail-on-removed-library",
+        )
+        scope = doc["comparison_scope"]
+        assert scope["new_inventory"]["completeness"] == "proven"
+        assert [n.split("-")[0] for n in scope["proven_removed"]] == ["libgone.so"]
+        assert scope["completeness"] == "complete"
+        assert code == 8
+
+
+class TestFailedMemberIsNeverAProvenRemoval:
+    """`proven_removed_members`/`proven_added_members` require the
+    `not_supplied` state: a `failed` member is present on its side but its
+    acquisition never established what the artifact was, so however
+    complete the other side's inventory is, it is unchecked, never a
+    removal/addition (Codex review, tenth round)."""
+
+    @pytest.mark.parametrize("state", list(AcquisitionState))
+    @pytest.mark.parametrize("side", ["old", "new"])
+    def test_only_not_supplied_qualifies(
+        self, state: AcquisitionState, side: str
+    ) -> None:
+        from abicheck.model.scope_acquisition import MemberAcquisition
+
+        member = MemberAcquisition(
+            "libx.so", state, old_present=side == "old", new_present=side == "new"
+        )
+        record = ScopeAcquisitionRecord(
+            (member,),
+            SideInventory(InventoryCompleteness.PROVEN, "t"),
+            SideInventory(InventoryCompleteness.PROVEN, "t"),
+            "all_expected",
+        )
+        proven = (
+            record.proven_removed_members
+            if side == "old"
+            else record.proven_added_members
+        )
+        assert bool(proven) is (state is AcquisitionState.NOT_SUPPLIED)
+        if state in UNCHECKED_STATES and state is not AcquisitionState.NOT_SUPPLIED:
+            assert record.unchecked_members == (member,)
+            assert record.is_incomplete
+
+    def test_dso_only_unclassified_old_member_absent_from_proven_new(
+        self, tmp_path: Path
+    ) -> None:
+        """OLD cannot classify libnoelf.so; the proven-complete NEW package
+        does not ship it at all: `failed`, unchecked, never exit 8."""
+        libs = {"libdso.so": _lib("libdso.so", exports=("dso_fn",))}
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        _write_stored_package(
+            old,
+            {**libs, "libnoelf.so": AbiSnapshot(library="libnoelf.so", version="1")},
+        )
+        _write_stored_package(new, libs)
+        code, doc = _invoke_json(
+            "compare",
+            str(old),
+            str(new),
+            "-j",
+            "1",
+            "--dso-only",
+            "--fail-on-removed-library",
+        )
+        scope = doc["comparison_scope"]
+        assert scope["new_inventory"]["completeness"] == "proven"
+        assert scope["old_inventory"]["completeness"] == "unproven"
+        assert scope["proven_removed"] == []
+        assert [n.split("-")[0] for n in scope["unchecked"]] == ["libnoelf.so"]
+        assert scope["counts"]["failed"] == 1
+        assert _removal_findings(doc) == []
+        # Never exit 8 -- but the classification failure itself is this
+        # run's operational error (Codex review, twentieth round).
+        assert doc["run_outcome"]["operational"] == "extraction_error"
+        assert code == 4
+
+
+class TestExplicitManifestNeverFallsBackToTheStoredOne:
+    """An explicit `--manifest` replaces a stored side's captured manifest
+    entirely. Once scoping withholds every explicit promise, the comparison
+    must enforce nothing -- not the stored manifest `compare_bundle_from_
+    facts`'s own fallback would otherwise pick up (CodeRabbit review)."""
+
+    @staticmethod
+    def _explicit(tmp_path: Path) -> Path:
+        # Optional-provider promise: withheld whole once a member is absent.
+        path = tmp_path / "manifest.json"
+        path.write_text(json.dumps({"provides": [{"symbol": "core_fn"}]}))
+        return path
+
+    @staticmethod
+    def _libs() -> dict[str, AbiSnapshot]:
+        return {
+            "libcore.so": _lib("libcore.so", exports=("core_fn",)),
+            "libalgo.so": _lib("libalgo.so", exports=("algo_fn",)),
+        }
+
+    # The stored manifest pins a promise NEW's retained member no longer
+    # provides -- enforced, it would fire; replaced by the explicit one, it
+    # must not.
+    _STORED = (("gone_fn", "libalgo.so"),)
+
+    def test_stored_pair_driver(self, tmp_path: Path) -> None:
+        from abicheck.workflows.bundle_stored_pair_compare import (
+            compare_stored_bundle_facts_pair,
+        )
+
+        libs = self._libs()
+        old = _facts_file(
+            tmp_path, "old.bundlefacts.json", libs, manifest=_manifest(*self._STORED)
+        )
+        new = _facts_file(
+            tmp_path,
+            "new.bundlefacts.json",
+            {**libs, "libcore.so": _lib("libcore.so")},
+            degraded={"libcore.so": "dump failed"},
+        )
+        result = compare_stored_bundle_facts_pair(
+            old, new, manifest_path=self._explicit(tmp_path)
+        )
+        kinds = {f.kind.value for f in result.bundle_findings}
+        assert not any(k.startswith("bundle_manifest_instantiation_") for k in kinds)
+        assert any("core_fn" in e and "withheld" in e for e in result.analysis_errors)
+
+    def test_stored_live_driver(self, tmp_path: Path) -> None:
+        from abicheck.bundle_side_input import compare_release_against_bundle_facts
+
+        libs = self._libs()
+        old = _facts_file(
+            tmp_path, "old.bundlefacts.json", libs, manifest=_manifest(*self._STORED)
+        )
+        new = tmp_path / "new"
+        _write(new, "libalgo.so.json", _lib("libalgo.so", exports=("algo_fn",)))
+        result = compare_release_against_bundle_facts(
+            old, new / "libalgo.so.json", manifest_path=self._explicit(tmp_path)
+        )
+        kinds = {f.kind.value for f in result.bundle_findings}
+        assert not any(k.startswith("bundle_manifest_instantiation_") for k in kinds)
+        assert any("core_fn" in e and "withheld" in e for e in result.analysis_errors)
+
+
+class TestDegradedMarkerIsValidatedBeforeAnyWrite:
+    def test_a_rejected_import_leaves_no_orphaned_object(self) -> None:
+        """`ObjectStore` has no rollback: the marker gate must run before
+        the per-library snapshot imports, or a rejected document leaves
+        unreferenced objects behind (CodeRabbit review)."""
+        from abicheck.bundle_facts import capture_bundle_facts
+        from abicheck.bundle_facts_serialization import bundle_facts_to_dict
+        from abicheck.serialization import SCHEMA_VERSION
+        from abicheck.storage.import_bundle_facts import import_bundle_facts
+        from abicheck.storage.package import InMemoryObjectStore
+
+        doc = dict(
+            bundle_facts_to_dict(
+                capture_bundle_facts(
+                    {"liba.so": AbiSnapshot(library="liba.so", version="")},
+                    degraded_members={"liba.so": "ELF-only: boom"},
+                )
+            )
+        )
+        doc["schema_version"] = 2
+        store = InMemoryObjectStore()
+        with pytest.raises(ValueError, match="degraded_members"):
+            import_bundle_facts(
+                doc, store=store, max_known_schema_version=SCHEMA_VERSION
+            )
+        assert store._objects == {}
+
+
+class TestDegradedSingleArtifactPackageRoutesToTheFanOut:
+    """A one-member `ProjectSnapshot` package whose sole member was captured
+    degraded is not a scalar "file" operand: only the scope-aware fan-out
+    reads the marker and records the member `failed`, where the
+    single-artifact reader would compare the ELF-only stand-in as complete
+    evidence and manufacture removals (Codex review, twelfth round)."""
+
+    @staticmethod
+    def _packages(tmp_path: Path) -> tuple[Path, Path]:
+        healthy = _lib("libfoo.so", exports=("foo", "bar"))
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        _write_stored_package(old, {"libfoo.so": healthy})
+        _write_stored_package(
+            new,
+            {"libfoo.so": _lib("libfoo.so")},
+            degraded={"libfoo.so": "dump failed: boom"},
+        )
+        return old, new
+
+    def test_classification(self, tmp_path: Path) -> None:
+        from abicheck.cli_resolve import classify_compare_operand
+        from abicheck.workflows.release_package import is_multi_artifact_package
+
+        old, new = self._packages(tmp_path)
+        assert is_multi_artifact_package(old) is False
+        assert is_multi_artifact_package(new) is True
+        assert classify_compare_operand(old) == "file"
+        assert classify_compare_operand(new) == "directory"
+
+    @pytest.mark.parametrize("degraded_side", ["old", "new"])
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    def test_compare_records_the_member_failed(
+        self, tmp_path: Path, degraded_side: str, policy: str
+    ) -> None:
+        old, new = self._packages(tmp_path)
+        if degraded_side == "old":
+            old, new = new, old
+        code, doc = _invoke_json(
+            "compare", str(old), str(new), "-j", "1", "--on-incomplete-scope", policy
+        )
+        assert "func_removed" not in json.dumps(doc)
+        assert doc["verdict"] != "BREAKING"
+        scope = doc["comparison_scope"]
+        assert scope["counts"]["failed"] == 1
+        assert scope["no_comparison_completed"] is True
+        assert doc["run_outcome"]["operational"] == "no_comparison_completed"
+        assert doc["run_outcome"]["compatibility"] is None
+        assert code == 1
+
+
+class TestDamagedMarkerSectionFailsClosed:
+    """A single-artifact package whose composition section is present but
+    unreadable is not "no marker" (Codex review, thirteenth round): it
+    routes to the fan-out, and the fan-out refuses to compare it."""
+
+    @staticmethod
+    def _corrupt_composition(pkg: Path) -> None:
+        from abicheck.project_snapshot_store import (
+            DirectoryObjectStore,
+            read_manifest_summary,
+            read_variant_ref,
+        )
+        from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
+
+        (variant_id,) = read_manifest_summary(pkg).variant_ids
+        ref = read_variant_ref(pkg, variant_id).sections[
+            BUNDLE_COMPOSITION_SECTION_KIND
+        ]
+        DirectoryObjectStore(pkg)._json_path(ref.digest).write_bytes(b"garbage")
+
+    def test_routes_to_the_fan_out_and_is_refused(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.cli_resolve import classify_compare_operand
+        from abicheck.workflows.release_package import is_multi_artifact_package
+
+        healthy = {"libfoo.so": _lib("libfoo.so", exports=("foo", "bar"))}
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        _write_stored_package(old, healthy)
+        _write_stored_package(new, healthy)
+        self._corrupt_composition(new)
+        assert is_multi_artifact_package(new) is True
+        assert classify_compare_operand(new) == "directory"
+        result = CliRunner().invoke(
+            main, ["compare", str(old), str(new), "-j", "1", "--format", "json"]
+        )
+        # Refused as a usage error by whichever reader meets the damage
+        # first (materialization or the marker read), never compared.
+        assert result.exit_code == 64, result.output
+        assert "refusing" in result.output
+        assert "BREAKING" not in result.output
+
+
+class TestDirectBundleApiHonorsDegradation:
+    """`bundle_snapshot_from_facts` (and so `compare_bundle_from_facts` and
+    `compare_bundle_sides`) refuses facts carrying a degraded marker: the
+    stand-in is not evidence, and a direct caller must resolve the scope
+    first as the drivers do (Codex review, thirteenth round)."""
+
+    @staticmethod
+    def _facts():
+        from abicheck.bundle_facts import capture_bundle_facts
+
+        return capture_bundle_facts(
+            {"libcore.so": _lib("libcore.so"), "libalgo.so": _lib("libalgo.so")},
+            degraded_members={"libcore.so": "dump failed"},
+        )
+
+    def test_compare_bundle_from_facts_refuses(self) -> None:
+        from abicheck.bundle_facts import (
+            bundle_snapshot_from_facts,
+            capture_bundle_facts,
+            compare_bundle_from_facts,
+        )
+
+        new_snapshot = bundle_snapshot_from_facts(
+            capture_bundle_facts({"libalgo.so": _lib("libalgo.so")})
+        )
+        with pytest.raises(ValueError, match="libcore.so.*ADR-065 D8"):
+            compare_bundle_from_facts(self._facts(), new_snapshot, [])
+
+    def test_compare_bundle_sides_refuses(self, tmp_path: Path) -> None:
+        from abicheck.bundle_side_input import (
+            StoredBundleFactsInput,
+            compare_bundle_sides,
+        )
+        from abicheck.serialization import save_bundle_facts
+
+        path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(self._facts(), path)
+        with pytest.raises(ValueError, match="degraded"):
+            compare_bundle_sides(
+                StoredBundleFactsInput(path), StoredBundleFactsInput(path), []
+            )
+
+    def test_a_resolved_scope_passes(self) -> None:
+        from abicheck.bundle_facts import bundle_snapshot_from_facts
+        from abicheck.workflows.release_scope import restrict_bundle_facts
+
+        facts = self._facts()
+        record = build_stored_baseline_scope_record(
+            facts.per_library_snapshots,
+            {"libalgo.so": Path("libalgo.so"), "libcore.so": Path("libcore.so")},
+            compared=["libalgo.so"],
+            degraded={"libcore.so": "dump failed"},
+            old_provenance="t",
+            new_provenance="t",
+        )
+        snapshot = bundle_snapshot_from_facts(restrict_bundle_facts(facts, record))
+        assert set(snapshot.libraries) == {"libalgo.so"}
+
+
+class TestNarrowingOutranksAnUnrelatedOldFailure:
+    """D9's out-of-scope demotion is decided before D1's `failed` state for
+    an OLD-only member: when NEW names one artifact explicitly, a baseline
+    member `--dso-only` could not classify is *unselected* first -- its
+    failure is named on the record but never poisons the current-artifact
+    comparison's completeness under `block`. A NEW-side failure is still
+    `failed`: it concerns the very artifact the caller selected (Codex
+    review, sixteenth round)."""
+
+    @staticmethod
+    def _evidence(*, new_single_artifact: bool) -> ReleaseInventoryEvidence:
+        return ReleaseInventoryEvidence(
+            old=SideInventory(InventoryCompleteness.UNPROVEN, "t"),
+            new=SideInventory(InventoryCompleteness.UNPROVEN, "t"),
+            new_single_artifact=new_single_artifact,
+        )
+
+    @pytest.mark.parametrize(
+        "failed_keys",
+        [("libbroken.so",), ("libbroken.so", "libworse.so"), ()],
+        ids=["one", "two", "none"],
+    )
+    @pytest.mark.parametrize("other_old", [(), ("libother.so",)], ids=["no", "yes"])
+    def test_record_keeps_a_narrowed_comparison_complete(
+        self, failed_keys: tuple[str, ...], other_old: tuple[str, ...]
+    ) -> None:
+        old_map = {k: Path(k) for k in ("libsel.so", *other_old)}
+        old_failed = {k: "--dso-only could not read it" for k in failed_keys}
+        if not failed_keys and not other_old:
+            pytest.skip("nothing to narrow away")
+        record = build_release_scope_record(
+            old_map,
+            {"libsel.so": Path("libsel.so")},
+            ["libsel.so"],
+            [{"library": "libsel.so", "verdict": "NO_CHANGE"}],
+            self._evidence(new_single_artifact=True),
+            old_failed=old_failed,
+        )
+        by_key = {m.member: m for m in record.members}
+        assert record.selection == "current_artifact"
+        assert (
+            f"other {len(failed_keys) + len(other_old)} OLD" in record.selection_reason
+        )
+        assert by_key["libsel.so"].state is AcquisitionState.AVAILABLE
+        for key in (*failed_keys, *other_old):
+            assert by_key[key].state is AcquisitionState.OUT_OF_SCOPE
+            assert (by_key[key].old_present, by_key[key].new_present) == (True, False)
+            assert ("could not read it" in by_key[key].reason) is (key in old_failed)
+        assert not record.is_incomplete
+        assert record.unchecked_members == ()
+
+    def test_without_narrowing_the_failure_is_still_failed(self) -> None:
+        record = build_release_scope_record(
+            {"libsel.so": Path("libsel.so")},
+            {"libsel.so": Path("libsel.so")},
+            ["libsel.so"],
+            [{"library": "libsel.so", "verdict": "NO_CHANGE"}],
+            self._evidence(new_single_artifact=False),
+            old_failed={"libbroken.so": "--dso-only could not read it"},
+        )
+        by_key = {m.member: m for m in record.members}
+        assert by_key["libbroken.so"].state is AcquisitionState.FAILED
+        assert record.is_incomplete
+
+    def test_a_new_side_failure_is_never_narrowed_away(self) -> None:
+        """A NEW-side unclassified member is the selected artifact's own
+        side failing; nothing was narrowed and the record is incomplete."""
+        record = build_release_scope_record(
+            {"libsel.so": Path("libsel.so"), "libother.so": Path("libother.so")},
+            {"libsel.so": Path("libsel.so")},
+            ["libsel.so"],
+            [{"library": "libsel.so", "verdict": "NO_CHANGE"}],
+            self._evidence(new_single_artifact=True),
+            new_failed={"libnew.so": "--dso-only could not read it"},
+        )
+        by_key = {m.member: m for m in record.members}
+        assert record.selection == "all_expected"
+        assert by_key["libnew.so"].state is AcquisitionState.FAILED
+        assert by_key["libother.so"].state is AcquisitionState.NOT_SUPPLIED
+        assert record.is_incomplete
+
+    @pytest.mark.integration
+    @pytest.mark.skipif(
+        sys.platform != "linux",
+        reason="--dso-only classifies ELF shared objects; MinGW/clang gcc build PE/Mach-O",
+    )
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    def test_dso_only_current_artifact_compare_exits_0(
+        self, tmp_path: Path, policy: str
+    ) -> None:
+        """OLD stored package: the real DSO's own dump plus a member
+        `--dso-only` cannot classify; NEW named as that one current artifact
+        (a real ELF shared object, since `--dso-only` keeps only those --
+        on Windows a MinGW gcc builds a PE the selector cannot classify, so
+        NEW read as failed and nothing narrowed: CI on edaaadb1)."""
+        import shutil
+        import subprocess
+
+        gcc = shutil.which("gcc")
+        if gcc is None:
+            pytest.skip("gcc is not available")
+        src = tmp_path / "libdso.c"
+        src.write_text("int dso_fn(void) { return 1; }\n")
+        so = tmp_path / "new" / "libdso.so"
+        so.parent.mkdir()
+        res = subprocess.run(
+            [gcc, "-shared", "-fPIC", str(src), "-o", str(so), "-Wl,-soname,libdso.so"],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode != 0:
+            pytest.fail(f"gcc failed: {res.stderr}")
+        from abicheck import service
+
+        old = tmp_path / "old_pkg"
+        _write_stored_package(
+            old,
+            {
+                "libdso.so": service.resolve_input(so),
+                "libnoelf.so": AbiSnapshot(library="libnoelf.so", version="1"),
+            },
+        )
+        code, doc = _invoke_json(
+            "compare",
+            str(old),
+            str(so),
+            "-j",
+            "1",
+            "--dso-only",
+            "--on-incomplete-scope",
+            policy,
+        )
+        scope = doc["comparison_scope"]
+        assert scope["selection"] == "current_artifact"
+        assert scope["completeness"] == "complete"
+        assert scope["counts"]["failed"] == 0
+        assert [n.split("-")[0] for n in scope["out_of_scope"]] == ["libnoelf.so"]
+        assert scope["unchecked"] == []
+        assert doc["run_outcome"]["scope"] == "complete"
+        assert doc["exit"]["incomplete_scope_contribution"] == 0
+        assert code == 0
+
+
+class TestStoredLiveDriverSurvivesAMemberExtractionFailure:
+    """`compare_release_against_bundle_facts`: a NEW member whose extraction
+    fails outright (a damaged snapshot file) is `failed` on the record and
+    named, and every sibling's completed comparison is kept -- the native
+    fan-out's per-member handling, not an exception escaping before the
+    record exists (Codex review, sixteenth round)."""
+
+    @pytest.mark.parametrize(
+        "damage",
+        [b"{not json", b'{"schema_version": 1}', b""],
+        ids=["syntax", "missing-fields", "empty"],
+    )
+    def test_sibling_comparisons_survive(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: bytes
+    ) -> None:
+        import abicheck.package as package
+        from abicheck.bundle_side_input import compare_release_against_bundle_facts
+
+        monkeypatch.setattr(
+            package,
+            "discover_shared_libraries",
+            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
+        )
+        libs = {
+            "libok.so": _lib("libok.so", exports=("ok_fn",)),
+            "libbad.so": _lib("libbad.so", exports=("bad_fn",)),
+        }
+        old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
+        new_dir = tmp_path / "new"
+        _write(new_dir, "libok.so.json", libs["libok.so"])
+        (new_dir / "libbad.so.json").write_bytes(damage)
+        result = compare_release_against_bundle_facts(old, new_dir)
+        assert [d.library for d in result.per_library] == ["libok.so"]
+        assert any(
+            "libbad.so" in m and "failed extraction" in m
+            for m in result.analysis_errors
+        ), result.analysis_errors
+        record = result.scope_record
+        assert record is not None
+        by_key = {m.member: m for m in record.members}
+        assert by_key["libok.so"].state is AcquisitionState.AVAILABLE
+        assert by_key["libbad.so"].state is AcquisitionState.FAILED
+        assert [m.member for m in record.unchecked_members] == ["libbad.so"]
+        assert record.is_incomplete and not record.no_comparison_completed
+
+
+class TestStoredLiveExtractionFailureIsAnOperationalError:
+    """A NEW member whose extraction fails *in this run* is the native
+    fan-out's per-library `ERROR`: `run_outcome.operational` reads
+    `extraction_error` and the exit is floored at 4 under either
+    `--on-incomplete-scope` policy -- never a warn-accepted scope gap that
+    lets a damaged current artifact exit 0. A stored capture's own D8
+    `degraded` marker stays a scope-axis matter (Codex review, nineteenth
+    round)."""
+
+    @staticmethod
+    def _point_discovery_at_json(monkeypatch: pytest.MonkeyPatch) -> None:
+        import abicheck.package as package
+
+        monkeypatch.setattr(
+            package,
+            "discover_shared_libraries",
+            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
+        )
+
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    @pytest.mark.parametrize(
+        "damage", [b"{not json", b'{"schema_version": 1}'], ids=["syntax", "fields"]
+    )
+    def test_cli_floors_the_exit_and_names_the_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        policy: str,
+        damage: bytes,
+    ) -> None:
+        self._point_discovery_at_json(monkeypatch)
+        libs = {
+            "libok.so": _lib("libok.so", exports=("ok_fn",)),
+            "libbad.so": _lib("libbad.so", exports=("bad_fn",)),
+        }
+        old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
+        new_dir = tmp_path / "new"
+        _write(new_dir, "libok.so.json", libs["libok.so"])
+        (new_dir / "libbad.so.json").write_bytes(damage)
+        code, doc = _invoke_json(
+            "compare", str(old), str(new_dir), "--on-incomplete-scope", policy
+        )
+        assert code == 4, doc
+        assert doc["run_outcome"]["operational"] == "extraction_error"
+        assert doc["run_outcome"]["scope"] == "incomplete"
+        # The top-level verdict is the fan-out's operational sentinel, so a
+        # consumer keyed on it (the aggregate loader, the Action's fallback)
+        # keeps exit 4; the real compared result stays on its own axes.
+        assert doc["verdict"] == "ERROR"
+        assert doc["per_library_verdict"] == "NO_CHANGE"
+        assert doc["run_outcome"]["compatibility"] == "NO_CHANGE"
+        assert list(doc["libraries"]) == ["libok.so"]
+        assert list(doc["extraction_failures"]) == ["libbad.so"]
+        assert doc["comparison_scope"]["unchecked"] == ["libbad.so"]
+        assert doc["comparison_scope"]["counts"]["failed"] == 1
+        assert any(
+            "libbad.so" in e and "failed extraction" in e
+            for e in doc["analysis_errors"]
+        )
+
+    def test_a_stored_degraded_marker_is_not_an_extraction_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Control: the D8 marker records a *past* capture failure; it is
+        gated by the completeness policy, not floored as this run's error."""
+        self._point_discovery_at_json(monkeypatch)
+        libs = {
+            "libok.so": _lib("libok.so", exports=("ok_fn",)),
+            "libdeg.so": _lib("libdeg.so", exports=("deg_fn",)),
+        }
+        old = _facts_file(
+            tmp_path, "old.bundlefacts.json", libs, degraded={"libdeg.so": "ELF-only"}
+        )
+        new_dir = tmp_path / "new"
+        for name, snap in libs.items():
+            _write(new_dir, f"{name}.json", snap)
+        code, doc = _invoke_json("compare", str(old), str(new_dir))
+        assert code == 0, doc
+        assert doc["run_outcome"]["operational"] == "none"
+        assert doc["extraction_failures"] == {}
+        code, doc = _invoke_json(
+            "compare", str(old), str(new_dir), "--on-incomplete-scope", "block"
+        )
+        assert code == 1
+
+    def test_every_member_failing_is_also_no_comparison_completed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._point_discovery_at_json(monkeypatch)
+        libs = {"libbad.so": _lib("libbad.so", exports=("bad_fn",))}
+        old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        (new_dir / "libbad.so.json").write_bytes(b"{not json")
+        code, doc = _invoke_json("compare", str(old), str(new_dir))
+        assert code == 4, doc
+        assert doc["comparison_scope"]["no_comparison_completed"] is True
+        assert doc["run_outcome"]["compatibility"] is None
+        # The exit is 4 *because* extraction failed: the operational axis
+        # names that cause, outranking D7's status (twenty-first round).
+        assert doc["run_outcome"]["operational"] == "extraction_error"
+        assert doc["extraction_failures"] == {
+            "libbad.so": doc["extraction_failures"]["libbad.so"]
+        }
+
+    def test_render_json_states_the_operational_axis(self, tmp_path: Path) -> None:
+        from abicheck.bundle_models import BundleDiffResult
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+
+        result = BundleDiffResult(old_root=tmp_path, new_root=tmp_path)
+        clean = json.loads(
+            _render_json(result, old_facts_path=tmp_path, new_dir=tmp_path)
+        )
+        assert clean["run_outcome"]["operational"] == "none"
+        assert clean["extraction_failures"] == {}
+        result.extraction_failures = {"libbad.so": "boom"}
+        doc = json.loads(
+            _render_json(result, old_facts_path=tmp_path, new_dir=tmp_path)
+        )
+        assert doc["run_outcome"]["operational"] == "extraction_error"
+        assert doc["extraction_failures"] == {"libbad.so": "boom"}
+        assert clean["verdict"] == "NO_CHANGE" and doc["verdict"] == "ERROR"
+        from abicheck.frontends.cli.commands.compare_bundle_facts import (
+            _render_markdown,
+        )
+
+        md = _render_markdown(result, old_facts_path=tmp_path, new_dir=tmp_path)
+        assert "- **Verdict:** `ERROR`" in md
+
+
+class TestGhostMarkerInAStoredPackageIsRefused:
+    """A stored `ProjectSnapshot` package whose composition marker names a
+    member the variant does not store (a hand-edited or directly assembled
+    package -- the import path already refuses one) must be refused by the
+    composition reader too, never re-keyed away into a package that reads
+    complete (Codex review, twenty-fourth round)."""
+
+    @staticmethod
+    def _rewrite_marker(
+        pkg: Path, degraded: dict[str, str], *, vouch: bool = False
+    ) -> None:
+        """*vouch*: also list every marker key in the composition's own
+        ``library_filenames``, the way a hand-edited package would try to
+        make its ghost look stored."""
+        import json as _json
+
+        from abicheck.project_snapshot_store import (
+            DirectoryObjectStore,
+            read_manifest_summary,
+            read_variant_ref,
+        )
+        from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
+        from abicheck.storage.package import variant_ref_relpath
+
+        (variant_id,) = read_manifest_summary(pkg).variant_ids
+        variant = read_variant_ref(pkg, variant_id)
+        ref = variant.sections[BUNDLE_COMPOSITION_SECTION_KIND]
+        store = DirectoryObjectStore(pkg)
+        raw = dict(store.get(ref.digest))
+        raw["section_schema_version"] = 2
+        payload = {**dict(raw["payload"]), "degraded_members": degraded}
+        if vouch:
+            payload["library_filenames"] = {
+                **dict(payload.get("library_filenames", {})),
+                **{k: k for k in degraded},
+            }
+        raw["payload"] = payload
+        new_digest = store.put(raw)
+        ref_path = pkg / variant_ref_relpath(variant_id)
+        doc = _json.loads(ref_path.read_text(encoding="utf-8"))
+        doc["sections"][BUNDLE_COMPOSITION_SECTION_KIND]["digest"] = new_digest
+        ref_path.write_text(_json.dumps(doc, indent=2), encoding="utf-8")
+
+    def test_reader_refuses_a_ghost_key(self, tmp_path: Path) -> None:
+        from abicheck.errors import SnapshotError
+        from abicheck.project_snapshot_store import read_manifest_summary
+        from abicheck.storage.variant_composition import (
+            read_variant_composition_degraded_members,
+        )
+        from abicheck.workflows.release_scope import stored_side_degraded_members
+
+        pkg = tmp_path / "pkg"
+        _write_stored_package(pkg, {"libfoo.so": _lib("libfoo.so", exports=("foo",))})
+        (variant_id,) = read_manifest_summary(pkg).variant_ids
+        # A marker on a real member reads back.
+        self._rewrite_marker(pkg, {"libfoo.so": "boom"})
+        assert read_variant_composition_degraded_members(pkg, variant_id) == {
+            "libfoo.so": "boom"
+        }
+        # A ghost key is refused by the reader and the fan-out's own read.
+        self._rewrite_marker(pkg, {"libghost.so": "boom"})
+        with pytest.raises(ValueError, match="libghost.so"):
+            read_variant_composition_degraded_members(pkg, variant_id)
+        with pytest.raises(SnapshotError, match="refusing"):
+            stored_side_degraded_members(pkg, variant_id=None)
+        # A ghost the package's own `library_filenames` vouches for is still
+        # a ghost: only a stored artifact proves membership (twenty-fifth
+        # round).
+        self._rewrite_marker(pkg, {"libghost.so": "boom"}, vouch=True)
+        with pytest.raises(ValueError, match="libghost.so"):
+            read_variant_composition_degraded_members(pkg, variant_id)
+
+    @pytest.mark.parametrize("raw", [None, "boom", {"libfoo.so": 1}, ["libfoo.so"]])
+    def test_reader_refuses_a_malformed_marker(
+        self, tmp_path: Path, raw: object
+    ) -> None:
+        from abicheck.project_snapshot_store import read_manifest_summary
+        from abicheck.storage.variant_composition import (
+            read_variant_composition_degraded_members,
+        )
+
+        pkg = tmp_path / "pkg"
+        _write_stored_package(pkg, {"libfoo.so": _lib("libfoo.so", exports=("foo",))})
+        (variant_id,) = read_manifest_summary(pkg).variant_ids
+        self._rewrite_marker(pkg, raw)  # type: ignore[arg-type]
+        with pytest.raises(ValueError):
+            read_variant_composition_degraded_members(pkg, variant_id)
+
+    def test_compare_refuses_the_package_instead_of_proving_a_removal(
+        self, tmp_path: Path
+    ) -> None:
+        """OLD ships libgone.so; NEW is a proven-complete package without it
+        but carrying a ghost marker: the run is refused (exit 64), never a
+        proven removal (exit 8)."""
+        libs = {"libfoo.so": _lib("libfoo.so", exports=("foo",))}
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        _write_stored_package(old, {**libs, "libgone.so": _lib("libgone.so")})
+        _write_stored_package(new, libs)
+        self._rewrite_marker(new, {"libghost.so": "boom"}, vouch=True)
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new),
+                "-j",
+                "1",
+                "--fail-on-removed-library",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "refusing" in result.output and "libghost.so" in result.output

@@ -44,7 +44,6 @@ should import from here directly.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -73,7 +72,12 @@ from .frontends.cli.options.params import (
     DEFAULT_POLICY_PROFILE,
     _load_suppression_and_policy,
 )
+from .frontends.cli.release_summary import (  # moved (ADR-065 S2), re-exported
+    _write_release_summary_file as _write_release_summary_file,
+)
 from .model import AbiSnapshot
+from .report.comparison_scope import ComparisonScopeTerms
+from .workflows.gate import incomplete_scope_diagnostic
 
 if TYPE_CHECKING:
     from .pack_application import PackApplication
@@ -95,91 +99,6 @@ def _discover_files(
     else:
         files = _collect_release_inputs(lib_dir)
     return files
-
-
-def _write_release_summary_file(
-    output_dir: Path,
-    worst_verdict: str,
-    library_results: list[dict[str, object]],
-    removed_keys: list[str],
-    added_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
-    severity_config: SeverityConfig | None = None,
-    fail_on_removed: bool = False,
-    severity_exit_code: int | None = None,
-    contract_coverage_exit_contribution: int = 0,
-    bundle_result: BundleDiffResult | None = None,
-    matrix_result: DiffResult | None = None,
-    policy: str = DEFAULT_POLICY_PROFILE,
-    policy_file_path: Path | None = None,
-    suppress: Path | None = None,
-    pack_application: PackApplication | None = None,
-    scope_public_headers: bool = True,
-) -> None:
-    """Write per-library summary JSON to output directory.
-
-    *severity_config*, when in effect, feeds the same effective-config
-    digest ``_format_release_json`` (the primary release report) already
-    stamps, via the one shared helper ``_release_summary_effective_config_
-    block`` so the two can never independently drift (Codex review, PR
-    #803). Also gains the same ``exit`` block that report does, via the
-    same resolver (ADR-064 stage 1b, Codex review). *policy*/
-    *policy_file_path*/*suppress*/*pack_application*/*scope_public_headers*
-    (P1, CLI-audit) are the release's own resolved policy/surface inputs,
-    forwarded so this sidecar's ``effective_config_fields`` reflects the
-    real configuration every library was compared under, same as the
-    primary report (see ``_release_summary_effective_config_block``'s own
-    docstring).
-    """
-    from .cli_compare_receipt import _release_summary_effective_config_block
-    from .cli_compare_release_helpers import (
-        _release_completed_compatibility_verdict,
-        _release_global_verdict,
-    )
-    from .report.not_comparable import run_outcome_dict_for_release
-    from .workflows.gate import resolve_release_exit_decision_for_report
-
-    digest, fields = _release_summary_effective_config_block(
-        severity_config,
-        policy=policy,
-        policy_file_path=policy_file_path,
-        suppress=suppress,
-        pack_application=pack_application,
-        scope_public_headers=scope_public_headers,
-    )
-    release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
-    exit_dict = resolve_release_exit_decision_for_report(
-        worst_verdict,
-        fail_on_removed,
-        removed_keys,
-        severity_exit_code,
-        contract_coverage_exit_contribution,
-        library_results,
-        release_global_verdict,
-    ).to_dict()
-    summary_data: dict[str, object] = {
-        "verdict": worst_verdict,
-        "libraries": library_results,
-        "unmatched_old": [old_map[k].name for k in removed_keys],
-        "unmatched_new": [new_map[k].name for k in added_keys],
-        "effective_config_digest": digest,
-        "effective_config_fields": fields,
-        "exit": exit_dict,
-        "run_outcome": run_outcome_dict_for_release(
-            _release_completed_compatibility_verdict(
-                library_results,
-                release_global_verdict,
-                release_global_ran=(
-                    bundle_result is not None or matrix_result is not None
-                ),
-            ),
-            exit_dict,
-        ),
-    }
-    summary_path = output_dir / "summary.json"
-    _safe_write_output(summary_path, json.dumps(summary_data, indent=2))
-    click.echo(f"Per-library reports written to {output_dir}/", err=True)
 
 
 def _collect_matrix_result(
@@ -279,8 +198,16 @@ def _finalize_release_output(
     suppress: Path | None = None,
     pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
+    scope_terms: ComparisonScopeTerms | None = None,
 ) -> None:
-    """Write summary output, step summary, per-library dir report, then exit."""
+    """Write summary output, step summary, per-library dir report, then exit.
+
+    *scope_terms* (ADR-065 S2) is the release's one resolved
+    :class:`~abicheck.report.comparison_scope.ComparisonScopeTerms`: every
+    rendered format, the ``--output-dir`` sidecar, the stderr notice, and
+    the real process exit read the same object. *removed_keys*/*added_keys*
+    are the **proven** sets (D2) by the time they reach here.
+    """
     text = _format_release_summary(
         fmt,
         worst_verdict,
@@ -305,6 +232,7 @@ def _finalize_release_output(
         suppress=suppress,
         pack_application=pack_application,
         scope_public_headers=scope_public_headers,
+        scope_terms=scope_terms,
     )
     _write_or_echo(output, text)
 
@@ -335,7 +263,25 @@ def _finalize_release_output(
             suppress=suppress,
             pack_application=pack_application,
             scope_public_headers=scope_public_headers,
+            scope_terms=scope_terms,
+            write_output=_safe_write_output,
         )
+
+    # ADR-065 D6/D7, the completeness axis's own stderr notice -- the same
+    # reason the contract-coverage notice below exists: a Markdown/JUnit
+    # consumer, or `action/run.sh`'s stderr fallback, must still learn why
+    # a run was (or, under `warn`, was not) floored, and that a zero-pair
+    # run is never a clean pass. JSON carries the full `comparison_scope`.
+    if scope_terms is not None and scope_terms.record is not None and fmt != "json":
+        scope_notice = incomplete_scope_diagnostic(
+            scope_terms.record,
+            scope_terms.policy,
+            base_exit=_release_compatibility_base_exit(
+                worst_verdict, severity_exit_code
+            ),
+        )
+        if scope_notice is not None:
+            click.echo(scope_notice, err=True)
 
     # ADR-049 Phase 7's orthogonal contract-coverage axis, release/package
     # parity (CLI-audit P1, Codex review): a single-pair `compare` announces
@@ -399,7 +345,33 @@ def _finalize_release_output(
         removed_keys,
         severity_exit_code,
         contract_coverage_exit_contribution=contract_coverage_exit_contribution,
+        incomplete_scope_exit_contribution=(
+            scope_terms.decision.incomplete_scope_exit_contribution if scope_terms else 0
+        ),
+        no_comparison_completed_exit_contribution=(
+            scope_terms.decision.no_comparison_completed_exit_contribution if scope_terms else 0
+        ),
     )
+
+
+def _release_compatibility_base_exit(
+    worst_verdict: str, severity_exit_code: int | None
+) -> int:
+    """The compatibility axis's own exit code for a stderr notice's wording
+    -- the severity-aware code when one is in effect, else the legacy
+    verdict mapping with the release's own operational ``ERROR`` floor.
+    ``not_comparable`` is ``16`` under either scheme, exactly as
+    ``_exit_compare_release`` exits it ahead of every floor (CodeRabbit)."""
+    if worst_verdict == "not_comparable":
+        return 16
+    if severity_exit_code is not None:
+        return max(severity_exit_code, 4 if worst_verdict == "ERROR" else 0)
+    from .checker_policy import Verdict
+    from .workflows.gate import legacy_exit_code
+
+    if worst_verdict in Verdict.__members__:
+        return legacy_exit_code(Verdict[worst_verdict])
+    return 4 if worst_verdict == "ERROR" else 0
 
 
 def _validate_suppression_early(
@@ -665,8 +637,14 @@ def _prepare_compare_release_inputs(
     list[str],
     list[str],
     list[str],
+    dict[str, str],
+    dict[str, str],
 ]:
     """Prepare inputs/maps/keys for compare-release command.
+
+    The trailing two mappings (ADR-065 D1) name the stored members
+    `--dso-only` could not classify on OLD/NEW, keyed like the maps, with
+    the reason; empty whenever the flag is off or a side is live.
 
     *old_variant*/*new_variant* and *make_temp_dir* (ADR-062 A1.7) are the
     stored-side plumbing for a `ProjectSnapshot` package operand -- ``None``
@@ -689,6 +667,10 @@ def _prepare_compare_release_inputs(
         if make_temp_dir is not None
         else None
     )
+    # ADR-065 D1/D2: a stored member --dso-only could not classify is an
+    # acquisition failure the caller records, not a silent narrowing.
+    old_unclassified: dict[str, str] = {}
+    new_unclassified: dict[str, str] = {}
     if dso_only:
         # --dso-only's stored-side counterpart to is_elf_shared_object
         # filtering a live directory's files below (Codex review: previously
@@ -696,7 +678,11 @@ def _prepare_compare_release_inputs(
         # in scope). No-op on either map that's already None.
         from .workflows.release_package import dso_only_filter_pair
 
-        old_pkg_map, new_pkg_map = dso_only_filter_pair(old_pkg_map, new_pkg_map)
+        old_cls, new_cls = dso_only_filter_pair(old_pkg_map, new_pkg_map)
+        if old_cls is not None:
+            old_pkg_map, old_unclassified = old_cls.members, old_cls.unclassified
+        if new_cls is not None:
+            new_pkg_map, new_unclassified = new_cls.members, new_cls.unclassified
 
     old_lib_dir, old_debug_dir, old_header_dir, old_symbols_file = extract_if_package(
         old_dir,
@@ -797,4 +783,6 @@ def _prepare_compare_release_inputs(
         matched_keys,
         removed_keys,
         added_keys,
+        old_unclassified,
+        new_unclassified,
     )
