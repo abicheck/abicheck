@@ -697,7 +697,7 @@ def _embed_inline_source_sides(
     debuginfod: bool, debuginfod_url: str | None,
     collect_mode: str, depth: str | None,
     include_labels: dict[Path, str] | None,
-    include_dependencies: bool,
+    include_dependencies: bool, build_config: Path | None = None,
 ) -> tuple[Path, Path | None, Path | None, Path, Path | None, Path | None]:
     """Dump each raw source/build-dir side inline, returning the rewritten inputs.
 
@@ -790,7 +790,7 @@ def _embed_inline_source_sides(
         debuginfod=debuginfod, debuginfod_url=debuginfod_url,
         collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
         depth=depth, include_labels=include_labels,
-        include_dependencies=include_dependencies,
+        include_dependencies=include_dependencies, build_config=build_config,
     )
     new_input, new_sources, new_build_info = _embed_inline_source_side(
         ctx, input_path=new_input, sources=new_sources,
@@ -809,7 +809,7 @@ def _embed_inline_source_sides(
         pdb_path=new_pdb_path or pdb_path,
         collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
         depth=depth, include_labels=include_labels,
-        include_dependencies=include_dependencies,
+        include_dependencies=include_dependencies, build_config=build_config,
     )
     return (
         old_input, old_sources, old_build_info,
@@ -1787,7 +1787,7 @@ def run_compare(
             debuginfod=debuginfod, debuginfod_url=debuginfod_url,
             collect_mode=collect_mode, depth=depth,
             include_labels=include_labels,
-            include_dependencies=include_dependencies,
+            include_dependencies=include_dependencies, build_config=config,
         )
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
