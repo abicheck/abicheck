@@ -173,8 +173,12 @@ Shipped today: two-sided comparison of binaries, snapshots, release
 directories, and packages; the layered evidence model with explicit
 coverage reporting; contract-aware evaluation; policies, suppressions, and
 severity gating; application and plugin checks against supplied consumers;
-multi-profile aggregation; one resolution path shared by the Action, CLI,
-and Python API; and the release recommendation.
+multi-profile aggregation; typed requests and one engine shared by the
+Action, CLI, and Python API, so equivalent *resolved* inputs give the same
+answer (the CLI and Action additionally fold in a discovered project
+config, a run profile, and packs that a bare API call does not — full
+configuration-resolution parity is direction, not shipped); and the
+release recommendation.
 
 Direction, in whole or in part: comparison-scope and completeness semantics
 for partial matrices and package inventories; a detected-versus-effective
