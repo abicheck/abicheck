@@ -65,6 +65,10 @@ CASES = [
     ("2", "<absent>", None),
     ("1", "<absent>", ScopeCompleteness.COMPLETE),
     ("0.9", "<absent>", ScopeCompleteness.COMPLETE),
+    ("1.00", "<absent>", ScopeCompleteness.COMPLETE),
+    ("one.one", "<absent>", None),
+    ("1.0.0", "<absent>", None),
+    ("", "<absent>", None),
 ]
 _IDS = [f"{v}-{s}" for v, s, _ in CASES]
 
@@ -72,8 +76,12 @@ _IDS = [f"{v}-{s}" for v, s, _ in CASES]
 def test_the_current_writer_version_requires_scope() -> None:
     assert run_outcome_scope_required(RUN_OUTCOME_SCHEMA_VERSION)
     assert not run_outcome_scope_required("1.0")
+    # An absent stamp is a pre-axis writer; a present unparseable or
+    # non-string one is required, exactly as the schema's pattern decides.
     assert not run_outcome_scope_required(None)
-    assert not run_outcome_scope_required("one.one")
+    assert run_outcome_scope_required(1.1)
+    assert run_outcome_scope_required("one.one")
+    assert run_outcome_scope_required("1.0.0")
 
 
 @pytest.mark.parametrize(("version", "scope", "expected"), CASES, ids=_IDS)

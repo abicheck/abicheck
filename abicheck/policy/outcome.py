@@ -61,6 +61,7 @@ against a raw integer or literal -- see
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -98,17 +99,22 @@ __all__ = [
 RUN_OUTCOME_SCHEMA_VERSION = "1.1"
 
 
+#: Pre-``scope`` ``run_outcome`` versions (``0.x``/``1``/``1.0``): textually
+#: the published schema's own exemption pattern, so the readers agree.
+_RUN_OUTCOME_SCOPELESS_VERSIONS = re.compile(r"^(0(\.[0-9]+)*|1(\.0+)?)$")
+
+
 def run_outcome_scope_required(schema_version: object) -> bool:
-    """Whether a ``run_outcome`` block stamped *schema_version* must carry
-    ``scope`` (ADR-065 D6): every version from ``1.1`` (the one that
-    introduced the axis) on. A ``1.0``/pre-``1.1`` or unparseable version
-    predates it and reads absence as complete (Codex review)."""
-    if not isinstance(schema_version, str):
+    """Whether a block stamped *schema_version* must carry ``scope`` (ADR-065
+    D6): every version but the pre-axis pattern above. An absent stamp is a
+    pre-axis writer; a present unparseable or non-string one is required,
+    never read as predating the axis (Codex review)."""
+    if schema_version is None:
         return False
-    try:
-        return tuple(int(p) for p in schema_version.split(".")) >= (1, 1)
-    except ValueError:
-        return False
+    return not (
+        isinstance(schema_version, str)
+        and _RUN_OUTCOME_SCOPELESS_VERSIONS.match(schema_version) is not None
+    )
 
 
 class PolicyGateDecision(str, Enum):
@@ -346,11 +352,8 @@ class RunOutcome:
             )
         except ValueError:
             lifecycle = TargetLifecycle.EXISTING
-        # `scope` absent from a pre-1.1 block (a pre-ADR-065 writer) reads
-        # COMPLETE: every such writer was a scalar/synthetic report whose
-        # scope was the one pair it described -- a backfill of what was
-        # true, not a guess. From 1.1 on it is required: a block that omits
-        # or corrupts it does not parse (`run_outcome_scope_required`).
+        # A pre-1.1 block reads an absent `scope` as COMPLETE (every such
+        # writer described the one pair it ran); later ones must carry it.
         required = run_outcome_scope_required(data.get("schema_version"))
         try:
             scope = ScopeCompleteness(data.get("scope"))

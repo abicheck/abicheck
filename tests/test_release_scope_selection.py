@@ -1041,7 +1041,12 @@ class TestGhostMarkerInAStoredPackageIsRefused:
     complete (Codex review, twenty-fourth round)."""
 
     @staticmethod
-    def _rewrite_marker(pkg: Path, degraded: dict[str, str]) -> None:
+    def _rewrite_marker(
+        pkg: Path, degraded: dict[str, str], *, vouch: bool = False
+    ) -> None:
+        """*vouch*: also list every marker key in the composition's own
+        ``library_filenames``, the way a hand-edited package would try to
+        make its ghost look stored."""
         import json as _json
 
         from abicheck.project_snapshot_store import (
@@ -1058,7 +1063,13 @@ class TestGhostMarkerInAStoredPackageIsRefused:
         store = DirectoryObjectStore(pkg)
         raw = dict(store.get(ref.digest))
         raw["section_schema_version"] = 2
-        raw["payload"] = {**dict(raw["payload"]), "degraded_members": degraded}
+        payload = {**dict(raw["payload"]), "degraded_members": degraded}
+        if vouch:
+            payload["library_filenames"] = {
+                **dict(payload.get("library_filenames", {})),
+                **{k: k for k in degraded},
+            }
+        raw["payload"] = payload
         new_digest = store.put(raw)
         ref_path = pkg / variant_ref_relpath(variant_id)
         doc = _json.loads(ref_path.read_text(encoding="utf-8"))
@@ -1087,6 +1098,12 @@ class TestGhostMarkerInAStoredPackageIsRefused:
             read_variant_composition_degraded_members(pkg, variant_id)
         with pytest.raises(SnapshotError, match="refusing"):
             stored_side_degraded_members(pkg, variant_id=None)
+        # A ghost the package's own `library_filenames` vouches for is still
+        # a ghost: only a stored artifact proves membership (twenty-fifth
+        # round).
+        self._rewrite_marker(pkg, {"libghost.so": "boom"}, vouch=True)
+        with pytest.raises(ValueError, match="libghost.so"):
+            read_variant_composition_degraded_members(pkg, variant_id)
 
     @pytest.mark.parametrize("raw", [None, "boom", {"libfoo.so": 1}, ["libfoo.so"]])
     def test_reader_refuses_a_malformed_marker(
@@ -1114,7 +1131,7 @@ class TestGhostMarkerInAStoredPackageIsRefused:
         old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
         _write_stored_package(old, {**libs, "libgone.so": _lib("libgone.so")})
         _write_stored_package(new, libs)
-        self._rewrite_marker(new, {"libghost.so": "boom"})
+        self._rewrite_marker(new, {"libghost.so": "boom"}, vouch=True)
         from click.testing import CliRunner
 
         from abicheck.cli import main

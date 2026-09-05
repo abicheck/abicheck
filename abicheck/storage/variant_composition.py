@@ -135,15 +135,16 @@ def read_variant_composition_degraded_members(
 def _variant_member_keys(
     root: str | Path, variant_id: str, composition: dict[str, Any]
 ) -> set[str]:
-    """The bundle keys the selected variant actually stores: every
-    artifact's own recorded library name plus the composition's
-    ``library_filenames`` keys (each writer records at least one)."""
+    """The bundle keys the selected variant actually stores: every stored
+    artifact's own recorded library name -- never the composition's own
+    ``library_filenames`` keys, which sit in the same untrusted payload as
+    the marker and would let a hand-edited package vouch for itself (Codex
+    review); *composition* is accepted only so a caller can pass the
+    payload it already decoded."""
     from ..project_snapshot_store import read_artifact_ref, read_variant_ref
 
+    del composition
     keys: set[str] = set()
-    filenames = composition.get("library_filenames")
-    if isinstance(filenames, dict):
-        keys.update(k for k in filenames if isinstance(k, str))
     for artifact_id in read_variant_ref(root, variant_id).artifact_ids:
         name = read_artifact_ref(root, artifact_id).native_identity.get(
             _LIBRARY_NAME_KEY
