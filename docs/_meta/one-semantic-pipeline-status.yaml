@@ -99,9 +99,12 @@
 # duplication-and-convergence-assessment.md's "2026-09-05 re-assessment"
 # section and its Phase 6): a concept's `authority` value must reflect
 # which representation *decides*, not which one is populated. Two
-# corrections this file carries: `semantic_ir`'s landed cohorts are
-# fidelity gates (both indexes built every comparison, legacy adjudicates),
-# not authority transfers; and an "investigated and declined" disposition
+# corrections this file carries: at the time of this re-assessment,
+# `semantic_ir`'s landed cohorts were fidelity gates (both indexes built
+# every comparison, legacy adjudicates), not authority transfers -- Track
+# T3 below (same day) is what actually closes that gap for the typedef/
+# constant cohorts, changing `authority` from `legacy` to `mixed`; and an
+# "investigated and declined" disposition
 # for a *behavioral* change never closes an *implementation* consolidation's
 # removal gate.
 #
