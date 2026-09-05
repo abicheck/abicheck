@@ -1031,3 +1031,106 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
 
         md = _render_markdown(result, old_facts_path=tmp_path, new_dir=tmp_path)
         assert "- **Verdict:** `ERROR`" in md
+
+
+class TestGhostMarkerInAStoredPackageIsRefused:
+    """A stored `ProjectSnapshot` package whose composition marker names a
+    member the variant does not store (a hand-edited or directly assembled
+    package -- the import path already refuses one) must be refused by the
+    composition reader too, never re-keyed away into a package that reads
+    complete (Codex review, twenty-fourth round)."""
+
+    @staticmethod
+    def _rewrite_marker(pkg: Path, degraded: dict[str, str]) -> None:
+        import json as _json
+
+        from abicheck.project_snapshot_store import (
+            DirectoryObjectStore,
+            read_manifest_summary,
+            read_variant_ref,
+        )
+        from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
+        from abicheck.storage.package import variant_ref_relpath
+
+        (variant_id,) = read_manifest_summary(pkg).variant_ids
+        variant = read_variant_ref(pkg, variant_id)
+        ref = variant.sections[BUNDLE_COMPOSITION_SECTION_KIND]
+        store = DirectoryObjectStore(pkg)
+        raw = dict(store.get(ref.digest))
+        raw["section_schema_version"] = 2
+        raw["payload"] = {**dict(raw["payload"]), "degraded_members": degraded}
+        new_digest = store.put(raw)
+        ref_path = pkg / variant_ref_relpath(variant_id)
+        doc = _json.loads(ref_path.read_text(encoding="utf-8"))
+        doc["sections"][BUNDLE_COMPOSITION_SECTION_KIND]["digest"] = new_digest
+        ref_path.write_text(_json.dumps(doc, indent=2), encoding="utf-8")
+
+    def test_reader_refuses_a_ghost_key(self, tmp_path: Path) -> None:
+        from abicheck.errors import SnapshotError
+        from abicheck.project_snapshot_store import read_manifest_summary
+        from abicheck.storage.variant_composition import (
+            read_variant_composition_degraded_members,
+        )
+        from abicheck.workflows.release_scope import stored_side_degraded_members
+
+        pkg = tmp_path / "pkg"
+        _write_stored_package(pkg, {"libfoo.so": _lib("libfoo.so", exports=("foo",))})
+        (variant_id,) = read_manifest_summary(pkg).variant_ids
+        # A marker on a real member reads back.
+        self._rewrite_marker(pkg, {"libfoo.so": "boom"})
+        assert read_variant_composition_degraded_members(pkg, variant_id) == {
+            "libfoo.so": "boom"
+        }
+        # A ghost key is refused by the reader and the fan-out's own read.
+        self._rewrite_marker(pkg, {"libghost.so": "boom"})
+        with pytest.raises(ValueError, match="libghost.so"):
+            read_variant_composition_degraded_members(pkg, variant_id)
+        with pytest.raises(SnapshotError, match="refusing"):
+            stored_side_degraded_members(pkg, variant_id=None)
+
+    @pytest.mark.parametrize("raw", [None, "boom", {"libfoo.so": 1}, ["libfoo.so"]])
+    def test_reader_refuses_a_malformed_marker(
+        self, tmp_path: Path, raw: object
+    ) -> None:
+        from abicheck.project_snapshot_store import read_manifest_summary
+        from abicheck.storage.variant_composition import (
+            read_variant_composition_degraded_members,
+        )
+
+        pkg = tmp_path / "pkg"
+        _write_stored_package(pkg, {"libfoo.so": _lib("libfoo.so", exports=("foo",))})
+        (variant_id,) = read_manifest_summary(pkg).variant_ids
+        self._rewrite_marker(pkg, raw)  # type: ignore[arg-type]
+        with pytest.raises(ValueError):
+            read_variant_composition_degraded_members(pkg, variant_id)
+
+    def test_compare_refuses_the_package_instead_of_proving_a_removal(
+        self, tmp_path: Path
+    ) -> None:
+        """OLD ships libgone.so; NEW is a proven-complete package without it
+        but carrying a ghost marker: the run is refused (exit 64), never a
+        proven removal (exit 8)."""
+        libs = {"libfoo.so": _lib("libfoo.so", exports=("foo",))}
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        _write_stored_package(old, {**libs, "libgone.so": _lib("libgone.so")})
+        _write_stored_package(new, libs)
+        self._rewrite_marker(new, {"libghost.so": "boom"})
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new),
+                "-j",
+                "1",
+                "--fail-on-removed-library",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "refusing" in result.output and "libghost.so" in result.output

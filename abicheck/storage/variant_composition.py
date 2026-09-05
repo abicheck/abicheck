@@ -32,12 +32,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .bundle_facts_validation import (
+    require_degraded_members_known,
+    validated_degraded_members,
+)
 from .dto import (
     BUNDLE_COMPOSITION_SECTION_KIND,
     SectionDTO,
     bundle_composition_from_dto,
 )
-from .import_bundle_facts import _manifest_entry_for_export
+from .import_bundle_facts import _LIBRARY_NAME_KEY, _manifest_entry_for_export
 
 __all__ = [
     "read_variant_composition_degraded_members",
@@ -46,7 +50,9 @@ __all__ = [
 ]
 
 
-def _read_variant_composition(root: str | Path, variant_id: str) -> dict[str, Any] | None:
+def _read_variant_composition(
+    root: str | Path, variant_id: str
+) -> dict[str, Any] | None:
     """*variant_id*'s own decoded `BUNDLE_COMPOSITION_SECTION_KIND` payload,
     `None` if genuinely absent (no readable variant, no section). Shared by
     the two readers below; a decode failure once the section is *present*
@@ -111,7 +117,40 @@ def read_variant_composition_degraded_members(
     composition = _read_variant_composition(root, variant_id)
     if composition is None:
         return {}
-    return dict(composition.get("degraded_members", {}))
+    degraded = validated_degraded_members(composition.get("degraded_members", {}))
+    if not degraded:
+        return {}
+    # Decision-bearing, so validated like every other reader of the marker
+    # (Codex review): a hand-edited or directly constructed package whose
+    # marker names no member of this variant would otherwise be re-keyed
+    # away by the fan-out and vanish, leaving the package read as complete.
+    require_degraded_members_known(
+        degraded,
+        _variant_member_keys(root, variant_id, composition),
+        what=f"{root}: variant {variant_id!r} composition",
+    )
+    return degraded
+
+
+def _variant_member_keys(
+    root: str | Path, variant_id: str, composition: dict[str, Any]
+) -> set[str]:
+    """The bundle keys the selected variant actually stores: every
+    artifact's own recorded library name plus the composition's
+    ``library_filenames`` keys (each writer records at least one)."""
+    from ..project_snapshot_store import read_artifact_ref, read_variant_ref
+
+    keys: set[str] = set()
+    filenames = composition.get("library_filenames")
+    if isinstance(filenames, dict):
+        keys.update(k for k in filenames if isinstance(k, str))
+    for artifact_id in read_variant_ref(root, variant_id).artifact_ids:
+        name = read_artifact_ref(root, artifact_id).native_identity.get(
+            _LIBRARY_NAME_KEY
+        )
+        if isinstance(name, str):
+            keys.add(name)
+    return keys
 
 
 def read_variant_composition_library_filenames(
