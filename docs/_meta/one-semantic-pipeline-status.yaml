@@ -251,7 +251,14 @@ concepts:
     primitive: complete
     producers: partial
     consumers: partial
-    authority: mixed
+    # 2026-09-05 re-assessment: lowered from `mixed` to `legacy`. Both
+    # migrated cohorts run behind a fidelity gate that can only select the
+    # IR when it already reproduces the legacy projection exactly, so the
+    # IR cannot produce an outcome the legacy representation would not --
+    # the legacy projection is what decides. `mixed` would require an
+    # authoritative IR consumer that is not so adjudicated; there is none
+    # today. See this concept's removal_gate for the full account.
+    authority: legacy
     removal_gate: >-
       Phase 6B (semantic-ir-checker-cutover), two cohorts landed so far.
       First cohort (2026-09-03): the TYPEDEF family now reads SemanticIR
@@ -342,8 +349,8 @@ concepts:
       constant_index_pair construct the IR-backed AND the legacy-backed
       index on every comparison, and use the IR only when the legacy
       projection agrees on names, values, identities and ordering --
-      the legacy representation still adjudicates, so `authority: mixed`
-      overstates the cutover for these two families. The gate closes when
+      the legacy representation still adjudicates -- which is why this
+      concept's own authority field reads `legacy`, not `mixed`. The gate closes when
       a current-format snapshot causes no legacy index to be built at all
       and a disagreement is an explicit consistency failure rather than a
       silent fallback. Tracked as duplication-and-convergence-assessment.md
@@ -373,12 +380,18 @@ concepts:
       call site landed 2026-09-03: service_compare_pipeline.
       resolve_compare_request builds one from its own already-resolved
       AnalysisPlan and attaches it on ResolvedComparePair, additive and
-      unread by any consumer. The dump path is built too, not unwired:
-      execute_dump_request calls with_assurance() (landed 2026-09-03) and
-      both paths now thread per-side compile_contexts, so what stays open
-      is consumption, not construction -- nothing downstream reads either
-      object back, and evaluation_config is still None on every real
-      ResolvedComparePair/ResolvedDumpRequest, so this gate stays open.
+      unread by any consumer at the time that slice landed. The two paths
+      have since diverged and are recorded separately rather than as one
+      status: the COMPARE path has one real consumer --
+      classify_compare_pair reads pair.resolved_execution_context.
+      requested_depth (fourth slice, 2026-09-04) -- so its consumption is
+      partial, not absent; the DUMP path is built but still wholly unread
+      (execute_dump_request calls with_assurance(), landed 2026-09-03, and
+      both paths thread per-side compile_contexts, but nothing downstream
+      of execute_dump_request reads the object back). What stays open on
+      both is consumption, not construction, and evaluation_config is
+      still None on every real ResolvedComparePair/ResolvedDumpRequest, so
+      this gate stays open.
       **2026-09-05 re-assessment correction:** unread, not unwired, on both
       paths -- compare classification still separately loads suppression and
       policy, applies pack contributions, prepares source evidence, resolves

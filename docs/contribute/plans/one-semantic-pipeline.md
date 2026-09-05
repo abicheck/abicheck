@@ -194,7 +194,7 @@ which track closes each:
 | Row | Correction | Track |
 |---|---|---|
 | 2B/6B | The landed typedef and constant cohorts are *fidelity gates*, not authority transfers: both indexes are built every comparison and the legacy projection adjudicates | T3 |
-| 4B | Unread, not unwired, on both the dump and compare paths | T4 |
+| 4B | Built, not unwired, on both paths — what is open is consumption: partial on compare (`classify_compare_pair` reads `requested_depth`), absent on dump | T4 |
 | 5B | The `vtable` "final closure" is an investigated decline of a behavioral change; the PDB fabrication path and the authority transfer are still open | T9 |
 | 7B | `action/run.sh` is partially migrated — the residual is the raw exit/stderr path | T8 |
 
