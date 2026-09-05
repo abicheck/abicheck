@@ -370,14 +370,13 @@ def _snapshot_contract_symbols(snap: Any) -> set[str]:
     index = build_raw_export_index(snap)
     if index is not None:
         if index.platform == "elf":
-            for name in callable_visible_export_names(index, _CALLABLE_SYM_TYPE_NAMES):
-                _add(name)
+            names = callable_visible_export_names(index, _CALLABLE_SYM_TYPE_NAMES)
         elif index.platform == "pe":
-            for name in named_pe_exports(index):
-                _add(name)
-        elif index.platform == "macho":
-            for name in macho_callable_names(index):
-                _add(name)
+            names = named_pe_exports(index)
+        else:
+            names = macho_callable_names(index)
+        for name in names:
+            _add(name)
     return out
 
 
