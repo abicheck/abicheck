@@ -354,6 +354,50 @@ class TestDetectorBehavior:
         assert isinstance(pair_new_index, SemanticIRIndex)
         assert old_id in pair_old_index.entities_of_kind(EntityKind.CONSTANT)
 
+    def test_a_value_change_on_one_of_two_colliding_anonymous_constants_is_still_caught(
+        self,
+    ) -> None:
+        """Mirrors ``test_typedef_cutover.py``'s identical fix (Codex review,
+        PR #1078, sixth round): two constants declared in two distinct
+        anonymous namespaces both render to the bare leaf name ``X``.
+        Picking an arbitrary representative per side used to mean a real
+        value change on whichever occurrence didn't become the
+        representative was silently read as "unchanged" whenever the
+        *other* occurrence's value happened to match across sides."""
+        first_old = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        second_old = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        first_new = entity_id_for_constant((Anonymous("namespace", 2),), "X")
+        second_new = entity_id_for_constant((Anonymous("namespace", 3),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("3")
+                    ),
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_CHANGED
+        assert change.symbol == "X"
+        assert change.old_value == "2"
+        assert change.new_value == "3"
+
 
 # -- end to end, through the real detector entry point ---------------------
 

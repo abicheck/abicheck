@@ -467,6 +467,46 @@ class TestTypedefIndexPair:
             assert producer_entity_id(eid_) is None
             assert render_display_name(eid_) == "Alias"
 
+    def test_bare_mode_still_uses_a_side_own_real_ir_when_its_bare_map_is_incomplete(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, seventh round: the OLD side is genuinely
+        pre-v25 (no ``typedefs_qualified``, no ``semantic_ir``), forcing the
+        whole comparison into bare-key mode -- but the NEW side's own
+        *bare* ``typedefs`` map is empty even though it carries a real,
+        qualified ``SemanticIR`` (a hand-built or future-producer snapshot;
+        every current real header-AST parser populates ``typedefs``/
+        ``typedefs_qualified``/``semantic_ir`` together from one pass, so
+        this specific split does not occur from a real dump today -- but
+        this module's own per-side-independence design already rejects
+        relying on that as a standing invariant, see
+        ``_bare_typedef_side_index``'s own docstring). Before the fix, the
+        bare-mode branch trusted the empty *new_typedefs* parameter alone
+        and fabricated ``TYPEDEF_REMOVED`` for a typedef the new side's real
+        IR still has."""
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old = _snap(typedefs={"Alias": "int"}, ast_producer="")
+        new = _snap(
+            typedefs={},
+            typedefs_qualified={"ns::Alias": "int"},
+            semantic_ir=_typedef_ir({eid: "int"}),
+        )
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs={"Alias": "int"}, new_typedefs={}
+        )
+        changes = diff_typedefs(
+            old_index,
+            new_index,
+            exclude_stdlib_namespaces=False,
+            suppress_removed=False,
+            is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
+        )
+        assert changes == []
+        assert "Alias" in {
+            render_display_name(e)
+            for e in new_index.entities_of_kind(EntityKind.TYPEDEF)
+        }
+
     def test_an_unrenderable_anonymous_scope_is_used_but_invisible_to_aliasing(
         self,
     ) -> None:

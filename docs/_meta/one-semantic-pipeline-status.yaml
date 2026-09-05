@@ -420,6 +420,37 @@ concepts:
       pre-v38 reload) still reads through the legacy adapter for that side
       alone -- unchanged, and correctly so: there is no real producer
       output there for an IR to be authoritative over.
+
+      **Two further Codex review rounds (2026-09-05, same PR) found real
+      gaps in the per-side-independence design itself, both fixed.** A
+      sixth round found `_aliases`/`_values` collapsed every entity
+      colliding on one rendered alias down to a single `setdefault` winner
+      -- harmless for the legacy adapter (its own flat map already
+      collapses a bare-name collision upstream, a pre-existing, accepted,
+      different failure mode), but a real `SemanticIR` genuinely keeps two
+      colliding occurrences (e.g. two anonymous-scoped typedefs sharing a
+      leaf name) distinct, so a value change on whichever occurrence lost
+      the race was silently read as "unchanged". Fixed by grouping every
+      colliding entity into a list per alias and comparing the sorted value
+      *multiset* on each side, picking a symmetric-difference
+      representative pair only when reporting a real difference -- mirrored
+      identically in both `compare/typedefs.py` and `compare/constants.py`.
+      A seventh round found the bare-key-space branch (one side pre-v25,
+      forcing both sides through the legacy adapter over the comparison's
+      own bare-keyed maps) trusted the caller-supplied bare map alone, so a
+      side carrying a real `SemanticIR` but an incomplete bare map (not
+      reachable from any current real header-AST producer -- both backends
+      populate `typedefs`/`typedefs_qualified`/`semantic_ir` from one
+      shared filtered-element pass, so the bare map is empty if and only if
+      the qualified map and `semantic_ir` are too -- but exactly the kind
+      of hand-built-or-future-producer case this design's own per-side
+      independence reasoning already declines to assume can't occur) had
+      its real evidence silently discarded, fabricating a removal. Fixed by
+      `_bare_typedef_side_index`, which projects a side's own real
+      `SemanticIR` down onto bare aliases when it has one, rather than
+      trusting the bare map parameter alone; constants have no
+      bare/qualified split (no schema-versioned bare-only baseline
+      predates them), so this round is typedef-only.
   public_surface:
     primitive: complete
     producers: complete

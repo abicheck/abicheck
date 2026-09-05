@@ -102,3 +102,34 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   snapshot carrying a `SemanticIR` with no populated legacy sidecar at all
   (the common, forward-looking shape) is unaffected — the check only fires
   when both representations are actually present and disagree.
+- **A colliding alias/name no longer silently drops all but one occurrence's
+  value.** `compare.typedefs._aliases`/`compare.constants._values` used to
+  key each rendered alias by a single `setdefault`-won `EntityId`, discarding
+  every other entity that happened to render to the identical alias (two
+  anonymous-scoped typedefs or constants sharing a leaf name, per
+  `render_display_name_or_leaf`'s own accepted collision risk) — so a real
+  value change on whichever occurrence lost the race was silently compared
+  as "unchanged" whenever the *other* occurrence's value happened to match
+  across sides (Codex review, PR #1078, sixth round). Both now group every
+  colliding entity per alias and compare the sorted value multiset, only
+  falling back to a symmetric-difference representative pair when reporting
+  a real difference — the same failure mode a flat legacy map's own key
+  collision already accepted (one occurrence wins), just without the
+  additional risk of silently declaring "unchanged".
+- **A typedef comparison forced into bare-key mode no longer discards a
+  side's real `SemanticIR` just because its bare `typedefs` map happens to
+  be empty.** `typedef_index_pair`'s bare-key-space branch (one side
+  genuinely pre-v25, forcing both sides through the legacy adapter over
+  their own bare-keyed maps) used to trust the caller-supplied bare map
+  alone — every current real header-AST producer populates
+  `typedefs`/`typedefs_qualified`/`semantic_ir` together from one shared
+  element pass, so this specific split does not occur from a real dump
+  today, but a hand-built or future-producer snapshot carrying real typedef
+  `SemanticIR` occurrences with an incomplete bare map is exactly the case
+  this module's own per-side-independence design already declines to treat
+  as impossible (Codex review, PR #1078, seventh round). The new
+  `_bare_typedef_side_index` projects a side's own real `SemanticIR` down
+  onto bare aliases when it has one, instead of trusting the bare map
+  parameter on its own; constants have no bare/qualified split (no
+  schema-versioned bare-only baseline predates them), so this fix is
+  typedef-only.

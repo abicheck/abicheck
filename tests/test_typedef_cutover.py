@@ -185,6 +185,54 @@ class TestDetectorBehavior:
         assert change.kind is ChangeKind.TYPEDEF_REMOVED
         assert change.symbol == "Alias"
 
+    def test_a_value_change_on_one_of_two_colliding_anonymous_typedefs_is_still_caught(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, sixth round: two typedefs declared in two
+        distinct anonymous namespaces both render to the bare leaf name
+        ``Alias`` (``render_display_name_or_leaf`` cannot distinguish them --
+        neither carries a named ancestor). Picking an arbitrary
+        representative per side used to mean a real value change on
+        whichever occurrence didn't become the representative was silently
+        read as "unchanged" whenever the *other* occurrence's value happened
+        to match across sides. Here the first occurrence's value (``int``)
+        is unchanged and the second's (``long`` -> ``char``) is not -- the
+        whole point of comparing by value multiset rather than by picking
+        one entity to stand in for the whole group."""
+        first_old = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        second_old = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        first_new = entity_id_for_typedef((Anonymous("namespace", 2),), "Alias")
+        second_new = entity_id_for_typedef((Anonymous("namespace", 3),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(second_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(second_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("char")
+                    ),
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.TYPEDEF_BASE_CHANGED
+        assert change.symbol == "Alias"
+        assert change.old_value == "long"
+        assert change.new_value == "char"
+
     def test_removal_change_and_no_op(self) -> None:
         changes = _run(
             _ir_backed({"gone": "int", "moved": "int", "same": "int"}),
@@ -437,4 +485,4 @@ class TestPrivateHelpers:
                 )
             }
         )
-        assert _aliases(SemanticIRIndex(ir)) == {"Alias": anon}
+        assert _aliases(SemanticIRIndex(ir)) == {"Alias": [anon]}

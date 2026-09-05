@@ -78,16 +78,24 @@ class _ReliabilityPredicate(Protocol):
     def __call__(self, old_value: str, new_value: str) -> bool: ...
 
 
-def _values(index: SemanticIRIndex) -> dict[str, EntityId]:
-    """This index's constant occurrences, keyed by their rendered qualified
-    name. Mirrors ``compare.typedefs._aliases`` exactly, including using
+def _values(index: SemanticIRIndex) -> dict[str, list[EntityId]]:
+    """This index's constant occurrences, grouped by their rendered name --
+    a *list* per name, not a single winner (Codex review, PR #1078, sixth
+    round). Mirrors ``compare.typedefs._aliases`` exactly, including using
     ``render_display_name_or_leaf`` rather than the strict
     ``render_display_name`` (Codex review, PR #1078, fourth round) -- see
     that function's own docstring for why an anonymous/local-to-function-
-    scoped constant still needs a name to compare under."""
-    by_name: dict[str, EntityId] = {}
+    scoped constant still needs a name to compare under, and for why a
+    collision on that rendered name must keep every occurrence rather than
+    ``setdefault``-ing to the first: two distinct anonymous-scoped constants
+    sharing a leaf name are still two distinct pieces of evidence, and
+    collapsing to one silently discarded whichever occurrence didn't win the
+    race. :func:`diff_constants` compares the *set* of values under a
+    colliding name rather than a single representative, for the same reason
+    :func:`~abicheck.compare.typedefs.diff_typedefs` does."""
+    by_name: dict[str, list[EntityId]] = {}
     for entity_id in index.entities_of_kind(EntityKind.CONSTANT):
-        by_name.setdefault(render_display_name_or_leaf(entity_id), entity_id)
+        by_name.setdefault(render_display_name_or_leaf(entity_id), []).append(entity_id)
     return by_name
 
 
@@ -185,6 +193,15 @@ def diff_constants(
     including which two spellings a ``CONSTANT_CHANGED`` finding carries
     (``old``/``new`` as ``repr()`` text alongside ``old_value``/``new_value``
     as the raw strings).
+
+    **A colliding name is compared by its whole value multiset, not one
+    representative** (Codex review, PR #1078, sixth round): ``_values``
+    groups every entity that renders to the same name, since two distinct
+    anonymous-scoped constants can share one leaf name. Picking an arbitrary
+    representative per side could miss a real value change on whichever
+    occurrence didn't become the representative, silently reporting no
+    change at all -- mirrors ``compare.typedefs.diff_typedefs``'s own fix
+    for the identical failure mode.
     """
     changes: list[Change] = []
     old_values = _values(old_index)
@@ -199,12 +216,12 @@ def diff_constants(
         value = _value(index, entity_id)
         return value if value is not None else constants.get(name)
 
-    for name, old_id in old_values.items():
-        new_id = new_values.get(name)
-        eid = producer_entity_id(old_id) or (
-            producer_entity_id(new_id) if new_id is not None else None
+    for name, old_ids in old_values.items():
+        new_ids = new_values.get(name)
+        eid = producer_entity_id(old_ids[0]) or (
+            producer_entity_id(new_ids[0]) if new_ids else None
         )
-        if new_id is None:
+        if new_ids is None:
             # A membership change (removed) is real regardless of whether
             # this constant's own value was ever comparable -- checked
             # before the `old_val is None` unsupported-value skip below, so
@@ -218,15 +235,38 @@ def diff_constants(
                     ChangeKind.CONSTANT_REMOVED,
                     symbol=name,
                     name=name,
-                    old_value=_value_or_legacy(old_index, old_id, name, old_constants),
+                    old_value=_value_or_legacy(
+                        old_index, old_ids[0], name, old_constants
+                    ),
                     entity_id=eid,
                 )
             )
             continue
-        old_val = _value_or_legacy(old_index, old_id, name, old_constants)
-        new_val = _value_or_legacy(new_index, new_id, name, new_constants)
-        if old_val is None or new_val is None or new_val == old_val:
+        old_vals = sorted(
+            v
+            for i in old_ids
+            if (v := _value_or_legacy(old_index, i, name, old_constants)) is not None
+        )
+        new_vals = sorted(
+            v
+            for i in new_ids
+            if (v := _value_or_legacy(new_index, i, name, new_constants)) is not None
+        )
+        if old_vals == new_vals:
             continue
+        if not old_vals or not new_vals:
+            # Mirrors the single-entity `old_val is None or new_val is None`
+            # skip: nothing comparable survived on at least one side.
+            continue
+        old_val = old_vals[0]
+        new_val = new_vals[0]
+        if len(old_ids) > 1 or len(new_ids) > 1:
+            # Ambiguous group: report one value present only on the old
+            # side and one present only on the new side, rather than an
+            # arbitrary representative pair that might coincidentally
+            # agree even though the multiset as a whole differs.
+            old_val = next((v for v in old_vals if v not in new_vals), old_val)
+            new_val = next((v for v in new_vals if v not in old_vals), new_val)
         if is_fingerprint_comparison_unreliable(old_val, new_val):
             continue
         changes.append(
@@ -242,7 +282,7 @@ def diff_constants(
             )
         )
 
-    for name, new_id in new_values.items():
+    for name, new_ids in new_values.items():
         if name in old_values:
             continue
         # Mirrors the removal side above: an addition is real regardless of
@@ -252,8 +292,8 @@ def diff_constants(
                 ChangeKind.CONSTANT_ADDED,
                 symbol=name,
                 name=name,
-                new_value=_value_or_legacy(new_index, new_id, name, new_constants),
-                entity_id=producer_entity_id(new_id),
+                new_value=_value_or_legacy(new_index, new_ids[0], name, new_constants),
+                entity_id=producer_entity_id(new_ids[0]),
             )
         )
     return changes
