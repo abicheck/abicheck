@@ -320,7 +320,10 @@ def _declined_entry(**overrides: object) -> dict[str, object]:
     """One structurally valid `investigated_declined` entry."""
     entry: dict[str, object] = {
         "item": "Some behavioral change, investigated and declined.",
-        "decided": "2026-09-04",
+        # At or before `_valid_ledger()`'s own `as_of_date` — a decision
+        # dated after the ledger's snapshot is itself a finding, see
+        # `TestDecidedAgainstAsOfDate`.
+        "decided": "2026-09-01",
         "leaves_open": "The consolidation this decline does not close.",
         "tracked_as": "some-plan.md's own section",
     }
@@ -640,3 +643,63 @@ def test_the_real_ledger_records_no_retired_concept_carrying_a_decline() -> None
     for name, entry in data["concepts"].items():
         if entry.get("investigated_declined"):
             assert entry["lifecycle"] != "retired", name
+
+
+class TestDecidedAgainstAsOfDate:
+    """A decision dated after the snapshot the ledger claims to describe is
+    the file asserting that decision existed at an earlier assessment
+    (Codex review, PR #1066). Checked across the ordering's whole
+    three-way domain — before, equal, after — rather than only the one
+    direction the finding named, so an overcorrection rejecting a
+    same-day or earlier decision fails here too."""
+
+    @pytest.mark.parametrize(
+        ("as_of_date", "decided", "expect_error"),
+        [
+            ("2026-09-02", "2026-09-01", False),
+            ("2026-09-02", "2026-09-02", False),
+            ("2026-09-02", "2026-09-03", True),
+            # Ordering must hold across a month and a year boundary too: a
+            # naive lexical comparison happens to be correct for zero-padded
+            # ISO dates, and these pin that it stays correct rather than
+            # accidentally so for one month's worth of inputs.
+            ("2026-09-30", "2026-10-01", True),
+            ("2026-12-31", "2027-01-01", True),
+            ("2027-01-01", "2026-12-31", False),
+        ],
+    )
+    def test_ordering(self, as_of_date: str, decided: str, expect_error: bool) -> None:
+        data = _valid_ledger()
+        data["as_of_date"] = as_of_date
+        data["concepts"]["facts"]["investigated_declined"] = [
+            _declined_entry(decided=decided)
+        ]
+        f = FakeFindings()
+        check_pipeline_status_ledger(f, data)
+        later = [e for e in f.errors if "later than the ledger" in e]
+        assert bool(later) is expect_error, (
+            f"as_of_date={as_of_date} decided={decided}: expected "
+            f"{'a' if expect_error else 'no'} finding, got {f.errors}"
+        )
+
+    def test_an_unparseable_as_of_date_adds_no_second_finding(self) -> None:
+        """A malformed `as_of_date` already reports itself; comparing a
+        `decided` against it would add a misleading second finding about
+        the entry rather than the header."""
+        data = _valid_ledger()
+        data["as_of_date"] = "not-a-date"
+        data["concepts"]["facts"]["investigated_declined"] = [_declined_entry()]
+        f = FakeFindings()
+        check_pipeline_status_ledger(f, data)
+        assert any("'as_of_date'" in e for e in f.errors)
+        assert not any("later than the ledger" in e for e in f.errors)
+
+
+def test_the_real_ledger_dates_no_decision_after_its_own_snapshot() -> None:
+    """The committed file's own instance of the invariant."""
+    f = FakeFindings()
+    data = load_pipeline_status(f)
+    assert data is not None
+    for name, entry in data["concepts"].items():
+        for declined in entry.get("investigated_declined", []):
+            assert declined["decided"] <= data["as_of_date"], name

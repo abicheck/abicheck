@@ -399,7 +399,11 @@ def _check_lifecycle(
 
 
 def _check_investigated_declined(
-    f: Findings, rel: str, name: object, entry: dict[object, object]
+    f: Findings,
+    rel: str,
+    name: object,
+    entry: dict[object, object],
+    as_of_date: str | None,
 ) -> None:
     """Validate the optional `investigated_declined` list, and enforce the
     one rule it exists for.
@@ -419,6 +423,11 @@ def _check_investigated_declined(
     narrative owner (the plan section or module docstring named by
     `tracked_as`), which is where the full reasoning lives anyway per
     docs/AGENTS.md's fact-owner/narrative-owner split.
+
+    *as_of_date* is the ledger's own validated snapshot date, or `None` when
+    it did not parse; an entry `decided` after it is rejected, since the
+    file would then be dating a decision after the assessment it claims to
+    describe.
     """
     if "investigated_declined" not in entry:
         return
@@ -449,6 +458,24 @@ def _check_investigated_declined(
                 problem = _iso_date_problem(value)
                 if problem is not None:
                     f.err("pipeline-status-ledger", f"{where}.decided: {problem}")
+                elif as_of_date is not None and str(value) > as_of_date:
+                    # Both dates are already known well-formed `YYYY-MM-DD`,
+                    # so a plain string comparison is a correct date
+                    # ordering. A decision the file dates *after* the
+                    # snapshot it claims to describe is the ledger asserting
+                    # that a decision existed at an earlier assessment
+                    # (Codex review, PR #1066). `as_of_date` is this file's
+                    # assessment date, not its base commit's authorship
+                    # date, so the fix is always to bump it -- which the
+                    # header already requires of the same PR anyway.
+                    f.err(
+                        "pipeline-status-ledger",
+                        f"{where}.decided: {value!r} is later than the "
+                        f"ledger's own 'as_of_date' ({as_of_date!r}) -- this "
+                        f"file cannot record a decision made after the "
+                        f"assessment it describes; bump 'as_of_date' in the "
+                        f"same change that adds the entry",
+                    )
             elif not isinstance(value, str) or not value.strip():
                 f.err(
                     "pipeline-status-ledger",
@@ -529,12 +556,17 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
     # PR #1019); `_iso_date_problem` applies the calendar check too, and is
     # shared with `investigated_declined[].decided` so both date fields
     # cannot drift apart.
-    date_problem = _iso_date_problem(data.get("as_of_date"))
+    raw_as_of_date = data.get("as_of_date")
+    date_problem = _iso_date_problem(raw_as_of_date)
     if date_problem is not None:
         f.err(
             "pipeline-status-ledger",
             f"{rel}: 'as_of_date' {date_problem}",
         )
+    # Only a validated date is worth comparing an entry's `decided` against;
+    # an unparseable one has already produced its own finding above, and
+    # comparing against it would add a second, misleading one.
+    as_of_date = str(raw_as_of_date) if date_problem is None else None
     concepts = data.get("concepts")
     if not isinstance(concepts, dict) or not concepts:
         f.err(
@@ -617,7 +649,7 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
                 f"{rel}: concepts.{name}.removal_gate: must be a non-empty string",
             )
         _check_lifecycle(f, rel, name, entry)
-        _check_investigated_declined(f, rel, name, entry)
+        _check_investigated_declined(f, rel, name, entry, as_of_date)
         allowed_extra = set(
             _PIPELINE_PER_CONCEPT_EXTRA_REQUIRED_FIELDS.get(name, ())
         ) | set(_PIPELINE_OPTIONAL_CONCEPT_FIELDS)
