@@ -283,38 +283,59 @@ repository says it does not run:
   `True` direction but load-bearing as the ADR-037 D4 level-implies-query
   guard — neither is a CLI concern, so neither moves here (Codex review on
   #1073, verified against the call sites).
-- `--btf` / `--ctf` / `--dwarf` (`debug_resolution_options`) — hidden duplicate
-  spellings of `--debug-format {btf,ctf,dwarf}`, which the module's own help
-  text already calls their supersession.
+- `--btf` / `--ctf` / `--dwarf` — hidden duplicate spellings of
+  `--debug-format {btf,ctf,dwarf}`, which the option's own help text already
+  calls their supersession. **Declared twice**: `debug_resolution_options`
+  (`frontends/cli/options/release.py`, reached by `compare`) *and* inline on
+  `dump` (`frontends/cli/commands/dump.py`, three `@click.option` lines) —
+  editing only the shared decorator would leave `dump` still accepting all
+  three (Codex review on #1073). Two further touchpoints in the same slice:
+  the `debug_resolution` family set in `frontends/cli/options/inventory.py`,
+  which the contract gate keys on, and the `--help-all` grouping in
+  `frontends/cli/help.py` (which also still lists `--allow-build-query`).
 
-Acceptance: each old spelling exits `64` with `No such option`; the canonical
-replacement behaves identically; `build.query`'s explicit-`--config` trust gate
+**Six spellings, not four**, and each has to be tested on *every* command that
+declares it — `--header-graph`/`--header-graph-includes` on `compare` and
+`dump`, `--allow-build-query` on `dump`, and the three debug aliases on
+`compare` and `dump` separately.
+
+Acceptance: each of the six spellings exits `64` with `No such option` on
+every command that declares it today; the canonical replacement behaves
+identically; `build.query`'s explicit-`--config` trust gate
 is unchanged; `--help-all` and `docs/reference/cli-reference.md` regenerated.
 This slice depends on nothing in the vision rollout and must not wait for it.
 
 ### Parallel work blocks an agent can start now
 
-Seven blocks, each with a disjoint primary file set. Blocks 1–3 are the
-highest-value openers; 4–7 are independently startable and none of them
-blocks another. **The requirements for every block live in the workstream
+Seven blocks, each with a disjoint primary file set. **Four can start
+immediately** (tier 0 and tier 1 below); the other three have a real
+dependency and are listed with it rather than as free parallelism. The tiers
+are the owning plan's own global order — *A and E first under one integration
+owner, then C's audit half with G's first reporting slice, then B/D/F* — not a
+re-sequencing of it (Codex review on #1073). **The requirements for every block live in the workstream
 this table names — read that section before starting; what is written here
 is only the entry point, the first file to open, and the boundary with the
 other blocks.** Deliberately not a second copy of the owning plan's
 checklist: where the two ever disagree, `vision-api-abi-evolution.md` wins.
 
-| # | Block | Owning workstream | Primary files | Touches shared request/plan/outcome types |
-|---|---|---|---|---|
-| 1 | H1 hidden-shim deletion | this plan (H1 above) | `frontends/cli/options/release.py`, tests, generated refs | No |
-| 2 | Scalar disposition audit | C-S1 + G-S1 | `policy/`, `report/`, `checker.py`, `semver.py` | No |
-| 3 | Release-path scope & completeness | A-S1/S2 (deletion gate A-S4) | `cli_compare_release*`, `workflows/`, `policy/outcome.py` | **Yes — integration owner** |
-| 4 | Header-only capture and comparison | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `workflows/dump` | No |
-| 5 | Per-dimension comparability + failed evidence | E-S1/S2 | `comparability.py`, `analysis_assurance.py`, `workflows/plan.py` | No |
-| 6 | `scan --artifact-set` member-identity manifest | this plan (PR H, last piece) | `cli_scan*`, ADR-056 surface | No |
-| 7 | Explicit-`--config` dry-run/execution parity | this plan (PR C tail) | `cli_dump_request.py`, `cli_compare*` config discovery | No |
+| # | Block | Start | Owning workstream | Primary files | Shared types |
+|---|---|---|---|---|---|
+| 1 | H1 hidden-shim deletion | **Tier 0 — now** | this plan (H1 above) | `frontends/cli/options/release.py`, `frontends/cli/commands/dump.py`, `options/inventory.py`, `help.py` | No |
+| 7 | Explicit-`--config` dry-run/execution parity | **Tier 0 — now** | this plan (PR C tail) | `cli_dump_request.py`, `cli_compare*` config discovery | No |
+| 3 | Release-path scope & completeness | **Tier 1 — now** | A-S1/S2 (deletion gate A-S4) | `cli_compare_release*`, `workflows/`, `policy/outcome.py` | **Yes — integration owner** |
+| 5 | Per-dimension comparability + failed evidence | **Tier 1 — now** | E-S1/S2 | `comparability.py`, `analysis_assurance.py`, `workflows/plan.py` | **Yes — integration owner** |
+| 2 | Scalar disposition audit | Tier 2 — after A/E's field contract (S0) is agreed | C-S1 + G-S1 | `policy/`, `report/`, `checker.py`, `semver.py` | No |
+| 4 | Header-only capture and comparison | Tier 3 — after E-S1 | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `workflows/dump` | No |
+| 6 | `scan --artifact-set` member-identity manifest | Tier 3 — needs A-S3's component inventory | this plan (PR H, last piece) | `cli_scan*`, a member-identity schema that does not exist yet | Indirectly (A's inventory) |
 
-Block 3 is the only one that edits the shared types, which is why it is the
-one the vision plan's integration owner reviews; the other six were chosen so
-they can proceed without waiting on that review.
+Tier 0 is outside the vision sequence entirely — pure interface hygiene with
+no shared model behind it. Tier 1 is the owning plan's own first pair, and the
+two blocks in it are the ones its integration owner reviews; they are
+independent of each other (A touches the release/outcome path, E the
+comparability/assurance path). Tier 2's *scalar* half can begin as soon as
+A/E's S0 field contract is written down — it does not need those slices
+finished — but starting it before that vocabulary exists is how two ledgers
+get invented. Tier 3 consumes upstream fields and should not start earlier.
 
 **Block 1 — H1 hidden-shim deletion.** Exactly the slice above, with the
 `allow_build_query` boundary it states. Deliverable: four spellings exit `64`,
@@ -324,7 +345,8 @@ they can proceed without waiting on that review.
 fragment beyond the removal note.
 
 **Block 2 — scalar disposition audit.** C-S1 plus G-S1's first slice, scoped
-to single-pair `compare` so it waits on neither scope nor evidence work.
+to single-pair `compare` — so it needs A/E's S0 field contract in writing, but
+not their slices finished (tier 2 above).
 Start by opening the four suppression application points C-S1 enumerates and
 deciding, per call shape, converge-or-cover: `post_processing
 .ApplySuppression.apply()`, `checker._filter_suppressed_changes()`,
@@ -388,14 +410,20 @@ task-relative.
 
 **Block 6 — `scan --artifact-set` member-identity manifest (PR H's last
 piece).** Syntax refinement, cost/dry-run, and audit-mode ownership all
-landed (see PR 5's own section); what remains is the manifest form that names
-each member's *identity* rather than only its path, so a set member is
-matched by what it is and an unsatisfied entry is reportable. Reuse
-`compare --instantiation-manifest`'s existing `InstantiationManifest` schema —
-the audit-mode `bundle_manifest_entry_unsatisfied` detector already does — and
-do not introduce a second manifest format; ADR-056 D2's safety boundary
-(no implicit positional-directory dispatch) stands unchanged. Self-contained
-in the `scan` surface, no dependency on blocks 1–5.
+landed (see PR 5's own section); what remains is a manifest form that names
+each set member's *identity* rather than only its path, so a member is matched
+by what it is and an unsatisfied entry is reportable. **This block's first
+deliverable is that identity contract, and it cannot be `InstantiationManifest`
+reused as-is**: a `ManifestEntry` is exactly one of `symbol`/`pattern`/
+`template` plus an optional provider name (`abicheck/bundle_manifest.py`) —
+there is no member path and no member identity in the schema, so the shipped
+`scan --artifact-set --manifest` expected-provider check consumes it for a
+different question entirely (Codex review on #1073, verified against the
+dataclass). Take the identity vocabulary from A-S3's package component
+inventories rather than minting a third one, which is why this block sits
+behind A; extending a canonical schema explicitly is fine, inventing a second
+manifest format is not. ADR-056 D2's safety boundary — no implicit
+positional-directory dispatch — stands unchanged either way.
 
 **Block 7 — explicit-`--config` dry-run/execution parity (PR C's tail).**
 Config discovery is closed for `scan` in both cases and for `dump`/`compare`'s
