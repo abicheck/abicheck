@@ -833,41 +833,65 @@ concepts:
       resolved pair existed -- now prefers a pair whose values are both
       resolved when one exists.
 
-      **A twentieth round found two further gaps in code the nineteenth
-      round's own fixes had just introduced or left untouched.** First,
-      `report_finding_id` (the public, documented-stable per-finding
-      fingerprint) never looked at `entity_id` at all, so two entity-
-      distinct occurrences that both carry a blank `disambiguator` -- the
-      common case for two anonymous-scope entities, which have no source
-      disambiguator to begin with -- still collided on this id even though
-      `_dedup_exact` already told them apart via `entity_id.key`. Fixed the
-      same conditional-append way as the eighteenth round's own
-      `disambiguator` fix. Second, `diff_constants`/`diff_typedefs` iterated
-      their `shared_ids` set directly to emit each cross-snapshot-stable
-      shared identity's own finding, but a `set` has no defined iteration
-      order -- when a colliding group carries more than one such shared
-      identity, their relative emission order varied with
-      `PYTHONHASHSEED` across two runs of byte-identical input. Both now
-      iterate in `old_ids`'s own deterministic encounter order, keeping the
-      set only for O(1) membership checks. Third, on the same round's
-      Codex pass: `diff_constants`/`diff_typedefs`'s mixed-group pairing
-      paired off exactly one removed/added occurrence pair as a single
-      `CHANGED` finding, leaving every further pair in the same colliding
-      group to fall through as an independent `REMOVED`/`ADDED` --
-      fabricating a removal-and-addition story for what equal cardinality
-      on both sides makes an equally valid multi-pair substitution (e.g.
-      anonymous `X=[1,2]` becoming `X=[3,4]`). Both now loop the pairing
-      while occurrences remain on each side -- the direct generalization of
-      the tenth round's own one-pair fix, with the exact same "genuine
-      leftover is only the excess beyond `min(removed, added)`" invariant.
+      **A twentieth round found four further gaps across two Codex
+      passes, in code the nineteenth round's own fixes had just introduced
+      or left untouched.** First, `report_finding_id` (the public,
+      documented-stable per-finding fingerprint) never looked at
+      `entity_id` at all, so two entity-distinct occurrences that both
+      carry a blank `disambiguator` -- the common case for two
+      anonymous-scope entities, which have no source disambiguator to
+      begin with -- still collided on this id even though `_dedup_exact`
+      already told them apart via `entity_id.key`. First fixed by
+      appending `entity_id.key` to `report_finding_id` conditionally
+      (mirroring the eighteenth round's own `disambiguator` fix), then
+      **reverted** on the round's second Codex pass: unlike
+      `disambiguator`, `entity_id` predates this PR entirely
+      (function/variable/layout detectors already populate it), so that
+      fix would have silently rehashed this id for that whole pre-existing,
+      already-shipped population, not just the newly-collision-prone
+      typedef/constant occurrences this round targeted. Fixed at the
+      source instead: the new `_collision_safe_disambiguator` in both
+      `compare.typedefs`/`compare.constants` gives a genuinely
+      distinguishable occurrence a real `disambiguator` whenever its
+      producer supplied none, so `report_finding_id`'s existing conditional
+      `disambiguator` append closes the gap without touching any other
+      kind's id. Second, `diff_constants`/`diff_typedefs` iterated their
+      `shared_ids` set directly to emit each cross-snapshot-stable shared
+      identity's own finding, but a `set` has no defined iteration order --
+      when a colliding group carries more than one such shared identity,
+      their relative emission order varied with `PYTHONHASHSEED` across two
+      runs of byte-identical input. Both now iterate in `old_ids`'s own
+      deterministic encounter order, keeping the set only for O(1)
+      membership checks. Third: `diff_constants`/`diff_typedefs`'s
+      mixed-group pairing paired off exactly one removed/added occurrence
+      pair as a single `CHANGED` finding, leaving every further pair in the
+      same colliding group to fall through as an independent
+      `REMOVED`/`ADDED` -- fabricating a removal-and-addition story for
+      what equal cardinality on both sides makes an equally valid
+      multi-pair substitution (e.g. anonymous `X=[1,2]` becoming
+      `X=[3,4]`). Both now loop the pairing while occurrences remain on
+      each side -- the direct generalization of the tenth round's own
+      one-pair fix, with the exact same "genuine leftover is only the
+      excess beyond `min(removed, added)`" invariant. Fourth, on the same
+      round's second Codex pass: a *partial* removal/addition within an
+      equal-valued, entity-unstable colliding group picked an arbitrary
+      list-prefix occurrence and stamped its real `entity_id` on the
+      residual finding -- presenting unrecoverable evidence as observed
+      attribution, and potentially crediting a still-*present*
+      declaration's identity to a finding claiming it vanished. The new
+      `_attribute_residuals` now attributes a real identity only when the
+      *entire* value bucket vanishes from one side (every occurrence in it
+      genuinely is gone); a partial residual carries no
+      `entity_id`/`disambiguator` at all.
 
-      A fourth, P1 finding from the same round -- that the stability filter
-      excludes an anonymous-scope entity from `shared_ids` even when its
-      literal `entity_id` matches on both sides, so a real value change on
-      it can be value-cancelled against an unrelated same-valued addition
-      elsewhere in the same colliding group instead of reported as a
-      `TYPEDEF_BASE_CHANGED`/`CONSTANT_CHANGED` -- was investigated and
-      declined; see `investigated_declined` below.
+      A fifth, P1 finding from the round's first Codex pass -- that the
+      stability filter excludes an anonymous-scope entity from
+      `shared_ids` even when its literal `entity_id` matches on both
+      sides, so a real value change on it can be value-cancelled against
+      an unrelated same-valued addition elsewhere in the same colliding
+      group instead of reported as a `TYPEDEF_BASE_CHANGED`/
+      `CONSTANT_CHANGED` -- was investigated and declined; see
+      `investigated_declined` below.
 
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.

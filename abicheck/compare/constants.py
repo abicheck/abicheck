@@ -50,7 +50,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from ..diff_helpers import make_change
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.identity import EntityKind
+from ..model.identity import EntityId, EntityKind
 from ..model.identity_stability import entity_id_is_cross_snapshot_stable
 from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir_index import SemanticIRIndex
@@ -98,6 +98,73 @@ def _unresolved_to_none(value: str) -> str | None:
     already uses for "no recoverable value text", same as a whole-name
     ``CONSTANT_ADDED``/``CONSTANT_REMOVED`` for an unsupported fact."""
     return None if value == _UNRESOLVED_MARKER else value
+
+
+def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
+    """*occurrence_id*'s own producer disambiguator when set, else a
+    fallback derived from its own (real, non-synthetic) entity id (Codex
+    review, PR #1078, twentieth round).
+
+    Two colliding, entity-distinct occurrences with no real source
+    disambiguator -- the common case for two anonymous-scope entities --
+    would otherwise both carry ``disambiguator=None`` and collide on
+    ``finding_identity.report_finding_id`` even though ``diff_filtering.
+    _dedup_exact`` already tells them apart via ``entity_id.key``. Folding
+    ``entity_id`` in here rather than directly into ``report_finding_id``
+    carries none of that function's backward-compatibility risk:
+    ``Change.disambiguator`` is a field this PR introduces (eighteenth
+    round), so every value this helper can produce is new, not a rehash of
+    an already-shipped id (see ``report_finding_id``'s own docstring for
+    the full account of why folding ``entity_id`` in there directly was
+    tried and reverted)."""
+    disambiguator = producer_occurrence_disambiguator(occurrence_id)
+    if disambiguator:
+        return disambiguator
+    entity_id = producer_entity_id(occurrence_id.entity_id)
+    return None if entity_id is None else str(entity_id.key)
+
+
+def _residual_entity_id(occurrence_id: OccurrenceId | None) -> EntityId | None:
+    """*occurrence_id*'s producer entity id, or ``None`` when *occurrence_id*
+    itself is ``None`` (an ambiguous residual, see :func:`_attribute_residuals`)."""
+    return (
+        None if occurrence_id is None else producer_entity_id(occurrence_id.entity_id)
+    )
+
+
+def _residual_disambiguator(occurrence_id: OccurrenceId | None) -> str | None:
+    """*occurrence_id*'s collision-safe disambiguator, or ``None`` when
+    *occurrence_id* itself is ``None``."""
+    return (
+        None if occurrence_id is None else _collision_safe_disambiguator(occurrence_id)
+    )
+
+
+def _attribute_residuals(
+    ids_for_value: list[OccurrenceId], excess: int
+) -> list[OccurrenceId | None]:
+    """The *excess* occurrences of one value bucket to report as
+    removed/added residuals, each attributed to a real identity only when
+    attribution is unambiguous (Codex review, PR #1078, twentieth round).
+
+    When the *entire* bucket vanishes from one side (``excess ==
+    len(ids_for_value)``), every occurrence in it really did stop appearing
+    with this value -- each one's own identity is genuine evidence, even
+    though which physical declaration became what is still unknown.  When
+    only *some* of the bucket's occurrences are excess (``excess <
+    len(ids_for_value)``), which specific occurrence(s) the excess
+    represents is unrecoverable from a bare value match alone: the
+    unstable/anonymous identities in ``ids_for_value`` are interchangeable
+    given only "N occurrences share this value", so presenting an arbitrary
+    list prefix (previously ``ids_for_value[:excess]``) as if it were
+    observed attribution could stamp a still-*present* declaration's
+    ``entity_id`` onto a finding claiming it vanished. Reporting the
+    residual without a specific identity in that case is the honest
+    reading of the same evidence.
+    """
+    if excess == len(ids_for_value):
+        return list(ids_for_value)
+    return [None] * excess
 
 
 def _values(index: SemanticIRIndex) -> dict[str, list[OccurrenceId]]:
@@ -373,7 +440,7 @@ def diff_constants(
                         name=name,
                         old_value=old_value,
                         entity_id=producer_entity_id(old_id.entity_id),
-                        disambiguator=producer_occurrence_disambiguator(old_id),
+                        disambiguator=_collision_safe_disambiguator(old_id),
                     )
                 )
             continue
@@ -477,7 +544,7 @@ def diff_constants(
                     old_value=old_val,
                     new_value=new_val,
                     entity_id=producer_entity_id(shared_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(shared_id),
+                    disambiguator=_collision_safe_disambiguator(shared_id),
                 )
             )
         # A colliding group on at least one side (Codex review, PR #1078,
@@ -538,16 +605,20 @@ def diff_constants(
             new_by_value.setdefault(
                 v if v is not None else _UNRESOLVED_MARKER, []
             ).append(i)
-        removed_occurrences: list[tuple[str, OccurrenceId]] = []
+        removed_occurrences: list[tuple[str, OccurrenceId | None]] = []
         for value, ids_for_value in old_by_value.items():
             excess = len(ids_for_value) - len(new_by_value.get(value, ()))
             if excess > 0:
-                removed_occurrences.extend((value, i) for i in ids_for_value[:excess])
-        added_occurrences: list[tuple[str, OccurrenceId]] = []
+                removed_occurrences.extend(
+                    (value, i) for i in _attribute_residuals(ids_for_value, excess)
+                )
+        added_occurrences: list[tuple[str, OccurrenceId | None]] = []
         for value, ids_for_value in new_by_value.items():
             excess = len(ids_for_value) - len(old_by_value.get(value, ()))
             if excess > 0:
-                added_occurrences.extend((value, i) for i in ids_for_value[:excess])
+                added_occurrences.extend(
+                    (value, i) for i in _attribute_residuals(ids_for_value, excess)
+                )
         if not removed_occurrences and not added_occurrences:
             continue
         # A mixed group (both a net removal and a net addition) carries more
@@ -620,12 +691,12 @@ def diff_constants(
                         new=repr(new_val),
                         old_value=old_val,
                         new_value=new_val,
-                        entity_id=producer_entity_id(removed_id.entity_id)
-                        or producer_entity_id(added_id.entity_id),
+                        entity_id=_residual_entity_id(removed_id)
+                        or _residual_entity_id(added_id),
                         disambiguator=(
-                            producer_occurrence_disambiguator(removed_id)
-                            if producer_entity_id(removed_id.entity_id) is not None
-                            else producer_occurrence_disambiguator(added_id)
+                            _residual_disambiguator(removed_id)
+                            if _residual_entity_id(removed_id) is not None
+                            else _residual_disambiguator(added_id)
                         ),
                     )
                 )
@@ -636,8 +707,8 @@ def diff_constants(
                     symbol=name,
                     name=name,
                     old_value=_unresolved_to_none(leftover_old_value),
-                    entity_id=producer_entity_id(leftover_old_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(leftover_old_id),
+                    entity_id=_residual_entity_id(leftover_old_id),
+                    disambiguator=_residual_disambiguator(leftover_old_id),
                 )
             )
         for leftover_new_value, leftover_new_id in added_occurrences:
@@ -647,8 +718,8 @@ def diff_constants(
                     symbol=name,
                     name=name,
                     new_value=_unresolved_to_none(leftover_new_value),
-                    entity_id=producer_entity_id(leftover_new_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(leftover_new_id),
+                    entity_id=_residual_entity_id(leftover_new_id),
+                    disambiguator=_residual_disambiguator(leftover_new_id),
                 )
             )
 
@@ -676,7 +747,7 @@ def diff_constants(
                     name=name,
                     new_value=new_value,
                     entity_id=producer_entity_id(new_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(new_id),
+                    disambiguator=_collision_safe_disambiguator(new_id),
                 )
             )
     return changes

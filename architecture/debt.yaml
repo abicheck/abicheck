@@ -853,12 +853,12 @@
     },
     {
       "path": "abicheck/finding_identity.py",
-      "baseline_lines": 1942,
+      "baseline_lines": 1948,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1923 -> 1936 (ADR-063 Track T3, Codex review, PR #1078, eighteenth round): report_finding_id() now appends Change.disambiguator, but only when set, so a pre-existing finding's id still hashes identically -- two ODR-duplicate occurrences that now legitimately both survive diff_filtering._dedup_exact with otherwise-identical fields would otherwise collide on this documented-stable, user-visible fingerprint too. Raised 1936 -> 1942 (Codex review, PR #1078, twentieth round): report_finding_id() now also appends Change.entity_id.key, conditionally on the same terms -- two entity-distinct occurrences that both carry a blank disambiguator (the common case for two anonymous-scope entities) still collided on this fingerprint, since it never consulted entity_id at all even though diff_filtering._dedup_exact already told such a pair apart that way.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1923 -> 1936 (ADR-063 Track T3, Codex review, PR #1078, eighteenth round): report_finding_id() now appends Change.disambiguator, but only when set, so a pre-existing finding's id still hashes identically -- two ODR-duplicate occurrences that now legitimately both survive diff_filtering._dedup_exact with otherwise-identical fields would otherwise collide on this documented-stable, user-visible fingerprint too. Raised 1936 -> 1948 (Codex review, PR #1078, twentieth round, two passes): first tried also appending Change.entity_id.key conditionally, then reverted that specific change on a second Codex pass -- entity_id predates this PR (function/variable/layout detectors already populate it), so appending it here would have rehashed this documented-stable id for that entire pre-existing, already-shipped population, not just the newly-collision-prone typedef/constant occurrences this round targeted. The net growth is the docstring recording why that path was tried and rejected, so a future round doesn't re-propose it; the actual fix moved to compare/typedefs.py's and compare/constants.py's own _collision_safe_disambiguator instead.",
       "review_by": "2026-11-30"
     },
     {

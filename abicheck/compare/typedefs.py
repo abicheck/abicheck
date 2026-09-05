@@ -170,6 +170,47 @@ def _underlying(index: SemanticIRIndex, occurrence_id: OccurrenceId) -> str:
     return _UNRESOLVED_TYPE_SENTINEL
 
 
+def _collision_safe_disambiguator(occurrence_id: OccurrenceId) -> str | None:
+    """*occurrence_id*'s own producer disambiguator when set, else a
+    fallback derived from its own (real, non-synthetic) entity id -- mirrors
+    ``compare.constants._collision_safe_disambiguator`` exactly; see that
+    function's own docstring (Codex review, PR #1078, twentieth round)."""
+    disambiguator = producer_occurrence_disambiguator(occurrence_id)
+    if disambiguator:
+        return disambiguator
+    entity_id = producer_entity_id(occurrence_id.entity_id)
+    return None if entity_id is None else str(entity_id.key)
+
+
+def _residual_entity_id(occurrence_id: OccurrenceId | None) -> EntityId | None:
+    """*occurrence_id*'s producer entity id, or ``None`` when *occurrence_id*
+    itself is ``None`` (an ambiguous residual, see :func:`_attribute_residuals`)."""
+    return (
+        None if occurrence_id is None else producer_entity_id(occurrence_id.entity_id)
+    )
+
+
+def _residual_disambiguator(occurrence_id: OccurrenceId | None) -> str | None:
+    """*occurrence_id*'s collision-safe disambiguator, or ``None`` when
+    *occurrence_id* itself is ``None``."""
+    return (
+        None if occurrence_id is None else _collision_safe_disambiguator(occurrence_id)
+    )
+
+
+def _attribute_residuals(
+    ids_for_value: list[OccurrenceId], excess: int
+) -> list[OccurrenceId | None]:
+    """The *excess* occurrences of one value bucket to report as
+    removed/added residuals, each attributed to a real identity only when
+    attribution is unambiguous -- mirrors ``compare.constants.
+    _attribute_residuals`` exactly; see that function's own docstring
+    (Codex review, PR #1078, twentieth round)."""
+    if excess == len(ids_for_value):
+        return list(ids_for_value)
+    return [None] * excess
+
+
 def _aliases(index: SemanticIRIndex) -> dict[str, list[OccurrenceId]]:
     """This index's typedef occurrences, grouped by their rendered alias --
     a *list* per alias, not a single winner (Codex review, PR #1078, sixth
@@ -305,7 +346,7 @@ def diff_typedefs(
                             name=bare_alias,
                             old_value=_underlying(old_index, rotated_id),
                             entity_id=producer_entity_id(rotated_id.entity_id),
-                            disambiguator=producer_occurrence_disambiguator(rotated_id),
+                            disambiguator=_collision_safe_disambiguator(rotated_id),
                         )
                     )
                 continue
@@ -323,7 +364,7 @@ def diff_typedefs(
                         name=bare_alias,
                         old_value=_underlying(old_index, removed_id),
                         entity_id=producer_entity_id(removed_id.entity_id),
-                        disambiguator=producer_occurrence_disambiguator(removed_id),
+                        disambiguator=_collision_safe_disambiguator(removed_id),
                         description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                     )
                 )
@@ -391,7 +432,7 @@ def diff_typedefs(
                     old_value=old_type,
                     new_value=new_type,
                     entity_id=producer_entity_id(shared_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(shared_id),
+                    disambiguator=_collision_safe_disambiguator(shared_id),
                     description=(
                         f"Typedef base type changed: {bare_alias}{qualified_suffix}"
                     ),
@@ -423,16 +464,20 @@ def diff_typedefs(
             if i in shared_id_set:
                 continue
             new_by_value.setdefault(_underlying(new_index, i), []).append(i)
-        removed_occurrences: list[tuple[str, OccurrenceId]] = []
+        removed_occurrences: list[tuple[str, OccurrenceId | None]] = []
         for value, ids_for_value in old_by_value.items():
             excess = len(ids_for_value) - len(new_by_value.get(value, ()))
             if excess > 0:
-                removed_occurrences.extend((value, i) for i in ids_for_value[:excess])
-        added_occurrences: list[tuple[str, OccurrenceId]] = []
+                removed_occurrences.extend(
+                    (value, i) for i in _attribute_residuals(ids_for_value, excess)
+                )
+        added_occurrences: list[tuple[str, OccurrenceId | None]] = []
         for value, ids_for_value in new_by_value.items():
             excess = len(ids_for_value) - len(old_by_value.get(value, ()))
             if excess > 0:
-                added_occurrences.extend((value, i) for i in ids_for_value[:excess])
+                added_occurrences.extend(
+                    (value, i) for i in _attribute_residuals(ids_for_value, excess)
+                )
         if not removed_occurrences and not added_occurrences:
             continue
         # Every removed/added pair still available after the shared-identity
@@ -457,12 +502,12 @@ def diff_typedefs(
                     name=bare_alias,
                     old_value=old_type,
                     new_value=new_type,
-                    entity_id=producer_entity_id(old_id.entity_id)
-                    or producer_entity_id(new_id.entity_id),
+                    entity_id=_residual_entity_id(old_id)
+                    or _residual_entity_id(new_id),
                     disambiguator=(
-                        producer_occurrence_disambiguator(old_id)
-                        if producer_entity_id(old_id.entity_id) is not None
-                        else producer_occurrence_disambiguator(new_id)
+                        _residual_disambiguator(old_id)
+                        if _residual_entity_id(old_id) is not None
+                        else _residual_disambiguator(new_id)
                     ),
                     description=(
                         f"Typedef base type changed: {bare_alias}{qualified_suffix}"
@@ -479,8 +524,8 @@ def diff_typedefs(
                     symbol=bare_alias,
                     name=bare_alias,
                     old_value=leftover_old_value,
-                    entity_id=producer_entity_id(leftover_old_id.entity_id),
-                    disambiguator=producer_occurrence_disambiguator(leftover_old_id),
+                    entity_id=_residual_entity_id(leftover_old_id),
+                    disambiguator=_residual_disambiguator(leftover_old_id),
                     description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                 )
             )

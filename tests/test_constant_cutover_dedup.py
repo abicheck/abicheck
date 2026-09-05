@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.compare.constants import diff_constants
+from abicheck.finding_identity import report_finding_id
 from abicheck.model.fact import Fact
 from abicheck.model.identity import Anonymous, Namespace, entity_id_for_constant
 from abicheck.model.occurrence import OccurrenceId
@@ -176,3 +177,140 @@ class TestOdrDuplicateRemovalsSurviveDedupExact:
         assert {c.disambiguator for c in changes} == {"tu-a", "tu-b"}
         deduped = _dedup_exact(changes)
         assert len(deduped) == 2
+
+
+class TestCollisionSafeDisambiguatorClosesReportFindingIdGap:
+    """Regression coverage for Codex review, PR #1078, twentieth round: two
+    entity-distinct occurrences sharing one rendered alias, both with a
+    blank source disambiguator -- the common case for two anonymous-scope
+    entities -- used to both carry ``Change.disambiguator=None`` and so
+    collide on ``finding_identity.report_finding_id`` even though
+    ``diff_filtering._dedup_exact`` already told them apart via
+    ``entity_id.key``. Fixed at the source: ``compare.constants.
+    _collision_safe_disambiguator`` (used everywhere this module emits a
+    per-occurrence finding for a colliding group) now falls back to the
+    occurrence's own real entity id when the producer supplied no
+    disambiguator -- safe to do here, unlike folding ``entity_id`` directly
+    into ``report_finding_id``, since ``Change.disambiguator`` is a field
+    this PR introduces with nothing pre-existing to rehash.
+    """
+
+    def test_two_whole_group_removals_get_distinct_report_finding_ids(
+        self,
+    ) -> None:
+        first = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        second = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        changes = diff_constants(
+            old_index,
+            SemanticIRIndex(SemanticIR()),
+            is_fingerprint_comparison_unreliable=lambda o, n: False,
+            old_constants={},
+            new_constants={},
+        )
+        assert len(changes) == 2
+        assert all(c.disambiguator for c in changes)
+        assert len({c.disambiguator for c in changes}) == 2
+        ids = {report_finding_id(c) for c in changes}
+        assert len(ids) == 2
+
+
+class TestAmbiguousResidualsGetNoAttributedIdentity:
+    """Regression coverage for Codex review, PR #1078, twentieth round: a
+    partial removal within an equal-valued, entity-unstable colliding group
+    used to attribute the residual ``CONSTANT_REMOVED``/``CONSTANT_ADDED``
+    finding to an arbitrary list-prefix occurrence's real ``entity_id`` --
+    presenting unrecoverable evidence as if it were observed attribution,
+    and potentially stamping a still-*present* declaration's identity onto
+    a finding claiming it vanished. When only some (not all) of a value
+    bucket's occurrences are excess, the residual now carries no
+    ``entity_id``/``disambiguator`` at all -- honest about what the
+    evidence can and cannot support.
+    """
+
+    def test_a_partial_removal_from_an_equal_valued_group_has_no_identity(
+        self,
+    ) -> None:
+        # Old: two anonymous X=1 occurrences (ordinals 0, 1). New: one
+        # anonymous X=1 occurrence -- which physical declaration persisted
+        # is unrecoverable from a bare value match.
+        old_a = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_b = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        new_a = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(old_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        changes = diff_constants(
+            old_index,
+            new_index,
+            is_fingerprint_comparison_unreliable=lambda o, n: False,
+            old_constants={},
+            new_constants={},
+        )
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.kind is ChangeKind.CONSTANT_REMOVED
+        assert change.old_value == "1"
+        assert change.entity_id is None
+        assert change.disambiguator is None
+
+    def test_a_whole_bucket_removal_keeps_its_real_identity(self) -> None:
+        # Old: two anonymous X=1 occurrences. New: none of value 1 at all --
+        # every occurrence in the bucket unambiguously vanished, so each
+        # keeps its own real identity (contrast with the partial case
+        # above).
+        old_a = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_b = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_a): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(old_b): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(SemanticIR())
+        changes = diff_constants(
+            old_index,
+            new_index,
+            is_fingerprint_comparison_unreliable=lambda o, n: False,
+            old_constants={},
+            new_constants={},
+        )
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_REMOVED for c in changes)
+        assert all(c.entity_id is not None for c in changes)
+        assert {c.entity_id for c in changes} == {old_a, old_b}

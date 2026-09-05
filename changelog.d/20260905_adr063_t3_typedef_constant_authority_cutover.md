@@ -449,10 +449,33 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   scope typedef/constant occurrences that both survive
   `diff_filtering._dedup_exact` via distinct `entity_id`s (each carrying an
   empty `disambiguator`, the common case) still hashed to the same
-  `report_finding_id` -- that function never consulted `entity_id` at all.
-  Fixed the same conditional way as the eighteenth round's `disambiguator`
-  fix: `entity_id.key` is appended only when set, so a pre-existing
-  finding's id still hashes identically (Codex review).
+  `report_finding_id` -- that function never consulted `entity_id` at all
+  (Codex review). First fixed by appending `entity_id.key` to
+  `report_finding_id` conditionally, then **reverted** on a second Codex
+  pass: unlike `disambiguator`, `entity_id` predates this PR entirely
+  (function/variable/layout detectors already populate it), so that fix
+  would have silently rehashed this documented-stable id for that whole
+  pre-existing, already-shipped population -- not just the newly-collision-
+  prone typedef/constant occurrences this round targeted. Fixed at the
+  source instead: `compare.typedefs`/`compare.constants`'s new
+  `_collision_safe_disambiguator` gives a genuinely distinguishable
+  occurrence a real `disambiguator` whenever its producer supplied none,
+  so `report_finding_id`'s existing (eighteenth-round) conditional
+  `disambiguator` append closes the gap without touching any other kind's
+  id.
+- **A partial removal/addition within an equal-valued, entity-unstable
+  colliding group no longer attributes an arbitrary occurrence's identity
+  to the residual finding.** When only *some* (not all) of a value
+  bucket's occurrences are excess, `diff_constants`/`diff_typedefs` picked
+  an arbitrary list-prefix occurrence and stamped its real `entity_id` on
+  the resulting `CONSTANT_REMOVED`/`CONSTANT_ADDED` -- presenting
+  unrecoverable evidence as if it were observed attribution, and
+  potentially crediting a still-*present* declaration's identity to a
+  finding claiming it vanished. The new `_attribute_residuals` now
+  attributes a real identity only when the *entire* value bucket vanishes
+  from one side (every occurrence in it genuinely is gone); a partial
+  residual now carries no `entity_id`/`disambiguator` at all (Codex
+  review).
 - **Two colliding, cross-snapshot-stable shared occurrences in one alias
   group no longer emit their findings in a `PYTHONHASHSEED`-dependent
   order.** `diff_constants`/`diff_typedefs` iterated their `shared_ids` set
