@@ -369,7 +369,10 @@ class DispositionLedger:
             # but the scoped gate does apply the severity configuration to
             # what it scores, so an included record is still re-answered by
             # kind. Only the exclusion itself is untouchable.
-            if record.gate_excluded:
+            if record.gate_excluded or record.disposition not in (
+                Disposition.GATING,
+                Disposition.NON_GATING,
+            ):
                 return record
             return replace(
                 record,
@@ -588,6 +591,16 @@ class DispositionLedger:
             # gate the consumer-scoped run never evaluated it for. The mark is
             # what ``with_gate`` reads; the demotion below is a no-op for one
             # that was not gating to begin with.
+            #
+            # Marked on *every* record, not only the ones demoted below: it
+            # says a consumer scope decided this run, which is what stops
+            # `with_gate`'s `result.changes` re-read from later pulling a
+            # scope-excluded row back into a gate that never scored it.
+            # A `deduplicated` row restored by `show_redundant` is exactly
+            # that case, and it is skipped by the demotion guard below --
+            # so the mark has to come first (found by an exhaustive sweep of
+            # the module's own state space, not by a report).
+            self._records[index] = record = replace(record, scope_decided=True)
             if record.disposition not in (
                 Disposition.GATING,
                 Disposition.NON_GATING,
@@ -598,7 +611,6 @@ class DispositionLedger:
                     record,
                     disposition=Disposition.NON_GATING,
                     gate_excluded=True,
-                    scope_decided=True,
                 )
 
     def record_for(self, change: object) -> DispositionRecord | None:

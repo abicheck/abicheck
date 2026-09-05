@@ -993,6 +993,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_disposition_audit_states.py",
             "tests/test_disposition_scope_matrix.py",
             "tests/test_disposition_rule_identity.py",
+            "tests/test_disposition_state_sweep.py",
         ),
         axes={
             "application_point": (
