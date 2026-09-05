@@ -57,28 +57,6 @@ def _param_from_cli(name: str) -> bool:
     return bool(src == click.core.ParameterSource.COMMANDLINE)
 
 
-def _merge_cli_debug_format(
-    debug_format_opt: str | None,
-    legacy_debug_format: str | None,
-    *,
-    legacy_from_cli: bool,
-) -> str | None:
-    """Effective *command-line* debug format across all CLI spellings (ADR-040 L2).
-
-    ``--debug-format`` (``debug_format_opt``) is the primary selector; the hidden
-    compatibility flags ``--btf``/``--ctf``/``--dwarf`` write the ``debug_format``
-    dest. Either, when typed, must beat a ``.abicheck.yml`` ``debug.format`` — so
-    fold a *command-line-sourced* legacy flag in here (the flag's own default is
-    ``None``, so ``legacy_from_cli`` distinguishes "typed" from "unset"). Returns
-    ``None`` when no format was given on the command line, letting config win.
-    """
-    if debug_format_opt is not None:
-        return debug_format_opt
-    if legacy_from_cli:
-        return legacy_debug_format
-    return None
-
-
 def _resolve_profile_severity_preset(
     severity_preset: str | None, *, from_profile: bool, project_cfg: object
 ) -> str | None:
@@ -366,7 +344,7 @@ def _reject_debug_format_for_non_elf(
     old_fmt: str | None,
     new_fmt: str | None,
 ) -> None:
-    """Reject --debug-format / legacy --btf/--ctf/--dwarf for PE/Mach-O inputs.
+    """Reject --debug-format for PE/Mach-O inputs.
 
     They force an ELF debug format and are silently ignored by the PE/Mach-O dump
     paths, so reject them up front (mirrors dump_cmd). JSON-snapshot / dump inputs

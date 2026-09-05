@@ -73,25 +73,37 @@ class TestDumpVerbose:
 # ── debug format on non-ELF binaries ─────────────────────────────────────
 
 class TestDumpDebugFormatValidation:
-    def test_btf_flag_rejected_for_pe_binary(self, tmp_path):
+    def test_debug_format_btf_rejected_for_pe_binary(self, tmp_path):
         dll = tmp_path / "foo.dll"
         dll.write_bytes(b"MZ" + b"\0" * 62)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(dll), "--btf"])
+        result = runner.invoke(main, ["dump", str(dll), "--debug-format", "btf"])
 
         assert result.exit_code != 0
-        assert "--btf is only supported for ELF binaries, not PE" in result.output
+        assert "--debug-format btf is only supported for ELF binaries, not PE" in result.output
 
-    def test_ctf_flag_rejected_for_macho_binary(self, tmp_path):
+    def test_debug_format_ctf_rejected_for_macho_binary(self, tmp_path):
         dylib = tmp_path / "libfoo.dylib"
         dylib.write_bytes(b"\xfe\xed\xfa\xcf" + b"\0" * 60)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(dylib), "--ctf"])
+        result = runner.invoke(main, ["dump", str(dylib), "--debug-format", "ctf"])
 
         assert result.exit_code != 0
-        assert "--ctf is only supported for ELF binaries, not MACHO" in result.output
+        assert "--debug-format ctf is only supported for ELF binaries, not MACHO" in result.output
+
+    def test_legacy_btf_ctf_dwarf_flags_removed(self, tmp_path):
+        # H1 hidden-shim deletion: the legacy --btf/--ctf/--dwarf spellings
+        # were deleted outright on `dump` too -- --debug-format is the only
+        # selector left.
+        dll = tmp_path / "foo.dll"
+        dll.write_bytes(b"MZ" + b"\0" * 62)
+        runner = CliRunner()
+        for flag in ("--btf", "--ctf", "--dwarf"):
+            result = runner.invoke(main, ["dump", str(dll), flag])
+            assert result.exit_code == 64
+            assert "No such option" in result.output
 
 
 # ── --lang on compare ────────────────────────────────────────────────────

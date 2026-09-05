@@ -281,7 +281,6 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
         )
     if (
         kwargs.get("debug_format_opt") is not None
-        or kwargs.get("debug_format") is not None
         or kwargs.get("dwarf_only") is True
         or kwargs.get("debuginfod") is True
         or kwargs.get("debuginfod_url") is not None

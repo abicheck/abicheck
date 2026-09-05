@@ -117,7 +117,6 @@ def _load_dump_manifest_or_reject(
 def _resolve_and_check_dump_debug_format(
     so_path: Path | None,
     debug_format_opt: str | None,
-    debug_format: str | None,
 ) -> str | None:
     """Resolve the effective debug format and reject the usage error it implies.
 
@@ -132,7 +131,7 @@ def _resolve_and_check_dump_debug_format(
     from ....cli_dump_helpers import check_dump_debug_format_error
     from ....workflows.extraction import normalize_binary_input as _peek_binary_format
 
-    effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
+    effective_debug_format = resolve_dump_debug_format(debug_format_opt)
     _, dry_run_binary_fmt = _peek_binary_format(so_path)
     debug_format_error = check_dump_debug_format_error(
         effective_debug_format, dry_run_binary_fmt
@@ -188,14 +187,7 @@ def _resolve_and_check_dump_debug_format(
                    "Writes nothing; incompatible with -o/--output.")
 @click.option("--debug-format", "debug_format_opt",
               type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
-              help="Force the ELF debug format (auto=pick best available). "
-                   "Supersedes the individual --btf/--ctf/--dwarf flags.")
-@click.option("--btf", "debug_format", flag_value="btf", default=None, hidden=True,
-              help="Force BTF debug format (ELF only).")
-@click.option("--ctf", "debug_format", flag_value="ctf", hidden=True,
-              help="Force CTF debug format (ELF only).")
-@click.option("--dwarf", "debug_format", flag_value="dwarf", hidden=True,
-              help="Force DWARF debug format (ELF only).")
+              help="Force the ELF debug format (auto=pick best available).")
 # ── Build context capture (ADR-020a) ──────────────────────────────────────────
 # The L2 compile database comes from --build-info, whose operand is already
 # "a build dir, a compile_commands.json, or a pre-captured pack" -- the same
@@ -240,7 +232,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
              dwarf_only: bool, dry_run: bool,
              debug_format_opt: str | None,
-             debug_format: str | None,
              compile_db_filter: str | None,
              debug_roots: tuple[Path, ...],
              debuginfod: bool, debuginfod_url: str | None,
@@ -495,7 +486,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # that echo and the so_path reassignment (a no-op re-validation once
     # this has already passed).
     effective_debug_format = _resolve_and_check_dump_debug_format(
-        so_path, debug_format_opt, debug_format,
+        so_path, debug_format_opt,
     )
 
     # CLI cleanup phase two, PR 3A blocker 5: one `DumpRequest` describing this
@@ -653,7 +644,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     so_path, binary_fmt = _normalize_binary_input(so_path)
     if effective_debug_format is not None and binary_fmt in ("pe", "macho"):
         raise click.BadParameter(
-            f"--{effective_debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
+            f"--debug-format {effective_debug_format} is only supported for ELF "
+            f"binaries, not {binary_fmt.upper()}."
         )
 
     # ADR-063 Phase 1: both binary formats now execute through the identical
