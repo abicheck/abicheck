@@ -59,11 +59,14 @@ _PIPELINE_AUTHORITY_VALUES = frozenset({"self", "legacy", "mixed"})
 #: (`duplication-and-convergence-assessment.md`'s "The four-state status
 #: model", accepted 2026-09-05). `authority` answers "which representation
 #: decides *today*"; this answers "how far through the consolidation is
-#: this concept", which `authority` cannot express at either end: it
-#: separates a merely-defined primitive from a wired-but-non-deciding one
-#: (`introduced` vs `wired`, both `authority: legacy`), and a concept that
-#: decides from one whose replaced implementation is actually gone
-#: (`authoritative` vs `retired`, both `authority: self`).
+#: this concept", which `authority` cannot express at either end. Two of
+#: the three authority values are ambiguous across two rungs each:
+#: `authority: legacy` covers both `introduced` and `wired` (a
+#: merely-defined primitive vs. a wired-but-non-deciding one), and
+#: `authority: self` covers both `authoritative` and `retired` (a concept
+#: that decides vs. one whose replaced implementation is actually gone).
+#: Only `mixed` picks out exactly one rung, `wired` -- which `wired` in
+#: turn does NOT imply, since a `legacy` concept can be wired too.
 _PIPELINE_LIFECYCLE_VALUES = ("introduced", "wired", "authoritative", "retired")
 #: Which lifecycle rungs each `authority` value admits. The two fields are
 #: deliberately a refinement, not two independent opinions -- an entry
@@ -346,20 +349,39 @@ def _check_lifecycle(
             f"decides today; `lifecycle` refines it, it does not disagree "
             f"with it",
         )
+    # Every rung, `introduced` included, asserts the primitive itself
+    # exists -- that is what "introduced" means. So this is not gated on
+    # the rung: a `primitive: not_started` concept is on no rung at all.
+    if entry.get("primitive") == "not_started":
+        f.err(
+            "pipeline-status-ledger",
+            f"{rel}: concepts.{name}: lifecycle {lifecycle!r} requires a "
+            f"primitive that exists, got primitive: 'not_started' -- every "
+            f"rung, 'introduced' included, means the type/module is defined",
+        )
+    # The consumer rule is deliberately symmetric around the same
+    # `not_started` line, in both directions: `introduced` is defined as "the
+    # primitive exists, nothing reads it", so a started consumer there is
+    # `wired` by definition, exactly as an unstarted consumer at `wired` or
+    # above is `introduced` by definition. A one-sided check would let the
+    # bottom rung absorb any consumer status at all (Codex review, PR #1066).
     rung = _PIPELINE_LIFECYCLE_VALUES.index(lifecycle)
+    consumers = entry.get("consumers")
     if rung >= _PIPELINE_LIFECYCLE_VALUES.index("wired"):
-        if entry.get("primitive") == "not_started":
-            f.err(
-                "pipeline-status-ledger",
-                f"{rel}: concepts.{name}: lifecycle {lifecycle!r} requires a "
-                f"primitive that exists, got primitive: 'not_started'",
-            )
-        if entry.get("consumers") == "not_started":
+        if consumers == "not_started":
             f.err(
                 "pipeline-status-ledger",
                 f"{rel}: concepts.{name}: lifecycle {lifecycle!r} means "
                 f"something downstream reads this concept, but consumers is "
                 f"'not_started' -- that is 'introduced'",
+            )
+    elif isinstance(consumers, str) and consumers in _PIPELINE_STATUS_STATES:
+        if consumers != "not_started":
+            f.err(
+                "pipeline-status-ledger",
+                f"{rel}: concepts.{name}: lifecycle 'introduced' means nothing "
+                f"reads this concept yet, but consumers is {consumers!r} -- "
+                f"that is 'wired'",
             )
     if lifecycle == "retired":
         incomplete = sorted(

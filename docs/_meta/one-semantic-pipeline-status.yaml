@@ -39,11 +39,14 @@
 #                 implementation it replaced is deleted or reduced to
 #                 delegation). A refinement of `authority`, not a second
 #                 opinion about it: `authority` cannot express either end
-#                 of the ladder, since `introduced`/`wired` are both
-#                 `authority: legacy` and `authoritative`/`retired` are
-#                 both `authority: self`. The validator enforces that
-#                 correspondence, so the two fields cannot contradict each
-#                 other.
+#                 of the ladder, because two of its three values are
+#                 ambiguous across two rungs each -- `authority: legacy`
+#                 covers both `introduced` and `wired`, and `authority:
+#                 self` covers both `authoritative` and `retired`. Only
+#                 `mixed` picks out exactly one rung (`wired`); the
+#                 converse does not hold, since a `legacy` concept can be
+#                 wired too. The validator enforces that correspondence,
+#                 so the two fields cannot contradict each other.
 #   removal_gate — the condition (an AI-readiness/architecture check, a
 #                 named future phase, or a specific still-open blocker)
 #                 that has to hold before the legacy representation this

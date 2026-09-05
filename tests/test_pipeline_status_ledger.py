@@ -386,8 +386,9 @@ def test_authority_lifecycle_agreement_over_the_whole_domain(
     entry["lifecycle"] = lifecycle
     # Keep the other cross-field rules satisfied so this test isolates the
     # authority/lifecycle rule: `retired` separately requires every status
-    # field to be `complete`.
-    entry["consumers"] = "complete"
+    # field to be `complete`, and `introduced` requires an unstarted
+    # consumer while every rung above it requires a started one.
+    entry["consumers"] = "not_started" if lifecycle == "introduced" else "complete"
     f = FakeFindings()
     check_pipeline_status_ledger(f, data)
     contradictions = [e for e in f.errors if "contradicts authority" in e]
@@ -398,21 +399,70 @@ def test_authority_lifecycle_agreement_over_the_whole_domain(
 
 
 @pytest.mark.parametrize("lifecycle", ["wired", "authoritative", "retired"])
-@pytest.mark.parametrize("field", ["primitive", "consumers"])
-def test_a_rung_above_introduced_requires_a_started_primitive_and_consumer(
-    lifecycle: str, field: str
+def test_a_rung_above_introduced_requires_a_started_consumer(
+    lifecycle: str,
 ) -> None:
     """Every rung above `introduced` asserts something downstream actually
-    reads a primitive that exists — checked for both fields at every such
-    rung, not only the one combination that motivated the rule."""
+    reads the concept — checked at every such rung, not only the one
+    combination that motivated the rule."""
     data = _valid_ledger()
     entry = data["concepts"]["facts"]
     entry["authority"] = "self" if lifecycle != "wired" else "mixed"
     entry["lifecycle"] = lifecycle
-    entry[field] = "not_started"
+    entry["consumers"] = "not_started"
     f = FakeFindings()
     check_pipeline_status_ledger(f, data)
-    assert any(f"lifecycle {lifecycle!r}" in e and field in e for e in f.errors)
+    assert any(f"lifecycle {lifecycle!r}" in e and "consumers" in e for e in f.errors)
+
+
+@pytest.mark.parametrize("consumers", ["partial", "complete"])
+def test_introduced_requires_an_unstarted_consumer(consumers: str) -> None:
+    """The symmetric half (Codex review, PR #1066): `introduced` is defined
+    as "the primitive exists, nothing reads it", so a *started* consumer
+    there is `wired` by definition — exactly as an unstarted consumer at
+    `wired` or above is `introduced` by definition. Enforcing only one
+    direction let the bottom rung silently absorb any consumer status."""
+    data = _valid_ledger()
+    entry = data["concepts"]["facts"]
+    entry["authority"] = "legacy"
+    entry["lifecycle"] = "introduced"
+    entry["consumers"] = consumers
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert any("'introduced'" in e and "consumers" in e for e in f.errors)
+
+
+def test_introduced_with_an_unstarted_consumer_is_accepted() -> None:
+    """Guard against an overcorrection: the bottom rung stays reachable."""
+    data = _valid_ledger()
+    entry = data["concepts"]["facts"]
+    entry["authority"] = "legacy"
+    entry["lifecycle"] = "introduced"
+    entry["consumers"] = "not_started"
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert f.errors == []
+
+
+@pytest.mark.parametrize(
+    "lifecycle", ["introduced", "wired", "authoritative", "retired"]
+)
+def test_no_rung_admits_an_unstarted_primitive(lifecycle: str) -> None:
+    """`introduced` already means the type/module is defined, so a
+    `primitive: not_started` concept is on no rung at all — checked at every
+    rung rather than only above `introduced`, which is where the check was
+    originally (and wrongly) gated (Codex review, PR #1066)."""
+    data = _valid_ledger()
+    entry = data["concepts"]["facts"]
+    entry["authority"] = (
+        "self" if lifecycle in ("authoritative", "retired") else "legacy"
+    )
+    entry["lifecycle"] = lifecycle
+    entry["consumers"] = "not_started" if lifecycle == "introduced" else "complete"
+    entry["primitive"] = "not_started"
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert any(f"lifecycle {lifecycle!r}" in e and "primitive" in e for e in f.errors)
 
 
 @pytest.mark.parametrize(
@@ -492,6 +542,7 @@ def test_investigated_declined_is_allowed_below_retired(lifecycle: str) -> None:
     entry = data["concepts"]["facts"]
     entry["authority"] = "legacy" if lifecycle != "authoritative" else "self"
     entry["lifecycle"] = lifecycle
+    entry["consumers"] = "not_started" if lifecycle == "introduced" else "partial"
     entry["investigated_declined"] = [_declined_entry()]
     f = FakeFindings()
     check_pipeline_status_ledger(f, data)

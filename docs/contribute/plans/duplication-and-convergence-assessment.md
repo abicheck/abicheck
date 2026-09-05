@@ -191,9 +191,12 @@ as closed is not.
 convention: the ledger is at `schema_version: 2`, every concept carries a
 `lifecycle` rung, and `scripts/pipeline_status_ledger.py` enforces that
 `lifecycle` agrees with `authority` (which it refines — `authority` cannot
-express either end of the ladder, since `introduced`/`wired` are both
-`authority: legacy` and `authoritative`/`retired` are both `authority:
-self`), that `retired` requires every status field `complete`, and that a
+express either end of the ladder, because two of its three values are
+ambiguous across two rungs each: `authority: legacy` covers both
+`introduced` and `wired`, and `authority: self` covers both `authoritative`
+and `retired`; only `mixed` picks out exactly one rung, `wired`, which
+`wired` does not imply in return), that `retired` requires every status
+field `complete`, and that a
 concept carrying any `investigated_declined` entry cannot sit at `retired`
 — the loophole above, closed mechanically rather than restated. Each entry
 names `item`, `decided`, `leaves_open` (what the decline does *not* close)
