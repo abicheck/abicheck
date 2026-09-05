@@ -67,7 +67,7 @@ needs:
 **Evaluating or comparing tools?**
 
 - [Tool Comparison & Benchmarks](reference/tool-comparison.md) — abicheck vs `abidiff` vs ABICC on a pinned 74-case benchmark subset.
-- [Examples & Case Encyclopedia](reference/examples/index.md) — generated pages for the single-library cases; bundle cases live under `examples/`.
+- [Compatibility Catalog](reference/examples/index.md) — a generated page for every one of the 197 calibration cases, navigable by rule, scenario kind, ecosystem, operation, evidence level, language, and verdict.
 - [ABI/API Compatibility](learn/abi-api-handling.md) — real-world scenarios with code, plus design patterns that prevent each break.
 - [Limitations](learn/limitations.md) — what abicheck does *not* catch.
 

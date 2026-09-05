@@ -819,7 +819,7 @@ def check_doc_count_sync(f: Findings) -> None:
             DOCS / "start" / "first-check.md",
             "catalog size",
             n_catalog,
-            r"repo includes (\d+) ABI scenario examples",
+            r"carries (\d+) calibration cases under `examples/case\*/`",
         ),
         (
             DOCS / "contribute/abicc-parity-status.md",

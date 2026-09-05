@@ -73,8 +73,8 @@ Every case, rule or scenario, tagged with the real-world ecosystem it models (`g
 
 **1 workflow example** so far, out of the 8 task-oriented workflows Phase 5 of the examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) targets: compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions.
 
-| Workflow |
-|---|
-| `compare-release` |
+| Workflow | Task | Platforms | Executed steps |
+|---|---|---|---|
+| `compare-release` | Did my next release break anything for existing consumers? | linux, macos | 3 |
 
-Reported here as its real, current count (derived from `examples/workflows/`'s own subdirectories) rather than a static placeholder, so this page states all five dimensions the plan tracks, not just the ones already implemented.
+Each row is a `workflow.yaml` that `validation/scripts/run_workflow_examples.py` runs end to end -- the documented commands themselves, in a scratch copy, checked against the exit code and the verdict/change kinds the walkthrough claims. A directory without that contract is a hard error rather than a free point of coverage.

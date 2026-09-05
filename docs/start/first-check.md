@@ -15,31 +15,39 @@ generated: false
 gives abicheck the most evidence to work with (see
 [how much evidence you need](#how-much-evidence-do-you-need) below).
 
-The repo includes 197 ABI scenario examples. Most are single-library cases with
-paired `v1`/`v2` sources and headers; the L3/L4/L5 build/source-only cases
-(152–164) ship hand-built evidence-model fixture pairs; bundle/release-level
-cases use release-style layouts.
-Browse the generated single-library pages in the
-[Examples & Case Encyclopedia](../reference/examples/index.md), or pick one and run it locally
-(`examples/workflows/compare-release/` walks through the exact steps below
-against a small, purpose-built project instead of a calibration case, if
-you'd rather start there):
+Start with the `compare-release` **workflow example** — a small,
+purpose-built library (`mathutils`) that ships two releases, the second of
+which quietly drops an exported function:
 
 ```bash
-cd examples/case01_symbol_removal
+cd examples/workflows/compare-release
 ```
 
 ```bash
-# Build v1 and v2 shared libraries
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
+# Build both releases as shared libraries
+gcc -shared -fPIC -g v1/mathutils.c -o libmathutils_v1.so
+gcc -shared -fPIC -g v2/mathutils.c -o libmathutils_v2.so
 ```
 
 ```bash
-# Compare (header-aware — needs castxml; see Requirements in Install)
-abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
-# Verdict: BREAKING (symbol 'helper' was removed)
+# Compare, giving abicheck each side's public header for the strongest evidence
+abicheck compare libmathutils_v1.so libmathutils_v2.so \
+    --header old=v1/mathutils.h --header new=v2/mathutils.h
+# Verdict: BREAKING (func_removed: subtract)
 ```
+
+`examples/workflows/compare-release/README.md` walks through the same run in
+more detail, and CI executes those exact commands on every change
+(`validation/scripts/run_workflow_examples.py`), so what you read is what
+runs.
+
+> **Looking for a catalogue rather than a tutorial?** The repository also
+> carries 197 calibration cases under `examples/case*/` — one per
+> compatibility mechanism, used to calibrate the detectors rather than to
+> teach the CLI. Browse them in the
+> [Compatibility Catalog](../reference/examples/index.md), which indexes them
+> by rule, scenario kind, ecosystem, operation, evidence level, language,
+> and verdict.
 
 > **No `castxml`?** The command above will fail with `castxml not found`. Either
 > [install castxml](install.md#requirements), or run the same comparison

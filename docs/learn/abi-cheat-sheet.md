@@ -273,7 +273,7 @@ Exits non-zero on any 🔴 BREAKING or 🟠 API_BREAK finding. Add `--suppress s
 
 🔴 `BREAKING` · 🟠 `API_BREAK` · 🟡 `COMPATIBLE_WITH_RISK` / `COMPATIBLE` (quality) · 🟢 `COMPATIBLE` (addition) · ✅ `NO_CHANGE` — what each means and how it maps to an exit code is owned by [Verdicts](verdicts.md).
 
-All example cases: [Examples & Case Encyclopedia](../reference/examples/index.md).
+All calibration cases: [Compatibility Catalog](../reference/examples/index.md).
 
 ---
 
