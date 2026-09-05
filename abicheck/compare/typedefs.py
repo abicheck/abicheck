@@ -55,6 +55,7 @@ from ..diff_helpers import make_change, typedef_side_trusts_qualified
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.fact import Fact
 from ..model.identity import Anonymous, EntityId, EntityKind
+from ..model.identity_stability import entity_id_is_cross_snapshot_stable
 from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir import CanonicalEntity, SemanticIR
 from ..model.semantic_ir_index import SemanticIRIndex
@@ -311,10 +312,30 @@ def diff_typedefs(
         # stable entity's old `int` against the new entity's `int`,
         # reporting only a compatible-looking value mismatch instead of the
         # real breaking change to the stable entity. `set(old_ids) &
-        # set(new_ids)` is exact, not a heuristic: `entities_of_kind()`
-        # never repeats an `EntityId` within one side, so each shared id
-        # names exactly one occurrence per side.
-        shared_ids = set(old_ids) & set(new_ids)
+        # set(new_ids)` is exact, not a heuristic, *for a stable identity*:
+        # `entities_of_kind()` never repeats an `EntityId` within one side,
+        # so each shared id names exactly one occurrence per side -- but an
+        # `Anonymous`/`LocalToFunction` scope segment's own ordinal is
+        # explicitly not stable across two snapshots
+        # (``model.identity_stability``'s own docstring: inserting an
+        # earlier anonymous sibling shifts every later one's ordinal, and
+        # therefore its whole `EntityId`, even though nothing about that
+        # later declaration changed). Trusting a raw intersection here
+        # would risk pairing two genuinely unrelated declarations that
+        # happen to collide on a shifted ordinal plus the same bare leaf
+        # name -- fabricating a `TYPEDEF_BASE_CHANGED` for what is really
+        # just an unrelated addition (Codex review, PR #1078, fourteenth
+        # round). Gated through
+        # :func:`~abicheck.model.identity_stability.
+        # entity_id_is_cross_snapshot_stable` -- this collision path is
+        # exactly the "real consumer" that predicate's own docstring says
+        # needs its own adversarial review before being wired in, so this
+        # is the first real call site.
+        shared_ids = {
+            i
+            for i in set(old_ids) & set(new_ids)
+            if entity_id_is_cross_snapshot_stable(i)
+        }
         for shared_id in shared_ids:
             old_type = _underlying(old_index, shared_id)
             new_type = _underlying(new_index, shared_id)

@@ -600,6 +600,27 @@ concepts:
       same borrowed text to genuinely different declarations -- the
       fallback is now used only for a single-entity group, matching the
       ninth round's identical rule for the general collision path.
+
+      **A fourteenth round found the identity-matched set itself was not
+      restricted to cross-snapshot-stable identities.** An
+      `Anonymous`/`LocalToFunction` scope segment's own ordinal is not
+      stable across two snapshots by design (inserting an earlier
+      anonymous sibling shifts every later one's ordinal, even though
+      nothing about those later declarations changed -- see
+      `model/identity_stability.py`'s own docstring, which names exactly
+      this class of consumer as needing this gate before trusting a raw
+      `EntityId` match across snapshots). Both functions now filter their
+      identity-matched set through
+      `entity_id_is_cross_snapshot_stable` -- the first real call site for
+      that predicate, which existed with no consumer specifically because
+      it needed one with this same review rigor before being wired in.
+      Without the gate, an old colliding group `X=[1, 2]` becoming
+      `[3, 1, 2]` after inserting an earlier-declared sibling (shifting
+      the original two declarations' ordinals by one) would have paired
+      old ordinal 0 against new ordinal 0 and old ordinal 1 against new
+      ordinal 1 by raw `EntityId` equality -- two fabricated `CHANGED`
+      findings for declarations that never changed, instead of the one
+      real, provable addition.
   public_surface:
     primitive: complete
     producers: complete

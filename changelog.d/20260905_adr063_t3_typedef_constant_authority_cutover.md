@@ -280,3 +280,19 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   different declarations — the fallback is now used only for a
   single-entity group, matching the ninth round's identical rule for the
   general collision path.
+- **The thirteenth round's own identity-first matching no longer trusts an
+  `Anonymous`-scoped identity's ordinal across two snapshots.** An
+  `Anonymous`/`LocalToFunction` scope segment's own ordinal is not stable
+  across two snapshots by design (`model.identity_stability`'s own
+  docstring: inserting an earlier anonymous sibling shifts every later
+  one's ordinal, even though nothing about those later declarations
+  changed), so raw `EntityId` equality could pair two genuinely unrelated
+  declarations that happen to collide on a shifted ordinal plus the same
+  bare name — fabricating a `CONSTANT_CHANGED`/`TYPEDEF_BASE_CHANGED` for
+  what is really just an unrelated addition (Codex review, PR #1078,
+  fourteenth round). Both `diff_constants` and `diff_typedefs` now gate
+  their identity-matched set through
+  `model.identity_stability.entity_id_is_cross_snapshot_stable` — that
+  predicate's own docstring named this collision path as exactly the kind
+  of real consumer it was written for but had no call site yet; this is
+  the first one.

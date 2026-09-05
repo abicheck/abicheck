@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Protocol
 from ..diff_helpers import make_change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.identity import EntityId, EntityKind
+from ..model.identity_stability import entity_id_is_cross_snapshot_stable
 from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
     legacy_constant_ir,
@@ -385,11 +386,31 @@ def diff_constants(
         # only a compatible-looking addition of `2` instead of the real
         # breaking change to the stable entity, and losing the genuine
         # addition entirely. `set(old_ids) & set(new_ids)` is exact, not a
-        # heuristic: `_values()` never repeats an `EntityId` within one
-        # side, so each shared id names exactly one occurrence per side.
+        # heuristic, *for a stable identity*: `_values()` never repeats an
+        # `EntityId` within one side, so each shared id names exactly one
+        # occurrence per side -- but an `Anonymous`/`LocalToFunction` scope
+        # segment's own ordinal is explicitly not stable across two
+        # snapshots (``model.identity_stability``'s own docstring:
+        # inserting an earlier anonymous sibling shifts every later one's
+        # ordinal, and therefore its whole `EntityId`, even though nothing
+        # about that later declaration changed). Trusting a raw
+        # intersection here would risk pairing two genuinely unrelated
+        # declarations that happen to collide on a shifted ordinal plus the
+        # same bare name -- fabricating a `CONSTANT_CHANGED` for what is
+        # really just an unrelated addition (Codex review, PR #1078,
+        # fourteenth round). Gated through
+        # :func:`~abicheck.model.identity_stability.
+        # entity_id_is_cross_snapshot_stable` -- this collision path is
+        # exactly the "real consumer" that predicate's own docstring says
+        # needs its own adversarial review before being wired in, so this
+        # is the first real call site.
         # No per-name legacy fallback here either, for the identical
         # ninth-round reason the rest of this path avoids it.
-        shared_ids = set(old_ids) & set(new_ids)
+        shared_ids = {
+            i
+            for i in set(old_ids) & set(new_ids)
+            if entity_id_is_cross_snapshot_stable(i)
+        }
         for shared_id in shared_ids:
             old_val = _value(old_index, shared_id)
             new_val = _value(new_index, shared_id)

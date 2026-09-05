@@ -540,6 +540,61 @@ class TestDetectorBehavior:
         assert added_change.new_value == "1"
         assert added_change.entity_id == added
 
+    def test_shifted_anonymous_ordinals_are_not_trusted_as_stable_identity(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, fourteenth round: an
+        ``Anonymous``-scoped identity's own ordinal is not stable across
+        snapshots (``model.identity_stability``'s own docstring) --
+        inserting an earlier anonymous sibling shifts every later one's
+        ordinal, even though nothing about those later declarations
+        changed. Two anonymous-scoped ``X`` declarations (``1``, ``2``)
+        collide on the old side; a *new*, earlier-declared sibling shifts
+        both of their ordinals by one on the new side, landing a
+        genuinely new ``X=3`` at the vacated ordinal 0. Naively trusting
+        `set(old_ids) & set(new_ids)` would pair old ordinal 0 (``1``)
+        against new ordinal 0 (``3``, actually the new declaration) and
+        old ordinal 1 (``2``) against new ordinal 1 (``1``, actually the
+        original ordinal-0 declaration, merely renumbered) -- two
+        fabricated ``CONSTANT_CHANGED`` findings for declarations that
+        never changed, on top of losing the real addition's own identity.
+        The only provable difference is the addition of ``X=3``."""
+        old_first = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_second = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        new_inserted = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        new_first_shifted = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        new_second_shifted = entity_id_for_constant((Anonymous("namespace", 2),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_first): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(old_second): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_inserted): CanonicalEntity(
+                        canonical_spelling=Fact.present("3")
+                    ),
+                    OccurrenceId(new_first_shifted): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(new_second_shifted): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_ADDED
+        assert change.new_value == "3"
+
     def test_a_duplicate_value_added_to_a_colliding_group_is_an_addition_not_a_change(
         self,
     ) -> None:

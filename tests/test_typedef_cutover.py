@@ -299,6 +299,58 @@ class TestDetectorBehavior:
         assert change.new_value == "long"
         assert change.entity_id == stable
 
+    def test_shifted_anonymous_ordinals_are_not_trusted_as_stable_identity(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, fourteenth round: the typedef-family
+        sibling of the identical constant-family finding. Two
+        anonymous-scoped ``Alias`` declarations (``int``, ``long``) collide
+        on the old side; a new, earlier-declared sibling shifts both of
+        their ordinals by one on the new side, landing a genuinely new
+        ``Alias=char`` at the vacated ordinal 0. Trusting a raw
+        `EntityId` intersection would pair old ordinal 0 (``int``) against
+        new ordinal 0 (``char``, actually the new declaration) and old
+        ordinal 1 (``long``) against new ordinal 1 (``int``, actually the
+        original ordinal-0 declaration merely renumbered) -- two fabricated
+        ``TYPEDEF_BASE_CHANGED`` findings for declarations that never
+        changed. The only provable difference is the addition of
+        ``Alias=char`` -- untracked for typedefs, so no finding at all."""
+        old_first = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_second = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        new_inserted = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        new_first_shifted = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        new_second_shifted = entity_id_for_typedef(
+            (Anonymous("namespace", 2),), "Alias"
+        )
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(old_first): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(old_second): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_inserted): CanonicalEntity(
+                        canonical_spelling=Fact.present("char")
+                    ),
+                    OccurrenceId(new_first_shifted): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(new_second_shifted): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                }
+            )
+        )
+        assert _run(old_index, new_index) == []
+
     def test_a_duplicate_value_added_to_a_colliding_group_is_not_a_base_change(
         self,
     ) -> None:
