@@ -51,9 +51,8 @@ ADR-063 Phase 1) — ``frontends/cli/commands/dump.py`` builds a second,
 execution-scoped ``ResolvedDumpRequest`` from the object this module
 produces and calls ``frontends.cli.dump_execute``, which runs it through
 ``service_dump_pipeline.execute_dump_request`` instead of the retired
-``perform_elf_dump``/``handle_non_elf_dump`` call sites (both still
-defined, for any other caller that depends on them, but no longer imported
-by ``dump_cmd``). The legacy ``-p``/``--compile-db`` auto-match this note
+``perform_elf_dump``/``handle_non_elf_dump`` call sites (both deleted by
+ADR-063 Track 1 once that migration left them with no production caller). The legacy ``-p``/``--compile-db`` auto-match this note
 used to call a blocker is threaded through as an explicit pass-through
 (``execute_dump_request(..., legacy_compile_db_tokens=...,
 legacy_compile_db_matched=...)``) rather than a typed-API field — see

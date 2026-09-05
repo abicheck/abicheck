@@ -5,7 +5,11 @@
 ``_dump_will_attempt_hybrid_l4_extraction``. Split out of
 ``test_cli_dump_helpers_coverage.py`` (CLAUDE.md file-size cap) -- that file
 still covers the rest of the module (compile-db/debug-format resolution,
-handle_non_elf_dump, perform_elf_dump plumbing).
+collect-context and compile-context resolution). The
+``handle_non_elf_dump``/``perform_elf_dump`` plumbing it also used to cover
+went away with those functions (ADR-063 Track 1); what remains of it is
+pinned against the live path in
+``tests/test_dump_cli_execution_behaviors.py``.
 """
 
 from __future__ import annotations

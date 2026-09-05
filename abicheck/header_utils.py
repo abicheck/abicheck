@@ -15,10 +15,10 @@
 
 """Pure path and compiler-flag helpers for header (``-H``) inputs.
 
-A leaf module (stdlib-only) so both the service layer (``service._dump_elf``)
-and the ``dump`` CLI helper (``cli_dump_helpers.perform_elf_dump``) can share the
-include-root derivation without an import cycle (``cli`` → ``cli_dump_helpers`` →
-``service`` → … → ``cli``).
+A leaf module (stdlib-only) so every caller can share the include-root
+derivation without an import cycle — originally ``service._dump_elf`` and the
+since-retired ``cli_dump_helpers.perform_elf_dump``, across the ``cli`` →
+``cli_dump_helpers`` → ``service`` → … → ``cli`` cycle (ADR-063 Track 1).
 
 Being that leaf is also why this module, rather than ``buildsource``, owns the
 compiler-dialect and include-flag vocabulary the whole codebase reads
@@ -396,8 +396,8 @@ def resolve_inferred_header_roots(
       build's own lowest include bucket (``/external:I`` / ``/imsvc`` / ``/I``)
       so the root never shadows the build's system dirs (#454).
 
-    Shared by the ``dump`` CLI path (``cli_dump_helpers.perform_elf_dump``) and
-    the service/``scan`` path (``service._dump_elf``) so they cannot drift.
+    Shared by the ELF parse (``service_dump_native._dump_elf``, which ``dump``
+    reaches directly now ``perform_elf_dump`` retired) and every other path.
     """
     # Tokenize the pass-through flags once, then reuse for every check below.
     ctx = _context_tokens(gcc_options, gcc_option_tokens)
@@ -555,8 +555,8 @@ def drop_include_tokens_duplicating_paths(
     identical ``(flag-class, directory)`` pair already appears in
     *already_covered* (a raw token list, in the same shape as *toks*).
 
-    ``dump``'s ELF and PE/Mach-O paths (:func:`abicheck.cli_dump_helpers.
-    perform_elf_dump`/:func:`abicheck.service_header_scoped._try_header_
+    ``dump``'s ELF and PE/Mach-O paths (:func:`abicheck.service_dump_native.
+    _dump_elf`/:func:`abicheck.service_header_scoped._try_header_
     scoped_dump`) both render the L3->L2 fold's merged compile context into
     ``gcc_option_tokens`` via ``header_compile_context._context_flags`` —
     which independently renders the *same* matched compile unit's

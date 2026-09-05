@@ -1216,8 +1216,14 @@ def dump(
             live `compare`-side extraction of the identical header set
             spuriously raises ``ScopeMismatchError`` (found during the G30
             pilot validation).
-            The CLI's ``dump`` command passes its own raw ``-H``/``--header``
-            directory arguments here (``cli_dump_helpers.perform_elf_dump``).
+            No typed request populates this field: ``dump``'s own ``-H``
+            directory operands reach ``public_header_dirs`` instead, via
+            ``service_dump_pipeline.resolve_dump_request``'s
+            ``split_public_header_inputs`` call (the same split ``compare``
+            applies to its own ``-H`` list). The retired
+            ``cli_dump_helpers.perform_elf_dump`` was this parameter's one
+            caller; see ``docs/contribute/known-gaps.md``'s entry on that
+            channel change.
             Mutually exclusive with *dump_manifest*, same as *headers*.
         frontend_context: "host"/"device" (ADR-050 D5) DPC++/SYCL AST pass;
             "device" on a non-DPC++-capable frontend raises ``AstContextMissingError``.
