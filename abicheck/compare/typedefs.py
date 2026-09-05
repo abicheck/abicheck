@@ -53,9 +53,13 @@ from typing import TYPE_CHECKING, Protocol
 
 from ..diff_helpers import make_change, typedef_side_trusts_qualified
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.identity import EntityId, EntityKind
+from ..model.fact import Fact
+from ..model.identity import Anonymous, EntityId, EntityKind
+from ..model.occurrence import OccurrenceId
+from ..model.semantic_ir import CanonicalEntity, SemanticIR
 from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
+    SYNTHETIC_IDENTITY_EXTRA,
     legacy_typedef_ir,
     producer_entity_id,
     render_display_name_or_leaf,
@@ -250,19 +254,6 @@ def diff_typedefs(
             # RD2-5: don't manufacture a phantom removal when the new side
             # is stripped of type evidence entirely.
             continue
-        old_id = old_ids[0]
-        old_type = _underlying(old_index, old_id)
-        # Old-side-preferred with a new-side fallback, the convention every
-        # other `entity_id` producer in this codebase uses.
-        # `producer_entity_id`, never the raw id: the legacy adapter
-        # synthesizes one for a declaration whose producer resolved none,
-        # and stamping that onto a `Change` would present this index's own
-        # bookkeeping as backend evidence -- and add a spurious `entity:`
-        # alias to `finding_identity.resolve_change_identity`, which real,
-        # stored suppression rules match against.
-        eid = producer_entity_id(old_id) or (
-            producer_entity_id(new_ids[0]) if new_ids else None
-        )
         if new_ids is None:
             if is_version_stamped_typedef(alias) and _has_version_family_successor(
                 alias, new_alias_keys
@@ -272,27 +263,38 @@ def diff_typedefs(
                 # design and is never exported as an ELF symbol -- not a
                 # binary ABI break. Requiring a same-family successor avoids
                 # hiding a genuine removal for a name that merely matches
-                # the pattern.
+                # the pattern. One finding per contributing entity, not just
+                # `old_ids[0]` (Codex review, PR #1078, twelfth round): a
+                # colliding group's own version-sentinel rotation is still
+                # one rotation per entity.
+                for rotated_id in old_ids:
+                    changes.append(
+                        make_change(
+                            ChangeKind.TYPEDEF_VERSION_SENTINEL,
+                            symbol=bare_alias,
+                            name=bare_alias,
+                            old_value=_underlying(old_index, rotated_id),
+                            entity_id=producer_entity_id(rotated_id),
+                        )
+                    )
+                continue
+            # One `TYPEDEF_REMOVED` per contributing entity, not just
+            # `old_ids[0]` (Codex review, PR #1078, twelfth round): when
+            # the whole colliding group vanishes -- not merely shrinks --
+            # every one of its distinct entities is an independent, real
+            # removal, and each carries its own entity_id rather than
+            # every finding sharing a single id.
+            for removed_id in old_ids:
                 changes.append(
                     make_change(
-                        ChangeKind.TYPEDEF_VERSION_SENTINEL,
+                        ChangeKind.TYPEDEF_REMOVED,
                         symbol=bare_alias,
                         name=bare_alias,
-                        old_value=old_type,
-                        entity_id=eid,
+                        old_value=_underlying(old_index, removed_id),
+                        entity_id=producer_entity_id(removed_id),
+                        description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                     )
                 )
-                continue
-            changes.append(
-                make_change(
-                    ChangeKind.TYPEDEF_REMOVED,
-                    symbol=bare_alias,
-                    name=bare_alias,
-                    old_value=old_type,
-                    entity_id=eid,
-                    description=f"Typedef removed: {bare_alias}{qualified_suffix}",
-                )
-            )
             continue
         # Occurrence-level bookkeeping, not a bare value `Counter`/`set`
         # (Codex review, PR #1078, eleventh round -- mirroring
@@ -420,16 +422,61 @@ def _bare_typedef_side_index(
     qualified-key-space case, without reopening the bare/qualified
     granularity mismatch :func:`typedef_index_pair` splits on: the
     *comparison* still runs entirely on bare keys.
+
+    **Preserves ambiguity rather than picking a last-wins winner** (Codex
+    review, PR #1078, twelfth round): projecting straight into a
+    ``dict[str, str]`` and handing it to :func:`legacy_typedef_ir` -- which
+    can only ever construct one occurrence per key -- collapsed two
+    distinct qualified entities that share a bare leaf name (e.g.
+    ``a::Alias`` and a newly-added ``b::Alias``) onto a single bare-string
+    assignment, with the later one silently overwriting the earlier. That
+    fabricated a spurious ``TYPEDEF_BASE_CHANGED`` for an unchanged
+    declaration whenever the discarded entity's value differed from the
+    survivor's -- exactly the collision this module's own occurrence-level
+    bookkeeping (:func:`diff_typedefs`) already knows how to handle
+    correctly, if only it were given the chance. So each real IR entity
+    gets its own synthetic bare-projected identity instead of collapsing
+    into a shared dict key: a fresh :class:`~abicheck.model.identity.
+    Anonymous` scope segment (tagged with a per-alias ordinal purely to
+    keep the identities distinct -- these are not real anonymous
+    declarations) renders to nothing via
+    :func:`~abicheck.model.semantic_ir_legacy_adapter.
+    render_display_name_or_leaf`, so every such entity still renders under
+    its shared bare *alias*, but as genuinely separate entries
+    :func:`_aliases` groups into one colliding list rather than one dict
+    key overwriting another.
     """
     if snapshot.semantic_ir is None:
         return SemanticIRIndex(legacy_typedef_ir(snapshot, typedefs))
     ir_index = SemanticIRIndex(snapshot.semantic_ir)
-    bare: dict[str, str] = dict(typedefs)
+    occurrences: dict[OccurrenceId, CanonicalEntity] = {}
+    covered_aliases: set[str] = set()
+    ordinal_by_alias: dict[str, int] = {}
     for entity_id in ir_index.entities_of_kind(EntityKind.TYPEDEF):
         alias = render_display_name_or_leaf(entity_id)
         bare_alias = alias.rsplit("::", 1)[-1]
-        bare[bare_alias] = _underlying(ir_index, entity_id)
-    return SemanticIRIndex(legacy_typedef_ir(snapshot, bare))
+        covered_aliases.add(bare_alias)
+        ordinal = ordinal_by_alias.get(bare_alias, 0)
+        ordinal_by_alias[bare_alias] = ordinal + 1
+        bare_id = EntityId(
+            scope=(Anonymous("bare-typedef-projection", ordinal),),
+            kind=EntityKind.TYPEDEF,
+            leaf_name=bare_alias,
+            extra=SYNTHETIC_IDENTITY_EXTRA,
+        )
+        occurrences[OccurrenceId(bare_id)] = CanonicalEntity(
+            canonical_spelling=Fact.present(_underlying(ir_index, entity_id))
+        )
+    # A bare alias this side's own *typedefs* map carries but the real IR
+    # doesn't cover at all still needs representation -- delegate to the
+    # legacy adapter's own single-occurrence-per-alias construction for
+    # exactly those leftover aliases (there is no collision risk for them,
+    # since the caller-supplied bare map is itself already single-valued
+    # per key).
+    leftover = {k: v for k, v in typedefs.items() if k not in covered_aliases}
+    if leftover:
+        occurrences.update(legacy_typedef_ir(snapshot, leftover).occurrences)
+    return SemanticIRIndex(SemanticIR(occurrences=occurrences))
 
 
 def typedef_index_pair(

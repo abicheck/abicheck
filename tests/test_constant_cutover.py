@@ -305,6 +305,55 @@ class TestDetectorBehavior:
         assert change.symbol == "X"
         assert change.old_value is None
 
+    def test_a_whole_colliding_group_disappearing_reports_every_removal(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, twelfth round: two anonymous-scoped
+        constants collide on ``X`` and the whole group vanishes on the new
+        side -- not merely shrinks. Both are independent, real removals,
+        not just `old_ids[0]`."""
+        first = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        second = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_REMOVED for c in changes)
+        assert {c.old_value for c in changes} == {"1", "2"}
+
+    def test_a_whole_new_colliding_group_reports_every_addition(self) -> None:
+        """The addition-side mirror: an entirely new colliding group (not
+        present in `old_values` at all) can carry more than one distinct
+        entity, each an independent addition."""
+        first = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        second = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                }
+            )
+        )
+        changes = _run(SemanticIRIndex(SemanticIR()), new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_ADDED for c in changes)
+        assert {c.new_value for c in changes} == {"1", "2"}
+
     def test_an_unrenderable_scope_segment_falls_back_to_its_bare_leaf_name(
         self,
     ) -> None:

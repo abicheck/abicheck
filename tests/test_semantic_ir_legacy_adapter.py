@@ -461,11 +461,17 @@ class TestTypedefIndexPair:
             is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
         )
         assert changes == []
-        # The adapter ran for `new`, not its real IR: its identity is
-        # synthetic, and it is keyed bare ("Alias"), not qualified.
+        # `new`'s own real IR is bare-projected (Codex review, PR #1078,
+        # twelfth round: each real entity gets its own synthetic,
+        # collision-safe bare identity rather than collapsing into a
+        # shared `legacy_typedef_ir` dict key) -- still synthetic (no
+        # backend evidence to stamp onto a `Change`) and still keyed bare
+        # ("Alias"), not qualified, via the best-effort renderer (the
+        # synthetic identity's own `Anonymous` wrapper makes the strict
+        # renderer refuse it).
         for eid_ in new_index.entities_of_kind(EntityKind.TYPEDEF):
             assert producer_entity_id(eid_) is None
-            assert render_display_name(eid_) == "Alias"
+            assert render_display_name_or_leaf(eid_) == "Alias"
 
     def test_bare_mode_still_uses_a_side_own_real_ir_when_its_bare_map_is_incomplete(
         self,
@@ -502,10 +508,47 @@ class TestTypedefIndexPair:
             is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
         )
         assert changes == []
+        # The bare-projected synthetic identity's own `Anonymous` wrapper
+        # (Codex review, PR #1078, twelfth round) makes the strict renderer
+        # refuse it -- use the best-effort one, matching how the alias
+        # grouping itself reads this entity.
         assert "Alias" in {
-            render_display_name(e)
+            render_display_name_or_leaf(e)
             for e in new_index.entities_of_kind(EntityKind.TYPEDEF)
         }
+
+    def test_bare_projection_preserves_ambiguity_across_colliding_qualified_names(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, twelfth round: the OLD side is pre-v25
+        with ``Alias=int``; the NEW side carries a real, qualified IR with
+        *two* distinct entities that both flatten to the bare alias
+        ``Alias`` -- an unchanged ``a::Alias=int`` and a newly-added
+        ``b::Alias=long``. Projecting straight into a ``dict[str, str]``
+        (an earlier version of this fix) collapsed both onto one bare key,
+        with the later one silently overwriting the earlier -- comparing
+        ``Alias=int`` (old) against whichever one survived (``long``)
+        fabricated a ``TYPEDEF_BASE_CHANGED`` for a declaration that never
+        actually changed. The only provable difference is the untracked,
+        compatible addition of ``b::Alias`` -- so no finding at all."""
+        unchanged_eid = entity_id_for_typedef((Namespace("a"),), "Alias")
+        added_eid = entity_id_for_typedef((Namespace("b"),), "Alias")
+        old = _snap(typedefs={"Alias": "int"}, ast_producer="")
+        new = _snap(
+            typedefs_qualified={"a::Alias": "int", "b::Alias": "long"},
+            semantic_ir=_typedef_ir({unchanged_eid: "int", added_eid: "long"}),
+        )
+        old_index, new_index = typedef_index_pair(
+            old, new, old_typedefs={"Alias": "int"}, new_typedefs={}
+        )
+        changes = diff_typedefs(
+            old_index,
+            new_index,
+            exclude_stdlib_namespaces=False,
+            suppress_removed=False,
+            is_non_abi_surface_type=lambda name, *, exclude_stdlib_namespaces: False,
+        )
+        assert changes == []
 
     def test_an_unrenderable_anonymous_scope_is_used_but_invisible_to_aliasing(
         self,

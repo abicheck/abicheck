@@ -236,3 +236,27 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   (`old_by_value`/`new_by_value`) instead of a `Counter`/`set`, so pairing
   order is deterministic and reproducible, multiplicity is exact, and
   every finding carries the specific occurrence's own entity_id.
+- **A whole colliding group disappearing (or newly appearing) now reports
+  every contributing entity, not just the first.** Both `diff_constants`'s
+  whole-name `CONSTANT_REMOVED`/`CONSTANT_ADDED` paths and `diff_typedefs`'s
+  whole-alias `TYPEDEF_REMOVED`/`TYPEDEF_VERSION_SENTINEL` path used to
+  stamp only `old_ids[0]`/`new_ids[0]` even when the vanishing (or
+  brand-new) group carried more than one distinct colliding entity (Codex
+  review, PR #1078, twelfth round) — removing two anonymous-scoped `X`
+  declarations at once reported only one removal. Each now emits one
+  finding per contributing entity, with that entity's own entity_id.
+- **A typedef's bare-mode projection no longer collapses two distinct
+  qualified entities sharing a bare leaf name onto one last-wins string.**
+  `_bare_typedef_side_index` used to project a side's real `SemanticIR`
+  straight into a `dict[str, str]` and hand it to `legacy_typedef_ir`,
+  which can only construct one occurrence per key — so two qualified
+  entities that flatten to the same bare alias (e.g. an unchanged
+  `a::Alias` and a newly-added `b::Alias`) silently overwrote each other,
+  fabricating a `TYPEDEF_BASE_CHANGED` for a declaration that never
+  actually changed whenever the discarded entity's value differed from the
+  survivor's (Codex review, PR #1078, twelfth round). Each real IR entity
+  now gets its own synthetic, collision-safe bare identity (a fresh
+  `Anonymous` scope wrapper that renders to nothing, keeping the identity
+  distinct while still rendering under the shared bare alias) instead of
+  collapsing into a shared dict key, letting the existing occurrence-level
+  collision handling in `diff_typedefs` compare them correctly.

@@ -185,6 +185,32 @@ class TestDetectorBehavior:
         assert change.kind is ChangeKind.TYPEDEF_REMOVED
         assert change.symbol == "Alias"
 
+    def test_a_whole_colliding_group_disappearing_reports_every_removal(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, twelfth round: two anonymous-scoped
+        typedefs collide on ``Alias`` and the whole group vanishes on the
+        new side -- not merely shrinks. Both are independent, real
+        removals, not just `old_ids[0]`."""
+        first = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        second = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_REMOVED for c in changes)
+        assert {c.old_value for c in changes} == {"int", "long"}
+
     def test_a_value_change_on_one_of_two_colliding_anonymous_typedefs_is_still_caught(
         self,
     ) -> None:

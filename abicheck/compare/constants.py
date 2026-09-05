@@ -304,9 +304,6 @@ def diff_constants(
 
     for name, old_ids in old_values.items():
         new_ids = new_values.get(name)
-        eid = producer_entity_id(old_ids[0]) or (
-            producer_entity_id(new_ids[0]) if new_ids else None
-        )
         if new_ids is None:
             # A membership change (removed) is real regardless of whether
             # this constant's own value was ever comparable -- checked
@@ -316,17 +313,25 @@ def diff_constants(
             # removal, just with no recoverable old_value text (Codex
             # review: this used to `continue` here before ever reaching the
             # membership check, silently dropping the removal).
-            changes.append(
-                make_change(
-                    ChangeKind.CONSTANT_REMOVED,
-                    symbol=name,
-                    name=name,
-                    old_value=_value_or_legacy(
-                        old_index, old_ids[0], name, old_constants
-                    ),
-                    entity_id=eid,
+            #
+            # One `CONSTANT_REMOVED` per contributing entity, not just
+            # `old_ids[0]` (Codex review, PR #1078, twelfth round): when
+            # the whole colliding group vanishes -- not merely shrinks --
+            # every one of its distinct entities is an independent, real
+            # removal, and each carries its own entity_id rather than
+            # every finding sharing a single id.
+            for old_id in old_ids:
+                changes.append(
+                    make_change(
+                        ChangeKind.CONSTANT_REMOVED,
+                        symbol=name,
+                        name=name,
+                        old_value=_value_or_legacy(
+                            old_index, old_id, name, old_constants
+                        ),
+                        entity_id=producer_entity_id(old_id),
+                    )
                 )
-            )
             continue
         if len(old_ids) == 1 and len(new_ids) == 1:
             # The common, non-colliding case: preserved exactly as before
@@ -346,7 +351,8 @@ def diff_constants(
                     new=repr(new_val),
                     old_value=old_val,
                     new_value=new_val,
-                    entity_id=eid,
+                    entity_id=producer_entity_id(old_ids[0])
+                    or producer_entity_id(new_ids[0]),
                 )
             )
             continue
@@ -475,16 +481,20 @@ def diff_constants(
         if name in old_values:
             continue
         # Mirrors the removal side above: an addition is real regardless of
-        # whether the new value is itself comparable.
-        changes.append(
-            make_change(
-                ChangeKind.CONSTANT_ADDED,
-                symbol=name,
-                name=name,
-                new_value=_value_or_legacy(new_index, new_ids[0], name, new_constants),
-                entity_id=producer_entity_id(new_ids[0]),
+        # whether the new value is itself comparable. One `CONSTANT_ADDED`
+        # per contributing entity, not just `new_ids[0]` (Codex review, PR
+        # #1078, twelfth round): an entirely new colliding group can carry
+        # more than one distinct entity, each an independent addition.
+        for new_id in new_ids:
+            changes.append(
+                make_change(
+                    ChangeKind.CONSTANT_ADDED,
+                    symbol=name,
+                    name=name,
+                    new_value=_value_or_legacy(new_index, new_id, name, new_constants),
+                    entity_id=producer_entity_id(new_id),
+                )
             )
-        )
     return changes
 
 

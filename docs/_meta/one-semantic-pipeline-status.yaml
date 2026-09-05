@@ -557,6 +557,29 @@ concepts:
       for a value on one side over the other is exactly that many
       removed/added *occurrences*, each still carrying its own real
       entity_id.
+
+      **A twelfth round found two further gaps.** First, both families'
+      whole-name/whole-alias membership paths (`CONSTANT_REMOVED`/
+      `CONSTANT_ADDED` in `compare/constants.py`,
+      `TYPEDEF_REMOVED`/`TYPEDEF_VERSION_SENTINEL` in `compare/
+      typedefs.py`) still stamped only `old_ids[0]`/`new_ids[0]` when the
+      whole colliding group vanished or newly appeared, even though such a
+      group can carry more than one distinct entity -- each now emits one
+      finding per contributing entity. Second, `_bare_typedef_side_index`
+      (the seventh round's own bare-projection fix) projected a side's
+      real `SemanticIR` straight into a `dict[str, str]` and handed it to
+      `legacy_typedef_ir`, which can only construct one occurrence per
+      key -- so two qualified entities sharing a bare leaf name (an
+      unchanged `a::Alias` and a newly-added `b::Alias`) silently
+      overwrote each other, fabricating a `TYPEDEF_BASE_CHANGED` for an
+      unchanged declaration. Fixed by giving each real IR entity its own
+      synthetic, collision-safe bare identity (an `Anonymous` scope
+      wrapper that renders to nothing but keeps the identity distinct)
+      instead of collapsing into a shared dict key, so the existing
+      occurrence-level collision handling in `diff_typedefs` -- already
+      correct once given the chance -- compares them properly. Constants
+      have no bare/qualified split at all (no schema-versioned bare-only
+      baseline predates them), so this second fix is typedef-only.
   public_surface:
     primitive: complete
     producers: complete
