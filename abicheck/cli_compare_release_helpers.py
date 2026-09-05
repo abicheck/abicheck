@@ -1115,14 +1115,15 @@ def _format_release_junit(
     # testsuite so CI dashboards reading the JUnit report see the failure.
     if matrix_result is not None:
         pairs.append((matrix_result, None))
-    scope_blocks = scope_terms is not None and scope_terms.incomplete_scope_exit_contribution == 1
+    # An `unsupported`/`failed` member is the scope suite's to render
+    # (`append_scope_suite`: skipped under `warn`, an error under `block`)
+    # -- listing it here too emitted the same failure twice (CodeRabbit).
     error_libs = [
         {**entry, "error": entry.get("reason", entry["verdict"])}
-        if entry.get("verdict") in ("not_comparable", "unsupported", "failed")
+        if entry.get("verdict") == "not_comparable"
         else entry
         for entry in library_results
         if entry.get("verdict") in ("ERROR", "not_comparable")
-        or (entry.get("verdict") in ("unsupported", "failed") and scope_blocks)
     ]
     return to_junit_xml_multi(
         pairs,

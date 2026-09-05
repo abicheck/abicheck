@@ -359,7 +359,11 @@ def _release_compatibility_base_exit(
 ) -> int:
     """The compatibility axis's own exit code for a stderr notice's wording
     -- the severity-aware code when one is in effect, else the legacy
-    verdict mapping with the release's own operational ``ERROR`` floor."""
+    verdict mapping with the release's own operational ``ERROR`` floor.
+    ``not_comparable`` is ``16`` under either scheme, exactly as
+    ``_exit_compare_release`` exits it ahead of every floor (CodeRabbit)."""
+    if worst_verdict == "not_comparable":
+        return 16
     if severity_exit_code is not None:
         return max(severity_exit_code, 4 if worst_verdict == "ERROR" else 0)
     from .checker_policy import Verdict

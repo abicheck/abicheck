@@ -274,7 +274,9 @@ def compare_stored_bundle_facts_pair(
         # no-op ceiling on evidence that was already at or below the
         # requested rung, so the comparison would proceed on binary-only
         # facts as if headers-level evidence had genuinely backed it.
-        enforce_requested_depth(depth, ((f"old:{key}", raw_old), (f"new:{key}", raw_new)))
+        enforce_requested_depth(
+            depth, ((f"old:{key}", raw_old), (f"new:{key}", raw_new))
+        )
         diff = compare_snapshots(
             projected_old_snapshots[key],
             projected_new_snapshots[key],
@@ -327,9 +329,10 @@ def compare_stored_bundle_facts_pair(
         new_facts.per_library_snapshots,
         compared=[key for key in matched_keys if key not in degraded_keys],
         degraded={
-            key: str(
-                old_facts.degraded_members.get(key)
-                or new_facts.degraded_members.get(key)
+            key: (
+                old_facts.degraded_members[key]
+                if key in old_facts.degraded_members
+                else new_facts.degraded_members[key]
             )
             for key in sorted(degraded_keys)
         },

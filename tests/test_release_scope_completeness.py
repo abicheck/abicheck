@@ -1121,11 +1121,10 @@ class TestJunitScopeProjection:
             if s.get("name") == "abicheck.comparison_scope"
         )
         assert scope.get("errors") == "1"
-        assert any(
-            s.get("name") == "libb.json" and s.get("errors") == "1"
-            for s in root.iter("testsuite")
-        )
-        assert int(root.get("errors") or 0) >= 2
+        # The scope suite owns the unsupported member: no second, per-library
+        # error suite for it, so the failure is counted once (CodeRabbit).
+        assert not any(s.get("name") == "libb.json" for s in root.iter("testsuite"))
+        assert root.get("errors") == "1"
 
     def test_zero_pair_release_errors_under_every_policy(self, tmp_path: Path) -> None:
         import xml.etree.ElementTree as ET

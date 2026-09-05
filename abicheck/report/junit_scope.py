@@ -51,12 +51,16 @@ def append_scope_suite(
         return 0, 0
     blocking = int(section.get("incomplete_scope_exit_contribution") or 0) == 1
     no_comparison = bool(section.get("no_comparison_completed"))
+    # Exactly the section's own resolved `unchecked` names: a `not_supplied`
+    # member the lacking side's proof turned into a proven removal is not
+    # unchecked, and must not render as a skipped/error case (CodeRabbit).
+    names = section.get("unchecked")
+    unchecked_names = set(names) if isinstance(names, list) else set()
     members = section.get("members")
     unchecked = [
         m
         for m in (members if isinstance(members, list) else [])
-        if isinstance(m, Mapping)
-        and m.get("state") not in ("available", "out_of_scope")
+        if isinstance(m, Mapping) and m.get("name") in unchecked_names
     ]
     suite = ET.SubElement(root, "testsuite")
     suite.set("name", SUITE_NAME)

@@ -540,6 +540,53 @@ class TestDegradedMarkerVersionGate:
             bundle_composition_from_dto(forged)
 
 
+class TestJunitScopeSuiteRendersResolvedUnchecked:
+    def test_a_proven_removal_is_not_a_scope_case(self) -> None:
+        """A `not_supplied` member the lacking side's proof turned into a
+        proven removal is not unchecked; the JUnit scope suite renders the
+        section's resolved `unchecked` names only (CodeRabbit)."""
+        import xml.etree.ElementTree as ET
+
+        from abicheck.report.junit_scope import append_scope_suite
+
+        section = {
+            "incomplete_scope_exit_contribution": 0,
+            "no_comparison_completed": False,
+            "policy": "warn",
+            "unchecked": ["libgap.so"],
+            "proven_removed": ["libgone.so"],
+            "members": [
+                {"name": "libgone.so", "state": "not_supplied", "reason": "proven"},
+                {"name": "libgap.so", "state": "unsupported", "reason": "wasm"},
+                {"name": "libok.so", "state": "available", "reason": ""},
+            ],
+        }
+        root = ET.Element("testsuites")
+        tests, errors = append_scope_suite(root, section)
+        assert (tests, errors) == (1, 0)
+        names = [c.get("name") for c in root.iter("testcase")]
+        assert names == ["libgap.so:unsupported"]
+
+    def test_degraded_reason_is_taken_from_the_marking_side(
+        self, tmp_path: Path
+    ) -> None:
+        """An empty-string reason on one side must not fall through to the
+        other side's absence and render as the literal "None" (CodeRabbit)."""
+        from abicheck.workflows.bundle_stored_pair_compare import (
+            compare_stored_bundle_facts_pair,
+        )
+
+        libs = {"libx.so": _lib("libx.so", exports=("x",))}
+        old = _facts_file(
+            tmp_path, "old.bundlefacts.json", libs, degraded={"libx.so": ""}
+        )
+        new = _facts_file(tmp_path, "new.bundlefacts.json", libs)
+        result = compare_stored_bundle_facts_pair(old, new)
+        assert result.scope_record is not None
+        (member,) = result.scope_record.unchecked_members
+        assert "None" not in member.reason
+
+
 class TestStoredPackageDegradedMember:
     """A ProjectSnapshot package preserves the marker; the live fan-out
     must read it back through package resolution and record the member
