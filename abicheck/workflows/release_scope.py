@@ -56,7 +56,7 @@ directory listing order (an ADR-065 acceptance invariant).
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -87,7 +87,8 @@ __all__ = [
     "release_inventory_evidence",
     "restrict_bundle_facts",
     "scope_manifest_to_members",
-    "stored_degraded_matched_members",
+    "StoredDegradedMembers",
+    "stored_degraded_members",
     "stored_side_degraded_members",
     "scoped_bundle_maps",
     "unmatched_names",
@@ -626,19 +627,40 @@ def stored_side_degraded_members(
         ) from exc
 
 
-def stored_degraded_matched_members(
+@dataclass(frozen=True)
+class StoredDegradedMembers:
+    """Every *selected* member either side's stored ``ProjectSnapshot``
+    package marks degraded (ADR-065 D8), split by where it sits in the
+    release: ``matched`` (in both maps -- skipped by the fan-out and
+    recorded ``failed``), ``old_unmatched``/``new_unmatched`` (in one map
+    only -- fed to the record builder's ``old_failed``/``new_failed`` so
+    the member is ``FAILED`` there, never ``NOT_SUPPLIED``: a degraded
+    capture is not the kind of evidence a proven inventory on the other
+    side may turn into a removal or an addition). Values are the reason
+    text the scope record and library results carry."""
+
+    matched: dict[str, str] = field(default_factory=dict)
+    old_unmatched: dict[str, str] = field(default_factory=dict)
+    new_unmatched: dict[str, str] = field(default_factory=dict)
+
+
+def stored_degraded_members(
     old_dir: Path,
     new_dir: Path,
-    matched_keys: Iterable[str],
+    old_map: Mapping[str, Path],
+    new_map: Mapping[str, Path],
     *,
     old_variant: str | None,
     new_variant: str | None,
-) -> dict[str, str]:
-    """``{matched key: reason}`` for every matched member either side's
-    stored ``ProjectSnapshot`` package marks degraded (ADR-065 D8), so the
-    fan-out skips it and records it ``failed`` -- the same treatment the
-    stored/stored and stored/live drivers give the marker. A live directory
-    or archive side carries no marker and contributes nothing.
+) -> StoredDegradedMembers:
+    """Read both sides' D8 markers and place each marked *selected* member
+    (a key of *old_map*/*new_map*) into :class:`StoredDegradedMembers`.
+    A live directory or archive side carries no marker and contributes
+    nothing; a marker on a key neither map selects is not this run's
+    concern (the reader already refused a key the package does not store).
+    An OLD-only degraded member used to be dropped here as "not matched",
+    which let a proven-complete NEW side promote it to a removal even though
+    its OLD acquisition failed (Codex review, twenty-seventh round).
     """
     found: dict[str, str] = {}
     for label, side_dir, variant in (
@@ -651,8 +673,16 @@ def stored_degraded_matched_members(
                 key,
                 f"{label} side was captured degraded ({reason}); comparison skipped (ADR-065 D8)",
             )
-    matched = set(matched_keys)
-    return {k: v for k, v in found.items() if k in matched}
+    result = StoredDegradedMembers()
+    for key, reason in found.items():
+        in_old, in_new = key in old_map, key in new_map
+        if in_old and in_new:
+            result.matched[key] = reason
+        elif in_old:
+            result.old_unmatched[key] = reason
+        elif in_new:
+            result.new_unmatched[key] = reason
+    return result
 
 
 def unmatched_names(record: ScopeAcquisitionRecord, *, side: str) -> list[str]:

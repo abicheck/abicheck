@@ -112,7 +112,7 @@ from .workflows.release_scope import (
     out_of_scope_provider_names,
     release_inventory_evidence,
     scoped_bundle_maps,
-    stored_degraded_matched_members,
+    stored_degraded_members,
     stored_side_degraded_members,
 )
 from .workflows.storage import is_project_snapshot_package_dir
@@ -629,16 +629,21 @@ def compare_release_cmd(
             # ADR-065 D8 (Codex review): a matched member either stored
             # package marks degraded is not compared -- its snapshot is the
             # ELF-only stand-in -- but recorded `failed` on the scope axis.
+            # An unmatched one is `failed` on the record too (below), so a
+            # proven inventory on the other side never turns a degraded
+            # capture into a removal or an addition (twenty-seventh round).
             try:
-                degraded_matched = stored_degraded_matched_members(
+                degraded = stored_degraded_members(
                     old_dir,
                     new_dir,
-                    matched_keys,
+                    old_map,
+                    new_map,
                     old_variant=old_variant,
                     new_variant=new_variant,
                 )
             except SnapshotError as exc:  # a damaged marker section (Codex review)
                 raise click.UsageError(str(exc)) from exc
+            degraded_matched = degraded.matched
             library_results, worst_verdict, diff_pairs = _compare_release_libraries(
                 [k for k in matched_keys if k not in degraded_matched],
                 old_map,
@@ -706,8 +711,8 @@ def compare_release_cmd(
                 matched_keys,
                 library_results,
                 inventory_evidence,
-                old_failed=old_unclassified,
-                new_failed=new_unclassified,
+                old_failed={**degraded.old_unmatched, **old_unclassified},
+                new_failed={**degraded.new_unmatched, **new_unclassified},
             )
             # A member --dso-only could not classify is this run's own
             # acquisition failure: an operational `ERROR` library result
