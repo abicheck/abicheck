@@ -1,13 +1,26 @@
 # ADR-067: Change-Intent Acknowledgment and the Policy-Disposition Audit
 
 **Date:** 2026-09-05
-**Status:** Proposed — not implemented. Design record for the vision's
+**Status:** Accepted — **slice S1 implemented** for the scalar single-pair
+`compare` path; S2–S4 not implemented. Design record for the vision's
 "intent and configuration accountability" decisions (`vision.md`). The
 audit half (D1–D4) extends ADR-013/024/044/049/063/064 and the report
 owners and is sequenced *first*, without waiting for history (ADR-066);
-the acknowledgment half (D5–D7) is the one genuinely new mechanism. No
-code, schema, or default changes with this document. Implementation is
-sequenced in
+the acknowledgment half (D5–D7) is the one genuinely new mechanism and
+remains unimplemented. What S1 landed: one conserved disposition ledger
+(`abicheck/policy/disposition_ledger.py`) that all five suppression
+application points record into
+(`abicheck/post_processing.py`, `abicheck/checker.py`,
+`abicheck/appcompat.py`); the raw-versus-effective counts and rule
+provenance in every scalar projection
+(`abicheck/report/disposition_audit.py`, `abicheck/reporter.py`,
+`abicheck/reporter_markdown.py`, `abicheck/report/render_text.py`,
+`abicheck/pr_comment_render.py`) under report schema 2.50; a
+`not_evaluated` detector state (`abicheck/detector_registry.py`,
+`abicheck/detectors.py`); and `abicheck/semver.py`'s release
+recommendation reading the conserved delta instead of the
+post-suppression change list — the one behavior change, carried with a
+migration note. Implementation is sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
 (workstream "Policy-disposition audit and change acknowledgment").
 **Decision maker:** maintainer (product decision recorded in `vision.md`);

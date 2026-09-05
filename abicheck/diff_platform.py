@@ -1320,14 +1320,35 @@ def _diff_abi_surface(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 # ── Sprint 3: DWARF-aware layout diff ────────────────────────────────────────
 
 
-@registry.detector("dwarf")
+def _has_any_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str | None]:
+    """Support gate for the ``dwarf`` detector (ADR-067 D3).
+
+    Neither side carrying debug info used to be an in-body ``return []``, which
+    the registry recorded as ``enabled=True, changes_count=0`` — a real,
+    evaluated zero. It is not one: no layout evidence existed to compare, so
+    the honest record is ``not_evaluated`` with this reason. Expressed through
+    the registry's own ``requires_support`` mechanism rather than a second
+    skip vocabulary; the detector's remaining degradation rules (old-has /
+    new-stripped) stay in the body, because those *do* produce a finding.
+    """
+    from .model.dwarf_facts import DwarfMetadata
+
+    o = getattr(old, "dwarf", None) or DwarfMetadata()
+    n = getattr(new, "dwarf", None) or DwarfMetadata()
+    if not o.has_dwarf and not n.has_dwarf:
+        return False, "no DWARF debug info on either side"
+    return True, None
+
+
+@registry.detector("dwarf", requires_support=_has_any_dwarf)
 def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """DWARF-aware struct/enum layout detectors (Sprint 3).
 
     Requires binaries compiled with -g.
 
     Graceful degradation rules:
-    - Neither side has DWARF → skip silently (no false positives)
+    - Neither side has DWARF → the ``_has_any_dwarf`` support gate above keeps
+      this detector from running at all, recorded as ``not_evaluated``
     - Old has DWARF, new is stripped → emit DWARF_INFO_MISSING warning change
       so callers know the comparison is incomplete (not silently COMPATIBLE)
     - Only new has DWARF → can't compare without old baseline → skip
@@ -1344,9 +1365,6 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     o: DwarfMetadata = getattr(old, "dwarf", None) or DwarfMetadata()
     n: DwarfMetadata = getattr(new, "dwarf", None) or DwarfMetadata()
-
-    if not o.has_dwarf and not n.has_dwarf:
-        return []  # neither side has DWARF — nothing to compare
 
     if o.has_dwarf and not n.has_dwarf:
         _log.warning(

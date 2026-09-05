@@ -971,6 +971,69 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="policy.disposition_conservation",
+        invariant=(
+            "A policy disposition (suppression, scope exclusion, "
+            "deduplication, contract exclusion) moves a detected change "
+            "between buckets; it never changes how many changes were "
+            "detected, and every report projection states both the "
+            "detected total and the effective (gating) total. Two "
+            "corollaries the pre-ADR-067 code violated: a consumer of the "
+            "comparison result that needs the *raw* delta -- "
+            "`semver.recommend_release` -- must read the conserved ledger "
+            "rather than the post-disposition `changes` list, so a "
+            "suppressed major-class break can never degrade to 'no bump "
+            "needed'; and a detector that never ran must read as "
+            "`not_evaluated`, never as a real `changes_count: 0`."
+        ),
+        fixed_by=(),
+        seed_tests=("tests/test_disposition_audit.py",),
+        axes={
+            "application_point": (
+                "apply_suppression",
+                "merge_late_findings",
+                "filter_suppressed_changes",
+                "filter_pattern_synthetic",
+                "consumer_overlay",
+            ),
+            "projection": ("json", "stat-json", "one-line", "review-digest", "pr-comment"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Scoped to the scalar single-pair `compare` path "
+                    "(ADR-067 S1). The bundle, aggregate, release fan-out "
+                    "and consumer-report projections do not yet carry the "
+                    "audit, so the conservation invariant is unchecked "
+                    "there -- that is S2. The seed tests likewise drive "
+                    "`checker.compare` and the reporters directly rather "
+                    "than the CLI or typed API, so `public_surfaces` is "
+                    "deliberately empty."
+                ),
+                reference=(
+                    "docs/contribute/plans/vision-api-abi-evolution.md"
+                    " -- workstream C, slice S2"
+                ),
+            ),
+            KnownGap(
+                description=(
+                    "`RuleProvenance.intent` is always 'unspecified': the "
+                    "explicit `intent: waiver|false_positive` rule field is "
+                    "ADR-067 D5 (S3). Until it lands, the audit cannot "
+                    "distinguish a claimed detector false positive from a "
+                    "deliberate waiver, which is why the suppressed-break "
+                    "release recommendation asks for review rather than "
+                    "asserting a MAJOR release outright."
+                ),
+                reference=(
+                    "docs/contribute/adr/"
+                    "067-change-intent-acknowledgment-and-disposition-audit.md"
+                    " -- D5"
+                ),
+            ),
+        ),
+    ),
 )
 
 

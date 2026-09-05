@@ -446,9 +446,25 @@ def _suppression_note(model: CommentModel) -> list[str]:
         parts.append(
             f"🔀 {n} finding{'s' if n != 1 else ''} reclassified by `--policy`"
         )
+    lines: list[str] = []
+    if model.disposition_audit is not None:
+        # ADR-067 D3: the raw-versus-effective counts come first and are not
+        # conditional on anything having been suppressed -- "0 breaking" must
+        # never be the only number a reviewer sees.
+        from .report.disposition_audit import (
+            DispositionAudit,
+            render_disposition_audit_comment_lines,
+        )
+
+        lines += render_disposition_audit_comment_lines(
+            DispositionAudit.from_dict(model.disposition_audit)
+        )
     if not parts:
-        return []
-    return [f"> ℹ️ {' · '.join(parts)} — see the full JSON report for details.", ""]
+        return lines
+    return lines + [
+        f"> ℹ️ {' · '.join(parts)} — see the full JSON report for details.",
+        "",
+    ]
 
 
 def _scoped_notes(model: CommentModel) -> list[str]:

@@ -88,6 +88,7 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
 
+from .disposition_audit import DispositionAudit
 from .document import ReportDocument
 from .render_markdown import (
     ConfidenceSection,
@@ -169,6 +170,11 @@ def build_review_digest_document(
         "bump_value": digest.bump_value,
         "soname_value": digest.soname_value,
         "impacted": [{"symbol": s.symbol, "kind": s.kind} for s in digest.impacted],
+        "disposition_audit": (
+            None
+            if digest.disposition_audit is None
+            else digest.disposition_audit.to_dict()
+        ),
     }
     return ReportDocument.from_mapping(d)
 
@@ -194,6 +200,11 @@ def _review_digest_from_mapping(d: Mapping[str, Any]) -> ReviewDigest:
         bump_value=d["bump_value"],
         soname_value=d["soname_value"],
         impacted=impacted,
+        disposition_audit=(
+            None
+            if d.get("disposition_audit") is None
+            else DispositionAudit.from_dict(d["disposition_audit"])
+        ),
     )
 
 

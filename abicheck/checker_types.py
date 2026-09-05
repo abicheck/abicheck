@@ -689,6 +689,21 @@ class DiffResult(ReportSideFacts):
     # ``True`` for both. Default ``True``, matching ``compare()``'s own
     # parameter default.
     scope_to_public_surface_requested: bool = field(default=True, kw_only=True)
+    # ADR-067 C-S1 -- the conserved policy-disposition ledger
+    # (``policy.disposition_ledger.DispositionLedger``): every atomically
+    # detected change with the single terminal disposition it received, plus
+    # the suppression rule's provenance for each finding a ``--suppress`` rule
+    # hid. Always populated by ``checker.compare()``; ``None`` for a
+    # ``DiffResult`` some other caller assembled, in which case
+    # ``policy.disposition_ledger.ledger_for`` finalizes an equivalent one
+    # from this object's own buckets -- so every consumer can state D3's
+    # counts unconditionally. Typed ``object`` for the same circular-import
+    # reason as ``contract_context``/``analysis_assurance`` above (the ledger
+    # module type-checks against ``DiffResult``). Audit data: it decides no
+    # verdict and no exit code, but it is not inert -- ``semver.
+    # recommend_release`` reads the *conserved* delta from it, so a suppressed
+    # major-class break can no longer read as "no bump needed".
+    disposition_ledger: object | None = field(default=None, kw_only=True)
 
     def _effective_kind_sets(
         self,

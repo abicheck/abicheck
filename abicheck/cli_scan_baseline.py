@@ -809,6 +809,11 @@ def _baseline_summary(
             "changes_count": det.changes_count,
             "enabled": det.enabled,
             "coverage_gap": det.coverage_gap,
+            # ADR-067 D3, carried here for the same §6.4 parity reason the
+            # comment above records: "did not run" and "ran, found nothing"
+            # are different statements, and `changes_count: 0` cannot tell
+            # them apart.
+            "not_evaluated": det.not_evaluated,
         }
         for det in getattr(diff, "detector_results", None) or []
         if det.changes_count > 0 or det.coverage_gap is not None

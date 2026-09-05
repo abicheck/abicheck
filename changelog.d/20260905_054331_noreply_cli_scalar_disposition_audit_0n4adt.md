@@ -1,0 +1,39 @@
+### Added
+
+- **Scalar policy-disposition audit (ADR-067 C-S1).** A single-pair `compare`
+  now records every atomically detected change together with the one terminal
+  disposition it received — `gating`, `non_gating`, `suppressed`,
+  `out_of_contract`, `unresolved_relevance` or `deduplicated` — in a conserved
+  ledger (`abicheck.policy.disposition_ledger`) that all five suppression
+  application points route through. Every report projection carries the
+  resulting raw-versus-effective counts: the JSON report gains an additive
+  top-level `disposition_audit` block, `--stat`'s one-line summary gains an
+  `[audit: N detected, M gating, …]` suffix, and the review digest and sticky
+  PR comment gain a disposition table/row. A fully suppressed comparison can no
+  longer read as "no changes".
+- **Rule provenance in the suppression ledger.** Each
+  `suppression.suppressed_changes[]` entry now records *which* rule hid the
+  finding — its selector identity, the `--suppress` document's path, reason,
+  label and expiry — instead of computing that and dropping it. Report schema
+  bumped to `2.50` (additive only).
+- **`not_evaluated` detector state.** A detector whose support gate refused it
+  is now recorded as `not_evaluated` with the gate's reason rather than as
+  `changes_count: 0`, so "did not run" and "ran, found nothing" are no longer
+  the same report. The `dwarf` detector's own "neither side has debug info"
+  early return moved onto that gate.
+
+### Fixed
+
+- **`recommend_release` no longer reports "no version bump required" for a
+  suppressed break.** It read the *post*-suppression change list, so a rule
+  with `allow_public_break: true` covering a removed public symbol silently
+  degraded the release advice. It now reads the conserved disposition ledger:
+  a suppressed major-class finding is reported as `major` with state `review`
+  and a rationale naming the rule, the finding kinds, and
+  `intent: unspecified`. **Migration note:** a run whose breaks are entirely
+  suppressed previously received `bump: none` / `soname_action:
+  no_bump_needed`; it now receives `bump: major` / `soname_action:
+  not_determined` / `state: review`. Automation keyed on the old value should
+  either drop the suppression rule or record an explicit acknowledgment once
+  ADR-067 D5's `intent:` field lands. No verdict, gate decision or exit code
+  changes.

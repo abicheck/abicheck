@@ -587,6 +587,7 @@ class SuppressionList:
         suppressions: list[Suppression],
         *,
         source_sha256: str | None = None,
+        source_path: str | None = None,
     ) -> None:
         self._suppressions = suppressions
         #: sha256 of the exact raw bytes :meth:`load` read, when these rules
@@ -595,6 +596,13 @@ class SuppressionList:
         #: changed in between, and the digest would then authenticate content
         #: that did not produce these rules (Codex review, ADR-049 D6 replay).
         self.source_sha256 = source_sha256
+        #: Path :meth:`load` read these rules from, when they came from a
+        #: file. ADR-067 D3/D4 want the suppression *source* in the audit, not
+        #: only its content hash: "which rule hid this finding" is only
+        #: actionable when the reader also knows which document to open. Set
+        #: on the same one read as ``source_sha256`` above, and ``None`` for a
+        #: programmatically-built or merged list.
+        self.source_path = source_path
 
     @classmethod
     def merge(cls, a: SuppressionList, b: SuppressionList) -> SuppressionList:
@@ -643,7 +651,7 @@ class SuppressionList:
             # A file with no `suppressions:` key is a valid, empty rule set —
             # it still has content that can drift, so it keeps its digest
             # (ADR-049 D6) exactly like the populated return below.
-            return cls([], source_sha256=digest)
+            return cls([], source_sha256=digest, source_path=str(path))
         if not isinstance(raw_suppressions, list):
             raise ValueError("'suppressions' must be a list")
 
@@ -697,7 +705,7 @@ class SuppressionList:
                 )
             suppressions.append(sup)
 
-        return cls(suppressions, source_sha256=digest)
+        return cls(suppressions, source_sha256=digest, source_path=str(path))
 
     def is_suppressed(self, change: Change, today: date | None = None) -> bool:
         """Return True if any active (non-expired) suppression rule matches the given change."""

@@ -133,6 +133,11 @@ from .dwarf_advanced import (
     diff_advanced_dwarf,  # noqa: F401 — re-export for monkeypatching
 )
 from .model import AbiSnapshot
+from .policy.disposition_ledger import (
+    DispositionLedger,
+    finalize_ledger,
+    record_suppressed_change,
+)
 from .policy_file import PolicyFile
 
 if TYPE_CHECKING:
@@ -203,6 +208,7 @@ def _filter_suppressed_changes(
     changes: list[Change],
     suppression: SuppressionList | None,
     suppressed: list[Change],
+    ledger: DispositionLedger | None = None,
 ) -> list[Change]:
     """Remove suppressed advisories (SONAME/platform-floor) from *changes*,
     appending them to *suppressed* in-place. Returns the visible subset.
@@ -228,6 +234,13 @@ def _filter_suppressed_changes(
         outcome = suppression.evaluate(c)
         if outcome.suppressed:
             c.suppression_rule = outcome.rule_label()
+            record_suppressed_change(
+                ledger,
+                c,
+                rule=outcome.matched_rule,
+                application_point="filter_suppressed_changes",
+                suppression=suppression,
+            )
             suppressed.append(c)
             continue
         visible.append(c)
@@ -258,6 +271,7 @@ def _apply_surface_metrics(
     stage: ContractEvaluationStage | None = None,
     old_public_entity_ids: frozenset[EntityId] | None = None,
     new_public_entity_ids: frozenset[EntityId] | None = None,
+    ledger: DispositionLedger | None = None,
 ) -> tuple[list[Change], Verdict]:
     """Compute aggregate surface-metric findings (ADR-027 A1/D1.2) and return
     the updated *kept* list and (possibly recomputed) *verdict*.
@@ -287,6 +301,7 @@ def _apply_surface_metrics(
         ),
         suppression,
         suppressed,
+        ledger,
     )
     if not visible:
         return kept, current_verdict
@@ -308,6 +323,7 @@ def _filter_pattern_synthetic(
     suppression: SuppressionList,
     suppressed: list[Change],
     pattern_modulations: list[dict[str, object]],
+    ledger: DispositionLedger | None = None,
 ) -> tuple[list[Change], list[dict[str, object]]]:
     """Filter newly-added synthetic pattern findings through suppression.
 
@@ -337,6 +353,13 @@ def _filter_pattern_synthetic(
         outcome = suppression.evaluate(c)
         if outcome.suppressed:
             c.suppression_rule = outcome.rule_label()
+            record_suppressed_change(
+                ledger,
+                c,
+                rule=outcome.matched_rule,
+                application_point="filter_pattern_synthetic",
+                suppression=suppression,
+            )
             suppressed.append(c)
             # Drop this synthetic finding's disclosure row too, so a
             # fully-suppressed handle/opaque/anti-pattern transition does
@@ -379,6 +402,7 @@ def _apply_pattern_verdicts_step(
     stage: ContractEvaluationStage | None = None,
     old_public_entity_ids: frozenset[EntityId] | None = None,
     new_public_entity_ids: frozenset[EntityId] | None = None,
+    ledger: DispositionLedger | None = None,
 ) -> tuple[list[Change], Verdict, list[dict[str, object]]]:
     """Apply ADR-027 A4 pattern-aware verdict modulation.
 
@@ -416,7 +440,12 @@ def _apply_pattern_verdicts_step(
 
     if suppression is not None and len(kept) > pre_pattern_count:
         kept, pattern_modulations = _filter_pattern_synthetic(
-            kept, pre_pattern_count, suppression, suppressed, pattern_modulations
+            kept,
+            pre_pattern_count,
+            suppression,
+            suppressed,
+            pattern_modulations,
+            ledger,
         )
 
     if pattern_modulations:
@@ -485,6 +514,7 @@ def _run_post_processing(
     force_public_symbols: set[str] | None,
     collapse_versioned_symbols: bool,
     public_surface_allowlist: set[str] | None = None,
+    disposition_ledger: DispositionLedger | None = None,
 ) -> tuple[
     list[Change],
     list[Change],
@@ -515,6 +545,7 @@ def _run_post_processing(
         force_public_symbols=force_public_symbols,
         collapse_versioned_symbols=collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,
+        disposition_ledger=disposition_ledger,
     )
     # scoping is "resolved" unless it was requested and had to fall back to the
     # full export table (issue #235: an unconfirmed scope must not read as a
@@ -541,6 +572,7 @@ def _apply_soname_policy(
     *,
     versioned_scheme_soname_relink_required: bool = False,
     stage: ContractEvaluationStage | None = None,
+    ledger: DispositionLedger | None = None,
 ) -> list[Change]:
     """Apply ELF version-node demotion and SONAME bump-policy check.
 
@@ -595,7 +627,9 @@ def _apply_soname_policy(
             for c in soname_changes
             if c.kind is not ChangeKind.SONAME_BUMP_UNNECESSARY
         ]
-    soname_changes = _filter_suppressed_changes(soname_changes, suppression, suppressed)
+    soname_changes = _filter_suppressed_changes(
+        soname_changes, suppression, suppressed, ledger
+    )
     if soname_changes:
         kept.extend(soname_changes)
     return kept
@@ -692,6 +726,7 @@ def _env_matrix_contract_changes(
     suppression: SuppressionList | None,
     suppressed: list[Change],
     env_matrix: EnvironmentMatrix | None,
+    ledger: DispositionLedger | None = None,
 ) -> list[Change]:
     """Every declared-runtime-floor / wheel-packaging check, run under one
     ``env_matrix.runtime_floors`` gate.
@@ -759,7 +794,7 @@ def _env_matrix_contract_changes(
         check_wheel_closure_dependency_violation(new_elf, floors),
     ):
         produced.extend(
-            _filter_suppressed_changes(check_changes, suppression, suppressed)
+            _filter_suppressed_changes(check_changes, suppression, suppressed, ledger)
         )
     return produced
 
@@ -907,6 +942,12 @@ def compare(
     if extra_changes:
         changes.extend(extra_changes)
 
+    # ADR-067 C-S1: one conserved policy-disposition ledger per comparison,
+    # built before the first disposition can be applied and threaded into every
+    # suppression application point below, so the raw-versus-effective totals
+    # reconcile by construction rather than being reconstructed afterwards.
+    ledger = DispositionLedger()
+
     # Run the post-processing pipeline (filtering, dedup, enrichment, suppression).
     # PolicyFile.frozen_namespaces is threaded in so the late-stage
     # EscalateFrozenNamespaceViolations step can tag matching findings.
@@ -928,6 +969,7 @@ def compare(
         force_public_symbols,
         collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,
+        disposition_ledger=ledger,
     )
 
     # ADR-049 D9 — contract relevance is classified *before* compatibility
@@ -997,6 +1039,7 @@ def compare(
             suppression,
             suppressed,
             env_matrix,
+            ledger,
         )
     )
 
@@ -1016,6 +1059,7 @@ def compare(
             ),
             suppression,
             suppressed,
+            ledger,
         )
     )
 
@@ -1032,6 +1076,7 @@ def compare(
             pp_ctx.versioned_scheme_soname_relink_required
         ),
         stage=stage,
+        ledger=ledger,
     )
 
     all_unsuppressed = kept + verdict_redundant
@@ -1087,6 +1132,7 @@ def compare(
             stage,
             old_public_entity_ids=old_public_entity_ids,
             new_public_entity_ids=new_public_entity_ids,
+            ledger=ledger,
         )
 
     # ADR-027 A4: pattern-aware verdict modulation. Runs after post-processing
@@ -1110,6 +1156,7 @@ def compare(
             stage,
             old_public_entity_ids=old_public_entity_ids,
             new_public_entity_ids=new_public_entity_ids,
+            ledger=ledger,
         )
 
     # ADR-049 D9's closing half: relevance was already decided above; here we
@@ -1259,6 +1306,12 @@ def compare(
         assurance=assurance,
         contract_context=contract_context,
     )
+    # ADR-067 C-S1/D3: close the ledger over every change that survived to a
+    # bucket on `result`, so the per-disposition counts sum to the detected
+    # total. The suppression application points already recorded their own
+    # findings (with the matched rule's provenance) as they ran.
+    result.disposition_ledger = finalize_ledger(ledger, result)
+
     # P0.4 — computed last, from data the pipeline above already produced
     # (evidence tiers, comparability outcome, contract context, whatever
     # BuildSourcePack either side already carries). A pure rollup over the

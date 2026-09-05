@@ -173,6 +173,12 @@ class CommentModel:
     # neither shows up in the three buckets above by construction.
     suppressed_count: int = 0
     reclassified_count: int = 0
+    # ADR-067 D3: the JSON report's `disposition_audit` block verbatim (raw
+    # versus effective totals, per-disposition counts, rule provenance), or
+    # None for a report that predates schema 2.50. Carried as the wire dict
+    # rather than a parsed struct for the same reason every other field here
+    # is: this model is built from an already-serialized report.
+    disposition_audit: dict[str, object] | None = None
     # scan mode only (see `pr_comment_scan.from_scan`): the raw
     # `scan_engine.ScanOutcome` verdict string
     # ("COMPATIBLE"/"API_BREAK"/"BREAKING"/"NOT_COMPARABLE"/…), the

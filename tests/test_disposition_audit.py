@@ -1,0 +1,502 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""ADR-067 C-S1: the scalar policy-disposition audit.
+
+The registered bug class is ``policy.disposition_conservation``
+(``tests/regressions/manifest.py``): *a policy disposition moves a detected
+change between buckets; it never changes how many changes were detected, and
+the report states both totals.* Two concrete defects fall out of that
+invariant being unstated before this slice, and both are exercised below
+rather than only described:
+
+* a suppressed major-class break degraded ``semver.recommend_release`` to "no
+  version bump required" — the recommendation read the *post*-disposition
+  ``changes`` list;
+* a detector that never ran was recorded as ``enabled=True,
+  changes_count=0``, so "did not run" and "ran, found nothing" were the same
+  report.
+
+The conservation tests are deliberately generative rather than fixed-input
+(AGENTS.md "A bug fix's regression test targets the bug *class*"): the
+oracle is an *independent recount* of the terminal buckets on ``DiffResult``,
+run over the full cross-product of five snapshot shapes and six rule shapes
+(narrow, broad, kind-scoped, non-matching, overlapping, none) so the
+invariant is checked against a formula the implementation does not share,
+across every application point those combinations reach — not against an
+expected number a reader could have copied out of the implementation.
+"""
+
+from __future__ import annotations
+
+import itertools
+import json
+
+import pytest
+
+from abicheck.checker import compare
+from abicheck.checker_policy import ChangeKind
+from abicheck.model import AbiSnapshot, Function, Variable, Visibility
+from abicheck.policy.disposition_ledger import (
+    Disposition,
+    DispositionLedger,
+    conservation_holds,
+    finalize_ledger,
+    ledger_for,
+)
+from abicheck.report.disposition_audit import compute_disposition_audit
+from abicheck.semver import ReleaseRecommendationState, SemverBump
+from abicheck.suppression import Suppression, SuppressionList
+
+
+def _snapshots(
+    removed: int = 0,
+    *,
+    kept: int = 0,
+    added: int = 0,
+    variables_removed: int = 0,
+    prefix: str = "foo",
+) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Old/new pair with *removed* public functions gone in the new side."""
+    old = AbiSnapshot(library="libfoo", version="1.0")
+    new = AbiSnapshot(library="libfoo", version="2.0")
+
+    def _fn(name: str) -> Function:
+        return Function(
+            name=f"{prefix}::{name}",
+            mangled=f"_ZN3{prefix}{len(name)}{name}Ev",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
+
+    for i in range(removed):
+        old.functions.append(_fn(f"gone{i}"))
+    for i in range(kept):
+        fn = _fn(f"stay{i}")
+        old.functions.append(fn)
+        new.functions.append(_fn(f"stay{i}"))
+    for i in range(added):
+        new.functions.append(_fn(f"new{i}"))
+    for i in range(variables_removed):
+        old.variables.append(
+            Variable(
+                name=f"{prefix}::var{i}",
+                mangled=f"_ZN3{prefix}3var{i}E",
+                type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        )
+    return old, new
+
+
+# ---------------------------------------------------------------------------
+# The ADR's own named acceptance fixture
+# ---------------------------------------------------------------------------
+
+
+class TestHundredSuppressedRemovals:
+    """ADR-067's "Tests (contract)" first row: *100 removals plus a wildcard
+    waiver (counts and rule visible on a passing run)*."""
+
+    @pytest.fixture
+    def result(self):
+        old, new = _snapshots(removed=100)
+        rules = SuppressionList(
+            [
+                Suppression(
+                    symbol_pattern=".*",
+                    reason="bulk internal churn",
+                    label="wildcard-waiver",
+                    allow_public_break=True,
+                )
+            ]
+        )
+        return compare(old, new, rules)
+
+    def test_the_run_passes_but_the_hundred_removals_are_still_counted(
+        self, result
+    ) -> None:
+        # The point of the fixture: the *gate* is clean, and the audit is not.
+        assert result.changes == []
+        audit = compute_disposition_audit(result)
+        assert audit.detected_total == 100
+        assert audit.effective_total == 0
+        assert dict(audit.counts)[Disposition.SUPPRESSED.value] == 100
+
+    def test_the_rule_that_hid_them_is_named_with_its_reason(self, result) -> None:
+        audit = compute_disposition_audit(result)
+        assert len(audit.rules) == 1
+        rule, count = audit.rules[0]
+        assert count == 100
+        assert rule.reason == "bulk internal churn"
+        assert rule.label == "wildcard-waiver"
+        assert rule.allow_public_break is True
+        # ADR-067 D5's migration default for every rule written before the
+        # explicit `intent:` field exists.
+        assert rule.intent == "unspecified"
+
+    def test_rule_provenance_reaches_the_json_suppression_ledger(self, result) -> None:
+        from abicheck import reporter
+
+        report = json.loads(reporter.to_json(result))
+        entries = report["suppression"]["suppressed_changes"]
+        assert len(entries) == 100
+        assert all(e["rule"]["reason"] == "bulk internal churn" for e in entries)
+        assert report["disposition_audit"]["detected_total"] == 100
+        assert report["disposition_audit"]["counts"]["suppressed"] == 100
+
+    def test_the_suppression_document_path_is_recorded(self, tmp_path) -> None:
+        path = tmp_path / "suppress.yml"
+        path.write_text(
+            "version: 1\nsuppressions:\n  - symbol_pattern: '.*'\n"
+            "    reason: bulk internal churn\n    allow_public_break: true\n",
+            encoding="utf-8",
+        )
+        old, new = _snapshots(removed=100)
+        result = compare(old, new, SuppressionList.load(path))
+        rule, count = compute_disposition_audit(result).rules[0]
+        assert count == 100
+        assert rule.source_file == str(path)
+
+    def test_every_projection_states_the_counts(self, result) -> None:
+        """Workstream G's report invariant: collapsing detail is fine,
+        dropping the counts is not."""
+        from abicheck import reporter
+        from abicheck.pr_comment import build_model, render_comment
+        from abicheck.reporter_markdown import to_review_digest, to_stat
+
+        one_line = to_stat(result)
+        assert "100 detected" in one_line and "0 gating" in one_line
+
+        digest = to_review_digest(result)
+        assert "| Detected (raw) | 100 |" in digest
+        assert "| Effective (gating) | 0 |" in digest
+        assert "bulk internal churn" in digest
+
+        for payload in (reporter.to_json(result), reporter.to_stat_json(result)):
+            block = json.loads(payload)["disposition_audit"]
+            assert block["detected_total"] == 100
+            assert block["effective_total"] == 0
+
+        comment = render_comment(build_model(json.loads(reporter.to_json(result))))
+        assert "100 detected" in comment
+        assert "0 gating" in comment
+        assert "bulk internal churn" in comment
+
+
+# ---------------------------------------------------------------------------
+# Conservation across the application points (the class-level invariant)
+# ---------------------------------------------------------------------------
+
+
+#: Selector shapes that reach genuinely different application points and
+#: gate paths — a narrow exact symbol, a broad pattern needing the
+#: public-break gate, a kind selector, and one that matches nothing at all.
+_RULE_SHAPES = (
+    lambda: [],
+    lambda: [Suppression(symbol_pattern=".*gone1.*", reason="narrow")],
+    lambda: [Suppression(symbol_pattern=".*", reason="broad", allow_public_break=True)],
+    lambda: [
+        Suppression(
+            symbol_pattern="_ZN3foo.*",
+            change_kind="func_removed",
+            reason="by kind",
+            allow_public_break=True,
+        )
+    ],
+    lambda: [Suppression(symbol="does::not::exist", reason="matches nothing")],
+    lambda: [
+        Suppression(symbol_pattern=".*gone0.*", reason="first", label="a"),
+        Suppression(symbol_pattern=".*", reason="rest", allow_public_break=True),
+    ],
+)
+
+#: Snapshot shapes exercising removals, additions, unchanged symbols and a
+#: removed variable (a different detector, hence a different call site).
+_SHAPES = (
+    dict(removed=0),
+    dict(removed=1),
+    dict(removed=3, kept=2, added=2),
+    dict(removed=2, variables_removed=2),
+    dict(removed=5, added=1, variables_removed=1, kept=1),
+)
+
+
+@pytest.mark.parametrize(
+    ("shape", "make_rules"),
+    list(itertools.product(_SHAPES, _RULE_SHAPES)),
+)
+def test_disposition_counts_conserve_the_detected_total(shape, make_rules) -> None:
+    """ADR-067 D3's counting identity, over a matrix of shapes and rules.
+
+    The oracle is deliberately *not* the ledger's own ``counts()`` sum: it is
+    an independent recount of the terminal buckets on ``DiffResult`` — kept,
+    suppressed, redundant, out-of-surface and reconciled — which is what
+    "conserved" has to mean for a reader of the report. A change that a
+    disposition moved between buckets must still be counted exactly once.
+    """
+    old, new = _snapshots(**shape)
+    rules = make_rules()
+    result = compare(old, new, SuppressionList(rules) if rules else None)
+    ledger = ledger_for(result)
+
+    assert conservation_holds(ledger)
+    assert sum(ledger.counts().values()) == ledger.detected_total
+
+    independent_total = (
+        len(result.changes)
+        + len(result.suppressed_changes)
+        + len(result.redundant_changes)
+        + len(result.out_of_surface_changes)
+        + len(result.reconciled_changes)
+    )
+    assert ledger.detected_total == independent_total
+
+
+@pytest.mark.parametrize(
+    ("shape", "make_rules"), list(itertools.product(_SHAPES, _RULE_SHAPES))
+)
+def test_every_suppressed_finding_has_a_ledger_record(shape, make_rules) -> None:
+    """No application point may move a change into ``suppressed_changes``
+    without recording it — the failure mode a ledger fed from one helper
+    alone would have."""
+    old, new = _snapshots(**shape)
+    rules = make_rules()
+    result = compare(old, new, SuppressionList(rules) if rules else None)
+    ledger = ledger_for(result)
+    for change in result.suppressed_changes:
+        record = ledger.record_for(change)
+        assert record is not None
+        assert record.disposition is Disposition.SUPPRESSED
+        # Recorded *at* the application point, so the rule survived: the
+        # fallback path (`unrecorded_suppression`) means one of them was
+        # missed.
+        assert record.application_point != "unrecorded_suppression"
+        assert record.rule is not None
+
+
+def test_suppression_never_changes_the_detected_total() -> None:
+    """The metamorphic half: adding a rule redistributes dispositions and
+    leaves the raw total alone, whatever the rule matches."""
+    old, new = _snapshots(removed=6, added=2, kept=2, variables_removed=2)
+    baseline = ledger_for(compare(old, new)).detected_total
+    for make_rules in _RULE_SHAPES:
+        rules = make_rules()
+        result = compare(old, new, SuppressionList(rules) if rules else None)
+        assert ledger_for(result).detected_total == baseline
+
+
+def test_consumer_overlay_suppression_records_into_the_same_ledger() -> None:
+    """The fourth application point (``appcompat``), whose input shape is a
+    raw ``missing_symbols`` string rather than a detected change."""
+    from abicheck.appcompat import AppRequirements
+    from abicheck.checker_types import Change, DiffResult
+
+    result = DiffResult(old_version="1.0", new_version="2.0", library="libfoo")
+    ledger = finalize_ledger(DispositionLedger(), result)
+    result.disposition_ledger = ledger
+    overlay = Change(
+        kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+        symbol="_ZN3foo4goneEv",
+        description="required by consumer",
+    )
+    rule = Suppression(symbol="_ZN3foo4goneEv", reason="consumer retired")
+    from abicheck.policy.disposition_ledger import record_suppressed_change
+
+    record_suppressed_change(
+        ledger_for(result),
+        overlay,
+        rule=rule,
+        application_point="consumer_overlay",
+        suppression=SuppressionList([rule]),
+    )
+    record = ledger.record_for(overlay)
+    assert record is not None
+    assert record.application_point == "consumer_overlay"
+    assert record.rule is not None and record.rule.reason == "consumer retired"
+    assert conservation_holds(ledger)
+    assert AppRequirements is not None  # the module imported cleanly
+
+
+def test_ledger_records_each_change_exactly_once() -> None:
+    """Idempotence: finalizing twice cannot double-count."""
+    old, new = _snapshots(removed=4, added=1)
+    result = compare(old, new)
+    ledger = ledger_for(result)
+    before = ledger.detected_total
+    finalize_ledger(ledger, result)
+    finalize_ledger(ledger, result)
+    assert ledger.detected_total == before
+    assert conservation_holds(ledger)
+
+
+def test_kept_findings_split_into_gating_and_non_gating() -> None:
+    old, new = _snapshots(removed=2, added=3)
+    result = compare(old, new)
+    counts = ledger_for(result).counts()
+    assert counts[Disposition.GATING.value] == 2
+    assert counts[Disposition.NON_GATING.value] == 3
+    assert counts[Disposition.SUPPRESSED.value] == 0
+
+
+def test_ledger_for_a_hand_built_result_still_reconciles() -> None:
+    """Every consumer must be able to state the counts unconditionally, even
+    for a ``DiffResult`` no ``compare()`` produced."""
+    from abicheck.checker_types import Change, DiffResult
+
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libfoo",
+        changes=[Change(kind=ChangeKind.FUNC_REMOVED, symbol="a", description="")],
+        suppressed_changes=[
+            Change(kind=ChangeKind.FUNC_REMOVED, symbol="b", description="")
+        ],
+        suppressed_count=1,
+    )
+    ledger = ledger_for(result)
+    assert ledger.detected_total == 2
+    assert conservation_holds(ledger)
+    # Cached, not rebuilt per call — two consumers must not see two ledgers.
+    assert ledger_for(result) is ledger
+
+
+# ---------------------------------------------------------------------------
+# not_evaluated detectors
+# ---------------------------------------------------------------------------
+
+
+class TestNotEvaluatedDetectors:
+    def test_a_detector_that_did_not_run_is_not_a_zero(self) -> None:
+        old, new = _snapshots(removed=1)
+        result = compare(old, new)
+        by_name = {d.name: d for d in result.detector_results}
+        dwarf = by_name["dwarf"]
+        assert dwarf.changes_count == 0
+        assert dwarf.not_evaluated is True
+        assert dwarf.enabled is False
+        assert dwarf.coverage_gap
+
+    def test_every_not_evaluated_detector_states_a_reason(self) -> None:
+        old, new = _snapshots(removed=1)
+        result = compare(old, new)
+        not_run = [d for d in result.detector_results if d.not_evaluated]
+        assert not_run, "this evidence-free pair must leave detectors unevaluated"
+        assert all(d.coverage_gap for d in not_run)
+        assert all(d.changes_count == 0 and not d.enabled for d in not_run)
+
+    def test_a_detector_that_ran_is_never_marked_not_evaluated(self) -> None:
+        old, new = _snapshots(removed=1)
+        result = compare(old, new)
+        ran = [d for d in result.detector_results if d.enabled]
+        assert ran
+        assert not any(d.not_evaluated for d in ran)
+
+    def test_the_state_reaches_the_report(self) -> None:
+        from abicheck import reporter
+
+        old, new = _snapshots(removed=1)
+        report = json.loads(reporter.to_json(compare(old, new)))
+        detectors = {d["name"]: d for d in report["detectors"]}
+        assert detectors["dwarf"]["not_evaluated"] is True
+        assert "dwarf" in {
+            d["name"] for d in report["disposition_audit"]["not_evaluated_detectors"]
+        }
+
+
+# ---------------------------------------------------------------------------
+# semver.recommend_release reads the conserved delta
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendReleaseReadsTheConservedDelta:
+    """The reported bug: a suppressed break became "no bump needed".
+
+    Exercised over several sibling shapes rather than the one reported input
+    — a wildcard waiver, an exact-symbol rule, a kind rule, and a variable
+    removal — because the defect was in *what the recommendation reads*, not
+    in any one rule spelling.
+    """
+
+    @pytest.mark.parametrize(
+        "rule",
+        [
+            Suppression(symbol_pattern=".*", reason="w", allow_public_break=True),
+            Suppression(symbol="_ZN3foo5gone0Ev", reason="w", allow_public_break=True),
+            Suppression(
+                symbol_pattern="_ZN3foo.*",
+                change_kind="func_removed",
+                reason="w",
+                allow_public_break=True,
+            ),
+        ],
+    )
+    def test_a_suppressed_break_is_not_no_bump_needed(self, rule) -> None:
+        from abicheck.semver import recommend_release
+
+        old, new = _snapshots(removed=1)
+        result = compare(old, new, SuppressionList([rule]))
+        assert result.changes == []  # the rule really did hide it
+
+        rec = recommend_release(result)
+        assert rec.bump is SemverBump.MAJOR
+        assert rec.state is ReleaseRecommendationState.REVIEW
+        assert "suppressed" in rec.rationale
+        assert "intent: unspecified" in rec.rationale
+        assert "no version bump required" not in rec.rationale
+
+    def test_an_unsuppressed_run_is_unchanged(self) -> None:
+        from abicheck.semver import recommend_release
+
+        old, new = _snapshots(removed=1)
+        assert recommend_release(compare(old, new)).bump is SemverBump.MAJOR
+        clean_old, clean_new = _snapshots(removed=0, kept=2)
+        clean = recommend_release(compare(clean_old, clean_new))
+        assert clean.bump is SemverBump.NONE
+        assert clean.state is ReleaseRecommendationState.ACTIONABLE
+
+    def test_a_suppressed_compatible_addition_does_not_force_a_major(self) -> None:
+        """Only a *major-class* suppressed finding changes the advice — a
+        suppressed addition is not a hidden break."""
+        from abicheck.semver import recommend_release
+
+        old, new = _snapshots(added=2)
+        result = compare(
+            old, new, SuppressionList([Suppression(symbol_pattern=".*", reason="w")])
+        )
+        rec = recommend_release(result)
+        assert rec.bump is not SemverBump.MAJOR
+        assert rec.state is ReleaseRecommendationState.ACTIONABLE
+
+    def test_the_rule_that_hid_the_break_is_named_in_the_rationale(self) -> None:
+        from abicheck.semver import recommend_release
+
+        old, new = _snapshots(removed=1)
+        result = compare(
+            old,
+            new,
+            SuppressionList(
+                [
+                    Suppression(
+                        symbol_pattern=".*gone.*",
+                        reason="tracked in ticket 42",
+                        allow_public_break=True,
+                    )
+                ]
+            ),
+        )
+        rationale = recommend_release(result).rationale
+        assert "symbol_pattern" in rationale
+        assert "func_removed" in rationale

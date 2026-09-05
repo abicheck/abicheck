@@ -246,6 +246,58 @@ def _unresolved_contract_findings(result: DiffResult) -> list[Change]:
     ]
 
 
+def _suppressed_major_class_recommendation(
+    result: DiffResult,
+) -> ReleaseRecommendation | None:
+    """ADR-067: a major-class break a suppression rule hid is still a break.
+
+    Before this, ``recommend_release`` read only ``result.verdict``/
+    ``result.changes`` -- i.e. the *post*-disposition list -- so a rule with
+    ``allow_public_break: true`` covering a removed public symbol degraded the
+    release advice to "no version bump required" with no trace that a
+    MAJOR-worthy break had been accepted. The conserved disposition ledger
+    (ADR-067 C-S1) is the input that fixes it: it records every atomically
+    detected change *before* any disposition applied, together with the rule
+    that hid each one.
+
+    A suppression is not proof the tool was wrong (D2), and without an
+    explicit ``intent:`` (D5, S3 -- every existing rule migrates to
+    ``unspecified``) abicheck cannot tell a claimed false positive from a
+    deliberate waiver. So this states the conserved fact and hands the call to
+    a human (``REVIEW``) rather than either silently dropping the break or
+    asserting a MAJOR release outright.
+
+    ``None`` -- and therefore no change at all -- whenever the post-suppression
+    verdict is *already* major-class: the recommendation then names the break
+    on its own, and this would only restate it.
+    """
+    from .policy.disposition_ledger import ledger_for
+
+    if result.verdict in (Verdict.BREAKING, Verdict.API_BREAK):
+        return None
+    hidden = ledger_for(result).suppressed_gating_records()
+    if not hidden:
+        return None
+    binary_break = any(r.verdict_class == Verdict.BREAKING.value for r in hidden)
+    rules = sorted(
+        {r.rule.rule_id for r in hidden if r.rule is not None and r.rule.rule_id}
+    )
+    attribution = f" (rule(s): {', '.join(rules)})" if rules else ""
+    kinds = ", ".join(sorted({r.kind for r in hidden}))
+    return ReleaseRecommendation(
+        SemverBump.MAJOR,
+        SonameAction.NOT_DETERMINED,
+        f"{len(hidden)} major-class finding(s) ({kinds}) were suppressed "
+        f"(intent: unspecified){attribution}, so this comparison is "
+        "**not** a proven-compatible release: the "
+        f"{'binary ABI' if binary_break else 'source API'} break was hidden "
+        "from the verdict, not shown to be absent. Record an explicit "
+        "acknowledgment, or drop the rule and re-run, before treating this "
+        "as anything less than a MAJOR release.",
+        state=ReleaseRecommendationState.REVIEW,
+    )
+
+
 def recommend_release(result: DiffResult) -> ReleaseRecommendation:
     """Derive a :class:`ReleaseRecommendation` from a comparison result.
 
@@ -253,7 +305,15 @@ def recommend_release(result: DiffResult) -> ReleaseRecommendation:
     on ``result`` (so ``--policy sdk_vendor`` / ``plugin_abi`` and custom policy
     files are honoured), refined by which change kinds are present (additions vs
     quality-only) and by the soname signals.
+
+    It reads one thing the verdict alone cannot tell it: the *conserved*
+    change set (ADR-067). A suppressed major-class break is reported as such
+    rather than as "no bump needed" -- see
+    :func:`_suppressed_major_class_recommendation`.
     """
+    suppressed_major = _suppressed_major_class_recommendation(result)
+    if suppressed_major is not None:
+        return suppressed_major
     verdict = result.verdict
     kinds = {c.kind for c in result.changes}
     has_additions = bool(kinds & ADDITION_KINDS)

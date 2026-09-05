@@ -197,6 +197,11 @@ class DetectorRegistry:
                             changes_count=0,
                             enabled=False,
                             coverage_gap=reason,
+                            # ADR-067 D3: the support gate refused this
+                            # detector, so it produced no evidence at all --
+                            # recorded as "not evaluated", never as a real
+                            # zero. `reason` is *why*; this is the state.
+                            not_evaluated=True,
                         )
                     )
                     continue

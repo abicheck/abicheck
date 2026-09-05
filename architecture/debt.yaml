@@ -23,12 +23,12 @@
     },
     {
       "path": "abicheck/appcompat.py",
-      "baseline_lines": 1818,
+      "baseline_lines": 1832,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1818 -> 1832 (ADR-067 C-S1, scalar disposition audit): the consumer-overlay suppression pass -- one of the four application points ADR-067 enumerates -- now records the finding it withholds into the run's conserved disposition ledger through the same `policy.disposition_ledger.record_suppressed_change` primitive the other four call sites use. The added lines are that one call plus the comment recording why an overlay built from a raw `missing_symbols` string needs no second record type. There is no responsibility to move: the suppression decision itself already lives here, and the ledger it now feeds is a `policy/` leaf.",
       "review_by": "2026-11-30"
     },
     {
@@ -353,12 +353,12 @@
     },
     {
       "path": "abicheck/checker.py",
-      "baseline_lines": 1286,
+      "baseline_lines": 1339,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1286 -> 1339 (ADR-067 C-S1, scalar disposition audit): `compare()` builds one conserved `DispositionLedger` before the first disposition can apply and threads it into every suppression application point (`_filter_suppressed_changes`, `_filter_pattern_synthetic`, `_apply_surface_metrics`, `_apply_soname_policy`, `_apply_pattern_verdicts_step`, `_env_matrix_contract_changes`, the post-processing pipeline), closing it over the result at the end. Almost all of the growth is one added parameter per already-existing helper signature plus the two `record_suppressed_change` calls -- the ledger type, the recording primitive and the finalization logic all live in `abicheck/policy/disposition_ledger.py`, which is where the responsibility actually moved to.",
       "review_by": "2026-11-30"
     },
     {
@@ -373,12 +373,12 @@
     },
     {
       "path": "abicheck/checker_types.py",
-      "baseline_lines": 815,
+      "baseline_lines": 830,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1: CHECK_ID_PATTERN/validate_check_id() extended in lockstep with contracts.py's _CHECK_ID_RE and the JSON schema pattern (this plan's own required three-layer extension) -- reviewed growth, not a routine edit. Raised 810 -> 815 (same phase, Codex review, fresh evidence): fixed the environment_id group's charset to require an initial alphanumeric character (matching build_check_id's own validate_identifier(), which already enforced it -- the public CHECK_ID_PATTERN validator had drifted more permissive than the canonical constructor), and expanded the header comment explaining why this module's pattern is no longer byte-identical to the published JSON Schema's own ECMAScript-compatible pattern (Python-only \\\\Z vs. portable $(?!\\\\n)).",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1: CHECK_ID_PATTERN/validate_check_id() extended in lockstep with contracts.py's _CHECK_ID_RE and the JSON schema pattern (this plan's own required three-layer extension) -- reviewed growth, not a routine edit. Raised 810 -> 815 (same phase, Codex review, fresh evidence): fixed the environment_id group's charset to require an initial alphanumeric character (matching build_check_id's own validate_identifier(), which already enforced it -- the public CHECK_ID_PATTERN validator had drifted more permissive than the canonical constructor), and expanded the header comment explaining why this module's pattern is no longer byte-identical to the published JSON Schema's own ECMAScript-compatible pattern (Python-only \\\\Z vs. portable $(?!\\\\n)). Baseline raised 815 -> 830 (ADR-067 C-S1): `DiffResult` gained one `kw_only` field, `disposition_ledger`, carrying the run's conserved policy-disposition ledger, with the same field-level documentation every other audit block on this dataclass (`contract_context`, `analysis_assurance`, `evaluation_config`) already carries. A real result field, not incidental growth: `DiffResult` is this file's own canonical home for a comparison's audit data, and the ledger's own logic lives in `abicheck/policy/disposition_ledger.py`.",
       "review_by": "2026-11-30"
     },
     {
@@ -503,12 +503,12 @@
     },
     {
       "path": "abicheck/cli_scan_baseline.py",
-      "baseline_lines": 1349,
+      "baseline_lines": 1354,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1343 -> 1349, ADR-063 Phase 8 follow-up (PR #1020, Codex review): `_run_baseline_compare` calls `compare_snapshots()` directly, the same as `cli_compare_helpers.run_compare` did before that review found neither call site applied the `--depth` ceiling projection (`project_pair_to_depth`, `abicheck/policy/depth_projection.py`) `classify_compare_pair` already had -- `scan --against --depth binary` leaked the identical header-derived findings the native `compare` CLI did. The added call is a single statement (`old_snap, new_snap = project_pair_to_depth(old_snap, new_snap, requested_depth)`) plus its import and a two-line attribution comment; no smaller diff closes the gap without leaving this call site silently unfixed while its sibling was.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1343 -> 1349, ADR-063 Phase 8 follow-up (PR #1020, Codex review): `_run_baseline_compare` calls `compare_snapshots()` directly, the same as `cli_compare_helpers.run_compare` did before that review found neither call site applied the `--depth` ceiling projection (`project_pair_to_depth`, `abicheck/policy/depth_projection.py`) `classify_compare_pair` already had -- `scan --against --depth binary` leaked the identical header-derived findings the native `compare` CLI did. The added call is a single statement (`old_snap, new_snap = project_pair_to_depth(old_snap, new_snap, requested_depth)`) plus its import and a two-line attribution comment; no smaller diff closes the gap without leaving this call site silently unfixed while its sibling was. Baseline raised 1349 -> 1354 (ADR-067 D3): the baseline summary's `detectors[]` projection gained `not_evaluated`, the one field of ADR-067's audit that `scan --against` shares with `compare` -- detector provenance is an ADR-049 Phase 5 \u00a76.4 cross-command parity field, so it moves on both sides together or the parity test fails. Five lines, four of them the comment recording that; nothing to move elsewhere, since this projection is this file's own.",
       "review_by": "2026-11-30"
     },
     {
@@ -653,12 +653,12 @@
     },
     {
       "path": "abicheck/diff_platform.py",
-      "baseline_lines": 1876,
+      "baseline_lines": 1893,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1876 -> 1893 (ADR-067 D3): the `dwarf` detector's \"neither side has debug info\" case moved from an in-body `return []` -- which the registry recorded as a real, evaluated `changes_count: 0` -- onto the registry's own `requires_support` gate (`_has_any_dwarf`), so it is now recorded as `not_evaluated` with a reason. The growth is that gate function and its docstring; the alternative (a second skip vocabulary inside the detector body) would have been the duplication this repo's detector registry exists to avoid.",
       "review_by": "2026-11-30"
     },
     {
@@ -963,12 +963,12 @@
     },
     {
       "path": "abicheck/post_processing.py",
-      "baseline_lines": 1606,
+      "baseline_lines": 1627,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1606 -> 1627 (ADR-067 C-S1): `ApplySuppression.apply()` and `_merge_findings_respecting_suppression()` -- two of the five suppression application points -- now record each withheld finding, with the matched rule, through the shared `policy.disposition_ledger.record_suppressed_change` primitive, and `Pipeline.run` threads the ledger through. The recording logic itself is in that `policy/` leaf; what is added here is the call at each point plus the pipeline parameter.",
       "review_by": "2026-11-30"
     },
     {
@@ -1063,12 +1063,12 @@
     },
     {
       "path": "abicheck/schemas/__init__.py",
-      "baseline_lines": 1118,
+      "baseline_lines": 1126,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1111 -> 1116 merging G42 phase 1 (PR #1008) onto ADR-063 Phase 7's already-landed REPORT_SCHEMA_VERSION bump to 2.48 (run_outcome): both PRs independently bumped REPORT_SCHEMA_VERSION on the same base version, a genuine same-line collision the file's own documented \"renumber, don't reuse\" convention (see the 2.32/2.36/2.38 history entries) resolves by renumbering G42's bump to 2.49 and adding its own five-line history entry rather than discarding either PR's change. Raised 1116 -> 1117 (same phase, Codex review, fresh evidence): SCAN_SCHEMA_VERSION bumped 1.24 -> 1.25 in lockstep with REPORT_SCHEMA_VERSION's 2.49 bump -- a scan-shaped check-target report shares build_check_id() with a compare-shaped one, so the widened check_id lexical contract reaches it too and needs its own feature-detectable version marker. Raised 1117 -> 1118 (CLI cleanup phase two PR G2, Codex review, fresh evidence): SCAN_SCHEMA_VERSION bumped 1.25 -> 1.26 -- ADR-037 D5's evidence-contract-error abort moved to a dedicated process exit code (cli_scan.py's _EXIT_EVIDENCE_CONTRACT_ERROR = 7), changing the value (1 -> 7) of two already-published fields (exit_code, evidence_contract_error_contribution) for that one abort axis; a consumer pinned to a pre-1.26 version and hard-coding the old value needs a feature-detectable marker.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1111 -> 1116 merging G42 phase 1 (PR #1008) onto ADR-063 Phase 7's already-landed REPORT_SCHEMA_VERSION bump to 2.48 (run_outcome): both PRs independently bumped REPORT_SCHEMA_VERSION on the same base version, a genuine same-line collision the file's own documented \"renumber, don't reuse\" convention (see the 2.32/2.36/2.38 history entries) resolves by renumbering G42's bump to 2.49 and adding its own five-line history entry rather than discarding either PR's change. Raised 1116 -> 1117 (same phase, Codex review, fresh evidence): SCAN_SCHEMA_VERSION bumped 1.24 -> 1.25 in lockstep with REPORT_SCHEMA_VERSION's 2.49 bump -- a scan-shaped check-target report shares build_check_id() with a compare-shaped one, so the widened check_id lexical contract reaches it too and needs its own feature-detectable version marker. Raised 1117 -> 1118 (CLI cleanup phase two PR G2, Codex review, fresh evidence): SCAN_SCHEMA_VERSION bumped 1.25 -> 1.26 -- ADR-037 D5's evidence-contract-error abort moved to a dedicated process exit code (cli_scan.py's _EXIT_EVIDENCE_CONTRACT_ERROR = 7), changing the value (1 -> 7) of two already-published fields (exit_code, evidence_contract_error_contribution) for that one abort axis; a consumer pinned to a pre-1.26 version and hard-coding the old value needs a feature-detectable marker. Baseline raised 1118 -> 1125 (ADR-067 C-S1): `REPORT_SCHEMA_VERSION` bumped to 2.50 for the additive `disposition_audit` block, the per-suppressed-finding `rule` provenance object, and `detectors[].not_evaluated`, and `SCAN_SCHEMA_VERSION` to 1.28 for the one field `scan --against` shares with it (ADR-049 Phase 5 \u00a76.4 detector provenance). The growth is this file's own established per-version history comment, which is the whole point of the module -- there is nothing to move elsewhere.",
       "review_by": "2026-11-30"
     },
     {

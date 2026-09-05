@@ -327,6 +327,17 @@ def _suppressed_count(report: dict[str, object]) -> int:
     return 0
 
 
+def _disposition_audit(report: dict[str, object]) -> dict[str, object] | None:
+    """ADR-067 D3's ``disposition_audit`` block, or ``None`` when absent.
+
+    Absent means the report predates schema 2.50 (or is a shape that carries
+    no comparison at all) -- not that nothing was disposed of, which is why
+    the renderer omits the row entirely rather than printing zeros.
+    """
+    audit = report.get("disposition_audit")
+    return audit if isinstance(audit, dict) else None
+
+
 def _reclassified_count(report: dict[str, object]) -> int:
     """The number of ``changes`` whose verdict was moved to a different
     bucket by a ``--policy-file`` reclassification -- either a kind-global
@@ -435,6 +446,7 @@ def _from_compare(
         ),
         suppressed_count=_suppressed_count(report),
         reclassified_count=_reclassified_count(report),
+        disposition_audit=_disposition_audit(report),
     )
 
 

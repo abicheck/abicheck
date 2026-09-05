@@ -25,6 +25,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from .policy.disposition_ledger import record_suppressed_change
+
 # Split out when this module reached the 2000-line hard cap (see each new
 # module's own docstring). `PipelineContext` is re-exported rather than
 # relocated outright: 23 call sites import it from this historical path.
@@ -38,6 +40,7 @@ from .post_processing_reachability import MarkReachability as MarkReachability
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import AbiSnapshot
+    from .policy.disposition_ledger import DispositionLedger
     from .suppression import Suppression, SuppressionList
 
 
@@ -576,6 +579,13 @@ class ApplySuppression:
             outcome = ctx.suppression.evaluate(c)
             if outcome.suppressed:
                 c.suppression_rule = outcome.rule_label()
+                record_suppressed_change(
+                    ctx.disposition_ledger,
+                    c,
+                    rule=outcome.matched_rule,
+                    application_point=self.name,
+                    suppression=ctx.suppression,
+                )
                 ctx.suppressed.append(c)
                 continue
             filtered.append(c)
@@ -710,6 +720,13 @@ def _merge_findings_respecting_suppression(
             outcome = ctx.suppression.evaluate(c)
             if outcome.suppressed:
                 c.suppression_rule = outcome.rule_label()
+                record_suppressed_change(
+                    ctx.disposition_ledger,
+                    c,
+                    rule=outcome.matched_rule,
+                    application_point="merge_late_findings",
+                    suppression=ctx.suppression,
+                )
                 ctx.suppressed.append(c)
                 continue
             if outcome.withheld_rule is not None:
@@ -1488,6 +1505,9 @@ class PostProcessingPipeline:
         # for scope_to_public_surface would instead bind `True` here and
         # leave scoping disabled, with no error).
         internal_namespaces: tuple[str, ...] | None = None,
+        # ADR-067 C-S1: appended last for the same positional-safety reason
+        # the note above records.
+        disposition_ledger: DispositionLedger | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -1500,6 +1520,7 @@ class PostProcessingPipeline:
             force_public_symbols=set(force_public_symbols or set()),
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=public_surface_allowlist,
+            disposition_ledger=disposition_ledger,
         )
         # ``FilterRedundant`` sets ``ctx.kept = kept`` — an *aliasing* contract,
         # not a snapshot: every step from that point on is required to either

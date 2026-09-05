@@ -34,6 +34,7 @@ from .checker_policy import ChangeKind, ReachabilityState, Verdict, compute_verd
 from .diff_helpers import make_change
 from .impact.engine import assess_change
 from .model import AbiSnapshot, Visibility
+from .policy.disposition_ledger import ledger_for, record_suppressed_change
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -1512,6 +1513,19 @@ def scope_diff_to_app(
             # (that was the point of promoting it out of a bespoke string),
             # so a suppressed overlay must also remove its raw string from
             # every one of those consumers.
+            # ADR-067 C-S1's fourth application point. This overlay's *input*
+            # shape is a raw ``missing_symbols`` string rather than a detected
+            # change, but what suppression acts on here is a real ``Change``,
+            # so it records through the identical primitive the library-diff
+            # points use -- one record type, one query surface (D2), with the
+            # consumer overlay named as its own application point.
+            record_suppressed_change(
+                ledger_for(diff),
+                overlay_change,
+                rule=outcome.matched_rule,
+                application_point="consumer_overlay",
+                suppression=suppression,
+            )
             suppressed_missing.add(sym)
             continue
         breaking_for_app.append(overlay_change)
