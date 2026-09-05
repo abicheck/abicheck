@@ -357,31 +357,18 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         ):
             node["analysis_assurance_exit_contribution"] = 0
         # CLI cleanup phase two, PR G1/PR E: the canonical `exit` block
-        # (`exit_decision.ExitDecision`) lives at exactly the same
-        # locations as the two contributions above -- the document root for
-        # a `compare` report, `diff`/`report.diff` for a scan one -- so the
-        # same `contract_coverage_block_paths` traversal already finds it;
-        # no separate path-finder is needed (Codex review, fresh evidence:
-        # an earlier revision neutralized every axis this block summarizes
-        # except the block itself, so an advisory report could still
-        # publish a nonzero `exit.code` -- and nonzero contributions -- that
-        # a consumer adopting the new canonical field would read as
-        # blocking). Replaced wholesale with the "clean" decision, the same
-        # way the `severity` gate above is replaced rather than
-        # conditionally rewritten: advisory mode means every *deferrable*
-        # axis gates nothing, so the persisted explanation has to say so
-        # outright rather than being left to disagree with the axes it
-        # summarizes. The four "comparison never completed" axes --
-        # operational_error/evidence_contract_error/budget_overflow/
-        # not_comparable_contribution (`_classify_verdict` treats those
-        # verdicts identically to an operational error; mutually exclusive
-        # per `resolve_scan_exit_decision`'s own docstring, so at most one
-        # is ever nonzero) -- are carried over, not zeroed with the rest
-        # (Codex review, fresh evidence, two rounds: round one only kept
-        # `operational_error_contribution`, leaving the same "exit.code: 0
-        # but the job still fails" gap for `NOT_COMPARABLE`). Every one of
-        # these fails every gate mode per `final_exit_code`, so zeroing any
-        # would make `exit.code` claim a clean pass the job doesn't give.
+        # (`exit_decision.ExitDecision`) lives at the same locations as the
+        # two contributions above, so the same traversal finds it too (Codex
+        # review: an earlier revision left it unneutralized, so an advisory
+        # report could still publish a nonzero `exit.code`). Replaced
+        # wholesale with the "clean" decision, same as `severity` above. The
+        # five "comparison never completed" axes -- operational_error/
+        # evidence_contract_error/budget_overflow/not_comparable/
+        # no_comparison_completed_contribution (mutually exclusive per
+        # `resolve_scan_exit_decision`'s docstring) -- are carried over, not
+        # zeroed: each fails every gate mode per `final_exit_code`, so
+        # zeroing any would claim a clean pass the job doesn't give (Codex
+        # review, fresh evidence, two rounds).
         old_exit = node.get("exit")
         if isinstance(old_exit, Mapping):
             from ..exit_decision import resolve_exit_decision
@@ -396,6 +383,7 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
                 evidence_contract_error_contribution=_int_or_zero("evidence_contract_error_contribution"),
                 budget_overflow_contribution=_int_or_zero("budget_overflow_contribution"),
                 not_comparable_contribution=_int_or_zero("not_comparable_contribution"),
+                no_comparison_completed_contribution=_int_or_zero("no_comparison_completed_contribution"),  # ADR-065 D7
             ).to_dict()
 
 
@@ -522,16 +510,23 @@ def _classify_verdict(
 ) -> None:
     """Split *raw_verdict* into a compatibility verdict or an operational error.
 
-    Any verdict string a scan run can produce that is neither a legacy
-    compatibility verdict nor the explicit operational-error sentinel (e.g.
-    ``"BUDGET_OVERFLOW"``/``"EVIDENCE_CONTRACT_ERROR"`` -- ``service_scan.py``'s
-    guard sentinels) is not a compatibility finding either: it is the scan
-    never completing its comparison at all, the same class of problem as an
-    analysis CLI error, not something ADR-047 §7's "deferred only defers the
-    *compatibility* verdict" rule was meant to cover. Treated as operational so
-    ``gate-mode: deferred``/``advisory`` cannot turn a guard failure into a
-    quiet pass (Codex review).
+    A verdict a scan run can produce that is neither a legacy compatibility
+    verdict nor the operational-error sentinel is the scan never completing
+    its comparison at all -- treated as operational so ``gate-mode: deferred``/
+    ``advisory`` cannot turn a guard failure into a quiet pass (Codex review).
+
+    ADR-065 D7's release ``no_comparison_completed`` outcome keeps a legacy
+    ``verdict`` too, so it's checked via ``run_outcome.operational`` instead,
+    mirroring ``aggregate.declares_null_compatibility()``.
     """
+    run_outcome = out.get("run_outcome")
+    run_outcome = run_outcome if isinstance(run_outcome, Mapping) else {}
+    if run_outcome.get("operational") == OperationalStatus.NO_COMPARISON_COMPLETED.value:
+        if run_outcome.get("compatibility") is not None:
+            out["compatibility_verdict"] = run_outcome["compatibility"]
+        msg = report.get("error") or "no comparison completed: zero library-name pairs matched between OLD and NEW"
+        out["operational_errors"] = [{"kind": "no_comparison_completed", "message": str(msg)}]
+        return
     if raw_verdict in LEGACY_VERDICT_VALUES:
         out["compatibility_verdict"] = raw_verdict
         out.setdefault("operational_errors", [])
