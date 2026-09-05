@@ -57,7 +57,7 @@ runs.
 > no debug info is present):
 >
 > ```bash
-> abicheck compare libv1.so libv2.so   # headerless, DWARF-aware fallback, no castxml needed
+> abicheck compare libmathutils_v1.so libmathutils_v2.so   # headerless, DWARF-aware fallback, no castxml needed
 > ```
 
 For your own library:
