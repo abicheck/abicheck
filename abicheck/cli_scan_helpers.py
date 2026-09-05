@@ -105,7 +105,7 @@ def load_artifact_set_manifest(manifest_path: Path | None) -> Any:
 
     Split out of ``cli_scan._run_artifact_set`` purely to keep that module
     under the AI-readiness 2000-line hard cap -- the load itself mirrors
-    ``compare --manifest``'s own
+    ``compare --instantiation-manifest``'s own
     ``cli_compare_release_helpers._analyze_release_bundle`` exactly: a
     malformed ``--manifest`` is an explicit user input error, not an
     environmental quirk, so it fails loudly (``click.ClickException``)

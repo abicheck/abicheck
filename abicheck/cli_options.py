@@ -1316,11 +1316,15 @@ def artifact_set_options(func: F) -> F:
     — `scan` doesn't need `--no-bundle-analysis`/`--bundle-cohort`/
     `--instantiation-manifest`, only the set operand and (PR H, CLI cleanup
     phase two) the same expected-provider ownership manifest `compare
-    --manifest` already enforces two-sided, applied here single-sided
-    (audit mode has no old side to diff). `--manifest`'s option text
-    otherwise matches `release_options`' below (same flag, same meaning,
-    just declared for a different command) rather than being redefined
-    with different wording.
+    --instantiation-manifest` already enforces two-sided, applied here
+    single-sided (audit mode has no old side to diff). `scan`'s own flag is
+    named `--manifest` rather than `--instantiation-manifest` (shorter, and
+    `scan --artifact-set` has no ambiguous sibling manifest flag to
+    disambiguate from the way `compare`'s release-fanout group does), but
+    the underlying `InstantiationManifest` YAML/JSON schema and semantics
+    are identical -- only the flag spelling differs (Codex review, fresh
+    evidence, PR H follow-up: an earlier revision of this help text
+    pointed users at a nonexistent `compare --manifest` flag).
 
     CLI cleanup phase two, PR J: `--bundle-system-providers` is gone from
     this group too — the system-provider allow-list extension is sourced
@@ -1345,8 +1349,9 @@ def artifact_set_options(func: F) -> F:
         type=click.Path(exists=True, path_type=Path),
         default=None,
         help="ABI ownership manifest (YAML/JSON, same format as compare "
-        "--manifest, ADR-023) asserting which library in the set is the "
-        "expected provider of a symbol/pattern/template instantiation. "
+        "--instantiation-manifest, ADR-023) asserting which library in "
+        "the set is the expected provider of a symbol/pattern/template "
+        "instantiation. "
         "Checked against this one declared set (no old side to diff): an "
         "unmatched entry, or a non-optional entry (optional_provider: "
         "false) matched by a library other than its declared provider, is "

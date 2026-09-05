@@ -390,7 +390,7 @@ def _manifest_ownership_findings(
     """Check whether *manifest*'s ownership promises hold against *snapshot*.
 
     The one-sided "does this contract hold right now" half shared by
-    :func:`_detect_manifest_drift` (``compare --manifest``, two-sided: this
+    :func:`_detect_manifest_drift` (``compare --instantiation-manifest``, two-sided: this
     is its "missing in new"/"wrong provider" pass) and
     :func:`abicheck.bundle_detectors._detect_manifest_ownership`
     (``scan --artifact-set --manifest``, audit-mode: no old side, so this
@@ -411,7 +411,21 @@ def _manifest_ownership_findings(
     """
     findings: list[BundleFinding] = []
     if index is None:
-        index = _build_demangled_index(snapshot)
+        # Codex review, fresh evidence, PR H follow-up: a literal-symbol
+        # entry resolves directly against the resolution graph
+        # (_match_target_against_index's own "symbol" branch never reads
+        # the index) -- building it unconditionally here defeated
+        # _match_entry's own already-correct per-entry laziness
+        # (`needs_index`) for the common case of a manifest containing
+        # only `symbol` entries (or none at all), paying the full
+        # O(exported symbols) demangle pass for nothing.
+        needs_index = any(
+            kind != "symbol"
+            for entry in manifest.entries
+            for _, kind in _entry_targets(entry)
+        )
+        if needs_index:
+            index = _build_demangled_index(snapshot)
 
     for entry in manifest.entries:
         for target, kind_word, matched, providers in _match_entry(

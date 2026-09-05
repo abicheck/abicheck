@@ -79,3 +79,15 @@
   already-expired budget went undetected (and every symbol got demangled
   anyway) whenever the index had fewer symbols than the interval, or while
   processing the first batch of a larger one.
+- `_manifest_ownership_findings` no longer builds the shared demangled-name
+  index at all when the manifest has only `symbol` entries (or none) --
+  a literal-symbol entry resolves directly against the resolution graph
+  and never reads the index, so building it unconditionally paid the full
+  O(exported symbols) demangle pass for nothing on a large C++ bundle,
+  potentially consuming or overrunning a small `--budget` on an otherwise
+  O(entries) check.
+- `scan --artifact-set --manifest`'s help text and this feature's internal
+  documentation named a nonexistent `compare --manifest` flag -- `compare`'s
+  own flag is `--instantiation-manifest` (renamed from `--manifest` by CLI
+  cleanup phase two's PR J, which landed after this feature's help text was
+  first written). Corrected throughout.

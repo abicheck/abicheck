@@ -972,7 +972,7 @@ def audit_bundle(
     (:func:`_detect_duplicate_providers`, PR H), and, when *manifest* is
     given, opt-in expected-provider enforcement
     (:func:`_detect_manifest_ownership`, PR H — the audit-mode sibling of
-    ``compare --manifest``'s two-sided drift check).
+    ``compare --instantiation-manifest``'s two-sided drift check).
     """
     snapshot = build_bundle_snapshot(libraries)
     # P2 regression (Codex review): two distinct set members advertising the

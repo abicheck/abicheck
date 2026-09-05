@@ -474,7 +474,7 @@ def _detect_manifest_ownership(
     new: BundleSnapshot,
     manifest: InstantiationManifest,
 ) -> list[BundleFinding]:
-    """Audit-mode (no old side) sibling of ``compare --manifest``'s
+    """Audit-mode (no old side) sibling of ``compare --instantiation-manifest``'s
     ownership check (:func:`~abicheck.bundle_detector_heuristics.
     _detect_manifest_drift`).
 
@@ -482,7 +482,7 @@ def _detect_manifest_ownership(
     is inherently a diff) -- only whether the promise holds *right now*.
     Delegates to :func:`~abicheck.bundle_detector_heuristics.
     _manifest_ownership_findings`, the identical "missing"/"wrong provider"
-    logic ``compare --manifest`` uses, so the two entry points can't
+    logic ``compare --instantiation-manifest`` uses, so the two entry points can't
     diverge on what "wrong provider" means. Emits
     ``BUNDLE_MANIFEST_ENTRY_UNSATISFIED`` -- distinct from
     ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED``, which implies a

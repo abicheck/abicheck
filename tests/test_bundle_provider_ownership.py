@@ -308,6 +308,35 @@ class TestDetectManifestOwnership:
         assert len(findings) == 1
         assert findings[0].new_value == "libcore.so"
 
+    def test_literal_symbol_only_manifest_never_builds_the_index(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review, fresh evidence, PR H follow-up: a `symbol` entry
+        # resolves directly against the resolution graph
+        # (_match_target_against_index's own "symbol" branch never reads
+        # the index) -- building the shared demangled-name index
+        # unconditionally here paid the full O(exported symbols) demangle
+        # pass for nothing when the manifest has no pattern/template entry.
+        import abicheck.bundle_detector_heuristics as heur
+
+        def _fail(*args: object, **kwargs: object) -> list[tuple[str, str]]:
+            raise AssertionError(
+                "_build_demangled_index must not be called for a "
+                "literal-symbol-only manifest"
+            )
+
+        monkeypatch.setattr(heur, "_build_demangled_index", _fail)
+        new = _snapshot({"liba.so": _meta(soname="liba.so.1", exports=["core_add"])})
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(symbol="core_add"),
+                ManifestEntry(symbol="promised_but_absent"),
+            )
+        )
+        findings = self._detect(new, manifest)
+        assert len(findings) == 1
+        assert findings[0].symbol == "promised_but_absent"
+
 
 class TestAuditBundleWiring:
     """`audit_bundle()` wires in the PR H audit-mode detectors: duplicate-
