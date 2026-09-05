@@ -398,6 +398,46 @@ class TestDetectorBehavior:
         assert change.old_value == "2"
         assert change.new_value == "3"
 
+    def test_a_membership_change_masked_by_an_unsupported_occurrence_is_still_caught(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, eighth round: the old side has two
+        occurrences colliding on ``X`` -- one comparable (``"1"``) and one
+        ``Fact.unsupported()`` with no legacy fallback text -- while the new
+        side has only the comparable one. Filtering out the unsupported
+        value before comparing left both sides' *filtered* multisets reading
+        ``["1"]``, so the group's own shrinking from two occurrences to one
+        was invisible even though a real removal happened."""
+        comparable_old = entity_id_for_constant((), "X")
+        unsupported_old = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        comparable_new = entity_id_for_constant((), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(comparable_old): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(unsupported_old): CanonicalEntity(
+                        canonical_spelling=Fact.unsupported("not comparable")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(comparable_new): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_CHANGED
+        assert change.symbol == "X"
+        assert change.old_value is None
+        assert change.new_value is None
+
 
 # -- end to end, through the real detector entry point ---------------------
 

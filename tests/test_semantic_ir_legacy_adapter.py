@@ -599,16 +599,53 @@ class TestConstructionTimeConsistency:
         snap = _snap(semantic_ir=_typedef_ir({eid: "int"}))
         assert snap.semantic_ir is not None
 
-    def test_an_unrenderable_sidecar_entity_id_cannot_collide(self) -> None:
-        """A sidecar id that does not itself render back to its own map key
-        (e.g. an anonymous-scoped identity kept only for a legacy consumer)
-        has nothing to be compared against -- the check only ever looks up
-        the sidecar by the *IR's own* rendered name, and an anonymous IR
-        entity renders no name to look up in the first place."""
+    def test_an_anonymous_scoped_entity_is_checked_by_its_flattened_name(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, eighth round: the sidecar check is keyed
+        by ``render_display_name_or_leaf`` (the same flattened name a real
+        producer's own sidecar uses), not the strict ``render_display_name``
+        that refuses an anonymous-scoped identity outright -- so an
+        anonymous-scoped IR entity *is* checked against its sidecar entry,
+        and an agreeing pair (as here) constructs cleanly."""
         anon = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
         snap = _snap(
             semantic_ir=_typedef_ir({anon: "int"}),
             typedef_entity_ids={"Alias": anon},
+        )
+        assert snap.semantic_ir is not None
+
+    def test_an_anonymous_scoped_sidecar_disagreement_is_now_caught(self) -> None:
+        """Codex review, PR #1078, eighth round: before keying by the
+        flattened name, an anonymous-scoped identity's ``None`` rendering
+        made this check skip it entirely, so a genuine identity
+        disagreement for such a declaration passed construction silently --
+        defeating the check for exactly the family of declarations
+        ``render_display_name_or_leaf`` exists to keep visible."""
+        import pytest
+
+        from abicheck.errors import SemanticIrAuthorityError
+
+        ir_eid = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        sidecar_eid = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        with pytest.raises(SemanticIrAuthorityError):
+            _snap(
+                semantic_ir=_typedef_ir({ir_eid: "int"}),
+                typedef_entity_ids={"Alias": sidecar_eid},
+            )
+
+    def test_a_colliding_anonymous_group_is_satisfied_by_any_member(self) -> None:
+        """Two distinct anonymous-scoped entities can render to the
+        identical flattened name (the same collision
+        ``render_display_name_or_leaf`` itself accepts) -- the sidecar,
+        built by a plain ``dict`` comprehension over the same colliding
+        key, can only ever record one of them, so agreement with *either*
+        colliding IR entity must not raise."""
+        first = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        second = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
+        snap = _snap(
+            semantic_ir=_typedef_ir({first: "int", second: "long"}),
+            typedef_entity_ids={"Alias": second},
         )
         assert snap.semantic_ir is not None
 

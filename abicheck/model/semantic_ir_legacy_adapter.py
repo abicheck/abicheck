@@ -328,25 +328,45 @@ def _assert_sidecar_identity_consistent(
     fail loudly instead of being silently routed around by falling back to
     whichever representation happens to look consistent.
 
-    Only entities with a *faithful* rendered name participate (an
-    ``Anonymous``/``LocalToFunction`` scope segment renders ``None`` and is
-    skipped, exactly as the comparison-time readers in
-    ``compare/typedefs.py``/``compare/constants.py`` already do) — an
-    unrenderable identity has no sidecar key it could possibly collide
-    with, so there is nothing here for it to disagree about.
+    Keyed by :func:`render_display_name_or_leaf`, not the strict
+    :func:`render_display_name` (Codex review, PR #1078, eighth round): the
+    same producer's flat sidecar (``typedef_entity_ids``/
+    ``constant_entity_ids``) is keyed by the header-AST parsers' own
+    qualified-name walk, which already keeps every named ancestor around an
+    unrenderable ``Anonymous``/``LocalToFunction`` segment rather than
+    refusing the whole name (``extract.headers.castxml.location.
+    qualified_name`` -- the exact convention :func:`render_display_name_or_
+    leaf` itself matches) -- so an anonymous-scoped declaration's sidecar
+    entry is real, keyed by that flattened name, and skipping it here
+    (the strict renderer's ``None``) let a genuine identity disagreement
+    for it pass silently, defeating this very check for exactly the family
+    of declarations :func:`render_display_name_or_leaf` exists to keep
+    visible to comparison in the first place.
+
+    Two distinct entities can render to the identical flattened name (the
+    same collision :func:`render_display_name_or_leaf`'s own docstring
+    accepts), in which case the sidecar -- itself built by a plain
+    ``dict`` comprehension over the same colliding key -- reflects only
+    one of them. So the check groups entities by their rendered name and
+    only flags a disagreement when *none* of the colliding entities match
+    the sidecar's recorded id, rather than picking one arbitrary member to
+    compare against and risking a false failure purely from which member
+    that happened to be.
     """
     index = SemanticIRIndex(snapshot.semantic_ir) if snapshot.semantic_ir else None
     if index is None:
         return
+    by_rendered: dict[str, list[EntityId]] = {}
     for entity_id in index.entities_of_kind(kind):
-        rendered = render_display_name(entity_id)
-        if rendered is None:
-            continue
+        by_rendered.setdefault(render_display_name_or_leaf(entity_id), []).append(
+            entity_id
+        )
+    for rendered, entity_ids in by_rendered.items():
         sidecar_id = sidecar.get(rendered)
-        if sidecar_id is not None and sidecar_id != entity_id:
+        if sidecar_id is not None and sidecar_id not in entity_ids:
             raise SemanticIrAuthorityError(
-                f"{family} {rendered!r}: SemanticIR resolves entity_id "
-                f"{entity_id!r}, but the snapshot's own "
+                f"{family} {rendered!r}: SemanticIR resolves entity_id(s) "
+                f"{entity_ids!r}, but the snapshot's own "
                 f"{family}_entity_ids sidecar records {sidecar_id!r} for "
                 "the same name -- the producer's two identity "
                 "representations disagree (ADR-063 Track T3: SemanticIR is "

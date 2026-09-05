@@ -133,3 +133,28 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   parameter on its own; constants have no bare/qualified split (no
   schema-versioned bare-only baseline predates them), so this fix is
   typedef-only.
+- **A constant membership change inside a colliding group is no longer
+  masked by filtering unsupported values before comparing.**
+  `compare.constants.diff_constants`'s multiset comparison filtered out
+  unsupported (`None`) values *before* comparing, so an unsupported-valued
+  occurrence appearing or disappearing under a colliding name (alongside a
+  comparable one whose own value didn't change) produced an identical
+  filtered value list on both sides and was silently read as "unchanged"
+  (Codex review, PR #1078, eighth round). `diff_constants` now also
+  compares each side's raw occurrence count independently of value
+  comparability, reporting `CONSTANT_CHANGED` (with no recoverable value
+  text) whenever the counts disagree even though the filtered values agree.
+- **The Track T3 sidecar-identity consistency check now also covers an
+  anonymous-scoped typedef/constant.** `_assert_sidecar_identity_consistent`
+  used to key its lookup by the strict `render_display_name`, which
+  refuses to render at all for an `Anonymous`/`LocalToFunction` scope
+  segment — skipping such an entity entirely, even though the same
+  producer's own legacy sidecar keys it by the *flattened* name (the same
+  convention `render_display_name_or_leaf` matches), so a genuine identity
+  disagreement for an anonymous-scoped declaration passed construction
+  silently (Codex review, PR #1078, eighth round). The check now keys by
+  `render_display_name_or_leaf` instead, grouping entities that collide on
+  one flattened name and flagging a disagreement only when *none* of the
+  colliding entities match the sidecar's recorded id — since the sidecar
+  itself, built by a plain `dict` comprehension over the same colliding
+  key, can only ever reflect one of them.

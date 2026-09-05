@@ -202,6 +202,22 @@ def diff_constants(
     occurrence didn't become the representative, silently reporting no
     change at all -- mirrors ``compare.typedefs.diff_typedefs``'s own fix
     for the identical failure mode.
+
+    **The multiset comparison alone was not enough** (Codex review, PR
+    #1078, eighth round): filtering out unsupported (``None``) values
+    *before* comparing the multiset silently discarded a genuine membership
+    change inside a colliding group whenever the discarded occurrence's
+    absence didn't change the *filtered* list -- e.g. one comparable value
+    (``"1"``) plus one unsupported occurrence on the old side, the same
+    comparable value alone on the new side: both sides' filtered multisets
+    read ``["1"]``, so the group's own shrinking from two occurrences to one
+    was invisible. This function now also compares each side's raw
+    occurrence *count*, independent of value comparability, and reports a
+    change (with no recoverable value text) whenever the counts disagree
+    even though the filtered values agree -- the same "which occurrence
+    changed remains ambiguous" acceptance every other colliding-group case
+    here already carries, just extended to a membership change instead of a
+    value change.
     """
     changes: list[Change] = []
     old_values = _values(old_index)
@@ -252,23 +268,41 @@ def diff_constants(
             for i in new_ids
             if (v := _value_or_legacy(new_index, i, name, new_constants)) is not None
         )
+        if old_vals == new_vals and len(old_ids) == len(new_ids):
+            continue
         if old_vals == new_vals:
-            continue
-        if not old_vals or not new_vals:
+            # The comparable values agree, but the group's own membership
+            # does not (Codex review, PR #1078, eighth round): filtering
+            # out unsupported (``None``) values before comparing lost this
+            # entirely -- an unsupported-valued occurrence appearing or
+            # disappearing under a colliding name produced an identical
+            # filtered value list on both sides, so a proven removal (or
+            # addition) inside the group was silently read as "unchanged".
+            # Reported with no recoverable value text, the same way a
+            # whole-name CONSTANT_ADDED/CONSTANT_REMOVED already tolerates
+            # one -- which specific occurrence changed is exactly as
+            # ambiguous here as it is for any other colliding group.
+            old_val = None
+            new_val = None
+        elif not old_vals or not new_vals:
             # Mirrors the single-entity `old_val is None or new_val is None`
-            # skip: nothing comparable survived on at least one side.
+            # skip: nothing comparable survived on at least one side, and
+            # the group's own membership is unchanged (handled above), so
+            # there is truly nothing to compare.
             continue
-        old_val = old_vals[0]
-        new_val = new_vals[0]
-        if len(old_ids) > 1 or len(new_ids) > 1:
-            # Ambiguous group: report one value present only on the old
-            # side and one present only on the new side, rather than an
-            # arbitrary representative pair that might coincidentally
-            # agree even though the multiset as a whole differs.
-            old_val = next((v for v in old_vals if v not in new_vals), old_val)
-            new_val = next((v for v in new_vals if v not in old_vals), new_val)
-        if is_fingerprint_comparison_unreliable(old_val, new_val):
-            continue
+        else:
+            old_val = old_vals[0]
+            new_val = new_vals[0]
+            if len(old_ids) > 1 or len(new_ids) > 1:
+                # Ambiguous group: report one value present only on the
+                # old side and one present only on the new side, rather
+                # than an arbitrary representative pair that might
+                # coincidentally agree even though the multiset as a whole
+                # differs.
+                old_val = next((v for v in old_vals if v not in new_vals), old_val)
+                new_val = next((v for v in new_vals if v not in old_vals), new_val)
+            if is_fingerprint_comparison_unreliable(old_val, new_val):
+                continue
         changes.append(
             make_change(
                 ChangeKind.CONSTANT_CHANGED,

@@ -451,6 +451,29 @@ concepts:
       trusting the bare map parameter alone; constants have no
       bare/qualified split (no schema-versioned bare-only baseline
       predates them), so this round is typedef-only.
+
+      **An eighth round found two further gaps in the sixth round's own
+      collision fix, both fixed the same day.** `diff_constants`'s multiset
+      comparison filtered out unsupported (`None`) values *before*
+      comparing, so a colliding group's own membership shrinking (an
+      unsupported occurrence disappearing, alongside an unchanged
+      comparable one) produced an identical *filtered* value list on both
+      sides and read as "unchanged" -- fixed by also comparing each side's
+      raw occurrence count, reporting a change (no recoverable value text)
+      whenever the counts disagree even though the filtered values agree;
+      typedefs have no equivalent gap, since `_underlying` never returns
+      `None` (an unresolved chain uses the `"?"` sentinel, always
+      comparable). Separately, `_assert_sidecar_identity_consistent` keyed
+      its lookup by the strict `render_display_name`, which refuses to
+      render for an `Anonymous`/`LocalToFunction` segment -- so an
+      anonymous-scoped identity's sidecar disagreement passed construction
+      silently, even though the same producer's own sidecar is keyed by the
+      flattened name (the `render_display_name_or_leaf` convention), not
+      skipped for such a declaration at all. Fixed by keying the check by
+      `render_display_name_or_leaf` instead, grouping colliding entities and
+      flagging a disagreement only when none of them match the sidecar's
+      recorded id (the sidecar itself, a plain `dict` comprehension over the
+      same colliding key, can only ever reflect one member).
   public_surface:
     primitive: complete
     producers: complete
