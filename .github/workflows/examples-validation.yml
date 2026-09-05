@@ -8,6 +8,7 @@ on:
       - "abicheck/**"
       - "tests/**"
       - "validation/scripts/**"
+      - "scripts/workflow_examples.py"
       - "scripts/check_examples_validation_status_sync.py"
       - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
@@ -19,6 +20,7 @@ on:
       - "abicheck/**"
       - "tests/**"
       - "validation/scripts/**"
+      - "scripts/workflow_examples.py"
       - "scripts/check_examples_validation_status_sync.py"
       - "scripts/check_build_source_release_proof.py"
       - ".github/workflows/examples-validation.yml"
@@ -48,6 +50,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      # compare-release's documented command passes --header, which goes
+      # through the default CastXML AST backend -- `pip install -e ".[dev]"`
+      # alone leaves the runner without it, and the manifest's `requires:`
+      # lists castxml, so the job would skip rather than fail silently. Both
+      # halves are needed: the toolchain here, and `--require` below turning
+      # a skip into a failure if this step ever stops providing it.
+      - name: Install system deps
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ cmake curl ca-certificates
+
+      - uses: ./.github/actions/setup-castxml
 
       - name: Set up Python
         uses: actions/setup-python@v6

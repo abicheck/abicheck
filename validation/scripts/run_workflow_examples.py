@@ -225,6 +225,29 @@ def run_workflow(
     return result
 
 
+def apply_required(
+    results: list[dict[str, object]], required_ids: list[str]
+) -> list[dict[str, object]]:
+    """Promote a `--require`d workflow's skip to a real failure, in place.
+
+    The promotion has to happen *on the result itself*, before anything is
+    counted or serialized. Recording it as a detached entry instead left the
+    JSON receipt reporting a plain skip while the console counted the same
+    workflow as both failed and skipped -- with one workflow that printed
+    "-1 passed, 1 failed, 1 skipped".
+    """
+    for required in required_ids:
+        for result in results:
+            if result["id"] != required or result["status"] != "skip":
+                continue
+            reason = result.get("reason", "skipped")
+            result["status"] = "fail"
+            result["required"] = True
+            failures: list[str] = result.setdefault("failures", [])  # type: ignore[assignment]
+            failures.append(f"{required}: required by --require but skipped ({reason})")
+    return results
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("workflows", nargs="*", help="workflow ids (default: all)")
@@ -259,6 +282,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     results = [run_workflow(w, timeout=args.timeout) for w in workflows]
+
+    apply_required(results, args.require)
+
     failed = [r for r in results if r["status"] == "fail"]
     skipped = [r for r in results if r["status"] == "skip"]
 
@@ -268,14 +294,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{marker}  {result['id']}: {detail}")
         for failure in result.get("failures") or []:
             print(f"        {failure}")
-
-    for required in args.require:
-        if any(r["id"] == required and r["status"] == "skip" for r in results):
-            print(
-                f"ERROR: workflow {required!r} was skipped but --require names it",
-                file=sys.stderr,
-            )
-            failed.append({"id": required})
 
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)

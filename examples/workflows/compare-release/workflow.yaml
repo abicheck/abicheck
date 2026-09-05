@@ -15,6 +15,12 @@ platforms:
   - macos
 requires:
   - gcc
+  # The compare step passes --header, which goes through the default CastXML
+  # AST backend. Declaring it here is what makes a host without CastXML report
+  # an honest skip instead of a failure that looks like an ABI regression --
+  # and what lets a CI lane that just installed CastXML turn that skip back
+  # into a failure with `--require compare-release`.
+  - castxml
 steps:
   - name: build-v1
     run: gcc -shared -fPIC -g v1/mathutils.c -o libmathutils_v1.so

@@ -213,3 +213,106 @@ def test_every_step_parses_to_a_real_argv(directory: Path):
     for step in workflow.steps:
         assert step.argv
         assert " ".join(step.argv) == workflow_examples.normalize_command(step.run)
+
+
+# --------------------------------------------------------------------------
+# `--require` bookkeeping in validation/scripts/run_workflow_examples.py.
+#
+# Bug class: a derived summary that double-counts because a status change was
+# recorded beside the record instead of on it. The original cut appended a
+# detached `{"id": ...}` entry to the local `failed` list, so the JSON receipt
+# still reported a plain skip while the console counted the same workflow as
+# both failed and skipped -- printing "-1 passed, 1 failed, 1 skipped". The
+# invariant below is the general one (the three buckets partition the results
+# exactly), checked over generated status combinations rather than the single
+# one-workflow case that exposed it.
+# --------------------------------------------------------------------------
+
+
+def _load_runner():
+    import importlib.util
+
+    path = REPO_DIR / "validation" / "scripts" / "run_workflow_examples.py"
+    spec = importlib.util.spec_from_file_location("run_workflow_examples", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _results(*statuses: str) -> list[dict]:
+    return [
+        {
+            "id": f"wf{index}",
+            "status": status,
+            "reason": "missing required tool(s): ['castxml']",
+            "failures": [],
+        }
+        for index, status in enumerate(statuses)
+    ]
+
+
+@pytest.mark.parametrize(
+    "statuses",
+    [
+        ("skip",),
+        ("pass",),
+        ("fail",),
+        ("skip", "pass"),
+        ("pass", "skip", "fail"),
+        ("skip", "skip", "skip"),
+        ("fail", "fail"),
+    ],
+)
+def test_status_buckets_always_partition_the_results(statuses: tuple[str, ...]):
+    """passed + failed + skipped == total, for every workflow named required
+    and for none of them. A workflow counted in two buckets is what produced
+    the negative pass count."""
+    runner = _load_runner()
+    for required in ([], ["wf0"], [r["id"] for r in _results(*statuses)]):
+        results = runner.apply_required(_results(*statuses), list(required))
+        buckets = [r["status"] for r in results]
+        assert buckets.count("pass") + buckets.count("fail") + buckets.count(
+            "skip"
+        ) == len(results)
+        assert set(buckets) <= {"pass", "fail", "skip"}
+
+
+def test_a_required_skip_becomes_a_failure_on_the_record_itself():
+    runner = _load_runner()
+    results = runner.apply_required(_results("skip"), ["wf0"])
+    assert results[0]["status"] == "fail"
+    assert results[0]["required"] is True
+    assert any("required by --require" in f for f in results[0]["failures"])
+
+
+def test_require_leaves_a_workflow_it_does_not_name_alone():
+    """The negative control: naming one workflow must not promote another's
+    skip, or `--require` would silently mean "fail on any skip"."""
+    runner = _load_runner()
+    results = runner.apply_required(_results("skip", "skip"), ["wf0"])
+    assert results[0]["status"] == "fail"
+    assert results[1]["status"] == "skip"
+    assert results[1]["failures"] == []
+
+
+@pytest.mark.parametrize("status", ["pass", "fail"])
+def test_require_does_not_touch_a_workflow_that_actually_ran(status: str):
+    runner = _load_runner()
+    results = runner.apply_required(_results(status), ["wf0"])
+    assert results[0]["status"] == status
+    assert results[0]["failures"] == []
+    assert "required" not in results[0]
+
+
+def test_the_compare_release_workflow_declares_the_backend_its_command_needs():
+    """compare-release passes `--header`, which goes through the CastXML AST
+    backend. If the manifest does not declare it, a host without CastXML
+    reports a failure that looks like an ABI regression instead of an honest
+    skip -- and CI installs the wrong toolchain for the job."""
+    workflow = workflow_examples.load(
+        workflow_examples.WORKFLOWS_DIR / "compare-release"
+    )
+    uses_header = any("--header" in step.run for step in workflow.steps)
+    assert uses_header
+    assert "castxml" in workflow.requires
