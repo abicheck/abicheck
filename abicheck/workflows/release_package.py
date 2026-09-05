@@ -177,7 +177,11 @@ def is_multi_artifact_package(path: str | Path) -> bool:
             read_variant_composition_degraded_members(path, summary.variant_ids[0])
         )
     except (SnapshotError, OSError, ValueError, TypeError, KeyError):
-        return False
+        # A present-but-unreadable decision-bearing section is not "no
+        # marker" (Codex review): route to the fan-out, whose own marker
+        # read surfaces the damage as an error instead of the scalar
+        # reader silently comparing the artifact.
+        return True
 
 
 def _release_match_key(

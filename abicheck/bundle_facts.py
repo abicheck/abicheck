@@ -223,27 +223,28 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
     """Reconstruct a live-equivalent :class:`BundleSnapshot` from *facts*,
     with no binaries read.
 
-    A per-library entry whose ``AbiSnapshot.elf`` is ``None`` (a non-ELF or
-    header-only dump) is dropped, the same way :func:`abicheck.bundle.
-    build_bundle_snapshot` drops a file that doesn't parse as ELF -- both
-    describe "this bundle member contributes no ELF-level bundle facts".
+    A per-library entry whose ``AbiSnapshot.elf`` is ``None`` is dropped,
+    as ``bundle.build_bundle_snapshot`` drops a non-ELF file.
 
-    ``facts.filesystem_aliases`` (real symlink-target/hard-link basenames
-    captured while the original binaries still existed, see
-    :func:`capture_bundle_facts`) is threaded through as
-    ``build_bundle_snapshot_from_metadata``'s ``extra_aliases`` so this
-    purely metadata-driven reconstruction can still resolve a
-    ``DT_NEEDED`` edge naming one of those aliases without probing the
-    filesystem, since the persisted facts may outlive the files captured.
+    ``facts.filesystem_aliases`` (captured symlink/hard-link basenames)
+    feeds ``build_bundle_snapshot_from_metadata``'s ``extra_aliases`` so a
+    ``DT_NEEDED`` edge still resolves without probing the filesystem;
+    ``facts.library_filenames`` feeds its ``paths`` so SONAME-skew sees the
+    real, versioned filename (Codex review).
 
-    ``facts.library_filenames`` is threaded through as that same
-    function's ``paths`` -- a real on-disk filename reconstructed as
-    ``Path(filename)`` rather than the default ``Path(canonical_key)``
-    fallback, so ``bundle._detect_soname_skew``'s own SONAME-major
-    fallback sees the real, versioned filename (Codex review). A name
-    absent from ``library_filenames`` falls back to the default."""
+    Refuses *facts* carrying a ``degraded_members`` marker (ADR-065 D8,
+    Codex review): a stand-in is not evidence, and a direct API caller must
+    resolve the scope first (``workflows.release_scope.restrict_bundle_facts``
+    under a ``ScopeAcquisitionRecord``, as every compare driver does)."""
     from .bundle import build_bundle_snapshot_from_metadata
 
+    if facts.degraded_members:
+        raise ValueError(
+            f"bundle facts mark {len(facts.degraded_members)} member(s) degraded "
+            f"({', '.join(sorted(facts.degraded_members))}): an ELF-only stand-in "
+            "is not bundle evidence (ADR-065 D8); resolve the scope with "
+            "workflows.release_scope.restrict_bundle_facts first"
+        )
     metadata = {}
     paths = {}
     for name, snap in facts.per_library_snapshots.items():

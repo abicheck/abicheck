@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from ..bundle_facts import BundleFacts
     from ..bundle_manifest import InstantiationManifest
 
+from ..errors import SnapshotError
 from ..model.scope_acquisition import (
     AcquisitionState,
     InventoryCompleteness,
@@ -596,7 +597,15 @@ def stored_side_degraded_members(
 
     if not (side_dir.is_dir() and is_project_snapshot_package_dir(side_dir)):
         return {}
-    return resolve_release_package_degraded_members(side_dir, variant_id=variant_id)
+    try:
+        return resolve_release_package_degraded_members(side_dir, variant_id=variant_id)
+    except (SnapshotError, OSError, ValueError, TypeError, KeyError) as exc:
+        # Fail closed (Codex review): a damaged marker section must not
+        # read as "no member is degraded".
+        raise SnapshotError(
+            f"{side_dir}: the stored package's degraded-member marker could not "
+            f"be read ({exc}); refusing to compare its members as complete evidence"
+        ) from exc
 
 
 def stored_degraded_matched_members(

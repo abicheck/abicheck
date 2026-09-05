@@ -49,6 +49,7 @@ from abicheck.model.scope_acquisition import (
 )
 from abicheck.workflows.release_scope import (
     build_release_scope_record,
+    build_stored_baseline_scope_record,
     bundle_analysis_members,
 )
 
@@ -607,3 +608,106 @@ class TestDegradedSingleArtifactPackageRoutesToTheFanOut:
         assert doc["run_outcome"]["operational"] == "no_comparison_completed"
         assert doc["run_outcome"]["compatibility"] is None
         assert code == 1
+
+
+class TestDamagedMarkerSectionFailsClosed:
+    """A single-artifact package whose composition section is present but
+    unreadable is not "no marker" (Codex review, thirteenth round): it
+    routes to the fan-out, and the fan-out refuses to compare it."""
+
+    @staticmethod
+    def _corrupt_composition(pkg: Path) -> None:
+        from abicheck.project_snapshot_store import (
+            DirectoryObjectStore,
+            read_manifest_summary,
+            read_variant_ref,
+        )
+        from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
+
+        (variant_id,) = read_manifest_summary(pkg).variant_ids
+        ref = read_variant_ref(pkg, variant_id).sections[
+            BUNDLE_COMPOSITION_SECTION_KIND
+        ]
+        DirectoryObjectStore(pkg)._json_path(ref.digest).write_bytes(b"garbage")
+
+    def test_routes_to_the_fan_out_and_is_refused(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.cli_resolve import classify_compare_operand
+        from abicheck.workflows.release_package import is_multi_artifact_package
+
+        healthy = {"libfoo.so": _lib("libfoo.so", exports=("foo", "bar"))}
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        _write_stored_package(old, healthy)
+        _write_stored_package(new, healthy)
+        self._corrupt_composition(new)
+        assert is_multi_artifact_package(new) is True
+        assert classify_compare_operand(new) == "directory"
+        result = CliRunner().invoke(
+            main, ["compare", str(old), str(new), "-j", "1", "--format", "json"]
+        )
+        # Refused as a usage error by whichever reader meets the damage
+        # first (materialization or the marker read), never compared.
+        assert result.exit_code == 64, result.output
+        assert "refusing" in result.output
+        assert "BREAKING" not in result.output
+
+
+class TestDirectBundleApiHonorsDegradation:
+    """`bundle_snapshot_from_facts` (and so `compare_bundle_from_facts` and
+    `compare_bundle_sides`) refuses facts carrying a degraded marker: the
+    stand-in is not evidence, and a direct caller must resolve the scope
+    first as the drivers do (Codex review, thirteenth round)."""
+
+    @staticmethod
+    def _facts():
+        from abicheck.bundle_facts import capture_bundle_facts
+
+        return capture_bundle_facts(
+            {"libcore.so": _lib("libcore.so"), "libalgo.so": _lib("libalgo.so")},
+            degraded_members={"libcore.so": "dump failed"},
+        )
+
+    def test_compare_bundle_from_facts_refuses(self) -> None:
+        from abicheck.bundle_facts import (
+            bundle_snapshot_from_facts,
+            capture_bundle_facts,
+            compare_bundle_from_facts,
+        )
+
+        new_snapshot = bundle_snapshot_from_facts(
+            capture_bundle_facts({"libalgo.so": _lib("libalgo.so")})
+        )
+        with pytest.raises(ValueError, match="libcore.so.*ADR-065 D8"):
+            compare_bundle_from_facts(self._facts(), new_snapshot, [])
+
+    def test_compare_bundle_sides_refuses(self, tmp_path: Path) -> None:
+        from abicheck.bundle_side_input import (
+            StoredBundleFactsInput,
+            compare_bundle_sides,
+        )
+        from abicheck.serialization import save_bundle_facts
+
+        path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(self._facts(), path)
+        with pytest.raises(ValueError, match="degraded"):
+            compare_bundle_sides(
+                StoredBundleFactsInput(path), StoredBundleFactsInput(path), []
+            )
+
+    def test_a_resolved_scope_passes(self) -> None:
+        from abicheck.bundle_facts import bundle_snapshot_from_facts
+        from abicheck.workflows.release_scope import restrict_bundle_facts
+
+        facts = self._facts()
+        record = build_stored_baseline_scope_record(
+            facts.per_library_snapshots,
+            {"libalgo.so": Path("libalgo.so"), "libcore.so": Path("libcore.so")},
+            compared=["libalgo.so"],
+            degraded={"libcore.so": "dump failed"},
+            old_provenance="t",
+            new_provenance="t",
+        )
+        snapshot = bundle_snapshot_from_facts(restrict_bundle_facts(facts, record))
+        assert set(snapshot.libraries) == {"libalgo.so"}

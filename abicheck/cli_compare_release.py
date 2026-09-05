@@ -96,6 +96,7 @@ from .cli_options import (
     severity_options,
     verbose_option,
 )
+from .errors import SnapshotError
 from .frontends.cli.options import (
     reject_incoherent_secondary_output,
     secondary_output_options,
@@ -627,13 +628,16 @@ def compare_release_cmd(
             # ADR-065 D8 (Codex review): a matched member either stored
             # package marks degraded is not compared -- its snapshot is the
             # ELF-only stand-in -- but recorded `failed` on the scope axis.
-            degraded_matched = stored_degraded_matched_members(
-                old_dir,
-                new_dir,
-                matched_keys,
-                old_variant=old_variant,
-                new_variant=new_variant,
-            )
+            try:
+                degraded_matched = stored_degraded_matched_members(
+                    old_dir,
+                    new_dir,
+                    matched_keys,
+                    old_variant=old_variant,
+                    new_variant=new_variant,
+                )
+            except SnapshotError as exc:  # a damaged marker section (Codex review)
+                raise click.UsageError(str(exc)) from exc
             library_results, worst_verdict, diff_pairs = _compare_release_libraries(
                 [k for k in matched_keys if k not in degraded_matched],
                 old_map,
