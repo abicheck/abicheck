@@ -172,45 +172,68 @@ went through three rounds on this PR, each correcting the previous one:
    declaring the fix complete, not by review alone. Reverted in full: this
    function's heuristic is unchanged from before this closure began.
 
-This closes ADR-063 Phase 5B's own removal gate for the ``vtable`` field
+This closed ADR-063 Phase 5B's own removal gate for the ``vtable`` field
 family as a formal, investigated decline -- the same disposition 2B's
 `entity:` alias promotion and 6B's own undone cohort items received, per
 ``docs/contribute/plans/one-semantic-pipeline.md``'s 5B section and
 ``docs/_meta/one-semantic-pipeline-status.yaml``'s ``facts`` concept --
 **not** left ambiguous between the two outcomes, and not silently reverted
-without a trace: the PDB fabrication round 2 found is real, reachable, and
-still open, recorded here and in the plan rather than only in this PR's
-own history. Closing it for real needs a snapshot/producer-level signal
-analogous to ``AbiSnapshot.clang_vtable_facts_reliable`` -- something that
-can tell "this whole backend never captures vtable data" apart from "this
-one record's constructor simply omitted the field," which
-``vtable_fact.status`` alone cannot do -- not a per-record ``FactStatus``
-branch, and not a different way of reading the fields already here for
-the DWARF per-TU ambiguity itself.
+without a trace: the PDB fabrication round 2 found was real and
+reachable, recorded here and in the plan rather than only in that PR's
+own history.
 
-**A second, distinct fabrication path, surfaced by review on this same
-closure and deliberately left out of scope: the owned-virtual-function
-fallback stream, not just the size-delta one, can also fire against a
-PE/PDB-derived side.** ``pe_metadata.py``/``pdb_metadata.py`` never set
-``Function.is_virtual`` explicitly (confirmed by inspection: neither
-module assigns it), so it reads its dataclass default (``False``) for
-*every* function recovered from export-table/symbol data alone -- not
-because those functions are confirmed non-virtual, but because that
-evidence was never collected, the identical "default reads as confirmed
-absence" ambiguity this whole closure investigated for ``vtable_fact``
-itself, one projection over. A PE/PDB side compared against a header-AST
-side can therefore differ on `_owned_virtual_signatures` for a class whose
-real virtual surface never changed, evidencing a transition via
-``vtable_transition_is_evidenced``'s "class's own virtual functions"
-branch the same way the size-delta branch does for PDB's ``vtable_fact``.
-This is real (verified, not assumed) and pre-existing -- part of the
-original heuristic this closure's round 3 reverted back to, unrelated to
-any change on this PR, and not attempted here for the same reason round 2
-was reverted: a narrow fix in this exact area was just shown, twice on
-this one PR, to need more scrutiny than a single pass gives it before it
-can be trusted not to regress real coverage. Recorded rather than left
-implicit, per this file's own "say so explicitly" convention -- its own
-dedicated, higher-scrutiny slice, not a drive-by extension of this one.
+**T9 closure (duplication-and-convergence-assessment.md Phase 6 item 4):
+the PDB fabrication above is now closed.** The 2026-09-04 note above
+diagnosed the blocker precisely: ``vtable_fact.status`` alone could not
+tell "this whole backend never captures vtable data" apart from "this one
+record's constructor simply omitted the field," because both PDB's own
+non-evidence and a hand-built/typed-API omission resolved to the
+identical ``NOT_COLLECTED`` status. The fix is not a snapshot-wide
+reliability flag (a `clang_vtable_facts_reliable`-shaped side channel) --
+it is using the status ``FactStatus`` already reserves for exactly PDB's
+situation, explicitly, at the one place that knows it: ``pdb_model.py``'s
+``_record_from_layout`` now constructs every PDB record's
+``vtable_fact``/``vptr_offset_bits_fact`` as ``Fact.unsupported(...,
+producer="pdb")`` rather than omitting the field. `compare/vtable_
+evidence.py`'s `vtable_transition_is_evidenced` (this module's
+``_vtable_transition_is_evidenced`` wraps it unchanged) now declines
+outright — before consulting either fallback evidence stream — whenever
+either side's `vtable_fact.status is FactStatus.UNSUPPORTED`. See that
+module's own "T9 closure" docstring note for the full account, including
+why gating on `UNSUPPORTED` specifically (not the broader `not
+is_present` round 2 tried) does not reopen the leaf-class regression round
+3 protects: a typed-API omission never resolves to `UNSUPPORTED`, only to
+`NOT_COLLECTED`, and this gate does not touch `NOT_COLLECTED` at all.
+
+This also closes the second, distinct fabrication path a prior revision
+of this docstring recorded as deliberately out of scope: the
+owned-virtual-function fallback stream (``pe_metadata.py``/
+``pdb_metadata.py`` never set ``Function.is_virtual`` explicitly, so it
+reads its dataclass default ``False`` for every PE/PDB-sourced function —
+the identical "default reads as confirmed absence" ambiguity, one
+projection over). That stream is only ever consulted *after* the new
+``UNSUPPORTED`` gate above, so a PDB-derived side's own
+``vtable_fact=Fact.unsupported(...)`` declines the whole predicate before
+either fallback stream — including the owned-virtual-function one — is
+ever reached; no separate fix to ``Function.is_virtual`` was needed to
+close this half.
+
+**What T9 does not close, and remains genuinely open:** the DWARF
+per-translation-unit completeness gap this cluster's own ``vtable_
+transition_is_evidenced`` docstring already names — a class whose virtual
+methods live in a TU only the *other* side's debug info covers still
+reads ``Fact.present([])``, genuinely ``PRESENT``, on the losing side.
+That is not a producer-*capability* gap ``producer``/``UNSUPPORTED`` can
+express (DWARF genuinely can capture this family; the gap is per-TU
+*scope*, not per-producer capability) — it is exactly the
+observed-vs-inferred / positive-observation-vs-completeness distinction
+the wider T9 tracking item (`docs/contribute/plans/duplication-and-
+convergence-assessment.md` Phase 6 item 4) still leaves unimplemented,
+and closing it needs either a per-TU coverage signal this model does not
+yet carry or artifact-level evidence (`_ZTV` presence, a per-finding
+provider record) this type-level detector does not receive — not a
+further reading of the fields already here. Recorded rather than left
+implicit, per this file's own "say so explicitly" convention.
 """
 
 from __future__ import annotations

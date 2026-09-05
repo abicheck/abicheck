@@ -146,6 +146,27 @@ concepts:
       method" from "I established the complete set of virtual methods."
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 4 /
       track T9.
+      **T9 first slice (2026-09-05): the PDB fabrication itself is now
+      closed.** `Fact[T]` gained a `producer` field (`model/fact.py`,
+      additive, round-tripped through `storage/fact_codec.py`).
+      `pdb_model.py` now stamps every PDB record's `vtable_fact`/
+      `vptr_offset_bits_fact` as an explicit `Fact.unsupported(...,
+      producer="pdb")` rather than omitting the fields, which previously
+      resolved to the same `NOT_COLLECTED` status a typed-API omission
+      also produces. `compare/vtable_evidence.
+      vtable_transition_is_evidenced` declines outright on either side's
+      `vtable_fact.status is FactStatus.UNSUPPORTED` -- a status only an
+      explicit producer-incapability claim produces, never a typed-API
+      omission -- closing the reachable fabrication without reopening the
+      leaf-class regression (`NOT_COLLECTED`/`FAILED` are untouched). This
+      closes the implementation-consolidation gap for the one concrete
+      case named above; it does *not* close the wider item: the DWARF
+      per-TU completeness gap (a producer-capability signal cannot express
+      a per-TU scope gap), the seven `fact_provenance`-gated case-(a)
+      fields' legacy-hybrid backfill blocker, and the shared declined-
+      comparison analysis accounting all remain open. See
+      duplication-and-convergence-assessment.md's own T9 row note for the
+      full account.
   identity:
     primitive: complete
     producers: partial

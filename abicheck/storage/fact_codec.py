@@ -250,6 +250,15 @@ def decode_fact(
         status=FactStatus(raw["status"]),
         value=raw.get("value"),
         diagnostics=tuple(raw.get("diagnostics") or ()),
+        # T9 (duplication-and-convergence-assessment Phase 6 item 4):
+        # additive, unversioned field -- a document predating it simply has
+        # no "producer" key, and `raw.get(...)` already reads that as
+        # `None`, the identical default every pre-existing `Fact[...]`
+        # construction site already carries. No schema-version gate needed
+        # (unlike `value`/`diagnostics`' own siblings above, whose *absence*
+        # can mean something at an older schema version): `producer` was
+        # never required for correctness, only ever additional attribution.
+        producer=raw.get("producer"),
     )
 
 

@@ -298,10 +298,15 @@ class TestExplicitFactStatusWouldNotSafelyGateThisGuard:
         owned-function evidence on either side, so only the ``size_bits``
         delta can settle it -- and must, regardless of which side's
         ``vtable_fact`` carries the bad status. This is the exact shape
-        PR #1057's own round-2 review found reachable via PDB and
-        fabricating a ``TYPE_VTABLE_CHANGED`` finding -- still a real,
-        open gap (see the module docstring), just not one this guard can
-        close without conflating it with the round-3 regression shape."""
+        PR #1057's own round-2 review found reachable via PDB -- but real
+        PDB records no longer carry ``NOT_COLLECTED``/``FAILED`` for this
+        field (T9 closure: ``pdb_model.py`` now constructs an explicit
+        ``Fact.unsupported(...)``, see
+        ``TestUnsupportedProducerClosesThePdbFabrication`` below), so this
+        parametrization now pins a hypothetical producer/hand-built shape
+        rather than the real PDB one -- deliberately still unguarded here,
+        since narrowing ``NOT_COLLECTED``/``FAILED`` themselves is exactly
+        what round 2 tried and round 3 reverted."""
         populated = RecordType(
             name=NAME, kind="class", size_bits=64, vtable=[f"{NAME}::f()"]
         )
@@ -378,6 +383,106 @@ class TestOmittedVtableStillDetectsARealAddition:
         assert new.vtable_fact is not None
         assert old.vtable_fact.status is new.vtable_fact.status is FactStatus.PRESENT
         assert _vtable_transition_is_evidenced(NAME, old, new, {}, {})
+
+
+class TestUnsupportedProducerClosesThePdbFabrication:
+    """T9 closure (duplication-and-convergence-assessment.md Phase 6 item
+    4): the real, reachable PDB fabrication ``TestExplicitFactStatusWould
+    NotSafelyGateThisGuard``'s own docstring names is closed here, via
+    ``FactStatus.UNSUPPORTED`` specifically -- never via ``NOT_COLLECTED``/
+    ``FAILED``, which stay exactly as unguarded as
+    ``TestOmittedVtableStillDetectsARealAddition`` above pins. This is the
+    one status a hand-constructed/typed-API ``RecordType`` omitting
+    ``vtable=`` never resolves to (only an explicit ``Fact.unsupported()``
+    construction does — see ``model/fact.py``'s own "producer" docstring),
+    so gating on it cannot reopen the round-3 regression.
+    """
+
+    def test_size_delta_from_an_unsupported_side_no_longer_fabricates_a_finding(
+        self,
+    ) -> None:
+        """The exact PR #1057 round-2 shape, but with the real PDB
+        producer's own real status (``UNSUPPORTED``, not ``NOT_COLLECTED``)
+        -- an unrelated size delta on a PDB-derived side must no longer
+        evidence a vtable transition."""
+        populated = RecordType(
+            name=NAME, kind="class", size_bits=64, vtable=[f"{NAME}::f()"]
+        )
+        pdb_side = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=128,
+            vtable_fact=Fact.unsupported(producer="pdb"),
+        )
+        assert not _vtable_transition_is_evidenced(NAME, pdb_side, populated, {}, {})
+        assert not _vtable_transition_is_evidenced(NAME, populated, pdb_side, {}, {})
+
+    def test_owned_virtual_signature_fallback_from_an_unsupported_side_also_declines(
+        self,
+    ) -> None:
+        """The second fabrication path the module docstring names: a
+        PE/PDB-derived side's own ``Function.is_virtual`` defaults to
+        ``False`` for every function (never observed, not confirmed
+        non-virtual), which would otherwise make the owned-virtual-
+        signature streams disagree. Declining via the same
+        ``UNSUPPORTED`` gate closes this path too, with no separate fix to
+        ``Function.is_virtual`` needed."""
+        populated = RecordType(
+            name=NAME, kind="class", size_bits=64, vtable=[f"{NAME}::f()"]
+        )
+        pdb_side = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.unsupported(producer="pdb"),
+        )
+        assert not _vtable_transition_is_evidenced(
+            NAME, pdb_side, populated, {}, _virtual()
+        )
+
+    def test_pdb_model_actually_produces_the_unsupported_status(self) -> None:
+        """End-to-end pin at the real producer boundary, not just at the
+        guard: ``pdb_model._record_from_layout`` -- not a hand-built
+        ``Fact.unsupported()`` -- is what must emit this status, or the
+        two tests above are exercising a shape PDB never actually
+        produces."""
+        from abicheck.pdb_model import _record_from_layout
+
+        class _Layout:
+            byte_size = 8
+            is_union = False
+            alignment = 8
+            fields: list[object] = []
+            decl_file = None
+
+        rec = _record_from_layout(NAME, _Layout(), frozenset())
+        assert rec.vtable_fact is not None
+        assert rec.vtable_fact.status is FactStatus.UNSUPPORTED
+        assert rec.vtable_fact.producer == "pdb"
+        assert rec.vptr_offset_bits_fact is not None
+        assert rec.vptr_offset_bits_fact.status is FactStatus.UNSUPPORTED
+        assert rec.vptr_offset_bits_fact.producer == "pdb"
+
+    def test_not_collected_side_by_side_with_unsupported_are_not_conflated(
+        self,
+    ) -> None:
+        """Sanity check on the distinguishing property itself: an omitted
+        ``vtable=`` (``NOT_COLLECTED``) and an explicit
+        ``Fact.unsupported()`` are different statuses, so a reader
+        checking specifically for ``UNSUPPORTED`` cannot mistake one for
+        the other."""
+        omitted = RecordType(name=NAME, kind="class", size_bits=32)
+        unsupported = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=32,
+            vtable_fact=Fact.unsupported(producer="pdb"),
+        )
+        assert omitted.vtable_fact is not None
+        assert unsupported.vtable_fact is not None
+        assert omitted.vtable_fact.status is FactStatus.NOT_COLLECTED
+        assert unsupported.vtable_fact.status is FactStatus.UNSUPPORTED
+        assert omitted.vtable_fact.status != unsupported.vtable_fact.status
 
 
 class TestOwnedVirtualSignaturesBackCompatWrapper:
