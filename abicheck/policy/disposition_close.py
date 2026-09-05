@@ -72,6 +72,7 @@ def record_kept_change(
         change,
         _kept_disposition(change, result),
         application_point=application_point,
+        from_gate=True,
     )
 
 
@@ -80,16 +81,15 @@ def _record_bucket(
     changes: Iterable[Change],
     disposition: Disposition,
     application_point: str,
-    *,
-    gate_excluded: bool = False,
 ) -> None:
+    """Record a whole bucket under one disposition.
+
+    Never passes ``from_gate``: a bucket is by definition a population the
+    verdict was *not* scored over, so a ``non_gating`` bucket is gate-excluded
+    (see :meth:`DispositionLedger.record`).
+    """
     for change in changes:
-        ledger.record(
-            change,
-            disposition,
-            application_point=application_point,
-            gate_excluded=gate_excluded,
-        )
+        ledger.record(change, disposition, application_point=application_point)
 
 
 def finalize_ledger(
@@ -123,6 +123,7 @@ def finalize_ledger(
             change,
             _kept_disposition(change, result, severity_config, gate),
             application_point="verdict",
+            from_gate=True,
         )
     # ``redundant_changes`` is two different populations concatenated, split at
     # ``redundant_count`` (``checker.compare``: ``redundant + opaque_filtered``,
@@ -160,6 +161,7 @@ def finalize_ledger(
                 change,
                 _kept_disposition(change, result, severity_config, gate),
                 application_point="redundancy_filter_scored",
+                from_gate=True,
             )
         else:
             ledger.record(
@@ -167,19 +169,18 @@ def finalize_ledger(
                 Disposition.DEDUPLICATED,
                 application_point="redundancy_filter",
             )
-    # `gate_excluded`: these two buckets are `non_gating` because they were
-    # taken *out of the verdict input* before any severity setting existed --
-    # `checker.compare` scores `kept + verdict_scored`, and neither is in it.
-    # Re-answering `_kept_disposition` for them under a severity config would
-    # promote a reconciled `TYPE_SIZE_CHANGED` back to `gating` under
-    # `abi_breaking: error`, reporting the run as gating on a finding
-    # `gate_decision_for_result` never scored (it reads `result.changes`).
+    # Both these buckets are `non_gating` because they were taken *out of the
+    # verdict input* before any severity setting existed -- `checker.compare`
+    # scores `kept + verdict_scored`, and neither is in it. Neither passes
+    # `from_gate`, so `record` marks them gate-excluded and `with_gate` leaves
+    # them alone; without that, `abi_breaking: error` would promote a
+    # reconciled `TYPE_SIZE_CHANGED` back to `gating` and report the run as
+    # gating on a finding `gate_decision_for_result` never scored.
     _record_bucket(
         ledger,
         redundant[redundant_count:],
         Disposition.NON_GATING,
         "opaque_downgrade",
-        gate_excluded=True,
     )
     _record_bucket(
         ledger,
@@ -196,7 +197,6 @@ def finalize_ledger(
         _bucket("reconciled_changes"),
         Disposition.NON_GATING,
         "build_context_reconciliation",
-        gate_excluded=True,
     )
     for change in _bucket("suppressed_changes"):
         ledger.record_suppression(
@@ -261,6 +261,10 @@ def close_consumer_scope(
             change,
             Disposition.NON_GATING if excluded else disposition,
             application_point="consumer_scope",
+            # Explicit rather than derived: an in-scope finding the gate
+            # scored `non_gating` is *not* gate-excluded, and an out-of-scope
+            # one is -- whatever the gate said. Only this call site knows
+            # both halves, so it states the answer instead of `from_gate`.
             gate_excluded=excluded,
         )
     # Promotion before narrowing: `_promote_scoped_contract` may have moved a

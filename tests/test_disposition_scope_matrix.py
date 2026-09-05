@@ -51,6 +51,9 @@ from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.contract_relevance_types import ContractRelevance
+from abicheck.contract_scoped_promotion import (
+    stamp_explicit_scope_contract_evaluation,
+)
 from abicheck.model import AbiSnapshot
 from abicheck.policy.disposition_close import (
     close_consumer_scope,
@@ -676,9 +679,12 @@ def test_a_contract_promotion_refreshes_a_stale_exclusion() -> None:
     _record_initially(ledger, promoted, Disposition.OUT_OF_CONTRACT, result)
     assert ledger.record_for(promoted).disposition is Disposition.OUT_OF_CONTRACT
 
-    # What `contract_scoped_promotion.stamp_scoped_changes` does to the
-    # finding: an explicit consumer outranks the snapshot-derived exclusion.
-    promoted.contract_relevance = ContractRelevance.IN_CONTRACT
+    # Through the real promoter, not a hand-set attribute: what makes this a
+    # promotion (rather than an ordinary finding that happens to read as
+    # evaluated) is the reason code that function stamps, and a test that set
+    # the relevance by hand would pass against the over-broad condition this
+    # replaced.
+    stamp_explicit_scope_contract_evaluation(promoted)
 
     close_consumer_scope(ledger, result, gating=[promoted], also_detected=[promoted])
     record = ledger.record_for(promoted)
@@ -695,10 +701,220 @@ def test_a_promotion_outside_the_consumer_scope_is_still_excluded() -> None:
     ledger = DispositionLedger()
     promoted = _fixture_change(Disposition.OUT_OF_CONTRACT, 0)
     _record_initially(ledger, promoted, Disposition.OUT_OF_CONTRACT, result)
-    promoted.contract_relevance = ContractRelevance.IN_CONTRACT
+    stamp_explicit_scope_contract_evaluation(promoted)
 
     close_consumer_scope(ledger, result, gating=[], also_detected=[])
     record = ledger.record_for(promoted)
     assert record.disposition is Disposition.NON_GATING
     assert record.gate_excluded is True
     assert ledger.effective_total == 0
+
+
+# ---------------------------------------------------------------------------
+# The structural backstop: a pre-gate `non_gating` cannot forget its marker
+# ---------------------------------------------------------------------------
+#
+# Three review rounds each found one more call site that produced a
+# `non_gating` label before the gate ever ran and left `gate_excluded` unset,
+# letting a severity configuration promote the finding back into a gate it was
+# never scored by. Fixing them one at a time is what produced three rounds; the
+# rule now lives in `DispositionLedger.record`, which derives the marker rather
+# than trusting each caller, and these tests are what keep it underivable-by-
+# accident: they inspect the real call sites and the real step metadata, not a
+# hand-listed set of fixtures.
+
+
+def _record_call_sites():
+    """Every ``…record(<disposition>, …)`` call under ``abicheck/``.
+
+    Yields ``(path, lineno, source)`` for each call to a method named
+    ``record`` — the ledger's own recording entry point. An AST walk rather
+    than a text scan, so a call split across lines is one site and a mention
+    in a comment or docstring is none.
+    """
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent / "abicheck"
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "record"
+            ):
+                yield path, node
+
+
+def test_only_a_gate_resolved_call_may_declare_from_gate() -> None:
+    """`from_gate=True` is the one way to opt a `non_gating` record out of
+    the marker, so it may only be used where the disposition really did come
+    from the gate — i.e. where `_kept_disposition` produced it.
+
+    This is the mechanical half. Without it, the derivation in `record` is a
+    convention a future call site can defeat by passing `from_gate=True` for
+    a label the gate never produced, which is the same bug in a new spelling.
+    """
+    import ast
+
+    offenders = []
+    for path, call in _record_call_sites():
+        declares = any(
+            kw.arg == "from_gate"
+            and isinstance(kw.value, ast.Constant)
+            and kw.value.value is True
+            for kw in call.keywords
+        )
+        if not declares:
+            continue
+        rendered = ast.unparse(call)
+        if "_kept_disposition" not in rendered:
+            offenders.append(f"{path.name}:{call.lineno}: {rendered.splitlines()[0]}")
+    assert not offenders, (
+        "these call sites claim their disposition came from the gate without "
+        "computing it with `_kept_disposition`:\n" + "\n".join(offenders)
+    )
+
+
+def test_no_call_site_passes_a_literal_false_gate_exclusion() -> None:
+    """The other way to defeat the derivation: state the old default aloud.
+
+    `gate_excluded=False` on an explicitly-labelled `non_gating` record is
+    exactly the bug the last three rounds fixed, spelled as an assertion. The
+    marker is derived; a caller that needs the record open to severity says
+    `from_gate=True`, which the test above then holds to its word.
+    """
+    import ast
+
+    offenders = [
+        f"{path.name}:{call.lineno}"
+        for path, call in _record_call_sites()
+        for kw in call.keywords
+        if kw.arg == "gate_excluded"
+        and isinstance(kw.value, ast.Constant)
+        and kw.value.value is False
+    ]
+    assert not offenders, (
+        "pass `from_gate=True` (and mean it) rather than re-stating the "
+        f"pre-derivation default at: {offenders}"
+    )
+
+
+def _pipeline_context(ledger: DispositionLedger):
+    """A real `PipelineContext` carrying *ledger*, with empty operands."""
+    from abicheck.post_processing import PipelineContext
+
+    ctx = PipelineContext(
+        old=AbiSnapshot(library="libmatrix", version="1.0"),
+        new=AbiSnapshot(library="libmatrix", version="2.0"),
+    )
+    ctx.disposition_ledger = ledger
+    return ctx
+
+
+def test_every_compatibility_dropping_step_records_a_gate_excluded_finding() -> None:
+    """The behavioural half, over the real pipeline rather than a fixture list.
+
+    Any step declaring `dropped_finding_disposition = NON_GATING` drops a
+    finding as compatible noise — `checker.compare` never scores it, so no
+    severity setting may put it back. Enumerated from `DEFAULT_PIPELINE`
+    itself, so a step added later is covered without editing this test.
+    """
+    from abicheck.post_processing import (
+        _DEFAULT_DROPPED_DISPOSITION,
+        DEFAULT_PIPELINE,
+        _record_dropped_duplicates,
+    )
+
+    declaring = [
+        step
+        for step in DEFAULT_PIPELINE.steps
+        if getattr(step, "dropped_finding_disposition", _DEFAULT_DROPPED_DISPOSITION)
+        is Disposition.NON_GATING
+    ]
+    assert declaring, "the pipeline must still contain such a step"
+    for step in declaring:
+        ledger = DispositionLedger()
+        ctx = _pipeline_context(ledger)
+        dropped = _fixture_change(Disposition.GATING, 0)
+        _record_dropped_duplicates(
+            [dropped], [], 0, ctx, step.name, Disposition.NON_GATING
+        )
+        record = ledger.record_for(dropped)
+        assert record is not None, f"{step.name} dropped a finding unrecorded"
+        assert record.disposition is Disposition.NON_GATING
+        assert record.gate_excluded is True, (
+            f"{step.name}'s compatibility drop can be promoted back into the "
+            "gate by a severity configuration"
+        )
+
+
+def test_a_dropped_compatibility_finding_survives_a_strict_severity_config() -> None:
+    """…and the same statement end to end, through `with_gate`."""
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+    from abicheck.post_processing import (
+        _DEFAULT_DROPPED_DISPOSITION,
+        DEFAULT_PIPELINE,
+        _record_dropped_duplicates,
+    )
+
+    result = _empty_result()
+    ledger = DispositionLedger()
+    ctx = _pipeline_context(ledger)
+    for index, step in enumerate(DEFAULT_PIPELINE.steps):
+        if (
+            getattr(step, "dropped_finding_disposition", _DEFAULT_DROPPED_DISPOSITION)
+            is not Disposition.NON_GATING
+        ):
+            continue
+        dropped = _fixture_change(Disposition.GATING, index)
+        _record_dropped_duplicates(
+            [dropped], [], 0, ctx, step.name, Disposition.NON_GATING
+        )
+
+    strict = SeverityConfig(
+        abi_breaking=SeverityLevel.ERROR,
+        potential_breaking=SeverityLevel.ERROR,
+        quality_issues=SeverityLevel.ERROR,
+        addition=SeverityLevel.ERROR,
+    )
+    assert ledger.effective_total == 0
+    assert ledger.with_gate(result, strict).effective_total == 0
+
+
+def test_an_unstamped_out_of_surface_finding_is_not_a_promotion() -> None:
+    """Round 12's regression from round 11's own fix, as a standing control.
+
+    `contract_gating.is_evaluated` answers `True` for an *unstamped* finding
+    by design — that is what keeps every run without `--contract` bit-for-bit
+    unchanged — so "reads as evaluated now" cannot distinguish *became*
+    evaluated from *always was*. Keying the refresh on it relabelled every
+    ordinary public-header scope exclusion in a `--used-by` run as a contract
+    promotion, corrupting both the disposition and the reason it names.
+
+    The finding here is exactly that shape: recorded `out_of_contract` by the
+    out-of-surface bucket, never stamped by anything, in a run with no
+    `--contract` at all.
+    """
+    from abicheck.contract_gating import is_evaluated
+    from abicheck.policy.disposition_close import finalize_ledger
+
+    result, change, _ = _result_with_one_breaking_finding_in("out_of_surface_changes")
+    assert is_evaluated(change), (
+        "the precondition this test exists for: an unstamped finding reads "
+        "as evaluated, which is why the old condition misfired"
+    )
+    ledger = finalize_ledger(DispositionLedger(), result)
+    assert ledger.record_for(change).disposition is Disposition.OUT_OF_CONTRACT
+
+    close_consumer_scope(ledger, result, gating=[], also_detected=[])
+    record = ledger.record_for(change)
+    assert record.disposition is Disposition.OUT_OF_CONTRACT, (
+        "an out-of-surface exclusion is not a contract promotion"
+    )
+    assert record.application_point == "surface_scope"
+    assert record.gate_excluded is False, (
+        "a finding the gate never scored is not *excluded from* the gate by "
+        "a consumer scope; its own disposition already says so"
+    )

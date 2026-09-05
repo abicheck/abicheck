@@ -265,20 +265,42 @@ class DispositionLedger:
         *,
         application_point: str,
         rule: RuleProvenance | None = None,
-        gate_excluded: bool = False,
+        from_gate: bool = False,
+        gate_excluded: bool | None = None,
     ) -> None:
         """Record *change*'s single terminal *disposition*.
 
         A no-op when *change* was already recorded — the disposition it
         received first is the one that actually applied to it.
 
-        *gate_excluded* marks a finding a consumer-scoping pass judged
-        irrelevant, so :meth:`with_gate` cannot later promote it into a gate
-        the run never evaluated it for. It is set here, rather than only by
-        :meth:`apply_scope`, because a late-appended finding is recorded for
-        the first time *during* the close and so has no earlier record to
-        rewrite.
+        **``gate_excluded`` is derived, not trusted to each call site.** A
+        ``non_gating`` label has exactly two possible origins, and only one of
+        them may be re-answered later by a severity configuration:
+
+        * the gate itself said so — :func:`_kept_disposition` scored the
+          finding and it contributed nothing. Those callers pass
+          ``from_gate=True``, and the record stays open to
+          :meth:`with_gate`.
+        * *anything else* said so — a pipeline step dropped it as compatible
+          noise, a bucket held it out of the verdict input, a consumer scope
+          judged it irrelevant. The finding never reached the gate, so no
+          severity setting can put it there, and the record is marked.
+
+        The default is therefore the *conservative* one: an explicitly-passed
+        ``non_gating`` is gate-excluded unless the caller states it came from
+        the gate. Three separate rounds of review found three separate call
+        sites that produced a pre-gate ``non_gating`` and forgot the marker
+        (build-context reconciliation, the opaque downgrade, and two
+        compatibility-drop pipeline steps); a fourth would have been a fourth
+        review round, because the rule lived in each caller instead of here.
+
+        *gate_excluded* may still be passed explicitly, for the one case the
+        derivation cannot see: a ``gating``-shaped answer that a consumer
+        scope is simultaneously excluding (:meth:`apply_scope`'s late sibling
+        in ``close_consumer_scope``).
         """
+        if gate_excluded is None:
+            gate_excluded = disposition is Disposition.NON_GATING and not from_gate
         key = id(change)
         if key in self._seen_ids:
             return
@@ -450,34 +472,40 @@ class DispositionLedger:
             )
 
     def refresh_promoted(self, result: DiffResult) -> None:
-        """Re-answer any record whose finding has since been *promoted*.
+        """Re-answer any record whose finding an explicit scope *promoted*.
 
         ADR-049 §4.3: a run given ``--used-by``/``--required-symbol`` has been
         *told* what the contract is, and
-        ``contract_scoped_promotion.stamp_scoped_changes`` can promote a
-        finding the ``--contract`` evaluator had ruled ``PROVEN_OUT_OF_
-        CONTRACT`` (or left ``UNKNOWN_*``) to ``IN_CONTRACT`` -- an explicit
-        consumer outranks anything two snapshots can show. The scoped gate
-        then scores it, so its ledger record's ``out_of_contract`` /
-        ``unresolved_relevance`` label is stale, and
-        :meth:`apply_scope`'s narrowing-only guard skips exactly those two
-        dispositions rather than refreshing them. Left alone, an evaluated
-        breaking removal exits nonzero while the audit reports
-        ``effective_total: 0``.
+        ``contract_scoped_promotion.stamp_scoped_changes`` promotes a finding
+        the ``--contract`` evaluator had ruled ``PROVEN_OUT_OF_CONTRACT`` (or
+        left ``UNKNOWN_*``) to ``IN_CONTRACT`` -- an explicit consumer
+        outranks anything two snapshots can show. The scoped gate then scores
+        it, so its ledger record's ``out_of_contract`` /
+        ``unresolved_relevance`` label is stale, and :meth:`apply_scope`'s
+        narrowing-only guard skips exactly those two dispositions rather than
+        refreshing them. Left alone, an evaluated breaking removal exits
+        nonzero while the audit reports ``effective_total: 0``.
+
+        **Keyed on the promoter's own stamp, not on the finding currently
+        reading as evaluated.** ``contract_gating.is_evaluated`` answers
+        ``True`` for an *unstamped* finding by design (an unstamped finding is
+        evaluated -- that is what keeps every run without ``--contract``
+        unchanged), so "is evaluated now" cannot distinguish *became*
+        evaluated from *always was*. Reading it here refreshed every
+        out-of-surface record in a ``--used-by`` run that never passed
+        ``--contract`` at all, relabelling an ordinary public-header scope
+        exclusion as a contract promotion. The reason code
+        ``stamp_explicit_scope_contract_evaluation`` writes is the transition
+        signal, and it is written by exactly the function whose effect this
+        pass exists to follow.
 
         A promotion is the one thing that may *widen* a record, which is why
         it is a separate pass ahead of the narrowing one rather than a branch
-        inside it: the two move in opposite directions and the order between
-        them is what makes the result well-defined (promote first, then
-        narrow to the consumer's own set -- a promoted finding that consumer
-        does not use is still excluded).
-
-        Deliberately keyed on the finding's *own* evaluated state rather than
-        on a promotion having been recorded anywhere: this asks "does the
-        record still describe the finding", which is answerable for any
-        future promoter too.
+        inside it: the two move in opposite directions, and promote-then-
+        narrow is what makes the result well-defined -- a finding promoted
+        into the contract that this consumer does not use is still excluded.
         """
-        from ..contract_gating import is_evaluated
+        from ..contract_relevance_types import EXPLICIT_SCOPE_REASON_CODE
 
         gate = _GateContext.of(result)
         for index, (record, change) in enumerate(zip(self._records, self._anchors)):
@@ -486,7 +514,10 @@ class DispositionLedger:
                 Disposition.UNRESOLVED_RELEVANCE,
             ):
                 continue
-            if not is_evaluated(change):
+            if (
+                getattr(change, "contract_reason_code", None)
+                != EXPLICIT_SCOPE_REASON_CODE
+            ):
                 continue
             self._records[index] = replace(
                 record,

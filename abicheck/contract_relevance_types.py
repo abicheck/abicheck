@@ -254,6 +254,16 @@ class SelectorLayer(str, Enum):
 # an existing code's *meaning* must not be repurposed, since external
 # consumers may key behavior off the string.
 
+#: ADR-049 section 4.3 item 1's reason code, named rather than spelled twice.
+#: Two modules key behaviour off it -- the promoter that stamps it
+#: (``contract_scoped_promotion``) and the disposition ledger's own
+#: promotion-refresh pass, which uses it as the *transition* signal ("this
+#: finding was promoted") that current relevance state cannot supply, since an
+#: unstamped finding already reads as evaluated. It lives here, in the reason-
+#: code registry both can depend on, because ``policy`` may not import a
+#: ``workflows`` module (ADR-061 dependency direction).
+EXPLICIT_SCOPE_REASON_CODE = "explicit_consumer_or_required_symbol_evidence"
+
 CONTRACT_REASON_CODES: MappingProxyType[str, str] = MappingProxyType(
     {
         "public_root_membership": (
