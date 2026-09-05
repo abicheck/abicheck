@@ -315,6 +315,37 @@ class TestScopeCompletenessFromARealRelease:
         agg = aggregate_reports_dir(reports, expected=_expect(LINUX))
         assert agg.scope_completeness_exit == 1
         assert agg.exit_code() == 1
+        # ADR-065 D7 (Codex review, twelfth round): the legacy root
+        # `verdict: NO_CHANGE` is not a result -- `run_outcome.compatibility`
+        # is null, and the aggregate must not manufacture a clean verdict.
+        assert agg.compatibility_verdict is None
+        (target,) = agg.targets
+        assert target.compatibility_verdict is None
+        assert target.reason is not None and "no comparison completed" in target.reason
+        assert target.gate is not None and target.gate.blocking
+
+    def test_a_null_compatibility_never_reads_as_the_root_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        _write_report(
+            tmp_path,
+            LINUX,
+            "NO_CHANGE",
+            run_outcome={
+                "schema_version": "1.1",
+                "compatibility": None,
+                "assurance": None,
+                "gate": "none",
+                "operational": "no_comparison_completed",
+                "lifecycle": "existing",
+                "scope": "incomplete",
+            },
+            **_exit(no_comparison_completed_contribution=1),
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.compatibility_verdict is None
+        assert result.to_dict()["targets"][0]["compatibility_verdict"] is None
+        assert result.exit_code() == 1
 
 
 class TestStoredDispatchShapeAndAcceptedGaps:

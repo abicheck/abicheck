@@ -93,3 +93,16 @@ def scope_completeness_incomplete(data: Mapping[str, Any]) -> bool:
             if isinstance(node, Mapping) and node.get(key) == "incomplete":
                 return True
     return False
+
+
+def declares_null_compatibility(data: Mapping[str, Any]) -> bool:
+    """Whether a schema-valid ``run_outcome`` block states ``compatibility:
+    null`` -- a release that completed no comparison (ADR-065 D7) keeps a
+    legacy root ``verdict: "NO_CHANGE"`` for older readers, and the aggregate
+    must not manufacture a clean verdict from it (Codex review)."""
+    from .gate import _has_valid_run_outcome_block
+
+    return (
+        _has_valid_run_outcome_block(data)
+        and data["run_outcome"].get("compatibility") is None
+    )

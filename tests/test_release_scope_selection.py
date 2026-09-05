@@ -557,3 +557,53 @@ class TestDegradedMarkerIsValidatedBeforeAnyWrite:
                 doc, store=store, max_known_schema_version=SCHEMA_VERSION
             )
         assert store._objects == {}
+
+
+class TestDegradedSingleArtifactPackageRoutesToTheFanOut:
+    """A one-member `ProjectSnapshot` package whose sole member was captured
+    degraded is not a scalar "file" operand: only the scope-aware fan-out
+    reads the marker and records the member `failed`, where the
+    single-artifact reader would compare the ELF-only stand-in as complete
+    evidence and manufacture removals (Codex review, twelfth round)."""
+
+    @staticmethod
+    def _packages(tmp_path: Path) -> tuple[Path, Path]:
+        healthy = _lib("libfoo.so", exports=("foo", "bar"))
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        _write_stored_package(old, {"libfoo.so": healthy})
+        _write_stored_package(
+            new,
+            {"libfoo.so": _lib("libfoo.so")},
+            degraded={"libfoo.so": "dump failed: boom"},
+        )
+        return old, new
+
+    def test_classification(self, tmp_path: Path) -> None:
+        from abicheck.cli_resolve import classify_compare_operand
+        from abicheck.workflows.release_package import is_multi_artifact_package
+
+        old, new = self._packages(tmp_path)
+        assert is_multi_artifact_package(old) is False
+        assert is_multi_artifact_package(new) is True
+        assert classify_compare_operand(old) == "file"
+        assert classify_compare_operand(new) == "directory"
+
+    @pytest.mark.parametrize("degraded_side", ["old", "new"])
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    def test_compare_records_the_member_failed(
+        self, tmp_path: Path, degraded_side: str, policy: str
+    ) -> None:
+        old, new = self._packages(tmp_path)
+        if degraded_side == "old":
+            old, new = new, old
+        code, doc = _invoke_json(
+            "compare", str(old), str(new), "-j", "1", "--on-incomplete-scope", policy
+        )
+        assert "func_removed" not in json.dumps(doc)
+        assert doc["verdict"] != "BREAKING"
+        scope = doc["comparison_scope"]
+        assert scope["counts"]["failed"] == 1
+        assert scope["no_comparison_completed"] is True
+        assert doc["run_outcome"]["operational"] == "no_comparison_completed"
+        assert doc["run_outcome"]["compatibility"] is None
+        assert code == 1

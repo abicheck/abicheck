@@ -131,7 +131,8 @@ def is_multi_artifact_package(path: str | Path) -> bool:
     before A1.7) and everything else (routed to the release fan-out instead,
     the same as a loose directory of `.so` files).
 
-    Three shapes route to the fan-out, not just "more than one artifact":
+    Four shapes route to the fan-out, not just "more than one artifact"
+    (the fourth, a degraded sole member, is checked in the body below):
 
     - **More than one artifact** -- the obvious multi-library release case.
     - **Zero artifacts** -- a real, valid package can declare a variant with
@@ -164,7 +165,19 @@ def is_multi_artifact_package(path: str | Path) -> bool:
         summary = read_manifest_summary(path)
     except (SnapshotError, OSError, ValueError, TypeError):
         return False
-    return len(summary.artifact_ids) != 1 or len(summary.variant_ids) != 1
+    if len(summary.artifact_ids) != 1 or len(summary.variant_ids) != 1:
+        return True
+    # A fourth shape (ADR-065 D8, Codex review): a genuinely single-artifact
+    # package whose sole member was captured *degraded* must reach the
+    # fan-out too -- only the scope-aware release path reads the marker and
+    # records the member `failed`; the single-artifact reader would compare
+    # the ELF-only stand-in as complete evidence and manufacture removals.
+    try:
+        return bool(
+            read_variant_composition_degraded_members(path, summary.variant_ids[0])
+        )
+    except (SnapshotError, OSError, ValueError, TypeError, KeyError):
+        return False
 
 
 def _release_match_key(

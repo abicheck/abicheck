@@ -60,7 +60,11 @@ from .gate import (
     contract_coverage_blocks,
 )
 from .reconcile import ReportFindings, parse_report_findings
-from .scope_axis import scope_completeness_exit, scope_completeness_incomplete
+from .scope_axis import (
+    declares_null_compatibility,
+    scope_completeness_exit,
+    scope_completeness_incomplete,
+)
 
 
 def parse_report_verdict(data: Mapping[str, Any]) -> Verdict | None:
@@ -710,24 +714,13 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     gate: GateInfo | None = None
     if verdict is not None:
         try:
-            # A scan-shaped document (``scan_schema_version`` present) is
-            # dispatched to `GateInfo.from_scan_report` FIRST, not
-            # `from_report_data` -- a native `scan` report carries its own
-            # top-level `run_outcome` (ADR-063 Phase 7) but no top-level
-            # `severity` block (a severity-scheme `scan --against` nests its
-            # gate at `diff.severity` instead), so `from_report_data`'s own
-            # "no severity -> read run_outcome alone" branch previously
-            # returned a `GateInfo` straight from the root `run_outcome`
-            # without ever reaching `from_scan_report`, which is the only
-            # reader that validates/cross-checks the nested `diff.severity`
-            # gate against it (Codex review, fresh evidence: a nested
-            # severity exit 4 paired with a root `run_outcome.gate: "none"`
-            # was accepted as nonblocking instead of failing closed).
-            # `from_scan_report` itself already folds the root `run_outcome`
-            # into whichever nested/legacy gate it finds
-            # (`_fold_top_level_run_outcome`), so this reordering loses no
-            # coverage for either shape -- only a non-scan report still
-            # prefers its own `severity` block first.
+            # A scan-shaped document goes to `GateInfo.from_scan_report`
+            # FIRST: it carries a root `run_outcome` but no root `severity`
+            # (a severity-scheme `scan --against` nests its gate at
+            # `diff.severity`), and only `from_scan_report` cross-checks that
+            # nested gate against the root block (Codex review: a nested exit
+            # 4 beside a root `gate: "none"` once read as nonblocking). It
+            # folds the root `run_outcome` itself, so nothing is lost.
             if "scan_schema_version" in data:
                 gate = GateInfo.from_scan_report(data)
                 if gate is None:
@@ -763,7 +756,14 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 ),
             )
     raw_verdict = data.get("verdict")
-    if verdict is not None:
+    if verdict is not None and declares_null_compatibility(data):
+        # ADR-065 D7: the gate above still folds `operational`/the scope
+        # axis; only the legacy root verdict is not a real result.
+        verdict = None
+        unavailable_reason = (
+            "no comparison completed (run_outcome.compatibility is null)"
+        )
+    elif verdict is not None:
         unavailable_reason = None
     elif raw_verdict == _BOOTSTRAP_VERDICT:
         unavailable_reason = "no baseline published yet (bootstrap)"

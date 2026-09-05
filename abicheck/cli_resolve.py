@@ -481,7 +481,7 @@ def classify_compare_operand(path: Path) -> str:
     * ``"app"``       — an ELF application/executable (or ambiguous PIE) that
       ``compare`` cannot pair as a library (hint the user at ``appcompat``).
     * ``"file"``      — a single ``.so``/JSON/Perl dump, or a single-artifact
-      ``ProjectSnapshot`` package dir (storage-v2, ADR-062/063).
+      ``ProjectSnapshot`` package dir (ADR-062/063; a degraded one is a ``"directory"``, ADR-065 D8).
     """
     from .workflows.extraction import is_package
     from .workflows.release_package import is_multi_artifact_package as _multi
