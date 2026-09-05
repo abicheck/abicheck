@@ -644,7 +644,9 @@ Every JSON report carries a top-level `report_schema_version` field
 > `scan`, schema 1.24; and the not-comparable refusal document alike)
 > carries an additive top-level `run_outcome` block —
 > `compatibility`/`assurance`/`gate`/`operational`/`lifecycle`, plus
-> (schema 2.50, ADR-065) `scope` — the report's independent-axis outcome
+> (schema 2.50, ADR-065) `scope` — its own `schema_version` is `1.1`
+> once `scope` is present; a `1.0` block has no `scope` and reads as
+> `complete` — the report's independent-axis outcome
 > (ADR-063 D6) — alongside the unchanged
 > `verdict`/`exit_code`/`severity` fields; nothing existing changes
 > meaning or is removed. `gate` is an exit-code-free category

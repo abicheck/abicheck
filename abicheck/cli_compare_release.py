@@ -107,7 +107,9 @@ from .workflows.release_scope import (
     DIRECT_PAIR_KEY,
     StrandedLibraryResolution,
     build_release_scope_record,
+    out_of_scope_provider_names,
     release_inventory_evidence,
+    scoped_bundle_maps,
 )
 from .workflows.storage import is_project_snapshot_package_dir
 
@@ -823,13 +825,22 @@ def compare_release_cmd(
 
             bundle_result: BundleDiffResult | None = None
             if not no_bundle_analysis:
+                # ADR-065 D2: the bundle graph sees matched members and
+                # *proven* removals/additions only -- an unchecked member
+                # is absent from it, not a deleted provider (Codex review).
+                bundle_old_map, bundle_new_map = scoped_bundle_maps(
+                    old_map, new_map, scope_record
+                )
                 bundle_result, worst_verdict = _collect_bundle_result(
                     library_results,
-                    old_map,
-                    new_map,
+                    bundle_old_map,
+                    bundle_new_map,
                     worst_verdict,
                     manifest_path=manifest_path,
-                    bundle_system_providers=bundle_system_providers,
+                    bundle_system_providers=(
+                        *bundle_system_providers,
+                        *out_of_scope_provider_names(scope_record),
+                    ),
                     bundle_cohorts=bundle_cohorts,
                     policy=policy,
                     policy_file=resolve_bundle_policy_file(

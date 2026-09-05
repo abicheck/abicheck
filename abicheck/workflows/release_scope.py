@@ -56,8 +56,12 @@ directory listing order (an ADR-065 acceptance invariant).
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..bundle_facts import BundleFacts
 
 from ..model.scope_acquisition import (
     AcquisitionState,
@@ -75,8 +79,12 @@ __all__ = [
     "StrandedLibraryResolution",
     "build_release_scope_record",
     "build_stored_baseline_scope_record",
+    "bundle_analysis_members",
+    "out_of_scope_provider_names",
     "release_global_ran",
     "release_inventory_evidence",
+    "restrict_bundle_facts",
+    "scoped_bundle_maps",
     "unmatched_names",
 ]
 
@@ -312,6 +320,7 @@ def build_stored_baseline_scope_record(
     old_provenance: str,
     new_provenance: str,
     new_single_artifact: bool = False,
+    unsupported: Mapping[str, str] | None = None,
 ) -> ScopeAcquisitionRecord:
     """The record for a stored-baseline driver (`bundle_side_input` /
     `bundle_stored_pair_compare`), through the same builder the live
@@ -324,17 +333,26 @@ def build_stored_baseline_scope_record(
     the capture was complete (S3 owns declared inventories).
     *new_single_artifact* is the stored/live driver's "NEW was named as one
     file" signal, the only shape D9's narrowing may read intent from.
+    *unsupported* maps a matched key whose NEW artifact this build cannot
+    analyze (an unsupported container format, a stored snapshot newer than
+    this reader) to the reason, recorded `unsupported` -- the same state
+    the live fan-out's per-member handler assigns (D6).
     """
     old_map = {k: Path(k) for k in old_keys}
     new_map = {k: Path(k) for k in new_keys}
     matched = sorted(set(old_map) & set(new_map))
-    results: list[Mapping[str, object]] = [
-        {"library": k, "verdict": "ERROR", "error": degraded[k]}
-        if k in degraded
-        else {"library": k, "verdict": "NO_CHANGE"}
-        for k in matched
-        if k in degraded or k in set(compared)
-    ]
+    unsupported = dict(unsupported or {})
+    compared_set = set(compared)
+    results: list[Mapping[str, object]] = []
+    for k in matched:
+        if k in degraded:
+            results.append({"library": k, "verdict": "ERROR", "error": degraded[k]})
+        elif k in unsupported:
+            results.append(
+                {"library": k, "verdict": "unsupported", "reason": unsupported[k]}
+            )
+        elif k in compared_set:
+            results.append({"library": k, "verdict": "NO_CHANGE"})
     evidence = ReleaseInventoryEvidence(
         old=SideInventory(InventoryCompleteness.UNPROVEN, old_provenance),
         new=SideInventory(InventoryCompleteness.UNPROVEN, new_provenance),
@@ -365,6 +383,87 @@ def release_global_ran(
         return True
     verdict = getattr(getattr(bundle_result, "bundle_verdict", None), "value", None)
     return verdict != "NO_CHANGE"
+
+
+def bundle_analysis_members(record: ScopeAcquisitionRecord) -> frozenset[str]:
+    """The members bundle-level (cross-library) analysis may see: every
+    matched member, plus a *proven* removal or addition.
+
+    An unmatched member whose lacking side's inventory is unproven, and an
+    ``out_of_scope`` member, are absent from the bundle graph rather than
+    present on one side only -- otherwise ``BUNDLE_LIBRARY_REMOVED`` and the
+    intra-bundle dependency-removal detectors would read a partial local
+    build (or a deliberately narrowed comparison) as a provider deleted from
+    the release and score it breaking, which is exactly the D2 reading this
+    record replaces (Codex review). What such a member *is* -- unchecked --
+    is carried by the completeness axis instead.
+    """
+    keep = {m.member for m in record.members if m.old_present and m.new_present}
+    keep.update(m.member for m in record.proven_removed_members)
+    keep.update(m.member for m in record.proven_added_members)
+    return frozenset(keep)
+
+
+def out_of_scope_provider_names(
+    record: ScopeAcquisitionRecord | None,
+) -> tuple[str, ...]:
+    """The names (canonical key and on-disk filename) of every member the
+    bundle graph does not hold (the complement of
+    :func:`bundle_analysis_members`), for the bundle analysis' external-
+    provider allow-list: a surviving consumer whose ``DT_NEEDED`` names an
+    unchecked member is depending on something *outside this run's scope*,
+    not on a provider the release dropped -- so its unresolved import is not
+    ``BUNDLE_INTRA_DEP_REMOVED`` (the same detector Codex named alongside
+    ``BUNDLE_LIBRARY_REMOVED``). A proven removal stays in the graph and is
+    not listed here, so that consumer's break is still reported.
+    """
+    if record is None:
+        return ()
+    keep = bundle_analysis_members(record)
+    names: list[str] = []
+    for m in record.members:
+        if m.member in keep:
+            continue
+        names.append(m.member)
+        if m.name != m.member:
+            names.append(m.name)
+    return tuple(names)
+
+
+def scoped_bundle_maps(
+    old_map: Mapping[str, Path],
+    new_map: Mapping[str, Path],
+    record: ScopeAcquisitionRecord | None,
+) -> tuple[dict[str, Path], dict[str, Path]]:
+    """*old_map*/*new_map* restricted to :func:`bundle_analysis_members`
+    (both returned unchanged when there is no record)."""
+    if record is None:
+        return dict(old_map), dict(new_map)
+    keep = bundle_analysis_members(record)
+    return (
+        {k: v for k, v in old_map.items() if k in keep},
+        {k: v for k, v in new_map.items() if k in keep},
+    )
+
+
+def restrict_bundle_facts(facts: BundleFacts, members: frozenset[str]) -> BundleFacts:
+    """A copy of *facts* carrying only *members* -- the stored-side
+    counterpart of :func:`scoped_bundle_maps` for a driver whose OLD (or
+    NEW) bundle is reconstructed from a ``BundleFacts`` document."""
+    if members >= set(facts.per_library_snapshots):
+        return facts
+    return replace(
+        facts,
+        per_library_snapshots={
+            k: v for k, v in facts.per_library_snapshots.items() if k in members
+        },
+        library_filenames={
+            k: v for k, v in facts.library_filenames.items() if k in members
+        },
+        degraded_members={
+            k: v for k, v in facts.degraded_members.items() if k in members
+        },
+    )
 
 
 def unmatched_names(record: ScopeAcquisitionRecord, *, side: str) -> list[str]:

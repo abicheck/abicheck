@@ -4,7 +4,9 @@
   gains a `scope` axis (`complete`/`incomplete`) and `ExitDecision` two
   `0`/`1` fold participants, `incomplete_scope_contribution` and
   `no_comparison_completed_contribution` (report schema 2.50, scan schema
-  1.28). A directory/package `compare` now records every expected member's
+  1.28; the nested `run_outcome.schema_version` is `1.1`, a `1.0` block
+  without `scope` reads as `complete`). A directory/package `compare` now
+  records every expected member's
   acquisition state (`available`/`not_supplied`/`unsupported`/`failed`/
   `out_of_scope`) in a new `comparison_scope` JSON block, rendered in the
   Markdown report and the PR comment too, and takes
@@ -29,7 +31,12 @@
   as an `abicheck.comparison_scope` suite (skipped cases under `warn`,
   errors under `block` or when no comparison completed). An artifact this build cannot analyze is
   recorded `unsupported` (an incompleteness signal) rather than an `ERROR`
-  floored to exit `4`.
+  floored to exit `4`, in the stored/live driver too. Bundle-level
+  (cross-library) analysis sees matched members and *proven*
+  removals/additions only: an unchecked member is absent from the bundle
+  graph, never a `BUNDLE_LIBRARY_REMOVED` provider, so a partial local
+  build under `warn` cannot exit `4` on a library that was merely not
+  supplied.
 - **`--fail-on-removed-library` exit `8` migration.** Exit `8` now requires the
   removal to be *proven* — the NEW side's inventory must be proven complete
   (a stored `ProjectSnapshot` package's declared composition). A partial

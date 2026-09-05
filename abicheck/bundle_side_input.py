@@ -406,6 +406,7 @@ def compare_release_against_bundle_facts(
     from .bundle_facts import compare_bundle_from_facts
     from .bundle_manifest import load_manifest
     from .bundle_models import BundleSignatureEvidence
+    from .errors import IncompatibleSnapshotSchemaError, UnsupportedArtifactError
     from .package import discover_shared_libraries
     from .serialization import load_bundle_facts
     from .workflows.bundle_facts_library_overrides import (
@@ -460,11 +461,14 @@ def compare_release_against_bundle_facts(
         if key in new_map
     }
     compared: list[str] = []
+    # ADR-065 D6: a NEW artifact this build cannot analyze at all is
+    # `unsupported` on the scope record (the live fan-out's own per-member
+    # rule), not a generic error that escapes before any record exists.
+    unsupported: dict[str, str] = {}
     for key, old_snapshot in old_facts.per_library_snapshots.items():
         new_path = new_map.get(key)
         if new_path is None or key in degraded:
             continue
-        compared.append(key)
         # Per-library overrides win over the uniform fallback -- a library
         # absent from a given override map still falls back to that map's
         # own uniform sibling (headers/includes/compile respectively), so a
@@ -474,17 +478,22 @@ def compare_release_against_bundle_facts(
         lib_headers = (per_library_headers or {}).get(key, headers)
         lib_includes = (per_library_includes or {}).get(key, includes)
         lib_compile = (per_library_compile or {}).get(key, compile)
-        new_snapshot = service.resolve_input(
-            new_path,
-            headers=lib_headers,
-            includes=lib_includes,
-            version=new_version,
-            lang=lang,
-            lang_explicit=lang_explicit,
-            header_backend=header_backend,
-            compile=lib_compile,
-            include_dependencies=include_dependencies,
-        )
+        try:
+            new_snapshot = service.resolve_input(
+                new_path,
+                headers=lib_headers,
+                includes=lib_includes,
+                version=new_version,
+                lang=lang,
+                lang_explicit=lang_explicit,
+                header_backend=header_backend,
+                compile=lib_compile,
+                include_dependencies=include_dependencies,
+            )
+        except (IncompatibleSnapshotSchemaError, UnsupportedArtifactError) as exc:
+            unsupported[key] = str(exc)
+            continue
+        compared.append(key)
         diff = service.compare_snapshots(
             old_snapshot, new_snapshot, suppress, policy=policy, policy_file=policy_file
         )
@@ -497,28 +506,14 @@ def compare_release_against_bundle_facts(
     # StoredBundleFactsInput/resolve_bundle_side, which would reload and
     # re-parse the identical file from disk a second time for no benefit.
     from .bundle import build_bundle_snapshot
-
-    manifest = load_manifest(manifest_path) if manifest_path is not None else None
-    new_bundle_snapshot = build_bundle_snapshot(new_map)
-    result = compare_bundle_from_facts(
-        old_facts,
-        new_bundle_snapshot,
-        per_library_results,
-        manifest=manifest,
-        system_providers=system_providers,
-        cohorts=cohorts,
-        policy=policy,
-        policy_file=policy_file,
-        new_signature_evidence=dict(new_signature_evidence),
+    from .workflows.release_scope import (
+        build_stored_baseline_scope_record,
+        bundle_analysis_members,
+        out_of_scope_provider_names,
+        restrict_bundle_facts,
     )
-    from .workflows.release_scope import build_stored_baseline_scope_record
 
-    result.analysis_errors.extend(
-        f"{key}: OLD side was captured degraded ({reason}); per-library "
-        "comparison skipped (ADR-065 D8)"
-        for key, reason in sorted(degraded.items())
-    )
-    result.scope_record = build_stored_baseline_scope_record(
+    scope_record = build_stored_baseline_scope_record(
         old_facts.per_library_snapshots,
         new_map,
         compared=compared,
@@ -526,5 +521,38 @@ def compare_release_against_bundle_facts(
         old_provenance="stored bundle-facts capture: the captured set is not a proven inventory",
         new_provenance="live directory/archive listing: no declared inventory",
         new_single_artifact=not new_dir.is_dir(),
+        unsupported=unsupported,
     )
+    # ADR-065 D2: the bundle graph sees matched members and proven
+    # removals/additions only (Codex review) -- see bundle_analysis_members.
+    bundle_members = bundle_analysis_members(scope_record)
+    manifest = load_manifest(manifest_path) if manifest_path is not None else None
+    new_bundle_snapshot = build_bundle_snapshot(
+        {k: v for k, v in new_map.items() if k in bundle_members}
+    )
+    result = compare_bundle_from_facts(
+        restrict_bundle_facts(old_facts, bundle_members),
+        new_bundle_snapshot,
+        per_library_results,
+        manifest=manifest,
+        system_providers=[
+            *(system_providers or ()),
+            *out_of_scope_provider_names(scope_record),
+        ],
+        cohorts=cohorts,
+        policy=policy,
+        policy_file=policy_file,
+        new_signature_evidence=dict(new_signature_evidence),
+    )
+    result.analysis_errors.extend(
+        f"{key}: OLD side was captured degraded ({reason}); per-library "
+        "comparison skipped (ADR-065 D8)"
+        for key, reason in sorted(degraded.items())
+    )
+    result.analysis_errors.extend(
+        f"{key}: NEW artifact is unsupported by this build ({reason}); "
+        "per-library comparison skipped (ADR-065 D6)"
+        for key, reason in sorted(unsupported.items())
+    )
+    result.scope_record = scope_record
     return result

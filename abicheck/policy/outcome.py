@@ -88,7 +88,13 @@ __all__ = [
 #: ``run_outcome`` report key) -- the same self-contained-sub-object
 #: convention ``analysis_assurance.ANALYSIS_ASSURANCE_SCHEMA_VERSION`` and
 #: ``buildsource.model.BUILD_SOURCE_PACK_VERSION`` already use.
-RUN_OUTCOME_SCHEMA_VERSION = "1.0"
+#:
+#: ``1.1`` (ADR-065 S2): the decision-bearing ``scope`` axis and the
+#: ``no_comparison_completed`` operational status. A ``1.0`` block (no
+#: ``scope``) still reads through :meth:`RunOutcome.from_dict`, which
+#: backfills ``complete`` -- true of every ``1.0`` writer, all of which
+#: described one pair.
+RUN_OUTCOME_SCHEMA_VERSION = "1.1"
 
 
 class PolicyGateDecision(str, Enum):
