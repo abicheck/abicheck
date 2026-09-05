@@ -57,7 +57,7 @@ new dependency on the report or gate layers.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -371,9 +371,6 @@ class DispositionLedger:
         record = self.record_for(change)
         return None if record is None else record.rule
 
-    def records_for(self, disposition: Disposition) -> tuple[DispositionRecord, ...]:
-        return tuple(r for r in self._records if r.disposition is disposition)
-
     def suppressed_gating_records(self) -> tuple[DispositionRecord, ...]:
         """Suppressed findings whose own verdict class would have gated.
 
@@ -567,23 +564,3 @@ def conservation_holds(ledger: DispositionLedger) -> bool:
     detected total. Exposed as a function (rather than only asserted in a
     test) so any consumer can check it against a ledger it did not build."""
     return sum(ledger.counts().values()) == ledger.detected_total
-
-
-def suppression_summary_lines(
-    rules: Sequence[tuple[RuleProvenance, int]], *, limit: int = 5
-) -> list[str]:
-    """Human-readable ``rule — reason (N findings)`` lines for a compact view.
-
-    Formatting only: every value is already resolved by the ledger.
-    """
-    lines: list[str] = []
-    for rule, count in rules[:limit]:
-        detail = rule.reason or rule.label or "no reason given"
-        source = f" [{rule.source_file}]" if rule.source_file else ""
-        expiry = f", expires {rule.expires}" if rule.expires else ""
-        lines.append(
-            f"{rule.rule_id or 'rule'}{source} — {detail}{expiry} ({count} findings)"
-        )
-    if len(rules) > limit:
-        lines.append(f"… and {len(rules) - limit} more rules")
-    return lines

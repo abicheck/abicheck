@@ -88,10 +88,6 @@ class DispositionAudit:
     #: *not evaluated*, never as a finding count of zero.
     not_evaluated_detectors: tuple[NotEvaluatedDetector, ...]
 
-    @property
-    def suppressed_total(self) -> int:
-        return dict(self.counts).get(Disposition.SUPPRESSED.value, 0)
-
     def to_dict(self) -> dict[str, object]:
         return {
             "detected_total": self.detected_total,
