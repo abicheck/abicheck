@@ -615,12 +615,13 @@ def _resolve_release_package_side(
         return resolve_release_package_map(
             side_dir, variant_id=variant_id, dest_root=dest_root
         )
-    except (KeyError, ValueError, OSError, SnapshotError) as exc:
+    except (KeyError, ValueError, TypeError, OSError, SnapshotError) as exc:
         # Ambiguous variant, a same-key collision (ValueError), a missing/
         # unreadable ref (OSError), an object absent from objects/ entirely
         # (KeyError, DirectoryObjectStore.get's own error on a truncated
-        # package; CodeRabbit review), or a corrupt document (SnapshotError)
-        # are all usage errors, translated like `_build_match_map`'s own
+        # package; CodeRabbit review), a corrupt document (SnapshotError), or
+        # a wrong-shaped composition field (TypeError, storage.guards' own
+        # convention) are all usage errors, like `_build_match_map`'s own
         # `AmbiguousLibraryMatchError` (Codex review).
         raise click.UsageError(str(exc)) from exc
 

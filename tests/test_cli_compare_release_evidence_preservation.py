@@ -101,6 +101,77 @@ class TestMaterializationObjectScoping:
             assert expected_digests
             assert len(_object_files(sub_dir)) == len(expected_digests)
 
+    def test_shared_objects_are_hard_linked_not_re_copied(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: a variant-/project-level object is
+        identical for every artifact in the variant, but each sub-package
+        used to re-fetch it from the source package and re-write it under
+        its own destination store -- an N-fold *physical* disk cost across
+        many artifacts (e.g. 100 artifacts sharing a 100 MB section
+        consuming ~10 GB of temporary disk). The second (and later)
+        artifact's copy of a shared object must now share an inode with
+        the first's, not merely have identical bytes.
+
+        Skipped when the filesystem under *tmp_path* itself rejects
+        `os.link` (a network/FAT volume, a restricted sandbox): the
+        production code deliberately catches exactly that `OSError` and
+        falls back to a real copy, so the inode-sharing assertion below
+        would fail against its own documented, supported fallback path
+        rather than a real regression (Codex review, fresh evidence)."""
+        import os
+
+        from abicheck.project_snapshot_store import read_project_manifest
+        from abicheck.workflows.release_package import resolve_release_package_map
+
+        probe_a = tmp_path / ".hardlink_probe_a"
+        probe_b = tmp_path / ".hardlink_probe_b"
+        probe_a.write_bytes(b"x")
+        try:
+            os.link(probe_a, probe_b)
+        except OSError:
+            pytest.skip(f"{tmp_path} does not support hard links (os.link)")
+        finally:
+            probe_a.unlink(missing_ok=True)
+            probe_b.unlink(missing_ok=True)
+
+        old_libs, _ = _old_new_libraries()
+        pkg = tmp_path / "pkg"
+        _write_package(pkg, old_libs, variant_id="v1")
+
+        resolved = resolve_release_package_map(
+            pkg, variant_id=None, dest_root=tmp_path / "resolved"
+        )
+        assert len(resolved) == 3
+
+        def _object_path_for_digest(sub_dir: Path, digest: str) -> Path | None:
+            objects_dir = sub_dir / "objects"
+            if not objects_dir.is_dir():
+                return None
+            for p in objects_dir.rglob("*"):
+                if p.is_file() and digest.split(":", 1)[-1] in p.name:
+                    return p
+            return None
+
+        # Every sub-package shares the identical variant-level composition
+        # section (they were all cut from the same one variant).
+        sub_dirs = list(resolved.values())
+        (variant,) = read_project_manifest(sub_dirs[0]).variant_refs
+        shared_digest = next(iter(variant.sections.values())).digest
+
+        paths = [
+            _object_path_for_digest(sub_dir, shared_digest) for sub_dir in sub_dirs
+        ]
+        assert all(p is not None for p in paths), paths
+        inodes = {p.stat().st_ino for p in paths if p is not None}  # type: ignore[union-attr]
+        assert len(inodes) == 1, (
+            "expected every sub-package's copy of the shared variant-level "
+            f"object to share one inode (hard-linked), got {len(inodes)} "
+            f"distinct inodes across {len(paths)} sub-packages"
+        )
+        for p in paths:
+            assert p is not None and p.stat().st_nlink >= len(sub_dirs)
+
 
 class TestEmbeddedInstantiationManifest:
     """Codex review, eighth round: nothing in the ordinary

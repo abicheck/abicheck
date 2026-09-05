@@ -32,6 +32,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from . import guards
 from .dto import (
     BUNDLE_COMPOSITION_SECTION_KIND,
     SectionDTO,
@@ -108,8 +109,30 @@ def read_variant_composition_library_filenames(
     `native_identity` carries only the bundle key, which can differ from a
     live directory operand's own filename-derived key; `workflows.
     release_package._release_match_key` uses this to recover it.
+
+    `bundle_composition_from_dto` only asserts its own top-level payload is
+    a dict -- it does not validate `library_filenames`'s own shape, so a
+    hand-produced or malformed composition storing it as an iterable of
+    pairs (rather than a JSON object) would otherwise pass through
+    `dict(...)`'s own permissive construction unrejected, silently
+    normalizing it (with a duplicate key becoming last-wins) instead of
+    failing as malformed input `_release_match_key` then trusts for a real
+    matching decision. Validated through the shared `storage.guards`
+    primitives rather than a bespoke check here (`guards.mapping` for the
+    container, `guards.decision_key` for each bundle key -- exactly what
+    `_release_match_key` looks this mapping up by -- `guards.identity_text`
+    for each real filename), per `storage/AGENTS.md`'s "new guard goes in
+    guards.py" rule: a storage reader restating this rule ad hoc is the
+    drift that rule exists to stop (Codex review, fresh evidence).
     """
     composition = _read_variant_composition(root, variant_id)
     if composition is None:
         return {}
-    return dict(composition.get("library_filenames", {}))
+    raw = composition.get("library_filenames", {})
+    guards.mapping(raw, "library_filenames")
+    return {
+        guards.decision_key(k, "library_filenames key"): guards.identity_text(
+            v, f"library_filenames[{k!r}]"
+        )
+        for k, v in raw.items()
+    }
