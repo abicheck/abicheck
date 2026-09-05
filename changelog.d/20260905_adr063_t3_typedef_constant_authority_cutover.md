@@ -564,3 +564,13 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   could not reproduce the id for a disambiguated typedef/constant
   occurrence finding. Updated the schema description and bumped
   `REPORT_SCHEMA_VERSION` to 2.50 (Codex review).
+- **`scan --against`'s JSON also gains a version signal for the changed
+  `finding_id` algorithm.** `cli_scan_baseline._finding_summary()`
+  serializes the same `report_finding_id()` `compare`'s 2.50 bump covers,
+  but `SCAN_SCHEMA_VERSION` wasn't bumped in lockstep -- a scan consumer
+  had no way to feature-detect the widened hash. Bumped to 1.28 (Codex
+  review).
+- **The user guide's `finding_id` description now documents the seventh
+  hash input too.** `docs/use/output-formats.md` still described
+  `finding_id` as the hash of exactly the original six fields after the
+  schema's own description was updated -- fixed to match (Codex review).

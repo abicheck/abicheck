@@ -964,6 +964,16 @@ concepts:
       Fixed the schema description and bumped `REPORT_SCHEMA_VERSION` to
       2.50.
 
+      **A twenty-fifth round found two more consumers of the changed
+      `finding_id` algorithm left undocumented.** `cli_scan_baseline.
+      _finding_summary()` serializes the identical `report_finding_id()`
+      whose hash gained a seventh input, but `SCAN_SCHEMA_VERSION` stayed
+      unbumped -- fixed by bumping it to 1.28 in lockstep with `compare`'s
+      2.50. Separately, `docs/use/output-formats.md`'s user-facing
+      `finding_id` description still documented only the original six-field
+      algorithm after the schema's own description was updated -- fixed to
+      match.
+
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.
     investigated_declined:
