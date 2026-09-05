@@ -14,16 +14,23 @@
 # limitations under the License.
 
 """The legacy-flat-snapshot adapter and the typedef cutover's index selector
-(ADR-063 Phase 6B).
+(ADR-063 Phase 6B; Track T3, "typedef/constant authority cutover", for the
+authority-transfer half).
 
-Two properties carry the whole cutover's safety and are therefore stated
-here as invariants over generated input rather than as fixed examples:
+Properties stated here as invariants over generated input rather than as
+fixed examples:
 
 1. :func:`render_display_name` round-trips a synthetic identity exactly, and
-   refuses (``None``) any identity carrying a parse-order ordinal — the
-   property :func:`typedef_index_pair`'s fidelity gate rests on.
-2. The gate is *both-or-neither*: it never pairs an IR-backed index with an
-   adapted one, whatever the two sides' evidence looks like.
+   refuses (``None``) any identity carrying a parse-order ordinal.
+2. :func:`render_display_name_or_leaf` matches it whenever it renders, and
+   otherwise keeps every *named* scope segment (only omitting an
+   unrenderable one), matching the header-AST parsers' own qualified-name
+   convention for a flat legacy collection's key.
+3. :func:`typedef_index_pair` decides each side of a comparison
+   independently (real ``SemanticIR`` when present, the legacy adapter's
+   own projection otherwise) *unless* the two sides disagree on whether
+   they trust qualified typedef naming, in which case both sides render
+   through the legacy adapter to keep one shared key-space granularity.
 """
 
 from __future__ import annotations
@@ -53,6 +60,7 @@ from abicheck.model.semantic_ir_legacy_adapter import (
     legacy_typedef_ir,
     producer_entity_id,
     render_display_name,
+    render_display_name_or_leaf,
 )
 
 _names = st.text(alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=6)
@@ -128,6 +136,62 @@ class TestRenderDisplayName:
         owner_id = EntityId(scope=(), kind=EntityKind.FUNCTION, leaf_name=owner)
         scope = (LocalToFunction(owner=owner_id, block_ordinal=block),)
         assert render_display_name(entity_id_for_typedef(scope, leaf)) is None
+
+
+# -- render_display_name_or_leaf --------------------------------------------
+
+
+class TestRenderDisplayNameOrLeaf:
+    """Codex review, PR #1078, fourth and fifth rounds: the fallback
+    detectors use to key an otherwise-unrenderable identity, matching the
+    header-AST parsers' own qualified-name convention exactly (an anonymous
+    segment contributes nothing to the joined string but does not abort the
+    walk to its named ancestors)."""
+
+    @given(scope=st.lists(_names, max_size=4), leaf=_names)
+    def test_agrees_with_render_display_name_when_it_renders(
+        self, scope: list[str], leaf: str
+    ) -> None:
+        eid = entity_id_for_typedef(tuple(Namespace(n) for n in scope), leaf)
+        assert render_display_name_or_leaf(eid) == render_display_name(eid)
+
+    def test_a_named_ancestor_survives_an_anonymous_segment(self) -> None:
+        """The exact scenario a Codex review round found the bare-leaf-only
+        fallback got wrong: ``N::<anonymous>::X`` must render ``"N::X"`` --
+        matching the flat legacy map's own key for the identical
+        declaration -- not collapse all the way to the bare leaf ``"X"``,
+        which would fabricate a removal/addition pair against an unchanged
+        declaration."""
+        eid = entity_id_for_typedef((Namespace("N"), Anonymous("namespace", 0)), "X")
+        assert render_display_name(eid) is None
+        assert render_display_name_or_leaf(eid) == "N::X"
+
+    def test_a_bare_anonymous_segment_with_no_named_ancestor_falls_back_to_the_leaf(
+        self,
+    ) -> None:
+        eid = entity_id_for_typedef((Anonymous("namespace", 0),), "X")
+        assert render_display_name_or_leaf(eid) == "X"
+
+    @given(
+        prefix=st.lists(_names, min_size=1, max_size=2),
+        suffix=st.lists(_names, max_size=2),
+        ordinal=st.integers(min_value=0, max_value=8),
+        leaf=_names,
+    )
+    def test_every_named_segment_is_kept_regardless_of_position(
+        self, prefix: list[str], suffix: list[str], ordinal: int, leaf: str
+    ) -> None:
+        """Position-independent, the mirror of ``render_display_name``'s own
+        ``test_any_anonymous_segment_anywhere_refuses_to_render``: wherever
+        the unrenderable segment sits, every *named* segment around it still
+        contributes to the rendered name, in order."""
+        scope = (
+            *(Namespace(n) for n in prefix),
+            Anonymous("struct", ordinal),
+            *(Namespace(n) for n in suffix),
+        )
+        eid = entity_id_for_typedef(scope, leaf)
+        assert render_display_name_or_leaf(eid) == "::".join([*prefix, *suffix, leaf])
 
 
 # -- synthetic identity ----------------------------------------------------

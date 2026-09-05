@@ -150,28 +150,47 @@ def render_display_name(entity_id: EntityId) -> str | None:
 
 
 def render_display_name_or_leaf(entity_id: EntityId) -> str:
-    """:func:`render_display_name`, falling back to *entity_id*'s bare
-    ``leaf_name`` when its scope contains an unrenderable segment (Codex
-    review, PR #1078, fourth round).
+    """A best-effort flat spelling for *entity_id*: every *renderable* scope
+    segment, in order, joined with ``"::"``, then the leaf name -- an
+    unrenderable segment (``Anonymous``/``LocalToFunction``) is *omitted*,
+    not treated as a reason to abandon the whole rendering the way
+    :func:`render_display_name` does (Codex review, PR #1078, fourth and
+    fifth rounds).
+
+    This is deliberately the identical convention the header-AST parsers'
+    own legacy qualified-name walk already uses for the flat
+    ``typedefs``/``typedefs_qualified``/``constants`` collections
+    (``extract.headers.castxml.location.qualified_name``: an anonymous
+    namespace's own XML ``name`` attribute is empty, so that parent
+    contributes nothing to the joined string, but the walk keeps going
+    to *its* named ancestors) -- not a new, independently-chosen fallback.
+    ``N::<anonymous>::X`` renders ``"N::X"`` here, matching the legacy
+    map's own key for the identical declaration exactly, rather than
+    collapsing all the way to the bare leaf ``"X"`` (which a prior version
+    of this function did, and which a Codex review round after that found
+    would itself fabricate a removal/addition pair against an unchanged
+    declaration whenever the anonymous segment had a named ancestor).
 
     A migrated cohort's own display-name projection (``compare.typedefs.
     _aliases``/``compare.constants._values``) used to skip such an entity
-    outright once ``SemanticIR`` became the sole comparison-time source --
-    but :func:`legacy_typedef_ir`/:func:`legacy_constant_ir` never had that
-    problem in the first place: a legacy flat map's key is a plain string,
-    so an anonymous-namespace declaration's synthetic identity (built from
-    that same string, with an empty scope) always renders. Skipping the
-    identical declaration on the real-IR path silently dropped an
-    anonymous-namespace typedef/constant from comparison entirely --
-    exactly the kind of case the pre-T3 fidelity gate's "any divergence
-    falls back to the adapter" rule used to catch by accident, not by
-    design. The bare-leaf fallback here is deliberately the *same* answer
-    the legacy path already gives, not a new one: it carries the identical,
-    already-accepted collision risk (two distinct anonymous-scoped
-    declarations sharing a leaf name), never a new one.
+    outright once ``SemanticIR`` became the sole comparison-time source,
+    silently dropping an anonymous-namespace typedef/constant from
+    comparison entirely -- exactly the kind of case the pre-T3 fidelity
+    gate's "any divergence falls back to the adapter" rule used to catch
+    by accident, not by design. Two distinct anonymous-scoped declarations
+    that render to the same string this way (identical named ancestors,
+    identical leaf name) still collide onto one dict entry in a caller
+    keyed by this name -- the identical, already-accepted collision risk
+    the legacy map's own key already carries for the same case, never a
+    new one.
     """
-    rendered = render_display_name(entity_id)
-    return rendered if rendered is not None else entity_id.leaf_name
+    parts = [
+        rendered
+        for segment in entity_id.scope
+        if (rendered := _render_segment(segment)) is not None
+    ]
+    parts.append(entity_id.leaf_name)
+    return "::".join(parts)
 
 
 def _render_segment(segment: ScopeSegment) -> str | None:

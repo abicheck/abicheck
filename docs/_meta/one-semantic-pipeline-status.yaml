@@ -392,8 +392,9 @@ concepts:
       adapter's own synthetic identity for the identical declaration always
       renders, since it is built from the flat map's own string key with an
       empty scope) -- fixed by a new `render_display_name_or_leaf` that
-      falls back to the identity's bare leaf name, the same name the legacy
-      path already surfaces, used by both cohorts' own name-keying
+      keeps every named scope segment and only omits the unrenderable one
+      (matching the header-AST parsers' own qualified-name convention for
+      the flat legacy collections), used by both cohorts' own name-keying
       projections. A current-format
       snapshot's IR disagreeing, by identity, with its own
       `typedef_entity_ids`/`constant_entity_ids` sidecar is no longer a
