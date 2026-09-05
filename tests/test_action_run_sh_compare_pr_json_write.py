@@ -176,6 +176,40 @@ class TestCompareDoesNotInjectALosingWrite:
         assert "--write" not in argv, argv
         assert "--dry-run" in argv, argv
 
+    def test_an_effective_dry_run_also_suppresses_output_file_forwarding(
+        self, tmp_path: Path
+    ) -> None:
+        # A second Codex review round (fresh evidence beyond the sidecar
+        # fix above) found the identical gap one line earlier: the
+        # `output-file` input's own `-o "$OUTPUT_FILE"` forwarding sat
+        # above the `--write` guard in the same non-dry-run branch, so it
+        # was never suppressed by the earlier fix either.
+        argv = _compare_argv(
+            tmp_path,
+            {
+                "INPUT_EXTRA_ARGS": "--dry-run",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.md"),
+            },
+        )
+        assert "-o" not in argv.split(), argv
+        assert "--dry-run" in argv, argv
+
+    def test_an_effective_dry_run_suppresses_the_sarif_default_output_path(
+        self, tmp_path: Path
+    ) -> None:
+        # `format: sarif` with no explicit `output-file` synthesizes a
+        # default `abicheck-results.sarif` path (for the sibling
+        # upload-sarif step to find) -- the exact same forwarding this
+        # branch's dry-run guard must also suppress, since it's assigned
+        # from inside the identical non-dry-run branch.
+        argv = _compare_argv(
+            tmp_path,
+            {"INPUT_FORMAT": "sarif", "INPUT_EXTRA_ARGS": "--dry-run"},
+        )
+        assert "-o" not in argv.split(), argv
+        assert "abicheck-results.sarif" not in argv, argv
+        assert "--dry-run" in argv, argv
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestCompareInjectsWriteForReleaseStyleOperandToo:

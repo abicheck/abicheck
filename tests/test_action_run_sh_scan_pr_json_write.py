@@ -156,3 +156,22 @@ class TestScanInjectsWriteByEffectiveFormat:
         argv = _scan_argv(tmp_path, {"INPUT_EXTRA_ARGS": "--dry-run"})
         assert "--write" not in argv, argv
         assert "--dry-run" in argv, argv
+
+    def test_an_effective_dry_run_also_suppresses_output_file_forwarding(
+        self, tmp_path: Path
+    ) -> None:
+        # A second Codex review round (fresh evidence beyond the sidecar
+        # fix above) found the identical gap one line earlier: the
+        # `output-file` input's own `-o "$OUTPUT_FILE"` forwarding sat
+        # above the `--write` guard in the same non-dry-run branch, so it
+        # was never suppressed by the earlier fix either -- `-o` is just
+        # as mutually exclusive with a real `--dry-run` as `--write` is.
+        argv = _scan_argv(
+            tmp_path,
+            {
+                "INPUT_EXTRA_ARGS": "--dry-run",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+        )
+        assert "-o" not in argv.split(), argv
+        assert "--dry-run" in argv, argv

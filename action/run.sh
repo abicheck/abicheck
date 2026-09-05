@@ -1304,6 +1304,15 @@ elif [[ "$MODE" == "compare" ]]; then
   DRY_RUN="${INPUT_DRY_RUN:-false}"
   if [[ "$DRY_RUN" == "true" ]]; then
     CMD+=(--dry-run)
+  elif _extra_args_has_dry_run_flag; then
+    # An *effective* dry run reached only through `extra-args --dry-run`
+    # (Codex review, P2, fresh evidence): the dedicated `--dry-run` token is
+    # already in `extra-args` and gets appended later, so nothing more is
+    # added here -- `-o`/`--write` are just as mutually exclusive with a
+    # passthrough `--dry-run` as with the dedicated input, and the PR_JSON
+    # sidecar-injection guard alone (added first) wasn't the whole branch:
+    # `-o "$OUTPUT_FILE"` above it had the identical gap.
+    :
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
     # Gated on the effective format, not the nominal one (Codex review, PR
@@ -1353,13 +1362,12 @@ elif [[ "$MODE" == "compare" ]]; then
     # *nominal* format looked already-JSON left such a run with no JSON
     # report anywhere (Codex review, PR #998, fresh evidence).
     #
-    # Also skipped on an *effective* dry run reached only through
-    # `extra-args --dry-run` (`INPUT_DRY_RUN` itself false, so this `else`
-    # branch still ran) -- see `_extra_args_has_dry_run_flag`'s own
-    # docstring for why injecting `--write` there is a CLI usage error, not
-    # merely redundant.
+    # An effective dry run via `extra-args --dry-run` never reaches this
+    # branch at all -- the `elif` above it returns before `OUTPUT_FILE`/`-o`/
+    # this injection are considered, so there is no separate dry-run check
+    # needed here.
     if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] \
-       && ! _extra_args_has_write_flag && ! _extra_args_has_dry_run_flag; then
+       && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
@@ -1799,6 +1807,13 @@ elif [[ "$MODE" == "scan" ]]; then
   # (they are mutually exclusive on scan).
   if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
     CMD+=(--dry-run)
+  elif _extra_args_has_dry_run_flag; then
+    # Same effective-dry-run shape as compare mode's own branch above
+    # (Codex review, P2, fresh evidence): the `--dry-run` token is already
+    # in `extra-args` and gets appended later, so `-o`/`--write` -- both
+    # mutually exclusive with it on the CLI -- are skipped entirely here
+    # too, not only the PR_JSON sidecar this branch used to guard alone.
+    :
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
     if [[ -n "$OUTPUT_FILE" ]]; then
@@ -1840,12 +1855,12 @@ elif [[ "$MODE" == "scan" ]]; then
     # prevent, not a real absence of a report. Compare mode's own injection
     # above has never had this gate.
     #
-    # Also skipped on an *effective* dry run reached only through
-    # `extra-args --dry-run` (Codex review, P2, fresh evidence) -- see
-    # `_extra_args_has_dry_run_flag`'s own docstring.
+    # An effective dry run via `extra-args --dry-run` never reaches this
+    # branch at all -- the `elif` above it returns before `OUTPUT_FILE`/`-o`/
+    # this injection are considered, so there is no separate dry-run check
+    # needed here (Codex review, P2, fresh evidence).
     if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" \
-       && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag \
-       && ! _extra_args_has_dry_run_flag; then
+       && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
