@@ -27,6 +27,7 @@ file's helpers rather than copying them.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -804,13 +805,19 @@ class TestNarrowingOutranksAnUnrelatedOldFailure:
         assert record.is_incomplete
 
     @pytest.mark.integration
+    @pytest.mark.skipif(
+        sys.platform != "linux",
+        reason="--dso-only classifies ELF shared objects; MinGW/clang gcc build PE/Mach-O",
+    )
     @pytest.mark.parametrize("policy", ["warn", "block"])
     def test_dso_only_current_artifact_compare_exits_0(
         self, tmp_path: Path, policy: str
     ) -> None:
         """OLD stored package: the real DSO's own dump plus a member
         `--dso-only` cannot classify; NEW named as that one current artifact
-        (a real ELF shared object, since `--dso-only` keeps only those)."""
+        (a real ELF shared object, since `--dso-only` keeps only those --
+        on Windows a MinGW gcc builds a PE the selector cannot classify, so
+        NEW read as failed and nothing narrowed: CI on edaaadb1)."""
         import shutil
         import subprocess
 
