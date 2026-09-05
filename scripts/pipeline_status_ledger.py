@@ -55,14 +55,51 @@ _PIPELINE_STATUS_STATES = frozenset({"not_started", "partial", "complete"})
 #: `authority` names which representation actually decides behavior today --
 #: see the ledger file's own header comment for what each value means.
 _PIPELINE_AUTHORITY_VALUES = frozenset({"self", "legacy", "mixed"})
+#: The four-state consolidation ladder every concept sits on
+#: (`duplication-and-convergence-assessment.md`'s "The four-state status
+#: model", accepted 2026-09-05). `authority` answers "which representation
+#: decides *today*"; this answers "how far through the consolidation is
+#: this concept", which `authority` cannot express at either end. Two of
+#: the three authority values are ambiguous across two rungs each:
+#: `authority: legacy` covers both `introduced` and `wired` (a
+#: merely-defined primitive vs. a wired-but-non-deciding one), and
+#: `authority: self` covers both `authoritative` and `retired` (a concept
+#: that decides vs. one whose replaced implementation is actually gone).
+#: Only `mixed` picks out exactly one rung, `wired` -- which `wired` in
+#: turn does NOT imply, since a `legacy` concept can be wired too.
+_PIPELINE_LIFECYCLE_VALUES = ("introduced", "wired", "authoritative", "retired")
+#: Which lifecycle rungs each `authority` value admits. The two fields are
+#: deliberately a refinement, not two independent opinions -- an entry
+#: claiming `authority: self` while sitting at `wired` (or `legacy` while
+#: claiming `authoritative`) is a self-contradiction the ledger should not
+#: be able to record, which is exactly the drift this file exists to catch.
+_PIPELINE_AUTHORITY_TO_LIFECYCLES: dict[str, frozenset[str]] = {
+    "legacy": frozenset({"introduced", "wired"}),
+    "mixed": frozenset({"wired"}),
+    "self": frozenset({"authoritative", "retired"}),
+}
 #: Fields every concept entry must carry.
 _PIPELINE_REQUIRED_CONCEPT_FIELDS = (
     "primitive",
     "producers",
     "consumers",
     "authority",
+    "lifecycle",
     "removal_gate",
 )
+#: Optional-everywhere concept fields (present or absent, but validated
+#: when present). Unlike `_PIPELINE_PER_CONCEPT_EXTRA_REQUIRED_FIELDS`
+#: below, no concept is *required* to carry one: a concept with nothing
+#: investigated-and-declined must not be forced to record an empty list,
+#: which would be indistinguishable from a real one left un-updated.
+_PIPELINE_OPTIONAL_CONCEPT_FIELDS = ("investigated_declined",)
+#: The fields each `investigated_declined` entry must carry, and nothing
+#: else. `leaves_open` is required rather than optional on purpose: the
+#: whole reason this disposition is separate from the ladder is that a
+#: declined *behavioral* change leaves the *implementation-consolidation*
+#: item open, so an entry that does not say what stays open is the exact
+#: shape of the loophole this field exists to close.
+_PIPELINE_DECLINED_REQUIRED_FIELDS = ("item", "decided", "leaves_open", "tracked_as")
 #: Fields whose value must be one of `_PIPELINE_STATUS_STATES`.
 _PIPELINE_STATUS_FIELDS = ("primitive", "producers", "consumers", "persistence")
 #: Concept -> extra field(s) that concept specifically must carry, beyond
@@ -99,8 +136,13 @@ _PIPELINE_REQUIRED_CONCEPTS = frozenset(
 #: The only ledger schema version this validator's field layout implements.
 #: A future schema bump must update both this constant and the validation
 #: logic together (or dispatch per-version), never silently accept a new
-#: version number against the old field rules.
-_PIPELINE_SUPPORTED_SCHEMA_VERSION = 1
+#: version number against the old field rules. Bumped to 2 when the
+#: `lifecycle` ladder and the `investigated_declined` disposition were
+#: added (see `_PIPELINE_LIFECYCLE_VALUES`): a version-1 document has no
+#: `lifecycle` field at all, so accepting one under these rules would
+#: report a missing required field rather than the real "this file predates
+#: the schema" problem.
+_PIPELINE_SUPPORTED_SCHEMA_VERSION = 2
 #: The complete top-level key set this schema version defines. Checked as
 #: an exact set the same way `_PIPELINE_REQUIRED_CONCEPTS`/
 #: `_PIPELINE_REQUIRED_CONCEPT_FIELDS` are -- a misspelled top-level key
@@ -244,6 +286,239 @@ def load_pipeline_status(f: Findings) -> dict[str, object] | None:
     return data
 
 
+def _iso_date_problem(value: object) -> str | None:
+    """Describe why *value* is not a `YYYY-MM-DD` calendar date, or `None`.
+
+    The shape regex and the calendar check are deliberately both applied,
+    and reported separately: the regex alone accepts `2026-02-30`, while
+    `date.fromisoformat` alone accepts wider ISO 8601 spellings (`20260905`,
+    and on 3.11+ a full timestamp) that this schema does not use. Shared by
+    `as_of_date` and every `investigated_declined[].decided`, so the two
+    cannot drift apart -- each caller supplies its own field prefix.
+    """
+    if not isinstance(value, str) or not _PIPELINE_DATE_RE.match(value):
+        return f"must be 'YYYY-MM-DD', got {value!r}"
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return f"is not a real calendar date: {value!r}"
+    return None
+
+
+def _check_lifecycle(
+    f: Findings, rel: str, name: object, entry: dict[object, object]
+) -> None:
+    """Validate one concept's `lifecycle` rung and its consistency with the
+    concept's own `authority` and status fields.
+
+    The ladder (`introduced -> wired -> authoritative -> retired`) is a
+    refinement of `authority`, not a second independent opinion about the
+    same thing, so the cross-field rules here are what stop the ledger from
+    recording a self-contradiction -- `authority: self` at `wired`, or a
+    `retired` concept still reporting `consumers: partial`. Each rule is
+    applied only when the field it reads is itself valid, so one bad value
+    produces one finding rather than a cascade.
+    """
+    if "lifecycle" not in entry:
+        # Already reported by the required-field loop; nothing to add.
+        return
+    lifecycle = entry["lifecycle"]
+    # `x in tuple` is safe for an unhashable value (unlike `in frozenset`),
+    # but the `isinstance` guard is kept explicit so the finding names the
+    # real problem for a YAML list/mapping rather than silently reporting
+    # "not one of ...".
+    if not isinstance(lifecycle, str) or lifecycle not in _PIPELINE_LIFECYCLE_VALUES:
+        f.err(
+            "pipeline-status-ledger",
+            f"{rel}: concepts.{name}.lifecycle: {lifecycle!r} is not one of "
+            f"{list(_PIPELINE_LIFECYCLE_VALUES)}",
+        )
+        return
+    authority = entry.get("authority")
+    allowed = (
+        _PIPELINE_AUTHORITY_TO_LIFECYCLES.get(authority)
+        if isinstance(authority, str)
+        else None
+    )
+    if allowed is not None and lifecycle not in allowed:
+        f.err(
+            "pipeline-status-ledger",
+            f"{rel}: concepts.{name}: lifecycle {lifecycle!r} contradicts "
+            f"authority {authority!r} -- authority {authority!r} admits only "
+            f"{sorted(allowed)}. `authority` names which representation "
+            f"decides today; `lifecycle` refines it, it does not disagree "
+            f"with it",
+        )
+    # Every rung, `introduced` included, asserts the primitive itself
+    # exists -- that is what "introduced" means. So this is not gated on
+    # the rung: a `primitive: not_started` concept is on no rung at all.
+    if entry.get("primitive") == "not_started":
+        f.err(
+            "pipeline-status-ledger",
+            f"{rel}: concepts.{name}: lifecycle {lifecycle!r} requires a "
+            f"primitive that exists, got primitive: 'not_started' -- every "
+            f"rung, 'introduced' included, means the type/module is defined",
+        )
+    # The consumer rule is deliberately symmetric around the same
+    # `not_started` line, in both directions: `introduced` is defined as "the
+    # primitive exists, nothing reads it", so a started consumer there is
+    # `wired` by definition, exactly as an unstarted consumer at `wired` or
+    # above is `introduced` by definition. A one-sided check would let the
+    # bottom rung absorb any consumer status at all (Codex review, PR #1066).
+    rung = _PIPELINE_LIFECYCLE_VALUES.index(lifecycle)
+    consumers = entry.get("consumers")
+    if rung >= _PIPELINE_LIFECYCLE_VALUES.index("wired"):
+        # `producers` is checked alongside `consumers` because the two are
+        # not independent: nothing downstream can read a concept that no
+        # extraction/construction site populates, so `producers:
+        # not_started` at this rung is internally impossible rather than
+        # merely optimistic (Codex review, PR #1066).
+        if entry.get("producers") == "not_started":
+            f.err(
+                "pipeline-status-ledger",
+                f"{rel}: concepts.{name}: lifecycle {lifecycle!r} means "
+                f"something downstream reads this concept, but producers is "
+                f"'not_started' -- nothing can read what nothing populates",
+            )
+        if consumers == "not_started":
+            f.err(
+                "pipeline-status-ledger",
+                f"{rel}: concepts.{name}: lifecycle {lifecycle!r} means "
+                f"something downstream reads this concept, but consumers is "
+                f"'not_started' -- that is 'introduced'",
+            )
+    elif isinstance(consumers, str) and consumers in _PIPELINE_STATUS_STATES:
+        # Deliberately asymmetric with `producers`, which gets no
+        # bottom-rung rule: `introduced` is defined by the absence of
+        # *readers*, not of writers, so a fully-populated concept nothing
+        # consumes yet is exactly what this rung is for. Only `consumers`
+        # distinguishes `introduced` from `wired`.
+        if consumers != "not_started":
+            f.err(
+                "pipeline-status-ledger",
+                f"{rel}: concepts.{name}: lifecycle 'introduced' means nothing "
+                f"reads this concept yet, but consumers is {consumers!r} -- "
+                f"that is 'wired'",
+            )
+    if lifecycle == "retired":
+        incomplete = sorted(
+            field
+            for field in _PIPELINE_STATUS_FIELDS
+            if field in entry and entry[field] != "complete"
+        )
+        if incomplete:
+            f.err(
+                "pipeline-status-ledger",
+                f"{rel}: concepts.{name}: lifecycle 'retired' means the "
+                f"replaced implementation is gone, so every status field must "
+                f"be 'complete'; these are not: {incomplete}",
+            )
+
+
+def _check_investigated_declined(
+    f: Findings,
+    rel: str,
+    name: object,
+    entry: dict[object, object],
+    as_of_date: str | None,
+) -> None:
+    """Validate the optional `investigated_declined` list, and enforce the
+    one rule it exists for.
+
+    `duplication-and-convergence-assessment.md`'s "The completion rule this
+    plan was missing" identified a real loophole in how items here were
+    closed: a migration *investigated and declined* for lack of a
+    demonstrated benefit was then treated as equivalent to "the removal gate
+    is closed." Declining a **behavioral** change on that basis is correct;
+    it does not delete a second **implementation**. So a concept carrying
+    any declined-investigation entry cannot sit at `retired` -- the rung
+    that asserts the replaced implementation is actually gone.
+
+    An entry is a record of something still open, not a permanent history
+    log: once the consolidation it left open genuinely lands, the entry's
+    `leaves_open` is no longer true and the entry belongs with the concept's
+    narrative owner (the plan section or module docstring named by
+    `tracked_as`), which is where the full reasoning lives anyway per
+    docs/AGENTS.md's fact-owner/narrative-owner split.
+
+    *as_of_date* is the ledger's own validated snapshot date, or `None` when
+    it did not parse; an entry `decided` after it is rejected, since the
+    file would then be dating a decision after the assessment it claims to
+    describe.
+    """
+    if "investigated_declined" not in entry:
+        return
+    declined = entry["investigated_declined"]
+    if not isinstance(declined, list) or not declined:
+        f.err(
+            "pipeline-status-ledger",
+            f"{rel}: concepts.{name}.investigated_declined: must be a "
+            f"non-empty list (omit the field entirely when nothing was "
+            f"investigated and declined -- an empty list is "
+            f"indistinguishable from a real one left un-updated)",
+        )
+        return
+    for index, item in enumerate(declined):
+        where = f"{rel}: concepts.{name}.investigated_declined[{index}]"
+        if not isinstance(item, dict):
+            f.err("pipeline-status-ledger", f"{where}: must be a mapping")
+            continue
+        for field in _PIPELINE_DECLINED_REQUIRED_FIELDS:
+            if field not in item:
+                f.err(
+                    "pipeline-status-ledger",
+                    f"{where}: missing required field {field!r}",
+                )
+                continue
+            value = item[field]
+            if field == "decided":
+                problem = _iso_date_problem(value)
+                if problem is not None:
+                    f.err("pipeline-status-ledger", f"{where}.decided: {problem}")
+                elif as_of_date is not None and str(value) > as_of_date:
+                    # Both dates are already known well-formed `YYYY-MM-DD`,
+                    # so a plain string comparison is a correct date
+                    # ordering. A decision the file dates *after* the
+                    # snapshot it claims to describe is the ledger asserting
+                    # that a decision existed at an earlier assessment
+                    # (Codex review, PR #1066). `as_of_date` is this file's
+                    # assessment date, not its base commit's authorship
+                    # date, so the fix is always to bump it -- which the
+                    # header already requires of the same PR anyway.
+                    f.err(
+                        "pipeline-status-ledger",
+                        f"{where}.decided: {value!r} is later than the "
+                        f"ledger's own 'as_of_date' ({as_of_date!r}) -- this "
+                        f"file cannot record a decision made after the "
+                        f"assessment it describes; bump 'as_of_date' in the "
+                        f"same change that adds the entry",
+                    )
+            elif not isinstance(value, str) or not value.strip():
+                f.err(
+                    "pipeline-status-ledger",
+                    f"{where}.{field}: must be a non-empty string",
+                )
+        unknown = set(item) - set(_PIPELINE_DECLINED_REQUIRED_FIELDS)
+        if unknown:
+            # See the `unknown`/`extra` blocks in the caller: a YAML mapping
+            # can carry non-string keys, so `sorted()` needs `key=repr`.
+            f.err(
+                "pipeline-status-ledger",
+                f"{where}: unknown field(s) {sorted(unknown, key=repr)} -- "
+                f"either a typo or the schema needs extending deliberately",
+            )
+    if entry.get("lifecycle") == "retired":
+        f.err(
+            "pipeline-status-ledger",
+            f"{rel}: concepts.{name}: an investigated-and-declined "
+            f"disposition is not a synonym for 'retired' -- declining a "
+            f"behavioral change for lack of a demonstrated benefit does not "
+            f"delete a second implementation, so the consolidation item "
+            f"stays open (duplication-and-convergence-assessment.md, "
+            f"'The completion rule this plan was missing')",
+        )
+
+
 def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
     """Structural validation for the ADR-063 status ledger -- what makes it
     a genuinely machine-consumed `docs/_meta/` registry (docs/AGENTS.md's
@@ -293,26 +568,22 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
             f"{rel}: 'as_of_commit' must be a short/long git sha (hex), "
             f"got {as_of_commit!r}",
         )
-    as_of_date = data.get("as_of_date")
     # The regex alone only checks the YYYY-MM-DD *shape* -- it accepts a
     # calendar-invalid value like "2026-02-30" (a real review finding on
-    # PR #1019). `date.fromisoformat` is the actual calendar check, run
-    # only once the shape is already confirmed (it accepts a wider set of
-    # ISO 8601 forms on its own -- e.g. no dashes at all -- that the regex
-    # exists specifically to keep out).
-    if not isinstance(as_of_date, str) or not _PIPELINE_DATE_RE.match(as_of_date):
+    # PR #1019); `_iso_date_problem` applies the calendar check too, and is
+    # shared with `investigated_declined[].decided` so both date fields
+    # cannot drift apart.
+    raw_as_of_date = data.get("as_of_date")
+    date_problem = _iso_date_problem(raw_as_of_date)
+    if date_problem is not None:
         f.err(
             "pipeline-status-ledger",
-            f"{rel}: 'as_of_date' must be 'YYYY-MM-DD', got {as_of_date!r}",
+            f"{rel}: 'as_of_date' {date_problem}",
         )
-    else:
-        try:
-            datetime.date.fromisoformat(as_of_date)
-        except ValueError:
-            f.err(
-                "pipeline-status-ledger",
-                f"{rel}: 'as_of_date' is not a real calendar date: {as_of_date!r}",
-            )
+    # Only a validated date is worth comparing an entry's `decided` against;
+    # an unparseable one has already produced its own finding above, and
+    # comparing against it would add a second, misleading one.
+    as_of_date = str(raw_as_of_date) if date_problem is None else None
     concepts = data.get("concepts")
     if not isinstance(concepts, dict) or not concepts:
         f.err(
@@ -394,7 +665,11 @@ def check_pipeline_status_ledger(f: Findings, data: dict[str, object]) -> None:
                 "pipeline-status-ledger",
                 f"{rel}: concepts.{name}.removal_gate: must be a non-empty string",
             )
-        allowed_extra = set(_PIPELINE_PER_CONCEPT_EXTRA_REQUIRED_FIELDS.get(name, ()))
+        _check_lifecycle(f, rel, name, entry)
+        _check_investigated_declined(f, rel, name, entry, as_of_date)
+        allowed_extra = set(
+            _PIPELINE_PER_CONCEPT_EXTRA_REQUIRED_FIELDS.get(name, ())
+        ) | set(_PIPELINE_OPTIONAL_CONCEPT_FIELDS)
         extra = set(entry) - set(_PIPELINE_REQUIRED_CONCEPT_FIELDS) - allowed_extra
         if extra:
             # See the `unknown` block above: `extra` may hold non-string

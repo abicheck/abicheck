@@ -187,6 +187,33 @@ authority transition still has not happened. Recording that as
 `investigated_declined` with an open removal gate is accurate; recording it
 as closed is not.
 
+**Landed (track T2, 2026-09-05).** Both halves are now schema, not
+convention: the ledger is at `schema_version: 2`, every concept carries a
+`lifecycle` rung, and `scripts/pipeline_status_ledger.py` enforces that
+`lifecycle` agrees with `authority` (which it refines — `authority` cannot
+express either end of the ladder, because two of its three values are
+ambiguous across two rungs each: `authority: legacy` covers both
+`introduced` and `wired`, and `authority: self` covers both `authoritative`
+and `retired`; only `mixed` picks out exactly one rung, `wired`, which
+`wired` does not imply in return), that `retired` requires every status
+field `complete`, and that a
+concept carrying any `investigated_declined` entry cannot sit at `retired`
+— the loophole above, closed mechanically rather than restated. Each entry
+names `item`, `decided`, `leaves_open` (what the decline does *not* close)
+and `tracked_as` (the narrative owner holding the full reasoning);
+`leaves_open` is required precisely because an entry that says nothing
+about what stays open is the loophole in structured form.
+
+The re-audit that shipped with the schema found **no concept at `retired`**,
+and only the three `authority: self` concepts (`public_surface`,
+`report_document`, `l5_source_graph_identity`) at `authoritative`; the other
+six are `wired`. Three carry a declined disposition: `facts` (the
+`vtable`/`TYPE_VTABLE_CHANGED` FactStatus gating above), `identity` (the
+`entity:` alias-tier promotion), and `semantic_ir` (the record/function
+detector cohort). That distribution is this section's own headline —
+primitives built, authority not transferred — recorded as data rather than
+prose.
+
 ### Corrections to current status prose
 
 Two claims elsewhere in this family of documents are now stale and are
@@ -1719,9 +1746,10 @@ Ordered by dependency, not by size:
      `test_dump_cli_execution_behaviors.py` pins the current channel with
      the reasoning attached.
 
-   Simultaneously, close the roadmap loophole: a declined *behavioral*
-   change no longer closes a *consolidation* item (see "The completion rule
-   this plan was missing" above).
+   The roadmap loophole half of this item — a declined *behavioral* change
+   no longer closing a *consolidation* item (see "The completion rule this
+   plan was missing" above) — landed separately as track T2 on 2026-09-05,
+   enforced by the ledger's schema-2 validator rather than by convention.
 2. **Finish one complete data-authority cutover.** Typedefs and constants
    are closest. Establish one stored semantic state per migrated family
    (reusing the existing typed `Function`/`RecordType` payloads inside the
@@ -1779,7 +1807,17 @@ Ordered by dependency, not by size:
    index and its named views, shared report preparation, and standard
    multi-artifact flows. **Every cohort must reduce the number of live
    legacy readers and writers**; a cohort that ends with another populated
-   sidecar has not landed.
+   sidecar has not landed. The **record and function families** are the
+   concrete instance of that last clause and are named here explicitly so
+   they have an owner: `SemanticIR` already populates their occurrences on
+   every header-AST and DWARF producer while their detectors still read
+   `AbiSnapshot.types`/`.functions`. Migration was investigated on
+   2026-09-03 and declined — but the decline is of the *behavioral* change
+   (their matching already resolves through ADR-045's `TypeMap` and
+   `resolve_function_identity`'s CANONICAL tier, so changing matching
+   precedence or published finding IDs would close no defect), not of the
+   consolidation, which needs no new bug to justify it. Track T3 does not
+   cover this: its scope is typedefs and constants.
 
 Extend the existing architecture checks rather than adding a planning
 system. `scripts/semantic_ir_cutover.py`'s per-cohort registration is the
@@ -1809,20 +1847,20 @@ track, the steps are ordered.
 | Track | Scope | Touches | Depends on |
 |---|---|---|---:|
 | ~~**T1 — Dead-implementation retirement**~~ ✅ **done (2026-09-05)** | Rehomed `perform_elf_dump`/`handle_non_elf_dump`'s unique assertions onto the live path; deleted both functions, `cli_dump_non_elf.py` and `cli_dump_protocols.py` | `cli_dump_helpers.py` (-661 lines), `cli_dump_non_elf.py` + `cli_dump_protocols.py` (deleted), their tests, `architecture/{modules,debt}.yaml`, `CLI_CONTRACT_ALLOWLIST` | nothing |
-| **T2 — Ledger/status-model change** | Add the `introduced → wired → authoritative → retired` ladder and a separate `investigated_declined` disposition to `docs/_meta/one-semantic-pipeline-status.yaml` + `scripts/pipeline_status_ledger.py`'s field/enum validation; re-audit every concept row against it | `scripts/pipeline_status_ledger.py`, the ledger, `tests/` | nothing |
+| ~~**T2 — Ledger/status-model change**~~ ✅ **done (2026-09-05)** | Added the `introduced → wired → authoritative → retired` ladder and a separate `investigated_declined` disposition to `docs/_meta/one-semantic-pipeline-status.yaml` + `scripts/pipeline_status_ledger.py`'s field/enum validation; re-audited every concept row against it. Shipped as ledger `schema_version: 2` with the cross-field rules and the re-audit described under "The four-state status model" above | `scripts/pipeline_status_ledger.py`, the ledger, `tests/` | nothing |
 | ~~**T3 — Typedef/constant authority cutover**~~ ✅ **done (2026-09-05)** | Deleted the runtime dual-index construction: `typedef_index_pair`/`constant_index_pair` now decide each side of a comparison independently, reading a side's real `SemanticIR` directly whenever it has one (never both-or-neither — a Codex review round found the first both-or-neither cut would starve an IR-carrying side of its own real evidence whenever the *other* side lacked one) and falling back to the legacy adapter's projection of that side's own flat collection only when it has none; the identity half of the old fidelity gate (a real IR disagreeing with its own `typedef_entity_ids`/`constant_entity_ids` sidecar) moved to the canonical model's load boundary (`AbiSnapshot.__post_init__`, and re-run explicitly after `serialization.snapshot_from_dict` decodes a stored IR — a second Codex finding, since that decode bypasses `__post_init__`), now a hard `SemanticIrAuthorityError` rather than a silent fallback. A related fix in the same PR: `diff_constants` was silently dropping a constant addition/removal whenever its value was `Fact.unsupported()`, since only now reachable with the dual-index gate gone (Codex finding). The old gate's name/value equality half against the legacy alias/value collections is deliberately *not* preserved anywhere — requiring it would make a populated legacy collection an accidental prerequisite of `SemanticIR`-only construction, the opposite of authority transfer | `compare/typedefs.py`, `compare/constants.py`, `model/semantic_ir_legacy_adapter.py`, `model/snapshot.py`, `errors.py`, `serialization.py`, `scripts/semantic_ir_cutover.py` | nothing (T2 records it) |
 | **T4 — Dump request contract** | Fold `execute_dump_request`'s nine semantic kwargs into the typed request; split backend selection from fallback policy; give source-only dump an execution variant | `service_dump_pipeline.py`, `cli_dump_request.py`, `cli_buildsource.py`, `frontends/cli/dump_execute.py` | ~~T1~~ — satisfied (T1 landed 2026-09-05) |
 | **T5 — Direct-bypass migration** | Route `appcompat.check_appcompat()` and `stack_checker._run_abi_diff()` through the shared extraction/comparison workflow; shrink `CLI_CONTRACT_ALLOWLIST` accordingly | `appcompat.py`, `stack_checker.py`, `cli_stack.py`, `scripts/check_ai_readiness.py` | T4 for the dump half; the compare half is independent |
 | **T6 — Effective gate/policy convergence** ✅ *(landed 2026-09-05; the shared fold and the derived scheme are done, the two runtime shapes remain P0's own job)* | Collapse `apply_release_gate_pack`'s raw-string mirror of `pack_application.apply_to_compare_config` onto one shared fold **without inverting the dependency direction** — `policy/release_gate_options.py` deliberately consumes a `_GatePackApplication` `Protocol` rather than importing the flat-root `pack_application`, since `policy` may not import it (ADR-061; `policy/AGENTS.md`'s "Permitted imports"), so the shared fold belongs in an inward module both may import, or an outer layer invokes both halves — never a `policy → legacy root` call. Also make `GateOptions.exit_code_scheme` derived rather than independently constructible | `policy/release_gate_options.py`, `pack_application.py`, a new inward fold owner, `tests/test_release_gate_pack_fold_parity.py` | nothing |
 | **T7 — Canonical export index** | One raw export index plus named projections (versioned ELF / default versions / Mach-O normalization / named PE / ordinal imports / missing-vs-empty); delete the five sibling implementations | `policy/depth_projection.py`, `buildsource/crosscheck_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, `diff_unnamed_types.py` | nothing |
 | **T8 — Action boundary** | Remove the residual raw-exit/stderr verdict reconstruction; keep only a transport-level no-result fallback; keep `fail-on-*` as step policy that never rewrites the verdict | `action/run.sh`, `action/` tests | nothing |
-| **T9 — Fact provenance and scope** | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, the import adapter | T2 for status recording; otherwise independent |
+| **T9 — Fact provenance and scope** | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, the import adapter | ~~T2~~ — satisfied (T2 landed 2026-09-05, so the ladder and `investigated_declined` are available to record this work's status); otherwise independent |
 | **T10 — Shared report preparation** | Compute evaluated findings/outcomes once ahead of format-specific construction; remove **both** runtime cycle escape hatches, which are distinct sites with distinct fixes: `render_markdown_document._reporter_markdown()`'s `..reporter_markdown` load (the Markdown cycle) and `report/scoped_gate.py`'s `..reporter` load (scoped-JSON construction, whose cycle exists only because `apply_scoped_gate` mutates an already-built payload); give consumer scoping an explicit finalization boundary instead of mutating shared changes | `report/render_markdown_document.py`, `report/render_markdown_alternate.py`, `report/scoped_gate.py`, `reporter_markdown.py`, `appcompat.py`'s `scope_diff_to_app` | T5's appcompat half for the scoping item |
 
 **Recommended first wave (fully parallel, no shared files):** ~~T1~~ (done),
-T2, T6, T7, T8. **Second wave:** ~~T3~~ (done), T4, T9 (each large enough to
-be its own multi-PR effort). **Third wave:** T5, T10, once T4/T5's shared
-surfaces settle.
+~~T2~~ (done), T6, T7, T8. **Second wave:** ~~T3~~ (done), T4, T9 (each large
+enough to be its own multi-PR effort). **Third wave:** T5, T10, once T4/T5's
+shared surfaces settle.
 
 ## Acceptance tests
 
