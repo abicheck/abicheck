@@ -342,6 +342,70 @@ def test_ledger_records_each_change_exactly_once() -> None:
     assert conservation_holds(ledger)
 
 
+def test_two_distinct_changes_are_never_collapsed_into_one_record() -> None:
+    """The must-merge / must-not-merge pair for the ledger's identity keying.
+
+    ``record()`` is identity-keyed so a finalization pass cannot re-record a
+    change an application point already recorded (the must-merge half, above).
+    The complement matters just as much and is a separate claim: two *distinct*
+    findings that happen to share a ``(kind, symbol)`` spelling — the key a
+    naive value-based ledger would use — must stay two records, or the
+    conservation identity would be satisfiable by collapsing everything.
+    """
+    from abicheck.checker_types import Change, DiffResult
+
+    def _change() -> Change:
+        return Change(kind=ChangeKind.FUNC_REMOVED, symbol="dup", description="removed")
+
+    twins = [_change(), _change()]
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libfoo", changes=twins
+    )
+    ledger = ledger_for(result)
+    assert ledger.detected_total == 2
+    assert ledger.record_for(twins[0]) is not None
+    assert ledger.record_for(twins[1]) is not None
+
+    # …and the must-merge half, stated against the same ledger: recording the
+    # *same* object again is a no-op, whatever disposition is offered.
+    ledger.record(twins[0], Disposition.SUPPRESSED, application_point="again")
+    assert ledger.detected_total == 2
+    assert ledger.counts()[Disposition.SUPPRESSED.value] == 0
+    assert conservation_holds(ledger)
+
+
+def test_distinct_rules_are_never_merged_in_the_rule_tally() -> None:
+    """The same pair for the audit's *rule* grouping: two rules sharing a
+    label/reason must stay two rows, and one rule matching many findings must
+    stay one row with a count — the failure this repo's own history calls a
+    grouping key that folds in too much or too little."""
+    old, new = _snapshots(removed=4)
+    result = compare(
+        old,
+        new,
+        SuppressionList(
+            [
+                Suppression(
+                    symbol_pattern=".*gone0.*",
+                    reason="shared prose",
+                    label="same",
+                    allow_public_break=True,
+                ),
+                Suppression(
+                    symbol_pattern=".*",
+                    reason="shared prose",
+                    label="same",
+                    allow_public_break=True,
+                ),
+            ]
+        ),
+    )
+    rules = compute_disposition_audit(result).rules
+    assert len(rules) == 2, "two rules sharing label and reason are still two"
+    assert {count for _, count in rules} == {1, 3}
+    assert sum(count for _, count in rules) == 4
+
+
 def test_kept_findings_split_into_gating_and_non_gating() -> None:
     old, new = _snapshots(removed=2, added=3)
     result = compare(old, new)
