@@ -296,3 +296,26 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   predicate's own docstring named this collision path as exactly the kind
   of real consumer it was written for but had no call site yet; this is
   the first one.
+
+- **A genuine ODR-duplicate/multi-TU typedef or constant occurrence no
+  longer loses its own value evidence to a "most facts present" reduction.**
+  `compare.typedefs._aliases`/`_underlying` and `compare.constants.
+  _values`/`_value` used to read through `SemanticIRIndex`'s *reduced*,
+  one-entry-per-`EntityId` view (`entities_of_kind()`/`.fact()` ->
+  `SemanticIR.canonical_entities()`) rather than `SemanticIR.occurrences`
+  itself (Codex review, PR #1078, fifteenth round). That reduction's own
+  docstring already warns it must never back a legacy-shape projection,
+  since it silently collapses two occurrences sharing one `EntityId` —
+  exactly the case `OccurrenceId`'s own disambiguator exists to keep
+  distinct — down to a single winner picked by "most facts present, then
+  `canonical_key` order". A real value change on whichever occurrence lost
+  that reduction was therefore invisible to `diff_typedefs`/
+  `diff_constants` even though `SemanticIR` itself never merged the two.
+  All four functions, plus `compare.typedefs._bare_typedef_side_index`'s
+  own bare-projection loop (which had the same bug, compounded by a type
+  mismatch that made every bare-projected typedef read as permanently
+  unresolved once `_underlying` started expecting an `OccurrenceId`), now
+  iterate `SemanticIRIndex.ir.occurrences` directly and key by
+  `OccurrenceId`, so two same-identity occurrences are just another
+  instance of the alias-collision multiset comparison these detectors
+  already handle correctly.

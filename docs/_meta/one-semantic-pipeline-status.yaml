@@ -621,6 +621,29 @@ concepts:
       ordinal 1 by raw `EntityId` equality -- two fabricated `CHANGED`
       findings for declarations that never changed, instead of the one
       real, provable addition.
+
+      **A fifteenth round found the collision helpers themselves still
+      read through `SemanticIRIndex`'s reduced view.**
+      `compare/typedefs.py`'s `_aliases`/`_underlying` and
+      `compare/constants.py`'s `_values`/`_value` answered off
+      `entities_of_kind()`/`.fact()` -- both backed by
+      `SemanticIR.canonical_entities()`'s explicit one-entry-per-`EntityId`
+      reduction, whose own docstring already warns it must never back a
+      legacy-shape projection. Two genuine occurrences sharing one
+      `EntityId` (an ODR-duplicate/multi-TU pair, distinguished only by
+      `OccurrenceId.disambiguator`) collapsed to a single "most facts
+      present, then `canonical_key` order" winner, silently discarding the
+      other occurrence's own value evidence -- exactly the distinction
+      `SemanticIR.occurrences` (keyed by `OccurrenceId`, not bare
+      `EntityId`) exists to keep. All four helpers, plus
+      `_bare_typedef_side_index`'s own bare-projection loop (which shared
+      the bug and additionally passed a now-mistyped `EntityId` into
+      `_underlying` once it started expecting an `OccurrenceId`, making
+      every bare-projected typedef read as permanently unresolved), now
+      iterate `SemanticIRIndex.ir.occurrences` directly and key by
+      `OccurrenceId` -- a same-identity pair is just another instance of
+      the alias-collision multiset comparison the twelfth-through-
+      fourteenth rounds already handle correctly.
   public_surface:
     primitive: complete
     producers: complete

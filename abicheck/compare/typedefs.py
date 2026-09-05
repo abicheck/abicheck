@@ -142,17 +142,25 @@ def _has_version_family_successor(name: str, new_aliases: frozenset[str]) -> boo
     return any(k.lower().startswith(prefix) for k in new_aliases)
 
 
-def _underlying(index: SemanticIRIndex, entity_id: EntityId) -> str:
-    """*entity_id*'s resolved underlying type, or the unresolved placeholder.
+def _underlying(index: SemanticIRIndex, occurrence_id: OccurrenceId) -> str:
+    """*occurrence_id*'s resolved underlying type, or the unresolved
+    placeholder.
+
+    Reads *occurrence_id*'s own ``CanonicalEntity`` directly off
+    ``index.ir.occurrences`` -- never ``SemanticIRIndex.fact()``/
+    ``.entity()``, which answer off the *reduced*, one-entry-per-``EntityId``
+    view (``SemanticIR.canonical_entities()``) and would silently collapse
+    two genuine ODR-duplicate/multi-TU occurrences sharing one identity back
+    onto a single winner (Codex review, PR #1078, fifteenth round) -- see
+    :func:`_aliases`'s own docstring for the full account.
 
     See :data:`_UNRESOLVED_TYPE_SENTINEL`: a ``Fact`` that is not present
     means the producer could not follow the chain, which the legacy path
     represented as the literal ``"?"`` string. Collapsing the two back
-    together here is what keeps the cutover behavior-preserving; a reader
-    wanting the distinction still has the ``Fact``'s own ``.status`` via
-    ``SemanticIRIndex.fact``.
+    together here is what keeps the cutover behavior-preserving.
     """
-    spelling = index.fact(entity_id, "canonical_spelling")
+    entity = index.ir.occurrences.get(occurrence_id)
+    spelling = entity.canonical_spelling if entity is not None else None
     if spelling is not None and spelling.is_present and spelling.value is not None:
         value = spelling.value
         assert isinstance(value, str)
@@ -160,7 +168,7 @@ def _underlying(index: SemanticIRIndex, entity_id: EntityId) -> str:
     return _UNRESOLVED_TYPE_SENTINEL
 
 
-def _aliases(index: SemanticIRIndex) -> dict[str, list[EntityId]]:
+def _aliases(index: SemanticIRIndex) -> dict[str, list[OccurrenceId]]:
     """This index's typedef occurrences, grouped by their rendered alias --
     a *list* per alias, not a single winner (Codex review, PR #1078, sixth
     round), since two distinct entities can render to the identical alias
@@ -175,12 +183,31 @@ def _aliases(index: SemanticIRIndex) -> dict[str, list[EntityId]]:
     alias rather than a single representative, so a real difference is
     never silently read as unchanged merely because attribution to one
     specific occurrence is ambiguous.
+
+    **Grouped by raw occurrence, not by the reduced entity view** (Codex
+    review, PR #1078, fifteenth round): ``SemanticIRIndex.entities_of_kind``
+    is explicitly the *reduced* projection -- ``SemanticIR.
+    canonical_entities()``'s one-entry-per-``EntityId`` "most facts present"
+    winner, its own docstring's stated purpose being "a consumer that
+    genuinely wants a single canonical view". Reading through it here
+    collapsed a genuine ODR-duplicate/multi-TU pair sharing one ``EntityId``
+    (exactly the case ``SemanticIR.occurrences`` -- keyed by
+    :class:`~abicheck.model.occurrence.OccurrenceId`, not bare ``EntityId``
+    -- exists to keep distinct) down to whichever occurrence won that
+    reduction, silently discarding the other's own value evidence. Iterating
+    ``index.ir.occurrences`` directly instead means two occurrences sharing
+    an identity are just another instance of the alias-collision this
+    function already groups and :func:`diff_typedefs` already compares by
+    multiset -- no second mechanism needed, only reading at the right
+    granularity to begin with.
     """
-    by_alias: dict[str, list[EntityId]] = {}
-    for entity_id in index.entities_of_kind(EntityKind.TYPEDEF):
-        by_alias.setdefault(render_display_name_or_leaf(entity_id), []).append(
-            entity_id
-        )
+    by_alias: dict[str, list[OccurrenceId]] = {}
+    for occurrence_id in index.ir.occurrences:
+        if occurrence_id.entity_id.kind is not EntityKind.TYPEDEF:
+            continue
+        by_alias.setdefault(
+            render_display_name_or_leaf(occurrence_id.entity_id), []
+        ).append(occurrence_id)
     return by_alias
 
 
@@ -275,7 +302,7 @@ def diff_typedefs(
                             symbol=bare_alias,
                             name=bare_alias,
                             old_value=_underlying(old_index, rotated_id),
-                            entity_id=producer_entity_id(rotated_id),
+                            entity_id=producer_entity_id(rotated_id.entity_id),
                         )
                     )
                 continue
@@ -292,7 +319,7 @@ def diff_typedefs(
                         symbol=bare_alias,
                         name=bare_alias,
                         old_value=_underlying(old_index, removed_id),
-                        entity_id=producer_entity_id(removed_id),
+                        entity_id=producer_entity_id(removed_id.entity_id),
                         description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                     )
                 )
@@ -334,7 +361,7 @@ def diff_typedefs(
         shared_ids = {
             i
             for i in set(old_ids) & set(new_ids)
-            if entity_id_is_cross_snapshot_stable(i)
+            if entity_id_is_cross_snapshot_stable(i.entity_id)
         }
         for shared_id in shared_ids:
             old_type = _underlying(old_index, shared_id)
@@ -348,7 +375,7 @@ def diff_typedefs(
                     name=bare_alias,
                     old_value=old_type,
                     new_value=new_type,
-                    entity_id=producer_entity_id(shared_id),
+                    entity_id=producer_entity_id(shared_id.entity_id),
                     description=(
                         f"Typedef base type changed: {bare_alias}{qualified_suffix}"
                     ),
@@ -370,22 +397,22 @@ def diff_typedefs(
         # excess count for a value on one side over the other is exactly
         # that many removed/added occurrences, each keeping its own real
         # entity_id.
-        old_by_value: dict[str, list[EntityId]] = {}
+        old_by_value: dict[str, list[OccurrenceId]] = {}
         for i in old_ids:
             if i in shared_ids:
                 continue
             old_by_value.setdefault(_underlying(old_index, i), []).append(i)
-        new_by_value: dict[str, list[EntityId]] = {}
+        new_by_value: dict[str, list[OccurrenceId]] = {}
         for i in new_ids:
             if i in shared_ids:
                 continue
             new_by_value.setdefault(_underlying(new_index, i), []).append(i)
-        removed_occurrences: list[tuple[str, EntityId]] = []
+        removed_occurrences: list[tuple[str, OccurrenceId]] = []
         for value, ids_for_value in old_by_value.items():
             excess = len(ids_for_value) - len(new_by_value.get(value, ()))
             if excess > 0:
                 removed_occurrences.extend((value, i) for i in ids_for_value[:excess])
-        added_occurrences: list[tuple[str, EntityId]] = []
+        added_occurrences: list[tuple[str, OccurrenceId]] = []
         for value, ids_for_value in new_by_value.items():
             excess = len(ids_for_value) - len(old_by_value.get(value, ()))
             if excess > 0:
@@ -409,7 +436,8 @@ def diff_typedefs(
                     name=bare_alias,
                     old_value=old_type,
                     new_value=new_type,
-                    entity_id=producer_entity_id(old_id) or producer_entity_id(new_id),
+                    entity_id=producer_entity_id(old_id.entity_id)
+                    or producer_entity_id(new_id.entity_id),
                     description=(
                         f"Typedef base type changed: {bare_alias}{qualified_suffix}"
                     ),
@@ -425,7 +453,7 @@ def diff_typedefs(
                     symbol=bare_alias,
                     name=bare_alias,
                     old_value=leftover_old_value,
-                    entity_id=producer_entity_id(leftover_old_id),
+                    entity_id=producer_entity_id(leftover_old_id.entity_id),
                     description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                 )
             )
@@ -515,8 +543,20 @@ def _bare_typedef_side_index(
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     covered_aliases: set[str] = set()
     ordinal_by_alias: dict[str, int] = {}
-    for entity_id in ir_index.entities_of_kind(EntityKind.TYPEDEF):
-        alias = render_display_name_or_leaf(entity_id)
+    for occurrence_id in ir_index.ir.occurrences:
+        # Iterates raw occurrences, not the reduced `entities_of_kind()` view
+        # (Codex review, PR #1078, fifteenth round -- the same fix as
+        # `_aliases`/`_underlying`, applied here too: this loop used to read
+        # through the reduced one-entry-per-`EntityId` projection, which
+        # would have collapsed a genuine ODR-duplicate/multi-TU typedef pair
+        # sharing one identity down to a single occurrence's value *and*
+        # then fed that reduced `EntityId` straight into `_underlying`,
+        # which now takes an `OccurrenceId` and would find nothing for a
+        # bare `EntityId` key -- silently reading every bare-projected
+        # typedef in this branch as unresolved).
+        if occurrence_id.entity_id.kind is not EntityKind.TYPEDEF:
+            continue
+        alias = render_display_name_or_leaf(occurrence_id.entity_id)
         bare_alias = alias.rsplit("::", 1)[-1]
         covered_aliases.add(bare_alias)
         ordinal = ordinal_by_alias.get(bare_alias, 0)
@@ -528,7 +568,7 @@ def _bare_typedef_side_index(
             extra=SYNTHETIC_IDENTITY_EXTRA,
         )
         occurrences[OccurrenceId(bare_id)] = CanonicalEntity(
-            canonical_spelling=Fact.present(_underlying(ir_index, entity_id))
+            canonical_spelling=Fact.present(_underlying(ir_index, occurrence_id))
         )
     # A bare alias this side's own *typedefs* map carries but the real IR
     # doesn't cover at all still needs representation -- delegate to the

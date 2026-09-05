@@ -50,8 +50,9 @@ from typing import TYPE_CHECKING, Protocol
 
 from ..diff_helpers import make_change
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.identity import EntityId, EntityKind
+from ..model.identity import EntityKind
 from ..model.identity_stability import entity_id_is_cross_snapshot_stable
+from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
     legacy_constant_ir,
@@ -97,7 +98,7 @@ def _unresolved_to_none(value: str) -> str | None:
     return None if value == _UNRESOLVED_MARKER else value
 
 
-def _values(index: SemanticIRIndex) -> dict[str, list[EntityId]]:
+def _values(index: SemanticIRIndex) -> dict[str, list[OccurrenceId]]:
     """This index's constant occurrences, grouped by their rendered name --
     a *list* per name, not a single winner (Codex review, PR #1078, sixth
     round). Mirrors ``compare.typedefs._aliases`` exactly, including using
@@ -111,18 +112,43 @@ def _values(index: SemanticIRIndex) -> dict[str, list[EntityId]]:
     collapsing to one silently discarded whichever occurrence didn't win the
     race. :func:`diff_constants` compares the *set* of values under a
     colliding name rather than a single representative, for the same reason
-    :func:`~abicheck.compare.typedefs.diff_typedefs` does."""
-    by_name: dict[str, list[EntityId]] = {}
-    for entity_id in index.entities_of_kind(EntityKind.CONSTANT):
-        by_name.setdefault(render_display_name_or_leaf(entity_id), []).append(entity_id)
+    :func:`~abicheck.compare.typedefs.diff_typedefs` does.
+
+    **Grouped by raw occurrence, not by the reduced entity view** (Codex
+    review, PR #1078, fifteenth round -- mirrors ``compare.typedefs.
+    _aliases``'s identical fix; see that function's own docstring for the
+    full account): ``SemanticIRIndex.entities_of_kind`` answers off
+    ``SemanticIR.canonical_entities()``'s explicit one-entry-per-``EntityId``
+    reduction, which would collapse a genuine ODR-duplicate/multi-TU pair of
+    constants sharing one ``EntityId`` down to a single "most facts present"
+    winner -- exactly the case ``SemanticIR.occurrences`` (keyed by
+    :class:`~abicheck.model.occurrence.OccurrenceId`, not bare ``EntityId``)
+    exists to keep distinct. Iterating ``index.ir.occurrences`` directly
+    instead means such a pair is just another instance of the alias-collision
+    this function already groups and :func:`diff_constants` already compares
+    by multiset."""
+    by_name: dict[str, list[OccurrenceId]] = {}
+    for occurrence_id in index.ir.occurrences:
+        if occurrence_id.entity_id.kind is not EntityKind.CONSTANT:
+            continue
+        by_name.setdefault(
+            render_display_name_or_leaf(occurrence_id.entity_id), []
+        ).append(occurrence_id)
     return by_name
 
 
-def _value(index: SemanticIRIndex, entity_id: EntityId) -> str | None:
-    """*entity_id*'s value text, or ``None`` when this producer has no
+def _value(index: SemanticIRIndex, occurrence_id: OccurrenceId) -> str | None:
+    """*occurrence_id*'s value text, or ``None`` when this producer has no
     comparable spelling for it (``Fact.unsupported()`` -- a clang compound-
     initializer fingerprint or Python-bool-derived literal spelling, see
     ``extract/semantic_normalizer.py``'s "Scope of the fourth slice").
+
+    Reads *occurrence_id*'s own ``CanonicalEntity`` directly off
+    ``index.ir.occurrences`` -- never ``SemanticIRIndex.fact()``/``.entity()``,
+    which answer off the reduced view and would silently collapse two
+    genuine ODR-duplicate/multi-TU occurrences sharing one identity onto a
+    single winner (Codex review, PR #1078, fifteenth round; see
+    :func:`_values`'s own docstring for the full account).
 
     Unlike a typedef's unresolved-chain placeholder (``"?"``, a real string
     both backends agree on), a constant carries no legacy sentinel for this
@@ -151,7 +177,8 @@ def _value(index: SemanticIRIndex, entity_id: EntityId) -> str | None:
     fallback there only makes the finding's own old/new value text more
     informative.
     """
-    spelling = index.fact(entity_id, "canonical_spelling")
+    entity = index.ir.occurrences.get(occurrence_id)
+    spelling = entity.canonical_spelling if entity is not None else None
     if spelling is not None and spelling.is_present and spelling.value is not None:
         value = spelling.value
         assert isinstance(value, str)
@@ -296,11 +323,11 @@ def diff_constants(
 
     def _value_or_legacy(
         index: SemanticIRIndex,
-        entity_id: EntityId,
+        occurrence_id: OccurrenceId,
         name: str,
         constants: dict[str, str],
     ) -> str | None:
-        value = _value(index, entity_id)
+        value = _value(index, occurrence_id)
         return value if value is not None else constants.get(name)
 
     for name, old_ids in old_values.items():
@@ -343,7 +370,7 @@ def diff_constants(
                         symbol=name,
                         name=name,
                         old_value=old_value,
-                        entity_id=producer_entity_id(old_id),
+                        entity_id=producer_entity_id(old_id.entity_id),
                     )
                 )
             continue
@@ -365,8 +392,8 @@ def diff_constants(
                     new=repr(new_val),
                     old_value=old_val,
                     new_value=new_val,
-                    entity_id=producer_entity_id(old_ids[0])
-                    or producer_entity_id(new_ids[0]),
+                    entity_id=producer_entity_id(old_ids[0].entity_id)
+                    or producer_entity_id(new_ids[0].entity_id),
                 )
             )
             continue
@@ -409,7 +436,7 @@ def diff_constants(
         shared_ids = {
             i
             for i in set(old_ids) & set(new_ids)
-            if entity_id_is_cross_snapshot_stable(i)
+            if entity_id_is_cross_snapshot_stable(i.entity_id)
         }
         for shared_id in shared_ids:
             old_val = _value(old_index, shared_id)
@@ -427,7 +454,7 @@ def diff_constants(
                     new=repr(new_val),
                     old_value=old_val,
                     new_value=new_val,
-                    entity_id=producer_entity_id(shared_id),
+                    entity_id=producer_entity_id(shared_id.entity_id),
                 )
             )
         # A colliding group on at least one side (Codex review, PR #1078,
@@ -472,7 +499,7 @@ def diff_constants(
         # sentinel is deliberately less informative than the single-entity
         # fallback, but never fabricates a per-occurrence value this
         # function cannot actually attribute.
-        old_by_value: dict[str, list[EntityId]] = {}
+        old_by_value: dict[str, list[OccurrenceId]] = {}
         for i in old_ids:
             if i in shared_ids:
                 continue
@@ -480,7 +507,7 @@ def diff_constants(
             old_by_value.setdefault(
                 v if v is not None else _UNRESOLVED_MARKER, []
             ).append(i)
-        new_by_value: dict[str, list[EntityId]] = {}
+        new_by_value: dict[str, list[OccurrenceId]] = {}
         for i in new_ids:
             if i in shared_ids:
                 continue
@@ -488,12 +515,12 @@ def diff_constants(
             new_by_value.setdefault(
                 v if v is not None else _UNRESOLVED_MARKER, []
             ).append(i)
-        removed_occurrences: list[tuple[str, EntityId]] = []
+        removed_occurrences: list[tuple[str, OccurrenceId]] = []
         for value, ids_for_value in old_by_value.items():
             excess = len(ids_for_value) - len(new_by_value.get(value, ()))
             if excess > 0:
                 removed_occurrences.extend((value, i) for i in ids_for_value[:excess])
-        added_occurrences: list[tuple[str, EntityId]] = []
+        added_occurrences: list[tuple[str, OccurrenceId]] = []
         for value, ids_for_value in new_by_value.items():
             excess = len(ids_for_value) - len(old_by_value.get(value, ()))
             if excess > 0:
@@ -530,8 +557,8 @@ def diff_constants(
                         new=repr(new_val),
                         old_value=old_val,
                         new_value=new_val,
-                        entity_id=producer_entity_id(removed_id)
-                        or producer_entity_id(added_id),
+                        entity_id=producer_entity_id(removed_id.entity_id)
+                        or producer_entity_id(added_id.entity_id),
                     )
                 )
         for leftover_old_value, leftover_old_id in removed_occurrences:
@@ -541,7 +568,7 @@ def diff_constants(
                     symbol=name,
                     name=name,
                     old_value=_unresolved_to_none(leftover_old_value),
-                    entity_id=producer_entity_id(leftover_old_id),
+                    entity_id=producer_entity_id(leftover_old_id.entity_id),
                 )
             )
         for leftover_new_value, leftover_new_id in added_occurrences:
@@ -551,7 +578,7 @@ def diff_constants(
                     symbol=name,
                     name=name,
                     new_value=_unresolved_to_none(leftover_new_value),
-                    entity_id=producer_entity_id(leftover_new_id),
+                    entity_id=producer_entity_id(leftover_new_id.entity_id),
                 )
             )
 
@@ -578,7 +605,7 @@ def diff_constants(
                     symbol=name,
                     name=name,
                     new_value=new_value,
-                    entity_id=producer_entity_id(new_id),
+                    entity_id=producer_entity_id(new_id.entity_id),
                 )
             )
     return changes

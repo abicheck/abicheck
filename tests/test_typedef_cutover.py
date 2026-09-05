@@ -720,4 +720,70 @@ class TestPrivateHelpers:
                 )
             }
         )
-        assert _aliases(SemanticIRIndex(ir)) == {"Alias": [anon]}
+        assert _aliases(SemanticIRIndex(ir)) == {"Alias": [OccurrenceId(anon)]}
+
+
+class TestOdrDuplicateOccurrencesSurviveReduction:
+    """Regression coverage for Codex review, PR #1078, fifteenth round:
+    ``_aliases``/``_underlying`` used to read through ``SemanticIRIndex``'s
+    *reduced*, one-entry-per-``EntityId`` view (``entities_of_kind()``/
+    ``.fact()``), which silently collapsed two genuine occurrences sharing
+    one identity -- distinguished only by ``OccurrenceId.disambiguator`` --
+    onto a single "most facts present" winner. A real value change on
+    whichever occurrence did not win that reduction was then invisible to
+    ``diff_typedefs`` even though ``SemanticIR.occurrences`` never actually
+    merged the two: it is keyed by ``OccurrenceId``, not bare ``EntityId``,
+    precisely to keep this pair distinct.
+    """
+
+    def _ir_with_two_occurrences(
+        self, eid, *, value_a: str, value_b: str
+    ) -> SemanticIR:
+        return SemanticIR(
+            occurrences={
+                OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                    canonical_spelling=Fact.present(value_a)
+                ),
+                OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                    canonical_spelling=Fact.present(value_b)
+                ),
+            }
+        )
+
+    def test_aliases_keeps_both_odr_duplicate_occurrences_distinct(self) -> None:
+        from abicheck.compare.typedefs import _aliases
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        ir = self._ir_with_two_occurrences(eid, value_a="int", value_b="int")
+        grouped = _aliases(SemanticIRIndex(ir))
+        assert set(grouped) == {"ns::Alias"}
+        assert set(grouped["ns::Alias"]) == {
+            OccurrenceId(eid, "tu-a"),
+            OccurrenceId(eid, "tu-b"),
+        }
+
+    def test_a_value_change_on_one_odr_duplicate_occurrence_is_detected(
+        self,
+    ) -> None:
+        """Two occurrences share one ``EntityId`` (an ODR-duplicate pair,
+        e.g. two internal-linkage typedefs in different TUs). Only one of
+        them changes value between snapshots -- the reduced-view bug would
+        have let the ``canonical_entities()`` "most facts present" tie-break
+        pick the same, *unchanged* occurrence as the representative on both
+        sides, reporting no change at all despite a real base-type change on
+        the sibling occurrence.
+        """
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old_index = SemanticIRIndex(
+            self._ir_with_two_occurrences(eid, value_a="int", value_b="int")
+        )
+        new_index = SemanticIRIndex(
+            self._ir_with_two_occurrences(eid, value_a="int", value_b="long")
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.kind is ChangeKind.TYPEDEF_BASE_CHANGED
+        assert change.symbol == "Alias"
+        assert change.old_value == "int"
+        assert change.new_value == "long"

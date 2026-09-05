@@ -1044,3 +1044,65 @@ class TestSemanticIrCutoverGate:
             'x = some_object.getattr(snap, "constants")',
         ):
             assert legacy_collection_reads(ast.parse(source), forbidden) == []
+
+
+class TestOdrDuplicateOccurrencesSurviveReduction:
+    """Regression coverage for Codex review, PR #1078, fifteenth round --
+    mirrors ``tests.test_typedef_cutover.
+    TestOdrDuplicateOccurrencesSurviveReduction`` exactly; see that class's
+    own docstring for the full account. ``_values``/``_value`` used to read
+    through ``SemanticIRIndex``'s reduced, one-entry-per-``EntityId`` view,
+    which silently collapsed two genuine occurrences sharing one identity
+    onto a single "most facts present" winner -- hiding a real value change
+    on whichever occurrence did not win that reduction.
+    """
+
+    def _ir_with_two_occurrences(
+        self, eid, *, value_a: str, value_b: str
+    ) -> SemanticIR:
+        return SemanticIR(
+            occurrences={
+                OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                    canonical_spelling=Fact.present(value_a)
+                ),
+                OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                    canonical_spelling=Fact.present(value_b)
+                ),
+            }
+        )
+
+    def test_values_keeps_both_odr_duplicate_occurrences_distinct(self) -> None:
+        from abicheck.compare.constants import _values
+
+        eid = entity_id_for_constant((Namespace("ns"),), "X")
+        ir = self._ir_with_two_occurrences(eid, value_a="1", value_b="1")
+        grouped = _values(SemanticIRIndex(ir))
+        assert set(grouped) == {"ns::X"}
+        assert set(grouped["ns::X"]) == {
+            OccurrenceId(eid, "tu-a"),
+            OccurrenceId(eid, "tu-b"),
+        }
+
+    def test_a_value_change_on_one_odr_duplicate_occurrence_is_detected(
+        self,
+    ) -> None:
+        """Two occurrences share one ``EntityId`` (an ODR-duplicate pair).
+        Only one of them changes value between snapshots -- the reduced-view
+        bug would have let the ``canonical_entities()`` "most facts present"
+        tie-break pick the same, *unchanged* occurrence as the
+        representative on both sides, reporting no change at all despite a
+        real value change on the sibling occurrence."""
+        eid = entity_id_for_constant((Namespace("ns"),), "X")
+        old_index = SemanticIRIndex(
+            self._ir_with_two_occurrences(eid, value_a="1", value_b="1")
+        )
+        new_index = SemanticIRIndex(
+            self._ir_with_two_occurrences(eid, value_a="1", value_b="2")
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.kind is ChangeKind.CONSTANT_CHANGED
+        assert change.symbol == "ns::X"
+        assert change.old_value == "1"
+        assert change.new_value == "2"
