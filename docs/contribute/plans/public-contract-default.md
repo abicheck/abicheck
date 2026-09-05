@@ -1,7 +1,17 @@
 # Public-contract default: implementation and rollout plan
 
 **Status:** ADR-049 accepted (2026-07-26); implementation in progress — see
-"Work breakdown" below for current per-phase status
+"Work breakdown" below for current per-phase status. **2026-09-02: the
+contract decision became authoritative** (`contract_pipeline.py`'s
+`ContractEvaluationStage` runs before `checker._compute_verdict_for`, not
+after `verdict`) — the "still open" items in this document that predate
+that change (framed as "flipping the evaluator to run before the verdict")
+are done; only the *default* flip (making `--contract` apply without being
+asked for) remains open. The MCP `abi_compare`/`mcp_server.py`/
+`mcp_compare_receipt.py` references in this document's history below are
+historical — the MCP server was later retired in full (see
+[ADR-021](../adr/021-mcp-security-model.md)); do not read them as a
+current, reachable code path.
 **Normative decision:** [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md)
 **Related:** ADR-010, ADR-013, ADR-015, ADR-024, ADR-028/033, ADR-037/040/043, ADR-042, ADR-048, PR #494 / case97
 **Scope:** `compare`, the comparison portion of `scan --against`, service/API

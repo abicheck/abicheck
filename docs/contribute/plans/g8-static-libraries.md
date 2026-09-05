@@ -5,9 +5,26 @@
 
 ## Problem
 
-Static/import library archives are now a documented non-goal. A user pointing
+Static/import library archives are unsupported input today. A user pointing
 `abicheck` at a `.a`/`.lib` gets an explicit guidance error instead of a late or
 misleading parse failure.
+
+**Amendment (2026-09, clarification):** `vision.md`'s current, authoritative
+scope statement is narrower than this document's "documented non-goal"
+framing below: static archives "merit a bounded, lower-priority
+investigation into which questions can honestly be answered; today they
+remain unsupported input, and that is a current limitation rather than a
+permanent exclusion." Read every "non-goal"/`by_design_excluded` reference
+below in that light — it describes today's actual, shipped stance (option
+(A), decided and implemented), not a permanent decision against ever
+investigating option (B). A bounded investigation into what a static
+archive's symbol/type union could honestly answer remains permitted and, per
+the vision, is exactly the kind of lower-priority work that could reopen
+this decision — it carries no implied delivery commitment, and nothing here
+schedules it. The registry's `by_design_excluded` classification (a
+`docs/contribute/usecase-registry.yaml` entry, not edited by this
+documentation pass) should be revisited for the same wording gap in a future
+change to that file.
 
 ## Goal & acceptance criteria
 

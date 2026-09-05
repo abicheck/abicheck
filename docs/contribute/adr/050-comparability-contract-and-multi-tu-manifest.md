@@ -2374,6 +2374,81 @@ flag to what `dumper.py` resolves must remember to fold it into D1's
 fingerprint inputs, or the two silently drift apart) — this is called out
 explicitly in G32 so it isn't rediscovered the hard way.
 
+## Amendment (2026-09, clarification): dimensional comparability, not an
+all-or-nothing gate
+
+A documentation review of this ADR against `vision.md`'s support for
+*intentional* cross-profile comparison (e.g. deliberately comparing an x86
+build against an ARM build, or a Release against a Debug build, to answer a
+narrower question than full binary interchangeability) found this ADR's
+decision as shipped reads as stricter than the vision requires: today,
+`ProfileMismatchError`/`ScopeMismatchError` refuse the *entire* comparison
+outright whenever the two sides' extraction contracts disagree (see D2/D5
+above and the "References" list's `not_comparable` call sites) — there is no
+path that computes any answer for a genuinely incomparable pair, however
+narrow.
+
+This does not conflict with D1–D6's actual mechanism — the profile/scope
+fingerprint comparison, the multi-TU manifest, and every `not_comparable`
+call site remain the ADR's normative design — but it does mean this ADR
+never described the *further* distinction the vision's use case needs. This
+amendment states that distinction without changing today's shipped
+behavior (a genuinely incomparable pair still refuses outright; nothing
+here authorizes silently proceeding), so it does not conflict with anything
+already accepted:
+
+1. **Pair selection** — was this comparison requested between two
+   *intentional* counterparts (a user explicitly asked "how does the ARM
+   build compare to the x86 one"), or is it the ordinary same-profile
+   release-over-release case? This is a fact about the *request*, not the
+   binaries — nothing in a snapshot alone can tell them apart, and this ADR
+   never modeled a way for a caller to state which one is meant.
+2. **Dimension comparability** — given an intentional cross-profile pair,
+   *which questions can still be answered*, and which cannot, split by
+   dimension rather than treated as one pass/fail gate: symbol-table
+   availability (an exported name is either present or absent regardless of
+   arch/compiler), source-level declaration facts (a header-derived
+   signature/field is comparable across compilers that parse the same
+   language dialect), compiled layout facts (`sizeof`/offsets are only
+   comparable within one ABI-compatible profile family — an x86-64 vs.
+   AArch64 struct layout comparison is not a layout question with a real
+   answer), and deployment requirements (a `SONAME`/runtime-floor
+   requirement is a property of the target platform, not comparable
+   cross-arch at all). A single `ProfileMismatchError` conflates all four
+   into one refusal.
+3. **Result aggregation** — an intentional cross-profile comparison's report
+   must distinguish, per dimension: *established* (a real comparable
+   answer), *unverified* (the dimension exists on both sides but this pair's
+   mismatch makes it unanswerable), and *inapplicable* (the dimension has no
+   meaning for at least one side, e.g. a layout question for a header-only
+   library with no compiled artifact on one side). Collapsing these three
+   into either "compatible" or "not_comparable" is exactly the loss this
+   amendment is naming.
+
+Two things this amendment explicitly does **not** authorize, stated because
+the failure mode on either side is a real regression:
+
+- **It must not mean silently ignoring a real arch/compiler mismatch.** A
+  same-profile comparison mistakenly run across two different ABIs must
+  still refuse (or, once implemented, must still mark every layout-bearing
+  finding `unverified`) — an intentional cross-profile pair result is
+  opt-in via pair selection (item 1), never inferred by relaxing the
+  mismatch check itself.
+- **It must not let a source-level (header-declaration) comparison
+  masquerade as proof of binary interchangeability.** "The two sides declare
+  the same function signature" is a dimension-2 answer, not a dimension-3
+  layout answer — a report must never fold the two into one verdict that
+  reads as "these binaries are ABI-compatible" when only the source
+  dimension was actually established.
+
+This amendment is a clarification of decision scope, not an implementation
+commitment: no code, schema, or CLI flag changes with this document. See
+[ADR-065](065-comparison-scope-selection-and-completeness.md) (whose own
+selection/acquisition/execution state split is the closest existing
+precedent for pair-selection-as-an-explicit-input) and
+`docs/contribute/plans/vision-api-abi-evolution.md` for where implementing
+this split, if picked up, would be sequenced.
+
 ## References
 
 - `abicheck/model.py` — `AbiSnapshot`, `ScopeOrigin` (`:131-147`)

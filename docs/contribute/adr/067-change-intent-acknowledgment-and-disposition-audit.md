@@ -66,6 +66,35 @@ consumer impact, history) reads this set, so a suppression can never
 starve a sibling or consumer finding by deleting its input (this
 generalizes G38 Phase 14's fix for public-surface scoping).
 
+**Clarification (2026-09): the observation and its evaluated relevance are
+two objects, not one immutable record.** A documentation review found a
+real tension between this decision's own wording ("the observed change
+set... with its evidence, selected scope, **and contract relevance**... is
+recorded once... and never mutated") and D4's requirement to show how a
+*different* resolved policy/suppression context changes dispositions over
+the **same** detected facts (a PR's base-vs-head policy diff) — contract
+relevance is itself the output of evaluating a detected fact against a
+*particular* resolved contract mode (ADR-049's `CompatibilityEvaluationConfig`),
+so if it were baked into the one immutable record, evaluating a second
+resolved context (D4's base/head comparison, or ADR-066's later
+re-evaluation of old history under a revised policy) would have nowhere to
+put its answer without violating "never mutated." The correct model,
+already implicit in ADR-049's own replay/re-evaluation design
+(`contract_replay.py`'s `replay_original_decisions()`/
+`reevaluate_from_evidence()`): an **immutable observation** (the detected
+change, its evidence, and its selected scope — never contract relevance)
+plus, separately, an **immutable evaluation result for one resolved
+context** (contract relevance, compatibility decision, gate contribution —
+everything this decision's own "contract relevance" phrase was describing).
+Re-evaluating under a different resolved context (a different policy
+revision, a different contract mode, a later ADR-066 history re-read)
+produces **another** evaluation-result object keyed by its own context, and
+never mutates the observation or rewrites an earlier evaluation-result's own
+receipt — the same "replay vs. reevaluate, never in place" split ADR-049
+Phase 4 already established for its own persisted context. D1/D2's
+"immutable" language throughout this ADR should be read with this split
+already applied.
+
 ### D2 — One change, one terminal disposition, many matches
 
 Each atomic detected change carries exactly one terminal **effective gate
@@ -99,6 +128,54 @@ waiver (the rule's declared kind); proven out-of-contract; unresolved
 relevance; reclassification; deduplication/root-cause grouping;
 display-only filtering. An acknowledgment is not proof of compatibility,
 and a suppression is not proof the tool was wrong.
+
+**Clarification (2026-09): counting units stay separate across
+aggregation.** D2's "disposition counts sum to the detected total" invariant
+needs one further precision a documentation review found this decision does
+not yet state explicitly: a *logical* change can be observed more than once
+along more than one independent axis — e.g. the same underlying signature
+change detected in 3 compiler profiles of a declared build matrix, and
+separately shown (via ADR-057's consumer graph / `--use-cases` attribution)
+to affect 2 named consumers. That single scenario must never collapse
+ambiguously into "1 change," "3 changes," or "6 changes" reported
+interchangeably depending on which view happens to be read. Instead, four
+counting domains stay separate, each internally consistent and reconciling
+only within itself (D2's reconciliation invariant applies *per domain*, not
+across domains): the **logical finding** count (one, keyed by canonical
+identity — ADR-045/049's `finding_identity` — regardless of how many
+profiles or consumers observed it); the **profile-specific observation**
+count (three, one per build-matrix member that actually detected it,
+per ADR-065's per-member acquisition/selection model); the **affected
+consumer** count (two, from the consumer/use-case join, orthogonal to how
+many profiles detected the underlying change); and the **presentation
+group** count (however many rows a report's own grouping/root-cause
+collapsing renders it as — D2's own "derived impact findings and grouped
+presentation rows never inflate the raw totals" already governs this one).
+A report may show any of these four numbers, but must always label *which*
+one it is showing, and must never sum across domains (a report claiming
+"6 changes" by multiplying profiles by consumers states nothing that answers
+a real question).
+
+**Clarification (2026-09): technical classification survives policy
+reclassification as a separately exposed value.** D2 already *records*
+`reclassified` as a from→to attribute distinct from the terminal
+disposition; this clarification states the report-facing consequence
+explicitly, since a documentation review found no requirement anywhere in
+this ADR that a rendered report actually *show* the distinction rather than
+only retain it internally. A report must be able to expose, for any
+reclassified change, all three of: the **original technical
+classification** (the raw detector `ChangeKind`'s `default_verdict` — what
+the underlying binary/source fact *is*, unaffected by any policy), the
+**effective classification** under the resolved policy (D2's `reclassified`
+`to` value, or the unreclassified original when no rule matched), and the
+**gate contribution** (D5's acknowledgment-adjusted, D2's disposition-driven
+number that actually reaches the exit code) — as three separately labeled
+values, never collapsed into one "severity" field that silently reports
+only the effective or only the gate-facing number. A reader auditing "did
+policy hide a real technical break" needs the first value available next to
+the third; a report that only ever shows the effective/gate value cannot
+answer that question even when the underlying data (D2's `reclassified`
+attribute) already has the answer.
 
 ### D3 — The raw-versus-effective summary is unsuppressible and survives every view
 
