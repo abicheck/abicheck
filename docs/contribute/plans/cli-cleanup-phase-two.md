@@ -325,7 +325,7 @@ checklist: where the two ever disagree, `vision-api-abi-evolution.md` wins.
 | 3 | Release-path scope & completeness | **Tier 1 — now** | A-S1/S2 (deletion gate A-S4) | `cli_compare_release*`, `workflows/`, `policy/outcome.py` | **Yes — integration owner** |
 | 5 | Per-dimension comparability + failed evidence | **Tier 1 — now** | E-S1/S2 | `comparability.py`, `analysis_assurance.py`, `workflows/plan.py` | **Yes — integration owner** |
 | 2 | Scalar disposition audit | Tier 2 — after A/E's field contract (S0) is agreed | C-S1 + G-S1 | `policy/`, `report/`, `checker.py`, `semver.py` | No |
-| 4 | Header-only capture and comparison | Tier 3 — after E-S1 | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `workflows/dump` | No |
+| 4 | Header-only capture and comparison | Tier 3 — after E-S1 | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `service_dump_pipeline.py`, `workflows/artifact/` | No |
 | 6 | `scan --artifact-set` member-identity manifest | Tier 3 — needs A-S3's component inventory | this plan (PR H, last piece) | `cli_scan*`, a member-identity schema that does not exist yet | Indirectly (A's inventory) |
 
 Tier 0 is outside the vision sequence entirely — pure interface hygiene with
@@ -383,7 +383,11 @@ snapshots compare. Two concrete blockers to start from, both named in F's
 and `dump_source_only()` (`cli_buildsource.py`) discards `-H` — the L2 header
 parse never reaches the written snapshot for a binary-less input. Route the
 input through the existing `DumpRequest`/`CompareRequest` path with an
-explicit parse context rather than adding an operand shape beside them, and
+explicit parse context rather than adding an operand shape beside them —
+concretely `service_dump_pipeline.run_dump_request`/`execute_dump_request`
+and `workflows/artifact/{resolve,execute}.py`, the modules that own dump
+resolution today. There is no `workflows/dump` package and this block must
+not create one (Codex review on #1073); and
 keep `-H` (what to parse), `-I` (where to resolve includes) and public-root
 data (what is promised) distinct — collapsing them is a model regression, not
 a simplification. L0/L1 must read `NOT_APPLICABLE` for this task, never
