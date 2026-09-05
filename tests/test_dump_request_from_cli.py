@@ -353,8 +353,15 @@ class TestExecutionConsumesTheResolvedPlan:
             # kwargs are folded into one `DumpExecutionOptions`, so the
             # individual fields the assertions below check are flattened
             # back out here rather than making every call site below reach
-            # into `seen["options"]` itself.
-            options = kwargs.get("options")
+            # into `seen["options"]` itself. Since Track T4's follow-up,
+            # `execute_dump_cli_run` no longer passes an explicit `options=`
+            # kwarg at all -- it relies on `execute_dump_request`'s own
+            # fallback to `resolved.execution_options` -- so this reads
+            # `kwargs["options"]` when a caller did pass one explicitly
+            # (other callers/tests still do) and falls back to
+            # `resolved.execution_options` otherwise, which is exactly what
+            # a real invocation now populates.
+            options = kwargs.get("options") or resolved.execution_options
             if options is not None:
                 seen["build_config"] = options.build_config
                 seen["allow_build_query"] = options.allow_build_query

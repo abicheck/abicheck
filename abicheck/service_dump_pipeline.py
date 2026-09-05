@@ -201,6 +201,19 @@ class ResolvedDumpRequest:
     resolved_execution_context: ResolvedExecutionContext | None = field(
         default=None, compare=False
     )
+    # ADR-063 Track T4 ("Dump request contract"): the `DumpExecutionOptions`
+    # a real execution would pass to `execute_dump_request`, when a caller
+    # has resolved one -- so `dump --dry-run`
+    # (`cli_dump_helpers.render_dump_dry_run`) can show these nine values.
+    # `resolve_dump_request` never populates this itself (`build_config`/
+    # `legacy_compile_db_tokens`/`legacy_compile_db_matched` are CLI-only
+    # values with no `DumpRequest` equivalent); the `dump` CLI attaches its
+    # own via `dataclasses.replace(resolved, execution_options=...)`.
+    # `execute_dump_request` reads this as its default when its own
+    # `options` is `None` -- an explicit `options=` argument still wins.
+    # Comparable like any plain value (unlike `artifact_plan`/
+    # `resolved_execution_context` above, which compare by identity).
+    execution_options: DumpExecutionOptions | None = None
 
     @property
     def collect_mode(self) -> str:
@@ -544,6 +557,14 @@ class DumpExecutionOptions:
     it, so ``DumpExecutionOptions()`` (the parameter's own default) is
     bit-for-bit equivalent to omitting all nine kwargs before this change.
 
+    Since this track's follow-up, an instance is also attachable to the
+    *resolved* request (see :attr:`ResolvedDumpRequest.execution_options`)
+    rather than only assembled fresh at :func:`execute_dump_request`'s own
+    call boundary -- so ``dump --dry-run`` can render what a real run would
+    pass, instead of the ``dump`` CLI threading the nine values through
+    :func:`~abicheck.frontends.cli.dump_execute.execute_dump_cli_run` as
+    separate parameters.
+
     *build_config*/*build_query*/*build_compile_db*/*changed_paths*/
     *allow_build_query* (PR 3A, dump/scan resolver convergence): optional
     pass-throughs to
@@ -626,11 +647,12 @@ def execute_dump_request(
     already takes ``notify`` the same way.
 
     *options* (ADR-063 Track T4, "Dump request contract"; see
-    :class:`DumpExecutionOptions` for the full field-by-field rationale)
-    folds the nine out-of-band execution kwargs this function used to accept
-    directly into one typed value. ``None`` (the default) is equivalent to
-    ``DumpExecutionOptions()`` -- every pre-existing caller that passed none
-    of the nine is unaffected.
+    :class:`DumpExecutionOptions`) folds the nine out-of-band execution
+    kwargs this function used to accept directly into one typed value.
+    ``None`` (the default) falls back to *resolved*'s own
+    :attr:`~ResolvedDumpRequest.execution_options` when the caller resolved
+    one, or ``DumpExecutionOptions()`` when neither is set -- every
+    pre-existing caller is unaffected.
 
     Raises:
         ValidationError: If *resolved* requests a ``depth`` the resolved
@@ -643,7 +665,7 @@ def execute_dump_request(
     from .evidence_depth import depth_rank, gated_source_label
 
     if options is None:
-        options = DumpExecutionOptions()
+        options = resolved.execution_options or DumpExecutionOptions()
     request = resolved.request
     side = request.input
     if side.path is None:

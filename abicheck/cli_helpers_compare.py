@@ -68,6 +68,47 @@ def _provenance_timestamp(source_date_epoch: str | None) -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def _matched_build_context(
+    effective_compile_db: Path,
+    headers: tuple[Path, ...],
+    compile_db_filter: str | None,
+) -> tuple[Any, int]:
+    """Load *effective_compile_db* and match it against *headers* -- the one
+    resolution core :func:`_resolve_build_context_flags`,
+    :func:`dry_run_compile_db_matched`, and :func:`dry_run_build_context_preview`
+    all build on (ADR-063 Track T4: these three used to each re-derive this
+    identical load-and-match independently).
+
+    Returns ``(ctx, entry_count)`` -- the resolved
+    :class:`~abicheck.build_context.BuildContext` and the number of compile-DB
+    entries loaded (the real-run caller's stderr announcement needs the
+    count; the dry-run siblings ignore it). Raises
+    :class:`~abicheck.errors.AbicheckError`/``OSError`` on a missing or
+    malformed compile database -- callers that must not raise (the dry-run
+    siblings) catch around this call themselves; the real-run caller
+    (:func:`_resolve_build_context_flags`) translates the same exception into
+    a ``click.ClickException``.
+    """
+    from .build_context import (
+        build_context_for_header,
+        build_context_union_fallback,
+        load_compile_db,
+    )
+    from .cli_resolve import _expand_header_inputs
+
+    db_entries = load_compile_db(effective_compile_db)
+    resolved_hdrs = _expand_header_inputs(list(headers)) if headers else []
+    if resolved_hdrs:
+        ctx = build_context_for_header(
+            db_entries,
+            resolved_hdrs[0],
+            source_filter=compile_db_filter,
+        )
+    else:
+        ctx = build_context_union_fallback(db_entries, source_filter=compile_db_filter)
+    return ctx, len(db_entries)
+
+
 def _resolve_build_context_flags(
     effective_compile_db: Path | None,
     headers: tuple[Path, ...],
@@ -89,32 +130,16 @@ def _resolve_build_context_flags(
     database (Codex review, second finding on this signal)."""
     if not effective_compile_db:
         return [], False
-    from .cli_resolve import _expand_header_inputs
     from .errors import AbicheckError
 
     try:
-        from .build_context import (
-            build_context_for_header,
-            build_context_union_fallback,
-            load_compile_db,
+        ctx, entry_count = _matched_build_context(
+            effective_compile_db, headers, compile_db_filter
         )
-
-        db_entries = load_compile_db(effective_compile_db)
-        resolved_hdrs = _expand_header_inputs(list(headers)) if headers else []
-        if resolved_hdrs:
-            ctx = build_context_for_header(
-                db_entries,
-                resolved_hdrs[0],
-                source_filter=compile_db_filter,
-            )
-        else:
-            ctx = build_context_union_fallback(
-                db_entries, source_filter=compile_db_filter
-            )
         flags = ctx.to_castxml_flags()
         if flags:
             click.echo(
-                f"Build context: {len(db_entries)} entries from "
+                f"Build context: {entry_count} entries from "
                 f"{effective_compile_db}, {len(flags)} flags derived",
                 err=True,
             )
@@ -152,7 +177,8 @@ def dry_run_compile_db_matched(
     echoes to stderr (``_resolve_build_context_flags``'s "Build context: N
     entries..." announcement belongs to the real run, not a dry run) and
     never returns the derived flags themselves (dry-run has no use for
-    them). Any load/match failure (missing file, malformed JSON, wrong
+    them -- see :func:`dry_run_build_context_preview` for the sibling that
+    does). Any load/match failure (missing file, malformed JSON, wrong
     structure) is folded into ``False`` -- the real run would fail on the
     identical input too, just via a different exception shape
     (``click.ClickException`` from a malformed compile database vs.
@@ -163,29 +189,12 @@ def dry_run_compile_db_matched(
     effective_compile_db = compile_db_path or compile_db_path_alt
     if not effective_compile_db:
         return None
-    from .cli_resolve import _expand_header_inputs
     from .errors import AbicheckError
 
     try:
-        from .build_context import (
-            build_context_for_header,
-            build_context_union_fallback,
-            load_compile_db,
+        ctx, _entry_count = _matched_build_context(
+            effective_compile_db, headers, compile_db_filter
         )
-
-        db_entries = load_compile_db(effective_compile_db)
-        resolved_hdrs = _expand_header_inputs(list(headers)) if headers else []
-        if resolved_hdrs:
-            ctx = build_context_for_header(
-                db_entries,
-                resolved_hdrs[0],
-                source_filter=compile_db_filter,
-            )
-        else:
-            ctx = build_context_union_fallback(
-                db_entries,
-                source_filter=compile_db_filter,
-            )
         return ctx.compile_db_path is not None
     except (AbicheckError, OSError, ValueError, click.ClickException):
         # click.ClickException also covers _expand_header_inputs's own
