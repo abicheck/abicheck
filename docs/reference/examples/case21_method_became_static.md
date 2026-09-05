@@ -144,4 +144,4 @@ shape here.
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Member function became static](by-rule/method-became-static.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Member function became static](by-rule/method-became-static.md)._

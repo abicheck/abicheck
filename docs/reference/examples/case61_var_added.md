@@ -99,4 +99,4 @@ once shipped.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Exported variable added](by-rule/var-added.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Exported variable added](by-rule/var-added.md)._

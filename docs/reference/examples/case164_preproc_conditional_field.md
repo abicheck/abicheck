@@ -130,4 +130,4 @@ tool, so there is nothing to reproduce with them here.
 - `v1.abi.json`
 - `v2.abi.json`
 
-_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Preprocessor-conditional field](by-rule/preproc-conditional-field.md)._
+_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Preprocessor-conditional field](by-rule/preproc-conditional-field.md)._

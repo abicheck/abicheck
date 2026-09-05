@@ -140,4 +140,4 @@ abidiff v1.xml v2.xml
 - `good.c`
 - `good.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enumeration underlying type changed](by-rule/enum-underlying-size-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enumeration underlying type changed](by-rule/enum-underlying-size-changed.md)._

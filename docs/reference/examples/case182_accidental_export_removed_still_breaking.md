@@ -163,4 +163,4 @@ to answer.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Accidental export removed](by-rule/accidental-export-removed-still-breaking.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Accidental export removed](by-rule/accidental-export-removed-still-breaking.md)._

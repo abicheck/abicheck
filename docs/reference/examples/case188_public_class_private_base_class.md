@@ -141,4 +141,4 @@ inheritance for internal implementation details.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public class derives from a private class](by-rule/public-class-private-base-class.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public class derives from a private class](by-rule/public-class-private-base-class.md)._

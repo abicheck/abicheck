@@ -142,4 +142,4 @@ comparable to abicheck's `param_default_value_removed`.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Default argument removed](by-rule/default-argument-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Default argument removed](by-rule/default-argument-removed.md)._

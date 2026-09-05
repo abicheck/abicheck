@@ -126,4 +126,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Union member removed](by-rule/union-field-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Union member removed](by-rule/union-field-removed.md)._

@@ -143,10 +143,10 @@ for downgrading the verdict from a flat removal.
 
 The bundle-level verdict above is the cohort's. Each library in the cohort is separately expected to report:
 
-| Library | Expected |
-|---------|----------|
-| `libcore.so` | `expected_kinds`: ['func_removed'], `verdict`: BREAKING |
-| `libutil.so` | `expected_kinds`: ['func_added'], `verdict`: COMPATIBLE |
+| Library | Verdict | Detected `ChangeKind`s |
+|---------|---------|------------------------|
+| `libcore.so` | 🔴 BREAKING | `func_removed` |
+| `libutil.so` | 🟢 COMPATIBLE | `func_added` |
 
 ## Source files
 
@@ -154,4 +154,4 @@ The bundle-level verdict above is the cohort's. Each library in the cohort is se
 - `old/`
 - `CMakeLists.txt`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._

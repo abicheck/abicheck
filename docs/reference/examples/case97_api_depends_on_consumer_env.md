@@ -143,4 +143,4 @@ exit code is reproduced here.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported surface depends on consumer environment](by-rule/api-depends-on-consumer-env.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported surface depends on consumer environment](by-rule/api-depends-on-consumer-env.md)._

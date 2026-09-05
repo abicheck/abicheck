@@ -120,4 +120,4 @@ exactly the blind spot this case demonstrates.
 - `v1.pyi`
 - `v2.pyi`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Python keyword argument renamed](by-rule/python-kwarg-renamed.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Python keyword argument renamed](by-rule/python-kwarg-renamed.md)._

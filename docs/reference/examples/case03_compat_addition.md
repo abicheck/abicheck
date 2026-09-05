@@ -118,4 +118,4 @@ echo "exit: $?"   # → 4 (abidiff's convention: any ABI change, including a
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Compatible addition](by-rule/compat-addition.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Compatible addition](by-rule/compat-addition.md)._

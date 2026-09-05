@@ -139,4 +139,4 @@ indistinguishable from removing one function and adding an unrelated one.
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Member function cv-qualification changed](by-rule/method-const-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Member function cv-qualification changed](by-rule/method-const-changed.md)._

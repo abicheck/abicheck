@@ -141,4 +141,4 @@ here).
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Toolchain flag drift](by-rule/toolchain-flag-drift.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Toolchain flag drift](by-rule/toolchain-flag-drift.md)._

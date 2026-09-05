@@ -128,4 +128,4 @@ not installed in this environment, so no such output is reproduced here.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal struct gained a field, out of contract](by-rule/internal-struct-field-added-scoped.md)._
+_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal struct gained a field, out of contract](by-rule/internal-struct-field-added-scoped.md)._

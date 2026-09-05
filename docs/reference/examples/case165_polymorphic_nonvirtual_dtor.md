@@ -142,4 +142,4 @@ header.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Polymorphic type has a non-virtual destructor](by-rule/polymorphic-nonvirtual-dtor.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Polymorphic type has a non-virtual destructor](by-rule/polymorphic-nonvirtual-dtor.md)._

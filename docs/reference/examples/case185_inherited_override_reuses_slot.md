@@ -132,4 +132,4 @@ python3 -m abicheck.cli compare \
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Override reuses an inherited vtable slot](by-rule/inherited-override-reuses-slot.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Override reuses an inherited vtable slot](by-rule/inherited-override-reuses-slot.md)._

@@ -142,10 +142,10 @@ tooling rather than a stronger per-file diff.
 
 The bundle-level verdict above is the cohort's. Each library in the cohort is separately expected to report:
 
-| Library | Expected |
-|---------|----------|
-| `libalgo.so` | `expected_kinds`: [], `verdict`: COMPATIBLE |
-| `libcore.so` | `expected_kinds`: ['func_params_changed', 'func_return_changed'], `verdict`: BREAKING |
+| Library | Verdict | Detected `ChangeKind`s |
+|---------|---------|------------------------|
+| `libalgo.so` | 🟢 COMPATIBLE | — (no findings) |
+| `libcore.so` | 🔴 BREAKING | `func_params_changed`, `func_return_changed` |
 
 ## Source files
 
@@ -153,4 +153,4 @@ The bundle-level verdict above is the cohort's. Each library in the cohort is se
 - `old/`
 - `CMakeLists.txt`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._

@@ -161,4 +161,4 @@ environment (`abidiff` is not installed here).
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Frozen runtime entry point signature changed](by-rule/frozen-runtime-signature-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Frozen runtime entry point signature changed](by-rule/frozen-runtime-signature-changed.md)._

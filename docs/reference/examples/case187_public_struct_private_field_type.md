@@ -135,4 +135,4 @@ indirection instead of embedding the internal type directly.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public struct has a private field type](by-rule/public-struct-private-field-type.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public struct has a private field type](by-rule/public-struct-private-field-type.md)._

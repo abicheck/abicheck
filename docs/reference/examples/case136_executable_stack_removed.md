@@ -111,4 +111,4 @@ unmarked object file.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Executable-stack marking changed](by-rule/executable-stack-flag-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Executable-stack marking changed](by-rule/executable-stack-flag-changed.md)._

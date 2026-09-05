@@ -147,4 +147,4 @@ symbol-table evidence.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Symbol versioning scheme changed](by-rule/versioned-symbol-scheme.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Symbol versioning scheme changed](by-rule/versioned-symbol-scheme.md)._

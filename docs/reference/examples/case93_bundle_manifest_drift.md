@@ -154,9 +154,9 @@ the per-library removal both tools already see.
 
 The bundle-level verdict above is the cohort's. Each library in the cohort is separately expected to report:
 
-| Library | Expected |
-|---------|----------|
-| `libcore.so` | `expected_kinds`: ['func_removed'], `verdict`: BREAKING |
+| Library | Verdict | Detected `ChangeKind`s |
+|---------|---------|------------------------|
+| `libcore.so` | 🔴 BREAKING | `func_removed` |
 
 ## Source files
 
@@ -165,4 +165,4 @@ The bundle-level verdict above is the cohort's. Each library in the cohort is se
 - `CMakeLists.txt`
 - `manifest.yaml`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._

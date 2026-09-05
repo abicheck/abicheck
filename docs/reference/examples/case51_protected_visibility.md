@@ -111,4 +111,4 @@ interposability for codegen freedom.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: ELF symbol visibility changed](by-rule/protected-visibility.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: ELF symbol visibility changed](by-rule/protected-visibility.md)._

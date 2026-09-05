@@ -135,4 +135,4 @@ is on par with changing a wire-protocol field.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Serialization tag reassigned](by-rule/serialization-tag-reassigned.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Serialization tag reassigned](by-rule/serialization-tag-reassigned.md)._

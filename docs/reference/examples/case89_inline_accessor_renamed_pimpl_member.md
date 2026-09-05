@@ -160,4 +160,4 @@ exit-code comparison on a related layout-change finding.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline accessor references a renamed internal member](by-rule/inline-accessor-renamed-pimpl-member.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline accessor references a renamed internal member](by-rule/inline-accessor-renamed-pimpl-member.md)._

@@ -140,4 +140,4 @@ per-file diff.
 - `onedal_dpc.c`
 - `onedal_thread.c`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._

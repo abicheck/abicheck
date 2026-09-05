@@ -159,4 +159,4 @@ document the slot order as part of the binary contract.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal pimpl vtable leaks](by-rule/detail-pimpl-vtable-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal pimpl vtable leaks](by-rule/detail-pimpl-vtable-changed.md)._

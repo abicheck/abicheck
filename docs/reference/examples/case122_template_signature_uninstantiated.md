@@ -200,4 +200,4 @@ here without a source-AST-replay capability equivalent to abicheck's own L4.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Uninstantiated template body changed](by-rule/template-signature-uninstantiated.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Uninstantiated template body changed](by-rule/template-signature-uninstantiated.md)._

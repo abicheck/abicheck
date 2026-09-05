@@ -116,4 +116,4 @@ readelf -dW libfoo_v2.so | grep NEEDED   # adds libm.so.6, libc.so.6
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: New shared-library dependency added](by-rule/needed-added.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: New shared-library dependency added](by-rule/needed-added.md)._

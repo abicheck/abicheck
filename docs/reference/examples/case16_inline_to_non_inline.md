@@ -144,4 +144,4 @@ abidiff v1.xml v2.xml || true
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Inline function outlined](by-rule/inline-function-outlined.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Inline function outlined](by-rule/inline-function-outlined.md)._

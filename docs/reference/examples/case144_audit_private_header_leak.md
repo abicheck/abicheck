@@ -108,4 +108,4 @@ other, not a binary's public surface against its own header provenance).
 
 - `snapshot.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Private header leaks into the public surface](by-rule/audit-private-header-leak.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Private header leaks into the public surface](by-rule/audit-private-header-leak.md)._

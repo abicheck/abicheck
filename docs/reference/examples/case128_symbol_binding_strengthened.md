@@ -106,4 +106,4 @@ same field.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Symbol binding strengthened](by-rule/symbol-binding-strengthened.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Symbol binding strengthened](by-rule/symbol-binding-strengthened.md)._

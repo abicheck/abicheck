@@ -143,4 +143,4 @@ is no `.so`/`abidw` XML pair to hand either tool for this case.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Public API gained an internal dependency](by-rule/public-api-gains-internal-dependency.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Public API gained an internal dependency](by-rule/public-api-gains-internal-dependency.md)._

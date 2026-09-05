@@ -539,17 +539,22 @@ def _library_assertions(case: Case) -> str:
         "## Per-library expectations\n\n",
         "The bundle-level verdict above is the cohort's. Each library in "
         "the cohort is separately expected to report:\n\n",
-        "| Library | Expected |\n",
-        "|---------|----------|\n",
+        "| Library | Verdict | Detected `ChangeKind`s |\n",
+        "|---------|---------|------------------------|\n",
     ]
     for library, expected in sorted(case.library_assertions.items()):
-        if isinstance(expected, dict):
-            rendered = ", ".join(f"`{k}`: {v}" for k, v in sorted(expected.items()))
-        elif isinstance(expected, list):
-            rendered = ", ".join(f"`{v}`" for v in expected) or "—"
-        else:
-            rendered = f"**{expected}**"
-        lines.append(f"| `{library}` | {rendered} |\n")
+        if not isinstance(expected, dict):
+            # Unknown shape: render it rather than dropping it, so a future
+            # bundle case that pins something else is visible on its page
+            # instead of silently missing from it.
+            lines.append(f"| `{library}` | {expected} | — |\n")
+            continue
+        verdict = expected.get("verdict")
+        info = VERDICT_META.get(str(verdict))
+        verdict_cell = f"{info['icon']} {info['label']}" if info else str(verdict)
+        kinds = expected.get("expected_kinds") or []
+        kinds_cell = ", ".join(f"`{k}`" for k in kinds) or "— (no findings)"
+        lines.append(f"| `{library}` | {verdict_cell} | {kinds_cell} |\n")
     lines.append("\n")
     return "".join(lines)
 
@@ -571,7 +576,7 @@ def _provenance_notes(case: Case) -> str:
 def _render_case_page(case: Case) -> str:
     body = case.body.replace("__CASE__", case.name)
     see_also = [
-        "[Examples overview](index.md)",
+        "[Compatibility Catalog](index.md)",
         f"[All {VERDICT_META[case.verdict]['label']} cases]"
         f"(by-verdict/{VERDICT_META[case.verdict]['slug']}.md)",
         f"[Category: {CATEGORY_META[case.category]['label']}](by-category/{case.category}.md)",

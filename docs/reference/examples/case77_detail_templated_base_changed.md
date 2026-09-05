@@ -155,4 +155,4 @@ layout of every shipped algorithm descriptor built on it.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal templated base leaks](by-rule/detail-templated-base-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal templated base leaks](by-rule/detail-templated-base-changed.md)._
