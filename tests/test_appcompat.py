@@ -1322,7 +1322,8 @@ class TestCheckAppcompat:
         return [
             patch("abicheck.appcompat._get_lib_soname", return_value=soname),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
-            patch("abicheck.dumper.dump", return_value=MagicMock()),
+            patch("abicheck.service.detect_binary_format", return_value="elf"),
+            patch("abicheck.service.run_dump", return_value=MagicMock()),
             patch("abicheck.service.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value=None),
@@ -1340,7 +1341,7 @@ class TestCheckAppcompat:
         new_exports = {"foo_init", "foo_process", "foo_cleanup"}
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
             result = check_appcompat(app, old_lib, new_lib)
 
         assert result.verdict == Verdict.COMPATIBLE
@@ -1349,9 +1350,8 @@ class TestCheckAppcompat:
 
     def test_headers_passed_as_public_headers(self, tmp_path):
         """appcompat's -H/--header is documented as "Public header file or
-        directory" (like compare's) — check_appcompat must thread the same
-        paths through to dump() as public_headers so provenance is actually
-        classified, matching the compare/compare-release fix."""
+        directory" (like compare's) — the same paths must reach run_dump()
+        as public_headers, matching the compare/compare-release fix."""
         app = tmp_path / "app"
         old_lib = tmp_path / "old.so"
         new_lib = tmp_path / "new.so"
@@ -1363,7 +1363,8 @@ class TestCheckAppcompat:
 
         with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
              patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
-             patch("abicheck.dumper.dump", return_value=MagicMock()) as mock_dump, \
+             patch("abicheck.service.detect_binary_format", return_value="elf"), \
+             patch("abicheck.service.run_dump", return_value=MagicMock()) as mock_run_dump, \
              patch("abicheck.service.compare_snapshots", return_value=diff), \
              patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
              patch("abicheck.appcompat._detect_app_format", return_value=None):
@@ -1372,50 +1373,42 @@ class TestCheckAppcompat:
                 old_headers=[old_hdr], new_headers=[new_hdr],
             )
 
-            assert mock_dump.call_count == 2
-            old_call, new_call = mock_dump.call_args_list
+            assert mock_run_dump.call_count == 2
+            old_call, new_call = mock_run_dump.call_args_list
             assert old_call.kwargs["public_headers"] == [old_hdr]
             assert new_call.kwargs["public_headers"] == [new_hdr]
 
-    def test_both_dumps_suppress_streaming_prune(self, tmp_path):
-        """check_appcompat calls dumper.dump() directly for both sides, with
-        no service.run_dump dependency-scope wrapper downstream to retain
-        what the opt-in streaming pruner (dumper_clang_streaming.py) would
-        otherwise drop -- both calls must suppress it themselves (Codex
-        review, PR #840, thread bdSMk)."""
-        from abicheck.dumper_clang_streaming import streaming_prune_suppressed
-
+    def test_both_dumps_leave_include_dependencies_at_default(self, tmp_path):
+        """check_appcompat routes dumps through `service.run_dump` (T5),
+        whose wrapper defaults `include_dependencies` to True -- suppressing
+        the streaming pruner the way this call used to do manually (Codex
+        review, PR #840, bdSMk) -- so it must not override that default."""
         app = tmp_path / "app"
         old_lib = tmp_path / "old.so"
         new_lib = tmp_path / "new.so"
 
         app_reqs = AppRequirements(undefined_symbols=set())
         diff = DiffResult(old_version="1", new_version="2", library="libfoo")
-        observed: list[bool] = []
-
-        def _fake_dump(*_a, **_kw):
-            observed.append(streaming_prune_suppressed())
-            return MagicMock()
 
         with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
              patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
-             patch("abicheck.dumper.dump", side_effect=_fake_dump), \
+             patch("abicheck.service.detect_binary_format", return_value="elf"), \
+             patch("abicheck.service.run_dump", return_value=MagicMock()) as mock_run_dump, \
              patch("abicheck.service.compare_snapshots", return_value=diff), \
              patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
              patch("abicheck.appcompat._detect_app_format", return_value=None):
-            assert not streaming_prune_suppressed()  # not leaked before the call
             check_appcompat(app, old_lib, new_lib)
-            assert not streaming_prune_suppressed()  # not leaked after the call
 
-        assert observed == [True, True]
+        assert mock_run_dump.call_count == 2
+        for call in mock_run_dump.call_args_list:
+            assert "include_dependencies" not in call.kwargs
 
     def test_includes_passed_as_public_include_search_dirs(self, tmp_path):
         """check_appcompat's own explicit old_includes/new_includes (or the
         shared includes= fallback) are a genuine, caller-declared -I list --
-        not auto-derived -- so they must reach dump()'s provenance-only
-        public_include_search_dirs the same way perform_elf_dump's/
-        _dump_elf's own explicit -I wiring does (Codex review, PR #839
-        round 7), not just the compile-time extra_includes param."""
+        not auto-derived -- so they must reach run_dump()'s provenance-only
+        public_include_search_dirs the same way _dump_elf's own explicit
+        -I wiring does (Codex review, PR #839 round 7)."""
         app = tmp_path / "app"
         old_lib = tmp_path / "old.so"
         new_lib = tmp_path / "new.so"
@@ -1429,7 +1422,8 @@ class TestCheckAppcompat:
 
         with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
              patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
-             patch("abicheck.dumper.dump", return_value=MagicMock()) as mock_dump, \
+             patch("abicheck.service.detect_binary_format", return_value="elf"), \
+             patch("abicheck.service.run_dump", return_value=MagicMock()) as mock_run_dump, \
              patch("abicheck.service.compare_snapshots", return_value=diff), \
              patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
              patch("abicheck.appcompat._detect_app_format", return_value=None):
@@ -1439,8 +1433,8 @@ class TestCheckAppcompat:
                 old_includes=[old_inc], new_includes=[new_inc],
             )
 
-        assert mock_dump.call_count == 2
-        old_call, new_call = mock_dump.call_args_list
+        assert mock_run_dump.call_count == 2
+        old_call, new_call = mock_run_dump.call_args_list
         assert old_call.kwargs["public_include_search_dirs"] == [old_inc]
         assert new_call.kwargs["public_include_search_dirs"] == [new_inc]
 
@@ -1456,7 +1450,7 @@ class TestCheckAppcompat:
         new_exports = {"foo_init"}  # foo_gone is missing
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
             result = check_appcompat(app, old_lib, new_lib)
 
         assert result.verdict == Verdict.BREAKING
@@ -1483,7 +1477,7 @@ class TestCheckAppcompat:
         new_exports = {"foo_init"}  # still exported (e.g., diff reports signature change)
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
             result = check_appcompat(app, old_lib, new_lib)
 
         assert len(result.breaking_for_app) == 1
@@ -1509,7 +1503,7 @@ class TestCheckAppcompat:
         new_exports = {"foo_init", "bar_new"}
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
             result = check_appcompat(app, old_lib, new_lib)
 
         assert result.verdict == Verdict.COMPATIBLE
@@ -1525,7 +1519,7 @@ class TestCheckAppcompat:
         new_exports = {"foo_init"}
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
             result = check_appcompat(app, old_lib, new_lib)
 
         assert result.verdict == Verdict.NO_CHANGE
@@ -1540,7 +1534,7 @@ class TestCheckAppcompat:
         new_exports: set[str] = set()  # No exports at all
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
             result = check_appcompat(app, old_lib, new_lib)
 
         assert result.symbol_coverage == 0.0
@@ -1567,7 +1561,7 @@ class TestCheckAppcompat:
         mock_pf.compute_verdict.return_value = Verdict.COMPATIBLE_WITH_RISK
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
             result = check_appcompat(
                 app, old_lib, new_lib, policy_file=mock_pf,
             )
@@ -1594,7 +1588,8 @@ class TestCheckAppcompat:
         with (
             patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so"),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
-            patch("abicheck.dumper.dump", return_value=MagicMock()),
+            patch("abicheck.service.detect_binary_format", return_value="elf"),
+            patch("abicheck.service.run_dump", return_value=MagicMock()),
             patch("abicheck.service.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
@@ -1606,7 +1601,8 @@ class TestCheckAppcompat:
         assert "FOO_1.0" in result.missing_versions
 
     def test_lang_c(self, tmp_path):
-        """Test lang='c' passes correct compiler."""
+        """lang='c' is forwarded to run_dump() unchanged; run_dump derives
+        the "cc" castxml frontend from it (`_dump_elf`'s own check)."""
         app = tmp_path / "app"
         old_lib = tmp_path / "old.so"
         new_lib = tmp_path / "new.so"
@@ -1618,16 +1614,18 @@ class TestCheckAppcompat:
         with (
             patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so"),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
-            patch("abicheck.dumper.dump", return_value=MagicMock()) as mock_dump,
+            patch("abicheck.service.detect_binary_format", return_value="elf"),
+            patch("abicheck.service.run_dump", return_value=MagicMock()) as mock_run_dump,
             patch("abicheck.service.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value=None),
         ):
             check_appcompat(app, old_lib, new_lib, lang="c")
-            # verify dump was called with compiler="cc" and lang="c"
-            for call in mock_dump.call_args_list:
-                assert call.kwargs.get("compiler") == "cc"
-                assert call.kwargs.get("lang") == "c"
+            # run_dump's positional signature: (path, binary_fmt, headers,
+            # includes, version, lang) -- "c" must reach the `lang` slot.
+            assert mock_run_dump.call_count == 2
+            for call in mock_run_dump.call_args_list:
+                assert call.args[5] == "c"
 
     def test_elf_scopes_symbols_to_old_lib_exports(self, tmp_path):
         """Symbols not exported by target old DSO must be ignored (no false positives)."""
@@ -1645,7 +1643,8 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
             patch("abicheck.appcompat._get_old_lib_exports_for_scoping", return_value={"inflate"}),
-            patch("abicheck.dumper.dump", return_value=MagicMock()),
+            patch("abicheck.service.detect_binary_format", return_value="elf"),
+            patch("abicheck.service.run_dump", return_value=MagicMock()),
             patch("abicheck.service.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value={"inflate"}),
             patch("abicheck.elf_metadata.parse_elf_metadata", return_value=SimpleNamespace(versions_defined=[])),
@@ -1670,7 +1669,8 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
             patch("abicheck.appcompat._get_old_lib_exports_for_scoping", return_value={"inflate"}),
-            patch("abicheck.dumper.dump", return_value=MagicMock()),
+            patch("abicheck.service.detect_binary_format", return_value="elf"),
+            patch("abicheck.service.run_dump", return_value=MagicMock()),
             patch("abicheck.service.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value={"inflate"}),
             patch("abicheck.elf_metadata.parse_elf_metadata", return_value=SimpleNamespace(versions_defined=[])),

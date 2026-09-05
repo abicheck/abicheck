@@ -390,13 +390,16 @@ class TestRunAbiDiff:
         new_lib.write_bytes(b"new")
 
         monkeypatch.setattr(
-            "abicheck.dumper.dump", lambda **_kw: MagicMock(name="snapshot")
+            "abicheck.service.detect_binary_format", lambda _path: "elf"
+        )
+        monkeypatch.setattr(
+            "abicheck.service.run_dump", lambda *_a, **_kw: MagicMock(name="snapshot")
         )
 
         def _raise(*_a, **_kw):
             raise ProfileMismatchError("profile drift")
 
-        monkeypatch.setattr("abicheck.stack_checker.compare", _raise)
+        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
 
         with pytest.raises(ProfileMismatchError):
             _run_abi_diff(old_lib, new_lib, "libfoo.so")
@@ -412,13 +415,16 @@ class TestRunAbiDiff:
         new_lib.write_bytes(b"new")
 
         monkeypatch.setattr(
-            "abicheck.dumper.dump", lambda **_kw: MagicMock(name="snapshot")
+            "abicheck.service.detect_binary_format", lambda _path: "elf"
+        )
+        monkeypatch.setattr(
+            "abicheck.service.run_dump", lambda *_a, **_kw: MagicMock(name="snapshot")
         )
 
         def _raise(*_a, **_kw):
             raise RuntimeError("unrelated failure")
 
-        monkeypatch.setattr("abicheck.stack_checker.compare", _raise)
+        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
 
         assert _run_abi_diff(old_lib, new_lib, "libfoo.so") is None
 
