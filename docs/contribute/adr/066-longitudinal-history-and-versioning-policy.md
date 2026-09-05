@@ -100,9 +100,18 @@ underlying type, a constant value — since those change exactly when a
 removal-plus-reintroduction; payload is compared only after
 correspondence is established. Overloads, which the projection no longer
 separates, are disambiguated inside the correspondence step by their
-signature discriminators: a one-to-one signature match is continuity, a
-changed signature with a unique remaining candidate is a `changed` event
-on that overload, and anything else is a *possible correspondence*. It reports an ambiguous match as
+signature discriminators: a one-to-one signature match is continuity;
+anything else — including a changed signature with a single remaining
+candidate, since old `f(int)`/new `f(double)` look identical whether one
+declaration changed or `f(int)` was removed while an unrelated overload
+was added — is a *possible correspondence* only, never an asserted
+`changed` event. A possible correspondence becomes `changed` only when
+stable provenance corroborates it (the same declaration anchor in the
+same TU-relative location, or a project-supplied explicit rename/
+signature-change mapping); otherwise history records a `removed` and a
+`first_observed` pair with the correspondence attached as a hint, so
+deprecation or first-observed history is never carried between distinct
+APIs. It reports an ambiguous match as
 a *possible correspondence*, and never asserts continuity it cannot prove.
 Defining that key is S1's first deliverable, gated by the rebased-path
 test below. Distinct overloads, occurrences, ABI aliases, and template
