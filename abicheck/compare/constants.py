@@ -320,15 +320,28 @@ def diff_constants(
             # every one of its distinct entities is an independent, real
             # removal, and each carries its own entity_id rather than
             # every finding sharing a single id.
+            #
+            # The per-name legacy fallback is used only when there is
+            # exactly one entity to attribute it to (Codex review, PR
+            # #1078, thirteenth round): `old_constants.get(name)` retains
+            # only one raw value per bare name, so applying it to *every*
+            # member of a multi-entity group vanishing at once would credit
+            # the same borrowed text to every one of them, same as the
+            # ninth round's identical reasoning for the general collision
+            # path -- this whole-group path just hadn't been given the
+            # same treatment yet.
             for old_id in old_ids:
+                old_value = (
+                    _value_or_legacy(old_index, old_id, name, old_constants)
+                    if len(old_ids) == 1
+                    else _value(old_index, old_id)
+                )
                 changes.append(
                     make_change(
                         ChangeKind.CONSTANT_REMOVED,
                         symbol=name,
                         name=name,
-                        old_value=_value_or_legacy(
-                            old_index, old_id, name, old_constants
-                        ),
+                        old_value=old_value,
                         entity_id=producer_entity_id(old_id),
                     )
                 )
@@ -356,6 +369,46 @@ def diff_constants(
                 )
             )
             continue
+        # Shared real identity resolved *before* any value-based pairing
+        # (Codex review, PR #1078, thirteenth round): an entity present
+        # under the identical `EntityId` on both sides of the comparison is
+        # not an ambiguous member of the colliding group at all -- it is
+        # the same declaration, so its own old/new value comparison is
+        # exact, never a heuristic pairing. Skipping this and going
+        # straight to value-based matching let a stable entity's own real
+        # value change be silently absorbed into an unrelated occurrence's
+        # addition/removal whenever the multiset arithmetic happened to
+        # find a same-valued partner elsewhere in the group -- e.g. a
+        # stable `X` changing `1` -> `2` while a *different*, newly-added
+        # colliding entity is `1`: value-only subtraction cancels the
+        # stable entity's old `1` against the new entity's `1`, reporting
+        # only a compatible-looking addition of `2` instead of the real
+        # breaking change to the stable entity, and losing the genuine
+        # addition entirely. `set(old_ids) & set(new_ids)` is exact, not a
+        # heuristic: `_values()` never repeats an `EntityId` within one
+        # side, so each shared id names exactly one occurrence per side.
+        # No per-name legacy fallback here either, for the identical
+        # ninth-round reason the rest of this path avoids it.
+        shared_ids = set(old_ids) & set(new_ids)
+        for shared_id in shared_ids:
+            old_val = _value(old_index, shared_id)
+            new_val = _value(new_index, shared_id)
+            if old_val is None or new_val is None or old_val == new_val:
+                continue
+            if is_fingerprint_comparison_unreliable(old_val, new_val):
+                continue
+            changes.append(
+                make_change(
+                    ChangeKind.CONSTANT_CHANGED,
+                    symbol=name,
+                    name=name,
+                    old=repr(old_val),
+                    new=repr(new_val),
+                    old_value=old_val,
+                    new_value=new_val,
+                    entity_id=producer_entity_id(shared_id),
+                )
+            )
         # A colliding group on at least one side (Codex review, PR #1078,
         # ninth/tenth/eleventh rounds). Compared occurrence-by-occurrence,
         # not by a bare value `Counter`: a `Counter` alone answers "how many
@@ -400,12 +453,16 @@ def diff_constants(
         # function cannot actually attribute.
         old_by_value: dict[str, list[EntityId]] = {}
         for i in old_ids:
+            if i in shared_ids:
+                continue
             v = _value(old_index, i)
             old_by_value.setdefault(
                 v if v is not None else _UNRESOLVED_MARKER, []
             ).append(i)
         new_by_value: dict[str, list[EntityId]] = {}
         for i in new_ids:
+            if i in shared_ids:
+                continue
             v = _value(new_index, i)
             new_by_value.setdefault(
                 v if v is not None else _UNRESOLVED_MARKER, []
@@ -484,14 +541,22 @@ def diff_constants(
         # whether the new value is itself comparable. One `CONSTANT_ADDED`
         # per contributing entity, not just `new_ids[0]` (Codex review, PR
         # #1078, twelfth round): an entirely new colliding group can carry
-        # more than one distinct entity, each an independent addition.
+        # more than one distinct entity, each an independent addition. The
+        # per-name legacy fallback is used only for a single-entity group,
+        # for the identical reason the removal side above is (Codex
+        # review, PR #1078, thirteenth round).
         for new_id in new_ids:
+            new_value = (
+                _value_or_legacy(new_index, new_id, name, new_constants)
+                if len(new_ids) == 1
+                else _value(new_index, new_id)
+            )
             changes.append(
                 make_change(
                     ChangeKind.CONSTANT_ADDED,
                     symbol=name,
                     name=name,
-                    new_value=_value_or_legacy(new_index, new_id, name, new_constants),
+                    new_value=new_value,
                     entity_id=producer_entity_id(new_id),
                 )
             )

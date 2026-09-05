@@ -260,3 +260,23 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   distinct while still rendering under the shared bare alias) instead of
   collapsing into a shared dict key, letting the existing occurrence-level
   collision handling in `diff_typedefs` compare them correctly.
+- **A stable entity's own value change inside a colliding group is no
+  longer masked by value-only matching, and a whole vanishing/appearing
+  group's per-name legacy fallback is no longer shared across its
+  members.** Both `diff_constants` and `diff_typedefs` now match colliding
+  occurrences by shared `EntityId` *before* falling back to value-based
+  pairing (Codex review, PR #1078, thirteenth round): an entity present
+  under the identical `EntityId` on both sides is the same declaration, so
+  its own old/new value comparison is exact, never a heuristic pairing.
+  Previously, a stable entity changing value (e.g. `X=1` -> `X=2`) while a
+  *different*, newly-added colliding entity happened to carry the old
+  value (`X=1`) let value-only multiset subtraction cancel the stable
+  entity's old value against the new entity's, reporting only a
+  compatible-looking addition and silently losing both the real breaking
+  change and the genuine addition. Separately, `diff_constants`'s
+  whole-group vanish/appear loops (from the twelfth round's own per-entity
+  fix) still called the per-name legacy fallback for every member of a
+  multi-entity group, crediting the same borrowed text to genuinely
+  different declarations — the fallback is now used only for a
+  single-entity group, matching the ninth round's identical rule for the
+  general collision path.

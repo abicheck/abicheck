@@ -259,6 +259,46 @@ class TestDetectorBehavior:
         assert change.old_value == "long"
         assert change.new_value == "char"
 
+    def test_a_stable_identitys_own_base_change_is_not_masked_by_a_new_arrival(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, thirteenth round: a stable, real-backend
+        identity ``Alias`` changes from ``int`` to ``long`` while a
+        *different*, newly-added anonymous-scope ``Alias`` arrives as
+        ``int``. Value-only multiset matching cancels the stable entity's
+        old ``int`` against the new entity's ``int``, reporting a clean
+        comparison (a pure addition, untracked) -- silently masking the
+        stable entity's own real, breaking base-type change. Matching by
+        shared ``EntityId`` first must catch it directly."""
+        stable = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        added = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                    OccurrenceId(added): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.TYPEDEF_BASE_CHANGED
+        assert change.old_value == "int"
+        assert change.new_value == "long"
+        assert change.entity_id == stable
+
     def test_a_duplicate_value_added_to_a_colliding_group_is_not_a_base_change(
         self,
     ) -> None:

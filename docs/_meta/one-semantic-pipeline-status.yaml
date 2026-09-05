@@ -580,6 +580,26 @@ concepts:
       correct once given the chance -- compares them properly. Constants
       have no bare/qualified split at all (no schema-versioned bare-only
       baseline predates them), so this second fix is typedef-only.
+
+      **A thirteenth round found the collision path still matched purely
+      by value, never by shared identity.** Both `diff_constants` and
+      `diff_typedefs` now compute `set(old_ids) & set(new_ids)` first --
+      an entity present under the identical `EntityId` on both sides is
+      the same declaration, so comparing its own old/new value directly is
+      exact, not a heuristic pairing. Without this, a stable entity
+      changing value (`X=1` -> `X=2`) while a different, newly-added
+      colliding entity happened to carry the old value (`X=1`) let
+      value-only multiset subtraction cancel the stable entity's old value
+      against the new entity's, reporting only a compatible-looking
+      addition and losing both the real change and the genuine addition.
+      Only the remaining, identity-unmatched occurrences on each side feed
+      the existing value-based bookkeeping. Separately,
+      `diff_constants`'s whole-group vanish/appear loops (the twelfth
+      round's own per-entity fix) still called the per-name legacy
+      fallback for every member of a multi-entity group, crediting the
+      same borrowed text to genuinely different declarations -- the
+      fallback is now used only for a single-entity group, matching the
+      ninth round's identical rule for the general collision path.
   public_surface:
     primitive: complete
     producers: complete

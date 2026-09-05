@@ -493,6 +493,53 @@ class TestDetectorBehavior:
         assert change.old_value is None
         assert change.new_value is None
 
+    def test_a_stable_identitys_own_value_change_is_not_masked_by_a_new_arrival(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, thirteenth round: a stable, real-backend
+        identity ``X`` changes from ``1`` to ``2`` while a *different*,
+        newly-added anonymous-scope ``X`` arrives with value ``1``.
+        Value-only multiset matching cancels the stable entity's old ``1``
+        against the new entity's ``1``, reporting only a compatible-looking
+        ``CONSTANT_ADDED`` for value ``2`` -- silently masking the real,
+        breaking change to the stable entity and never reporting the
+        genuine addition at all. Matching by shared ``EntityId`` first
+        must catch the stable entity's own value change directly, and the
+        addition must still be reported separately."""
+        stable = entity_id_for_constant((Namespace("ns"),), "X")
+        added = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    )
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(stable): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                    OccurrenceId(added): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        by_kind = {c.kind: c for c in changes}
+        assert set(by_kind) == {ChangeKind.CONSTANT_CHANGED, ChangeKind.CONSTANT_ADDED}
+        changed = by_kind[ChangeKind.CONSTANT_CHANGED]
+        assert changed.old_value == "1"
+        assert changed.new_value == "2"
+        assert changed.entity_id == stable
+        added_change = by_kind[ChangeKind.CONSTANT_ADDED]
+        assert added_change.new_value == "1"
+        assert added_change.entity_id == added
+
     def test_a_duplicate_value_added_to_a_colliding_group_is_an_addition_not_a_change(
         self,
     ) -> None:
@@ -625,6 +672,41 @@ class TestDetectorBehavior:
             new_constants={"X": "expr:bbbbbbbbbbbbbbbb"},
         )
         assert changes == []
+
+    def test_a_whole_removed_groups_own_fallback_is_not_shared_across_members(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, thirteenth round: two anonymous-scoped,
+        unsupported-valued constants collide on ``X`` and the whole group
+        vanishes at once. ``AbiSnapshot.constants`` retains only one raw
+        value per bare name -- applying it as a per-occurrence fallback to
+        *both* removed entities would credit the same borrowed text to two
+        genuinely different declarations. With more than one entity in the
+        vanishing group, the fallback must not be consulted at all -- each
+        removal reports ``old_value=None``, same as the general collision
+        path's own identical rule."""
+        first = entity_id_for_constant((), "X")
+        second = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(first): CanonicalEntity(
+                        canonical_spelling=Fact.unsupported("not comparable")
+                    ),
+                    OccurrenceId(second): CanonicalEntity(
+                        canonical_spelling=Fact.unsupported("not comparable")
+                    ),
+                }
+            )
+        )
+        changes = _run(
+            old_index,
+            SemanticIRIndex(SemanticIR()),
+            old_constants={"X": "expr:aaaaaaaaaaaaaaaa"},
+        )
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_REMOVED for c in changes)
+        assert all(c.old_value is None for c in changes)
 
     def test_a_mixed_group_reports_both_the_change_and_the_residual_addition(
         self,

@@ -296,7 +296,45 @@ def diff_typedefs(
                     )
                 )
             continue
-        # Occurrence-level bookkeeping, not a bare value `Counter`/`set`
+        # Shared real identity resolved *before* any value-based pairing
+        # (Codex review, PR #1078, thirteenth round): an entity present
+        # under the identical `EntityId` on both sides of the comparison is
+        # not an ambiguous member of the colliding group at all -- it is
+        # the same declaration, so its own old/new value comparison is
+        # exact, never a heuristic pairing. Skipping this and going
+        # straight to value-based matching let a stable entity's own real
+        # value change be silently absorbed into an unrelated occurrence's
+        # addition/removal whenever the multiset arithmetic happened to
+        # find a same-valued partner elsewhere in the group -- e.g. stable
+        # `Alias` changing `int` -> `long` while a *different*, newly-added
+        # colliding entity is `int`: value-only subtraction cancels the
+        # stable entity's old `int` against the new entity's `int`,
+        # reporting only a compatible-looking value mismatch instead of the
+        # real breaking change to the stable entity. `set(old_ids) &
+        # set(new_ids)` is exact, not a heuristic: `entities_of_kind()`
+        # never repeats an `EntityId` within one side, so each shared id
+        # names exactly one occurrence per side.
+        shared_ids = set(old_ids) & set(new_ids)
+        for shared_id in shared_ids:
+            old_type = _underlying(old_index, shared_id)
+            new_type = _underlying(new_index, shared_id)
+            if old_type == new_type:
+                continue
+            changes.append(
+                make_change(
+                    ChangeKind.TYPEDEF_BASE_CHANGED,
+                    symbol=bare_alias,
+                    name=bare_alias,
+                    old_value=old_type,
+                    new_value=new_type,
+                    entity_id=producer_entity_id(shared_id),
+                    description=(
+                        f"Typedef base type changed: {bare_alias}{qualified_suffix}"
+                    ),
+                )
+            )
+        # Occurrence-level bookkeeping over the *remaining*, identity-
+        # unmatched occurrences only, not a bare value `Counter`/`set`
         # (Codex review, PR #1078, eleventh round -- mirroring
         # ``compare.constants.diff_constants``'s identical fix, see that
         # function's own docstring for the full three-defect account): a
@@ -313,9 +351,13 @@ def diff_typedefs(
         # entity_id.
         old_by_value: dict[str, list[EntityId]] = {}
         for i in old_ids:
+            if i in shared_ids:
+                continue
             old_by_value.setdefault(_underlying(old_index, i), []).append(i)
         new_by_value: dict[str, list[EntityId]] = {}
         for i in new_ids:
+            if i in shared_ids:
+                continue
             new_by_value.setdefault(_underlying(new_index, i), []).append(i)
         removed_occurrences: list[tuple[str, EntityId]] = []
         for value, ids_for_value in old_by_value.items():
