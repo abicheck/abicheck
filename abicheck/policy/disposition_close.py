@@ -89,6 +89,8 @@ def finalize_ledger(
     ledger: DispositionLedger,
     result: DiffResult,
     severity_config: object | None = None,
+    *,
+    verdict_scored: Iterable[Change] = (),
 ) -> DispositionLedger:
     """Close *ledger* over *result*, labelling every not-yet-recorded change.
 
@@ -124,12 +126,40 @@ def finalize_ledger(
     # claim it was folded into a finding that does not exist.
     redundant = _bucket("redundant_changes")
     redundant_count = getattr(result, "redundant_count", len(redundant))
-    _record_bucket(
-        ledger,
-        redundant[:redundant_count],
-        Disposition.DEDUPLICATED,
-        "redundancy_filter",
-    )
+    # ...and the first half is itself two populations. `checker.compare`
+    # scores the verdict on `kept + verdict_scored`, where `verdict_scored` is
+    # the redundant findings policy did *not* exclude from the gate (the
+    # rename-collapsed halves are excluded; everything else is not). One of
+    # those can still drive a breaking exit code -- downgrade a kept
+    # `TYPE_SIZE_CHANGED` to compatible while its derived, redundant
+    # `FUNC_PARAMS_CHANGED` stays breaking and the run exits 4 -- so labelling
+    # the whole prefix `deduplicated` made the audit report `effective_total:
+    # 0` for a run that gated. A finding the gate scored is answered by the
+    # gate (`_kept_disposition`), like every other scored finding in this
+    # module; the mechanism that hid it from the *display* is recorded in the
+    # application point, which is what that field is for.
+    #
+    # `checker.compare` hands the set in rather than this module re-deriving
+    # it from `caused_by_type`: that rule belongs to the caller that owns the
+    # verdict input, and a second copy of it here would be exactly the kind of
+    # parallel policy this ledger exists to avoid. A caller that passes
+    # nothing (`ledger_for`'s reconciliation fallback for a hand-built
+    # `DiffResult`) keeps the conservative labelling, since such a result
+    # carries no scored set to honour.
+    scored_ids = {id(c) for c in verdict_scored}
+    for change in redundant[:redundant_count]:
+        if id(change) in scored_ids:
+            ledger.record(
+                change,
+                _kept_disposition(change, result, severity_config, gate),
+                application_point="redundancy_filter_scored",
+            )
+        else:
+            ledger.record(
+                change,
+                Disposition.DEDUPLICATED,
+                application_point="redundancy_filter",
+            )
     _record_bucket(
         ledger,
         redundant[redundant_count:],

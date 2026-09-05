@@ -409,3 +409,133 @@ def test_the_ledger_a_projection_reads_is_never_mutated_by_scoping_twice() -> No
     close_consumer_scope(ledger_for(result), result, gating=[change])
     assert ledger_for(result) is ledger
     assert ledger_for(result).effective_total == 1
+
+
+# ---------------------------------------------------------------------------
+# The audit and the exit code are computed from the same findings
+# ---------------------------------------------------------------------------
+
+
+def _gates(verdict) -> bool:
+    """Whether *verdict* produces a non-zero legacy exit code.
+
+    Written down here rather than read from `severity.legacy_exit_code`: this
+    is the oracle, and an oracle that calls the function under test proves
+    nothing (`tests/test_snapshot_compression.py`'s own lesson, generalized).
+    """
+    from abicheck.checker import Verdict
+
+    return verdict in (Verdict.BREAKING, Verdict.API_BREAK)
+
+
+@pytest.mark.parametrize(("removed", "added"), [(0, 0), (2, 0), (0, 2), (3, 2), (1, 1)])
+@pytest.mark.parametrize("suppress_everything", [False, True])
+def test_the_effective_total_agrees_with_the_verdict(
+    removed: int, added: int, suppress_everything: bool
+) -> None:
+    """A gating verdict means at least one gating finding, and vice versa.
+
+    The invariant behind a whole family of this ledger's bugs: the audit is
+    supposed to *reconcile with* the number the user is gated on, and every
+    time a bucket was trusted to imply a disposition instead of the gate
+    being asked, the two silently drifted apart. Most recently, a redundant
+    finding that policy still scored (`checker.compare` computes the verdict
+    over `kept + verdict_redundant`) was labelled `deduplicated`
+    unconditionally, so a run that really exits 4 reported
+    `effective_total: 0`.
+
+    The oracle is `DiffResult.verdict` — computed by a different code path
+    from anything the ledger touches — not a recount of the ledger's own
+    records.
+    """
+    from abicheck.model import Function, Visibility
+    from abicheck.suppression import Suppression, SuppressionList
+
+    old = AbiSnapshot(library="libmatrix", version="1.0")
+    new = AbiSnapshot(library="libmatrix", version="2.0")
+    for i in range(removed):
+        old.functions.append(
+            Function(
+                name=f"gone{i}",
+                mangled=f"_Z4gone{i}v",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            )
+        )
+    for i in range(added):
+        new.functions.append(
+            Function(
+                name=f"new{i}",
+                mangled=f"_Z3new{i}v",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            )
+        )
+    rules = (
+        SuppressionList(
+            [Suppression(symbol_pattern=".*", reason="all", allow_public_break=True)]
+        )
+        if suppress_everything
+        else None
+    )
+    result = compare(old, new, rules)
+    effective = ledger_for(result).effective_total
+    assert (effective > 0) is _gates(result.verdict), (
+        f"verdict {result.verdict.value} and effective_total {effective} "
+        "disagree about whether this run gated"
+    )
+
+
+def test_a_policy_scored_redundant_finding_is_not_deduplicated() -> None:
+    """The reported shape directly, at the finalizer's own boundary.
+
+    A derived finding can be redundant *for display* and still be scored by
+    the gate — `checker.compare` computes the verdict over
+    `kept + verdict_redundant`. `deduplicated` claims it was folded into
+    another finding and removes it from `effective_total`; the disposition
+    has to come from the gate instead, with the display mechanism recorded as
+    the application point.
+    """
+    from abicheck.checker_types import DiffResult
+    from abicheck.policy.disposition_close import finalize_ledger
+
+    result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+    root = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="T", description="root")
+    derived = Change(
+        kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="f", description="derived"
+    )
+    collapsed = Change(
+        kind=ChangeKind.FUNC_REMOVED, symbol="g", description="rename half"
+    )
+    result.changes = [root]
+    result.redundant_changes = [derived, collapsed]
+    result.redundant_count = 2
+
+    # Only `derived` was scored; `collapsed` is the rename-collapsed half
+    # `checker.compare` deliberately keeps out of the verdict input.
+    ledger = finalize_ledger(DispositionLedger(), result, verdict_scored=[derived])
+    assert ledger.record_for(derived).disposition is Disposition.GATING
+    assert ledger.record_for(derived).application_point == "redundancy_filter_scored"
+    assert ledger.record_for(collapsed).disposition is Disposition.DEDUPLICATED
+    assert ledger.effective_total == 2, "the root and the scored derived finding"
+    assert ledger.detected_total == 3
+    assert conservation_holds(ledger)
+
+
+def test_an_unscored_redundant_finding_stays_deduplicated() -> None:
+    """The negative control: passing no scored set (the reconciliation
+    fallback for a `DiffResult` no `compare()` built) must not start
+    promoting redundant findings into the gate."""
+    from abicheck.checker_types import DiffResult
+    from abicheck.policy.disposition_close import finalize_ledger
+
+    result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+    derived = Change(
+        kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="f", description="derived"
+    )
+    result.changes = []
+    result.redundant_changes = [derived]
+    result.redundant_count = 1
+    ledger = finalize_ledger(DispositionLedger(), result)
+    assert ledger.record_for(derived).disposition is Disposition.DEDUPLICATED
+    assert ledger.effective_total == 0

@@ -1306,11 +1306,11 @@ def compare(
         assurance=assurance,
         contract_context=contract_context,
     )
-    # ADR-067 C-S1/D3: close the ledger over every change that survived to a
-    # bucket on `result`, so the per-disposition counts sum to the detected
-    # total. The suppression application points already recorded their own
-    # findings (with the matched rule's provenance) as they ran.
-    result.disposition_ledger = finalize_ledger(ledger, result)
+    # ADR-067 C-S1/D3, see `finalize_ledger`: `verdict_scored` is the redundant
+    # subset the verdict was scored over, so the audit agrees with the gate.
+    result.disposition_ledger = finalize_ledger(
+        ledger, result, verdict_scored=verdict_redundant
+    )
 
     # P0.4 — computed last, from data the pipeline above already produced
     # (evidence tiers, comparability outcome, contract context, whatever
