@@ -546,3 +546,21 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   heuristic silently suppressed a real removal purely because the legacy
   sidecar wasn't populated. `_has_type_evidence` now also recognizes
   `SemanticIR` type/enum/typedef occurrences (Codex review).
+- **A lone bare-projected typedef no longer changes its public
+  `finding_id`.** `_bare_typedef_side_index` (the bare-key-space fallback
+  used when one comparison side predates schema v25) unconditionally
+  stamped a synthetic `str(ordinal)` disambiguator -- always `"0"` for a
+  bare alias with exactly one real entity -- even with no collision to
+  disambiguate. Only stamps the ordinal-based discriminator now when the
+  bare alias actually has more than one real entity, mirroring
+  `_group_safe_disambiguator`'s group-size gate for this separate inline
+  path (Codex review).
+- **`finding_id`'s public schema description now documents the
+  `disambiguator` hash input.** The seventeenth round's conditional
+  append of `Change.disambiguator` (never itself a reported field) into
+  `finding_id`'s hash was never reflected in the published JSON Schema's
+  `finding_id` description, which still documented only the original
+  six-field algorithm -- a consumer following the documented algorithm
+  could not reproduce the id for a disambiguated typedef/constant
+  occurrence finding. Updated the schema description and bumped
+  `REPORT_SCHEMA_VERSION` to 2.50 (Codex review).

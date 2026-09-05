@@ -1128,3 +1128,71 @@ class TestOrdinaryEntityBackedFindingsKeepBlankDisambiguator:
         assert change.kind is ChangeKind.TYPEDEF_REMOVED
         assert change.entity_id == eid
         assert change.disambiguator is None
+
+
+class TestBareProjectionKeepsBlankDisambiguatorForALoneAlias:
+    """Regression coverage for Codex review, PR #1078, twenty-fourth round:
+    ``_bare_typedef_side_index`` unconditionally stamped a synthetic
+    ``str(ordinal)`` disambiguator (always ``"0"`` for a lone entity) with
+    no collision to disambiguate, rehashing ``report_finding_id`` for the
+    ordinary case -- the same overreach ``_group_safe_disambiguator`` fixed
+    (twenty-second round) for the qualified-key-space path; this path builds
+    its own disambiguator inline, so it needed its own fix."""
+
+    def test_a_lone_bare_alias_gets_no_synthetic_disambiguator(self) -> None:
+        from abicheck.compare.typedefs import _bare_typedef_side_index
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        snap = _snap(
+            typedefs_qualified={"ns::Alias": "long"},
+            typedef_entity_ids={"ns::Alias": eid},
+            semantic_ir=_ir_backed({"ns::Alias": "long"}).ir,
+        )
+        index = _bare_typedef_side_index(snap, {"Alias": "long"})
+        (occurrence_id,) = index.ir.occurrences
+        assert occurrence_id.disambiguator == ""
+
+    def test_two_colliding_bare_aliases_still_get_distinct_disambiguators(
+        self,
+    ) -> None:
+        """The collision case the ordinal exists for must still work: two
+        distinct qualified entities sharing one bare leaf name."""
+        from abicheck.compare.typedefs import _bare_typedef_side_index
+
+        maps = {"a::Alias": "int", "b::Alias": "long"}
+        snap = _snap(
+            typedefs_qualified=maps,
+            typedef_entity_ids={
+                "a::Alias": entity_id_for_typedef((Namespace("a"),), "Alias"),
+                "b::Alias": entity_id_for_typedef((Namespace("b"),), "Alias"),
+            },
+            semantic_ir=_ir_backed(maps).ir,
+        )
+        index = _bare_typedef_side_index(snap, {"Alias": "int"})
+        disambiguators = {oid.disambiguator for oid in index.ir.occurrences}
+        assert len(index.ir.occurrences) == 2
+        assert "" not in disambiguators
+        assert len(disambiguators) == 2
+
+    def test_through_compare_a_lone_bare_alias_value_change_keeps_its_id(
+        self,
+    ) -> None:
+        """End-to-end: comparing a pre-v25 side against a real-IR side over
+        one lone bare alias must not change ``finding_id`` relative to the
+        pre-existing legacy-adapter-only behavior."""
+        from abicheck.diff_types import _diff_typedefs
+
+        old = _snap(typedefs={"Alias": "int"})
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        new = _snap(
+            typedefs_qualified={"ns::Alias": "long"},
+            typedef_entity_ids={"ns::Alias": eid},
+            semantic_ir=_ir_backed({"ns::Alias": "long"}).ir,
+        )
+        (change,) = _diff_typedefs(old, new)
+        assert change.kind is ChangeKind.TYPEDEF_BASE_CHANGED
+        assert change.disambiguator is None
+        legacy_old = _snap(typedefs={"Alias": "int"})
+        legacy_new = _snap(typedefs={"Alias": "long"})
+        (legacy_change,) = _diff_typedefs(legacy_old, legacy_new)
+        assert report_finding_id(change) == report_finding_id(legacy_change)

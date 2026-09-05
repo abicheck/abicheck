@@ -693,7 +693,10 @@ from typing import Any
 #:       ``compatibility``/``assurance``/``gate``/``operational``/
 #:       ``lifecycle``), alongside the unchanged ``verdict``/``exit_code``/
 #:       ``severity`` fields.
-REPORT_SCHEMA_VERSION = "2.49"  #: G42 phase 1 (explicit check identifiers): ``check_id``'s pattern gains two optional, composable tail segments -- ``!<environment_id>`` (reserved) and ``~<explicit_id>`` (a project author's ``checks[].id``) -- additive to the existing four-component shape. Renumbered from a conflicting 2.48 when the origin/main merge claimed that version first for ADR-063 Phase 7's ``run_outcome`` block (same "renumber, don't reuse" convention as the 2.32/2.36/2.38 entries above).
+#: 2.49 -- G42 phase 1: ``check_id`` gains two optional tail segments,
+#:       ``!<environment_id>`` and ``~<explicit_id>``. Renumbered from a
+#:       conflicting 2.48 (origin/main claimed it for the ``run_outcome`` block).
+REPORT_SCHEMA_VERSION = "2.50"  #: ADR-063 Track T3 (Codex review, PR #1078, twenty-fourth round): ``finding_id``'s documented algorithm gains a seventh, conditional input -- ``Change.disambiguator`` (never itself a reported field) -- appended only for a typedef/constant occurrence-level finding needing collision disambiguation. Every other finding's id is unchanged; the schema's own description was updated to match (previously undocumented since the seventeenth round introduced the conditional append).
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

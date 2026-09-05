@@ -944,6 +944,23 @@ concepts:
       reclassifying a genuine typedef removal as unconfirmed. Fixed by also
       recognizing `SemanticIR` type/enum/typedef occurrences as evidence.
 
+      **A twenty-fourth round found two more instances of the same
+      collision-disambiguator overreach class.** First,
+      `_bare_typedef_side_index` (the bare-key-space fallback for a
+      pre-v25 comparison side) built its own disambiguator inline rather
+      than through `_group_safe_disambiguator`, and inherited the identical
+      bug that helper was built to fix: it unconditionally stamped
+      `str(ordinal)` -- always `"0"` for a bare alias with exactly one real
+      entity -- with no collision to disambiguate. Fixed by counting
+      occurrences per bare alias up front and only stamping the ordinal
+      when the count exceeds one. Second: `finding_id`'s public JSON Schema
+      description still documented only the original six-field algorithm,
+      never updated when the seventeenth round's conditional
+      `disambiguator` append landed -- a consumer following the documented
+      algorithm could not reproduce the id for a disambiguated finding.
+      Fixed the schema description and bumped `REPORT_SCHEMA_VERSION` to
+      2.50.
+
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.
     investigated_declined:
