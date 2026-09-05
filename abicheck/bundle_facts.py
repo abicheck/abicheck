@@ -49,6 +49,7 @@ from .storage.bundle_facts_validation import (
     BUNDLE_ARCHIVE_ARTIFACT_TYPE,
     load_bundle_facts_blob_json,
     require_degraded_marker_version,
+    require_degraded_members_known,
     require_int_schema_version,
     validate_bundle_archive_artifact_type,
     validated_alias_map,
@@ -138,23 +139,17 @@ class BundleFacts:
     :func:`compare_bundle_from_facts` nothing to diff when the *old* side is
     a stored dump rather than a live directory.
 
-    ``filesystem_aliases`` records, per library, the extra soname spellings
-    :func:`abicheck.bundle_soname.filesystem_alias_basenames` recovered from
-    the *real* on-disk file at capture time, so :func:`bundle_snapshot_from_
-    facts`'s later, metadata-only reconstruction can still resolve a
-    ``DT_NEEDED`` edge naming one without touching the filesystem (Codex
-    review). Empty for a caller that didn't pass real paths at capture time.
+    ``filesystem_aliases``/``library_filenames`` record, per library, the
+    real on-disk soname spellings and basename captured while the files
+    still existed, so the metadata-only reconstruction resolves ``DT_NEEDED``
+    edges and SONAME skew without the filesystem (Codex review); empty for a
+    caller that passed no real paths. ``artifact_type`` is ``init=False``,
+    an invariant a caller cannot break by construction (Codex review).
+    ``degraded_members`` may name stored members only, checked at
+    construction so every reader and capture path shares the one rule."""
 
-    ``library_filenames`` records, per library, the real on-disk *basename*
-    at capture time (``libfoo_core.so.1``, not the canonical key) -- needed
-    by ``bundle._detect_soname_skew``'s ``path.name`` fallback for a
-    versioned DSO with no usable ``DT_SONAME`` (Codex review). Empty for a
-    caller that didn't pass real paths, same as ``filesystem_aliases``.
-    ``artifact_type`` is always :data:`BUNDLE_FACTS_ARTIFACT_TYPE` here --
-    ``init=False`` makes that an invariant a caller cannot break by
-    construction (``BundleFacts(artifact_type="other")`` is a ``TypeError``,
-    not a document that later writers and readers would disagree about --
-    Codex review, fresh evidence)."""
+    def __post_init__(self) -> None:
+        require_degraded_members_known(self.degraded_members, self.per_library_snapshots)
 
     schema_version: int = BUNDLE_FACTS_BASE_SCHEMA_VERSION
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT

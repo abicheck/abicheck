@@ -461,15 +461,19 @@ class TestRunOutcomeSchemaVersion:
 # ---------------------------------------------------------------------------
 
 
-def _degraded_facts_dict() -> dict[str, object]:
+def _degraded_facts_dict_facts():
     from abicheck.bundle_facts import capture_bundle_facts
-    from abicheck.bundle_facts_serialization import bundle_facts_to_dict
 
-    facts = capture_bundle_facts(
+    return capture_bundle_facts(
         {"liba.so": AbiSnapshot(library="liba.so", version="")},
         degraded_members={"liba.so": "ELF-only: boom"},
     )
-    return dict(bundle_facts_to_dict(facts))
+
+
+def _degraded_facts_dict() -> dict[str, object]:
+    from abicheck.bundle_facts_serialization import bundle_facts_to_dict
+
+    return dict(bundle_facts_to_dict(_degraded_facts_dict_facts()))
 
 
 class TestDegradedMarkerVersionGate:
@@ -820,3 +824,64 @@ class TestMarkdownAndNoticeRenderResolvedUnchecked:
         assert notice is not None
         assert "lib1.so (unsupported)" in notice
         assert "lib0.so" not in notice
+
+
+class TestDegradedMarkerMustNameAStoredMember:
+    """A `degraded_members` key naming no stored member is rejected at every
+    reader and at construction: re-keyed away later, such a marker would
+    vanish and the real members would compare as complete evidence (Codex
+    review, fourteenth round)."""
+
+    @staticmethod
+    def _doc() -> dict[str, object]:
+        from abicheck.bundle_facts_serialization import bundle_facts_to_dict
+
+        d = dict(bundle_facts_to_dict(_degraded_facts_dict_facts()))
+        d["degraded_members"] = {"libghost.so": "ELF-only: boom"}
+        return d
+
+    @pytest.mark.parametrize("reader", ["json", "import", "archive", "construct"])
+    def test_a_ghost_member_is_rejected(self, tmp_path: Path, reader: str) -> None:
+        from abicheck.bundle_facts import BUNDLE_ARCHIVE_ARTIFACT_TYPE, BundleFacts
+        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
+        from abicheck.serialization import SCHEMA_VERSION, load_bundle_facts
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+        from abicheck.storage.import_bundle_facts import import_bundle_facts
+        from abicheck.storage.package import InMemoryObjectStore
+
+        with pytest.raises(ValueError, match="degraded_members.*libghost.so"):
+            if reader == "json":
+                bundle_facts_from_dict(self._doc())
+            elif reader == "import":
+                import_bundle_facts(
+                    self._doc(),
+                    store=InMemoryObjectStore(),
+                    max_known_schema_version=SCHEMA_VERSION,
+                )
+            elif reader == "archive":
+                out = tmp_path / "old.bundlefacts.archive.zip"
+                with BundleArchiveWriter(out) as writer:
+                    writer.write_manifest(
+                        {
+                            "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+                            "schema_version": 1,
+                            "bundle_facts_schema_version": 3,
+                            "library_blobs": {},
+                            "degraded_members": {"libghost.so": "ELF-only: boom"},
+                        }
+                    )
+                load_bundle_facts(out, format="archive")
+            else:
+                BundleFacts(
+                    per_library_snapshots={
+                        "liba.so": AbiSnapshot(library="liba.so", version="")
+                    },
+                    degraded_members={"libghost.so": "ELF-only: boom"},
+                )
+
+    def test_a_marker_on_a_stored_member_still_loads(self) -> None:
+        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
+
+        assert bundle_facts_from_dict(_degraded_facts_dict()).degraded_members == {
+            "liba.so": "ELF-only: boom"
+        }

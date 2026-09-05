@@ -64,7 +64,10 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..errors import IncompatibleSnapshotSchemaError
-from .bundle_facts_validation import require_degraded_marker_version
+from .bundle_facts_validation import (
+    require_degraded_marker_version,
+    require_degraded_members_known,
+)
 from .dto import (
     BUNDLE_COMPOSITION_SECTION_KIND,
     SectionDTO,
@@ -472,14 +475,8 @@ def import_bundle_facts(
         )
     raw_snapshots = bundle_facts_document["per_library_snapshots"]
     _mapping(raw_snapshots, "bundle_facts_document['per_library_snapshots']")
-    # An explicitly *present*, empty mapping is a real, valid BundleFacts --
-    # the canonical `bundle_facts_from_dict` reader accepts it (a bundle
-    # with no libraries is not a contradiction, just a vacuous one), and a
-    # dedicated regression test pins that acceptance. Only the key's
-    # *absence* means malformed input, checked above -- Codex review, a
-    # second finding: an earlier version of this function rejected an
-    # empty-but-present mapping too, which this adapter's own claim to
-    # "accept what the canonical reader accepts" cannot allow.
+    # A present-but-empty mapping is a valid (vacuous) BundleFacts, as the
+    # canonical reader accepts; only the key's *absence* is malformed (Codex).
 
     # `resolve_ref_ids`, not the raw library name: unlike
     # `import_legacy_snapshot`'s own caller-supplied `artifact_id`, nothing
@@ -488,8 +485,7 @@ def import_bundle_facts(
     # preserved on the artifact's own `native_identity` for
     # `export_bundle_facts` to recover.
     artifact_ids_by_library = resolve_ref_ids(list(raw_snapshots), opaque_prefix="lib")
-    # Before any per-library write: `ObjectStore` has no rollback, so a
-    # marker rejected after the loop left orphaned objects (CodeRabbit).
+    # Before any per-library write: `ObjectStore` has no rollback (CodeRabbit).
     degraded_members = _validated_library_filenames(  # ADR-065 D8, same shape
         bundle_facts_document.get("degraded_members", _ABSENT), "degraded_members"
     )
@@ -498,6 +494,7 @@ def import_bundle_facts(
         raw_container_schema_version if "schema_version" in bundle_facts_document else 1,
         what="bundle_facts_document",
     )
+    require_degraded_members_known(degraded_members, raw_snapshots, what="bundle_facts_document")
 
     artifact_refs = []
     section_schema_versions: dict[str, int] = {}

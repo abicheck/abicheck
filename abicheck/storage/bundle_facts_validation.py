@@ -41,7 +41,7 @@ before this module existed.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -89,13 +89,19 @@ def load_bundle_facts_dispatch(
     import json as _json
 
     archived = maybe_read_bundle_facts_archive(
-        path, format, snapshot_from_dict=snapshot_from_dict, max_json_object_nodes=max_json_object_nodes
+        path,
+        format,
+        snapshot_from_dict=snapshot_from_dict,
+        max_json_object_nodes=max_json_object_nodes,
     )
     if archived is not None:
         return archived
     raw_text = read_snapshot_text(path)
     check_bundle_facts_json_budget(
-        raw_text.encode("utf-8"), max_json_object_nodes, path=path, description="bundle facts JSON"
+        raw_text.encode("utf-8"),
+        max_json_object_nodes,
+        path=path,
+        description="bundle facts JSON",
     )
     return bundle_facts_from_dict(_json.loads(raw_text))
 
@@ -134,7 +140,9 @@ def check_bundle_facts_json_budget(
             "max_json_object_nodes if this is a known-large, trusted payload)"
         ) from None
     except JsonNestingTooDeepError:
-        raise SnapshotError(f"{path}: {description} is too deeply nested to parse") from None
+        raise SnapshotError(
+            f"{path}: {description} is too deeply nested to parse"
+        ) from None
 
 
 #: Self-describing marker for the G40 archive *container*'s own
@@ -167,7 +175,9 @@ def require_int_schema_version(value: Any, *, field: str, path: str | Path) -> i
     from ..errors import SnapshotError
 
     if isinstance(value, bool) or not isinstance(value, int):
-        raise SnapshotError(f"{path}: manifest {field} must be an integer, got {value!r}")
+        raise SnapshotError(
+            f"{path}: manifest {field} must be an integer, got {value!r}"
+        )
     return cast(int, value)
 
 
@@ -187,13 +197,17 @@ def load_bundle_facts_blob_json(
 
     from ..errors import SnapshotError
 
-    check_bundle_facts_json_budget(raw, max_json_object_nodes, path=path, description=description)
+    check_bundle_facts_json_budget(
+        raw, max_json_object_nodes, path=path, description=description
+    )
     try:
         return _json.loads(raw)
     except (UnicodeDecodeError, ValueError) as exc:
         raise SnapshotError(f"{path}: {description} is not valid JSON: {exc}") from exc
     except RecursionError as exc:
-        raise SnapshotError(f"{path}: {description} is too deeply nested to parse") from exc
+        raise SnapshotError(
+            f"{path}: {description} is too deeply nested to parse"
+        ) from exc
 
 
 def validate_bundle_archive_artifact_type(
@@ -311,7 +325,10 @@ DEGRADED_MARKER_SCHEMA_VERSION = 3
 
 
 def require_degraded_marker_version(
-    degraded_members: Mapping[str, str], schema_version: int, *, what: str = "bundle facts"
+    degraded_members: Mapping[str, str],
+    schema_version: int,
+    *,
+    what: str = "bundle facts",
 ) -> None:
     """Reject a non-empty ``degraded_members`` marker on a document declaring
     a schema version that predates it.
@@ -333,6 +350,26 @@ def require_degraded_marker_version(
             f"schema_version {DEGRADED_MARKER_SCHEMA_VERSION} (ADR-065 D8); "
             f"this document declares schema_version {schema_version}, which a "
             "reader that cannot honor the marker would still accept"
+        )
+
+
+def require_degraded_members_known(
+    degraded_members: Mapping[str, str],
+    members: Iterable[str],
+    *,
+    what: str = "bundle facts",
+) -> None:
+    """Reject a ``degraded_members`` key naming no stored member: a marker
+    on a misspelled or absent library would be re-keyed away by a later
+    comparison and silently vanish, leaving the real members compared as
+    complete evidence despite a persisted capture-failure signal (Codex
+    review). Applied at every construction/import choke point."""
+    unknown = sorted(set(degraded_members) - set(members))
+    if unknown:
+        raise ValueError(
+            f"{what}: 'degraded_members' names {len(unknown)} library(ies) absent "
+            f"from 'per_library_snapshots' ({', '.join(unknown)}) -- a capture-"
+            "failure marker must name a stored member (ADR-065 D8)"
         )
 
 
