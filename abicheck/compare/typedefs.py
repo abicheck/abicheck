@@ -362,11 +362,22 @@ def diff_typedefs(
         # exactly the "real consumer" that predicate's own docstring says
         # needs its own adversarial review before being wired in, so this
         # is the first real call site.
-        shared_ids = {
+        shared_id_set = {
             i
             for i in set(old_ids) & set(new_ids)
             if entity_id_is_cross_snapshot_stable(i.entity_id)
         }
+        # Iterated in `old_ids`'s own order, not `shared_id_set`'s (Codex
+        # review, PR #1078, twentieth round -- mirroring
+        # ``compare.constants.diff_constants``'s identical fix): a `set`
+        # has no defined iteration order, so when more than one stable
+        # shared entity in one colliding group each independently emits a
+        # ``TYPEDEF_BASE_CHANGED``, their relative order in the report
+        # varied with `PYTHONHASHSEED` for two runs over byte-identical
+        # input. `old_ids` names each shared identity in the same relative
+        # position it already holds on its own side, so ordering by it is
+        # deterministic.
+        shared_ids = [i for i in old_ids if i in shared_id_set]
         for shared_id in shared_ids:
             old_type = _underlying(old_index, shared_id)
             new_type = _underlying(new_index, shared_id)
@@ -404,12 +415,12 @@ def diff_typedefs(
         # entity_id.
         old_by_value: dict[str, list[OccurrenceId]] = {}
         for i in old_ids:
-            if i in shared_ids:
+            if i in shared_id_set:
                 continue
             old_by_value.setdefault(_underlying(old_index, i), []).append(i)
         new_by_value: dict[str, list[OccurrenceId]] = {}
         for i in new_ids:
-            if i in shared_ids:
+            if i in shared_id_set:
                 continue
             new_by_value.setdefault(_underlying(new_index, i), []).append(i)
         removed_occurrences: list[tuple[str, OccurrenceId]] = []

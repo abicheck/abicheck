@@ -1767,16 +1767,19 @@ def report_finding_id(c: object) -> str:
     from ``checker`` would close a cycle the ``import-cycle-growth``
     AI-readiness gate rejects.
 
-    ``disambiguator`` (``Change``'s ODR/multi-TU occurrence discriminator,
-    Codex review, PR #1078, eighteenth round) is appended **only when set**:
-    unconditionally joining it would rehash every id this function has ever
-    produced (always ``None`` before this field existed) -- the same
-    universal-rehash cost a prior round declined to pay for a *narrower*
-    risk (``docs/contribute/plans/public-contract-default.md``'s
-    "delimiter" finding). Conditional append costs nothing for a pre-
-    existing finding while resolving the real, newly-reachable collision:
-    two ODR-duplicate occurrences now legitimately both survive
-    ``diff_filtering._dedup_exact`` with otherwise-identical fields.
+    ``disambiguator`` (Codex review, PR #1078, eighteenth round) and
+    ``entity_id`` (nineteenth round) are each appended **only when set**:
+    unconditionally joining either would rehash every id this function has
+    ever produced (both were always unset before their field existed) --
+    the same cost a prior round declined for a *narrower* risk
+    (``docs/contribute/plans/public-contract-default.md``'s "delimiter"
+    finding). Conditional append resolves two real collisions at no cost to
+    a pre-existing finding: two ODR-duplicate occurrences that now
+    legitimately survive ``diff_filtering._dedup_exact`` (closed by
+    ``disambiguator``), and two entity-distinct occurrences that both carry
+    a blank ``disambiguator`` -- the common case for two anonymous-scope
+    entities -- which ``_dedup_exact`` already tells apart via
+    ``entity_id.key`` but this function did not.
     """
     parts = [
         str(getattr(getattr(c, "kind", None), "value", getattr(c, "kind", ""))),
@@ -1786,6 +1789,9 @@ def report_finding_id(c: object) -> str:
         str(getattr(c, "source_location", None) or ""),
         str(getattr(c, "description", None) or ""),
     ]
+    entity_id = getattr(c, "entity_id", None)
+    if entity_id is not None:
+        parts.append(str(entity_id.key))
     disambiguator = getattr(c, "disambiguator", None)
     if disambiguator:
         parts.append(str(disambiguator))

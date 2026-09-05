@@ -875,3 +875,44 @@ class TestOdrDuplicateRemovalsSurviveDedupExact:
         assert {c.disambiguator for c in changes} == {"tu-a", "tu-b"}
         deduped = _dedup_exact(changes)
         assert len(deduped) == 2
+
+
+class TestSharedIdOrderIsDeterministic:
+    """Regression coverage for Codex review, PR #1078, twentieth round --
+    mirrors ``tests.test_constant_cutover.TestSharedIdOrderIsDeterministic``
+    exactly; see that class's own docstring for the full account."""
+
+    def test_two_shared_stable_occurrences_change_in_old_ids_order(self) -> None:
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("short")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("long")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("char")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.TYPEDEF_BASE_CHANGED for c in changes)
+        # Deterministic by `old_ids`' own encounter order (`SemanticIR.
+        # occurrences`' insertion order), not by `PYTHONHASHSEED`.
+        assert [c.old_value for c in changes] == ["int", "short"]
+        assert [c.new_value for c in changes] == ["long", "char"]
+        assert [c.disambiguator for c in changes] == ["tu-a", "tu-b"]

@@ -444,3 +444,21 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   intended. `diff_symbols.py`, `model/semantic_ir_legacy_adapter.py`, and
   `scripts/semantic_ir_cutover.py` each had a stale "both sides" framing of
   the old (pre-per-side-independence) selector behavior, corrected.
+- **Two entity-distinct occurrences with blank disambiguators no longer
+  collide on the public, documented-stable `finding_id`.** Two anonymous-
+  scope typedef/constant occurrences that both survive
+  `diff_filtering._dedup_exact` via distinct `entity_id`s (each carrying an
+  empty `disambiguator`, the common case) still hashed to the same
+  `report_finding_id` -- that function never consulted `entity_id` at all.
+  Fixed the same conditional way as the eighteenth round's `disambiguator`
+  fix: `entity_id.key` is appended only when set, so a pre-existing
+  finding's id still hashes identically (Codex review).
+- **Two colliding, cross-snapshot-stable shared occurrences in one alias
+  group no longer emit their findings in a `PYTHONHASHSEED`-dependent
+  order.** `diff_constants`/`diff_typedefs` iterated their `shared_ids` set
+  directly to emit each shared identity's own `CONSTANT_CHANGED`/
+  `TYPEDEF_BASE_CHANGED`; a `set` has no defined iteration order, so two
+  such findings from one comparison could print in either order across two
+  runs of byte-identical input. Both now iterate in `old_ids`'s own
+  (deterministic) encounter order instead, keeping the set only for O(1)
+  membership checks (Codex review).

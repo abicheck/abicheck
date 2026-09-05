@@ -441,11 +441,25 @@ def diff_constants(
         # is the first real call site.
         # No per-name legacy fallback here either, for the identical
         # ninth-round reason the rest of this path avoids it.
-        shared_ids = {
+        shared_id_set = {
             i
             for i in set(old_ids) & set(new_ids)
             if entity_id_is_cross_snapshot_stable(i.entity_id)
         }
+        # Iterated in `old_ids`'s own order, not `shared_id_set`'s (Codex
+        # review, PR #1078, twentieth round): a `set` has no defined
+        # iteration order, so when more than one stable shared entity in
+        # one colliding group each independently emits a `CONSTANT_CHANGED`,
+        # their relative order in the report varied with `PYTHONHASHSEED`
+        # for two runs over byte-identical input -- nothing downstream
+        # re-sorts findings to correct for it. `old_ids` and `new_ids` name
+        # the same shared identity in the same relative position on both
+        # sides (`_values()` groups each side in encounter order and a
+        # shared id's position doesn't move relative to its own side's
+        # other entries just because a differently-ordered side changed),
+        # so ordering by `old_ids` is deterministic and arbitrary-only in
+        # the same sense the collection's own encounter order already is.
+        shared_ids = [i for i in old_ids if i in shared_id_set]
         for shared_id in shared_ids:
             old_val = _value(old_index, shared_id)
             new_val = _value(new_index, shared_id)
@@ -510,7 +524,7 @@ def diff_constants(
         # function cannot actually attribute.
         old_by_value: dict[str, list[OccurrenceId]] = {}
         for i in old_ids:
-            if i in shared_ids:
+            if i in shared_id_set:
                 continue
             v = _value(old_index, i)
             old_by_value.setdefault(
@@ -518,7 +532,7 @@ def diff_constants(
             ).append(i)
         new_by_value: dict[str, list[OccurrenceId]] = {}
         for i in new_ids:
-            if i in shared_ids:
+            if i in shared_id_set:
                 continue
             v = _value(new_index, i)
             new_by_value.setdefault(

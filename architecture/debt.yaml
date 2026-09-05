@@ -853,12 +853,12 @@
     },
     {
       "path": "abicheck/finding_identity.py",
-      "baseline_lines": 1936,
+      "baseline_lines": 1942,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1923 -> 1936 (ADR-063 Track T3, Codex review, PR #1078, eighteenth round): report_finding_id() now appends Change.disambiguator, but only when set, so a pre-existing finding's id still hashes identically -- two ODR-duplicate occurrences that now legitimately both survive diff_filtering._dedup_exact with otherwise-identical fields would otherwise collide on this documented-stable, user-visible fingerprint too.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1923 -> 1936 (ADR-063 Track T3, Codex review, PR #1078, eighteenth round): report_finding_id() now appends Change.disambiguator, but only when set, so a pre-existing finding's id still hashes identically -- two ODR-duplicate occurrences that now legitimately both survive diff_filtering._dedup_exact with otherwise-identical fields would otherwise collide on this documented-stable, user-visible fingerprint too. Raised 1936 -> 1942 (Codex review, PR #1078, twentieth round): report_finding_id() now also appends Change.entity_id.key, conditionally on the same terms -- two entity-distinct occurrences that both carry a blank disambiguator (the common case for two anonymous-scope entities) still collided on this fingerprint, since it never consulted entity_id at all even though diff_filtering._dedup_exact already told such a pair apart that way.",
       "review_by": "2026-11-30"
     },
     {

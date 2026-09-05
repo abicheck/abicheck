@@ -833,9 +833,78 @@ concepts:
       resolved pair existed -- now prefers a pair whose values are both
       resolved when one exists.
 
+      **A twentieth round found two further gaps in code the nineteenth
+      round's own fixes had just introduced or left untouched.** First,
+      `report_finding_id` (the public, documented-stable per-finding
+      fingerprint) never looked at `entity_id` at all, so two entity-
+      distinct occurrences that both carry a blank `disambiguator` -- the
+      common case for two anonymous-scope entities, which have no source
+      disambiguator to begin with -- still collided on this id even though
+      `_dedup_exact` already told them apart via `entity_id.key`. Fixed the
+      same conditional-append way as the eighteenth round's own
+      `disambiguator` fix. Second, `diff_constants`/`diff_typedefs` iterated
+      their `shared_ids` set directly to emit each cross-snapshot-stable
+      shared identity's own finding, but a `set` has no defined iteration
+      order -- when a colliding group carries more than one such shared
+      identity, their relative emission order varied with
+      `PYTHONHASHSEED` across two runs of byte-identical input. Both now
+      iterate in `old_ids`'s own deterministic encounter order, keeping the
+      set only for O(1) membership checks.
+
+      A third, P1 finding from the same round -- that the stability filter
+      excludes an anonymous-scope entity from `shared_ids` even when its
+      literal `entity_id` matches on both sides, so a real value change on
+      it can be value-cancelled against an unrelated same-valued addition
+      elsewhere in the same colliding group instead of reported as a
+      `TYPEDEF_BASE_CHANGED`/`CONSTANT_CHANGED` -- was investigated and
+      declined; see `investigated_declined` below.
+
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.
     investigated_declined:
+      - item: >-
+          Trusting an anonymous/local-scoped entity's literal `EntityId`
+          equality across two snapshots for *value-change* detection
+          specifically, when it happens to match on both sides of a
+          colliding alias group (Codex review, PR #1078, twentieth round).
+          The scenario: an anonymous typedef/constant keeps its ordinal and
+          changes value (e.g. `int` -> `long`) while a second, genuinely
+          new anonymous entity with the *old* value is added to the same
+          colliding group in the same comparison. The fourteenth round's
+          stability filter (`entity_id_is_cross_snapshot_stable`) excludes
+          this pair from `shared_ids` by design, so the by-value multiset
+          bookkeeping treats the old entity's `int` and the new entity's
+          `int` as fungible, netting out to report only the new `long`
+          value as an addition -- correctly reporting that a `long`
+          appeared, but not that the specific anonymous entity's own value
+          changed, since that identity claim is unprovable from raw
+          evidence alone.
+        decided: "2026-09-05"
+        leaves_open: >-
+          Trusting the literal `EntityId` match here for this narrower
+          purpose would directly reintroduce the fourteenth round's own
+          counterexample in the opposite direction: an unrelated anonymous
+          sibling inserted or removed elsewhere in the same scope shifts
+          every later sibling's ordinal, so two literally-equal anonymous
+          `EntityId`s across two snapshots are not reliably "the same
+          declaration" evidence, only "happened to land on the same
+          ordinal this time." This is the second identity heuristic
+          considered and rejected for this exact ambiguity (the first being
+          the fourteenth round's own rejection of trusting the raw
+          intersection at all) -- per this repository's own accepted
+          precedent (`tests/CLAUDE.md`'s "Primitive-level property tests"
+          section, citing `_type_index_items`'s and `_diff_constants`'s
+          structural-identity docstrings), a heuristic falsified this way
+          twice is accepted as a documented, evidentiary limitation of
+          value-based multiset matching without stable identity, not
+          reattempted a third time. A different fix shape -- e.g. a new
+          "ambiguous identity" signal distinct from both `_CHANGED` and
+          `_ADDED`/`_REMOVED` -- would be a new detector-output contract,
+          not a bug fix, and is out of this track's scope.
+        tracked_as: >-
+          No open tracking item; recorded here as the decision record per
+          this file's own convention. A future proposal to resolve this
+          ambiguity differently should read this entry first.
       - item: >-
           Changing how the record and function detector families MATCH --
           the behavioral half of migrating them onto SemanticIRIndex as

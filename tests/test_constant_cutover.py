@@ -1087,3 +1087,54 @@ class TestSemanticIrCutoverGate:
             'x = some_object.getattr(snap, "constants")',
         ):
             assert legacy_collection_reads(ast.parse(source), forbidden) == []
+
+
+class TestSharedIdOrderIsDeterministic:
+    """Regression coverage for Codex review, PR #1078, twentieth round:
+    when a colliding group carries more than one cross-snapshot-stable
+    shared identity (Codex review, PR #1078, thirteenth round), each
+    independently able to emit its own ``CONSTANT_CHANGED``, the order
+    those findings were emitted in used to depend on `set` iteration order
+    -- a real, reachable non-determinism (``PYTHONHASHSEED`` varies
+    between runs of the same input), even though a `set` has never been
+    the mechanism this collision path uses for *value* bucketing (that has
+    been dict-insertion-ordered since the eleventh round). Two ODR-
+    duplicate occurrences sharing one stable entity, both persisting across
+    old and new with a real value change each, isolate the gap: the
+    ``shared_ids`` set alone decided their relative order.
+    """
+
+    def test_two_shared_stable_occurrences_change_in_old_ids_order(self) -> None:
+        eid = entity_id_for_constant((Namespace("ns"),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("5")
+                    ),
+                }
+            )
+        )
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("6")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, new_index)
+        assert len(changes) == 2
+        assert all(c.kind is ChangeKind.CONSTANT_CHANGED for c in changes)
+        # Deterministic by `old_ids`' own encounter order (`SemanticIR.
+        # occurrences`' insertion order), not by `PYTHONHASHSEED`.
+        assert [c.old_value for c in changes] == ["1", "5"]
+        assert [c.new_value for c in changes] == ["2", "6"]
+        assert [c.disambiguator for c in changes] == ["tu-a", "tu-b"]
