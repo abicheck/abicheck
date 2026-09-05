@@ -237,25 +237,30 @@ condition is narrower and orthogonal to this: it fires when the run could
 not establish *any* answer at all for the requested scope — no complete
 inventory on either side to reason from, every selected member `ambiguous`
 or `failed`, or (the dry-run/baseline-unavailable case) no baseline to
-compare against in the first place. Distinguish two outcomes that both
-still report `no comparison completed` (per D7's own base text above,
-unchanged by this clarification) from a third that does not:
-*successful planning* (a `--dry-run` plan view enumerated the expected set
-— it never claims compatibility, and separately never triggers D7's
-`no comparison completed` reporting at all, since no comparison was even
-attempted), *baseline initialization* (a `new_target`, first-ever-baseline
-run — reports `no comparison completed` exactly as D7's base text
-requires; this is an honest, expected first-run state, not a failure, but
-it is not exempted from that label — there is genuinely no prior baseline
-to compare against), and *successful compatibility analysis with zero
-binary-level diffs* (the three-removals case above, or a matrix where
-every selected member matched with no findings) — which is a real,
-complete answer and the only one of the three that must **not** report
-`no comparison completed`. The acceptance test above should be read with
-this distinction already applied: "zero valid comparisons" there means
-zero *established answers* of any kind for the requested scope, not merely
-zero binary pairs — it does not relax D7's existing `new_target`/dry-run
-reporting requirement in any way.
+compare against in the first place. State each of the three outcomes'
+reporting independently, since none is a variant of another:
+
+- *Successful planning* — a `--dry-run` plan view enumerated the expected
+  set. It never claims compatibility, and it never reports
+  `no comparison completed` either, because no comparison was attempted at
+  all — D7's trigger condition presupposes an attempted comparison, and a
+  pure planning view is not one.
+- *Baseline initialization* — a `new_target`, first-ever-baseline run.
+  This **does** report `no comparison completed`, exactly as D7's base
+  text already requires (unchanged by this clarification): it is an
+  honest, expected first-run state, not a failure, but it is not exempted
+  from that label — there is genuinely no prior baseline to compare
+  against.
+- *Successful compatibility analysis with zero binary-level diffs* — the
+  three-removals case above, or a matrix where every selected member
+  matched with no findings. This is a real, complete answer, so it must
+  **not** report `no comparison completed`.
+
+The acceptance test above should be read with this distinction already
+applied: "zero valid comparisons" there means zero *established answers* of
+any kind for the requested scope, not merely zero binary pairs — it does
+not relax D7's existing `new_target`/dry-run reporting requirement in any
+way.
 
 ### D8 — Failed extraction is a failed member, persisted as such
 
