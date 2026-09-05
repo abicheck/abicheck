@@ -586,3 +586,11 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   now detects a DWARF-qualified-native side (`diff_helpers.
   typedef_flat_map_is_dwarf_qualified`) and renders the real-IR side fully
   qualified too, matching DWARF's own convention (Codex review).
+- **`typedef_flat_map_is_dwarf_qualified` no longer misclassifies a
+  header-parsed snapshot that also happens to carry DWARF metadata.** A
+  header-parsed ELF binary can set both `dwarf` and a bare, header-derived
+  `typedefs` together (`dumper.py`'s combined header+DWARF path) --
+  `dwarf is not None` alone can't tell that apart from a genuinely
+  DWARF-only side, and misclassifying it fabricated a removal for an
+  entirely unchanged typedef. Now also checks `not snapshot.from_headers`
+  (Codex review).

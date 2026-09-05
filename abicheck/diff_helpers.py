@@ -366,14 +366,12 @@ def typedef_diff_maps(
     ``AbiSnapshot.typedefs_qualified`` (schema v25) carries the identical set
     keyed by qualified name instead, immune to this collision. A side
     "trusts" its own qualified map when non-empty, OR its legacy bare map
-    is itself empty (a side with zero typedefs loses nothing reporting zero
-    qualified ones either) -- lets an old side with real qualified typedefs
-    still enumerate every one as removed when the new side has genuinely
-    stripped all typedefs, rather than collapsing to the legacy bare map
-    purely because emptiness alone can't distinguish "unsupported" from
+    is itself empty -- lets an old side with real qualified typedefs still
+    enumerate every one as removed when the new side has genuinely stripped
+    all typedefs, rather than collapsing to the legacy bare map purely
+    because emptiness alone can't distinguish "unsupported" from
     "genuinely none" (Codex review). Used only when *both* sides trust
-    their own map; falls back to the legacy bare maps otherwise (a
-    DWARF-only or pre-v25 snapshot).
+    their own map; falls back to the legacy bare maps otherwise.
     """
     if typedef_side_trusts_qualified(old) and typedef_side_trusts_qualified(new):
         return old.typedefs_qualified, new.typedefs_qualified
@@ -388,9 +386,11 @@ def typedef_side_trusts_qualified(snapshot: AbiSnapshot) -> bool:
 def typedef_flat_map_is_dwarf_qualified(snapshot: AbiSnapshot) -> bool:
     """True when *snapshot* doesn't trust ``typedefs_qualified`` yet its flat
     ``typedefs`` is already qualified-keyed (Codex review, PR #1078,
-    twenty-sixth round): DWARF keys it by the full qualified name, and
-    ``dwarf is not None`` unambiguously means DWARF populated this side."""
-    return snapshot.dwarf is not None
+    twenty-sixth round): DWARF keys it by the full qualified name. ``dwarf
+    is not None`` alone is not enough (twenty-seventh round): a header-parsed
+    ELF binary can also carry DWARF debug info, setting both together --
+    ``from_headers`` is what actually distinguishes the two."""
+    return snapshot.dwarf is not None and not snapshot.from_headers
 
 
 def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:

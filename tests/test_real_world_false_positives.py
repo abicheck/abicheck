@@ -1019,3 +1019,43 @@ def test_dwarf_qualified_flat_typedefs_keep_their_key_space():
     assert typedef_changes[0].symbol == "Alias"
     assert typedef_changes[0].old_value == "int"
     assert typedef_changes[0].new_value == "long"
+
+
+def test_header_backed_snapshot_with_incidental_dwarf_stays_bare_keyed():
+    """Regression coverage for Codex review, PR #1078, twenty-seventh round:
+    ``dwarf is not None`` alone is not proof this side's flat ``typedefs``
+    is DWARF-qualified -- a header-parsed ELF binary that also carries
+    DWARF debug info sets both ``dwarf`` and a bare, header-derived
+    ``typedefs`` together (``dumper.py``'s combined header+DWARF path).
+    Treating such a side as DWARF-qualified rendered the *other* side's
+    real IR fully qualified against this side's actually-bare key,
+    fabricating a removal for an entirely unchanged typedef.
+    """
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.dwarf_metadata import DwarfMetadata
+    from abicheck.model.fact import Fact
+    from abicheck.model.identity import Namespace, entity_id_for_typedef
+    from abicheck.model.occurrence import OccurrenceId
+    from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
+
+    old = _elf_snapshot(functions=[_exported_func("use_alias")])
+    old.typedefs = {"Alias": "int"}
+    old.dwarf = DwarfMetadata()
+    old.from_headers = True
+
+    eid_ns = entity_id_for_typedef((Namespace("ns"),), "Alias")
+    new = _elf_snapshot(functions=[_exported_func("use_alias")])
+    new.typedefs_qualified = {"ns::Alias": "int"}
+    new.typedef_entity_ids = {"ns::Alias": eid_ns}
+    new.semantic_ir = SemanticIR(
+        occurrences={
+            OccurrenceId(eid_ns): CanonicalEntity(canonical_spelling=Fact.present("int"))
+        }
+    )
+
+    result = compare(old, new)
+    assert not any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in result.changes), (
+        "an unchanged typedef must not be reported as removed just because "
+        f"this side happens to also carry DWARF metadata; changes: "
+        f"{[(c.kind.value, c.symbol) for c in result.changes]}"
+    )

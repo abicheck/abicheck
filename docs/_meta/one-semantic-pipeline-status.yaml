@@ -987,6 +987,19 @@ concepts:
       DWARF-qualified-native side and renders the real-IR side fully
       qualified too, matching DWARF's own convention.
 
+      **A twenty-seventh round found the twenty-sixth round's own
+      `dwarf is not None` predicate too coarse.** A header-parsed ELF
+      binary that also carries DWARF debug info sets both `dwarf` and a
+      bare, header-derived `typedefs` together (`dumper.py`'s combined
+      header+DWARF path) -- `dwarf is not None` alone misclassified that
+      side as DWARF-qualified, rendering the *other* side's real IR fully
+      qualified against this side's actually-bare key and fabricating a
+      removal for an entirely unchanged typedef.
+      `typedef_flat_map_is_dwarf_qualified` now also requires
+      `not snapshot.from_headers`, the field that actually distinguishes
+      "typedefs came from headers" from "came from DWARF" regardless of
+      whether DWARF metadata also exists.
+
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.
     investigated_declined:
