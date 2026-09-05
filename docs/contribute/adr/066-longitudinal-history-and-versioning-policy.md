@@ -22,9 +22,12 @@ kinds to a hard-coded strict-SemVer table (`MAJOR/MINOR/PATCH/NONE`, a
 SONAME action, and an `actionable/review/unavailable` state). There is no
 `versioning:` configuration key, no pre-1.0 rule, no calendar or
 compatibility-line scheme, and no notion of a support or deprecation
-window. Deprecation exists only as a per-pair transition
-(`func/var/type/enum/field_deprecated_added|removed`, header-AST only),
-never as a durable attribute with a lifecycle.
+window. Deprecation is already a persisted per-declaration fact
+(`deprecated`/`deprecated_fact` on functions, variables, records, and
+enums, snapshot schema v40) with per-pair transition kinds
+(`func/var/type/enum/field_deprecated_added|removed`, header-AST only)
+derived from it; what is missing is any *lifecycle* read of that fact
+across more than two releases.
 
 Baselines are identified by a `channel × target × profile` tuple whose
 `project_ref` is an opaque label (a release tag or a git SHA) compared for
@@ -55,9 +58,17 @@ copy of their facts. Each history entry references one immutable snapshot
 project/component identity, release label, branch/channel/compatibility
 line, variant/profile coordinates, evidence coverage, extraction/tool/
 schema versions, the contract/config revision in force, and provenance
-(who produced it, from what source ref). Entries are ordered by the
-project's declared version scheme (D4) or by an explicit predecessor
-relation; lexical tag order and upload time are never authoritative.
+(who produced it, from what source ref). Entries are ordered by an explicit predecessor relation the project
+supplies, or, when none is supplied, by an order derived once from the
+declared version scheme (D4) *at index-build time*. Either way the
+resulting release order/predecessor graph is **persisted with the index
+as input provenance and frozen**: lifecycle events are computed from that
+persisted order, and a later policy re-evaluation (D6) reads it back and
+never re-derives it. A different `scheme` therefore cannot reorder the
+same entries or change an observed `first_observed`/`removed`/
+`reintroduced` event; changing the order is an explicit rebuild of the
+index that produces a new history with its own provenance, not a
+re-evaluation. Lexical tag order and upload time are never authoritative.
 
 The first implementation is **offline**: a user supplies N existing
 snapshots (two suffice), and the tool produces machine-readable lifecycle
@@ -149,7 +160,9 @@ make a known break policy-conforming; the break stays `BREAKING`, stays in
 the report, and still drives the SONAME advice. A relaxed policy may warn
 instead of block; it cannot remove findings, inflate evidence, or alter a
 verdict. Changing `enforcement` or `scheme` cannot change the raw finding
-set or any evidence status — an executable invariant, not prose.
+set, any evidence status, or — because the release order is frozen
+provenance (D1) — any recorded lifecycle event; an executable invariant,
+not prose.
 
 Advice distinguishes three things: an *observed recommendation* (what the
 delta implies), an *unmet release policy* (what the project's own rules

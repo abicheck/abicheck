@@ -99,8 +99,12 @@ S2 — not left as dead code.
 ### B. Longitudinal history and versioning policy — ADR-066
 
 **Existing.** `abicheck/semver.py` (`recommend_release`, strict-SemVer
-table, SONAME action, `actionable/review/unavailable`); deprecation
-transition kinds (`*_deprecated_added|removed`, header-AST only); baseline
+table, SONAME action, `actionable/review/unavailable`); a **persisted
+deprecation attribute** — `Function`/`Variable`/`RecordType`/`EnumType`
+carry `deprecated`/`deprecated_fact` (`abicheck/model/declarations.py`,
+`entities.py`), stored since snapshot schema v40 (`storage/fact_codec.py`),
+with the per-pair transition kinds (`*_deprecated_added|removed`,
+header-AST only) derived from them; baseline
 tuples `channel × target × profile` with an opaque `project_ref`;
 `AbiSnapshot.version/git_commit/git_tag/created_at`, `dump_provenance`;
 storage v2 `PackageManifest`/`VariantRef` with declared-vs-captured
@@ -109,9 +113,11 @@ coordinates (ADR-062); `EntityId`/`OccurrenceId`/`canonical_finding_id`;
 (ADR-043 D4) and stays so.
 
 **Missing.** Any N>2 comparison; any ordering of releases; a `versioning:`
-config namespace; a durable deprecation attribute; a history index;
-a version window on suppressions (`version_range` does not exist in
-`abicheck/`).
+config namespace; a history index and any *lifecycle evaluation* over the
+stored deprecation facts (the attribute exists; nothing reads it across
+releases — S1/S2 consume `deprecated_fact` as-is and introduce no second
+deprecation representation); a version window on suppressions
+(`version_range` does not exist in `abicheck/`).
 
 **Slices.** S0 model trade-offs on real fixtures (three-release sequences
 built from `examples/` cases); retention design. S1 offline history:
