@@ -49,7 +49,7 @@ class FakeFindings:
 
 
 def _valid_ledger() -> dict[str, object]:
-    """A minimal, fully-valid ledger matching the schema-1 field layout --
+    """A minimal, fully-valid ledger matching the schema-2 field layout --
     independent of the real committed file, so these tests keep working even
     if the real file's content (not shape) changes."""
     concept = {
@@ -57,6 +57,7 @@ def _valid_ledger() -> dict[str, object]:
         "producers": "complete",
         "consumers": "partial",
         "authority": "mixed",
+        "lifecycle": "wired",
         "removal_gate": "Some future phase closes this.",
     }
     concepts = {
@@ -75,7 +76,7 @@ def _valid_ledger() -> dict[str, object]:
     }
     concepts["facts"]["persistence"] = "complete"
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "as_of_commit": "aa78c37",
         "as_of_date": "2026-09-02",
         "concepts": concepts,
@@ -220,7 +221,7 @@ def test_unknown_top_level_field_is_an_error() -> None:
     assert any("unknown top-level field" in e for e in f.errors)
 
 
-@pytest.mark.parametrize("bad_version", [True, 2, "1", 1.0])
+@pytest.mark.parametrize("bad_version", [True, 1, 3, "2", 2.0])
 def test_non_canonical_schema_version_is_rejected(bad_version: object) -> None:
     data = _valid_ledger()
     data["schema_version"] = bad_version
@@ -307,3 +308,284 @@ def test_unknown_concept_field_is_an_error() -> None:
 
 def test_ledger_file_exists_on_disk() -> None:
     assert PIPELINE_STATUS_FILE.is_file()
+
+
+# --------------------------------------------------------------------------
+# Schema 2: the `introduced -> wired -> authoritative -> retired` ladder and
+# the separate `investigated_declined` disposition (track T2).
+# --------------------------------------------------------------------------
+
+
+def _declined_entry(**overrides: object) -> dict[str, object]:
+    """One structurally valid `investigated_declined` entry."""
+    entry: dict[str, object] = {
+        "item": "Some behavioral change, investigated and declined.",
+        "decided": "2026-09-04",
+        "leaves_open": "The consolidation this decline does not close.",
+        "tracked_as": "some-plan.md's own section",
+    }
+    entry.update(overrides)
+    return entry
+
+
+@pytest.mark.parametrize(
+    "bad_lifecycle",
+    ["complete", "self", "", "RETIRED", ["wired"], None, 2],
+    ids=["status-value", "authority-value", "empty", "case", "list", "none", "int"],
+)
+def test_lifecycle_value_outside_the_ladder_is_rejected(bad_lifecycle: object) -> None:
+    """Covers the enum itself, and — via the `list` case — that an
+    unhashable YAML value produces a finding rather than a `TypeError`
+    crash, the same bug class the status-field check already guards."""
+    data = _valid_ledger()
+    data["concepts"]["facts"]["lifecycle"] = bad_lifecycle
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)  # must not raise
+    assert any("lifecycle" in e for e in f.errors)
+
+
+def test_missing_lifecycle_is_a_missing_required_field() -> None:
+    data = _valid_ledger()
+    del data["concepts"]["facts"]["lifecycle"]
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert any(
+        "concepts.facts: missing required field 'lifecycle'" in e for e in f.errors
+    )
+
+
+@pytest.mark.parametrize("authority", sorted({"legacy", "mixed", "self"}))
+@pytest.mark.parametrize(
+    "lifecycle", ["introduced", "wired", "authoritative", "retired"]
+)
+def test_authority_lifecycle_agreement_over_the_whole_domain(
+    authority: str, lifecycle: str
+) -> None:
+    """The consistency rule is exhaustively enumerated over its entire
+    (3 x 4) input domain rather than checked on the one pair a reviewer
+    happened to name, per AGENTS.md's bug-class regression-testing rule.
+
+    The oracle is stated independently of the implementation's own
+    `_PIPELINE_AUTHORITY_TO_LIFECYCLES` lookup table: here it is expressed
+    as ordinal comparisons against the ladder's rungs (`self` sits at or
+    above `authoritative`, `legacy` at or below `wired`, `mixed` exactly at
+    `wired`), so a table edited in one direction cannot silently satisfy
+    the test that is supposed to catch it.
+    """
+    ladder = ["introduced", "wired", "authoritative", "retired"]
+    rung = ladder.index(lifecycle)
+    expected_ok = {
+        "self": rung >= ladder.index("authoritative"),
+        "legacy": rung <= ladder.index("wired"),
+        "mixed": rung == ladder.index("wired"),
+    }[authority]
+
+    data = _valid_ledger()
+    entry = data["concepts"]["facts"]
+    entry["authority"] = authority
+    entry["lifecycle"] = lifecycle
+    # Keep the other cross-field rules satisfied so this test isolates the
+    # authority/lifecycle rule: `retired` separately requires every status
+    # field to be `complete`.
+    entry["consumers"] = "complete"
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    contradictions = [e for e in f.errors if "contradicts authority" in e]
+    assert bool(contradictions) is not expected_ok, (
+        f"authority={authority!r} lifecycle={lifecycle!r}: expected "
+        f"{'no' if expected_ok else 'a'} contradiction finding, got {f.errors}"
+    )
+
+
+@pytest.mark.parametrize("lifecycle", ["wired", "authoritative", "retired"])
+@pytest.mark.parametrize("field", ["primitive", "consumers"])
+def test_a_rung_above_introduced_requires_a_started_primitive_and_consumer(
+    lifecycle: str, field: str
+) -> None:
+    """Every rung above `introduced` asserts something downstream actually
+    reads a primitive that exists — checked for both fields at every such
+    rung, not only the one combination that motivated the rule."""
+    data = _valid_ledger()
+    entry = data["concepts"]["facts"]
+    entry["authority"] = "self" if lifecycle != "wired" else "mixed"
+    entry["lifecycle"] = lifecycle
+    entry[field] = "not_started"
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert any(f"lifecycle {lifecycle!r}" in e and field in e for e in f.errors)
+
+
+@pytest.mark.parametrize(
+    "field", ["primitive", "producers", "consumers", "persistence"]
+)
+def test_retired_requires_every_status_field_complete(field: str) -> None:
+    """`retired` claims the replaced implementation is gone, so a concept
+    still reporting partial work anywhere cannot sit there. Checked for
+    each status field independently, `facts`-only `persistence` included."""
+    data = _valid_ledger()
+    entry = data["concepts"]["facts"]
+    entry["authority"] = "self"
+    entry["lifecycle"] = "retired"
+    entry["consumers"] = "complete"
+    entry[field] = "partial"
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert any("'retired'" in e and field in e for e in f.errors)
+
+
+def test_a_fully_complete_retired_concept_is_accepted() -> None:
+    """Guard against an overcorrection: the top rung must be reachable."""
+    data = _valid_ledger()
+    entry = data["concepts"]["facts"]
+    entry["authority"] = "self"
+    entry["lifecycle"] = "retired"
+    entry["consumers"] = "complete"
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert f.errors == []
+
+
+def test_a_valid_investigated_declined_list_is_accepted() -> None:
+    data = _valid_ledger()
+    data["concepts"]["facts"]["investigated_declined"] = [
+        _declined_entry(),
+        _declined_entry(item="A second one."),
+    ]
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert f.errors == []
+
+
+def test_investigated_declined_is_optional_on_every_concept() -> None:
+    """It must not become a de-facto required field: a concept with nothing
+    declined omits it, and that is not a finding."""
+    data = _valid_ledger()
+    assert all(
+        "investigated_declined" not in entry for entry in data["concepts"].values()
+    )
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert f.errors == []
+
+
+def test_investigated_declined_does_not_close_a_consolidation() -> None:
+    """The rule this field exists for (duplication-and-convergence-
+    assessment.md, "The completion rule this plan was missing"): declining
+    a *behavioral* change does not delete a second *implementation*, so a
+    concept carrying a decline cannot claim the `retired` rung."""
+    data = _valid_ledger()
+    entry = data["concepts"]["facts"]
+    entry["authority"] = "self"
+    entry["lifecycle"] = "retired"
+    entry["consumers"] = "complete"
+    entry["investigated_declined"] = [_declined_entry()]
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert any("not a synonym for 'retired'" in e for e in f.errors)
+
+
+@pytest.mark.parametrize("lifecycle", ["introduced", "wired", "authoritative"])
+def test_investigated_declined_is_allowed_below_retired(lifecycle: str) -> None:
+    """Guard against an overcorrection: a decline is a normal, correct
+    disposition — it blocks only the rung that asserts a deletion."""
+    data = _valid_ledger()
+    entry = data["concepts"]["facts"]
+    entry["authority"] = "legacy" if lifecycle != "authoritative" else "self"
+    entry["lifecycle"] = lifecycle
+    entry["investigated_declined"] = [_declined_entry()]
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert f.errors == []
+
+
+@pytest.mark.parametrize("field", ["item", "decided", "leaves_open", "tracked_as"])
+def test_each_declined_entry_field_is_required(field: str) -> None:
+    data = _valid_ledger()
+    entry = _declined_entry()
+    del entry[field]
+    data["concepts"]["facts"]["investigated_declined"] = [entry]
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert any(f"missing required field {field!r}" in e for e in f.errors)
+
+
+@pytest.mark.parametrize("field", ["item", "leaves_open", "tracked_as"])
+@pytest.mark.parametrize("blank", ["", "   ", "\n", 7, None, ["x"]])
+def test_each_declined_entry_string_field_must_be_non_empty(
+    field: str, blank: object
+) -> None:
+    """A blank `leaves_open` would be the loophole restated in structured
+    form — an entry that records a decline while saying nothing about what
+    stays open. Checked for every string field and every blank-ish shape,
+    including non-string and unhashable values."""
+    data = _valid_ledger()
+    data["concepts"]["facts"]["investigated_declined"] = [
+        _declined_entry(**{field: blank})
+    ]
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)  # must not raise
+    assert any(f"[0].{field}" in e for e in f.errors)
+
+
+@pytest.mark.parametrize(
+    "bad_date",
+    ["2026-02-30", "2026-9-4", "20260904", "2026-09-04\n", "yesterday", None],
+    ids=["calendar", "unpadded", "no-dashes", "trailing-newline", "prose", "none"],
+)
+def test_declined_entry_date_is_validated_like_as_of_date(bad_date: object) -> None:
+    """`decided` and `as_of_date` share one validation helper precisely so
+    they cannot drift apart — including the `\\A...\\Z` anchoring that a
+    YAML block scalar's trailing newline would otherwise slip past."""
+    data = _valid_ledger()
+    data["concepts"]["facts"]["investigated_declined"] = [
+        _declined_entry(decided=bad_date)
+    ]
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert any("[0].decided" in e for e in f.errors)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [[], {}, "a string", None, 3],
+    ids=["empty-list", "mapping", "string", "none", "int"],
+)
+def test_investigated_declined_must_be_a_non_empty_list(value: object) -> None:
+    """An empty list is rejected on purpose: it is indistinguishable from a
+    real list left un-updated, so the field is omitted instead."""
+    data = _valid_ledger()
+    data["concepts"]["facts"]["investigated_declined"] = value
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert any("investigated_declined: must be a non-empty list" in e for e in f.errors)
+
+
+def test_non_mapping_declined_entry_is_reported_not_crashed() -> None:
+    data = _valid_ledger()
+    data["concepts"]["facts"]["investigated_declined"] = ["just a string"]
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)  # must not raise
+    assert any("[0]: must be a mapping" in e for e in f.errors)
+
+
+def test_unknown_declined_entry_field_is_an_error_with_mixed_type_keys() -> None:
+    entry = _declined_entry()
+    entry["tracked_at"] = "typo of tracked_as"  # the misspelling is the point
+    entry[7] = "a non-string YAML key"  # type: ignore[index]
+    data = _valid_ledger()
+    data["concepts"]["facts"]["investigated_declined"] = [entry]
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)  # must not raise sorting mixed keys
+    assert any("[0]: unknown field(s)" in e for e in f.errors)
+
+
+def test_the_real_ledger_records_no_retired_concept_carrying_a_decline() -> None:
+    """The committed file's own audit invariant, asserted against the real
+    file rather than a fixture: every concept that records an
+    investigated-and-declined disposition sits below `retired`."""
+    f = FakeFindings()
+    data = load_pipeline_status(f)
+    assert data is not None
+    for name, entry in data["concepts"].items():
+        if entry.get("investigated_declined"):
+            assert entry["lifecycle"] != "retired", name

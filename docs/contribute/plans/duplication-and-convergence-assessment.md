@@ -187,6 +187,30 @@ authority transition still has not happened. Recording that as
 `investigated_declined` with an open removal gate is accurate; recording it
 as closed is not.
 
+**Landed (track T2, 2026-09-05).** Both halves are now schema, not
+convention: the ledger is at `schema_version: 2`, every concept carries a
+`lifecycle` rung, and `scripts/pipeline_status_ledger.py` enforces that
+`lifecycle` agrees with `authority` (which it refines — `authority` cannot
+express either end of the ladder, since `introduced`/`wired` are both
+`authority: legacy` and `authoritative`/`retired` are both `authority:
+self`), that `retired` requires every status field `complete`, and that a
+concept carrying any `investigated_declined` entry cannot sit at `retired`
+— the loophole above, closed mechanically rather than restated. Each entry
+names `item`, `decided`, `leaves_open` (what the decline does *not* close)
+and `tracked_as` (the narrative owner holding the full reasoning);
+`leaves_open` is required precisely because an entry that says nothing
+about what stays open is the loophole in structured form.
+
+The re-audit that shipped with the schema found **no concept at `retired`**,
+and only the three `authority: self` concepts (`public_surface`,
+`report_document`, `l5_source_graph_identity`) at `authoritative`; the other
+six are `wired`. Three carry a declined disposition: `facts` (the
+`vtable`/`TYPE_VTABLE_CHANGED` FactStatus gating above), `identity` (the
+`entity:` alias-tier promotion), and `semantic_ir` (the record/function
+detector cohort). That distribution is this section's own headline —
+primitives built, authority not transferred — recorded as data rather than
+prose.
+
 ### Corrections to current status prose
 
 Two claims elsewhere in this family of documents are now stale and are
@@ -1678,9 +1702,11 @@ Ordered by dependency, not by size:
    `handle_non_elf_dump()` have no production caller; only their own unit
    tests keep them alive. Transfer the unique behavioral assertions onto the
    typed executor, then delete both plus any exclusively-supporting
-   protocols. Simultaneously, close the roadmap loophole: a declined
-   *behavioral* change no longer closes a *consolidation* item (see "The
-   completion rule this plan was missing" above).
+   protocols. The roadmap loophole half of this item — a declined
+   *behavioral* change no longer closing a *consolidation* item (see "The
+   completion rule this plan was missing" above) — landed separately as
+   track T2 on 2026-09-05, enforced by the ledger's schema-2 validator
+   rather than by convention.
 2. **Finish one complete data-authority cutover.** Typedefs and constants
    are closest. Establish one stored semantic state per migrated family
    (reusing the existing typed `Function`/`RecordType` payloads inside the
@@ -1768,7 +1794,7 @@ track, the steps are ordered.
 | Track | Scope | Touches | Depends on |
 |---|---|---|---:|
 | **T1 — Dead-implementation retirement** | Rehome `perform_elf_dump`/`handle_non_elf_dump` test assertions onto the typed executor; delete both and `cli_dump_protocols.py`'s now-unused protocols | `cli_dump_helpers.py`, `cli_dump_non_elf.py`, `cli_dump_protocols.py`, their tests | nothing |
-| **T2 — Ledger/status-model change** | Add the `introduced → wired → authoritative → retired` ladder and a separate `investigated_declined` disposition to `docs/_meta/one-semantic-pipeline-status.yaml` + `scripts/pipeline_status_ledger.py`'s field/enum validation; re-audit every concept row against it | `scripts/pipeline_status_ledger.py`, the ledger, `tests/` | nothing |
+| **T2 — Ledger/status-model change** ✅ **landed 2026-09-05** | Add the `introduced → wired → authoritative → retired` ladder and a separate `investigated_declined` disposition to `docs/_meta/one-semantic-pipeline-status.yaml` + `scripts/pipeline_status_ledger.py`'s field/enum validation; re-audit every concept row against it. Shipped as ledger `schema_version: 2` with the cross-field rules and the re-audit described under "The four-state status model" above | `scripts/pipeline_status_ledger.py`, the ledger, `tests/` | nothing |
 | **T3 — Typedef/constant authority cutover** | Preserve the fidelity gate's four protected cases in the canonical model and the load-boundary adapter; then delete the runtime dual-index construction; extend the cohort guard to the selector and producers | `compare/typedefs.py`, `compare/constants.py`, `model/semantic_ir_legacy_adapter.py`, `scripts/semantic_ir_cutover.py` | nothing (T2 records it) |
 | **T4 — Dump request contract** | Fold `execute_dump_request`'s nine semantic kwargs into the typed request; split backend selection from fallback policy; give source-only dump an execution variant | `service_dump_pipeline.py`, `cli_dump_request.py`, `cli_buildsource.py`, `frontends/cli/dump_execute.py` | T1 (avoids re-migrating code about to be deleted) |
 | **T5 — Direct-bypass migration** | Route `appcompat.check_appcompat()` and `stack_checker._run_abi_diff()` through the shared extraction/comparison workflow; shrink `CLI_CONTRACT_ALLOWLIST` accordingly | `appcompat.py`, `stack_checker.py`, `cli_stack.py`, `scripts/check_ai_readiness.py` | T4 for the dump half; the compare half is independent |
@@ -1778,8 +1804,8 @@ track, the steps are ordered.
 | **T9 — Fact provenance and scope** | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, the import adapter | T2 for status recording; otherwise independent |
 | **T10 — Shared report preparation** | Compute evaluated findings/outcomes once ahead of format-specific construction; remove the alternate Markdown builders' runtime import back into `reporter.py`; give consumer scoping an explicit finalization boundary instead of mutating shared changes | `report/`, `reporter_markdown.py`, `appcompat.py`'s `scope_diff_to_app` | T5's appcompat half for the scoping item |
 
-**Recommended first wave (fully parallel, no shared files):** T1, T2, T6,
-T7, T8. **Second wave:** T3, T4, T9 (each large enough to be its own
+**Recommended first wave (fully parallel, no shared files):** T1, T2
+(landed), T6, T7, T8. **Second wave:** T3, T4, T9 (each large enough to be its own
 multi-PR effort). **Third wave:** T5, T10, once T4/T5's shared surfaces
 settle.
 
