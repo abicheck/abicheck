@@ -270,11 +270,19 @@ repository says it does not run:
   `warn_deprecated_header_graph_flags` and its two `compare`/`dump_cmd` call
   sites.
 - `dump --allow-build-query` (same module) — a deprecated no-op; an explicit
-  `--config` has been the only authorizer since PR F. Delete the flag; the
-  engine-side `allow_build_query` parameters it no longer feeds
-  (`buildsource/inline.py`, `embed.py`, `service_dump_pipeline.py`,
-  `scan_engine.py`) come out in the same slice rather than being left as
-  ignored keyword arguments.
+  `--config` has been the only authorizer since PR F. **Delete the CLI option
+  and `dump_cmd`'s own always-`False` local only.** The engine-side
+  `allow_build_query` parameters are *not* part of this slice and must stay:
+  `service_dump_pipeline.execute_dump_request` and
+  `workflows/artifact/execute.py` use it as a live programmatic permission
+  gate (`frontends/cli/dump_execute.py` passes `True` deliberately, precisely
+  because the CLI flag is not a trust signal), and `ScanRequest
+  .allow_build_query` is a public typed-API field. Only
+  `buildsource/inline.collect_inline_pack`'s copy is genuinely ignored, and
+  `cli_scan_helpers.resolve_effective_allow_query`'s parameter is dead in the
+  `True` direction but load-bearing as the ADR-037 D4 level-implies-query
+  guard — neither is a CLI concern, so neither moves here (Codex review on
+  #1073, verified against the call sites).
 - `--btf` / `--ctf` / `--dwarf` (`debug_resolution_options`) — hidden duplicate
   spellings of `--debug-format {btf,ctf,dwarf}`, which the module's own help
   text already calls their supersession.
@@ -284,47 +292,134 @@ replacement behaves identically; `build.query`'s explicit-`--config` trust gate
 is unchanged; `--help-all` and `docs/reference/cli-reference.md` regenerated.
 This slice depends on nothing in the vision rollout and must not wait for it.
 
-### Three pieces of parallel work an agent can start now
+### Parallel work blocks an agent can start now
 
-Chosen so the three touch disjoint files and share no schema. One integration
-owner reviews any change to the shared request/plan/outcome types (the vision
-plan's own rule), which is why none of these three edits them.
+Seven blocks, each with a disjoint primary file set. Blocks 1–3 are the
+highest-value openers; 4–7 are independently startable and none of them
+blocks another. **The requirements for every block live in the workstream
+this table names — read that section before starting; what is written here
+is only the entry point, the first file to open, and the boundary with the
+other blocks.** Deliberately not a second copy of the owning plan's
+checklist: where the two ever disagree, `vision-api-abi-evolution.md` wins.
 
-**Track 1 — H1 hidden-shim deletion (`frontends/`, tests, docs).**
-Exactly the slice above. Small, mechanical, no semantic change, no dependency
-on any other track. Deliverable: four spellings gone, dead engine parameters
-removed with them, references regenerated.
+| # | Block | Owning workstream | Primary files | Touches shared request/plan/outcome types |
+|---|---|---|---|---|
+| 1 | H1 hidden-shim deletion | this plan (H1 above) | `frontends/cli/options/release.py`, tests, generated refs | No |
+| 2 | Scalar disposition audit | C-S1 + G-S1 | `policy/`, `report/`, `checker.py`, `semver.py` | No |
+| 3 | Release-path scope & completeness | A-S1/S2 (deletion gate A-S4) | `cli_compare_release*`, `workflows/`, `policy/outcome.py` | **Yes — integration owner** |
+| 4 | Header-only capture and comparison | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `workflows/dump` | No |
+| 5 | Per-dimension comparability + failed evidence | E-S1/S2 | `comparability.py`, `analysis_assurance.py`, `workflows/plan.py` | No |
+| 6 | `scan --artifact-set` member-identity manifest | this plan (PR H, last piece) | `cli_scan*`, ADR-056 surface | No |
+| 7 | Explicit-`--config` dry-run/execution parity | this plan (PR C tail) | `cli_dump_request.py`, `cli_compare*` config discovery | No |
 
-**Track 2 — scalar disposition audit (`policy/`, `report/`, `semver.py`).**
-Vision workstream C-S1 plus G-S1's first slice, scoped to single-pair `compare`
-so it does not wait on scope or evidence work. Enumerate the four suppression
-application points C-S1 names (`post_processing.ApplySuppression.apply`,
-`checker._filter_suppressed_changes`, `checker._filter_pattern_synthetic`,
-`appcompat.py`'s consumer overlay) and route each through one ledger-recording
-primitive; carry rule provenance into the JSON suppression ledger; put
-detected / effective / per-disposition counts into *every* projection including
-the one-line and review digests; add `not_evaluated` to `DetectorRegistry` so a
-detector that returned early stops reading as `enabled=True, changes_count=0`;
-and make `semver.recommend_release` read the conserved delta rather than the
-post-suppression `result.changes`, so a suppressed break can no longer become
-"no bump needed". Fixture: 100 removals under one wildcard rule, still visible
-as 100 suppressed with their rule on a passing run.
+Block 3 is the only one that edits the shared types, which is why it is the
+one the vision plan's integration owner reviews; the other six were chosen so
+they can proceed without waiting on that review.
 
-**Track 3 — release fan-out scope honesty (`cli_compare_release*`, `workflows/`).**
-Vision workstream A's first executable slice, and the deletion gate for this
-plan's oldest correctness complaint. Replace `_match_release_keys`'s
-`old − new` / `new − old` set difference with pairing that distinguishes
-selected, paired, unselected, expected-but-absent and failed members; make a
-removal finding require a complete NEW inventory and an addition a complete OLD
-one; make zero completed comparisons a no-comparison outcome instead of
-`NO_CHANGE` / exit 0; and stop persisting a stranded old-side library as an
-unmarked ELF-only snapshot. `--fail-on-removed-library` keeps its spelling and
-starts consuming proven removals. Exit `8` ordering versus the coverage
-contribution is unchanged.
+**Block 1 — H1 hidden-shim deletion.** Exactly the slice above, with the
+`allow_build_query` boundary it states. Deliverable: four spellings exit `64`,
+`warn_deprecated_header_graph_flags` and its two call sites gone,
+`--help-all` and `docs/reference/cli-reference.md` regenerated
+(`python scripts/gen_cli_reference.py`). No semantic change, no changelog
+fragment beyond the removal note.
 
-Tracks 2 and 3 are behavior corrections: each needs a changelog fragment and a
-migration note, and each states its invariant in `tests/regressions/manifest.py`
-as a bug class rather than a single reproducer. Track 1 needs neither.
+**Block 2 — scalar disposition audit.** C-S1 plus G-S1's first slice, scoped
+to single-pair `compare` so it waits on neither scope nor evidence work.
+Start by opening the four suppression application points C-S1 enumerates and
+deciding, per call shape, converge-or-cover: `post_processing
+.ApplySuppression.apply()`, `checker._filter_suppressed_changes()`,
+`checker._filter_pattern_synthetic()`, `appcompat.py`'s consumer overlay.
+Everything else this block owes — ledger fields, rule provenance, which
+projections carry the counts, the detector state, the fixture — is C-S1's and
+G's "Report invariants" list; do not re-derive it here. One correction this
+plan adds, because it is a behavior change and needs its own migration note:
+`semver.recommend_release` reads `result.verdict`/`result.changes`, i.e. the
+post-suppression list, so a suppressed break currently becomes "no bump
+needed" — it must read the conserved delta instead.
+
+**Block 3 — release-path scope and completeness.** A-S1 and A-S2 as they
+apply to the release fan-out, *in that order*: the completeness model comes
+first, the pairing rewrite follows it. Concretely, this block adds the
+acquisition states and the completeness axis (A-S2's `RunOutcome`/
+`ExitDecision` work), then makes `cli_compare_release_pairwise.py`'s
+zero-matched-pairs path a no-comparison outcome instead of `NO_CHANGE`/exit 0,
+and stops `cli_compare_release._resolve_stranded_library` persisting a
+degraded ELF-only snapshot unmarked. **`_match_release_keys`'s set difference
+is not the opening move**: A-S4 is its deletion gate, and it is deleted once
+every removal finding flows from proven inventory completeness — replacing it
+before the shared model exists would be one more release-local approximation
+of the behavior it is meant to fix (Codex review on #1073, agreeing with the
+owning plan's own sequencing). `--fail-on-removed-library` keeps its spelling
+throughout and starts consuming proven removals at that gate; exit `8`'s
+precedence over the coverage contribution is unchanged.
+
+**Block 4 — header-only capture and comparison (F-S1).** Make
+`abicheck dump -H include/api.hpp --lang c++ -o old.abi.json` a real operand,
+with no synthesized binary and no required compile database, so two such
+snapshots compare. Two concrete blockers to start from, both named in F's
+"Existing": `buildsource/project_targets.py` hard-requires `binary_pattern`,
+and `dump_source_only()` (`cli_buildsource.py`) discards `-H` — the L2 header
+parse never reaches the written snapshot for a binary-less input. Route the
+input through the existing `DumpRequest`/`CompareRequest` path with an
+explicit parse context rather than adding an operand shape beside them, and
+keep `-H` (what to parse), `-I` (where to resolve includes) and public-root
+data (what is promised) distinct — collapsing them is a model regression, not
+a simplification. L0/L1 must read `NOT_APPLICABLE` for this task, never
+"empty": no SONAME or export claim may be invented. Acceptance is F-S1's list
+(removed declaration, added API, changed enum/constant, signature, default
+argument, qualifier, access). Static archives are explicitly *not* in this
+block.
+
+**Block 5 — per-dimension comparability and failed evidence (E-S1/S2).**
+`ComparabilityMismatch` (`comparability.py`) carries a single
+`kind: "scope" | "profile" | "dependency_scope"`, so a GCC-vs-Clang pair is
+today either wholly refused or wholly trusted, and `--diagnostic-comparison`'s
+report-wide `assurance: none` is the only middle. Replace that with a
+per-dimension record — symbol, declaration, layout, runtime, source — so an
+intentional cross-profile comparison keeps its valid declaration conclusions
+while layout reads explicitly unverified. In the same block: a compiler-probe
+failure must produce a `FAILED` toolchain identity rather than an *absent*
+one (an absent fingerprint currently lets a mismatched pair compare
+silently), and an incomplete later stage must not erase a change an earlier
+stage already proved. Leave `DetectorRegistry`'s `not_evaluated` state to
+block 2 — it is the one E/C overlap, and two blocks adding it is a conflict.
+`--require-complete-analysis` keeps its spelling; only its meaning becomes
+task-relative.
+
+**Block 6 — `scan --artifact-set` member-identity manifest (PR H's last
+piece).** Syntax refinement, cost/dry-run, and audit-mode ownership all
+landed (see PR 5's own section); what remains is the manifest form that names
+each member's *identity* rather than only its path, so a set member is
+matched by what it is and an unsatisfied entry is reportable. Reuse
+`compare --instantiation-manifest`'s existing `InstantiationManifest` schema —
+the audit-mode `bundle_manifest_entry_unsatisfied` detector already does — and
+do not introduce a second manifest format; ADR-056 D2's safety boundary
+(no implicit positional-directory dispatch) stands unchanged. Self-contained
+in the `scan` surface, no dependency on blocks 1–5.
+
+**Block 7 — explicit-`--config` dry-run/execution parity (PR C's tail).**
+Config discovery is closed for `scan` in both cases and for `dump`/`compare`'s
+auto-discovery case; the residual is `dump`/`compare` with an *explicit*
+`--config`, where what `--dry-run` projects and what execution resolves can
+still differ. The full account is the "Configuration discovery (PR C's tail)"
+bullet under "Re-verified, unchanged, still open" — read it first, it is
+narrower than it sounds and has already been re-litigated once. `build.query`
+executes only from an explicit `--config` (ADR-032 D5) and that must remain
+true through whatever this block changes; the trust receipt in `--dry-run` is
+part of the parity, not an optional extra.
+
+**Blocked, deliberately not on this list.** `--used-by`'s enrichment
+rewrite (D-S1) needs block 2's disposition model first, or per-consumer rows
+land beside counts that still do not reconcile. History and versioning policy
+(B) need blocks 2, 3 and 5. The `contract=public` default flip needs
+ADR-063 Phase 2's `EntityId` closure, not a string heuristic. PR I's
+evaluation/gate/report unification needs a shared gate/report object that no
+block above creates.
+
+Blocks 2, 3, 4 and 5 are behavior changes: each needs a changelog fragment, a
+migration note, and its invariant stated in `tests/regressions/manifest.py` as
+a bug class rather than a single reproducer. Blocks 1, 6 and 7 need a
+changelog fragment only where they touch `abicheck/**/*.py`.
 
 ## Problem
 
