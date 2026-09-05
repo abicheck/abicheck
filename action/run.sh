@@ -2027,10 +2027,12 @@ _json_report_src() {
   # query` callers (severity_exit, coverage_where, annotations,
   # blocking_categories) would silently misread SARIF's absence of their
   # expected keys as "definitely no severity gate/no coverage gap/no
-  # annotations" rather than "cannot tell". A SARIF document answers
-  # `compat_verdict` alone; see `_report_compat_verdict`'s own SARIF
-  # fallback below, which reads `_EFFECTIVE_FORMAT`/`OUTPUT_FILE` directly
-  # rather than routing through this shared function.
+  # annotations" rather than "cannot tell". `_report_compat_verdict` used
+  # to consult a SARIF `runs[0].properties.abiVerdict` of its own for that
+  # reason, reading `_EFFECTIVE_FORMAT`/`OUTPUT_FILE` directly rather than
+  # routing through this shared function; ADR-063 Track T8 retired that
+  # fallback along with the rest of the boundary's verdict reconstruction,
+  # so no reader consults a SARIF document for a verdict any more.
 }
 
 # Read one derived value out of the JSON report, whatever shape produced it.
@@ -2132,25 +2134,16 @@ elif query == "compat_verdict":
     # alone when the gate demotes the exit code, and `compare` reports
     # `result.verdict` unconditionally. It is therefore the only signal that
     # tells a genuinely clean run from a break the user chose not to gate on.
-    verdict = _either("verdict", "") or ""
-    if not verdict:
-        # SARIF has no top-level/nested "verdict" key -- abicheck's SARIF
-        # renderer instead stamps the identical value at
-        # runs[0].properties.abiVerdict (sarif.py's own `_result_for`).
-        # Reached here only as the true last resort: `_json_report_src`
-        # hands this function a SARIF file at all solely when no PR_JSON,
-        # stdout-JSON, or extra_write_json_path source exists for this run
-        # -- which happens when `format: sarif` is paired with an
-        # `extra-args --write <non-json>=...` that both suppresses the
-        # automatic JSON sidecar and occupies the one `--write` slot the
-        # CLI accepts per invocation (Codex review, PR #1016, fresh
-        # evidence -- see `_json_report_src`'s own SARIF branch).
-        runs = report.get("runs")
-        if isinstance(runs, list) and runs and isinstance(runs[0], dict):
-            props = runs[0].get("properties")
-            if isinstance(props, dict):
-                verdict = props.get("abiVerdict") or ""
-    print(verdict)
+    #
+    # Read from an abicheck-native JSON report's own `verdict` key alone.
+    # A SARIF `runs[0].properties.abiVerdict` fallback used to live here
+    # too, for the one shape that reaches this query with a SARIF document
+    # (`format: sarif` plus an `extra-args --write <non-json>=...`
+    # suppressing the JSON sidecar); ADR-063 Track T8 retired it with the
+    # rest of the boundary's verdict reconstruction, and `_json_report_src`
+    # -- the only source this function is ever handed -- never yields a
+    # SARIF document in the first place.
+    print(_either("verdict", "") or "")
 elif query == "blocking_categories":
     print(", ".join(str(c) for c in (_severity().get("blocking_categories") or [])))
 elif query == "coverage_where":
@@ -2336,47 +2329,26 @@ _emit_annotations() {
 # verdict=ERROR (an operational failure) and `compare` SEVERITY_ERROR (a
 # severity-policy failure) for what is neither.
 #
-# Two signals, mirroring where abicheck itself puts the answer: the JSON
-# report carries `contract_coverage_exit_contribution`, and for every other
-# renderer — which omits the ledger — the same fact is announced on stderr.
-# Absent both (no --contract), the field reads 0 and the mapping
-# below is exactly what it was.
+# One signal, and only one: the JSON report's own
+# `contract_coverage_exit_contribution` field. Absent a `--contract` the
+# field reads 0 and the mapping below is exactly what it was.
 #
-# The JSON answer is AUTHORITATIVE when readable, and the stderr grep is
-# reached only when it is not (Codex review, P1): an earlier revision fell
-# through to the stderr grep unconditionally whenever the JSON read "0", not
-# just when the JSON was unreadable. `contract.unresolved: warn` deliberately
-# zeroes the exit contribution while still wording the stderr notice as
-# "Contract coverage incomplete..." (just with an "Accepted by
-# contract.unresolved: warn" effect clause, per `_coverage_message`) — so
-# whenever both a readable JSON *and* that stderr notice existed together
-# (true for every markdown-format single-pair `compare`, and, since this
-# same commit's own P1 fix, every non-JSON release `compare` too), the grep
-# still matched and defeated the acceptance mechanism entirely. `_report_
-# query` prints nothing (empty string) only when the report is genuinely
-# unreadable/absent — that emptiness, not the printed value, is what decides
-# whether the stderr fallback is even consulted.
+# ADR-063 Track T8 removed the stderr-text fallback this function used to
+# carry (a `grep 'Contract coverage incomplete'` over `$STDERR_CONTENT`,
+# plus a second grep excluding the `contract.unresolved=warn`-accepted
+# wording, since the notice is worded identically for both). Reconstructing
+# an axis contribution by regex-matching rendered prose is exactly the
+# raw-exit/stderr reconstruction that track retires: the structured
+# `run_outcome`/JSON contract is the boundary's one source of truth, and
+# the absence of structured data means this axis *cannot be claimed to have
+# fired*, not that it may be guessed at from a diagnostic line. So an
+# unreadable/absent JSON report answers "not gated" here. `_report_query`
+# prints nothing (empty string) exactly in that case.
 _coverage_gated() {
   local _src _contribution
   _src=$(_json_report_src)
   _contribution=$(_report_query "$_src" coverage_contribution)
-  if [[ -n "$_contribution" ]]; then
-    [[ "$_contribution" == "1" ]]
-    return
-  fi
-  # The genuine "no JSON at all" fallback (Codex review, second P1 round):
-  # the stderr notice itself says "Contract coverage incomplete..." even
-  # for a `contract.unresolved=warn`-accepted gap (just with an "Accepted
-  # by contract.unresolved=warn" effect clause, per `_coverage_message`
-  # in contract_coverage_exit.py -- both single-pair `compare` and this
-  # PR's own release-mode notice use that exact phrase, deliberately kept
-  # in sync). A bare substring match on "Contract coverage incomplete"
-  # cannot tell the two apart, so it must also confirm the acceptance
-  # phrase is absent -- exactly the shape a non-JSON release `compare`
-  # takes outside a `pull_request` event, where this fallback is the ONLY
-  # signal available at all.
-  echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete' \
-    && ! echo "$STDERR_CONTENT" | grep -q 'Accepted by contract.unresolved=warn'
+  [[ -n "$_contribution" && "$_contribution" == "1" ]]
 }
 
 # Did P0.4's orthogonal analysis-assurance axis (--require-complete-analysis,
@@ -2429,24 +2401,23 @@ _coverage_gated() {
 # the labeled verdict.
 #
 # Once the input is confirmed set, the JSON report's own
-# `analysis_assurance.status` is the authoritative answer (mirroring
-# `_coverage_gated`'s JSON-first preference) -- `assurance_floor_
-# diagnostic`'s stderr line is only the fallback for when there is no
-# readable JSON report at all (a non-JSON-format run, or the report file
-# is otherwise unreadable), the same "genuine cannot-tell" shape
-# `_coverage_gated`'s own stderr fallback exists for.
+# `analysis_assurance.status` is the sole answer (mirroring
+# `_coverage_gated`'s JSON-only rule). ADR-063 Track T8 removed the
+# `assurance_floor_diagnostic` stderr grep that used to answer this when no
+# readable JSON report existed (a non-JSON-format run, or an unreadable
+# report file): re-deriving an axis contribution from rendered prose is the
+# textual reconstruction that track retires, and it is the same class of
+# forgeable inference revisions (1)-(3) above were already found to be.
+# No structured data therefore means "not gated by this axis" rather than a
+# guess -- the same "cannot claim it fired" contract `_coverage_gated` now
+# states.
 _assurance_gated() {
   [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]] || return 1
 
   local _src _status
   _src=$(_json_report_src)
   _status=$(_report_query "$_src" assurance_status)
-  if [[ -n "$_status" ]]; then
-    [[ "$_status" != "complete" ]]
-    return
-  fi
-  echo "$STDERR_CONTENT" \
-    | grep -q 'Analysis assurance incomplete .*under --require-complete-analysis'
+  [[ -n "$_status" && "$_status" != "complete" ]]
 }
 
 # scan's own evidence-contract axis (ADR-037 D5 -- a *pinned*
@@ -2492,20 +2463,18 @@ _assurance_gated() {
 # genuine "cannot tell", and the caller keeps its established verdict rather
 # than guessing.
 #
-# Falls back to the **text** report when there is no JSON to read. That is not
-# an edge case for `scan`: `format: text` is the Action's documented default
-# and scan writes no JSON sidecar, so `_json_report_src` is empty and the
-# query answered nothing -- publishing ERROR (an operational failure) for a
-# severity-policy result on the most common invocation there is (Codex
-# review). The CLI prints its own gate on that path (`cli_scan_helpers.
-# _severity_gate_lines`), so the fact is present; it just is not JSON.
-#
-# Only a *blocking* gate line is matched, and it is mapped to the same
-# non-zero the JSON branch would yield. A passing gate prints "pass" and is
-# left to answer 0 through the absent-block rule below, exactly as a
-# legacy-scheme run does.
+# ADR-063 Track T8 removed the rendered-**text** fallback this function used
+# to end with (a `sed` over the CLI's own `severity gate: exit N ...
+# blocking: ...` line, reached when no JSON was readable -- the common shape
+# for `scan`, whose documented default `format: text` writes no JSON
+# sidecar). Scraping a renderer's prose to recover a gate exit is the
+# textual reconstruction that track retires; the structured
+# `run_outcome.gate` axis is the boundary's contract, with the legacy
+# `severity_exit` field as its structured predecessor. With neither
+# present, this function answers the empty "no signal" its callers already
+# handle -- they keep the verdict the exit-code dispatch established.
 _severity_gate_exit() {
-  local _src _answer _gate
+  local _src _gate
   _src=$(_json_report_src)
   # ADR-063 Phase 7 (D6): prefer the report's own `run_outcome.gate` axis --
   # already the compatibility-policy gate this function exists to answer,
@@ -2513,8 +2482,9 @@ _severity_gate_exit() {
   # `legacy_exit_code(verdict)` -- see `policy/outcome.py`'s own
   # `run_outcome_dict_for_diff_result` docstring), so this needs no
   # scheme-specific handling of its own. Falls through to the pre-existing
-  # `severity_exit`/text derivation below whenever the axis is absent (an
-  # older abicheck, or no readable JSON at all).
+  # structured `severity_exit` field below whenever the axis is absent (an
+  # older abicheck), and to the empty "no signal" when there is no readable
+  # JSON at all.
   _gate=$(_report_query "$_src" run_outcome gate)
   case "$_gate" in
     none) echo 0; return ;;
@@ -2522,14 +2492,7 @@ _severity_gate_exit() {
     potential_breaking) echo 2; return ;;
     abi_breaking) echo 4; return ;;
   esac
-  _answer=$(_report_query "$_src" severity_exit)
-  if [[ -n "$_answer" ]]; then
-    echo "$_answer"
-    return
-  fi
-  # `severity gate: exit N — blocking: <categories>`
-  sed -n 's/.*severity gate: exit \([0-9][0-9]*\).*blocking:.*/\1/p' \
-    <<<"$(_text_report_content)" | head -1
+  _report_query "$_src" severity_exit
 }
 
 # The text report, wherever this invocation put it. `format: text` with an
@@ -2578,23 +2541,31 @@ _severity_gate_categories() {
 
 
 
-# The compatibility verdict the report itself published, JSON first and
-# otherwise the rendered report -- the same two-source rule as the severity
-# gate readers above, and for the same reason: `format: text` is the Action's
-# documented default for scan and writes no JSON sidecar.
+# The compatibility verdict the report itself published, read only from
+# structured JSON: `run_outcome.compatibility` first, then the legacy
+# `compat_verdict` field.
 #
-# The label spelling is shared by both renderers (`Verdict: BREAKING` in the
-# scan text footer, ``**Verdict:** 💥 `BREAKING`  — …`` in the compare
-# markdown header), so one pattern reads both. Only uppercase-free filler is
-# allowed between the two halves, which is what stops a `COMPATIBLE` verdict
-# line from matching on a later "breaking" word in its own explanatory tail.
+# ADR-063 Track T8 removed the two textual reconstruction layers this
+# function used to end with -- a SARIF `runs[0].properties.abiVerdict`
+# lookup for a `format: sarif` run with no JSON anywhere, and a `sed -E`
+# over the rendered markdown/text report's own `Verdict:`/`**Verdict**`
+# line. Both re-derived the verdict from a renderer's output rather than
+# from the boundary's structured contract, which is precisely what that
+# track retires. When no JSON report is readable this function now prints
+# nothing, and its two callers (`_escalate_verdict_to_report`,
+# `_resolve_clean_exit_verdict`) already treat an empty answer as "no
+# signal": each guards on an exact `BREAKING`/`API_BREAK`
+# (/`COMPATIBLE_WITH_RISK`) equality that empty fails, so the verdict the
+# `case $ABICHECK_EXIT in ...` dispatch established from the process exit
+# code is published unchanged. A verdict is stated by the report or not at
+# all -- it is never guessed from prose.
 _report_compat_verdict() {
   local _src _answer _operational
   _src=$(_json_report_src)
   # ADR-063 Phase 7 (D6): the report's own `run_outcome.compatibility` is
   # this exact fact (`result.verdict`, unconditionally) under its canonical
-  # name -- preferred over the raw `verdict`/`abiVerdict` field lookups
-  # below, which stay as this function's fallback for a report from an
+  # name -- preferred over the raw `verdict` field lookup
+  # below, which stays as this function's fallback for a report from an
   # older abicheck (no `run_outcome` block) or a synthetic report whose
   # `run_outcome.compatibility` is `null` (no real comparison ever ran, so
   # `_report_query` prints nothing for it -- `compat_verdict` may still hold
@@ -2625,66 +2596,7 @@ _report_compat_verdict() {
       return
     fi
   fi
-  _answer=$(_report_query "$_src" compat_verdict)
-  if [[ -n "$_answer" ]]; then
-    echo "$_answer"
-    return
-  fi
-  # `format: sarif` fallback, deliberately scoped to THIS function alone
-  # rather than a `_json_report_src` branch every other reader shares
-  # (Codex review, fresh evidence, PR #1016): a first version of this fix
-  # did widen `_json_report_src` itself, which made `_can_reuse_primary_
-  # json` treat a bare SARIF document as a faithful abicheck-native JSON
-  # report and `cp` it straight into `PR_JSON` for `cli_pr_comment` to
-  # parse -- silently posting/overwriting the sticky PR comment with an
-  # empty-looking report instead of the real findings, and letting
-  # `_severity_gate_categories`/coverage/annotation readers misread SARIF's
-  # missing keys as "definitely none" rather than "cannot tell". SARIF is
-  # only ever consulted here, for `compat_verdict` specifically, and only
-  # once `_json_report_src` already came back with nothing to read (no
-  # PR_JSON/stdout-JSON/extra_write_json_path -- see that function's own
-  # docstring for why: `format: sarif` paired with an `extra-args --write
-  # <non-json>=...` occupies the CLI's one `--write` slot and suppresses
-  # the automatic JSON sidecar, leaving no other JSON anywhere in this
-  # run's output). SARIF's own `runs[0].properties.abiVerdict` (`sarif.py`)
-  # carries the identical native verdict string `_report_query`'s
-  # `compat_verdict` case reads from ordinary abicheck JSON.
-  if [[ -z "$_src" && "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "sarif" \
-        && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
-     && { [[ -z "${_output_file_pre_fp+x}" ]] \
-          || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
-    _answer=$(_report_query "$OUTPUT_FILE" compat_verdict)
-    if [[ -n "$_answer" ]]; then
-      echo "$_answer"
-      return
-    fi
-  fi
-  # `sed -E`, not the basic-regex `\(a\|b\)` the other readers here get away
-  # with not needing: BSD sed (macOS runners, which this Action supports and
-  # CI covers) has no alternation in BRE at all, so the pattern silently
-  # matched nothing there and every demoted break read as COMPATIBLE on
-  # macOS while passing on Linux. `-E` is accepted by both.
-  #
-  # `Verdict(:|**)` covers both spellings, because the per-library release
-  # fan-out has no third option: `--write` is rejected for a
-  # directory/package operand, so a markdown release compare reaches this
-  # fallback with no JSON at all -- and its renderer writes the verdict as a
-  # table row, `| **Verdict** | 💥 \`BREAKING\` |`, with no colon. Matching
-  # only the colon form left every release compare unescalated: an exit-2
-  # release whose own report said BREAKING still published API_BREAK, which is
-  # the whole thing this reconciliation exists to prevent (Codex review). The
-  # delimiter is still required rather than dropped -- a bare `Verdict`
-  # followed by uppercase-free filler would match prose.
-  #
-  # COMPATIBLE_WITH_RISK is a third alternative for the same reason R1
-  # (CLI-audit) added it to `_resolve_clean_exit_verdict`'s JSON-sourced
-  # branch: `extra-args: --write markdown=...` suppresses the JSON sidecar
-  # (per action/AGENTS.md), so a run whose *only* report is rendered
-  # markdown/text reaches this fallback for that tier too -- without it, a
-  # report the CLI classified COMPATIBLE_WITH_RISK still fell through to
-  # `sed` matching nothing and silently reported COMPATIBLE (Codex review).
-  sed -nE 's/.*Verdict(:|\*\*)[^A-Z]*(API_BREAK|BREAKING|COMPATIBLE_WITH_RISK).*/\2/p' \
-    <<<"$(_text_report_content)" | head -1
+  _report_query "$_src" compat_verdict
 }
 
 # Exit 0 is not the same fact as "no break was found". Under a demoting

@@ -645,9 +645,13 @@ class TestTextReportContentEffectiveFormat:
     nominal `$FORMAT` instead of `$_EFFECTIVE_FORMAT`, so a `format: json`
     step whose own `extra-args` overrode to `--format text` (with
     `output-file` set) wrote real text to `$OUTPUT_FILE` that this function
-    never read, silently losing the severity-gate line
-    (`_severity_gate_exit`/`_severity_gate_categories` both call through it)
-    and publishing the generic `ERROR` instead of `SEVERITY_ERROR`.
+    never read, silently losing the severity-gate line and publishing the
+    generic `ERROR` instead of `SEVERITY_ERROR`.
+
+    Its remaining caller is `_severity_gate_categories`, which names the
+    blocking categories in an explanatory note; `_severity_gate_exit`'s own
+    text derivation was retired by ADR-063 Track T8, so no *verdict* or gate
+    exit is decided through this function any more.
     """
 
     def test_reads_output_file_when_effective_format_overrides_away_from_json(

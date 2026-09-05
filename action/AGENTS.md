@@ -95,6 +95,45 @@ their output/exit codes — run them with the normal fast test command
   (associative arrays, `readarray`, process substitution where a `<<<`
   here-string works instead).
 
+## How `run.sh` resolves the verdict it publishes
+
+Since ADR-063 Phase 6 (Track T8) there are exactly two sources, and no
+third:
+
+1. **The structured report.** `run_outcome` (ADR-063 D6,
+   `abicheck/policy/outcome.py`) first — `compatibility` for the verdict,
+   `gate` for the severity gate — then the legacy JSON fields
+   (`verdict`, `severity.exit_code`,
+   `contract_coverage_exit_contribution`, `analysis_assurance.status`) for
+   a report from an older abicheck.
+2. **The process exit code**, via the `case $ABICHECK_EXIT in ...`
+   dispatch, plus `_is_cli_error()`'s stderr check for a Click usage error
+   that produces no report at all. This is the *transport-level* fallback:
+   it answers "what did the invocation itself say" when there is no result
+   to read.
+
+Nothing else is consulted. `run.sh` used to re-derive these facts by
+regex-matching rendered output — a `sed` over a markdown/text report's
+`Verdict:`/`**Verdict**` line and its `severity gate: exit N ... blocking:`
+line, a SARIF `runs[0].properties.abiVerdict` lookup, and `grep`s over
+captured stderr for the contract-coverage and analysis-assurance floor
+notices — and all of that is gone. **Don't add a reader that parses a
+renderer's prose**: a renderer's wording is presentation, it drifts, and it
+carries values a PR author can influence. If the boundary needs a fact,
+give it a field in the structured report.
+
+The consequence to know when reading a failure report: a run whose report
+is genuinely unreadable (`format: text`/`markdown`/`sarif` with no JSON
+sidecar, a crash, an `extra-args --write` that suppressed the sidecar) gets
+the plain exit-code-derived verdict — no `SEVERITY_ERROR`/
+`COVERAGE_INCOMPLETE`/`ANALYSIS_INCOMPLETE` label and no escalation, since
+no structured evidence stated one. That is deliberate: absence of data is
+not evidence an axis fired.
+
+`fail-on-breaking`/`fail-on-api-break` and friends are **step policy on top
+of** the published verdict. They decide whether the step fails; they never
+rewrite `$VERDICT`.
+
 ## Known sharp edge: requested vs. achieved depth
 
 An Action baseline generated with an explicit depth request (e.g.
