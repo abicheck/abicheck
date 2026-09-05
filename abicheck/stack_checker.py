@@ -29,10 +29,10 @@ from enum import Enum
 from pathlib import Path
 
 from .binder import BindingStatus, SymbolBinding, compute_bindings
-from .checker import DiffResult, compare
+from .checker import DiffResult
 from .checker_policy import BREAKING_KINDS
 from .checker_types import Change
-from .errors import ProfileMismatchError, ScopeMismatchError
+from .errors import ProfileMismatchError, ScopeMismatchError, UnsupportedArtifactError
 from .resolver import DependencyGraph, resolve_dependencies
 from .stack_binding_diff import diff_runtime_bindings
 
@@ -441,23 +441,42 @@ def _run_abi_diff(old_path: Path, new_path: Path, library_name: str) -> DiffResu
             ``None`` indistinguishable from every other failure mode.
         ScopeMismatchError: same, for the scope contract.
     """
-    from .dumper import dump
+    # T5 direct-bypass migration (ADR-037 D10.1): route both the dump and
+    # compare halves through the Tier-2 `service` module instead of calling
+    # `dumper.dump()`/`checker.compare()` directly.
+    from . import service
 
     try:
-        old_snap = dump(
-            so_path=old_path, headers=[], extra_includes=[],
-            version="baseline", compiler="c++",
+        old_fmt = service.detect_binary_format(old_path)
+        new_fmt = service.detect_binary_format(new_path)
+        if old_fmt is None or new_fmt is None:
+            bad_path = old_path if old_fmt is None else new_path
+            raise UnsupportedArtifactError(
+                f"Unrecognised binary format for {bad_path}: expected ELF, "
+                "Mach-O, or PE shared library."
+            )
+        old_snap = service.run_dump(
+            old_path,
+            old_fmt,
+            [],
+            [],
+            "baseline",
+            "c++",
         )
-        new_snap = dump(
-            so_path=new_path, headers=[], extra_includes=[],
-            version="candidate", compiler="c++",
+        new_snap = service.run_dump(
+            new_path,
+            new_fmt,
+            [],
+            [],
+            "candidate",
+            "c++",
         )
     except Exception as exc:  # noqa: BLE001
         log.warning("_run_abi_diff: failed for %s: %s", library_name, exc)
         return None
 
     try:
-        return compare(old_snap, new_snap)
+        return service.compare_snapshots(old_snap, new_snap)
     except (ProfileMismatchError, ScopeMismatchError):
         raise
     except Exception as exc:  # noqa: BLE001

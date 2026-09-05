@@ -2626,10 +2626,9 @@ _RESOLVE_INPUT_WRAPPER_MODULES: frozenset[str] = frozenset({"cli_resolve"})
 # shared typed executor.
 CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
     {
-        # Standalone application-compatibility (P0 item 6): dumps both
-        # sides directly rather than through any of the other paths.
-        "abicheck/appcompat.py:1650:19:dumper.dump",
-        "abicheck/appcompat.py:1666:19:dumper.dump",
+        # `appcompat.check_appcompat`'s two `dumper.dump()` call sites left
+        # this list in T5 (direct-bypass migration): both now route through
+        # `service.run_dump` instead.
         # Scan baseline resolution (P0 item 4's baseline half): calls
         # `service.resolve_input()` directly rather than through
         # `service_input_resolution.resolve_side_snapshot`.
