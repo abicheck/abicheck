@@ -579,6 +579,19 @@ class TestExtraArgsHasWriteFlag:
         # mis-expanded into consuming the next token.
         assert self._predicate("-vHabc --write")
 
+    def test_a_preceding_options_value_that_looks_like_a_cluster_is_not_expanded(
+        self,
+    ) -> None:
+        # A sixth Codex review round (P1, fresh evidence): `-H -vH --write`
+        # means "-H with a header literally named -vH", then a real
+        # `--write` -- `-vH` here is `-H`'s own already-claimed value, not a
+        # cluster to expand. Expanding every raw token up front (rather than
+        # only once confirmed not already claimed as a preceding value)
+        # corrupted this ordinary value into extra synthetic options and
+        # could flip the following real `--write` either way; this pins
+        # that a value token is left untouched regardless of its shape.
+        assert self._predicate("-H -vH --write")
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestExtraArgsHasDryRunFlag:

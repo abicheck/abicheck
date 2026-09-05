@@ -453,20 +453,22 @@ _extra_args_expand_short_clusters() {
 # token at all, so leaving it unexpanded is already the correct outcome,
 # and reaching for its inline value here would just be the concatenated-
 # value gap this comment already documents as out of scope.
+#
+# Cluster expansion happens INLINE in the single stateful loop below, never
+# as a separate pre-pass over the raw token list -- a fifth Codex review
+# round (P1, fresh evidence) found that a pre-pass expanding every token
+# up front cannot tell a real cluster from a *value* token that merely
+# looks like one (`-H -vH --write`: `-vH` here is `-H`'s own consumed
+# value, a literal string, not a cluster to expand), which corrupted a
+# perfectly ordinary value into extra synthetic options and could just as
+# easily flip a real `--write` the other way. Expansion is only even
+# attempted once `$_pending` is confirmed empty, i.e. the current token is
+# not already claimed as a preceding option's value.
 _extra_args_options() {
-  local _arg _pending="" _expanded=() _cluster _line
+  local _arg _pending="" _cluster _line
   # shellcheck disable=SC2086  # word-splitting is the point; see above.
   set -- ${INPUT_EXTRA_ARGS:-}
   for _arg in "$@"; do
-    if _cluster="$(_extra_args_expand_short_clusters "$_arg")"; then
-      while IFS= read -r _line; do
-        [[ -n "$_line" ]] && _expanded+=("$_line")
-      done <<<"$_cluster"
-    else
-      _expanded+=("$_arg")
-    fi
-  done
-  for _arg in ${_expanded[@]+"${_expanded[@]}"}; do
     if [[ -n "$_pending" ]]; then
       printf '%s\t%s\n' "$_pending" "$_arg"
       _pending=""
@@ -474,11 +476,24 @@ _extra_args_options() {
     fi
     if [[ "$_arg" == --*=* ]]; then
       printf '%s\t%s\n' "${_arg%%=*}" "${_arg#*=}"
-    elif _extra_args_is_value_option "$_arg"; then
-      _pending="$_arg"
-    else
-      printf '%s\t\n' "$_arg"
+      continue
     fi
+    if _extra_args_is_value_option "$_arg"; then
+      _pending="$_arg"
+      continue
+    fi
+    if _cluster="$(_extra_args_expand_short_clusters "$_arg")"; then
+      while IFS= read -r _line; do
+        [[ -z "$_line" ]] && continue
+        if _extra_args_is_value_option "$_line"; then
+          _pending="$_line"
+        else
+          printf '%s\t\n' "$_line"
+        fi
+      done <<<"$_cluster"
+      continue
+    fi
+    printf '%s\t\n' "$_arg"
   done
   [[ -n "$_pending" ]] && printf '%s\t\n' "$_pending"
 }
