@@ -36,6 +36,19 @@ class ValidationError(AbicheckError, ValueError):
     """
 
 
+class UnsupportedArtifactError(ValidationError):
+    """Raised when an input artifact is one this build cannot analyze at all
+    (a binary container format the dumper has no backend for) -- ADR-065
+    D6's ``unsupported`` acquisition state, as opposed to an artifact that
+    *should* have worked and failed (``failed``, also an operational error).
+
+    A :class:`ValidationError` subclass so every existing ``except
+    ValidationError`` translation (Tier-2 usage-error handling) is
+    unchanged; the release fan-out catches it ahead of that to record the
+    member as ``unsupported`` rather than as an ``ERROR`` crash.
+    """
+
+
 class SnapshotError(AbicheckError, RuntimeError):
     """Raised when an ABI snapshot cannot be loaded or parsed.
 

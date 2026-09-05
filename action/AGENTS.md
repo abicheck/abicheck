@@ -218,3 +218,30 @@ routing" section for anything that runs abicheck from a workflow:
 
 This section does not change the repository's own merge policy, which
 stays as recorded in `.github/AGENTS.md`.
+
+## ADR-065 completeness axis (`SCOPE_INCOMPLETE`)
+
+`_scope_incomplete()` is the informational sibling of `_scope_gated()`: it
+reads `_report_query ... scope_incomplete` (the report's own
+`comparison_scope.completeness`/`run_outcome.scope` reading `incomplete`) and
+only decides whether the step summary names an accepted gap under the default
+`--on-incomplete-scope warn`; it never fails the step (Codex review).
+`_scope_gated()` mirrors `_coverage_gated()` exactly (report contribution
+first -- `_report_query ... scope_contribution`, the max of the release
+`exit` block's `incomplete_scope_contribution`/`no_comparison_completed_
+contribution`, else the stored-baseline dispatch's `comparison_scope`
+section's own `*_exit_contribution` pair (that report shape has no root
+`exit` block), printing *nothing* when the report carries neither, so
+a scope-less document -- an older abicheck, a scalar report, or the
+`{}`-shaped placeholder the PR-comment re-run leaves in `PR_JSON` when the
+primary run wrote no report -- is "cannot tell", not "did not fire"). There
+is deliberately **no** stderr fallback: an earlier revision grepped the
+CLI's notice and excluded its `warn`-accepted wording, which a member
+failure reason carrying PR-controlled text could forge to suppress a real
+`block` contribution -- the same class ADR-063 Track T8 retired for the
+coverage and assurance axes (Codex review). With no readable JSON the
+process exit still fails the step; only the label is withheld. It feeds
+the compare exit-1 dispatch (verdict `SCOPE_INCOMPLETE`),
+the job-summary case (`scope_where` names the unchecked members), the
+"also contributed" note, and an unconditional `FINAL_EXIT=1`, since no
+`fail-on-*` input governs the axis. Tests: `tests/test_action_scope_verdict.py`.

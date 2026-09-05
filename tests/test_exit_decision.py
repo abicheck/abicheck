@@ -155,6 +155,8 @@ class TestResolveExitDecision:
             "budget_overflow_contribution": 0,
             "not_comparable_contribution": 0,
             "removed_required_library_contribution": 0,
+            "incomplete_scope_contribution": 0,
+            "no_comparison_completed_contribution": 0,
         }
 
     def test_crosscheck_promotion_is_a_real_contribution_not_a_patch(self) -> None:
@@ -762,6 +764,8 @@ class TestCompareExitDecisionIntegration:
             "budget_overflow_contribution": 0,
             "not_comparable_contribution": 0,
             "removed_required_library_contribution": 0,
+            "incomplete_scope_contribution": 0,
+            "no_comparison_completed_contribution": 0,
         }
 
     def test_breaking_comparison_reports_the_compatibility_gate_reason(

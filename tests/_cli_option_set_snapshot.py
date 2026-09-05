@@ -82,6 +82,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--no-demangle",
         "--no-dwarf-only",
         "--no-fail-on-removed-library",
+        "--on-incomplete-scope",
         "--no-nostdinc",
         "--no-pattern-verdicts",
         "--no-scope-public-headers",

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://abicheck.github.io/abicheck/reference/schemas/v1/aggregate_report.schema.json",
   "title": "abicheck aggregate report",
-  "description": "Schema for the JSON document produced by `abicheck aggregate --format json`, the multi-target CI fan-in gate. Five axes are kept separate (ADR-042, plus ADR-049 \u00a77 and P0.4): gate (each report's own recorded severity decision, combined), coverage (did every required target report?), compatibility (worst verdict, for reporting), contract_coverage (added in schema 1.3: did a target that *did* report have the evidence to close its selected --contract domain?), and analysis_assurance (added in schema 1.5: did a target that *did* report have complete evidence under --require-complete-analysis?). effective_policy (added in schema 1.6) is a non-gating provenance field reporting which missing_required/unexpected_target gate policy this run actually applied and where it came from. Each target entry's effective_config_digest (added in schema 1.7) carries that target's own already-computed digest through from its per-target report -- see compare_report.schema.json's own effective_config_digest for what it fingerprints. The three gating axes beyond compatibility are distinct on purpose \u2014 coverage, contract_coverage, and analysis_assurance each contribute 1 and answer different questions, so an exit of 1 stays attributable to exactly one of them. The document is versioned via aggregate_schema_version; additive changes (new optional keys) bump the MINOR component, breaking changes bump the MAJOR. Consumers should accept any document whose MAJOR matches theirs and ignore unknown keys.",
+  "description": "Schema for the JSON document produced by `abicheck aggregate --format json`, the multi-target CI fan-in gate. Five axes are kept separate (ADR-042, plus ADR-049 \u00a77 and P0.4): gate (each report's own recorded severity decision, combined), coverage (did every required target report?), compatibility (worst verdict, for reporting), contract_coverage (added in schema 1.3: did a target that *did* report have the evidence to close its selected --contract domain?), analysis_assurance (added in schema 1.5: did a target that *did* report have complete evidence under --require-complete-analysis?), and scope_completeness (added in schema 1.8: did a release target check every member it selected, and complete any comparison at all?). effective_policy (added in schema 1.6) is a non-gating provenance field reporting which missing_required/unexpected_target gate policy this run actually applied and where it came from. Each target entry's effective_config_digest (added in schema 1.7) carries that target's own already-computed digest through from its per-target report -- see compare_report.schema.json's own effective_config_digest for what it fingerprints. The four gating axes beyond compatibility are distinct on purpose \u2014 coverage, contract_coverage, analysis_assurance, and scope_completeness each contribute 1 and answer different questions, so an exit of 1 stays attributable to exactly one of them. The document is versioned via aggregate_schema_version; additive changes (new optional keys) bump the MINOR component, breaking changes bump the MAJOR. Consumers should accept any document whose MAJOR matches theirs and ignore unknown keys.",
   "type": "object",
   "required": [
     "aggregate_schema_version",
@@ -11,6 +11,7 @@
     "coverage",
     "contract_coverage",
     "analysis_assurance",
+    "scope_completeness",
     "gate",
     "targets",
     "unexpected_targets"
@@ -65,6 +66,26 @@
         "blocking": {
           "type": "boolean",
           "description": "True when the required-coverage gap contributes to the exit code."
+        }
+      }
+    },
+    "scope_completeness": {
+      "type": "object",
+      "description": "Added in schema 1.8. ADR-065's orthogonal scope-completeness axis for the whole target set -- the third sibling of contract_coverage and analysis_assurance: did a directory/package release target check every member it selected (--on-incomplete-scope block), and did it complete at least one comparison at all (never a clean pass, under either policy)? Read from each target report's own exit block (incomplete_scope_contribution / no_comparison_completed_contribution) or, for the stored/stored and stored/live drivers that emit no exit block, its comparison_scope section (incomplete_scope_exit_contribution / no_comparison_completed_exit_contribution), never recomputed. Present in every document; exit_contribution is 0 and incomplete_targets empty for every scalar comparison and every complete release.",
+      "required": ["exit_contribution", "incomplete_targets"],
+      "properties": {
+        "exit_contribution": {
+          "type": "integer",
+          "description": "0 or 1, the max over every gated target's own scope_completeness_exit. Folded into gate.exit_code with max, so it raises a clean 0 to 1 and can never lower a real break's 2/4.",
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "incomplete_targets": {
+          "type": "array",
+          "description": "The target ids whose comparison scope was incomplete: the why behind a non-zero exit_contribution, plus every target that accepted the gap under --on-incomplete-scope warn (contribution 0) -- like contract_coverage.incomplete_targets, accepting an evidence gap is not hiding it. Which of these gated is readable per target from its own scope_completeness_exit.",
+          "items": {"type": "string"}
         }
       }
     },
@@ -173,7 +194,7 @@
   "$defs": {
     "target": {
       "type": "object",
-      "required": ["target_id", "required", "state", "compatibility_verdict", "gate", "contract_coverage_exit", "analysis_assurance_exit"],
+      "required": ["target_id", "required", "state", "compatibility_verdict", "gate", "contract_coverage_exit", "analysis_assurance_exit", "scope_completeness_exit"],
       "properties": {
         "target_id": {"type": "string"},
         "required": {"type": "boolean"},
@@ -208,6 +229,14 @@
             1
           ]
         },
+        "scope_completeness_exit": {
+          "type": "integer",
+          "description": "ADR-065 (aggregate schema 1.8): this target's own scope-completeness contribution, the max of its report's exit.incomplete_scope_contribution and exit.no_comparison_completed_contribution -- the third orthogonal exit-floor axis. 0 for every scalar comparison, every complete release, and an unavailable target. Folded into the top-level scope_completeness.exit_contribution and thence into gate.exit_code with max. Always present.",
+          "enum": [
+            0,
+            1
+          ]
+        },
         "reason": {
           "type": "string",
           "description": "Present when the target is unavailable — why it could not be analyzed."
@@ -222,7 +251,7 @@
     "profile_matrix_entry": {
       "type": "object",
       "description": "Added in schema 1.1. One logical target's outcome across every profile that checked it.",
-      "required": ["base_target", "profiles", "affected_profiles", "incomplete_profiles", "unanalyzed_profiles", "contract_incomplete_profiles", "analysis_incomplete_profiles", "verdict_by_profile"],
+      "required": ["base_target", "profiles", "affected_profiles", "incomplete_profiles", "unanalyzed_profiles", "contract_incomplete_profiles", "analysis_incomplete_profiles", "scope_incomplete_profiles", "verdict_by_profile"],
       "properties": {
         "base_target": {"type": "string"},
         "profiles": {
@@ -254,6 +283,11 @@
           "type": "array",
           "items": {"type": "string"},
           "description": "Added in schema 1.5. The exact sibling of contract_incomplete_profiles for P0.4's own orthogonal analysis-assurance axis -- the profile-level view of the top-level analysis_assurance.incomplete_targets, using the same predicate so the two can never name different targets. A profile can appear here and in affected_profiles/contract_incomplete_profiles at once."
+        },
+        "scope_incomplete_profiles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Added in schema 1.8. The third sibling, for ADR-065's scope-completeness axis -- the profile-level view of the top-level scope_completeness.incomplete_targets, using the same predicate (a profile that accepted the gap under --on-incomplete-scope warn is listed too, with a contribution of 0). A profile can appear here and in the other lists at once."
         },
         "verdict_by_profile": {
           "type": "object",

@@ -180,6 +180,25 @@ class ExitReason(str, Enum):
     #: policy finding decided the exit, when the comparison for that
     #: library never actually ran to completion.
     OPERATIONAL_ERROR = "operational_error"
+    #: A directory/package release comparison only (ADR-065 D6). A
+    #: selected, expected member of the comparison scope never reached a
+    #: completed comparison (unmatched with no counterpart supplied,
+    #: unsupported by this build, failed, or ambiguously matched) and the
+    #: run's completeness policy is ``block`` -- so the scope axis
+    #: contributed ``1``, folded with ``max()`` exactly like
+    #: ``CONTRACT_COVERAGE``: it raises a clean ``0`` to ``1`` and never
+    #: lowers a real ``2``/``4``. Under the default ``warn`` policy the axis
+    #: contributes ``0`` and never appears here, while the report's
+    #: ``run_outcome.scope`` still reads ``incomplete``.
+    INCOMPLETE_SCOPE = "incomplete_scope"
+    #: A directory/package release comparison only (ADR-065 D7). The
+    #: selected scope produced no valid comparison at all -- zero matched
+    #: pairs, or every selected member failed/was unsupported. Contributes
+    #: ``1`` under **every** completeness policy: ``warn`` can downgrade
+    #: missing members, never "nothing compared" into "compatibility
+    #: checked". A fold participant (never dominant), so a proven
+    #: removed-library ``8`` or a ``not_comparable`` ``16`` still wins.
+    NO_COMPARISON_COMPLETED = "no_comparison_completed"
 
 
 @dataclass(frozen=True)
@@ -279,7 +298,6 @@ class ExitDecision:
     #: `resolve_release_exit_decision`. See :class:`ExitReason.
     #: OPERATIONAL_ERROR` and this class's own docstring above.
     operational_error_contribution: int = 0
-
     #: `scan` only. Nonzero (always equal to `code`) exactly when
     #: :func:`resolve_scan_exit_decision` returned this decision because
     #: `_EvidenceContractError` fired. `0` for every decision built any
@@ -306,6 +324,19 @@ class ExitDecision:
     #: consulted and lost (it wasn't set) -- both are genuinely "did not
     #: determine this outcome," which `0` correctly states either way.
     removed_required_library_contribution: int = 0
+    #: A directory/package release comparison only (ADR-065 D6). ``0``/``1``,
+    #: a fold participant shaped exactly like ``contract_coverage_
+    #: contribution`` -- see :class:`ExitReason.INCOMPLETE_SCOPE`. ``0`` for
+    #: every caller but `resolve_release_exit_decision`, and ``0`` under the
+    #: default ``warn`` completeness policy even when the scope is
+    #: incomplete (the report's ``run_outcome.scope`` carries that fact).
+    #: Declared after every pre-existing field (Codex review): a positional
+    #: caller of this public constructor keeps binding the older tail.
+    incomplete_scope_contribution: int = 0
+    #: A directory/package release comparison only (ADR-065 D7). ``0``/``1``,
+    #: a fold participant -- see :class:`ExitReason.NO_COMPARISON_
+    #: COMPLETED`. ``0`` for every caller but `resolve_release_exit_decision`.
+    no_comparison_completed_contribution: int = 0
 
     def to_dict(self) -> dict[str, object]:
         """JSON-serializable form, for the report's ``exit`` block.
@@ -331,6 +362,10 @@ class ExitDecision:
             "not_comparable_contribution": self.not_comparable_contribution,
             "removed_required_library_contribution": (
                 self.removed_required_library_contribution
+            ),
+            "incomplete_scope_contribution": self.incomplete_scope_contribution,
+            "no_comparison_completed_contribution": (
+                self.no_comparison_completed_contribution
             ),
         }
 
@@ -369,6 +404,10 @@ class ExitDecision:
             removed_required_library_contribution=d.get(
                 "removed_required_library_contribution", 0
             ),
+            incomplete_scope_contribution=d.get("incomplete_scope_contribution", 0),
+            no_comparison_completed_contribution=d.get(
+                "no_comparison_completed_contribution", 0
+            ),
         )
 
 
@@ -382,6 +421,8 @@ def resolve_exit_decision(
     evidence_contract_error_contribution: int = 0,
     budget_overflow_contribution: int = 0,
     not_comparable_contribution: int = 0,
+    incomplete_scope_contribution: int = 0,
+    no_comparison_completed_contribution: int = 0,
     compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
     """Fold the axis contributions below into one explainable decision.
@@ -434,6 +475,11 @@ def resolve_exit_decision(
     one is ever nonzero on a real persisted decision; folded here the same
     tie-inclusive way as every other axis purely so a caller preserving one
     does not have to duplicate this function's own fold logic).
+    *incomplete_scope_contribution*/*no_comparison_completed_contribution*
+    (ADR-065 D6/D7) default to ``0`` (every caller but
+    `resolve_release_exit_decision`) -- two more ``0``/``1`` fold
+    participants, so a genuine tie with coverage/assurance/operational-error
+    is named rather than hidden, exactly as for the coverage axis.
     """
     contributions = {
         compatibility_reason: compatibility_contribution,
@@ -444,6 +490,8 @@ def resolve_exit_decision(
         ExitReason.EVIDENCE_CONTRACT_ERROR: evidence_contract_error_contribution,
         ExitReason.BUDGET_OVERFLOW: budget_overflow_contribution,
         ExitReason.NOT_COMPARABLE: not_comparable_contribution,
+        ExitReason.INCOMPLETE_SCOPE: incomplete_scope_contribution,
+        ExitReason.NO_COMPARISON_COMPLETED: no_comparison_completed_contribution,
     }
     code = max(contributions.values())
     if code == 0:
@@ -465,6 +513,8 @@ def resolve_exit_decision(
         evidence_contract_error_contribution=evidence_contract_error_contribution,
         budget_overflow_contribution=budget_overflow_contribution,
         not_comparable_contribution=not_comparable_contribution,
+        incomplete_scope_contribution=incomplete_scope_contribution,
+        no_comparison_completed_contribution=no_comparison_completed_contribution,
     )
 
 

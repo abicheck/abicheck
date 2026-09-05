@@ -690,16 +690,15 @@ class TestDirVsDir:
         assert code == 4
         assert "BREAKING" in out
 
-    def test_fully_disjoint_dirs_warns_and_exits_0(self, tmp_path: Path) -> None:
-        """Dirs with no matching lib names: warn, empty libraries list, exit 0."""
-        old_dir = tmp_path / "old"
+    def test_fully_disjoint_dirs_is_no_comparison_completed(self, tmp_path: Path) -> None:
+        """ADR-065 D7: exit 1, never 0 (see test_release_scope_completeness.py)."""
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
         old_dir.mkdir()
-        new_dir = tmp_path / "new"
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libbar.json", _snap())
         code, out = _invoke("compare", str(old_dir), str(new_dir))
-        assert code == 0
+        assert code == 1
         assert "no matching" in out.lower() or "warning" in out.lower()
 
 
@@ -754,21 +753,18 @@ class TestUnmatched:
         assert code == 0
 
     def test_removed_library_with_flag(self, tmp_path: Path) -> None:
-        """--fail-on-removed-library exits 8 when library disappears."""
-        old_dir = tmp_path / "old"
+        """ADR-065 D2: a plain directory cannot prove a removal, so no exit 8
+        (see test_release_scope_completeness.py for the proven case)."""
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
         old_dir.mkdir()
-        new_dir = tmp_path / "new"
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(old_dir / "libbar.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
-        code, _ = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--fail-on-removed-library",
-        )
-        assert code == 8
+        flag = "--fail-on-removed-library"
+        code, out = _invoke("compare", str(old_dir), str(new_dir), flag, "--format", "json")
+        assert code == 0
+        assert json.loads(out)["comparison_scope"]["proven_removed"] == []
 
     def test_removed_and_breaking_exits_4_not_8(self, tmp_path: Path) -> None:
         """BREAKING (4) takes priority over removed-library (8)."""

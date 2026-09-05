@@ -48,10 +48,14 @@ from .model import AbiSnapshot
 from .storage.bundle_facts_validation import (
     BUNDLE_ARCHIVE_ARTIFACT_TYPE,
     load_bundle_facts_blob_json,
+    require_degraded_marker_version,
+    require_degraded_members_known,
     require_int_schema_version,
     validate_bundle_archive_artifact_type,
     validated_alias_map,
+    validated_degraded_members,
     validated_filename_map,
+    validated_inventory_complete,
     validated_variant_fingerprint,
 )
 
@@ -66,8 +70,20 @@ log = logging.getLogger(__name__)
 #: independent of `AbiSnapshot.SCHEMA_VERSION` (each per-library snapshot
 #: already carries its own), since the container's own shape (what fields
 #: `BundleFacts` has) can evolve on its own timeline. Bumped to 2 for the
-#: `BUNDLE_FACTS_ARTIFACT_TYPE` marker below.
-BUNDLE_FACTS_SCHEMA_VERSION = 2
+#: `BUNDLE_FACTS_ARTIFACT_TYPE` marker below; to 3 (ADR-065 D8) for the
+#: decision-bearing `degraded_members` marker. This is the *reader's* max;
+#: `document_schema_version` below chooses what a writer declares.
+BUNDLE_FACTS_SCHEMA_VERSION = 3
+#: What a document with no degraded member declares (a pre-S2 reader still
+#: opens it); one *with* degraded members declares 3, so a reader that cannot
+#: honor the marker rejects it instead of misreading an ELF-only stand-in.
+BUNDLE_FACTS_BASE_SCHEMA_VERSION = 2
+
+
+def document_schema_version(facts: BundleFacts) -> int:
+    """The ``schema_version`` a writer declares for *facts* (see above)."""
+    return BUNDLE_FACTS_SCHEMA_VERSION if facts.degraded_members else BUNDLE_FACTS_BASE_SCHEMA_VERSION
+
 
 #: Self-describing document-type marker; see `bundle_facts_serialization.
 #: looks_like_bundle_facts_document` for the classifier built on it.
@@ -119,41 +135,35 @@ class BundleFacts:
     :class:`~abicheck.model.AbiSnapshot` for a single library.
 
     ``per_library_snapshots`` is mandatory, not optional: ``compare_bundle()``'s
-    cross-DSO findings (``bundle_intra_dep_signature_changed``,
-    ``bundle_intra_type_changed``, ``bundle_provider_changed``) are not
-    derived from the resolution graph alone -- they are each keyed off a
-    *per-library* ``DiffResult``. A ``BundleFacts`` carrying only
-    resolution-graph-level data would have nowhere for
-    :func:`compare_bundle_from_facts` to get those per-library diffs from
-    when the *old* side is a stored dump rather than a live directory.
+    cross-DSO findings are each keyed off a *per-library* ``DiffResult``, so
+    a ``BundleFacts`` carrying only resolution-graph-level data would give
+    :func:`compare_bundle_from_facts` nothing to diff when the *old* side is
+    a stored dump rather than a live directory.
 
-    ``filesystem_aliases`` records, per library, the extra soname
-    spellings :func:`abicheck.bundle_soname.filesystem_alias_basenames` recovered
-    from the *real* on-disk file at capture time -- captured once, up front,
-    so :func:`bundle_snapshot_from_facts`'s later, metadata-only
-    reconstruction can still resolve a ``DT_NEEDED`` edge naming one of
-    those aliases without touching the filesystem itself (Codex review).
-    Empty for a caller that didn't pass real paths at capture time.
+    ``filesystem_aliases``/``library_filenames`` record, per library, the
+    real on-disk soname spellings and basename captured while the files
+    still existed, so the metadata-only reconstruction resolves ``DT_NEEDED``
+    edges and SONAME skew without the filesystem (Codex review); empty for a
+    caller that passed no real paths. ``artifact_type`` is ``init=False``,
+    an invariant a caller cannot break by construction (Codex review).
+    ``degraded_members`` may name stored members only, checked at
+    construction so every reader and capture path shares the one rule."""
 
-    ``library_filenames`` records, per library, the real on-disk
-    *basename* at capture time (``libfoo_core.so.1``, not the canonical
-    ``libfoo_core.so`` key) -- needed by ``bundle._detect_soname_skew``'s
-    own ``path.name`` fallback for a versioned DSO with no usable
-    ``DT_SONAME``, else it silently goes unreported for a stored-baseline
-    comparison a live one would have caught (Codex review). Empty for a
-    caller that didn't pass real paths, same as ``filesystem_aliases``.
-    ``artifact_type`` is always :data:`BUNDLE_FACTS_ARTIFACT_TYPE` here --
-    ``init=False`` makes that an invariant a caller cannot break by
-    construction (``BundleFacts(artifact_type="other")`` is a ``TypeError``,
-    not a document that later writers and readers would disagree about --
-    Codex review, fresh evidence)."""
+    def __post_init__(self) -> None:
+        require_degraded_members_known(self.degraded_members, self.per_library_snapshots)
 
-    schema_version: int = BUNDLE_FACTS_SCHEMA_VERSION
+    schema_version: int = BUNDLE_FACTS_BASE_SCHEMA_VERSION
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT
     per_library_snapshots: dict[str, AbiSnapshot] = field(default_factory=dict)
     manifest: InstantiationManifest | None = None
     filesystem_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
     library_filenames: dict[str, str] = field(default_factory=dict)
+    #: ADR-065 D8: ``{library: failure reason}`` for a member whose dump
+    #: failed at capture (its snapshot is the ELF-only degradation).
+    degraded_members: dict[str, str] = field(default_factory=dict)
+    #: ADR-065 D2: the capture's own assertion that ``per_library_snapshots`` is
+    #: the whole release; ``False`` (every pre-field document) proves nothing.
+    inventory_complete: bool = False
     artifact_type: str = field(default=BUNDLE_FACTS_ARTIFACT_TYPE, init=False)
 
 
@@ -163,12 +173,13 @@ def capture_bundle_facts(
     manifest: InstantiationManifest | None = None,
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT,
     library_paths: dict[str, Path] | None = None,
+    degraded_members: dict[str, str] | None = None,
+    inventory_complete: bool = False,
 ) -> BundleFacts:
     """Build a :class:`BundleFacts` from already-dumped per-library snapshots.
 
-    No new *ABI* extraction happens here -- *per_library_snapshots* is
-    exactly what a real ``dump``/``compare`` run already produced for each
-    member (each carrying its own ``AbiSnapshot.elf``).
+    No new *ABI* extraction happens here -- *per_library_snapshots* is what
+    a real ``dump``/``compare`` run already produced (each with its ``.elf``).
 
     *library_paths*, when given, is a ``{library_name: Path}`` map of each
     snapshot's real on-disk file (or a stored member's materialized
@@ -196,12 +207,16 @@ def capture_bundle_facts(
             if stored_aliases:
                 filesystem_aliases[name] = stored_aliases
     return BundleFacts(
-        schema_version=BUNDLE_FACTS_SCHEMA_VERSION,
+        schema_version=(
+            BUNDLE_FACTS_SCHEMA_VERSION if degraded_members else BUNDLE_FACTS_BASE_SCHEMA_VERSION
+        ),
         variant_fingerprint=variant_fingerprint,
         per_library_snapshots=dict(per_library_snapshots),
         manifest=manifest,
         filesystem_aliases=filesystem_aliases,
         library_filenames=library_filenames,
+        degraded_members=dict(degraded_members or {}),
+        inventory_complete=inventory_complete,
     )
 
 
@@ -209,27 +224,28 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
     """Reconstruct a live-equivalent :class:`BundleSnapshot` from *facts*,
     with no binaries read.
 
-    A per-library entry whose ``AbiSnapshot.elf`` is ``None`` (a non-ELF or
-    header-only dump) is dropped, the same way :func:`abicheck.bundle.
-    build_bundle_snapshot` drops a file that doesn't parse as ELF -- both
-    describe "this bundle member contributes no ELF-level bundle facts".
+    A per-library entry whose ``AbiSnapshot.elf`` is ``None`` is dropped,
+    as ``bundle.build_bundle_snapshot`` drops a non-ELF file.
 
-    ``facts.filesystem_aliases`` (real symlink-target/hard-link basenames
-    captured while the original binaries still existed, see
-    :func:`capture_bundle_facts`) is threaded through as
-    ``build_bundle_snapshot_from_metadata``'s ``extra_aliases`` so this
-    purely metadata-driven reconstruction can still resolve a
-    ``DT_NEEDED`` edge naming one of those aliases without probing the
-    filesystem, since the persisted facts may outlive the files captured.
+    ``facts.filesystem_aliases`` (captured symlink/hard-link basenames)
+    feeds ``build_bundle_snapshot_from_metadata``'s ``extra_aliases`` so a
+    ``DT_NEEDED`` edge still resolves without probing the filesystem;
+    ``facts.library_filenames`` feeds its ``paths`` so SONAME-skew sees the
+    real, versioned filename (Codex review).
 
-    ``facts.library_filenames`` is threaded through as that same
-    function's ``paths`` -- a real on-disk filename reconstructed as
-    ``Path(filename)`` rather than the default ``Path(canonical_key)``
-    fallback, so ``bundle._detect_soname_skew``'s own SONAME-major
-    fallback sees the real, versioned filename (Codex review). A name
-    absent from ``library_filenames`` falls back to the default."""
+    Refuses *facts* carrying a ``degraded_members`` marker (ADR-065 D8,
+    Codex review): a stand-in is not evidence, and a direct API caller must
+    resolve the scope first (``workflows.release_scope.restrict_bundle_facts``
+    under a ``ScopeAcquisitionRecord``, as every compare driver does)."""
     from .bundle import build_bundle_snapshot_from_metadata
 
+    if facts.degraded_members:
+        raise ValueError(
+            f"bundle facts mark {len(facts.degraded_members)} member(s) degraded "
+            f"({', '.join(sorted(facts.degraded_members))}): an ELF-only stand-in "
+            "is not bundle evidence (ADR-065 D8); resolve the scope with "
+            "workflows.release_scope.restrict_bundle_facts first"
+        )
     metadata = {}
     paths = {}
     for name, snap in facts.per_library_snapshots.items():
@@ -302,41 +318,20 @@ def compare_bundle_from_facts(
     )
 
 
-# Note: `bundle_facts_to_dict`/`bundle_facts_from_dict` live in
-# `serialization.py`, not here — the same split `AbiSnapshot`/
-# `snapshot_to_dict`/`snapshot_from_dict` already use (the model module
-# stays a leaf; its serialization lives in the module that already owns
-# every other snapshot's serialization). Keeping them here instead would
-# create a real `bundle_facts <-> serialization` import cycle: this
-# module's own `capture_bundle_facts`/`compare_bundle_from_facts` are
-# needed by `serialization.py`'s docstrings/type hints only, but the
-# to_dict/from_dict pair would need `serialization.snapshot_to_dict`/
-# `snapshot_from_dict` at the same time `serialization.py` needs
-# `BundleFacts` for its own `save_bundle_facts`/`load_bundle_facts` --
-# see `scripts/check_ai_readiness.py`'s `import-cycle-growth` check, which
-# caught exactly this the first time this module was drafted.
+# `bundle_facts_to_dict`/`_from_dict` live in `bundle_facts_serialization.py` (cycle otherwise).
 
 
 # ---------------------------------------------------------------------------
 # G40: content-addressed archive format -- the BundleFacts<->blobs glue.
-#
-# Deliberately placed here rather than in `serialization.py` (ADR-061's
-# `storage` responsibility owner for this behavior): `serialization.py` is
-# a `debt.yaml`-tracked, no-growth module today (predates ADR-061, can't
-# grow without moving responsibility elsewhere first). `abicheck/storage/
-# bundle_archive.py` (the low-level, content-addressed zip-container
-# primitive this glue calls into) is deliberately kept free of any
-# `BundleFacts`/`AbiSnapshot` knowledge -- see that module's own docstring.
+# Placed here rather than in `serialization.py` (a no-growth module) or
+# `storage/bundle_archive.py` (deliberately BundleFacts-free, see its docstring).
 #
 # This glue takes `snapshot_to_dict`/`snapshot_from_dict` as *parameters*
 # rather than importing them from `serialization.py`: that module already
-# imports `BundleFacts` from here, so importing back -- even function-
-# scoped -- makes the two mutually dependent, which `scripts/
-# check_ai_readiness.py`'s `import-cycle-growth` check flags via static
-# AST scanning regardless of laziness (caught on this module's first
-# draft, not assumed). `validated_alias_map`/`validated_filename_map`
-# (`bundle_facts_validation.py`, a dependency-free leaf) duplicate
-# `serialization`'s own private validators for the same reason.
+# imports `BundleFacts` from here, so importing back (even function-scoped)
+# is a cycle `check_ai_readiness.py`'s `import-cycle-growth` check flags.
+# `validated_alias_map`/`validated_filename_map` (`bundle_facts_validation.
+# py`, a dependency-free leaf) duplicate `serialization`'s for the same reason.
 def maybe_write_bundle_facts_archive(
     facts: BundleFacts,
     path: str | Path,
@@ -516,9 +511,9 @@ def write_bundle_facts_archive(
     container_manifest = {
         "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
         "schema_version": BUNDLE_ARCHIVE_SCHEMA_VERSION,
-        # Unconditional, not facts.schema_version -- mirrors
+        # Not facts.schema_version -- the same writer rule as
         # bundle_facts_to_dict()'s own schema_version field (Codex).
-        "bundle_facts_schema_version": BUNDLE_FACTS_SCHEMA_VERSION,
+        "bundle_facts_schema_version": document_schema_version(facts),
         "variant_fingerprint": facts.variant_fingerprint,
         "library_blobs": library_blobs,
         "manifest_blob": manifest_blob,
@@ -527,6 +522,8 @@ def write_bundle_facts_archive(
             name: list(aliases) for name, aliases in sorted(facts.filesystem_aliases.items())
         },
         "library_filenames": dict(sorted(facts.library_filenames.items())),
+        "degraded_members": dict(sorted(facts.degraded_members.items())),
+        "inventory_complete": facts.inventory_complete,
     }
     # A third cap: manifest.json's own reader-side size ceiling. Checked
     # incrementally via iterencode() (fully materializing the string
@@ -785,6 +782,8 @@ def read_bundle_facts_archive(
                     )
                 total_decoded += copy_bytes
             instantiation_manifest = manifest_from_dict(_load_blob_json(raw_manifest, "manifest_blob"))
+        degraded_members = validated_degraded_members(manifest.get("degraded_members", {}))
+        require_degraded_marker_version(degraded_members, bundle_facts_schema_version, what=f"{path}: bundle archive")
         return BundleFacts(
             schema_version=bundle_facts_schema_version,
             variant_fingerprint=validated_variant_fingerprint(manifest.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)),
@@ -796,4 +795,6 @@ def read_bundle_facts_archive(
             library_filenames=validated_filename_map(
                 manifest.get("library_filenames", {})
             ),
+            degraded_members=degraded_members,
+            inventory_complete=validated_inventory_complete(manifest.get("inventory_complete", False)),
         )

@@ -453,7 +453,7 @@ Each finding in `changes[]` also carries:
   `_added`/`_removed` kind-name suffixes.
 - **`finding_id`** — a stable, deterministic fingerprint (a truncated SHA-256
   hash of `kind`/`symbol`/`old_value`/`new_value`/`source_location`/
-  `description`, plus a seventh, conditional input as of schema 2.50 — see
+  `description`, plus a seventh, conditional input as of schema 2.51 — see
   below) that identifies *this finding* independent of its position
   in the `changes[]` array. Two `compare` runs over the same underlying
   change produce the same `finding_id`, so a consumer can correlate a
@@ -465,7 +465,7 @@ Each finding in `changes[]` also carries:
   pointer-depth change reported on two different parameters of one
   function). `finding_id` deliberately excludes policy-derived fields
   (`severity`, `evidence_status`) — the same underlying finding hashes
-  identically regardless of the active `--policy`. As of schema 2.50, a
+  identically regardless of the active `--policy`. As of schema 2.51, a
   typedef/constant occurrence-level finding whose identity needs collision
   disambiguation (not itself a reported field) has that internal
   discriminator appended as a seventh hash input; every other finding's id
@@ -648,15 +648,19 @@ Every JSON report carries a top-level `report_schema_version` field
 > **`run_outcome`.** Every JSON report (`compare`/release, schema 2.48;
 > `scan`, schema 1.24; and the not-comparable refusal document alike)
 > carries an additive top-level `run_outcome` block —
-> `compatibility`/`assurance`/`gate`/`operational`/`lifecycle`, the
-> report's independent-axis outcome (ADR-063 D6) — alongside the unchanged
+> `compatibility`/`assurance`/`gate`/`operational`/`lifecycle`, plus
+> (schema 2.50, ADR-065) `scope` — its own `schema_version` is `1.1`
+> once `scope` is present; a `1.0` block has no `scope` and reads as
+> `complete` — the report's independent-axis outcome
+> (ADR-063 D6) — alongside the unchanged
 > `verdict`/`exit_code`/`severity` fields; nothing existing changes
 > meaning or is removed. `gate` is an exit-code-free category
 > (`none`/`addition_quality`/`potential_breaking`/`abi_breaking`).
 > `operational` is an **independent** axis, not proof that no compatibility
 > result exists: it is `none` when nothing operational went wrong, and any
 > other value (`budget_overflow`/`not_comparable`/`evidence_contract_error`/
-> `extraction_error`) flags an incomplete part of the run — but `compatibility`
+> `extraction_error`/`no_comparison_completed`) flags an incomplete part of
+> the run — but `compatibility`
 > can still be non-`null` alongside it, e.g. a late budget/evidence abort
 > that retains an already-completed verdict, or a release/scan set whose
 > reported `compatibility` is one member's real result while a *different*
@@ -696,7 +700,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "2.50",
+  "report_schema_version": "2.51",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }

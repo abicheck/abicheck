@@ -228,6 +228,8 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(
             "budget_overflow_contribution": 0,
             "not_comparable_contribution": 0,
             "removed_required_library_contribution": 0,
+            "incomplete_scope_contribution": 0,
+            "no_comparison_completed_contribution": 0,
         },
     }
     assert "findings" not in summary

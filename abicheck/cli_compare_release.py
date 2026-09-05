@@ -96,12 +96,28 @@ from .cli_options import (
     severity_options,
     verbose_option,
 )
+from .errors import SnapshotError
 from .frontends.cli.options import (
     reject_incoherent_secondary_output,
     secondary_output_options,
 )
 from .model import AbiSnapshot
+from .model.scope_acquisition import AcquisitionState
 from .pack_application import resolve_bundle_policy_file
+from .report.comparison_scope import comparison_scope_terms
+from .workflows.gate import resolve_scope_decision
+from .workflows.release_scope import (
+    DIRECT_PAIR_KEY,
+    StrandedLibraryResolution,
+    build_release_scope_record,
+    out_of_scope_provider_names,
+    release_inventory_evidence,
+    scoped_bundle_maps,
+    stored_degraded_members,
+    stored_side_degraded_members,
+    stored_side_inventory_complete,
+)
+from .workflows.storage import is_project_snapshot_package_dir
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
@@ -148,7 +164,19 @@ if TYPE_CHECKING:
     "--fail-on-removed-library/--no-fail-on-removed-library",
     "fail_on_removed",
     default=False,
-    help="Exit 8 when a library present in old_dir is absent in new_dir.",
+    help="Exit 8 when a library present in old_dir is proven removed in new_dir "
+    "(ADR-065 D2: NEW's inventory must be proven complete; an unmatched "
+    "library under an unproven inventory is an incomplete scope instead).",
+)
+@click.option(
+    "--on-incomplete-scope",
+    "on_incomplete_scope",
+    type=click.Choice(["warn", "block"]),
+    default="warn",
+    show_default=True,
+    help="What an incompletely checked comparison scope does to the exit code "
+    "(ADR-065 D6): 'warn' reports every unchecked member and contributes 0; "
+    "'block' contributes 1, folded with max() like the contract-coverage axis.",
 )
 @click.option(
     "--debug-info1",
@@ -322,6 +350,7 @@ def compare_release_cmd(
     probe_matrix_old: Path | None,
     probe_matrix_new: Path | None,
     severity_preset: str | None,
+    on_incomplete_scope: str = "warn",
     # Not Click options: `compare`'s directory/package fan-out `ctx.invoke`s
     # this engine with the *already-merged* per-category severity levels it
     # resolved from `.abicheck.yml` (the four `--severity-<category>` CLI
@@ -506,6 +535,8 @@ def compare_release_cmd(
                 matched_keys,
                 removed_keys,
                 added_keys,
+                old_unclassified,
+                new_unclassified,
             ) = _prepare_compare_release_inputs(
                 old_dir,
                 new_dir,
@@ -529,6 +560,36 @@ def compare_release_cmd(
                 old_variant=old_variant,
                 new_variant=new_variant,
                 make_temp_dir=_make_temp_dir,
+            )
+            # ADR-065 D2's inventory proof for this release (S2): a stored
+            # ProjectSnapshot package whose capture asserted a complete
+            # inventory (`inventory_complete`, persisted with its
+            # composition); the package type alone, a live directory, an
+            # extracted archive, or a direct file pair never proves it.
+            old_stored = old_dir.is_dir() and is_project_snapshot_package_dir(old_dir)
+            new_stored = new_dir.is_dir() and is_project_snapshot_package_dir(new_dir)
+            try:
+                old_complete = old_stored and stored_side_inventory_complete(
+                    old_dir, variant_id=old_variant
+                )
+                new_complete = new_stored and stored_side_inventory_complete(
+                    new_dir, variant_id=new_variant
+                )
+            except SnapshotError as exc:  # a damaged composition (fail closed)
+                raise click.UsageError(str(exc)) from exc
+            inventory_evidence = release_inventory_evidence(
+                old_stored=old_stored,
+                new_stored=new_stored,
+                old_complete=old_complete,
+                new_complete=new_complete,
+                direct_pair=list(matched_keys) == [DIRECT_PAIR_KEY],
+                # D9 reads intent from the operand shape: a single-file NEW
+                # (not a directory/archive that discovered one member).
+                new_single_artifact=new_dir.is_file() and not is_package(new_dir),
+                # ADR-065 D2 (Codex review): a stored member --dso-only
+                # could not classify withholds that side's proof.
+                old_unclassified=old_unclassified,
+                new_unclassified=new_unclassified,
             )
 
             if fmt != "json":
@@ -580,8 +641,26 @@ def compare_release_cmd(
             # the enclosing dedup_validate_overrides_warnings() scope above
             # is what keeps a single risky override from logging its
             # validate_overrides() warning once per library (Codex review).
+            # ADR-065 D8 (Codex review): a matched member either stored
+            # package marks degraded is not compared -- its snapshot is the
+            # ELF-only stand-in -- but recorded `failed` on the scope axis.
+            # An unmatched one is `failed` on the record too (below), so a
+            # proven inventory on the other side never turns a degraded
+            # capture into a removal or an addition (twenty-seventh round).
+            try:
+                degraded = stored_degraded_members(
+                    old_dir,
+                    new_dir,
+                    old_map,
+                    new_map,
+                    old_variant=old_variant,
+                    new_variant=new_variant,
+                )
+            except SnapshotError as exc:  # a damaged marker section (Codex review)
+                raise click.UsageError(str(exc)) from exc
+            degraded_matched = degraded.matched
             library_results, worst_verdict, diff_pairs = _compare_release_libraries(
-                matched_keys,
+                [k for k in matched_keys if k not in degraded_matched],
                 old_map,
                 new_map,
                 old_debug_dir,
@@ -622,6 +701,61 @@ def compare_release_cmd(
                 depth=depth,
             )
 
+            for key in matched_keys:
+                if key in degraded_matched:
+                    library_results.append(
+                        {
+                            "library": old_map[key].name,
+                            "verdict": "failed",
+                            "reason": degraded_matched[key],
+                        }
+                    )
+                    click.echo(
+                        f"Failed: {old_map[key].name}: {degraded_matched[key]}", err=True
+                    )
+
+            # ADR-065 D1/D2/D6/D7 (S2): the per-member acquisition record.
+            # From here on `removed_keys`/`added_keys` are the *proven*
+            # sets (empty unless the lacking side's inventory is proven
+            # complete) -- what exit 8, the verdict bump, and the Markdown
+            # removed/added sections read; the raw set difference stays in
+            # the record and is reported as `unmatched_old`/`unmatched_new`.
+            scope_record = build_release_scope_record(
+                old_map,
+                new_map,
+                matched_keys,
+                library_results,
+                inventory_evidence,
+                old_failed={**degraded.old_unmatched, **old_unclassified},
+                new_failed={**degraded.new_unmatched, **new_unclassified},
+            )
+            # A member --dso-only could not classify is this run's own
+            # acquisition failure: an operational `ERROR` library result
+            # (the same rank a failed extraction takes, floored at exit 4
+            # under either --on-incomplete-scope policy), unless D9 narrowed
+            # it out of scope -- then it is listed on the record only (Codex
+            # review, twentieth round).
+            scope_states = {m.member: m.state for m in scope_record.members}
+            for key in sorted(set(old_unclassified) | set(new_unclassified)):
+                reason = old_unclassified.get(key) or new_unclassified[key]
+                if scope_states.get(key) is AcquisitionState.OUT_OF_SCOPE:
+                    continue
+                library_results.append(
+                    {"library": key, "verdict": "ERROR", "error": reason}
+                )
+                if _RELEASE_VERDICT_ORDER.get("ERROR", 0) > _RELEASE_VERDICT_ORDER.get(
+                    worst_verdict, 0
+                ):
+                    worst_verdict = "ERROR"
+                click.echo(f"Failed: {key}: {reason}", err=True)
+            # Decided by policy once; every consumer below (the writers, the
+            # sidecar, the stderr notice, the exit) reads this one decision.
+            scope_terms = comparison_scope_terms(
+                resolve_scope_decision(scope_record, on_incomplete_scope)
+            )
+            removed_keys = [m.member for m in scope_record.proven_removed_members]
+            added_keys = [m.member for m in scope_record.proven_added_members]
+
             if bundle_facts_out is not None and not no_bundle_analysis:
                 # Resolved here, not in the leaf write_bundle_facts_out() (see its docstring).
                 #
@@ -654,7 +788,9 @@ def compare_release_cmd(
                 # ELF-only entry with a warning, not a hard failure -- the
                 # migration changes *how* the input resolves, not this
                 # function's own degrade-rather-than-abort contract.
-                def _resolve_stranded_library(old_path: Path) -> AbiSnapshot:
+                def _resolve_stranded_library(
+                    old_path: Path,
+                ) -> StrandedLibraryResolution:
                     from .api_types import DumpRequest, InputSpec
                     from .service_dump_pipeline import (
                         execute_dump_request,
@@ -682,14 +818,24 @@ def compare_release_cmd(
                             depth=depth,
                         )
                         resolved = resolve_dump_request(dump_request)
-                        return execute_dump_request(resolved).snapshot
+                        return StrandedLibraryResolution(
+                            execute_dump_request(resolved).snapshot
+                        )
                     except Exception as exc:
-                        # Degrade rather than abort, but warn: lossy entry (Codex review).
+                        # Degrade rather than abort, but warn: lossy entry
+                        # (Codex review) -- and, since ADR-065 D8, carry the
+                        # failure with the snapshot so `write_bundle_facts_
+                        # out` persists this member as `failed` in-band
+                        # (`BundleFacts.degraded_members`), never as a
+                        # silently impoverished old side.
                         click.echo(f"{old_path.name}: ELF-only ({exc})", err=True)
-                        return AbiSnapshot(
-                            library=old_path.name,
-                            version="",
-                            elf=extraction.parse_elf_metadata(old_path),
+                        return StrandedLibraryResolution(
+                            AbiSnapshot(
+                                library=old_path.name,
+                                version="",
+                                elf=extraction.parse_elf_metadata(old_path),
+                            ),
+                            failure=f"ELF-only degraded capture: {exc}",
                         )
 
                 write_bundle_facts_out(
@@ -698,6 +844,17 @@ def compare_release_cmd(
                     manifest_path,
                     old_map,
                     resolve_stranded_library=_resolve_stranded_library,
+                    # ADR-065 D8 (Codex review): a stored OLD package's own
+                    # marker survives the recapture, matched or stranded.
+                    inherited_degraded=stored_side_degraded_members(
+                        old_dir, variant_id=old_variant
+                    ),
+                    # ADR-065 D2: this capture walked every member the
+                    # release enumerated on OLD (matched or stranded, a
+                    # degraded one marked), so it asserts a complete
+                    # inventory -- unless --dso-only left a member
+                    # unclassified, which the assertion must not paper over.
+                    inventory_complete=not old_unclassified,
                     # ADR-062 A1.7: the same explicit-or-embedded manifest
                     # resolution the bundle-analysis call below applies, so
                     # a stored OLD side's own manifest-drift contract is
@@ -764,13 +921,22 @@ def compare_release_cmd(
 
             bundle_result: BundleDiffResult | None = None
             if not no_bundle_analysis:
+                # ADR-065 D2: the bundle graph sees matched members and
+                # *proven* removals/additions only -- an unchecked member
+                # is absent from it, not a deleted provider (Codex review).
+                bundle_old_map, bundle_new_map = scoped_bundle_maps(
+                    old_map, new_map, scope_record
+                )
                 bundle_result, worst_verdict = _collect_bundle_result(
                     library_results,
-                    old_map,
-                    new_map,
+                    bundle_old_map,
+                    bundle_new_map,
                     worst_verdict,
                     manifest_path=manifest_path,
-                    bundle_system_providers=bundle_system_providers,
+                    bundle_system_providers=(
+                        *bundle_system_providers,
+                        *out_of_scope_provider_names(scope_record),
+                    ),
                     bundle_cohorts=bundle_cohorts,
                     policy=policy,
                     policy_file=resolve_bundle_policy_file(
@@ -780,6 +946,7 @@ def compare_release_cmd(
                     new_root=new_dir,
                     old_variant=old_variant,
                     new_variant=new_variant,
+                    scope_record=scope_record,
                 )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.
@@ -850,6 +1017,7 @@ def compare_release_cmd(
                     suppress=suppress,
                     pack_application=pack_application,
                     scope_public_headers=scope_public_headers,
+                    scope_terms=scope_terms,
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -879,6 +1047,7 @@ def compare_release_cmd(
                 suppress=suppress,
                 pack_application=pack_application,
                 scope_public_headers=scope_public_headers,
+                scope_terms=scope_terms,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)

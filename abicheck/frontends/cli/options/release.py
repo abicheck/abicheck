@@ -147,8 +147,22 @@ def release_options(func: F) -> F:
         "--fail-on-removed-library/--no-fail-on-removed-library",
         "fail_on_removed",
         default=False,
-        help="Exit 8 when a library present in old_dir is absent in new_dir. "
-        "(directory/package inputs only)",
+        help="Exit 8 when a library present in old_dir is proven removed in "
+        "new_dir -- NEW's inventory must be proven complete (ADR-065 D2); an "
+        "unmatched library under an unproven inventory is reported as an "
+        "incomplete scope instead. (directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--on-incomplete-scope",
+        "on_incomplete_scope",
+        type=click.Choice(["warn", "block"]),
+        default="warn",
+        show_default=True,
+        help="What an incompletely checked comparison scope does to the exit "
+        "code (ADR-065 D6): 'warn' reports every unchecked member and "
+        "contributes 0; 'block' contributes 1, folded with max() like the "
+        "contract-coverage axis. A run that completed no comparison at all "
+        "contributes 1 under either setting. (directory/package inputs only)",
     )(func)
     return func
 

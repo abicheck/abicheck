@@ -60,6 +60,11 @@ from .gate import (
     contract_coverage_blocks,
 )
 from .reconcile import ReportFindings, parse_report_findings
+from .scope_axis import (
+    declares_null_compatibility,
+    scope_completeness_exit,
+    scope_completeness_incomplete,
+)
 
 
 def parse_report_verdict(data: Mapping[str, Any]) -> Verdict | None:
@@ -91,37 +96,30 @@ class _LoadedReport:
     reason: str | None
     path: Path
     #: ADR-049 Phase 7's orthogonal contract-coverage contribution, read off
-    #: the report's own ``contract_coverage_exit_contribution`` (schema 2.26).
-    #: ``0`` for every report that carries none -- a run without
-    #: ``--contract`` selected no contract domain, so it cannot be
-    #: short of evidence for one.
+    #: the report's own ``contract_coverage_exit_contribution`` (schema 2.26);
+    #: ``0`` for a report that carries none (no ``--contract`` domain).
     contract_coverage_exit: int = 0
     #: Whether the report listed any coverage failure at all -- true even
-    #: when the contribution above is ``0`` because ``contract.unresolved=
-    #: warn`` accepted it. Reported, never folded into an exit code.
+    #: when ``contract.unresolved=warn`` zeroed the contribution above.
     contract_coverage_incomplete: bool = False
     #: Whether the report stated a usable contribution at all -- see
-    #: :func:`_contract_coverage_declared`. Distinguishes a real
-    #: ``contract.unresolved=warn`` acceptance from a silent or malformed
-    #: one, so prose about the run cannot claim a policy it never set.
+    #: :func:`_contract_coverage_declared`.
     contract_coverage_declared: bool = False
-    #: ``None`` on every failure branch below (unreadable, malformed gate,
-    #: operational error, not comparable), since none of those establish what
-    #: the comparison did or did not find. Otherwise the report's own
-    #: :func:`~abicheck.aggregate_findings.parse_report_findings` result.
+    #: ``None`` on every failure branch below (none establishes what the
+    #: comparison found); otherwise ``parse_report_findings``'s result.
     findings: ReportFindings | None = None
     #: P0.4's orthogonal analysis-assurance contribution, read off the
-    #: report's own ``analysis_assurance_exit_contribution``. The exact
-    #: sibling of :attr:`contract_coverage_exit` above, for the same reason:
-    #: a run without ``--require-complete-analysis`` never floors its exit
-    #: on this axis, so ``0`` is the honest default rather than a fallback.
+    #: report's own ``analysis_assurance_exit_contribution``; ``0`` for a run
+    #: without ``--require-complete-analysis``.
     analysis_assurance_exit: int = 0
-    #: Phase 0 item 6 ("every effective evaluation carries a digest"): read
-    #: straight off the per-target report's own ``effective_config_digest``
-    #: — never recomputed here. ``None`` for a report that carries none (a
-    #: pre-digest report, or one written with ``include_exit_decision=False``
-    #: — same fail-open default as the coverage/assurance fields above.
+    #: Phase 0 item 6: the report's own ``effective_config_digest``, never
+    #: recomputed; ``None`` when it carries none (fail-open like the above).
     effective_config_digest: str | None = None
+    #: ADR-065's scope-completeness contribution (``scope_axis``); ``0`` for
+    #: every scalar comparison and every complete release.
+    scope_completeness_exit: int = 0
+    #: Whether the report recorded an incomplete scope, gating or accepted.
+    scope_completeness_incomplete: bool = False
 
 
 def _malformed_gate_report(
@@ -162,13 +160,10 @@ def _not_comparable_contradiction_reason(
 
 
 def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
-    """The report's own P0.4 analysis-assurance contribution (``0``/``1``).
-
-    Sibling of :func:`_contract_coverage_exit`: read, not recomputed, since
-    ``GateInfo.from_scan_report`` reads only the nested compatibility gate,
-    never this orthogonal axis (Codex review). Fails open like its sibling,
-    reusing :func:`contract_coverage_blocks`' document-shape traversal.
-    """
+    """The report's own P0.4 analysis-assurance contribution (``0``/``1``):
+    read, not recomputed (``GateInfo.from_scan_report`` reads only the
+    nested compatibility gate -- Codex review); fails open like its sibling
+    :func:`_contract_coverage_exit`, over the same block traversal."""
     for block in contract_coverage_blocks(data):
         raw = block.get("analysis_assurance_exit_contribution")
         if _is_valid_contribution(raw):
@@ -186,12 +181,9 @@ def _effective_config_digest(data: Mapping[str, Any]) -> str | None:
     """The report's own ``effective_config_digest`` (Phase 0 item 6 of
     docs/contribute/plans/duplication-and-convergence-assessment.md).
 
-    Reuses :func:`contract_coverage_blocks`'s shape-aware traversal (a
-    ``compare``/release report carries this at the document root; a
-    *scan* report nests it under ``diff``/``report.diff`` -- the same
-    distinction :func:`_analysis_assurance_exit` already accounts for)
-    rather than a second, root-only lookup. A value not matching
-    :data:`_EFFECTIVE_CONFIG_DIGEST_RE` reads as absent, not passed through.
+    Reuses :func:`contract_coverage_blocks`'s shape-aware traversal (root
+    for ``compare``/release, ``diff``/``report.diff`` for a scan). A value
+    not matching :data:`_EFFECTIVE_CONFIG_DIGEST_RE` reads as absent.
     """
     for block in contract_coverage_blocks(data):
         raw = block.get("effective_config_digest")
@@ -457,6 +449,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
             contract_coverage_declared=_contract_coverage_declared(data),
             analysis_assurance_exit=_analysis_assurance_exit(data),
+            scope_completeness_exit=scope_completeness_exit(data),
+            scope_completeness_incomplete=scope_completeness_incomplete(data),
             # An operational ERROR means *a* library failed, not that nothing
             # was compared: real `bundle_findings`/`matrix_findings` from
             # whatever did complete are worth keeping, but never complete --
@@ -550,6 +544,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 _contract_coverage_declared(data) or contract_declared
             ),
             analysis_assurance_exit=max(_analysis_assurance_exit(data), assurance_axis),
+            scope_completeness_exit=scope_completeness_exit(data),
+            scope_completeness_incomplete=scope_completeness_incomplete(data),
             # No comparison ran at all for a true abort -- no partial finding
             # set to preserve. `BUNDLE_INCOMPLETE` (compat_verdict resolved
             # above) is the exception: its members did complete.
@@ -613,6 +609,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
             contract_coverage_declared=_contract_coverage_declared(data),
             analysis_assurance_exit=_analysis_assurance_exit(data),
+            scope_completeness_exit=scope_completeness_exit(data),
+            scope_completeness_incomplete=scope_completeness_incomplete(data),
             # A completed sibling/global comparison still leaves real
             # bundle_findings/matrix_findings even though this library
             # refused -- mirrors the ERROR/scan-abort branches.
@@ -708,30 +706,21 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 contract_coverage_incomplete=_contract_coverage_incomplete(data),
                 contract_coverage_declared=_contract_coverage_declared(data),
                 analysis_assurance_exit=_analysis_assurance_exit(data),
+                scope_completeness_exit=scope_completeness_exit(data),
+                scope_completeness_incomplete=scope_completeness_incomplete(data),
                 effective_config_digest=effective_config_digest,
             )
     verdict = parse_report_verdict(data)
     gate: GateInfo | None = None
     if verdict is not None:
         try:
-            # A scan-shaped document (``scan_schema_version`` present) is
-            # dispatched to `GateInfo.from_scan_report` FIRST, not
-            # `from_report_data` -- a native `scan` report carries its own
-            # top-level `run_outcome` (ADR-063 Phase 7) but no top-level
-            # `severity` block (a severity-scheme `scan --against` nests its
-            # gate at `diff.severity` instead), so `from_report_data`'s own
-            # "no severity -> read run_outcome alone" branch previously
-            # returned a `GateInfo` straight from the root `run_outcome`
-            # without ever reaching `from_scan_report`, which is the only
-            # reader that validates/cross-checks the nested `diff.severity`
-            # gate against it (Codex review, fresh evidence: a nested
-            # severity exit 4 paired with a root `run_outcome.gate: "none"`
-            # was accepted as nonblocking instead of failing closed).
-            # `from_scan_report` itself already folds the root `run_outcome`
-            # into whichever nested/legacy gate it finds
-            # (`_fold_top_level_run_outcome`), so this reordering loses no
-            # coverage for either shape -- only a non-scan report still
-            # prefers its own `severity` block first.
+            # A scan-shaped document goes to `GateInfo.from_scan_report`
+            # FIRST: it carries a root `run_outcome` but no root `severity`
+            # (a severity-scheme `scan --against` nests its gate at
+            # `diff.severity`), and only `from_scan_report` cross-checks that
+            # nested gate against the root block (Codex review: a nested exit
+            # 4 beside a root `gate: "none"` once read as nonblocking). It
+            # folds the root `run_outcome` itself, so nothing is lost.
             if "scan_schema_version" in data:
                 gate = GateInfo.from_scan_report(data)
                 if gate is None:
@@ -767,7 +756,14 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 ),
             )
     raw_verdict = data.get("verdict")
-    if verdict is not None:
+    if verdict is not None and declares_null_compatibility(data):
+        # ADR-065 D7: the gate above still folds `operational`/the scope
+        # axis; only the legacy root verdict is not a real result.
+        verdict = None
+        unavailable_reason = (
+            "no comparison completed (run_outcome.compatibility is null)"
+        )
+    elif verdict is not None:
         unavailable_reason = None
     elif raw_verdict == _BOOTSTRAP_VERDICT:
         unavailable_reason = "no baseline published yet (bootstrap)"
@@ -787,6 +783,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         contract_coverage_incomplete=_contract_coverage_incomplete(data),
         contract_coverage_declared=_contract_coverage_declared(data),
         analysis_assurance_exit=_analysis_assurance_exit(data),
+        scope_completeness_exit=scope_completeness_exit(data),
+        scope_completeness_incomplete=scope_completeness_incomplete(data),
         # Only a report that produced a real verdict has a finding set worth
         # reading: a verdictless one is unavailable, and its `changes` array
         # (if any) describes a comparison that never reached a conclusion.

@@ -57,7 +57,12 @@ from .checker import DiffResult
 from .cli import _normalize_binary_input, _safe_write_output
 from .cli_compare_receipt import record_release_resolved_config
 from .cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
-from .errors import ProfileMismatchError, ScopeMismatchError
+from .errors import (
+    IncompatibleSnapshotSchemaError,
+    ProfileMismatchError,
+    ScopeMismatchError,
+    UnsupportedArtifactError,
+)
 from .model import AbiSnapshot
 from .reporter import to_json
 
@@ -410,6 +415,12 @@ def _compare_one_library(
             "verdict": "not_comparable",
             "reason": str(exc),
         }
+    except (IncompatibleSnapshotSchemaError, UnsupportedArtifactError) as exc:
+        # ADR-065 D6: an artifact this build cannot analyze at all (a stored
+        # snapshot newer than this reader, a container format with no
+        # backend) is `unsupported` -- an incompleteness signal on the
+        # scope axis, not an operational `ERROR` crash floored to exit 4.
+        return {"library": old_path.name, "verdict": "unsupported", "reason": str(exc)}
     except (click.ClickException, click.UsageError) as exc:
         return {
             "library": old_path.name,
@@ -609,6 +620,12 @@ def _compare_release_libraries(
                 click.echo(
                     f"Not comparable: {entry['library']}: {entry['reason']}", err=True
                 )
+        elif v == "unsupported":
+            click.echo(
+                f"Unsupported: {entry['library']}: {entry.get('reason', '')}", err=True
+            )
+        elif v == "failed":
+            click.echo(f"Failed: {entry['library']}: {entry.get('reason', '')}", err=True)
         if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(
             worst_verdict, 0
         ):

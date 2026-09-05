@@ -52,15 +52,10 @@ addition to that dataclass) rather than squeezed into any single
 
 **Why every per-library snapshot must agree on one `source_schema_version`.**
 `PackageManifest.versions` carries exactly one `StorageVersions` for the
-whole package — there is no per-artifact schema-version axis for
-`export_bundle_facts` to read back from later. Every real `BundleFacts`
-producer (`bundle_facts.capture_bundle_facts`) captures every member
-snapshot from the same in-process `dump`/`compare` run, so this is not a
-narrowing of what can actually occur — a hand-edited or corrupted document
-mixing schema versions across libraries is refused outright (fail closed,
-matching this package's own established convention) rather than silently
-picking one arbitrarily and lying about the other library's real
-provenance.
+whole package (no per-artifact axis to read back later), and every real
+producer captures every member in one run -- so a document mixing schema
+versions across libraries is hand-edited or corrupt and is refused (fail
+closed) rather than one version being picked arbitrarily.
 """
 
 from __future__ import annotations
@@ -69,9 +64,13 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..errors import IncompatibleSnapshotSchemaError
+from .bundle_facts_validation import (
+    require_degraded_marker_version,
+    require_degraded_members_known,
+    validated_inventory_complete,
+)
 from .dto import (
     BUNDLE_COMPOSITION_SECTION_KIND,
-    SECTION_SCHEMA_VERSIONS,
     SectionDTO,
     bundle_composition_from_dto,
     bundle_composition_to_dto,
@@ -97,29 +96,17 @@ __all__ = [
 ]
 
 #: Self-describing document-type marker, duplicated here rather than
-#: imported — the same reason `storage.bundle_facts_validation
-#: .BUNDLE_ARCHIVE_ARTIFACT_TYPE` duplicates the plain-JSON marker's sibling
-#: value for the G40 archive *container* instead of importing
-#: `bundle_facts.py`: `storage/` may depend only on `model`
-#: (`storage/AGENTS.md`), so it cannot import the module that owns this
-#: constant. Must always equal `abicheck.bundle_facts
-#: .BUNDLE_FACTS_ARTIFACT_TYPE` — pinned by
-#: `tests/unit/storage/test_import_bundle_facts.py`'s own cross-check so the
-#: two cannot silently drift apart.
+#: imported (`storage/` may depend only on `model` -- `storage/AGENTS.md`),
+#: the same reason `bundle_facts_validation.BUNDLE_ARCHIVE_ARTIFACT_TYPE`
+#: duplicates its sibling. Must equal `abicheck.bundle_facts
+#: .BUNDLE_FACTS_ARTIFACT_TYPE`; `tests/unit/storage/test_import_bundle_facts.py` pins it.
 BUNDLE_FACTS_ARTIFACT_TYPE = "abicheck.bundle-facts"
 
-#: `abicheck.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION`, duplicated for the
-#: identical reason as `BUNDLE_FACTS_ARTIFACT_TYPE` above -- required
-#: alongside it, since `bundle_facts_serialization.bundle_facts_from_dict`
-#: rejects a document declaring `artifact_type` at a `schema_version` below
-#: 2 (the version `artifact_type` itself was introduced at) as
-#: self-contradictory. `export_bundle_facts` always emits the *current*
-#: shape, exactly like `bundle_facts_to_dict()` itself does — never
-#: whatever version happened to be recorded on the package's own
-#: `StorageVersions.source_schema_version` axis, which tracks each
-#: per-library `AbiSnapshot`'s schema, a wholly independent axis from the
-#: `BundleFacts` container's own shape.
-_BUNDLE_FACTS_SCHEMA_VERSION = 2
+#: `abicheck.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION`/`..._BASE_SCHEMA_VERSION`, duplicated as
+#: `BUNDLE_FACTS_ARTIFACT_TYPE` is. `export_bundle_facts` applies `bundle_facts_to_dict()`'s
+#: writer rule (base, or 3 once `degraded_members` is non-empty -- ADR-065 D8).
+_BUNDLE_FACTS_SCHEMA_VERSION = 3
+_BUNDLE_FACTS_BASE_SCHEMA_VERSION = 2
 
 #: `abicheck.bundle_facts.DEFAULT_VARIANT_FINGERPRINT`, duplicated for the
 #: identical reason as `BUNDLE_FACTS_ARTIFACT_TYPE` above.
@@ -172,23 +159,21 @@ def _validated_filesystem_aliases(raw: Any) -> dict[str, list[str]]:
     return validated
 
 
-def _validated_library_filenames(raw: Any) -> dict[str, str]:
-    """`bundle_facts_to_dict()`'s own `library_filenames` shape
-    (`{library: filename}`), validated the same way
-    `_validated_filesystem_aliases` is, for the identical reason."""
+def _validated_library_filenames(
+    raw: Any, field: str = "library_filenames"
+) -> dict[str, str]:
+    """`bundle_facts_to_dict()`'s own `library_filenames` shape (`{library: filename}`) -- and, since ADR-065 D8, its identically-shaped `degraded_members` (`{library: failure reason}`) -- validated the same way `_validated_filesystem_aliases` is, for the identical reason."""
     if raw is _ABSENT:
         return {}
     if not isinstance(raw, Mapping):
         raise ValueError(
-            f"bundle_facts_document['library_filenames'] must be a mapping, "
-            f"not {type(raw).__name__} ({raw!r})"
+            f"bundle_facts_document['{field}'] must be a mapping, not {type(raw).__name__} ({raw!r})"
         )
     validated: dict[str, str] = {}
     for library, filename in raw.items():
         if not isinstance(library, str) or not isinstance(filename, str):
             raise ValueError(
-                "bundle_facts_document['library_filenames'] must map strings "
-                f"to strings, got {library!r}: {filename!r}"
+                f"bundle_facts_document['{field}'] must map strings to strings, got {library!r}: {filename!r}"
             )
         validated[library] = filename
     return validated
@@ -491,14 +476,8 @@ def import_bundle_facts(
         )
     raw_snapshots = bundle_facts_document["per_library_snapshots"]
     _mapping(raw_snapshots, "bundle_facts_document['per_library_snapshots']")
-    # An explicitly *present*, empty mapping is a real, valid BundleFacts --
-    # the canonical `bundle_facts_from_dict` reader accepts it (a bundle
-    # with no libraries is not a contradiction, just a vacuous one), and a
-    # dedicated regression test pins that acceptance. Only the key's
-    # *absence* means malformed input, checked above -- Codex review, a
-    # second finding: an earlier version of this function rejected an
-    # empty-but-present mapping too, which this adapter's own claim to
-    # "accept what the canonical reader accepts" cannot allow.
+    # A present-but-empty mapping is a valid (vacuous) BundleFacts, as the
+    # canonical reader accepts; only the key's *absence* is malformed (Codex).
 
     # `resolve_ref_ids`, not the raw library name: unlike
     # `import_legacy_snapshot`'s own caller-supplied `artifact_id`, nothing
@@ -507,6 +486,16 @@ def import_bundle_facts(
     # preserved on the artifact's own `native_identity` for
     # `export_bundle_facts` to recover.
     artifact_ids_by_library = resolve_ref_ids(list(raw_snapshots), opaque_prefix="lib")
+    # Before any per-library write: `ObjectStore` has no rollback (CodeRabbit).
+    degraded_members = _validated_library_filenames(  # ADR-065 D8, same shape
+        bundle_facts_document.get("degraded_members", _ABSENT), "degraded_members"
+    )
+    require_degraded_marker_version(  # an absent key is a v1 document, not the default
+        degraded_members,
+        raw_container_schema_version if "schema_version" in bundle_facts_document else 1,
+        what="bundle_facts_document",
+    )
+    require_degraded_members_known(degraded_members, raw_snapshots, what="bundle_facts_document")
 
     artifact_refs = []
     section_schema_versions: dict[str, int] = {}
@@ -569,15 +558,19 @@ def import_bundle_facts(
         "library_filenames": _validated_library_filenames(
             bundle_facts_document.get("library_filenames", _ABSENT)
         ),
+        "degraded_members": degraded_members,
+        # ADR-065 D2: verbatim -- the package proves what the capture asserted.
+        "inventory_complete": validated_inventory_complete(bundle_facts_document.get("inventory_complete", False)),
     }
     composition_dto = bundle_composition_to_dto(composition_payload)
     composition_ref = ObjectRef(
         kind=BUNDLE_COMPOSITION_SECTION_KIND,
         digest=store.put(composition_dto.to_dict()),
     )
-    section_schema_versions[BUNDLE_COMPOSITION_SECTION_KIND] = SECTION_SCHEMA_VERSIONS[
-        BUNDLE_COMPOSITION_SECTION_KIND
-    ]
+    # The DTO's own stamp (v1 without a degraded member, so pre-S2 readers still open it).
+    section_schema_versions[BUNDLE_COMPOSITION_SECTION_KIND] = (
+        composition_dto.section_schema_version
+    )
 
     variant = VariantRef(
         variant_id=variant_id,
@@ -789,12 +782,19 @@ def export_bundle_facts(
             "was hand-edited"
         )
 
+    degraded_members = composition.get("degraded_members", {})
     return {
         "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
-        "schema_version": _BUNDLE_FACTS_SCHEMA_VERSION,
+        "schema_version": (
+            _BUNDLE_FACTS_SCHEMA_VERSION
+            if degraded_members
+            else _BUNDLE_FACTS_BASE_SCHEMA_VERSION
+        ),
         "variant_fingerprint": raw_variant_fingerprint,
         "per_library_snapshots": per_library_snapshots,
         "filesystem_aliases": composition.get("filesystem_aliases", {}),
         "library_filenames": composition.get("library_filenames", {}),
+        "degraded_members": degraded_members,
+        "inventory_complete": validated_inventory_complete(composition.get("inventory_complete", False)),
         "manifest": exported_manifest,
     }

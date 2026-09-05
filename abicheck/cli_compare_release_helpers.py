@@ -38,28 +38,42 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import click
 
-from .bundle import BundleDiffResult, render_bundle_findings_markdown
+from .bundle import BundleDiffResult
 from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
 from .errors import SnapshotError
 from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 from .model import AbiSnapshot
+from .report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
+from .report.render_release_markdown import (  # re-exported, moved (ADR-065 S2)
+    _release_md_bundle_findings as _release_md_bundle_findings,
+    _release_md_changed_libraries as _release_md_changed_libraries,
+    _release_md_coverage_warnings as _release_md_coverage_warnings,
+    _release_md_libraries_table as _release_md_libraries_table,
+    _release_md_matrix_findings as _release_md_matrix_findings,
+)
 from .workflows.gate import (
     GateOptions as GateOptions,  # re-exported, ADR-064
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
     apply_release_gate_pack as apply_release_gate_pack,  # re-exported, ADR-064
     resolve_release_exit_decision_for_report,
     resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
+    resolve_scope_decision,
+)
+from .workflows.release_scope import (
+    StrandedLibraryResolution,
+    scope_manifest_to_members,
 )
 
 if TYPE_CHECKING:
     from .bundle_manifest import InstantiationManifest
+    from .model.scope_acquisition import ScopeAcquisitionRecord
     from .pack_application import PackApplication
     from .workflows.extraction import PackageExtractor
     from .workflows.gate import SeverityConfig
@@ -100,7 +114,9 @@ def _release_global_verdict(bundle_result: BundleDiffResult | None, matrix_resul
 #: dominates the release's own reported "verdict"), which is exactly the
 #: right behavior for the *reported* release verdict but the wrong one for
 #: `run_outcome.compatibility`, a genuinely separate axis.
-_RELEASE_OPERATIONAL_SENTINELS = frozenset({"ERROR", "not_comparable"})
+_RELEASE_OPERATIONAL_SENTINELS = frozenset(
+    {"ERROR", "not_comparable", "unsupported", "failed"}
+)
 
 
 def _release_completed_compatibility_verdict(
@@ -232,13 +248,15 @@ def _collect_release_warnings(
     new_map: dict[str, Path],
 ) -> None:
     """Collect warning messages for unmatched libraries."""
+    # ADR-065 D2: the raw set difference is *unmatched*, never removed/added.
     for k in removed_keys:
-        warning_msgs.append(f"Warning: library removed: {old_map[k].name}")
+        warning_msgs.append(f"Warning: library unmatched (no counterpart on NEW): {old_map[k].name}")
     for k in added_keys:
-        warning_msgs.append(f"Info: library added: {new_map[k].name}")
+        warning_msgs.append(f"Info: library unmatched (no counterpart on OLD): {new_map[k].name}")
     if not matched_keys:
         warning_msgs.append(
-            "Warning: no matching library pairs found between OLD and NEW inputs."
+            "Warning: no matching library pairs found between OLD and NEW inputs -- "
+            "no comparison completed (ADR-065 D7)."
         )
 
 
@@ -326,6 +344,7 @@ def _run_bundle_analysis(
     new_root: Path | None = None,
     old_variant: str | None = None,
     new_variant: str | None = None,
+    scope_record: ScopeAcquisitionRecord | None = None,
 ) -> BundleDiffResult | None:
     """Run bundle-level (ADR-023) analysis on a compare-release run.
 
@@ -354,26 +373,18 @@ def _run_bundle_analysis(
     -- *not* the library's file basename), matching what
     ``BundleSnapshot.resolution`` itself keys providers/consumers by.
 
-    G38 stabilization Phase 12: both stages (the core
-    ``compare_bundle()`` suite and the Phase 4 signature-evidence gate)
-    now run through the single :func:`abicheck.bundle_analysis.
-    analyze_bundle` orchestrator -- the same one
-    :func:`abicheck.bundle_facts.compare_bundle_from_facts` calls for a
-    stored-baseline comparison -- rather than being sequenced by hand here.
-    This function's own job narrows to what only the live release path
-    needs: building the two live ``BundleSnapshot``\\ s, loading an
-    explicit ``--instantiation-manifest``, and re-surfacing ``analyze_bundle``'s
-    structured ``analysis_errors`` as the same ``click.echo(...,
-    err=True)`` warnings this function has always emitted.
+    G38 stabilization Phase 12: both stages run through the single
+    :func:`abicheck.bundle_analysis.analyze_bundle` orchestrator (shared
+    with :func:`abicheck.bundle_facts.compare_bundle_from_facts`); this
+    function only builds the two live ``BundleSnapshot``\\ s, resolves the
+    manifest, and re-surfaces ``analysis_errors`` as stderr warnings.
 
     *old_root*/*new_root* (ADR-062 A1.7) are the two release operands
-    themselves (a stored ``ProjectSnapshot`` package directory or a live
-    directory), used only for the embedded-``InstantiationManifest``
-    fallback below -- a package whose selected variant carries zero
-    artifacts has no entry in *old_map*/*new_map* at all to search for one
-    (Codex review, fresh evidence: a valid empty ``BundleFacts`` package
-    can still carry a manifest, and the required-symbol check was silently
-    skipped for it). *old_variant*/*new_variant* select which variant's manifest that fallback reads.
+    themselves, used only for the embedded-``InstantiationManifest``
+    fallback -- a package whose selected variant carries zero artifacts has
+    no *old_map*/*new_map* entry to search (Codex review). *old_variant*/
+    *new_variant* select which variant's manifest that fallback reads.
+    *scope_record* (ADR-065 D2) scopes that manifest to the retained members.
     """
     from .bundle import build_bundle_snapshot_mixed
     from .bundle_analysis import analyze_bundle
@@ -388,6 +399,7 @@ def _run_bundle_analysis(
         old_variant=old_variant,
         new_variant=new_variant,
     )
+    manifest, manifest_note = scope_manifest_to_members(manifest, scope_record)
     if not old_map and not new_map and manifest is None:
         return None
     try:
@@ -428,6 +440,8 @@ def _run_bundle_analysis(
     # orchestrator itself is a pure/leaf function with no CLI-echoing
     # concerns of its own (it's shared with the stored-facts path, which
     # has no `click` context to echo into).
+    if manifest_note is not None:
+        result.analysis_errors.append(manifest_note)
     for err in result.analysis_errors:
         click.echo(f"Warning: {err}", err=True)
 
@@ -603,8 +617,10 @@ def write_bundle_facts_out(
     manifest_path: Path | None,
     old_map: dict[str, Path],
     *,
-    resolve_stranded_library: Callable[[Path], AbiSnapshot],
+    resolve_stranded_library: Callable[[Path], AbiSnapshot | StrandedLibraryResolution],
+    inherited_degraded: Mapping[str, str] | None = None,
     resolved_manifest: InstantiationManifest | None = None,
+    inventory_complete: bool = False,
 ) -> None:
     """Persist the OLD side's per-library snapshots (plus manifest, if any)
     to *bundle_facts_out* as a :class:`~abicheck.bundle_facts.BundleFacts`
@@ -687,14 +703,14 @@ def write_bundle_facts_out(
     fresh evidence: this parameter's absence meant a captured
     ``--bundle-facts-out`` baseline silently dropped that contract).
     *manifest_path* is still respected when *resolved_manifest* is
-    `None`, for a caller that predates this parameter.
+    `None`. *inherited_degraded* (ADR-065 D8) is a stored OLD package's own
+    persisted marker, keyed like *old_map*: it stays marked in this recapture
+    even though its ELF-only stand-in reloads fine (Codex review).
+    *inventory_complete* (ADR-065 D2): the caller asserts this capture covers
+    every member OLD enumerated (``BundleFacts.inventory_complete``).
 
     Failure here (a bad *manifest_path*, an unwritable *bundle_facts_out*)
-    is a genuine usage error -- unlike bundle *analysis* itself, which
-    degrades to a warning on failure (see ``_run_bundle_analysis``'s own
-    docstring), writing an explicitly-requested output file that silently
-    fails would leave a user believing a baseline was captured when it
-    was not.
+    is a usage error, unlike bundle *analysis* (which degrades to a warning).
     """
     from .bundle_facts import capture_bundle_facts
     from .bundle_manifest import load_manifest
@@ -708,31 +724,37 @@ def write_bundle_facts_out(
         else:
             manifest = load_manifest(manifest_path) if manifest_path is not None else None
 
-        # Canonicalize DiffResult.library itself (the real, possibly-
-        # versioned filename each compared snapshot reports) the same way
-        # old_map's own keys were derived, rather than matching by basename
-        # against old_map's *values* -- a stored operand's value is a
-        # materialized sub-package directory (its own display dirname, not
-        # the real library filename), which a basename match silently
-        # misses; the same successful diff pair then also (wrongly) reads
-        # as "stranded" below and gets appended a second time under its
-        # real canonical key (Codex review, fresh evidence: a stored
-        # comparison's captured baseline could contain the same library
-        # twice, reading as false library/provider findings). Falls back to
-        # the basename itself only if truly unmatched (shouldn't happen for
-        # a genuine diff_pairs entry, but degrades safely either way).
+        # Canonicalize DiffResult.library the way old_map's keys were derived,
+        # not by basename against old_map's *values* -- a stored operand's value
+        # is a materialized sub-package dirname a basename match misses, so the
+        # pair read as "stranded" too and was captured twice (Codex review).
         per_library_snapshots: dict[str, AbiSnapshot] = {}
         for diff, old_snapshot in diff_pairs:
             key = _canonical_library_key(Path(diff.library))
             if key not in old_map:
                 key = Path(diff.library).name
             per_library_snapshots[key] = old_snapshot
+        # ADR-065 D8: a failed stranded dump is persisted *with* its failure
+        # (`BundleFacts.degraded_members`); a bare AbiSnapshot means resolved.
+        degraded_members: dict[str, str] = {
+            k: v for k, v in (inherited_degraded or {}).items() if k in old_map
+        }
         for key, old_path in old_map.items():
             if key in per_library_snapshots:
                 continue
-            per_library_snapshots[key] = resolve_stranded_library(old_path)
+            resolved = resolve_stranded_library(old_path)
+            if isinstance(resolved, StrandedLibraryResolution):
+                per_library_snapshots[key] = resolved.snapshot
+                if resolved.failure is not None:
+                    degraded_members.setdefault(key, resolved.failure)
+            else:
+                per_library_snapshots[key] = resolved
         facts = capture_bundle_facts(
-            per_library_snapshots, manifest=manifest, library_paths=dict(old_map)
+            per_library_snapshots,
+            manifest=manifest,
+            library_paths=dict(old_map),
+            degraded_members=degraded_members,
+            inventory_complete=inventory_complete,
         )
         save_bundle_facts(facts, bundle_facts_out)
     except (OSError, ValueError, SnapshotError) as exc:
@@ -752,6 +774,7 @@ def _collect_bundle_result(
     new_root: Path | None = None,
     old_variant: str | None = None,
     new_variant: str | None = None,
+    scope_record: ScopeAcquisitionRecord | None = None,
 ) -> tuple[BundleDiffResult | None, str]:
     """Extract stashed DiffResults, run bundle analysis, update worst verdict.
 
@@ -800,6 +823,7 @@ def _collect_bundle_result(
         new_root=new_root,
         old_variant=old_variant,
         new_variant=new_variant,
+        scope_record=scope_record,
     )
     if bundle_result is not None:
         bundle_result.policy_file = policy_file  # G38 Phase 16
@@ -923,8 +947,17 @@ def _exit_compare_release(
     severity_exit_code: int | None = None,
     *,
     contract_coverage_exit_contribution: int = 0,
+    incomplete_scope_exit_contribution: int = 0,
+    no_comparison_completed_exit_contribution: int = 0,
 ) -> None:
     """Exit compare-release with ABI-compatible status code mapping.
+
+    *incomplete_scope_exit_contribution*/*no_comparison_completed_exit_
+    contribution* (ADR-065 D6/D7) are two more ``0``/``1`` orthogonal
+    floors with exactly the coverage axis's rank in both schemes, so they
+    are folded into one floor with it below and then treated identically.
+    *removed_keys* is the **proven** removal set since S2 (D2), never the
+    raw ``unmatched_old`` set difference.
 
     When *severity_exit_code* is not None, the severity-aware scheme is in
     effect: that code replaces the verdict-based 2/4 mapping, except that
@@ -952,6 +985,11 @@ def _exit_compare_release(
     lower a real 2/4/8, and is `0` (a no-op fold) for every run that never
     passed ``--contract``.
     """
+    contract_coverage_exit_contribution = max(
+        contract_coverage_exit_contribution,
+        incomplete_scope_exit_contribution,
+        no_comparison_completed_exit_contribution,
+    )
     if worst_verdict == "not_comparable":
         sys.exit(16)
     if severity_exit_code is not None:
@@ -1014,11 +1052,14 @@ def _format_release_summary(
     policy: str = DEFAULT_POLICY_PROFILE, policy_file_path: Path | None = None,
     suppress: Path | None = None, pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
+    scope_terms: ComparisonScopeTerms | None = None,
 ) -> str:
-    """Format the release comparison summary as JSON, markdown, or JUnit XML."""
+    """Format the release comparison summary as JSON, markdown, or JUnit XML.
+    *scope_terms* (ADR-065 S2): the one resolved scope every format reads."""
     if fmt == "junit":
         return _format_release_junit(
             diff_pairs, matrix_result, library_results, severity_config=severity_config,
+            scope_terms=scope_terms,
         )
     if fmt == "json":
         return _format_release_json(
@@ -1032,18 +1073,12 @@ def _format_release_summary(
             policy=policy, policy_file_path=policy_file_path,
             suppress=suppress, pack_application=pack_application,
             scope_public_headers=scope_public_headers,
+            scope_terms=scope_terms,
         )
     return _format_release_markdown(
-        worst_verdict,
-        old_dir,
-        new_dir,
-        library_results,
-        removed_keys,
-        added_keys,
-        old_map,
-        new_map,
-        bundle_result,
-        matrix_result,
+        worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
+        old_map, new_map, bundle_result, matrix_result,
+        scope_section=scope_terms.section if scope_terms is not None else None,
     )
 
 
@@ -1053,8 +1088,12 @@ def _format_release_junit(
     library_results: list[dict[str, object]],
     *,
     severity_config: SeverityConfig | None = None,
+    scope_terms: ComparisonScopeTerms | None = None,
 ) -> str:
     """Render the release summary as a JUnit XML report.
+
+    *scope_terms* (ADR-065 S2): ``unsupported`` errors only when the
+    completeness decision blocks; see ``report.junit_scope`` otherwise.
 
     *severity_config*, when given, is forwarded to
     :func:`to_junit_xml_multi` (Codex review on #549) so a finding a severity
@@ -1079,8 +1118,11 @@ def _format_release_junit(
     # testsuite so CI dashboards reading the JUnit report see the failure.
     if matrix_result is not None:
         pairs.append((matrix_result, None))
+    # An `unsupported`/`failed` member is the scope suite's to render
+    # (`append_scope_suite`: skipped under `warn`, an error under `block`)
+    # -- listing it here too emitted the same failure twice (CodeRabbit).
     error_libs = [
-        {**entry, "error": entry.get("reason", "not comparable")}
+        {**entry, "error": entry.get("reason", entry["verdict"])}
         if entry.get("verdict") == "not_comparable"
         else entry
         for entry in library_results
@@ -1090,6 +1132,7 @@ def _format_release_junit(
         pairs,
         severity_config=severity_config,
         error_libraries=error_libs if error_libs else None,
+        comparison_scope=scope_terms.section if scope_terms is not None else None,
     )
 
 
@@ -1112,37 +1155,50 @@ def _format_release_json(
     policy: str = DEFAULT_POLICY_PROFILE, policy_file_path: Path | None = None,
     suppress: Path | None = None, pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
+    scope_terms: ComparisonScopeTerms | None = None,
 ) -> str:
-    """Render the release summary as a JSON document."""
+    """Render the release summary as a JSON document. ``unmatched_old``/
+    ``unmatched_new`` are the raw set difference (ADR-065 D2), read off the
+    record; *removed_keys*/*added_keys* are the **proven** sets ``exit`` reads."""
     changed_libraries = [
         str(lib["library"])
         for lib in library_results
-        if str(lib.get("verdict")) not in ("NO_CHANGE", "ERROR")
+        if str(lib.get("verdict")) != "NO_CHANGE"
+        and str(lib.get("verdict")) not in _RELEASE_OPERATIONAL_SENTINELS
     ]
     from .report.not_comparable import run_outcome_dict_for_release
+    from .workflows.release_scope import release_global_ran, unmatched_names
+    terms = scope_terms if scope_terms is not None else comparison_scope_terms(resolve_scope_decision(None, None))
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
-    exit_dict = resolve_release_exit_decision_for_report(worst_verdict, fail_on_removed, removed_keys, severity_exit_code, contract_coverage_exit_contribution, library_results, release_global_verdict).to_dict()
+    exit_dict = resolve_release_exit_decision_for_report(
+        worst_verdict, fail_on_removed, removed_keys, severity_exit_code,
+        contract_coverage_exit_contribution, library_results, release_global_verdict,
+        incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
+        no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
+    ).to_dict()
+    record = terms.record
     summary: dict[str, object] = {
         "verdict": worst_verdict,
         "old_dir": str(old_dir),
         "new_dir": str(new_dir),
         "libraries": library_results,
         "changed_libraries": changed_libraries,
-        "unmatched_old": [old_map[k].name for k in removed_keys],
-        "unmatched_new": [new_map[k].name for k in added_keys],
+        "unmatched_old": unmatched_names(record, side="old") if record else [old_map[k].name for k in removed_keys],
+        "unmatched_new": unmatched_names(record, side="new") if record else [new_map[k].name for k in added_keys],
         "warnings": warning_msgs,
         "exit": exit_dict,
         "run_outcome": run_outcome_dict_for_release(
             _release_completed_compatibility_verdict(
                 library_results,
                 release_global_verdict,
-                release_global_ran=(
-                    bundle_result is not None or matrix_result is not None
-                ),
+                release_global_ran=release_global_ran(bundle_result, matrix_result, record),
             ),
             exit_dict,
+            scope=terms.completeness,
         ),
     }
+    if terms.section is not None:
+        summary["comparison_scope"] = terms.section
     # Severity config block (present only when a severity setting was in effect), mirroring
     # compare mode so downstream consumers (e.g. the PR-comment renderer) can see
     # which categories are gated to error and bucket findings accordingly.
@@ -1251,7 +1307,7 @@ def _format_release_json(
     digest, fields = _release_summary_effective_config_block(
         severity_config, policy=policy, policy_file_path=policy_file_path,
         suppress=suppress, pack_application=pack_application,
-        scope_public_headers=scope_public_headers,
+        scope_public_headers=scope_public_headers, on_incomplete_scope=terms.policy,
     )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields
@@ -1289,9 +1345,18 @@ def _format_release_markdown(
     new_map: dict[str, Path],
     bundle_result: BundleDiffResult | None,
     matrix_result: DiffResult | None,
+    scope_section: Mapping[str, object] | None = None,
 ) -> str:
-    """Render the release summary as a Markdown document."""
+    """Render the release summary as a Markdown document.
+
+    *scope_section* (ADR-065 S2) is the JSON ``comparison_scope`` mapping;
+    rendered by ``report.comparison_scope.render_comparison_scope_markdown``,
+    and when it says no comparison completed the verdict row says so too,
+    rather than showing the compared-members floor ``NO_CHANGE`` as the
+    whole scope's answer.
+    """
     from .cli_compare_receipt import _release_md_library_findings
+    from .report.comparison_scope import render_comparison_scope_markdown
 
     _VERDICT_EMOJI = {
         "NO_CHANGE": "✅",
@@ -1301,7 +1366,14 @@ def _format_release_markdown(
         "BREAKING": "❌",
         "ERROR": "💥",
         "not_comparable": "❓",
+        "unsupported": "🚫",
+        "failed": "💥",
     }
+    verdict_cell = f"{_VERDICT_EMOJI.get(worst_verdict, '?')} `{worst_verdict}`"
+    if scope_section is not None and scope_section.get("no_comparison_completed"):
+        verdict_cell = "🛑 no comparison completed"
+    elif scope_section is not None and scope_section.get("completeness") == "incomplete":
+        verdict_cell += " (compared members only — scope incompletely checked)"
     lines: list[str] = [
         "# ABI Release Comparison",
         "",
@@ -1309,7 +1381,7 @@ def _format_release_markdown(
         "|---|---|",
         f"| **Old** | `{old_dir}` |",
         f"| **New** | `{new_dir}` |",
-        f"| **Verdict** | {_VERDICT_EMOJI.get(worst_verdict, '?')} `{worst_verdict}` |",
+        f"| **Verdict** | {verdict_cell} |",
     ]
     bundle_count = len(bundle_result.bundle_findings) if bundle_result else 0
     if bundle_result is not None:
@@ -1318,6 +1390,8 @@ def _format_release_markdown(
             f"| **Bundle** | {bundle_em} `{bundle_result.bundle_verdict.value}` "
             f"({bundle_count} cross-library finding{'s' if bundle_count != 1 else ''}) |",
         )
+    if scope_section is not None:
+        lines += render_comparison_scope_markdown(scope_section)
     lines += _release_md_libraries_table(library_results, _VERDICT_EMOJI)
     lines += _release_md_coverage_warnings(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
@@ -1325,77 +1399,3 @@ def _format_release_markdown(
     lines += _release_md_bundle_findings(bundle_result)
     lines += _release_md_matrix_findings(matrix_result)
     return "\n".join(lines)
-
-
-def _release_md_libraries_table(
-    library_results: list[dict[str, object]],
-    emoji: dict[str, str],
-) -> list[str]:
-    """Markdown per-library results table."""
-    lines = [
-        "",
-        "## Libraries",
-        "",
-        "| Library | Verdict | Breaking | Source | Risk | Additions |",
-        "|---|---|---|---|---|---|",
-    ]
-    for lib in library_results:
-        em = emoji.get(str(lib["verdict"]), "?")
-        lines.append(
-            f"| `{lib['library']}` | {em} `{lib['verdict']}` "
-            f"| {lib.get('breaking', '—')} | {lib.get('source_breaks', '—')} "
-            f"| {lib.get('risk_changes', '—')} | {lib.get('compatible_additions', '—')} |"
-        )
-    return lines
-
-
-def _release_md_coverage_warnings(library_results: list[dict[str, object]]) -> list[str]:
-    """Per-library `coverage_warnings` (e.g. same-binary) -- absent when none carry any (Codex review: the release table alone omits this signal)."""
-    entries = [f"- `{lib['library']}`: {w}" for lib in library_results for w in cast(list[str], lib.get("coverage_warnings") or [])]
-    return ["", "## ⚠️ Coverage Warnings", "", *entries] if entries else []
-
-
-def _release_md_changed_libraries(
-    removed_keys: list[str],
-    added_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
-) -> list[str]:  # Markdown sections listing removed/added libraries.
-    lines: list[str] = []
-    if removed_keys:
-        lines += ["", "## ⚠️ Removed Libraries", ""]
-        lines += [f"- `{old_map[k].name}`" for k in removed_keys]
-    if added_keys:
-        lines += ["", "## ℹ️ Added Libraries", ""]
-        lines += [f"- `{new_map[k].name}`" for k in added_keys]
-    return lines
-
-
-def _release_md_bundle_findings(bundle_result: BundleDiffResult | None) -> list[str]:
-    """Markdown section for cross-library (bundle) findings. G38 P0-D: a partial ``analysis_errors`` warning is rendered even when ``bundle_findings`` is empty -- an empty finding list after a raised exception means "nothing was checked", not "nothing was found", and a reader must not conflate the two."""
-    lines: list[str] = []
-    if bundle_result is not None and bundle_result.analysis_errors:
-        lines += ["", "## ⚠️ Bundle Analysis Warnings", ""]
-        lines += [f"- {msg}" for msg in bundle_result.analysis_errors]
-    if bundle_result is None or not bundle_result.bundle_findings:
-        return lines
-    lines += [
-        "",
-        "## 🔗 Bundle (Cross-Library) Findings",
-        "",
-        *render_bundle_findings_markdown(bundle_result.bundle_findings),
-    ]
-    return lines
-
-
-def _release_md_matrix_findings(matrix_result: DiffResult | None) -> list[str]:
-    """Markdown section for build-configuration (matrix) findings."""
-    if matrix_result is None or not matrix_result.changes:
-        return []
-    lines = ["", "## 🛠️ Build-Configuration (Matrix) Findings", ""]
-    for c in matrix_result.changes:
-        lines.append(
-            f"- **{c.kind.value}**" + (f" — `{c.symbol}`" if c.symbol else ""),
-        )
-        lines.append(f"  - {c.description}")
-    return lines

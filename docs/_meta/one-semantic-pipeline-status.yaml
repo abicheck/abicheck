@@ -962,14 +962,15 @@ concepts:
       `disambiguator` append landed -- a consumer following the documented
       algorithm could not reproduce the id for a disambiguated finding.
       Fixed the schema description and bumped `REPORT_SCHEMA_VERSION` to
-      2.50.
+      2.50 (later renumbered to 2.51 -- see the merge-conflict note below).
 
       **A twenty-fifth round found two more consumers of the changed
       `finding_id` algorithm left undocumented.** `cli_scan_baseline.
       _finding_summary()` serializes the identical `report_finding_id()`
       whose hash gained a seventh input, but `SCAN_SCHEMA_VERSION` stayed
-      unbumped -- fixed by bumping it to 1.28 in lockstep with `compare`'s
-      2.50. Separately, `docs/use/output-formats.md`'s user-facing
+      unbumped -- fixed by bumping it to 1.28 (later renumbered to 1.29) in
+      lockstep with `compare`'s 2.50/2.51. Separately,
+      `docs/use/output-formats.md`'s user-facing
       `finding_id` description still documented only the original six-field
       algorithm after the schema's own description was updated -- fixed to
       match.
@@ -1016,6 +1017,24 @@ concepts:
       construction sites (`dumper_elf_fallback.py`'s own DWARF slice
       faithfully covers typedefs and needs no fallback; BTF/CTF's slice
       does not and does).
+
+      **Merging `origin/main` after the twenty-eighth round produced a real
+      version-number collision, not just a text conflict.** `origin/main`
+      had independently claimed `REPORT_SCHEMA_VERSION` 2.50 (ADR-065 S2's
+      `comparison_scope`/`run_outcome` additions) and `SCAN_SCHEMA_VERSION`
+      1.28 (ADR-065 S2's scan-side mirror) for its own, unrelated additive
+      bumps in the same two constants this track had already bumped to the
+      identical numbers for the disambiguator-hash-input change above.
+      Resolved the same "renumber, don't reuse" way the file's own history
+      already handles a colliding bump (the 2.32/2.36/2.38/2.48 precedent):
+      kept `origin/main`'s 2.50/1.28 assignments as landed first, and
+      renumbered this track's own conflicting bumps to 2.51/1.29 --
+      updating every place that named the old numbers for this track's own
+      change (the schema file's own history comments, both copies of
+      `compare_report.schema.json`, `docs/use/output-formats.md`, this
+      status file, and the changelog fragment) while leaving every
+      ADR-065-owned 2.50/1.28 reference (including its own tests) alone,
+      since those numbers are genuinely, correctly ADR-065's.
 
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.

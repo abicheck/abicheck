@@ -40,6 +40,7 @@ classified module -- `frontends.may_import` lists `workflows`, not
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -50,6 +51,8 @@ from ..project_snapshot_legacy import (
 )
 from ..project_snapshot_store import read_manifest_summary
 from ..storage.variant_composition import (
+    read_variant_composition_degraded_members,
+    read_variant_composition_inventory_complete,
     read_variant_composition_library_filenames,
     read_variant_composition_manifest_payload,
 )
@@ -64,6 +67,8 @@ __all__ = [
     "is_project_snapshot_package_dir",
     "is_multi_artifact_package",
     "read_embedded_manifest",
+    "resolve_release_package_degraded_members",
+    "resolve_release_package_inventory_complete",
     "resolve_release_package_map",
 ]
 
@@ -96,12 +101,15 @@ def read_embedded_manifest(
         summary = read_manifest_summary(root)
     except Exception:
         return None
-    variant_ids = (variant_id,) if variant_id is not None else tuple(summary.variant_ids)
+    variant_ids = (
+        (variant_id,) if variant_id is not None else tuple(summary.variant_ids)
+    )
     for vid in variant_ids:
         payload = read_variant_composition_manifest_payload(root, vid)
         if payload is not None:
             return manifest_from_dict(payload)
     return None
+
 
 #: The two `ArtifactRef.native_identity` keys used, independently, by both of
 #: today's not-yet-reconciled multi-artifact package writers
@@ -125,7 +133,8 @@ def is_multi_artifact_package(path: str | Path) -> bool:
     before A1.7) and everything else (routed to the release fan-out instead,
     the same as a loose directory of `.so` files).
 
-    Three shapes route to the fan-out, not just "more than one artifact":
+    Four shapes route to the fan-out, not just "more than one artifact"
+    (the fourth, a degraded sole member, is checked in the body below):
 
     - **More than one artifact** -- the obvious multi-library release case.
     - **Zero artifacts** -- a real, valid package can declare a variant with
@@ -158,7 +167,23 @@ def is_multi_artifact_package(path: str | Path) -> bool:
         summary = read_manifest_summary(path)
     except (SnapshotError, OSError, ValueError, TypeError):
         return False
-    return len(summary.artifact_ids) != 1 or len(summary.variant_ids) != 1
+    if len(summary.artifact_ids) != 1 or len(summary.variant_ids) != 1:
+        return True
+    # A fourth shape (ADR-065 D8, Codex review): a genuinely single-artifact
+    # package whose sole member was captured *degraded* must reach the
+    # fan-out too -- only the scope-aware release path reads the marker and
+    # records the member `failed`; the single-artifact reader would compare
+    # the ELF-only stand-in as complete evidence and manufacture removals.
+    try:
+        return bool(
+            read_variant_composition_degraded_members(path, summary.variant_ids[0])
+        )
+    except (SnapshotError, OSError, ValueError, TypeError, KeyError):
+        # A present-but-unreadable decision-bearing section is not "no
+        # marker" (Codex review): route to the fan-out, whose own marker
+        # read surfaces the damage as an error instead of the scalar
+        # reader silently comparing the artifact.
+        return True
 
 
 def _release_match_key(
@@ -216,6 +241,55 @@ def _release_match_key(
     if name:
         return _canonical_library_key(Path(name))
     return artifact.artifact_id
+
+
+def resolve_release_package_inventory_complete(
+    root: str | Path, *, variant_id: str | None
+) -> bool:
+    """The selected variant's own ADR-065 D2 ``inventory_complete``
+    assertion (``False`` when the capture never made one), read the same
+    way :func:`resolve_release_package_degraded_members` reads the D8
+    marker: a stored package's *type* proves nothing, only what its
+    capture asserted."""
+    resolved_variant_id = variant_id
+    if resolved_variant_id is None:
+        resolved_variant_id = read_manifest_summary(root).variant_ids[0]
+    return read_variant_composition_inventory_complete(root, resolved_variant_id)
+
+
+def resolve_release_package_degraded_members(
+    root: str | Path, *, variant_id: str | None
+) -> dict[str, str]:
+    """The selected variant's ADR-065 D8 ``degraded_members`` marker,
+    re-keyed the way :func:`resolve_release_package_map` keys the map --
+    ``{release match key: capture failure reason}`` -- so the fan-out can
+    look a matched key up directly and record the member ``failed``
+    instead of comparing its ELF-only stand-in (Codex review: the marker
+    survived the package round trip but nothing on this path read it).
+
+    The bundle key resolves through the same ``library_filenames`` lookup
+    :func:`_release_match_key` applies (real on-disk filename first, else
+    the bundle key itself), then ``_canonical_library_key`` -- one rule,
+    so a degraded member can never be keyed differently from its own
+    materialized artifact.
+    """
+    from ..binary_utils import _canonical_library_key
+
+    resolved_variant_id = variant_id
+    if resolved_variant_id is None:
+        resolved_variant_id = read_manifest_summary(root).variant_ids[0]
+    degraded = read_variant_composition_degraded_members(root, resolved_variant_id)
+    if not degraded:
+        return {}
+    library_filenames = read_variant_composition_library_filenames(
+        root, resolved_variant_id
+    )
+    return {
+        _canonical_library_key(
+            Path(library_filenames.get(bundle_key) or bundle_key)
+        ): reason
+        for bundle_key, reason in degraded.items()
+    }
 
 
 def resolve_release_package_map(
@@ -382,6 +456,55 @@ def _display_dirname(key: str, artifact_id: str) -> str:
     return f"{sanitized}-{artifact_id}"
 
 
+@dataclass(frozen=True)
+class DsoOnlyClassification:
+    """`--dso-only` over one stored side: the members confirmed to be real
+    shared objects, and the declared members whose kind or ELF metadata
+    could not be read at all. The latter is an acquisition failure the
+    caller must record (ADR-065 D1) and a reason to withhold the side's
+    inventory proof (D2) -- never a silent narrowing of the scope, which
+    would turn the other side's copy into a proven removal/addition (Codex
+    review, ninth round). A member confirmed *not* to be a DSO is simply
+    absent from both: that is the selection the user asked for."""
+
+    members: dict[str, Path]
+    unclassified: dict[str, str] = field(default_factory=dict)
+
+
+def classify_dso_only_package_map(pkg_map: dict[str, Path]) -> DsoOnlyClassification:
+    """`dso_only_package_map`, also reporting the members it could not classify."""
+    from ..bundle import _stored_elf_metadata
+    from ..package import _has_shared_object_name
+    from ..project_snapshot_store import read_artifact_ref, read_manifest_summary
+
+    members: dict[str, Path] = {}
+    unclassified: dict[str, str] = {}
+    for key, sub_dir in pkg_map.items():
+        try:
+            summary = read_manifest_summary(sub_dir)
+            (artifact_id,) = summary.artifact_ids
+            if read_artifact_ref(sub_dir, artifact_id).kind != "elf":
+                continue
+        except Exception as exc:
+            unclassified[key] = (
+                f"--dso-only could not read the stored artifact's kind: {exc}"
+            )
+            continue
+        elf = _stored_elf_metadata(sub_dir)
+        if elf is None:
+            unclassified[key] = (
+                "--dso-only could not read the stored ELF metadata of an artifact "
+                "declared as ELF"
+            )
+            continue
+        if elf.is_pie:
+            continue
+        if elf.interpreter and not _has_shared_object_name(key):
+            continue
+        members[key] = sub_dir
+    return DsoOnlyClassification(members, unclassified)
+
+
 def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
     """*pkg_map* (a `resolve_release_package_map` result), restricted to
     members whose materialized `ArtifactRef.kind` is `"elf"` and whose
@@ -402,41 +525,24 @@ def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
     (`package._has_shared_object_name`) the live path applies for that
     same ambiguous case.
 
-    Best-effort per member: a sub-package whose own kind or ELF metadata
-    cannot be determined is *excluded*, not included -- `--dso-only`'s
-    whole contract is "only compare what is confirmed to be a DSO", so
-    uncertainty must not silently widen it.
+    A sub-package whose own kind or ELF metadata cannot be determined is
+    *excluded* here too -- `--dso-only`'s whole contract is "only compare
+    what is confirmed to be a DSO", so uncertainty must not silently widen
+    it -- but :func:`classify_dso_only_package_map` names it, and a release
+    caller must use that form so the exclusion is recorded as a failure
+    rather than read as the member's absence.
     """
-    from ..bundle import _stored_elf_metadata
-    from ..package import _has_shared_object_name
-    from ..project_snapshot_store import read_artifact_ref, read_manifest_summary
-
-    filtered: dict[str, Path] = {}
-    for key, sub_dir in pkg_map.items():
-        try:
-            summary = read_manifest_summary(sub_dir)
-            (artifact_id,) = summary.artifact_ids
-            if read_artifact_ref(sub_dir, artifact_id).kind != "elf":
-                continue
-        except Exception:
-            continue
-        elf = _stored_elf_metadata(sub_dir)
-        if elf is None or elf.is_pie:
-            continue
-        if elf.interpreter and not _has_shared_object_name(key):
-            continue
-        filtered[key] = sub_dir
-    return filtered
+    return classify_dso_only_package_map(pkg_map).members
 
 
 def dso_only_filter_pair(
     old_pkg_map: dict[str, Path] | None, new_pkg_map: dict[str, Path] | None
-) -> tuple[dict[str, Path] | None, dict[str, Path] | None]:
-    """`dso_only_package_map` applied to whichever of *old_pkg_map*/
-    *new_pkg_map* is not `None` -- the pair shape
+) -> tuple[DsoOnlyClassification | None, DsoOnlyClassification | None]:
+    """`classify_dso_only_package_map` applied to whichever of
+    *old_pkg_map*/*new_pkg_map* is not `None` -- the pair shape
     `cli_compare_release_matrix._prepare_compare_release_inputs` needs for
     its own two stored-side maps in one call."""
     return (
-        dso_only_package_map(old_pkg_map) if old_pkg_map is not None else None,
-        dso_only_package_map(new_pkg_map) if new_pkg_map is not None else None,
+        classify_dso_only_package_map(old_pkg_map) if old_pkg_map is not None else None,
+        classify_dso_only_package_map(new_pkg_map) if new_pkg_map is not None else None,
     )
