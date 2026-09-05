@@ -16,7 +16,12 @@
   `abicheck.detected_total`/`abicheck.effective_total`/
   `abicheck.disposition.*` properties, the HTML change-summary table gains a
   raw-versus-effective footer row, and every Markdown mode (default, leaf,
-  root-cause, review digest) gains a "Disposition audit" section. A fully suppressed comparison can no
+  root-cause, review digest) gains a "Disposition audit" section. Every view
+  that can render a zero-change comparison also names how many detectors
+  could not run, since that is the one case where the audit is the only
+  place an assurance gap is stated. Under `--used-by`/`--required-symbol`
+  the counts follow the *scoped* gate, the one that produces the run's exit
+  code. A fully suppressed comparison can no
   longer read as "no changes". `gating` means the gate the run was actually
   scored on: with a `--severity-preset` (or a config `severity:` block) in
   effect, the split follows `severity.gate_contribution_for_change` — the same

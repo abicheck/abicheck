@@ -147,6 +147,7 @@ def _summary_table_from_mapping(d: Mapping[str, Any]) -> SummaryTableData:
             (name, count) for name, count in d.get("disposition_counts") or ()
         ),
         disposition_rules=tuple(d.get("disposition_rules") or ()),
+        not_evaluated_detectors=tuple(d.get("not_evaluated_detectors") or ()),
     )
 
 

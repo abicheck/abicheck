@@ -275,7 +275,7 @@ def render_disposition_audit_comment_lines(audit: DispositionAudit) -> list[str]
     row that also names the raw total, the gating total, and which rule (with
     its reason) did the withholding.
     """
-    if audit.detected_total == 0:
+    if audit.detected_total == 0 and not audit.not_evaluated_detectors:
         return []
     counts = ", ".join(
         f"{count} {name.replace('_', ' ')}"
@@ -283,6 +283,11 @@ def render_disposition_audit_comment_lines(audit: DispositionAudit) -> list[str]
         if count and name != Disposition.GATING.value
     )
     tail = f" · {counts}" if counts else ""
+    if audit.not_evaluated_detectors:
+        # Same reason as the one-line view: on a zero-delta comparison this
+        # row is the only place the reader learns a detector could not run,
+        # and "No ABI changes" is exactly the sentence that needs the caveat.
+        tail += f" · {len(audit.not_evaluated_detectors)} detector(s) not evaluated"
     lines = [
         f"> 📊 **Audit:** {audit.detected_total} detected · "
         f"{audit.effective_total} gating{tail}",

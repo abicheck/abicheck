@@ -336,6 +336,12 @@ class SummaryCategoryRow:
     added: int
 
 
+#: Detector names listed inline in the HTML summary row before it collapses
+#: to a count (an evidence-poor comparison legitimately leaves a dozen
+#: unevaluated).
+_NOT_EVALUATED_INLINE = 4
+
+
 @dataclass(frozen=True)
 class SummaryTableData:
     rows: tuple[SummaryCategoryRow, ...]
@@ -353,6 +359,12 @@ class SummaryTableData:
     effective_total: int | None = None
     disposition_counts: tuple[tuple[str, int], ...] = ()
     disposition_rules: tuple[str, ...] = ()
+    #: Names of detectors that did not run. Carried separately from the
+    #: counts because it is the one audit fact that can be non-empty while
+    #: every count is zero — exactly the case (a zero-delta comparison with a
+    #: real support gap) where dropping it renders a clean
+    #: "0 detected · 0 gating" over an analysis that never happened.
+    not_evaluated_detectors: tuple[str, ...] = ()
 
 
 def render_summary_table(data: SummaryTableData) -> str:
@@ -386,7 +398,7 @@ def render_summary_table(data: SummaryTableData) -> str:
     # suppressed or scoped out. These rows are the raw-versus-effective
     # statement every projection owes, in the same table a reader is already
     # looking at.
-    if data.detected_total is not None:
+    if data.detected_total is not None or data.not_evaluated_detectors:
         # Skipping the gating entry: it is already the headline number, and
         # repeating it in the detail reads as two different findings.
         detail = ", ".join(
@@ -394,11 +406,25 @@ def render_summary_table(data: SummaryTableData) -> str:
             for name, count in data.disposition_counts
             if count and name != "gating"
         )
+        detail = html.escape(detail)
+        if data.not_evaluated_detectors:
+            listed = ", ".join(
+                html.escape(name)
+                for name in data.not_evaluated_detectors[:_NOT_EVALUATED_INLINE]
+            )
+            remaining = len(data.not_evaluated_detectors) - _NOT_EVALUATED_INLINE
+            more = f", … and {remaining} more" if remaining > 0 else ""
+            detail += (
+                f"{' · ' if detail else ''}"
+                f"{len(data.not_evaluated_detectors)} detector(s) not evaluated "
+                f"({listed}{more})"
+            )
         rows.append(
             f"<tr style='border-top:1px solid #e0e0e0;'>"
             f"<td colspan='4' style='font-size:0.85em; padding:6px 12px;'>"
-            f"🔎 {data.detected_total} detected · {data.effective_total} gating"
-            f"{f' · {html.escape(detail)}' if detail else ''}</td></tr>"
+            f"🔎 {data.detected_total or 0} detected · "
+            f"{data.effective_total or 0} gating"
+            f"{f' · {detail}' if detail else ''}</td></tr>"
         )
         for line in data.disposition_rules:
             rows.append(

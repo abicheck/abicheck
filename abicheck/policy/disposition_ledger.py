@@ -382,15 +382,54 @@ class DispositionLedger:
         and it is what makes ``suppressed_gating_records`` (hence
         ``semver.recommend_release``'s conserved delta) answerable at all.
         """
+        from ..contract_gating import is_evaluated
+
         verdict_of = getattr(result, "_effective_verdict_for_change", None)
         if not callable(verdict_of):
             return  # a duck-typed stand-in with no verdict to read
         for index, (record, change) in enumerate(zip(self._records, self._anchors)):
             if record.verdict_class is not None:
                 continue
+            if not is_evaluated(change):
+                # ADR-049 D1: compatibility policy never scored this finding,
+                # and `contract_pipeline.record_compatibility_decisions`
+                # deliberately leaves its decision `None` for exactly that
+                # reason. Filling in a kind-level verdict here would undo
+                # that: a *suppressed* proven-out-of-contract finding would
+                # then drive `semver.recommend_release` to MAJOR/REVIEW,
+                # while the identical unsuppressed exclusion correctly
+                # recommends no bump. Suppression must not resurrect a
+                # contract exclusion.
+                continue
             self._records[index] = replace(
                 record, verdict_class=verdict_of(change).value
             )
+
+    def apply_scope(self, result: DiffResult, in_scope: Iterable[object]) -> None:
+        """Narrow the gating set to the findings the *scoped* gate scores.
+
+        ``compare --used-by``/``--required-symbol`` gates on a consumer's own
+        subset (``appcompat``'s ``breaking_for_app``), and that scoped
+        decision — not the whole-library verdict — is what produces the run's
+        exit code. Without this, a breaking removal the consumer never calls
+        stays ``gating`` and inflates ``effective_total`` while the gate it is
+        supposedly counted in passes with ``0``.
+
+        Only ever *narrows*: a finding already outside the gate cannot be
+        pulled into it by scoping, and a suppressed or excluded finding is
+        untouched (D2 — scoping is not a second chance at a disposition).
+        Mutates in place, unlike :meth:`with_gate`: this is the engine
+        recording what the run actually gated on, not a projection rendering
+        it.
+        """
+        scoped = {id(c) for c in in_scope}
+        for index, (record, change) in enumerate(zip(self._records, self._anchors)):
+            if record.disposition is not Disposition.GATING:
+                continue
+            if id(change) not in scoped:
+                self._records[index] = replace(
+                    record, disposition=Disposition.NON_GATING
+                )
 
     def record_for(self, change: object) -> DispositionRecord | None:
         """The record for *change*, or ``None`` if it was never recorded."""
@@ -674,6 +713,30 @@ def finalize_ledger(
         )
     ledger.resolve_verdict_classes(result)
     return ledger
+
+
+def close_consumer_scope(
+    ledger: DispositionLedger | None,
+    result: DiffResult,
+    *,
+    gating: Iterable[object],
+) -> None:
+    """Close the ledger again after a consumer-scoping pass added to it.
+
+    ``appcompat.scope_diff_to_app`` runs *after* ``checker.compare()``
+    finalized the ledger, so anything it records misses both closing passes:
+    the scoped findings it appends keep ``verdict_class=None`` (which hides a
+    suppressed consumer-breaking removal from
+    ``semver.recommend_release``), and the gating labels still describe the
+    whole-library gate rather than the scoped one that actually decides the
+    run. Both are the same root cause — a second producer joining after the
+    close — so both are fixed by one closing call rather than a patch per
+    symptom, and any future late producer has the same call available.
+    """
+    if ledger is None:
+        return
+    ledger.apply_scope(result, gating)
+    ledger.resolve_verdict_classes(result)
 
 
 def ledger_for(

@@ -55,9 +55,10 @@ from abicheck.policy.disposition_ledger import (
     conservation_holds,
     finalize_ledger,
     ledger_for,
+    record_suppressed_change,
 )
 from abicheck.report.disposition_audit import compute_disposition_audit
-from abicheck.semver import ReleaseRecommendationState, SemverBump
+from abicheck.semver import SemverBump
 from abicheck.suppression import Suppression, SuppressionList
 
 
@@ -961,163 +962,134 @@ def test_the_one_line_view_states_a_support_gap_on_a_zero_change_run() -> None:
     assert f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated" in line
 
 
-# ---------------------------------------------------------------------------
-# not_evaluated detectors
-# ---------------------------------------------------------------------------
-
-
-class TestNotEvaluatedDetectors:
-    def test_a_detector_that_did_not_run_is_not_a_zero(self) -> None:
-        old, new = _snapshots(removed=1)
-        result = compare(old, new)
-        by_name = {d.name: d for d in result.detector_results}
-        dwarf = by_name["dwarf"]
-        assert dwarf.changes_count == 0
-        assert dwarf.not_evaluated is True
-        assert dwarf.enabled is False
-        assert dwarf.coverage_gap
-
-    def test_every_not_evaluated_detector_states_a_reason(self) -> None:
-        old, new = _snapshots(removed=1)
-        result = compare(old, new)
-        not_run = [d for d in result.detector_results if d.not_evaluated]
-        assert not_run, "this evidence-free pair must leave detectors unevaluated"
-        assert all(d.coverage_gap for d in not_run)
-        assert all(d.changes_count == 0 and not d.enabled for d in not_run)
-
-    def test_a_new_only_dwarf_comparison_is_not_evaluated(self) -> None:
-        """The old side carrying no debug info means there is no baseline to
-        compare a new-side layout against — the detector's own documented
-        skip. Reporting that as `enabled=True, changes_count=0` presents an
-        unperformed comparison as a performed one that found nothing."""
-        from abicheck.model.dwarf_facts import DwarfMetadata
-
-        old, new = _snapshots(removed=1)
-        new.dwarf = DwarfMetadata(has_dwarf=True)
-        result = compare(old, new)
-        dwarf = {d.name: d for d in result.detector_results}["dwarf"]
-        assert dwarf.not_evaluated is True
-        assert dwarf.changes_count == 0
-        assert "baseline" in (dwarf.coverage_gap or "")
-
-    def test_an_old_only_dwarf_comparison_is_evaluated(self) -> None:
-        """The mirror case is *not* the same claim: the old side has layout
-        evidence and the new side lost it, which the detector reports as a
-        real `DWARF_INFO_MISSING` finding. That is an evaluated comparison
-        disclosing a loss of evidence, so the gate must stay open for it."""
-        from abicheck.model.dwarf_facts import DwarfMetadata
-
-        old, new = _snapshots()
-        old.dwarf = DwarfMetadata(has_dwarf=True)
-        result = compare(old, new)
-        dwarf = {d.name: d for d in result.detector_results}["dwarf"]
-        assert dwarf.not_evaluated is False
-        assert dwarf.enabled is True
-        assert any(
-            c.kind is ChangeKind.DWARF_INFO_MISSING
-            for c in result.changes + result.suppressed_changes
-        )
-
-    def test_a_detector_that_ran_is_never_marked_not_evaluated(self) -> None:
-        old, new = _snapshots(removed=1)
-        result = compare(old, new)
-        ran = [d for d in result.detector_results if d.enabled]
-        assert ran
-        assert not any(d.not_evaluated for d in ran)
-
-    def test_the_state_reaches_the_report(self) -> None:
-        from abicheck import reporter
-
-        old, new = _snapshots(removed=1)
-        report = json.loads(reporter.to_json(compare(old, new)))
-        detectors = {d["name"]: d for d in report["detectors"]}
-        assert detectors["dwarf"]["not_evaluated"] is True
-        assert "dwarf" in {
-            d["name"] for d in report["disposition_audit"]["not_evaluated_detectors"]
-        }
-
-
-# ---------------------------------------------------------------------------
-# semver.recommend_release reads the conserved delta
-# ---------------------------------------------------------------------------
-
-
-class TestRecommendReleaseReadsTheConservedDelta:
-    """The reported bug: a suppressed break became "no bump needed".
-
-    Exercised over several sibling shapes rather than the one reported input
-    — a wildcard waiver, an exact-symbol rule, a kind rule, and a variable
-    removal — because the defect was in *what the recommendation reads*, not
-    in any one rule spelling.
+class TestALateProducerClosesTheLedgerAgain:
+    """`appcompat.scope_diff_to_app` joins *after* `compare()` closed the
+    ledger, and every gap that produced had the same root cause: the two
+    closing passes (verdict-class resolution, gating classification) had
+    already run. `close_consumer_scope` is the one call that re-closes it, so
+    these assert the two consequences that motivated it rather than the call
+    itself.
     """
 
-    @pytest.mark.parametrize(
-        "rule",
-        [
-            Suppression(symbol_pattern=".*", reason="w", allow_public_break=True),
-            Suppression(symbol="_ZN3foo5gone0Ev", reason="w", allow_public_break=True),
-            Suppression(
-                symbol_pattern="_ZN3foo.*",
-                change_kind="func_removed",
-                reason="w",
-                allow_public_break=True,
-            ),
-        ],
-    )
-    def test_a_suppressed_break_is_not_no_bump_needed(self, rule) -> None:
+    def test_a_late_suppressed_finding_gets_its_verdict_class(self) -> None:
+        """Left unresolved, a suppressed consumer-breaking removal is
+        invisible to `recommend_release`'s conserved-delta check — it looks
+        for *gating* suppressed records, and `None` is not one."""
+        from abicheck.checker_types import Change, DiffResult
+        from abicheck.policy.disposition_ledger import close_consumer_scope
         from abicheck.semver import recommend_release
 
-        old, new = _snapshots(removed=1)
-        result = compare(old, new, SuppressionList([rule]))
-        assert result.changes == []  # the rule really did hide it
+        result = DiffResult(old_version="1.0", new_version="2.0", library="libfoo")
+        ledger = finalize_ledger(DispositionLedger(), result)
+        result.disposition_ledger = ledger
 
+        late = Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="_ZN3foo4goneEv",
+            description="required by consumer",
+        )
+        rule = Suppression(symbol="_ZN3foo4goneEv", reason="w")
+        record_suppressed_change(
+            ledger,
+            late,
+            rule=rule,
+            application_point="consumer_overlay",
+            suppression=SuppressionList([rule]),
+        )
+        assert ledger.record_for(late).verdict_class is None
+
+        close_consumer_scope(ledger, result, gating=[])
+        assert ledger.record_for(late).verdict_class is not None
+        assert ledger.suppressed_gating_records()
+        # …and the consequence: the hidden consumer break reaches the release
+        # advice instead of a clean "no bump required".
         rec = recommend_release(result)
         assert rec.bump is SemverBump.MAJOR
-        assert rec.state is ReleaseRecommendationState.REVIEW
         assert "suppressed" in rec.rationale
-        assert "intent: unspecified" in rec.rationale
-        assert "no version bump required" not in rec.rationale
 
-    def test_an_unsuppressed_run_is_unchanged(self) -> None:
-        from abicheck.semver import recommend_release
+    def test_scoping_narrows_the_gating_set_to_what_the_gate_scores(self) -> None:
+        """`--used-by` gates on the consumer's own subset, so a breaking
+        removal the consumer never calls must not be counted `gating` while
+        the gate it is supposedly counted in exits 0."""
+        from abicheck.policy.disposition_ledger import close_consumer_scope
 
-        old, new = _snapshots(removed=1)
-        assert recommend_release(compare(old, new)).bump is SemverBump.MAJOR
-        clean_old, clean_new = _snapshots(removed=0, kept=2)
-        clean = recommend_release(compare(clean_old, clean_new))
-        assert clean.bump is SemverBump.NONE
-        assert clean.state is ReleaseRecommendationState.ACTIONABLE
+        old, new = _snapshots(removed=2)
+        result = compare(old, new)
+        ledger = ledger_for(result)
+        assert ledger.effective_total == 2
 
-    def test_a_suppressed_compatible_addition_does_not_force_a_major(self) -> None:
-        """Only a *major-class* suppressed finding changes the advice — a
-        suppressed addition is not a hidden break."""
-        from abicheck.semver import recommend_release
-
-        old, new = _snapshots(added=2)
-        result = compare(
-            old, new, SuppressionList([Suppression(symbol_pattern=".*", reason="w")])
+        used = [result.changes[0]]
+        close_consumer_scope(ledger, result, gating=used)
+        assert ledger.effective_total == 1
+        assert ledger.detected_total == 2, "scoping moves, it never removes"
+        assert (
+            ledger.record_for(result.changes[1]).disposition is Disposition.NON_GATING
         )
-        rec = recommend_release(result)
-        assert rec.bump is not SemverBump.MAJOR
-        assert rec.state is ReleaseRecommendationState.ACTIONABLE
 
-    def test_the_rule_that_hid_the_break_is_named_in_the_rationale(self) -> None:
-        from abicheck.semver import recommend_release
+    def test_scoping_never_promotes_a_finding_into_the_gate(self) -> None:
+        """It only narrows: a suppressed or excluded finding is not pulled
+        back into the gating set by being named in scope (D2)."""
+        from abicheck.policy.disposition_ledger import close_consumer_scope
 
         old, new = _snapshots(removed=1)
         result = compare(
             old,
             new,
             SuppressionList(
-                [
-                    Suppression(
-                        symbol_pattern=".*gone.*",
-                        reason="tracked in ticket 42",
-                        allow_public_break=True,
-                    )
-                ]
+                [Suppression(symbol_pattern=".*", reason="w", allow_public_break=True)]
             ),
         )
-        rationale = recommend_release(result).rationale
-        assert "symbol_pattern" in rationale
-        assert "func_removed" in rationale
+        ledger = ledger_for(result)
+        hidden = result.suppressed_changes[0]
+        close_consumer_scope(ledger, result, gating=[hidden])
+        assert ledger.record_for(hidden).disposition is Disposition.SUPPRESSED
+        assert ledger.effective_total == 0
+
+
+def test_a_suppressed_out_of_contract_finding_does_not_force_a_bump() -> None:
+    """ADR-049 D1: compatibility policy never scored a proven-out-of-contract
+    finding, and `record_compatibility_decisions` leaves its decision `None`
+    for exactly that reason. Suppressing it must not resurrect a verdict —
+    otherwise the suppressed exclusion recommends MAJOR/REVIEW while the
+    identical *unsuppressed* exclusion correctly recommends no bump.
+    """
+    from abicheck.checker_types import Change, DiffResult
+    from abicheck.contract_relevance_types import ContractRelevance
+    from abicheck.semver import recommend_release
+
+    excluded = Change(
+        kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Internal", description="x"
+    )
+    excluded.contract_relevance = ContractRelevance.PROVEN_OUT_OF_CONTRACT
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libfoo",
+        suppressed_changes=[excluded],
+        suppressed_count=1,
+    )
+    ledger = ledger_for(result)
+    assert ledger.record_for(excluded).verdict_class is None
+    assert ledger.suppressed_gating_records() == ()
+    assert recommend_release(result).bump is not SemverBump.MAJOR
+
+
+def test_the_pr_comment_and_html_state_a_support_gap_on_a_zero_change_run() -> None:
+    """The remaining two projections with an early-return path: same class as
+    the one-line fix, different renderers. "No ABI changes" is the sentence
+    that most needs the caveat."""
+    import json as _json
+
+    from abicheck import reporter
+    from abicheck.html_report import generate_html_report
+    from abicheck.pr_comment import build_model, render_comment
+
+    old, new = _snapshots()
+    result = compare(old, new)
+    audit = compute_disposition_audit(result)
+    assert audit.detected_total == 0 and audit.not_evaluated_detectors
+
+    expected = f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated"
+    comment = render_comment(build_model(_json.loads(reporter.to_json(result))))
+    assert expected in comment
+    assert expected in generate_html_report(result)

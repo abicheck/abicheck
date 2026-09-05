@@ -286,6 +286,9 @@ def compute_summary_table(
             f" — {count} finding(s)"
             for rule, count in getattr(audit, "rules", ())
         ),
+        not_evaluated_detectors=tuple(
+            det.name for det in getattr(audit, "not_evaluated_detectors", ())
+        ),
     )
 
 
