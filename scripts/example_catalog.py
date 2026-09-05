@@ -45,22 +45,32 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+#: The curated, task-oriented tree (``examples/README.md``,
+#: ``examples/workflows/``). Not where calibration fixtures live any more --
+#: see ``CASES_DIR`` for that. Kept as its own name (rather than folded into
+#: ``CATALOG_DIR``) because it addresses a different audience per the plan's
+#: "Problem" section.
 EXAMPLES_DIR = ROOT / "examples"
-GROUND_TRUTH_PATH = EXAMPLES_DIR / "ground_truth.json"
+#: The calibration/compatibility-knowledge tree Phase 4 introduced:
+#: ``catalog/ground_truth.json``, ``catalog/catalog_rules.yaml``,
+#: ``catalog/probes/``, and ``catalog/cases/<case_id>/`` (``CASES_DIR``).
+CATALOG_DIR = ROOT / "catalog"
+CASES_DIR = CATALOG_DIR / "cases"
+GROUND_TRUTH_PATH = CATALOG_DIR / "ground_truth.json"
 
 
 def case_dir(case_id: str) -> Path:
     """Resolve a case id (e.g. ``"case01_symbol_removal"``) to its
-    directory. Today this is always ``examples/<case_id>``, and after
-    Phase 4 always ``catalog/cases/<case_id>`` -- unconditional either way,
-    with no taxonomy lookup (see the module docstring for why). Phase 4 is
-    the only change this module is meant to absorb without touching callers.
+    directory: unconditionally ``catalog/cases/<case_id>``, with no
+    taxonomy lookup (see the module docstring for why). This is the one
+    function Phase 4 changed to point past ``examples/`` -- every caller
+    that already routed through it was unaffected by the move.
     """
-    return EXAMPLES_DIR / case_id
+    return CASES_DIR / case_id
 
 
 def load_ground_truth() -> dict[str, object]:
-    """The parsed contents of ``examples/ground_truth.json``."""
+    """The parsed contents of ``catalog/ground_truth.json``."""
     return json.loads(GROUND_TRUTH_PATH.read_text(encoding="utf-8"))
 
 

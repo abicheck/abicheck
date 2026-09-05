@@ -73,11 +73,13 @@ from pipeline_status_ledger import (  # noqa: E402
 )
 
 DOCS = ROOT / "docs"
-#: The example-case tree whose per-case READMEs `gen_examples_docs.py`
+#: The calibration catalog tree (Phase 4 of the examples/catalog split).
+#: `CASES` is the per-case-README scan root whose READMEs `gen_examples_docs.py`
 #: publishes into `docs/reference/examples/`. Named separately from ROOT so
 #: the retired-surface sweep can be pointed at a fixture tree in tests the
 #: same way DOCS already is.
-EXAMPLES = ROOT / "examples"
+CATALOG = ROOT / "catalog"
+CASES = CATALOG / "cases"
 #: The user-flow catalogue. Each entry's `flow:` is a command a reader is
 #: meant to be able to run, so it is documentation by another file extension
 #: -- swept alongside the trees above, and pointable at a fixture tree the
@@ -1626,14 +1628,15 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     `docs/**/*.md` is the hand-authored narrative tree, keyed docs-relative
     (what `_RETIRED_SURFACES`'s allowlists already spell).
 
-    `examples/case*/README.md` is here because it is the *generator source*
-    for the published `docs/reference/examples/case*.md` pages: those carry
-    the generated marker and are skipped below, so scanning only the output
-    tree left a stale flag in a case README reproducing into a public page on
-    the next `gen_examples_docs.py` run while this guard stayed green -- which
-    is exactly what happened to Case 148's `--compile-db` recommendation
-    (Codex review). Checking the source rather than the artifact is the same
-    direction every other generated-file gate in this repo takes.
+    `catalog/cases/case*/README.md` is here because it is the *generator
+    source* for the published `docs/reference/examples/case*.md` pages: those
+    carry the generated marker and are skipped below, so scanning only the
+    output tree left a stale flag in a case README reproducing into a public
+    page on the next `gen_examples_docs.py` run while this guard stayed green
+    -- which is exactly what happened to Case 148's `--compile-db`
+    recommendation (Codex review). Checking the source rather than the
+    artifact is the same direction every other generated-file gate in this
+    repo takes.
 
     `tests/scenarios/*.yaml` is here for the same reason one step further out:
     it is the repository's user-flow catalogue, and each entry's `flow:` is a
@@ -1651,7 +1654,7 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     because it scanned Markdown/case-README/scenario YAML only (Codex
     review, fresh evidence).
 
-    `examples/ground_truth.json` is here for the same reason one further
+    `catalog/ground_truth.json` is here for the same reason one further
     step out: it is the *other* machine-checked example-catalog source of
     truth (alongside the case READMEs above), and its per-case
     `description` fields document real invocations too -- PR J's
@@ -1659,15 +1662,15 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     spelling, invisible to this sweep the same way (Codex review, fresh
     evidence).
 
-    Keyed repo-relative (`examples/caseNN.../README.md`,
+    Keyed repo-relative (`catalog/cases/caseNN.../README.md`,
     `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`,
-    `examples/ground_truth.json`), which cannot collide with a docs-relative
+    `catalog/ground_truth.json`), which cannot collide with a docs-relative
     key, so an allowlist entry stays unambiguous about which tree it exempts.
     """
     targets = [(p, p.relative_to(DOCS).as_posix()) for p in sorted(DOCS.rglob("*.md"))]
     targets += [
-        (p, f"examples/{p.relative_to(EXAMPLES).as_posix()}")
-        for p in sorted(EXAMPLES.glob("case*/README.md"))
+        (p, f"catalog/cases/{p.relative_to(CASES).as_posix()}")
+        for p in sorted(CASES.glob("case*/README.md"))
     ]
     targets += [
         (p, f"tests/scenarios/{p.name}") for p in sorted(SCENARIOS.glob("*.yaml"))
@@ -1677,9 +1680,9 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
         targets.append(
             (usecase_registry, "docs/contribute/usecase-registry.yaml")
         )
-    ground_truth = EXAMPLES / "ground_truth.json"
+    ground_truth = CATALOG / "ground_truth.json"
     if ground_truth.is_file():
-        targets.append((ground_truth, "examples/ground_truth.json"))
+        targets.append((ground_truth, "catalog/ground_truth.json"))
     return targets
 
 

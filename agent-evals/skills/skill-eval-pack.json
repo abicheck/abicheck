@@ -71,16 +71,16 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:17dcc3bf0b7bb66dc5021729ee77b21ce85acfcd5717de12cad79989e408e081",
+      "digest": "sha256:48191272e7389709f1dd6c09eab48f8d343fe25c2744e0fc2a77345cc95ad39b",
       "expected": {
         "kinds": [
           "func_params_changed"
         ],
         "min_evidence": "L1",
-        "resolved_from": "examples/ground_truth.json",
+        "resolved_from": "catalog/ground_truth.json",
         "verdict": "BREAKING"
       },
-      "inputs": "examples/case02_param_type_change",
+      "inputs": "catalog/cases/case02_param_type_change",
       "invocation": {},
       "platforms": [
         "linux"
@@ -88,8 +88,8 @@
       "prompt": "Does this change break existing consumers of the library, or only require a recompile?",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
-        "examples/case02_param_type_change",
-        "examples/ground_truth.json"
+        "catalog/cases/case02_param_type_change",
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -100,16 +100,16 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:a3859746c6570c0d3f3f18788cf731160379fd811061ca6c2890e4285959aa80",
+      "digest": "sha256:9727c0552626dc23de7cecaf3a1ee5a718d517f480374cca7f394b366cd7d71d",
       "expected": {
         "kinds": [
           "func_added"
         ],
         "min_evidence": "L0",
-        "resolved_from": "examples/ground_truth.json",
+        "resolved_from": "catalog/ground_truth.json",
         "verdict": "COMPATIBLE"
       },
-      "inputs": "examples/case03_compat_addition",
+      "inputs": "catalog/cases/case03_compat_addition",
       "invocation": {},
       "platforms": [
         "linux",
@@ -119,8 +119,8 @@
       "prompt": "We only added a new function this release. Confirm nothing else changed for existing consumers.",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
-        "examples/case03_compat_addition",
-        "examples/ground_truth.json"
+        "catalog/cases/case03_compat_addition",
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -131,16 +131,16 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:37c3dacf5ab0c31a9987a3494072ed41fab4c298bae6ff6a076c97e5de30693c",
+      "digest": "sha256:5c85d1f4fca89c6f89d2e29ab51d27d6a7d92c023c3dfbc1a3e59778ff14673e",
       "expected": {
         "kinds": [
           "constant_changed"
         ],
         "min_evidence": "L2",
-        "resolved_from": "examples/ground_truth.json",
+        "resolved_from": "catalog/ground_truth.json",
         "verdict": "API_BREAK"
       },
-      "inputs": "examples/case124_header_constant_value_changed",
+      "inputs": "catalog/cases/case124_header_constant_value_changed",
       "invocation": {},
       "platforms": [
         "linux",
@@ -150,8 +150,8 @@
       "prompt": "We changed the value of a public constant in our headers \u2014 no function signatures moved. Can existing binaries keep running against the new library as-is, or do they need to be rebuilt?",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
-        "examples/case124_header_constant_value_changed",
-        "examples/ground_truth.json"
+        "catalog/cases/case124_header_constant_value_changed",
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -180,7 +180,7 @@
       "roots": [
         "agent-evals/skills/fixtures/consumer-actually-affected",
         "agent-evals/skills/scenarios.yaml",
-        "examples/ground_truth.json"
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -209,7 +209,7 @@
       "roots": [
         "agent-evals/skills/fixtures/consumer-unaffected-despite-break",
         "agent-evals/skills/scenarios.yaml",
-        "examples/ground_truth.json"
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -237,7 +237,7 @@
       "roots": [
         "agent-evals/skills/fixtures/contract-coverage-incomplete",
         "agent-evals/skills/scenarios.yaml",
-        "examples/ground_truth.json"
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -248,16 +248,16 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:4c2175d8ef8536bd16e8df42332946b9f52f65076f77adeb6ac072bf7ada3d90",
+      "digest": "sha256:9b1f4718f44cae89127b8eab87bb816e8eb3f73b269c59c06799a61b869f5b05",
       "expected": {
         "kinds": [
           "enum_member_value_changed"
         ],
         "min_evidence": "L1",
-        "resolved_from": "examples/ground_truth.json",
+        "resolved_from": "catalog/ground_truth.json",
         "verdict": "BREAKING"
       },
-      "inputs": "examples/case08_enum_value_change",
+      "inputs": "catalog/cases/case08_enum_value_change",
       "invocation": {},
       "platforms": [
         "linux"
@@ -265,8 +265,8 @@
       "prompt": "Someone reordered an enum in a public header. What does that do to programs already linked against this library?",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
-        "examples/case08_enum_value_change",
-        "examples/ground_truth.json"
+        "catalog/cases/case08_enum_value_change",
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -295,7 +295,7 @@
       "roots": [
         "agent-evals/skills/fixtures/evidence-too-shallow",
         "agent-evals/skills/scenarios.yaml",
-        "examples/ground_truth.json"
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -322,7 +322,7 @@
       "roots": [
         "agent-evals/skills/fixtures/not-comparable-pair",
         "agent-evals/skills/scenarios.yaml",
-        "examples/ground_truth.json"
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -352,7 +352,7 @@
       "roots": [
         "agent-evals/skills/fixtures/plugin-required-symbol-loss",
         "agent-evals/skills/scenarios.yaml",
-        "examples/ground_truth.json"
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -363,16 +363,16 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:ef0a85dd49b97dad0e562213b06940b6585af8317080452a8be66f4fb636f285",
+      "digest": "sha256:ebc899d0858993e64b8a0ccacb3b025fe7a7285ce0e109073361adcd424d345b",
       "expected": {
         "kinds": [
           "func_removed"
         ],
         "min_evidence": "L0",
-        "resolved_from": "examples/ground_truth.json",
+        "resolved_from": "catalog/ground_truth.json",
         "verdict": "BREAKING"
       },
-      "inputs": "examples/case01_symbol_removal",
+      "inputs": "catalog/cases/case01_symbol_removal",
       "invocation": {},
       "platforms": [
         "linux",
@@ -382,8 +382,8 @@
       "prompt": "Review this change to our shared library for binary compatibility with applications already built against it.",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
-        "examples/case01_symbol_removal",
-        "examples/ground_truth.json"
+        "catalog/cases/case01_symbol_removal",
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -394,16 +394,16 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:f8e02c4347cba855225cc6e8710400493d2859866747e7d8e365ec64ca91d1dc",
+      "digest": "sha256:8acb0bec2efca927763548da9641c88d74346a66a66e43981ff5610d33107b77",
       "expected": {
         "kinds": [
           "runtime_floor_raised"
         ],
         "min_evidence": "L0",
-        "resolved_from": "examples/ground_truth.json",
+        "resolved_from": "catalog/ground_truth.json",
         "verdict": "COMPATIBLE_WITH_RISK"
       },
-      "inputs": "examples/case15_noexcept_change",
+      "inputs": "catalog/cases/case15_noexcept_change",
       "invocation": {},
       "platforms": [
         "linux"
@@ -411,8 +411,8 @@
       "prompt": "We removed the noexcept guarantee from a function that now throws internally. The symbol itself didn't change. Is this release still safe to deploy for people already running the old library?",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
-        "examples/case15_noexcept_change",
-        "examples/ground_truth.json"
+        "catalog/cases/case15_noexcept_change",
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -423,16 +423,16 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:7724211295f324e947787878ca19991abb1b81ac1e3c8db539d273b50371628e",
+      "digest": "sha256:cf94aade2cec4f7a6b8dd644c76615919e993201d39a5aec755e0581deecc853",
       "expected": {
         "kinds": [
           "type_size_changed"
         ],
         "min_evidence": "L1",
-        "resolved_from": "examples/ground_truth.json",
+        "resolved_from": "catalog/ground_truth.json",
         "verdict": "BREAKING"
       },
-      "inputs": "examples/case07_struct_layout",
+      "inputs": "catalog/cases/case07_struct_layout",
       "invocation": {},
       "platforms": [
         "linux"
@@ -440,8 +440,8 @@
       "prompt": "We changed a struct that appears in our public headers. Is that safe for already-compiled callers?",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
-        "examples/case07_struct_layout",
-        "examples/ground_truth.json"
+        "catalog/cases/case07_struct_layout",
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"
@@ -452,16 +452,16 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:b3a411931d9ac85031890464883bfbda6f3cb0af0c09e9be923b17ad5a1f1c5a",
+      "digest": "sha256:f11635e2a01c4b13ba80cc3751997a261372feb002b32880c4c26682e655bef1",
       "expected": {
         "kinds": [
           "type_vtable_changed"
         ],
         "min_evidence": "L1",
-        "resolved_from": "examples/ground_truth.json",
+        "resolved_from": "catalog/ground_truth.json",
         "verdict": "BREAKING"
       },
-      "inputs": "examples/case09_cpp_vtable",
+      "inputs": "catalog/cases/case09_cpp_vtable",
       "invocation": {},
       "platforms": [
         "linux"
@@ -469,8 +469,8 @@
       "prompt": "A virtual function was added to a class our users derive from. Review this for compatibility.",
       "roots": [
         "agent-evals/skills/scenarios.yaml",
-        "examples/case09_cpp_vtable",
-        "examples/ground_truth.json"
+        "catalog/cases/case09_cpp_vtable",
+        "catalog/ground_truth.json"
       ],
       "skill": "check-abi-compatibility",
       "status": "ready"

@@ -107,7 +107,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p run1 run2
-          cd examples/case01_symbol_removal
+          cd catalog/cases/case01_symbol_removal
           gcc -shared -fPIC v1.c -o "${GITHUB_WORKSPACE}/run1/libexample.so"
           gcc -shared -fPIC v2.c -o "${GITHUB_WORKSPACE}/run2/libexample.so"
 

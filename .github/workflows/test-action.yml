@@ -390,7 +390,7 @@ jobs:
 
       - name: Build test binaries
         run: |
-          cd examples/case01_symbol_removal
+          cd catalog/cases/case01_symbol_removal
           gcc -shared -fPIC v1.c -o libv1.so
           gcc -shared -fPIC v2.c -o libv2.so
           gcc app.c -L. -lv1 -o myapp -Wl,-rpath,.
@@ -400,13 +400,13 @@ jobs:
         uses: ./
         continue-on-error: true
         with:
-          old-library: examples/case01_symbol_removal/libv1.so
-          new-library: examples/case01_symbol_removal/libv2.so
+          old-library: catalog/cases/case01_symbol_removal/libv1.so
+          new-library: catalog/cases/case01_symbol_removal/libv2.so
           format: json
           output-file: appcompat-result.json
           install-deps: false
           fail-on-breaking: true
-          extra-args: '--used-by examples/case01_symbol_removal/myapp'
+          extra-args: '--used-by catalog/cases/case01_symbol_removal/myapp'
 
       - name: Verify verdict is BREAKING
         shell: bash
@@ -428,7 +428,7 @@ jobs:
 
       - name: Build test binaries
         run: |
-          cd examples/case01_symbol_removal
+          cd catalog/cases/case01_symbol_removal
           gcc -shared -fPIC v1.c -o libv1.so
           gcc app.c -L. -lv1 -o myapp -Wl,-rpath,.
 
@@ -436,11 +436,11 @@ jobs:
         id: abi
         uses: ./
         with:
-          old-library: examples/case01_symbol_removal/libv1.so
-          new-library: examples/case01_symbol_removal/libv1.so
+          old-library: catalog/cases/case01_symbol_removal/libv1.so
+          new-library: catalog/cases/case01_symbol_removal/libv1.so
           install-deps: false
           fail-on-breaking: true
-          extra-args: '--used-by examples/case01_symbol_removal/myapp'
+          extra-args: '--used-by catalog/cases/case01_symbol_removal/myapp'
 
       - name: Verify verdict is COMPATIBLE
         shell: bash
@@ -601,7 +601,7 @@ jobs:
 
       - name: Build test binaries (runner's own pre-installed compiler)
         run: |
-          cd examples/case01_symbol_removal
+          cd catalog/cases/case01_symbol_removal
           gcc -shared -fPIC v1.c -o libv1.so
           gcc -shared -fPIC v2.c -o libv2.so
 
@@ -609,10 +609,10 @@ jobs:
         id: abi
         uses: ./
         with:
-          old-library: examples/case01_symbol_removal/libv1.so
-          new-library: examples/case01_symbol_removal/libv2.so
-          old-header: examples/case01_symbol_removal/v1.h
-          new-header: examples/case01_symbol_removal/v2.h
+          old-library: catalog/cases/case01_symbol_removal/libv1.so
+          new-library: catalog/cases/case01_symbol_removal/libv2.so
+          old-header: catalog/cases/case01_symbol_removal/v1.h
+          new-header: catalog/cases/case01_symbol_removal/v2.h
           format: json
           output-file: conda-forge-result.json
           dependency-source: ${{ matrix.dependency-source }}

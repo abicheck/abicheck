@@ -3,7 +3,7 @@
 calibration catalog's taxonomy.
 
 Phase 2/6 of the examples/catalog split
-(docs/contribute/plans/examples-catalog-split.md). `examples/catalog_rules.yaml`
+(docs/contribute/plans/examples-catalog-split.md). `catalog/catalog_rules.yaml`
 is the hand-authored half: one `title` + `definition` per rule slug. This
 module is the derived half -- it joins that registry against
 `ground_truth.json["taxonomy"]` to answer, per rule, which case is the
@@ -39,7 +39,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import example_catalog  # noqa: E402
 
-REGISTRY_PATH = example_catalog.EXAMPLES_DIR / "catalog_rules.yaml"
+REGISTRY_PATH = example_catalog.CATALOG_DIR / "catalog_rules.yaml"
 
 #: A rule with at least one rule-entity case carrying it as `rule_slug`.
 STATUS_DEMONSTRATED = "demonstrated"
@@ -50,7 +50,7 @@ STATUS_REFERENCED_ONLY = "referenced-only"
 
 @dataclass(frozen=True)
 class RuleDefinition:
-    """The hand-authored half: one entry of `examples/catalog_rules.yaml`."""
+    """The hand-authored half: one entry of `catalog/catalog_rules.yaml`."""
 
     slug: str
     title: str
@@ -91,7 +91,7 @@ class RuleFamily:
 
 
 def load_registry(path: Path | None = None) -> dict[str, RuleDefinition]:
-    """Parse `examples/catalog_rules.yaml` into slug -> definition."""
+    """Parse `catalog/catalog_rules.yaml` into slug -> definition."""
     raw = yaml.safe_load((path or REGISTRY_PATH).read_text(encoding="utf-8"))
     rules = (raw or {}).get("rules") or {}
     out: dict[str, RuleDefinition] = {}

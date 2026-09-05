@@ -42,7 +42,7 @@ from abicheck.checker_policy import Verdict  # noqa: E402
 from abicheck.model import AbiSnapshot  # noqa: E402
 from abicheck.python_api import surface_from_stub_file  # noqa: E402
 
-_EXAMPLES = example_catalog.EXAMPLES_DIR
+_EXAMPLES = example_catalog.CASES_DIR
 _GROUND_TRUTH = example_catalog.load_ground_truth()["verdicts"]
 
 _STUB_PAIR_CASES = sorted(

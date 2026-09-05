@@ -98,7 +98,7 @@ def restore_mtimes(paths: list[str]) -> int:
 
 
 def main() -> int:
-    paths = sys.argv[1:] or ["examples"]
+    paths = sys.argv[1:] or ["examples", "catalog"]
     touched = restore_mtimes(paths)
     print(
         f"Restored git last-commit mtimes on {touched} file(s) under {', '.join(paths)}"

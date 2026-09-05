@@ -2,7 +2,7 @@
 """Generate docs/contribute/catalog-coverage.md -- Phase 6 of the
 examples/catalog split (docs/contribute/plans/examples-catalog-split.md).
 
-Phases 1-2 gave every case in `examples/ground_truth.json["taxonomy"]` an
+Phases 1-2 gave every case in `catalog/ground_truth.json["taxonomy"]` an
 `entity` (rule/scenario), a `rule_slug`/`variant_of`/`relation_type`/
 `relation_axis` set, a `scenario_kind`, and an `ecosystem`. Before this
 generator, every consumer that reported on catalog size
@@ -136,7 +136,7 @@ def _rule_coverage(taxonomy: dict[str, dict[str, object]]) -> str:
     lines = [
         "## Rule coverage",
         "",
-        "Every rule named below is defined in `examples/catalog_rules.yaml`, "
+        "Every rule named below is defined in `catalog/catalog_rules.yaml`, "
         "the canonical rule registry (a repository file, not a published "
         "page). A slug used by a case but missing from "
         "that file (or defined there but used by no case) fails "

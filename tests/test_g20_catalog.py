@@ -30,7 +30,7 @@ if str(_REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(_REPO / "scripts"))
 import example_catalog  # noqa: E402
 
-_EXAMPLES = example_catalog.EXAMPLES_DIR
+_EXAMPLES = example_catalog.CASES_DIR
 _GT = example_catalog.load_ground_truth()["verdicts"]
 
 #: G20 cases: those declaring a cross-check expectation (the v4 audit corpus).

@@ -238,7 +238,7 @@ incomparable.
 
 ## Adding a scenario
 
-1. Category A if `examples/ground_truth.json` can answer it — name the case,
+1. Category A if `catalog/ground_truth.json` can answer it — name the case,
    never restate the expected verdict. Category B only when the question needs
    `--used-by`, `--required-symbol`, a matrix, a broken comparability contract,
    a depth the question outruns, or an unclosable `--contract` domain.

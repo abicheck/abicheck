@@ -49,7 +49,7 @@ scenarios:
     plan: docs/contribute/plans/g6-kernel-btf-and-accelerator.md
     note: >
       SYCL metadata + diff is unit-tested (tests/test_diff_sycl.py) and there is
-      a change-type example (examples/case82_sycl_overload_set_removed). Full
+      a change-type example (catalog/cases/case82_sycl_overload_set_removed). Full
       automation needs a SYCL plugin fixture wired into a workflow-level run;
       CUDA is deferred.
 

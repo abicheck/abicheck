@@ -22,7 +22,7 @@ This module is the **single source of truth** for *which evidence layer each
 example case is designed to exercise* — i.e. the minimum source you must feed
 abicheck before the case's break (or its correct no-change verdict) becomes
 visible. ``benchmark_comparison.py --evidence-tiers`` consumes it to run the
-catalog at each tier and ``examples/ground_truth.json`` stores the computed
+catalog at each tier and ``catalog/ground_truth.json`` stores the computed
 ``min_evidence`` per case; ``tests/test_evidence_tiers.py`` keeps the two in
 sync. It is pure-stdlib and side-effect-free so it can be imported without a
 compiler, castxml, or any external tool.

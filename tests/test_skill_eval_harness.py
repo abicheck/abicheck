@@ -515,12 +515,12 @@ class TestToolchainPreflight:
     def test_a_c_only_selection_does_not_demand_a_cxx_compiler(self):
         """Requiring both unconditionally described the corpus, not the run."""
         assert runner.required_languages(
-            self._scenarios("examples/case01_symbol_removal")
+            self._scenarios("catalog/cases/case01_symbol_removal")
         ) == {"c"}
 
     def test_a_cxx_fixture_is_recognized(self):
         assert "c++" in runner.required_languages(
-            self._scenarios("examples/case09_cpp_vtable")
+            self._scenarios("catalog/cases/case09_cpp_vtable")
         )
 
     def test_msvc_counts_as_both_compilers(self):

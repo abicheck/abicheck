@@ -337,7 +337,7 @@ CLAUDE.md` for the full account of what is and is not verified.
 > affected`, `plugin-required-symbol-loss` — were promoted to `ready`,
 > each backed by a real, individually-verified fixture under
 > `agent-evals/skills/fixtures/`. The corpus now stands at 12 scenarios (6
-> Category A, drawn from `examples/ground_truth.json`; 6 Category B, with
+> Category A, drawn from `catalog/ground_truth.json`; 6 Category B, with
 > their own stated expected outcome), covering all three of dimension 2's
 > live uncertainty kinds (`not_comparable`, `evidence_too_shallow`,
 > `contract_coverage_incomplete` — `matrix_target_unrun` was narrowed out
@@ -500,7 +500,7 @@ CLAUDE.md` for the full account of what is and is not verified.
 > shipped (no fifth skill, no further scope added to the existing three
 > non-flagship skills) and designate `native-binary-compatibility-review` —
 > the skill with the cleanest ground truth (a binary compatibility verdict
-> against `examples/ground_truth.json`, no release-matrix or per-consumer
+> against `catalog/ground_truth.json`, no release-matrix or per-consumer
 > scoping to stand up first) — as the **sole flagship** subject for G37's
 > L1l/L2/L3 evaluation work. `native-api-evolution`,
 > `native-release-compatibility`, and `native-consumer-compatibility` remain

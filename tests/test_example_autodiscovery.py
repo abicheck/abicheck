@@ -11,7 +11,7 @@ Layout support:
   • good/bad  — examples/caseXX/bad.c (v1) + good.c (v2)  [bad=before, good=fixed]
   • libfoo    — examples/caseXX/libfoo_v1.c + libfoo_v2.c
 
-Expected verdicts are loaded from examples/ground_truth.json (single source
+Expected verdicts are loaded from catalog/ground_truth.json (single source
 of truth). Set a case to null in ground_truth.json to skip it entirely.
 
 Cross-platform: cases declare supported platforms in ground_truth.json.
@@ -403,10 +403,14 @@ def _build_with_cmake(
     case_name = case_dir.name
     case_out = build_dir / case_name
 
-    # Configure — only when no pre-configured build tree is provided
+    # Configure — only when no pre-configured build tree is provided.
+    # The CMake project root is catalog/ (catalog/CMakeLists.txt globs
+    # cases/case*), not case_dir.parent (catalog/cases/) -- Phase 4 of the
+    # examples/catalog split added that extra cases/ nesting level between
+    # the project root and each case directory.
     if not already_configured:
         r = subprocess.run(
-            [cmake, "-S", str(case_dir.parent), "-B", str(build_dir),
+            [cmake, "-S", str(example_catalog.CATALOG_DIR), "-B", str(build_dir),
              "-DCMAKE_BUILD_TYPE=Debug"],
             capture_output=True, text=True, timeout=60,
         )

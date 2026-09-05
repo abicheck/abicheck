@@ -1337,7 +1337,7 @@ statement of the problem still stands and is why G37 exists.
 > rubric stays visible.
 
 **Change (historical):** Select a representative subset of the `examples/` cases
-covering the categories `examples/ground_truth.json` can actually resolve
+covering the categories `catalog/ground_truth.json` can actually resolve
 against real per-case fixtures — removed export, changed function
 signature, struct layout drift, enum value change, vtable change,
 API-only break, different compile profiles, public/private scope false
@@ -1363,7 +1363,7 @@ above.
 
 **Files:** `validation/scripts/run_skill_evals.py` (new, alongside the
 existing `validation/scripts/run_example_owner_proofs.py`-style harness
-scripts — indexes cases via **`examples/ground_truth.json`**, the
+scripts — indexes cases via **`catalog/ground_truth.json`**, the
 repository's actual canonical per-case catalog, but **not by iterating
 its top level directly**: the file's top-level keys are file-wide metadata
 (`version`, `description`, `verdicts`, `cross_references`,

@@ -23,7 +23,7 @@ import example_catalog  # noqa: E402
 
 from abicheck.service import compare_snapshots, resolve_input  # noqa: E402
 
-_EXAMPLES = example_catalog.EXAMPLES_DIR
+_EXAMPLES = example_catalog.CASES_DIR
 _GT = example_catalog.load_ground_truth()["verdicts"]
 
 #: kABI cases: those shipping a v1.symvers/v2.symvers fixture pair. Order- and

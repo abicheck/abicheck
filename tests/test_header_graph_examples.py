@@ -58,7 +58,7 @@ if str(REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
-EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+EXAMPLES_DIR = example_catalog.CASES_DIR
 
 #: (case dir, expected verdict, expected changed kinds beyond the L5 risk
 #: finding all four share). An entry may itself be a ``frozenset`` of
@@ -154,7 +154,7 @@ def test_header_graph_reproduces_documented_finding(
     libv2 = tmp_path / "libv2.so"
     # macOS: without a pinned -install_name, clang derives LC_ID_DYLIB from
     # the (differing) output path, which the Mach-O diff reports as a
-    # spurious SONAME_CHANGED (same gotcha examples/CMakeLists.txt's APPLE
+    # spurious SONAME_CHANGED (same gotcha catalog/CMakeLists.txt's APPLE
     # branch and test_cross_platform_integration.py's
     # test_native_identical_dylib_is_compatible already document/pin around)
     # -- give both builds the identical install name.

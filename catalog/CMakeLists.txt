@@ -273,7 +273,7 @@ function(abicheck_add_bundle_case CASE_NAME)
 
   # CMAKE_CURRENT_SOURCE_DIR resolves to the case's own subdirectory
   # because abicheck_add_bundle_case is invoked from
-  # examples/<case>/CMakeLists.txt via add_subdirectory().
+  # cases/<case>/CMakeLists.txt via add_subdirectory().
   set(_case_src ${CMAKE_CURRENT_SOURCE_DIR})
   set(_old_out ${CMAKE_BINARY_DIR}/${CASE_NAME}/old)
   set(_new_out ${CMAKE_BINARY_DIR}/${CASE_NAME}/new)
@@ -362,13 +362,14 @@ endfunction()
 
 
 # ---------------------------------------------------------------------------
-# Include all case subdirectories
+# Include all case subdirectories (Phase 4 of the examples/catalog split:
+# cases now live under cases/caseNN_*/, not directly below this file).
 # ---------------------------------------------------------------------------
-file(GLOB _case_dirs RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} case*)
+file(GLOB _case_dirs RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/cases ${CMAKE_CURRENT_SOURCE_DIR}/cases/case*)
 list(SORT _case_dirs)
 foreach(_dir IN LISTS _case_dirs)
-  if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${_dir}
-     AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/CMakeLists.txt)
-    add_subdirectory(${_dir})
+  if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cases/${_dir}
+     AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/cases/${_dir}/CMakeLists.txt)
+    add_subdirectory(cases/${_dir})
   endif()
 endforeach()

@@ -120,7 +120,7 @@ def test_category_a_expectations_are_resolved_into_the_pack(
         if entry["category"] != "A":
             continue
         expected = entry["expected"]
-        assert expected["resolved_from"] == "examples/ground_truth.json"
+        assert expected["resolved_from"] == "catalog/ground_truth.json"
         assert expected["verdict"] in {
             v["expected"] for v in catalog["verdicts"].values()
         }, scenario_id
@@ -475,8 +475,8 @@ def test_every_hash_maps_to_a_skill(pack: dict[str, Any]) -> None:
     [
         ".agents/skills/check-abi-compatibility/SKILL.md",
         "agent-evals/skills/scenarios.yaml",
-        "examples/ground_truth.json",
-        "examples/case01_symbol_removal/old.h",
+        "catalog/ground_truth.json",
+        "catalog/cases/case01_symbol_removal/old.h",
         "tests/agent_skills/trigger_corpus.yaml",
         "docs/reference/cli-reference.md",
         # Routed via SURFACE_ROOTS: it is not hashed, but a change here is what
@@ -807,7 +807,7 @@ def test_an_input_routing_only_to_a_hash_this_bundle_lacks_fails(
     # to a different scenario's own fixture (`changed-signature`'s case
     # directory) routes to a scenario hash this bundle did not record.
     bundle["observed_inputs"].append(
-        _observed("examples/case02_param_type_change/v1.h")
+        _observed("catalog/cases/case02_param_type_change/v1.h")
     )
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
 

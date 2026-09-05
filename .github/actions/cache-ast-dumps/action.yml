@@ -27,7 +27,7 @@ runs:
     # instead of its own last edit, defeating the point.
     - name: Restore example file mtimes (stable AST-cache keys across CI runs)
       shell: bash
-      run: python3 scripts/restore_git_mtimes.py examples
+      run: python3 scripts/restore_git_mtimes.py examples catalog
 
     # Folded into the cache key below so a runner-image castxml/gcc/clang
     # upgrade invalidates the whole cache instead of silently reusing AST

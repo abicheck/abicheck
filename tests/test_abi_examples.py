@@ -22,7 +22,7 @@ if str(REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
-EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+EXAMPLES_DIR = example_catalog.CASES_DIR
 
 # (case_dir_name, expected_verdict, header_v1, header_v2)
 #
@@ -258,11 +258,14 @@ def _try_cmake_build(
         pytest.skip(f"{case_name}: cmake not found in PATH")
 
     cmake_build = tmp_path / "cmake_build"
+    # The CMake project root is catalog/ (catalog/CMakeLists.txt globs
+    # cases/case*), not case_dir.parent (catalog/cases/) -- Phase 4 of the
+    # examples/catalog split added that extra cases/ nesting level.
     r = subprocess.run(
         [
             "cmake",
             "-S",
-            str(case_dir.parent),
+            str(example_catalog.CATALOG_DIR),
             "-B",
             str(cmake_build),
             "-DCMAKE_BUILD_TYPE=Debug",

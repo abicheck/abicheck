@@ -51,7 +51,7 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     diff_source_graph_findings,
 )
 
-_EXAMPLES = example_catalog.EXAMPLES_DIR
+_EXAMPLES = example_catalog.CASES_DIR
 _GT = example_catalog.load_ground_truth()["verdicts"]
 
 #: The L3/L4/L5 corpus: cases shipping an old.json/new.json fixture pair.

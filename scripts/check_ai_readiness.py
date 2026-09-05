@@ -52,6 +52,11 @@ PKG = ROOT / "abicheck"
 TESTS = ROOT / "tests"
 DOCS = ROOT / "docs"
 EXAMPLES = example_catalog.EXAMPLES_DIR
+#: The calibration/compatibility-knowledge tree (Phase 4 of the
+#: examples/catalog split): `catalog/ground_truth.json`, `catalog/README.md`,
+#: and `catalog/cases/<case_id>/` (CASES).
+CATALOG = example_catalog.CATALOG_DIR
+CASES = example_catalog.CASES_DIR
 SCRIPTS = ROOT / "scripts"
 EVAL = ROOT / "eval"
 VALIDATION = ROOT / "validation"
@@ -204,6 +209,7 @@ REQUIRED_CLAUDE_MD_DIRS: tuple[Path, ...] = (
     TESTS,
     DOCS,
     EXAMPLES,
+    CATALOG,
     SCRIPTS,
     EVAL,
     VALIDATION,
@@ -713,7 +719,7 @@ def check_doc_count_sync(f: Findings) -> None:
 
     Four values historically drifted across the docs: the number of `ChangeKind`
     values ("N change types"), the size of the example catalog
-    (`examples/ground_truth.json`), the snapshot `schema_version`, and the
+    (`catalog/ground_truth.json`), the snapshot `schema_version`, and the
     compare report's `report_schema_version` (each a doc page hand-copying a
     number that already has a fact owner, per AGENTS.md's "don't hand-copy a
     count/version that has a fact owner elsewhere" rule, with nothing catching
@@ -762,7 +768,7 @@ def check_doc_count_sync(f: Findings) -> None:
 
     n_kinds = len(list(ChangeKind))
 
-    gt_path = EXAMPLES / "ground_truth.json"
+    gt_path = CATALOG / "ground_truth.json"
     try:
         ground_truth = json.loads(_read(gt_path))
         verdicts = ground_truth["verdicts"]
@@ -1702,13 +1708,20 @@ def check_mypy_baseline(f: Findings) -> None:
 
 
 def check_examples_ground_truth(f: Findings) -> None:
-    """Each examples/case*/ must have a README.md AND an entry in
-    examples/ground_truth.json["verdicts"]. Missing either side fails: the
+    """Each catalog/cases/case*/ must have a README.md AND an entry in
+    catalog/ground_truth.json["verdicts"]. Missing either side fails: the
     catalog is calibration data and the two sides have to stay in sync.
+
+    Deliberately scans CASES directly rather than driving discovery from
+    ground_truth.json (the way example_catalog.iter_case_dirs() does) --
+    this is one of the four "bidirectional directory-sync audits"
+    (scripts/example_catalog.py's own docstring) whose whole point is
+    independence from ground_truth.json, so an orphaned directory is still
+    caught.
     """
-    if not EXAMPLES.exists():
+    if not CASES.exists():
         return
-    gt_path = EXAMPLES / "ground_truth.json"
+    gt_path = CATALOG / "ground_truth.json"
     if not gt_path.is_file():
         f.err("examples-ground-truth", f"{_rel(gt_path)}: file not found")
         return
@@ -1722,27 +1735,27 @@ def check_examples_ground_truth(f: Findings) -> None:
         f.err("examples-ground-truth", f"{_rel(gt_path)}: missing 'verdicts' object")
         return
     case_dirs = {
-        p.name for p in EXAMPLES.iterdir() if p.is_dir() and p.name.startswith("case")
+        p.name for p in CASES.iterdir() if p.is_dir() and p.name.startswith("case")
     }
 
     for case_name in sorted(case_dirs):
-        case_dir = EXAMPLES / case_name
+        case_dir = CASES / case_name
         if not (case_dir / "README.md").is_file():
             f.err(
                 "examples-ground-truth",
-                f"examples/{case_name}/: missing README.md (per-case explainer required)",
+                f"catalog/cases/{case_name}/: missing README.md (per-case explainer required)",
             )
         if case_name not in verdicts:
             f.err(
                 "examples-ground-truth",
-                f"examples/{case_name}/: no entry in ground_truth.json['verdicts']",
+                f"catalog/cases/{case_name}/: no entry in ground_truth.json['verdicts']",
             )
 
     for entry_name in sorted(verdicts):
         if entry_name not in case_dirs:
             f.warn(
                 "examples-ground-truth",
-                f"ground_truth.json references '{entry_name}' but no examples/{entry_name}/ directory",
+                f"ground_truth.json references '{entry_name}' but no catalog/cases/{entry_name}/ directory",
             )
 
 
@@ -1752,17 +1765,17 @@ def check_examples_ground_truth(f: Findings) -> None:
 
 
 def check_examples_readme_sync(f: Findings) -> None:
-    """The hand-facing examples/README.md catalog must agree with ground_truth.
+    """The hand-facing catalog/README.md catalog must agree with ground_truth.
 
     Unlike the generated docs/reference/examples/ tree (gated by gen_examples_docs.py
-    --check), the top-level examples/README.md is GitHub-rendered and was
+    --check), the top-level catalog/README.md is GitHub-rendered and was
     historically hand-maintained, so its headline count, per-verdict
     distribution, and case-index rows drifted (missing newly-added cases and
     showing stale verdicts). This check pins all three to ground_truth.json so
     the drift can't recur silently.
     """
-    gt_path = EXAMPLES / "ground_truth.json"
-    readme = EXAMPLES / "README.md"
+    gt_path = CATALOG / "ground_truth.json"
+    readme = CATALOG / "README.md"
     if not gt_path.is_file() or not readme.is_file():
         return
     try:
@@ -1780,13 +1793,13 @@ def check_examples_readme_sync(f: Findings) -> None:
     if m is None:
         f.warn(
             "examples-readme-sync",
-            "examples/README.md: headline 'contains **N cases**' anchor not found; "
+            "catalog/README.md: headline 'contains **N cases**' anchor not found; "
             "update the regex in check_examples_readme_sync if the wording changed.",
         )
     elif int(m.group(1)) != n_total:
         f.err(
             "examples-readme-sync",
-            f"examples/README.md: headline says {int(m.group(1))} cases, "
+            f"catalog/README.md: headline says {int(m.group(1))} cases, "
             f"but ground_truth.json has {n_total}.",
         )
 
@@ -1816,13 +1829,13 @@ def check_examples_readme_sync(f: Findings) -> None:
         if mm is None:
             f.warn(
                 "examples-readme-sync",
-                f"examples/README.md: distribution row {pattern!r} not found; "
+                f"catalog/README.md: distribution row {pattern!r} not found; "
                 "update check_examples_readme_sync if the table changed.",
             )
         elif int(mm.group(1)) != expected:
             f.err(
                 "examples-readme-sync",
-                f"examples/README.md: distribution row {pattern!r} says "
+                f"catalog/README.md: distribution row {pattern!r} says "
                 f"{int(mm.group(1))}, but ground_truth.json has {expected}.",
             )
 
@@ -1841,7 +1854,7 @@ def check_examples_readme_sync(f: Findings) -> None:
     }
     # | [NN](caseXXX/README.md) | Title | Category | <icon> VERDICT (notes) |
     row_re = re.compile(
-        r"^\|\s*\[[^\]]*\]\((case[A-Za-z0-9_]+)/README\.md\)\s*"
+        r"^\|\s*\[[^\]]*\]\(cases/(case[A-Za-z0-9_]+)/README\.md\)\s*"
         r"\|([^|\n]*)\|([^|\n]*)\|([^|\n]*)\|\s*$",
         re.MULTILINE,
     )
@@ -1854,7 +1867,7 @@ def check_examples_readme_sync(f: Findings) -> None:
         if meta is None:
             f.err(
                 "examples-readme-sync",
-                f"examples/README.md: index row for '{name}' has no "
+                f"catalog/README.md: index row for '{name}' has no "
                 "ground_truth.json entry.",
             )
             continue
@@ -1867,21 +1880,21 @@ def check_examples_readme_sync(f: Findings) -> None:
         if got_verdict != want_verdict:
             f.err(
                 "examples-readme-sync",
-                f"examples/README.md: case '{name}' row shows verdict "
+                f"catalog/README.md: case '{name}' row shows verdict "
                 f"{got_verdict!r}, but ground_truth.json says {want_verdict!r}.",
             )
         if cat_cell != want_cat:
             f.err(
                 "examples-readme-sync",
-                f"examples/README.md: case '{name}' row shows category "
+                f"catalog/README.md: case '{name}' row shows category "
                 f"{cat_cell!r}, but ground_truth.json says {want_cat!r}.",
             )
 
     for name in sorted(set(verdicts) - seen):
         f.err(
             "examples-readme-sync",
-            f"examples/README.md: case '{name}' has no parseable index row "
-            f"(expected '| [..]({name}/README.md) | Title | Category | Verdict |').",
+            f"catalog/README.md: case '{name}' has no parseable index row "
+            f"(expected '| [..](cases/{name}/README.md) | Title | Category | Verdict |').",
         )
 
 

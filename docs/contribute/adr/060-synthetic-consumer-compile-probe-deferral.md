@@ -58,7 +58,7 @@ change the framing below:
    does compile the same consumer TU against a v1 and a v2 header/lib pair
    and reads the compiler's real success/failure as the check's own oracle.
    `case111_enumerable_thread_specific_lambda_ambiguity`
-   (`examples/ground_truth.json`) is exactly this ADR's proposed mechanism
+   (`catalog/ground_truth.json`) is exactly this ADR's proposed mechanism
    working end to end for one hand-built case: v1's `ets({})` compiles, v2's
    equivalent is genuinely ambiguous under real overload resolution, and the
    case is recorded with `detectability: none` — every snapshot-level
@@ -94,7 +94,7 @@ decision" below) — a driving case is not the open question, see below.
 - **A driving case exists, but it doesn't resolve the design question.**
   An earlier draft of this ADR claimed no concrete case motivates this
   layer; that was wrong, and a review round caught it directly against
-  `examples/ground_truth.json`. `case111` is a real, already-recorded proof
+  `catalog/ground_truth.json`. `case111` is a real, already-recorded proof
   that a compile-time probe catches an `API_BREAK` (constructor-overload
   ambiguity) every current evidence tier (L0–L5) misses —
   `known_detector_gap: "constructor_overload_ambiguity"` says so explicitly.

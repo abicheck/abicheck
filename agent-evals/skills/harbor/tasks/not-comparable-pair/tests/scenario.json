@@ -20,7 +20,7 @@
   "roots": [
     "agent-evals/skills/fixtures/not-comparable-pair",
     "agent-evals/skills/scenarios.yaml",
-    "examples/ground_truth.json"
+    "catalog/ground_truth.json"
   ],
   "skill": "check-abi-compatibility",
   "status": "ready"

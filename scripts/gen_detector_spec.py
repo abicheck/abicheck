@@ -80,7 +80,7 @@ def _category_of(kind, policy) -> str:
 def _examples_by_kind() -> dict[str, list[str]]:
     """Reverse-map each ChangeKind value to the example case(s) that demonstrate
     it, sourced from the one canonical
-    examples/ground_truth.json['verdicts'][*]['expected_kinds'] field.
+    catalog/ground_truth.json['verdicts'][*]['expected_kinds'] field.
     Audit and compare workflows share this contract.
     The canonical expected verdict and kinds never vary by evidence depth.
     A lane below min_evidence may miss them, but that is an XFAIL/FAIL against
@@ -140,7 +140,7 @@ def render_markdown(rows: list[dict[str, str]]) -> str:
         "partition (`checker_policy`), default policy (`policy_for`), the "
         "weakest evidence layer at which the kind becomes detectable "
         "(`scripts/evidence_tiers`), and the example case(s) that demonstrate the "
-        "kind (`examples/ground_truth.json`). The **Examples** column is capped at "
+        "kind (`catalog/ground_truth.json`). The **Examples** column is capped at "
         f"{_MAX_EXAMPLE_LINKS} links per kind; the full mapping is in "
         "`detector-spec.json`.",
         "",

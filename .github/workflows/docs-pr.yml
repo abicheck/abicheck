@@ -7,6 +7,7 @@ on:
       - 'docs/**'
       - 'abicheck/schemas/**'
       - 'examples/**'
+      - 'catalog/**'
       - 'mkdocs.yml'
       - 'scripts/gen_examples_docs.py'
       - 'scripts/publish_schemas.py'

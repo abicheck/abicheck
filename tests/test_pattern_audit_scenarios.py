@@ -31,7 +31,7 @@ library-agnostic.
 
 Cross-references:
     * ``abicheck/checker_policy.py``       — ``ChangeKind`` enum
-    * ``examples/ground_truth.json``       — existing example catalogue
+    * ``catalog/ground_truth.json``       — existing example catalogue
     * ``abicheck/internal_leak.py``        — PR #238 (``detail::`` leak)
     * ``tests/test_internal_leak.py``      — companion test style
     * ``tests/test_cpp_pattern_detectors.py``   — companion test style

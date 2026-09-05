@@ -29,10 +29,10 @@ Hierarchy (5-tier):
 
 Cross-references:
     abicheck/change_registry.py — single-declaration metadata registry
-    examples/ground_truth.json  — expected verdicts per example case
+    catalog/ground_truth.json    — expected verdicts per example case
     tests/test_example_autodiscovery.py — reads from ground_truth.json
     tests/test_abi_examples.py  — hardcoded expectations (cases 01-18)
-    examples/README.md          — case index table
+    catalog/README.md            — case index table
 """
 
 from __future__ import annotations
