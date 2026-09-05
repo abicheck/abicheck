@@ -545,6 +545,40 @@ class TestExtraArgsHasWriteFlag:
         # for no reason.
         assert not self._predicate("--output --write")
 
+    def test_write_consumed_as_a_clustered_short_options_value_is_not_a_flag(
+        self,
+    ) -> None:
+        # A fifth Codex review round (P1, fresh evidence): `extra-args:
+        # -vH --write` means "-v, then -H with a header literally named
+        # --write" -- Click parses a clustered bare short option (`-vH`)
+        # exactly like `-v -H`, and `-H` is the value-taking option here,
+        # consuming the literal token "--write" as its own value. There is
+        # no real `--write` flag in this invocation at all; failing to
+        # recognize the cluster left the literal "--write" unconsumed and
+        # wrongly classified as a real flag, silently suppressing the
+        # internal JSON sidecar injection (the unsafe direction, unlike the
+        # sibling false-positive class this file documents as accepted).
+        assert not self._predicate("-vH --write")
+
+    def test_write_after_a_clustered_bare_boolean_short_option_is_still_a_flag(
+        self,
+    ) -> None:
+        # The negative control: `-vv` is a cluster of two boolean flags
+        # only (no value-taking option at the end), so it consumes nothing
+        # from the following token -- a real `--write` right after it is
+        # still a real flag.
+        assert self._predicate("-vv --write")
+
+    def test_write_attached_to_a_clustered_short_option_value_is_not_a_flag(
+        self,
+    ) -> None:
+        # `-vHabc` is `-v` plus `-H` with an *attached* value ("abc") --
+        # Click does not consume a following token for this form at all,
+        # so a real `--write` right after it is unaffected either way; this
+        # pins that the attached-value form is left opaque rather than
+        # mis-expanded into consuming the next token.
+        assert self._predicate("-vHabc --write")
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestExtraArgsHasDryRunFlag:
@@ -756,6 +790,54 @@ class TestExtraArgsWriteJsonPath:
         # --write` means "write a file literally named --write", not a real
         # `--write` flag.
         assert self._value("--output --write") == ""
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestExtraArgsExpandShortClusters:
+    """Direct unit tests for `_extra_args_expand_short_clusters`, the helper
+    behind the fifth Codex review round (P1, fresh evidence): a clustered
+    bare short option (`-vH` for Click's own `-v -H`) was an unrecognized
+    token to `_extra_args_is_value_option`'s exact-string match, so a
+    following literal `--write` (a header path spelled that way) was
+    misclassified as a real flag instead of `-H`'s consumed value.
+    """
+
+    def _expand(self, token: str) -> str:
+        return _run_value(f"_extra_args_expand_short_clusters {token!r} || true")
+
+    def test_not_a_cluster_returns_nothing(self) -> None:
+        assert self._expand("--write") == ""
+        assert self._expand("-H") == ""
+        assert self._expand("plain") == ""
+
+    def test_bool_then_value_char_expands_and_marks_the_value_option(self) -> None:
+        assert self._expand("-vH") == "-v\n-H\n"
+
+    def test_multiple_bool_flags_then_value_char(self) -> None:
+        assert self._expand("-vvH") == "-v\n-v\n-H\n"
+
+    def test_every_known_value_char_expands(self) -> None:
+        for char in ("H", "I", "o", "j"):
+            assert self._expand(f"-v{char}") == f"-v\n-{char}\n"
+
+    def test_a_pure_boolean_cluster_is_not_expanded(self) -> None:
+        # `-vv` has no trailing value-taking option, so there is nothing
+        # that needs to consume a following token -- leaving it as one
+        # opaque token (no expansion) is safe and correct, unlike a cluster
+        # that ends in a real value-taking option.
+        assert self._expand("-vv") == ""
+
+    def test_an_attached_value_is_not_expanded(self) -> None:
+        # `-vHabc` is `-v -Habc` (an attached value for -H) in real Click
+        # parsing -- it does not consume a following token, so leaving it
+        # as a single opaque token (no expansion) is the correct outcome.
+        assert self._expand("-vHabc") == ""
+
+    def test_an_unknown_char_is_not_expanded(self) -> None:
+        assert self._expand("-vz") == ""
+
+    def test_a_single_short_option_is_not_a_cluster(self) -> None:
+        assert self._expand("-v") == ""
 
 
 # `_text_report_content` (and its `TestTextReportContentEffectiveFormat`

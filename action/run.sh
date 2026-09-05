@@ -362,6 +362,50 @@ _extra_args_is_value_option() {
   return 1
 }
 
+# Expand Click-style clustered short flags (`-vH` for `-v -H`) into their
+# constituent single-character options, printed one per line, when *token*
+# is exactly such a cluster; returns 1 (no output) otherwise, so the caller
+# falls through to treating the token as an ordinary opaque one.
+#
+# The only short options across compare+scan are one boolean flag (`-v`)
+# and four value-taking ones (`-H`/`-I`/`-j`/`-o`, mirroring
+# `_extra_args_is_value_option` above) -- so the only cluster shape that
+# needs expanding is zero or more `v`s followed by exactly one of those
+# four, with nothing else after it. A cluster with anything else attached
+# after the value char (`-vHfoo`, an *attached* inline value) is left
+# unexpanded on purpose: Click parses that form as `-v -Hfoo`, which does
+# NOT consume a following token as `-H`'s value at all, so leaving the
+# whole thing as one opaque bare token already produces the correct
+# outcome here (nothing downstream needs the attached value itself, only
+# whether the *next* raw token gets consumed). Any other shape (an unknown
+# character, more than one value char) is also left unexpanded, the same
+# safe-by-construction direction `_extra_args_is_value_option`'s own
+# docstring describes: worst case a token is under-recognized, never
+# mis-recognized as consuming something it doesn't.
+_extra_args_expand_short_clusters() {
+  local _tok="$1" _rest _last _flags _n _k
+  case "$_tok" in
+    -[a-zA-Z][a-zA-Z]*) ;;
+    *) return 1 ;;
+  esac
+  _rest="${_tok#-}"
+  _last="${_rest: -1}"
+  case "$_last" in
+    H | I | o | j) ;;
+    *) return 1 ;;
+  esac
+  _flags="${_rest%?}"
+  _n=${#_flags}
+  for ((_k = 0; _k < _n; _k++)); do
+    [[ "${_flags:_k:1}" == "v" ]] || return 1
+  done
+  for ((_k = 0; _k < _n; _k++)); do
+    printf -- '-v\n'
+  done
+  printf -- '-%s\n' "$_last"
+  return 0
+}
+
 # The one place `extra-args` is walked with option/value awareness. Every
 # other extra-args-inspecting helper in this file builds on this rather than
 # re-scanning raw tokens itself -- three independent Codex review rounds
@@ -396,11 +440,33 @@ _extra_args_is_value_option() {
 # for `-j VALUE`) -- both pre-existing limits of every extra-args scan in
 # this file, carried forward rather than silently narrowed by this
 # refactor.
+#
+# Clustered bare short flags (`-vH` for `-v -H`, Click's own short-option
+# clustering) ARE handled, via `_extra_args_expand_short_clusters` below --
+# a fourth Codex review round (P1, fresh evidence) found that `-vH --write`
+# (a literal header path spelled "--write") left `-vH` an unrecognized
+# token and the following literal `--write` misread as a real flag, wrongly
+# suppressing this script's own internal JSON sidecar the same unsafe
+# direction the three collisions above already existed to close. A cluster
+# ending in an *attached* value (`-vHfoo`) is deliberately left as an opaque
+# token rather than expanded: nothing in that form consumes the next raw
+# token at all, so leaving it unexpanded is already the correct outcome,
+# and reaching for its inline value here would just be the concatenated-
+# value gap this comment already documents as out of scope.
 _extra_args_options() {
-  local _arg _pending=""
+  local _arg _pending="" _expanded=() _cluster _line
   # shellcheck disable=SC2086  # word-splitting is the point; see above.
   set -- ${INPUT_EXTRA_ARGS:-}
   for _arg in "$@"; do
+    if _cluster="$(_extra_args_expand_short_clusters "$_arg")"; then
+      while IFS= read -r _line; do
+        [[ -n "$_line" ]] && _expanded+=("$_line")
+      done <<<"$_cluster"
+    else
+      _expanded+=("$_arg")
+    fi
+  done
+  for _arg in ${_expanded[@]+"${_expanded[@]}"}; do
     if [[ -n "$_pending" ]]; then
       printf '%s\t%s\n' "$_pending" "$_arg"
       _pending=""
