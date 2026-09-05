@@ -285,14 +285,15 @@ class TestPeOrdinalRetargeted:
              patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
              patch("abicheck.appcompat._missing_app_versions", return_value=[]), \
              patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse_pe, \
-             patch("abicheck.dumper.dump") as mock_dump, \
+             patch("abicheck.service.detect_binary_format", return_value="pe"), \
+             patch("abicheck.service.run_dump") as mock_run_dump, \
              patch("abicheck.service.compare_snapshots") as mock_compare:
             mock_parse_app.return_value = AppRequirements(undefined_symbols={"ordinal:17"})
             mock_parse_pe.side_effect = [
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
             ]
-            mock_dump.side_effect = [object(), object()]
+            mock_run_dump.side_effect = [object(), object()]
             change = Change(kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="Foo", description="params changed")
             mock_compare.return_value = DiffResult(
                 old_version="old", new_version="new", library="foo.dll",
