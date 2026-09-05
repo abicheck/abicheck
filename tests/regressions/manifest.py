@@ -1034,6 +1034,29 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
             KnownGap(
                 description=(
+                    "The *scoped* one-line view "
+                    "(`cli_compare_fold._ScopedFold.into_oneline`, printed by "
+                    "`--profile quick --used-by`/`--required-symbol`) carries "
+                    "no audit note, unlike every other projection. Attempted "
+                    "and reverted deliberately: that view's counts are "
+                    "recomputed from the *scoped* population -- synthesized "
+                    "scoped-only findings and missing contract labels that "
+                    "are not in `result.changes` at all -- while the ledger "
+                    "counts the detected library changes plus the consumer "
+                    "overlay. On a run whose scoped counts come entirely "
+                    "from synthesized findings the two populations disagree "
+                    "outright (the line reads '1 breaking' beside an audit "
+                    "of '0 detected'), which is worse than omitting the "
+                    "note. Reconciling the two is consumer-parity work "
+                    "(ADR-067 S2), not something this view can paper over."
+                ),
+                reference=(
+                    "docs/contribute/plans/vision-api-abi-evolution.md"
+                    " -- workstream C, slice S2"
+                ),
+            ),
+            KnownGap(
+                description=(
                     "`RuleProvenance.intent` is always 'unspecified': the "
                     "explicit `intent: waiver|false_positive` rule field is "
                     "ADR-067 D5 (S3). Until it lands, the audit cannot "
