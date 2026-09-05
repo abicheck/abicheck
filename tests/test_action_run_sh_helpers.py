@@ -533,6 +533,85 @@ class TestExtraArgsHasWriteFlag:
         # standalone token) must not trip the detector.
         assert not self._predicate("--not-a-write-flag")
 
+    def test_write_consumed_as_an_output_option_value_is_not_a_flag(self) -> None:
+        # A fourth Codex review round (fresh evidence): `extra-args:
+        # --output --write` means "write a file literally named --write"
+        # -- `--output` is the value-taking option here, so it consumes
+        # the literal token "--write" as its own filename, and there is no
+        # real `--write` flag in this invocation at all. Injecting the
+        # internal JSON sidecar on top of a false "the user already has a
+        # --write" belief would have left `_coverage_gated`/
+        # `_assurance_gated`/`_severity_gate_categories` without evidence
+        # for no reason.
+        assert not self._predicate("--output --write")
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestExtraArgsHasDryRunFlag:
+    """Codex review, P2, fresh evidence: an effective dry run reached only
+    through ``extra-args --dry-run`` (the dedicated ``INPUT_DRY_RUN`` input
+    left false) must be recognized too, so the command-assembly branches
+    that only check ``INPUT_DRY_RUN`` don't inject `-o`/`--write` alongside
+    it -- a combination the CLI itself rejects.
+    """
+
+    def _predicate(self, extra_args: str) -> bool:
+        return _run_predicate(
+            f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_dry_run_flag"
+        )
+
+    def test_absent_extra_args(self) -> None:
+        assert not self._predicate("")
+
+    def test_unrelated_extra_args(self) -> None:
+        assert not self._predicate("--verbose --gate-api-break")
+
+    def test_bare_dry_run(self) -> None:
+        assert self._predicate("--dry-run")
+
+    def test_dry_run_after_another_flag(self) -> None:
+        assert self._predicate("--verbose --dry-run")
+
+    def test_does_not_false_positive_on_a_substring(self) -> None:
+        assert not self._predicate("--not-a-dry-run-flag")
+
+    def test_dry_run_consumed_as_a_bare_output_option_value_is_not_a_flag(
+        self,
+    ) -> None:
+        # A second Codex review round (fresh evidence): `extra-args:
+        # --output --dry-run` means "write to a file literally named
+        # --dry-run" -- Click's `-o`/`--output PATH` (two-token form)
+        # consumes the next token as its value, never parses it as a flag.
+        assert not self._predicate("--output --dry-run")
+
+    def test_dry_run_consumed_as_a_short_output_option_value_is_not_a_flag(
+        self,
+    ) -> None:
+        assert not self._predicate("-o --dry-run")
+
+    def test_a_real_dry_run_after_an_output_option_value_is_still_a_flag(
+        self,
+    ) -> None:
+        # The negative control: only the token immediately after `-o`/
+        # `--output` is exempt. A `--dry-run` anywhere else, including
+        # right after a real (non-flag-shaped) output path, is a real flag.
+        assert self._predicate("--output out.json --dry-run")
+
+    def test_dry_run_after_an_unrelated_option_value_that_looks_like_o_is_still_a_flag(
+        self,
+    ) -> None:
+        # A third Codex review round (fresh evidence): the earlier fix's
+        # "skip the token right after -o/--output" rule was itself too
+        # naive -- it can't tell a real `-o` flag from some *other* option's
+        # value that happens to be spelled "-o" (e.g. a suppression file
+        # named "-o"). `--suppress` is the value-taking option here, so it
+        # consumes the literal "-o" as its own value, and the following
+        # `--dry-run` is a real, unconsumed flag -- exactly what Click
+        # itself would parse. The shared `_extra_args_options` tokenizer
+        # (rather than a bare "was the previous token -o?" check) is what
+        # gets this right.
+        assert self._predicate("--suppress -o --dry-run")
+
 
 def _run_value(call: str) -> str:
     """Source the real helper functions and return a value-printing call's
@@ -615,83 +694,73 @@ class TestEffectiveFormat:
     def test_does_not_false_positive_on_a_substring(self) -> None:
         assert self._value("text", "--not-a-format-flag") == "text"
 
+    def test_format_consumed_as_an_output_option_value_is_not_an_override(
+        self,
+    ) -> None:
+        # Same tokenizer, same class of bug as the sibling write/dry-run
+        # helpers: `--output --format` means "write a file literally named
+        # --format", not a `--format` override -- `--output` is the
+        # value-taking option here and consumes the literal token.
+        assert self._value("markdown", "--output --format") == "markdown"
 
-_TEXT_REPORT_CONTENT_MARKER = "_text_report_content() {"
-
-
-def _text_report_content_source() -> str:
-    """``_text_report_content`` is self-contained (no calls into any other
-    run.sh helper), so it is extracted directly by its own markers rather
-    than through ``_helpers_region()`` -- it is defined well after the
-    "Build the abicheck command" cutoff that function stops at."""
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_TEXT_REPORT_CONTENT_MARKER)
-    end = text.index("\n}\n", start) + len("\n}\n")
-    return text[start:end]
-
-
-def _run_text_report_content(env: dict[str, str]) -> str:
-    assignments = " ".join(f"{k}={v!r}" for k, v in env.items())
-    return _run_value(
-        f"{_text_report_content_source()}\n{assignments} _text_report_content"
-    )
+    def test_format_after_an_unrelated_option_value_still_overrides(self) -> None:
+        assert self._value("markdown", "--output out.md --format json") == "json"
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
-class TestTextReportContentEffectiveFormat:
-    """Codex review, PR #998, fresh evidence: `_text_report_content` is the
-    text-report counterpart of `_STDOUT_JSON_FILE`/`_json_report_src` and had
-    the identical effective-format-override defect -- it gated on the
-    nominal `$FORMAT` instead of `$_EFFECTIVE_FORMAT`, so a `format: json`
-    step whose own `extra-args` overrode to `--format text` (with
-    `output-file` set) wrote real text to `$OUTPUT_FILE` that this function
-    never read, silently losing the severity-gate line
-    (`_severity_gate_exit`/`_severity_gate_categories` both call through it)
-    and publishing the generic `ERROR` instead of `SEVERITY_ERROR`.
+class TestExtraArgsWriteJsonPath:
+    """``--write`` is a scalar Click option: a repeated occurrence resolves
+    to the *last* one, whatever its format -- not the first ``json=...``
+    match found (Codex review, P2, PR #1071). `_extra_args_write_json_path`
+    must track the last occurrence the same way `_effective_format` already
+    does for `--format`, including "un-discovering" a previously-seen JSON
+    path when a later, non-JSON `--write` wins instead.
     """
 
-    def test_reads_output_file_when_effective_format_overrides_away_from_json(
-        self, tmp_path
-    ) -> None:
-        output_file = tmp_path / "report.txt"
-        output_file.write_text("severity gate: exit 1 -- blocking: addition\n")
-        out = _run_text_report_content(
-            {
-                "FORMAT": "json",
-                "_EFFECTIVE_FORMAT": "text",
-                "OUTPUT_FILE": str(output_file),
-                "ABICHECK_OUTPUT": "",
-            }
+    def _value(self, extra_args: str) -> str:
+        return _run_value(
+            f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_write_json_path"
         )
-        assert "severity gate: exit 1" in out
 
-    def test_reads_stdout_when_effective_format_overrides_to_json(self) -> None:
-        # The reverse direction: nominal text/an output-file present, but the
-        # effective format is json -- the file must NOT be read as if it
-        # were the text report (it holds JSON), stdout is the real source.
-        out = _run_text_report_content(
-            {
-                "FORMAT": "text",
-                "_EFFECTIVE_FORMAT": "json",
-                "OUTPUT_FILE": "/nonexistent/should-not-be-read.txt",
-                "ABICHECK_OUTPUT": '{"severity": {"blocking_categories": []}}',
-            }
-        )
-        assert out == '{"severity": {"blocking_categories": []}}'
+    def test_absent_extra_args(self) -> None:
+        assert self._value("") == ""
 
-    def test_falls_back_to_nominal_format_when_effective_format_unset(
-        self, tmp_path
-    ) -> None:
-        # Isolated callers that never assign `$_EFFECTIVE_FORMAT` (matching
-        # today's real script before this invocation's command-assembly
-        # section runs) must keep behaving exactly as before this fix.
-        output_file = tmp_path / "report.txt"
-        output_file.write_text("severity gate: exit 1 -- blocking: quality_issues\n")
-        out = _run_text_report_content(
-            {
-                "FORMAT": "text",
-                "OUTPUT_FILE": str(output_file),
-                "ABICHECK_OUTPUT": "",
-            }
+    def test_single_write_json(self) -> None:
+        assert self._value("--write json=out.json") == "out.json"
+
+    def test_last_write_json_occurrence_wins(self) -> None:
+        # Click's own resolved value here is "second.json", not the first
+        # match -- an early `return 0` on the first hit disagreed with that.
+        assert (
+            self._value("--write json=first.json --write json=second.json")
+            == "second.json"
         )
-        assert "severity gate: exit 1" in out
+
+    def test_a_later_non_json_write_overrides_an_earlier_json_one(self) -> None:
+        # Click keeps only the last `--write`, regardless of format -- if
+        # that last one isn't `json=...`, there is no JSON path to recover
+        # at all, even though an earlier occurrence was one.
+        assert self._value("--write json=out.json --write text=out.txt") == ""
+
+    def test_a_later_json_write_overrides_an_earlier_non_json_one(self) -> None:
+        assert self._value("--write text=out.txt --write json=out.json") == "out.json"
+
+    def test_unrelated_extra_args(self) -> None:
+        assert self._value("--verbose --gate-api-break") == ""
+
+    def test_equals_form(self) -> None:
+        assert self._value("--write=json=out.json") == "out.json"
+
+    def test_write_consumed_as_an_output_option_value_is_not_a_flag(self) -> None:
+        # Same tokenizer, same class of bug as the sibling helpers: `--output
+        # --write` means "write a file literally named --write", not a real
+        # `--write` flag.
+        assert self._value("--output --write") == ""
+
+
+# `_text_report_content` (and its `TestTextReportContentEffectiveFormat`
+# tests) was retired by ADR-063 Track T8: it existed solely to feed
+# `_severity_gate_categories`'/`_severity_gate_exit`'s rendered-text
+# fallbacks, both of which the track removed as prose reconstruction of a
+# real gate decision. With no caller left, the function itself was deleted
+# rather than kept dead.

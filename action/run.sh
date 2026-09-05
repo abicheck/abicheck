@@ -321,6 +321,102 @@ _is_release_style_operand() {
   return 1
 }
 
+# Whether *name* is a compare/scan CLI option that consumes a following
+# token as its own value (Click `nargs=1`, not a boolean flag) -- the full
+# combined option table of both commands, current as of this commit
+# (`python -c "...click introspection over abicheck.cli.main.commands
+# ['compare'/'scan']..."`, see this function's own git history for the
+# exact one-liner). Every value-taking option, across both short and long
+# spellings, is listed; anything not listed here is treated as a flag/
+# unknown token.
+#
+# This is a hand-maintained snapshot, not derived at run time (the Action
+# has no live `abicheck --help-all` to introspect before it even knows
+# which dependency-source install produced a `python`/`abicheck` on PATH) --
+# it can go stale if a future PR adds a new value-taking CLI option without
+# updating this list. That staleness is the same *safe* direction as the
+# rest of this tokenizer's own documented limits (see `_extra_args_options`
+# below): treating an unlisted value-taking option as a bare flag means its
+# value token is misread as a flag/unknown token of its own, which can only
+# cause a false positive in a caller checking for one specific flag name --
+# never a false negative that lets a real conflicting combination through
+# unnoticed.
+_extra_args_is_value_option() {
+  case "$1" in
+    --abi3 | --against | --artifact-set | --ast-frontend | --budget | \
+    --build-info | --build-target | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
+    --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
+    --crosscheck | --debug-format | --debug-info | --debug-root | --debuginfod-url | \
+    --depth | --devel-pkg | --dump-manifest | --env-matrix | --format | \
+    --frontend-context | --header | --include | --instantiation-manifest | --jobs | \
+    --lang | --ld-library-path | --manifest | --max-findings | --max-json-object-nodes | \
+    --new-variant | --old-variant | --output | --output-dir | --pack | \
+    --pdb-path | --policy | --post-manifest | --probe-matrix | --profile | \
+    --public-header-dir | --report-mode | --required-symbol | --required-symbols | --risk-rules | \
+    --search-path | --severity-preset | --show-only | --since | --sources | \
+    --suppress | --sysroot | --use-cases | --used-by | --version | \
+    --write | -H | -I | -j | -o)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# The one place `extra-args` is walked with option/value awareness. Every
+# other extra-args-inspecting helper in this file builds on this rather than
+# re-scanning raw tokens itself -- three independent Codex review rounds
+# each found a real flag/value confusion in what used to be separate, ad hoc
+# per-flag token scans (`--output --dry-run` misread as an effective dry
+# run; `--suppress -o --dry-run` misread as *not* one, since a bare-token
+# scan can't tell a coincidental `-o`-shaped *value* from the real `-o`
+# flag; `--output --write` misread as requesting a `--write` secondary when
+# `--write` here is actually `--output`'s own filename value) -- the root
+# cause was the same in all three: no reader knew which preceding token, if
+# any, had already consumed the one being inspected as its argument.
+#
+# Emits one `NAME<TAB>VALUE` line per option occurrence: `VALUE` is empty
+# for a flag/unknown token, the joined half of a single-token `--foo=value`
+# form, or the following token for a bare two-token `--foo value`/`-f value`
+# form when `--foo`/`-f` is a known value-taking option
+# (`_extra_args_is_value_option`). A value-taking option with nothing after
+# it (malformed CLI usage the real CLI itself rejects) still gets one row,
+# empty value, rather than being silently dropped.
+#
+# Splits the same way the command line itself does, not by matching the raw
+# string: `CMD+=($INPUT_EXTRA_ARGS)` is an unquoted expansion, so bash
+# word-splits on IFS -- space, tab AND newline -- and an `extra-args: |`
+# YAML literal block (or anything with a tab) produces real, separate
+# tokens a literal-space substring check would not see (Codex review,
+# historical). `set --` reuses that identical splitting, so this can never
+# disagree with the real argv about what a token is; it also inherits the
+# same pathname expansion, deliberately, for the same reason.
+#
+# Still not full shell-quoting parsing (an exotically quoted option evades
+# this) and not aware of a short option's concatenated-value form (`-jVALUE`
+# for `-j VALUE`) -- both pre-existing limits of every extra-args scan in
+# this file, carried forward rather than silently narrowed by this
+# refactor.
+_extra_args_options() {
+  local _arg _pending=""
+  # shellcheck disable=SC2086  # word-splitting is the point; see above.
+  set -- ${INPUT_EXTRA_ARGS:-}
+  for _arg in "$@"; do
+    if [[ -n "$_pending" ]]; then
+      printf '%s\t%s\n' "$_pending" "$_arg"
+      _pending=""
+      continue
+    fi
+    if [[ "$_arg" == --*=* ]]; then
+      printf '%s\t%s\n' "${_arg%%=*}" "${_arg#*=}"
+    elif _extra_args_is_value_option "$_arg"; then
+      _pending="$_arg"
+    else
+      printf '%s\t\n' "$_arg"
+    fi
+  done
+  [[ -n "$_pending" ]] && printf '%s\t\n' "$_pending"
+}
+
 # Whether the user's own `extra-args` passthrough already requests
 # `--write` (documented, supported usage — `extra-args` is a general CLI
 # escape hatch). If it does, injecting our own internal one ahead of it is
@@ -335,31 +431,37 @@ _is_release_style_operand() {
 # present restores the older, always-correct "no PR_JSON at all" fallback
 # path instead.
 #
-# Answered by splitting the value the same way the command line itself does
-# rather than by matching the raw string. `CMD+=($INPUT_EXTRA_ARGS)` is an
-# unquoted expansion, so bash word-splits on IFS -- space, tab AND newline --
-# and a `extra-args: |` YAML literal block (or anything with a tab, or with
-# another argument before it) produces a real `--write` token that a
-# literal-space substring check does not see (Codex review). It then injected
-# ours anyway and lost to the user's, which is precisely the case this guard
-# exists to prevent. `set --` reuses that identical splitting, so the guard
-# and the argv can never disagree about what a token is; it also inherits the
-# same pathname expansion, deliberately, for the same reason.
-#
-# Still not full shell-quoting parsing: an exotically quoted `--write` evades
-# this, matching this script's existing plain word-splitting handling of
-# extra-args everywhere else.
+# Fed through a `<<<` here-string rather than `< <(...)` process
+# substitution (Codex review, P1, fresh evidence): this file's own
+# conventions prefer a here-string over process substitution where one
+# works, for the stock bash 3.2 contributors and macOS runners carry (this
+# and its three siblings below are the only new process-substitution use
+# this refactor introduced).
 _extra_args_has_write_flag() {
-  local _arg
-  # shellcheck disable=SC2086  # word-splitting is the point; see above.
-  set -- ${INPUT_EXTRA_ARGS:-}
-  for _arg in "$@"; do
-    case "$_arg" in
-      --write | --write=*)
-        return 0
-        ;;
-    esac
-  done
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    [[ "$_name" == "--write" ]] && return 0
+  done <<<"$(_extra_args_options)"
+  return 1
+}
+
+# Same shape as `_extra_args_has_write_flag` above, for the sibling defect
+# (Codex review, P2, fresh evidence): `INPUT_DRY_RUN` is a dedicated Action
+# input, but an *effective* dry run reached only through `extra-args
+# --dry-run` leaves `INPUT_DRY_RUN` false, so the compare/scan command
+# assembly still takes its non-dry-run branch and forwards `-o
+# "$OUTPUT_FILE"`/injects `--write json=$PR_JSON` -- both of which the CLI
+# itself rejects alongside a real `--dry-run` (`dry_run.
+# reject_dry_run_with_output`/`frontends.cli.options.secondary_output.
+# reject_incoherent_secondary_output`), turning what should be a clean
+# dry-run preview into a usage error (exit 64). Checked before the PR_JSON
+# sidecar injection in both modes, the same way `_extra_args_has_write_flag`
+# already is.
+_extra_args_has_dry_run_flag() {
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    [[ "$_name" == "--dry-run" ]] && return 0
+  done <<<"$(_extra_args_options)"
   return 1
 }
 
@@ -380,34 +482,29 @@ _extra_args_has_write_flag() {
 # either rejecting the combination outright or (worse) silently doing
 # nothing.
 #
-# Same word-splitting caveat as `_extra_args_has_write_flag`: an exotically
-# quoted `--write` evades this. `--write` and its value can be one token
-# (`--write=json=PATH`) or two (`--write json=PATH`); both spellings are
-# documented and handled.
+# `--write` is a scalar (non-`multiple=True`) Click option: a repeated
+# `--write` resolves to the *last* occurrence, whatever its format, not the
+# first `json=...` one found (Codex review, P2, PR #1071) -- so this keeps
+# scanning the whole `extra-args` list and only remembers the most recent
+# match, clearing it again if a later `--write` isn't `json=...` (matching
+# Click's real resolved value, which could just as well be a non-JSON
+# format last).
 _extra_args_write_json_path() {
-  local _arg _value _prev_was_write=0
-  # shellcheck disable=SC2086  # word-splitting is the point; see above.
-  set -- ${INPUT_EXTRA_ARGS:-}
-  for _arg in "$@"; do
-    if [[ "$_prev_was_write" == "1" ]]; then
-      _value="$_arg"
-      _prev_was_write=0
-    elif [[ "$_arg" == "--write" ]]; then
-      _prev_was_write=1
-      continue
-    elif [[ "$_arg" == --write=* ]]; then
-      _value="${_arg#--write=}"
-    else
-      continue
+  local _name _value _found=""
+  while IFS=$'\t' read -r _name _value; do
+    if [[ "$_name" == "--write" ]]; then
+      case "$_value" in
+        json=*)
+          _found="${_value#json=}"
+          ;;
+        *)
+          _found=""
+          ;;
+      esac
     fi
-    case "$_value" in
-      json=*)
-        printf '%s' "${_value#json=}"
-        return 0
-        ;;
-    esac
-  done
-  return 1
+  done <<<"$(_extra_args_options)"
+  [[ -n "$_found" ]] || return 1
+  printf '%s' "$_found"
 }
 
 # The real `--format` value `abicheck` runs with, accounting for `extra-args`
@@ -427,24 +524,11 @@ _extra_args_write_json_path() {
 #
 # Falls back to the nominal `$FORMAT` when extra-args carries no `--format`
 # of its own -- the ordinary, unoverridden case.
-#
-# Same word-splitting/quoting caveat as `_extra_args_has_write_flag`: an
-# exotically quoted `--format` evades this, same as every other extra-args
-# scan in this file.
 _effective_format() {
-  local _arg _found="${FORMAT:-}" _prev_was_format=0
-  # shellcheck disable=SC2086  # word-splitting is the point; see above.
-  set -- ${INPUT_EXTRA_ARGS:-}
-  for _arg in "$@"; do
-    if [[ "$_prev_was_format" == "1" ]]; then
-      _found="$_arg"
-      _prev_was_format=0
-    elif [[ "$_arg" == "--format" ]]; then
-      _prev_was_format=1
-    elif [[ "$_arg" == --format=* ]]; then
-      _found="${_arg#--format=}"
-    fi
-  done
+  local _name _value _found="${FORMAT:-}"
+  while IFS=$'\t' read -r _name _value; do
+    [[ "$_name" == "--format" ]] && _found="$_value"
+  done <<<"$(_extra_args_options)"
   printf '%s' "$_found"
 }
 
@@ -1282,6 +1366,15 @@ elif [[ "$MODE" == "compare" ]]; then
   DRY_RUN="${INPUT_DRY_RUN:-false}"
   if [[ "$DRY_RUN" == "true" ]]; then
     CMD+=(--dry-run)
+  elif _extra_args_has_dry_run_flag; then
+    # An *effective* dry run reached only through `extra-args --dry-run`
+    # (Codex review, P2, fresh evidence): the dedicated `--dry-run` token is
+    # already in `extra-args` and gets appended later, so nothing more is
+    # added here -- `-o`/`--write` are just as mutually exclusive with a
+    # passthrough `--dry-run` as with the dedicated input, and the PR_JSON
+    # sidecar-injection guard alone (added first) wasn't the whole branch:
+    # `-o "$OUTPUT_FILE"` above it had the identical gap.
+    :
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
     # Gated on the effective format, not the nominal one (Codex review, PR
@@ -1330,7 +1423,13 @@ elif [[ "$MODE" == "compare" ]]; then
     # does run without JSON output, and skipping this injection because the
     # *nominal* format looked already-JSON left such a run with no JSON
     # report anywhere (Codex review, PR #998, fresh evidence).
-    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] && ! _extra_args_has_write_flag; then
+    #
+    # An effective dry run via `extra-args --dry-run` never reaches this
+    # branch at all -- the `elif` above it returns before `OUTPUT_FILE`/`-o`/
+    # this injection are considered, so there is no separate dry-run check
+    # needed here.
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] \
+       && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
@@ -1770,6 +1869,13 @@ elif [[ "$MODE" == "scan" ]]; then
   # (they are mutually exclusive on scan).
   if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
     CMD+=(--dry-run)
+  elif _extra_args_has_dry_run_flag; then
+    # Same effective-dry-run shape as compare mode's own branch above
+    # (Codex review, P2, fresh evidence): the `--dry-run` token is already
+    # in `extra-args` and gets appended later, so `-o`/`--write` -- both
+    # mutually exclusive with it on the CLI -- are skipped entirely here
+    # too, not only the PR_JSON sidecar this branch used to guard alone.
+    :
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
     if [[ -n "$OUTPUT_FILE" ]]; then
@@ -1794,7 +1900,28 @@ elif [[ "$MODE" == "scan" ]]; then
     #
     # Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT`, for the same
     # reason as compare mode's own injection above.
-    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" && "${INPUT_PR_COMMENT:-true}" == "true" \
+    #
+    # NOT gated on `pr-comment` (ADR-063 Track T8, Codex review, P1, fresh
+    # evidence): an earlier revision only injected this sidecar when
+    # `pr-comment: true`, on the reasoning that it exists solely to feed the
+    # sticky PR comment. But `_coverage_gated`/`_assurance_gated`/
+    # `_severity_gate_categories` read the identical sidecar to answer
+    # ADR-049's unconditional contract-coverage/analysis-assurance floors and
+    # the severity-category gate below -- none of which has anything to do
+    # with whether a PR comment gets posted. With `pr-comment: false` and the
+    # documented `format: text` default, a coincident ABI break (which
+    # outranks those axes in the CLI's own max-fold) and `fail-on-breaking:
+    # false` used to leave this run with no JSON anywhere, so those
+    # unconditional floors read no structured evidence and silently did not
+    # fire -- exactly the class of "no valid result" this sidecar exists to
+    # prevent, not a real absence of a report. Compare mode's own injection
+    # above has never had this gate.
+    #
+    # An effective dry run via `extra-args --dry-run` never reaches this
+    # branch at all -- the `elif` above it returns before `OUTPUT_FILE`/`-o`/
+    # this injection are considered, so there is no separate dry-run check
+    # needed here (Codex review, P2, fresh evidence).
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" \
        && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
@@ -2027,10 +2154,12 @@ _json_report_src() {
   # query` callers (severity_exit, coverage_where, annotations,
   # blocking_categories) would silently misread SARIF's absence of their
   # expected keys as "definitely no severity gate/no coverage gap/no
-  # annotations" rather than "cannot tell". A SARIF document answers
-  # `compat_verdict` alone; see `_report_compat_verdict`'s own SARIF
-  # fallback below, which reads `_EFFECTIVE_FORMAT`/`OUTPUT_FILE` directly
-  # rather than routing through this shared function.
+  # annotations" rather than "cannot tell". `_report_compat_verdict` used
+  # to consult a SARIF `runs[0].properties.abiVerdict` of its own for that
+  # reason, reading `_EFFECTIVE_FORMAT`/`OUTPUT_FILE` directly rather than
+  # routing through this shared function; ADR-063 Track T8 retired that
+  # fallback along with the rest of the boundary's verdict reconstruction,
+  # so no reader consults a SARIF document for a verdict any more.
 }
 
 # Read one derived value out of the JSON report, whatever shape produced it.
@@ -2132,25 +2261,16 @@ elif query == "compat_verdict":
     # alone when the gate demotes the exit code, and `compare` reports
     # `result.verdict` unconditionally. It is therefore the only signal that
     # tells a genuinely clean run from a break the user chose not to gate on.
-    verdict = _either("verdict", "") or ""
-    if not verdict:
-        # SARIF has no top-level/nested "verdict" key -- abicheck's SARIF
-        # renderer instead stamps the identical value at
-        # runs[0].properties.abiVerdict (sarif.py's own `_result_for`).
-        # Reached here only as the true last resort: `_json_report_src`
-        # hands this function a SARIF file at all solely when no PR_JSON,
-        # stdout-JSON, or extra_write_json_path source exists for this run
-        # -- which happens when `format: sarif` is paired with an
-        # `extra-args --write <non-json>=...` that both suppresses the
-        # automatic JSON sidecar and occupies the one `--write` slot the
-        # CLI accepts per invocation (Codex review, PR #1016, fresh
-        # evidence -- see `_json_report_src`'s own SARIF branch).
-        runs = report.get("runs")
-        if isinstance(runs, list) and runs and isinstance(runs[0], dict):
-            props = runs[0].get("properties")
-            if isinstance(props, dict):
-                verdict = props.get("abiVerdict") or ""
-    print(verdict)
+    #
+    # Read from an abicheck-native JSON report's own `verdict` key alone.
+    # A SARIF `runs[0].properties.abiVerdict` fallback used to live here
+    # too, for the one shape that reaches this query with a SARIF document
+    # (`format: sarif` plus an `extra-args --write <non-json>=...`
+    # suppressing the JSON sidecar); ADR-063 Track T8 retired it with the
+    # rest of the boundary's verdict reconstruction, and `_json_report_src`
+    # -- the only source this function is ever handed -- never yields a
+    # SARIF document in the first place.
+    print(_either("verdict", "") or "")
 elif query == "blocking_categories":
     print(", ".join(str(c) for c in (_severity().get("blocking_categories") or [])))
 elif query == "coverage_where":
@@ -2336,47 +2456,26 @@ _emit_annotations() {
 # verdict=ERROR (an operational failure) and `compare` SEVERITY_ERROR (a
 # severity-policy failure) for what is neither.
 #
-# Two signals, mirroring where abicheck itself puts the answer: the JSON
-# report carries `contract_coverage_exit_contribution`, and for every other
-# renderer — which omits the ledger — the same fact is announced on stderr.
-# Absent both (no --contract), the field reads 0 and the mapping
-# below is exactly what it was.
+# One signal, and only one: the JSON report's own
+# `contract_coverage_exit_contribution` field. Absent a `--contract` the
+# field reads 0 and the mapping below is exactly what it was.
 #
-# The JSON answer is AUTHORITATIVE when readable, and the stderr grep is
-# reached only when it is not (Codex review, P1): an earlier revision fell
-# through to the stderr grep unconditionally whenever the JSON read "0", not
-# just when the JSON was unreadable. `contract.unresolved: warn` deliberately
-# zeroes the exit contribution while still wording the stderr notice as
-# "Contract coverage incomplete..." (just with an "Accepted by
-# contract.unresolved: warn" effect clause, per `_coverage_message`) — so
-# whenever both a readable JSON *and* that stderr notice existed together
-# (true for every markdown-format single-pair `compare`, and, since this
-# same commit's own P1 fix, every non-JSON release `compare` too), the grep
-# still matched and defeated the acceptance mechanism entirely. `_report_
-# query` prints nothing (empty string) only when the report is genuinely
-# unreadable/absent — that emptiness, not the printed value, is what decides
-# whether the stderr fallback is even consulted.
+# ADR-063 Track T8 removed the stderr-text fallback this function used to
+# carry (a `grep 'Contract coverage incomplete'` over `$STDERR_CONTENT`,
+# plus a second grep excluding the `contract.unresolved=warn`-accepted
+# wording, since the notice is worded identically for both). Reconstructing
+# an axis contribution by regex-matching rendered prose is exactly the
+# raw-exit/stderr reconstruction that track retires: the structured
+# `run_outcome`/JSON contract is the boundary's one source of truth, and
+# the absence of structured data means this axis *cannot be claimed to have
+# fired*, not that it may be guessed at from a diagnostic line. So an
+# unreadable/absent JSON report answers "not gated" here. `_report_query`
+# prints nothing (empty string) exactly in that case.
 _coverage_gated() {
   local _src _contribution
   _src=$(_json_report_src)
   _contribution=$(_report_query "$_src" coverage_contribution)
-  if [[ -n "$_contribution" ]]; then
-    [[ "$_contribution" == "1" ]]
-    return
-  fi
-  # The genuine "no JSON at all" fallback (Codex review, second P1 round):
-  # the stderr notice itself says "Contract coverage incomplete..." even
-  # for a `contract.unresolved=warn`-accepted gap (just with an "Accepted
-  # by contract.unresolved=warn" effect clause, per `_coverage_message`
-  # in contract_coverage_exit.py -- both single-pair `compare` and this
-  # PR's own release-mode notice use that exact phrase, deliberately kept
-  # in sync). A bare substring match on "Contract coverage incomplete"
-  # cannot tell the two apart, so it must also confirm the acceptance
-  # phrase is absent -- exactly the shape a non-JSON release `compare`
-  # takes outside a `pull_request` event, where this fallback is the ONLY
-  # signal available at all.
-  echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete' \
-    && ! echo "$STDERR_CONTENT" | grep -q 'Accepted by contract.unresolved=warn'
+  [[ -n "$_contribution" && "$_contribution" == "1" ]]
 }
 
 # Did P0.4's orthogonal analysis-assurance axis (--require-complete-analysis,
@@ -2429,24 +2528,23 @@ _coverage_gated() {
 # the labeled verdict.
 #
 # Once the input is confirmed set, the JSON report's own
-# `analysis_assurance.status` is the authoritative answer (mirroring
-# `_coverage_gated`'s JSON-first preference) -- `assurance_floor_
-# diagnostic`'s stderr line is only the fallback for when there is no
-# readable JSON report at all (a non-JSON-format run, or the report file
-# is otherwise unreadable), the same "genuine cannot-tell" shape
-# `_coverage_gated`'s own stderr fallback exists for.
+# `analysis_assurance.status` is the sole answer (mirroring
+# `_coverage_gated`'s JSON-only rule). ADR-063 Track T8 removed the
+# `assurance_floor_diagnostic` stderr grep that used to answer this when no
+# readable JSON report existed (a non-JSON-format run, or an unreadable
+# report file): re-deriving an axis contribution from rendered prose is the
+# textual reconstruction that track retires, and it is the same class of
+# forgeable inference revisions (1)-(3) above were already found to be.
+# No structured data therefore means "not gated by this axis" rather than a
+# guess -- the same "cannot claim it fired" contract `_coverage_gated` now
+# states.
 _assurance_gated() {
   [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]] || return 1
 
   local _src _status
   _src=$(_json_report_src)
   _status=$(_report_query "$_src" assurance_status)
-  if [[ -n "$_status" ]]; then
-    [[ "$_status" != "complete" ]]
-    return
-  fi
-  echo "$STDERR_CONTENT" \
-    | grep -q 'Analysis assurance incomplete .*under --require-complete-analysis'
+  [[ -n "$_status" && "$_status" != "complete" ]]
 }
 
 # scan's own evidence-contract axis (ADR-037 D5 -- a *pinned*
@@ -2492,20 +2590,18 @@ _assurance_gated() {
 # genuine "cannot tell", and the caller keeps its established verdict rather
 # than guessing.
 #
-# Falls back to the **text** report when there is no JSON to read. That is not
-# an edge case for `scan`: `format: text` is the Action's documented default
-# and scan writes no JSON sidecar, so `_json_report_src` is empty and the
-# query answered nothing -- publishing ERROR (an operational failure) for a
-# severity-policy result on the most common invocation there is (Codex
-# review). The CLI prints its own gate on that path (`cli_scan_helpers.
-# _severity_gate_lines`), so the fact is present; it just is not JSON.
-#
-# Only a *blocking* gate line is matched, and it is mapped to the same
-# non-zero the JSON branch would yield. A passing gate prints "pass" and is
-# left to answer 0 through the absent-block rule below, exactly as a
-# legacy-scheme run does.
+# ADR-063 Track T8 removed the rendered-**text** fallback this function used
+# to end with (a `sed` over the CLI's own `severity gate: exit N ...
+# blocking: ...` line, reached when no JSON was readable -- the common shape
+# for `scan`, whose documented default `format: text` writes no JSON
+# sidecar). Scraping a renderer's prose to recover a gate exit is the
+# textual reconstruction that track retires; the structured
+# `run_outcome.gate` axis is the boundary's contract, with the legacy
+# `severity_exit` field as its structured predecessor. With neither
+# present, this function answers the empty "no signal" its callers already
+# handle -- they keep the verdict the exit-code dispatch established.
 _severity_gate_exit() {
-  local _src _answer _gate
+  local _src _gate
   _src=$(_json_report_src)
   # ADR-063 Phase 7 (D6): prefer the report's own `run_outcome.gate` axis --
   # already the compatibility-policy gate this function exists to answer,
@@ -2513,8 +2609,9 @@ _severity_gate_exit() {
   # `legacy_exit_code(verdict)` -- see `policy/outcome.py`'s own
   # `run_outcome_dict_for_diff_result` docstring), so this needs no
   # scheme-specific handling of its own. Falls through to the pre-existing
-  # `severity_exit`/text derivation below whenever the axis is absent (an
-  # older abicheck, or no readable JSON at all).
+  # structured `severity_exit` field below whenever the axis is absent (an
+  # older abicheck), and to the empty "no signal" when there is no readable
+  # JSON at all.
   _gate=$(_report_query "$_src" run_outcome gate)
   case "$_gate" in
     none) echo 0; return ;;
@@ -2522,79 +2619,52 @@ _severity_gate_exit() {
     potential_breaking) echo 2; return ;;
     abi_breaking) echo 4; return ;;
   esac
-  _answer=$(_report_query "$_src" severity_exit)
-  if [[ -n "$_answer" ]]; then
-    echo "$_answer"
-    return
-  fi
-  # `severity gate: exit N — blocking: <categories>`
-  sed -n 's/.*severity gate: exit \([0-9][0-9]*\).*blocking:.*/\1/p' \
-    <<<"$(_text_report_content)" | head -1
+  _report_query "$_src" severity_exit
 }
 
-# The text report, wherever this invocation put it. `format: text` with an
-# `output-file` writes the report to that file and leaves stdout empty, so a
-# stdout-only search still published ERROR for a severity-policy result
-# (Codex review) -- the same defect as the JSON-only search before it, one
-# level down.
-#
-# Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT` -- same
-# effective-format-override class as `_STDOUT_JSON_FILE`/`_json_report_src`
-# (see `_effective_format`'s own docstring): a `format: json` step whose own
-# `extra-args` overrides to `--format text` really does write text to
-# `$OUTPUT_FILE`, and this check used to still read `$ABICHECK_OUTPUT`
-# instead (empty, since `-o` was used), losing the severity-gate line
-# entirely (Codex review, fresh evidence, PR #998). Falls back to
-# `${FORMAT:-}` when `$_EFFECTIVE_FORMAT` is unset, same as the other two
-# sites, so any isolated-snippet test exercising this function alone keeps
-# behaving exactly as before this fix.
-_text_report_content() {
-  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
-    cat "${OUTPUT_FILE}"
-  else
-    printf '%s' "${ABICHECK_OUTPUT:-}"
-  fi
-}
-
-# The categories the published gate blames, from JSON when there is one and
-# otherwise from the text gate line. Used by the scan final gate to tell a
+# The categories the published gate blames, read from the JSON report's own
+# `severity.blocking_categories`. Used by the scan final gate to tell a
 # severity-configured block (which the user asked to be an error) from a
-# promoted cross-check (which keeps following fail-on-api-break).
+# promoted cross-check (which keeps following fail-on-api-break) -- a real
+# gate decision (see the unconditional FINAL_EXIT check below), not merely a
+# display detail, so it must never be reconstructed from rendered prose
+# (ADR-063 Track T8). With no readable JSON this answers empty; the scan
+# mode's own PR_JSON sidecar injection (unconditional as of Track T8, not
+# gated on `pr-comment`) is what keeps JSON available for the mainline
+# `scan --against` path this gate applies to.
 _severity_gate_categories() {
-  local _src _answer
+  local _src
   _src=$(_json_report_src)
-  _answer=$(_report_query "$_src" blocking_categories)
-  if [[ -n "$_answer" ]]; then
-    echo "$_answer"
-    return
-  fi
-  # Not anchored on the em-dash the renderer happens to use: the exit-code
-  # reader above does not require it either, and a separator that only one of
-  # the two greps depends on is a difference waiting to bite under a
-  # different locale or renderer tweak.
-  sed -n 's/.*severity gate: exit [0-9][0-9]*[^:]*blocking: *\(.*\)$/\1/p' \
-    <<<"$(_text_report_content)" | head -1
+  _report_query "$_src" blocking_categories
 }
 
 
 
-# The compatibility verdict the report itself published, JSON first and
-# otherwise the rendered report -- the same two-source rule as the severity
-# gate readers above, and for the same reason: `format: text` is the Action's
-# documented default for scan and writes no JSON sidecar.
+# The compatibility verdict the report itself published, read only from
+# structured JSON: `run_outcome.compatibility` first, then the legacy
+# `compat_verdict` field.
 #
-# The label spelling is shared by both renderers (`Verdict: BREAKING` in the
-# scan text footer, ``**Verdict:** 💥 `BREAKING`  — …`` in the compare
-# markdown header), so one pattern reads both. Only uppercase-free filler is
-# allowed between the two halves, which is what stops a `COMPATIBLE` verdict
-# line from matching on a later "breaking" word in its own explanatory tail.
+# ADR-063 Track T8 removed the two textual reconstruction layers this
+# function used to end with -- a SARIF `runs[0].properties.abiVerdict`
+# lookup for a `format: sarif` run with no JSON anywhere, and a `sed -E`
+# over the rendered markdown/text report's own `Verdict:`/`**Verdict**`
+# line. Both re-derived the verdict from a renderer's output rather than
+# from the boundary's structured contract, which is precisely what that
+# track retires. When no JSON report is readable this function now prints
+# nothing, and its two callers (`_escalate_verdict_to_report`,
+# `_resolve_clean_exit_verdict`) already treat an empty answer as "no
+# signal": each guards on an exact `BREAKING`/`API_BREAK`
+# (/`COMPATIBLE_WITH_RISK`) equality that empty fails, so the verdict the
+# `case $ABICHECK_EXIT in ...` dispatch established from the process exit
+# code is published unchanged. A verdict is stated by the report or not at
+# all -- it is never guessed from prose.
 _report_compat_verdict() {
   local _src _answer _operational
   _src=$(_json_report_src)
   # ADR-063 Phase 7 (D6): the report's own `run_outcome.compatibility` is
   # this exact fact (`result.verdict`, unconditionally) under its canonical
-  # name -- preferred over the raw `verdict`/`abiVerdict` field lookups
-  # below, which stay as this function's fallback for a report from an
+  # name -- preferred over the raw `verdict` field lookup
+  # below, which stays as this function's fallback for a report from an
   # older abicheck (no `run_outcome` block) or a synthetic report whose
   # `run_outcome.compatibility` is `null` (no real comparison ever ran, so
   # `_report_query` prints nothing for it -- `compat_verdict` may still hold
@@ -2625,66 +2695,7 @@ _report_compat_verdict() {
       return
     fi
   fi
-  _answer=$(_report_query "$_src" compat_verdict)
-  if [[ -n "$_answer" ]]; then
-    echo "$_answer"
-    return
-  fi
-  # `format: sarif` fallback, deliberately scoped to THIS function alone
-  # rather than a `_json_report_src` branch every other reader shares
-  # (Codex review, fresh evidence, PR #1016): a first version of this fix
-  # did widen `_json_report_src` itself, which made `_can_reuse_primary_
-  # json` treat a bare SARIF document as a faithful abicheck-native JSON
-  # report and `cp` it straight into `PR_JSON` for `cli_pr_comment` to
-  # parse -- silently posting/overwriting the sticky PR comment with an
-  # empty-looking report instead of the real findings, and letting
-  # `_severity_gate_categories`/coverage/annotation readers misread SARIF's
-  # missing keys as "definitely none" rather than "cannot tell". SARIF is
-  # only ever consulted here, for `compat_verdict` specifically, and only
-  # once `_json_report_src` already came back with nothing to read (no
-  # PR_JSON/stdout-JSON/extra_write_json_path -- see that function's own
-  # docstring for why: `format: sarif` paired with an `extra-args --write
-  # <non-json>=...` occupies the CLI's one `--write` slot and suppresses
-  # the automatic JSON sidecar, leaving no other JSON anywhere in this
-  # run's output). SARIF's own `runs[0].properties.abiVerdict` (`sarif.py`)
-  # carries the identical native verdict string `_report_query`'s
-  # `compat_verdict` case reads from ordinary abicheck JSON.
-  if [[ -z "$_src" && "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "sarif" \
-        && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
-     && { [[ -z "${_output_file_pre_fp+x}" ]] \
-          || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
-    _answer=$(_report_query "$OUTPUT_FILE" compat_verdict)
-    if [[ -n "$_answer" ]]; then
-      echo "$_answer"
-      return
-    fi
-  fi
-  # `sed -E`, not the basic-regex `\(a\|b\)` the other readers here get away
-  # with not needing: BSD sed (macOS runners, which this Action supports and
-  # CI covers) has no alternation in BRE at all, so the pattern silently
-  # matched nothing there and every demoted break read as COMPATIBLE on
-  # macOS while passing on Linux. `-E` is accepted by both.
-  #
-  # `Verdict(:|**)` covers both spellings, because the per-library release
-  # fan-out has no third option: `--write` is rejected for a
-  # directory/package operand, so a markdown release compare reaches this
-  # fallback with no JSON at all -- and its renderer writes the verdict as a
-  # table row, `| **Verdict** | 💥 \`BREAKING\` |`, with no colon. Matching
-  # only the colon form left every release compare unescalated: an exit-2
-  # release whose own report said BREAKING still published API_BREAK, which is
-  # the whole thing this reconciliation exists to prevent (Codex review). The
-  # delimiter is still required rather than dropped -- a bare `Verdict`
-  # followed by uppercase-free filler would match prose.
-  #
-  # COMPATIBLE_WITH_RISK is a third alternative for the same reason R1
-  # (CLI-audit) added it to `_resolve_clean_exit_verdict`'s JSON-sourced
-  # branch: `extra-args: --write markdown=...` suppresses the JSON sidecar
-  # (per action/AGENTS.md), so a run whose *only* report is rendered
-  # markdown/text reaches this fallback for that tier too -- without it, a
-  # report the CLI classified COMPATIBLE_WITH_RISK still fell through to
-  # `sed` matching nothing and silently reported COMPATIBLE (Codex review).
-  sed -nE 's/.*Verdict(:|\*\*)[^A-Z]*(API_BREAK|BREAKING|COMPATIBLE_WITH_RISK).*/\2/p' \
-    <<<"$(_text_report_content)" | head -1
+  _report_query "$_src" compat_verdict
 }
 
 # Exit 0 is not the same fact as "no break was found". Under a demoting
@@ -3194,13 +3205,12 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # setup above already asks the same abicheck invocation to write via
         # --write, so it's already populated
         # by this point without a second run (Codex review). Falls back to
-        # the generic message when no report is readable.
-        # Through `_severity_gate_categories`, which falls back to the text
-        # report's own gate line. A scan on the default `format: text` has no
-        # JSON at all, so a JSON-only lookup printed the bare "severity-level
-        # issue" message the comment above says this exists to avoid -- the
-        # same JSON-only assumption that had to be fixed in the verdict
-        # mapping and then again in its text fallback.
+        # the generic message when no report is readable. `_severity_gate_
+        # categories` is JSON-only (ADR-063 Track T8) -- scan's own PR_JSON
+        # sidecar injection is unconditional as of that same track (not
+        # gated on `pr-comment`), which is what keeps this readable on the
+        # default `format: text` invocation this comment used to have to
+        # special-case a text fallback for.
         _blocking_categories=$(_severity_gate_categories)
         if [[ -n "$_blocking_categories" ]]; then
           echo "> **Verdict: SEVERITY_ERROR** ⚠️ — Blocked by severity policy: \`$_blocking_categories\` configured as \`error\`. This is a policy gate, not necessarily an ABI/API break — see the report below for each finding's actual compatibility."
@@ -3459,7 +3469,19 @@ _maybe_post_pr_comment() {
   # A dry run performed no real comparison -- posting a comment would either
   # show nothing (no PR_JSON) or silently trigger a second, real compare just
   # to produce one, defeating the point of --dry-run. Skip entirely.
-  [[ "${INPUT_DRY_RUN:-false}" == "true" ]] && return 0
+  #
+  # Also checks the effective dry run, not only the dedicated input (Codex
+  # review, P2, fresh evidence): an earlier revision checked `INPUT_DRY_RUN`
+  # alone, so a caller passing `--dry-run` through `extra-args` on a
+  # pull_request run (PR comments enabled by default) still fell through
+  # into this function's own JSON-acquisition path -- retaining `--dry-run`
+  # while appending `--format json -o ...` for a second invocation the CLI
+  # itself rejects (the identical `--dry-run`-vs-`-o`/`--write` conflict the
+  # sidecar-injection guard above exists to avoid at the command-assembly
+  # stage), before this function's own error handling turned that failure
+  # into a misleading "no JSON report produced" warning instead of the
+  # clean, silent skip a real dry run gets.
+  { [[ "${INPUT_DRY_RUN:-false}" == "true" ]] || _extra_args_has_dry_run_flag; } && return 0
   [[ "${INPUT_PR_COMMENT_ON:-changes}" == "never" ]] && return 0
   [[ "$VERDICT" == "ERROR" ]] && return 0
   # scan's own _BudgetOverflow handler (abicheck/cli_scan.py) exits 5 before

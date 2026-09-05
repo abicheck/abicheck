@@ -6388,67 +6388,47 @@ looked like the obvious fix and wasn't.
   L4/L5 coverage rows to `NOT_COLLECTED` in the same place the payload
   fields themselves are cleared.
 
-### The composite Action can't recover a compatibility verdict from an HTML primary report when its own JSON sidecar is suppressed
+### The composite Action's single `--write` slot can leave its unconditional coverage/assurance/severity floors without a structured report
 
-A Codex review round on PR #1016 (R1: teaching `action/run.sh`'s verdict
-readers about `COMPATIBLE_WITH_RISK`) found a sibling gap one level up:
-`_json_report_src`/`_report_compat_verdict` (and every other reader built
-on them — `_severity_gate_categories`, the coverage/annotation queries)
-have exactly two sources to fall back through when the automatic JSON
-sidecar isn't available — a JSON report (`_report_query`, schema-aware) or
-rendered markdown/text (`_text_report_content`, one shared regex). Both
-assume the *primary* report, when there's no JSON at all, is text-shaped.
-`format: sarif`/`format: html` break that assumption, and the automatic
-JSON sidecar is suppressed whenever the step's own `extra-args` already
-supplies a `--write` (any format) — the CLI's `--write` option is
+**Superseded** (ADR-063 Phase 6, Track T8): the SARIF-fallback/HTML-gap
+account this entry used to carry is retired along with the rendered-prose
+readers it described. `_report_compat_verdict`/`_severity_gate_exit`/
+`_coverage_gated`/`_assurance_gated` no longer have a "rendered markdown/
+text" fallback tier at all (`_text_report_content` is deleted), nor a
+SARIF `runs[0].properties.abiVerdict` branch — every one of them is
+JSON-only now (`run_outcome`, then the legacy per-field JSON, then
+nothing), per `action/AGENTS.md`'s "How `run.sh` resolves the verdict it
+publishes". A `format: html` primary was never coherent evidence for this
+group of readers, so its own absence is no longer a special case either.
+
+What remains, narrower than before: the CLI's `--write` option is still
 single-valued (`secondary_output.py`'s `--write FORMAT=PATH`, not
-`multiple=True`), so a step can't ask for both its own secondary format
-*and* the Action's internal JSON sidecar in the same invocation; something
-has to lose, and today the sidecar does.
-
-**SARIF is fixed** (this same PR, same review round): SARIF is itself
-well-formed JSON, and abicheck's SARIF renderer already stamps the native
-verdict string as `runs[0].properties.abiVerdict` (`sarif.py`'s
-`_result_for`) — so `_report_compat_verdict` gained its own, narrowly
-scoped last-resort branch that hands `format: sarif`'s own `OUTPUT_FILE`
-to `_report_query` when `_json_report_src` came back with nothing, and
-`compat_verdict`'s query gained a fallback reading that same property.
-Deliberately **not** a `_json_report_src` branch, even though a first
-version of this fix put it there: a Codex follow-up review caught that
-shape treating the bare SARIF document as a faithful abicheck-native JSON
-report for every other reader sharing that function too —
-`_can_reuse_primary_json` would `cp` it straight into `PR_JSON` for
-`cli_pr_comment` to misparse as an empty compare report, silently
-posting/overwriting the sticky PR comment with none of the real findings.
-`_json_report_src`'s contract stays exactly what it always was ("a
-faithful, unfiltered abicheck-native JSON report"); SARIF is consulted
-only from inside `_report_compat_verdict` itself, for `compat_verdict`
-alone. Every *other* query (annotations, severity_exit, coverage_where,
-blocking_categories, assurance_*) never sees the SARIF document at all —
-this extension is additive, not a behavior change for the common case
-where a full JSON sidecar already exists, and cannot regress a reader
-that never receives the SARIF path in the first place.
-
-**HTML is not fixed, and is a materially different problem, not the same
-one degree further:** HTML is not JSON. Recovering a verdict from
-abicheck's rendered HTML report needs real markup parsing (locating a
-`<th>Verdict</th>` cell and reading its sibling, per Codex's own finding —
-`html_report.py` owns that exact shape and could change it without notice)
-rather than a `json.load` call, which is a different, larger class of work
-than the SARIF fix above — not a "one more elif" the SARIF pattern
-generalizes into. It also compounds with the "single `--write` slot"
-constraint noted above: even a correct HTML parser only closes this one
-combination (`format: html` + a conflicting `extra-args --write`), while
-the root constraint (`--write` cannot name two formats in one invocation)
-is itself unaddressed and would need to be fixed first for a *general*
-solution rather than one more per-format special case bolted onto a
-single reader function. Not attempted here. If this combination becomes a real reported problem
-rather than a review-found edge case, the honest fix is one of: (a) make
-`--write` accept multiple `FORMAT=PATH` operands (a real CLI capability
-change touching `secondary_output.py` and every command that declares the
-option, not just this Action script), or (b) give `action/run.sh` a real,
-tested HTML-verdict extractor rather than reusing the markdown/text regex
-against markup it was never meant to parse.
+`multiple=True`), and `scan`/`compare`'s own internal `--write
+json=$PR_JSON` sidecar injection (unconditional since Track T8 — no longer
+gated on `pr-comment`, closing the gap this same track's own Codex review
+found in the `pr-comment: false` case) is still skipped whenever the
+step's own `extra-args` already supplies a `--write` of any format
+(`_extra_args_has_write_flag`), since `extra-args` is appended after the
+injection and Click keeps only the last occurrence of a repeated
+non-multiple option — a second, JSON-targeted `--write` this script
+appended would always lose to the user's own later one and never execute.
+When that user-supplied `--write` targets `json=`, `_extra_args_write_json_
+path` already recovers it, so `_json_report_src` still finds structured
+evidence. When it targets a **non-JSON** format (`--write text=...`,
+`--write markdown=...`, ...), there is no JSON anywhere, and ADR-049's
+unconditional contract-coverage/analysis-assurance floors plus the
+severity-category gate genuinely go blind for that one run — accepted, not
+fixed, per `action/AGENTS.md`'s own "Known, accepted limitation"
+paragraph, since closing it would mean either silently discarding the
+user's explicit `--write` choice or unconditionally re-running the
+analysis a second time purely to obtain JSON (a materially larger,
+separate trade-off `_maybe_post_pr_comment` only accepts today for the
+sticky-comment feature, under its own narrower guards). If this becomes a
+real reported problem rather than a review-found edge case, the honest fix
+is the same one this entry always named: make `--write` accept multiple
+`FORMAT=PATH` operands (a real CLI capability change touching
+`secondary_output.py` and every command that declares the option, not
+just this Action script) — not another per-reader special case.
 
 ### `bundle_facts_store.read_bundle_facts_package` holds a bundle's raw JSON and its decoded `AbiSnapshot`s concurrently at peak
 

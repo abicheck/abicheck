@@ -455,12 +455,6 @@ concepts:
       owner for this concept per docs/AGENTS.md's fact-owner/narrative-owner
       split; not reproduced here in full, to avoid the exact
       ledger-vs-plan drift this same PR exists to fix.
-      **2026-09-05 re-assessment correction:** action/run.sh is partially
-      migrated -- _report_compat_verdict() and _severity_gate_exit() already
-      prefer run_outcome's structured fields; the residual is the raw
-      process-exit/stderr-text path, which PR #1062 extended again for
-      evidence-contract errors. Tracked as track T8; the release fan-out's
-      apply_release_gate_pack raw-string mirror is track T6.
       **2026-09-05, T6 landed:** the raw-string mirror is gone. The fold
       rule itself now lives once, in policy/gate_pack_fold.py's
       fold_gate_pack_severity -- a leaf inward of both callers, which is the
@@ -482,6 +476,32 @@ concepts:
       than settable fields, so the model can no longer express the
       scheme-vs-severity disagreement both were already documented as
       unable to have.
+      **Track T8 landed 2026-09-05** (abicheck/abicheck#1071): the raw
+      process-exit/stderr-text reconstruction action/run.sh used to carry is
+      retired. _report_compat_verdict/_severity_gate_exit/_coverage_gated/
+      _assurance_gated/_severity_gate_categories are JSON-only now
+      (run_outcome's structured fields first, the legacy per-field JSON
+      next, empty "no signal" otherwise) -- no rendered-markdown/text
+      regex, no SARIF abiVerdict branch, no stderr grep survives. Only a
+      transport-level fallback remains: the bare process exit code for
+      each mode's own unambiguous per-code contract (4=BREAKING,
+      2=API_BREAK before escalation, scan's 5/6/7/8), and
+      _is_cli_error()'s stderr check for a Click usage error, which
+      produces no report at all -- both are "no valid result because
+      invocation failed" signals, not verdict reconstruction. `scan`'s own
+      `--write json=$PR_JSON` sidecar injection was also made unconditional
+      on `pr-comment` as part of this track (a Codex review round found the
+      prior `pr-comment`-gated injection left those same unconditional
+      floors without a report to read in exactly the `pr-comment: false`
+      case this track's own removal made newly load-bearing), plus a
+      follow-up guard against injecting it alongside an effective
+      `extra-args --dry-run`. One narrow gap remains, documented rather
+      than closed (`action/AGENTS.md`'s "Known, accepted limitation"
+      paragraph): a `scan --against` step whose own `extra-args` requests a
+      non-JSON `--write` (e.g. `--write text=...`) still leaves those
+      floors blind, since the CLI's single `--write` slot means this
+      script's own JSON-targeted append always loses to the user's later,
+      non-JSON one. Both track T8 and track T6 are now complete.
   sectioned_storage:
     primitive: complete
     producers: complete
