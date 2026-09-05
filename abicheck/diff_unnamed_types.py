@@ -38,6 +38,7 @@ from .detector_registry import registry
 from .diff_helpers import make_change
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot
+from .model.export_index import all_export_names, build_raw_export_index_from_elf
 
 # Itanium unnamed-type productions, both <unqualified-name> alternatives:
 #   closure-type  ::= Ul <lambda-sig> E [<number>] _
@@ -142,13 +143,26 @@ def _unnamed_kind(mangled: str) -> str | None:
 
 
 def _exported_symbol_names(snap: AbiSnapshot) -> set[str]:
+    """Exported, ABI-relevant, mangled C++ (``_Z``-prefixed) names on *snap*.
+
+    ADR-063 T7: sources its raw name set from
+    ``model.export_index.all_export_names`` (over
+    ``model.export_index.build_raw_export_index_from_elf``'s raw read) rather
+    than re-reading ``snap.elf.symbols`` itself — deliberately the *unfiltered
+    by version* projection, unlike most other export-index consumers: a
+    newly-introduced unnamed-type mangling must be caught on any exported
+    alias, versioned or not, so no ``is_default`` filter applies here. The
+    ``_Z``-prefix and ABI-relevance filtering stay local to this detector,
+    not part of the canonical index.
+    """
     elf = snap.elf
     if elf is None:
         return set()
+    index = build_raw_export_index_from_elf(elf)
     return {
-        s.name
-        for s in elf.symbols
-        if s.name.startswith("_Z") and is_abi_relevant_elf_symbol(s.name)
+        name
+        for name in all_export_names(index)
+        if name.startswith("_Z") and is_abi_relevant_elf_symbol(name)
     }
 
 

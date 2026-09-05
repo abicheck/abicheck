@@ -37,6 +37,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .model.export_index import (
+    build_raw_export_index_from_elf,
+    build_raw_export_index_from_macho,
+    build_raw_export_index_from_pe,
+    callable_export_names,
+    macho_callable_names,
+    named_pe_exports,
+)
+
 if TYPE_CHECKING:
     from .elf_metadata import ElfMetadata
 
@@ -438,6 +447,8 @@ class ManifestValidationResult:
 def _exported_symbol_names(elf_meta: ElfMetadata) -> set[str]:
     """Names of exported *callable* (FUNC/IFUNC) symbols in an ELF library.
 
+    ADR-063 T7: thin wrapper over ``model.export_index.callable_export_names``
+    (over ``model.export_index.build_raw_export_index_from_elf``'s raw read).
     Two filters keep this to symbols that actually satisfy a POST promise:
 
     * Only callable types (``_CALLABLE_SYM_TYPE_NAMES``). A data ``OBJECT``
@@ -447,14 +458,10 @@ def _exported_symbol_names(elf_meta: ElfMetadata) -> set[str]:
       consumer link to ``pp_foo`` (only ``pp_foo`` / ``pp_foo@@POST_1`` do).
 
     Counting either would let ``validate_manifest_against_binary`` pass while real
-    clients fail to link/call. This mirrors how the rest of the repo builds its
-    exported surface (see ``cli_buildsource_merge`` / ``diff_platform``).
+    clients fail to link/call.
     """
-    names: set[str] = set()
-    for sym in elf_meta.symbols:
-        if sym.sym_type.name in _CALLABLE_SYM_TYPE_NAMES and sym.is_default:
-            names.add(sym.name)
-    return names
+    index = build_raw_export_index_from_elf(elf_meta)
+    return set(callable_export_names(index, _CALLABLE_SYM_TYPE_NAMES))
 
 
 def validate_manifest_against_symbols(
@@ -523,10 +530,11 @@ def _exported_names_for_binary(so_path: Path) -> tuple[set[str], str]:
         # NOTE: unlike ELF (STT_OBJECT) and Mach-O (__DATA / is_data), the PE
         # export directory carries no data-vs-function type information — it is a
         # flat list of name/ordinal → RVA with no symbol type. So there is no
-        # equivalent data-export filter to apply here; every named export is kept.
-        # Distinguishing a data export would require an RVA-vs-code-section
-        # heuristic that the PE parser does not model.
-        names = {e.name for e in pe_meta.exports if e.name}
+        # equivalent data-export filter to apply here; every named export is kept
+        # (`model.export_index.named_pe_exports`). Distinguishing a data export
+        # would require an RVA-vs-code-section heuristic that the PE parser does
+        # not model.
+        names = set(named_pe_exports(build_raw_export_index_from_pe(pe_meta)))
         return names, Path(so_path).name
     if binary_fmt in ("macho", "mach-o"):
         from .macho_metadata import parse_macho_metadata
@@ -534,13 +542,14 @@ def _exported_names_for_binary(so_path: Path) -> tuple[set[str], str]:
         macho_meta = parse_macho_metadata(normalized_path)
         # Exclude __DATA globals (is_data) for parity with the ELF OBJECT filter:
         # a data symbol named `pp_foo` does not satisfy a client compiled to call
-        # the callable POST wrapper `pp_foo(...)`. LIMITATION: MachoExport.is_data
-        # only tracks the plain __DATA segment, so a const-data export in
-        # __DATA_CONST or __TEXT,__const is not caught here — a complete callable
-        # check would need per-section segment coverage the Mach-O parser does not
-        # yet model. In practice POST wrappers live in __TEXT, so this covers the
-        # common case; the residual gap needs a macho_metadata parser enhancement.
-        names = {e.name for e in macho_meta.exports if e.name and not e.is_data}
+        # the callable POST wrapper `pp_foo(...)` (`model.export_index.
+        # macho_callable_names`). LIMITATION: MachoExport.is_data only tracks the
+        # plain __DATA segment, so a const-data export in __DATA_CONST or
+        # __TEXT,__const is not caught here — a complete callable check would need
+        # per-section segment coverage the Mach-O parser does not yet model. In
+        # practice POST wrappers live in __TEXT, so this covers the common case;
+        # the residual gap needs a macho_metadata parser enhancement.
+        names = set(macho_callable_names(build_raw_export_index_from_macho(macho_meta)))
         return names, macho_meta.install_name or Path(so_path).name
 
     raise ValueError(
