@@ -321,6 +321,102 @@ _is_release_style_operand() {
   return 1
 }
 
+# Whether *name* is a compare/scan CLI option that consumes a following
+# token as its own value (Click `nargs=1`, not a boolean flag) -- the full
+# combined option table of both commands, current as of this commit
+# (`python -c "...click introspection over abicheck.cli.main.commands
+# ['compare'/'scan']..."`, see this function's own git history for the
+# exact one-liner). Every value-taking option, across both short and long
+# spellings, is listed; anything not listed here is treated as a flag/
+# unknown token.
+#
+# This is a hand-maintained snapshot, not derived at run time (the Action
+# has no live `abicheck --help-all` to introspect before it even knows
+# which dependency-source install produced a `python`/`abicheck` on PATH) --
+# it can go stale if a future PR adds a new value-taking CLI option without
+# updating this list. That staleness is the same *safe* direction as the
+# rest of this tokenizer's own documented limits (see `_extra_args_options`
+# below): treating an unlisted value-taking option as a bare flag means its
+# value token is misread as a flag/unknown token of its own, which can only
+# cause a false positive in a caller checking for one specific flag name --
+# never a false negative that lets a real conflicting combination through
+# unnoticed.
+_extra_args_is_value_option() {
+  case "$1" in
+    --abi3 | --against | --artifact-set | --ast-frontend | --budget | \
+    --build-info | --build-target | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
+    --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
+    --crosscheck | --debug-format | --debug-info | --debug-root | --debuginfod-url | \
+    --depth | --devel-pkg | --dump-manifest | --env-matrix | --format | \
+    --frontend-context | --header | --include | --instantiation-manifest | --jobs | \
+    --lang | --ld-library-path | --manifest | --max-findings | --max-json-object-nodes | \
+    --new-variant | --old-variant | --output | --output-dir | --pack | \
+    --pdb-path | --policy | --post-manifest | --probe-matrix | --profile | \
+    --public-header-dir | --report-mode | --required-symbol | --required-symbols | --risk-rules | \
+    --search-path | --severity-preset | --show-only | --since | --sources | \
+    --suppress | --sysroot | --use-cases | --used-by | --version | \
+    --write | -H | -I | -j | -o)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# The one place `extra-args` is walked with option/value awareness. Every
+# other extra-args-inspecting helper in this file builds on this rather than
+# re-scanning raw tokens itself -- three independent Codex review rounds
+# each found a real flag/value confusion in what used to be separate, ad hoc
+# per-flag token scans (`--output --dry-run` misread as an effective dry
+# run; `--suppress -o --dry-run` misread as *not* one, since a bare-token
+# scan can't tell a coincidental `-o`-shaped *value* from the real `-o`
+# flag; `--output --write` misread as requesting a `--write` secondary when
+# `--write` here is actually `--output`'s own filename value) -- the root
+# cause was the same in all three: no reader knew which preceding token, if
+# any, had already consumed the one being inspected as its argument.
+#
+# Emits one `NAME<TAB>VALUE` line per option occurrence: `VALUE` is empty
+# for a flag/unknown token, the joined half of a single-token `--foo=value`
+# form, or the following token for a bare two-token `--foo value`/`-f value`
+# form when `--foo`/`-f` is a known value-taking option
+# (`_extra_args_is_value_option`). A value-taking option with nothing after
+# it (malformed CLI usage the real CLI itself rejects) still gets one row,
+# empty value, rather than being silently dropped.
+#
+# Splits the same way the command line itself does, not by matching the raw
+# string: `CMD+=($INPUT_EXTRA_ARGS)` is an unquoted expansion, so bash
+# word-splits on IFS -- space, tab AND newline -- and an `extra-args: |`
+# YAML literal block (or anything with a tab) produces real, separate
+# tokens a literal-space substring check would not see (Codex review,
+# historical). `set --` reuses that identical splitting, so this can never
+# disagree with the real argv about what a token is; it also inherits the
+# same pathname expansion, deliberately, for the same reason.
+#
+# Still not full shell-quoting parsing (an exotically quoted option evades
+# this) and not aware of a short option's concatenated-value form (`-jVALUE`
+# for `-j VALUE`) -- both pre-existing limits of every extra-args scan in
+# this file, carried forward rather than silently narrowed by this
+# refactor.
+_extra_args_options() {
+  local _arg _pending=""
+  # shellcheck disable=SC2086  # word-splitting is the point; see above.
+  set -- ${INPUT_EXTRA_ARGS:-}
+  for _arg in "$@"; do
+    if [[ -n "$_pending" ]]; then
+      printf '%s\t%s\n' "$_pending" "$_arg"
+      _pending=""
+      continue
+    fi
+    if [[ "$_arg" == --*=* ]]; then
+      printf '%s\t%s\n' "${_arg%%=*}" "${_arg#*=}"
+    elif _extra_args_is_value_option "$_arg"; then
+      _pending="$_arg"
+    else
+      printf '%s\t\n' "$_arg"
+    fi
+  done
+  [[ -n "$_pending" ]] && printf '%s\t\n' "$_pending"
+}
+
 # Whether the user's own `extra-args` passthrough already requests
 # `--write` (documented, supported usage — `extra-args` is a general CLI
 # escape hatch). If it does, injecting our own internal one ahead of it is
@@ -334,32 +430,11 @@ _is_release_style_operand() {
 # temp file (Codex review). Skipping our own injection when the user's is
 # present restores the older, always-correct "no PR_JSON at all" fallback
 # path instead.
-#
-# Answered by splitting the value the same way the command line itself does
-# rather than by matching the raw string. `CMD+=($INPUT_EXTRA_ARGS)` is an
-# unquoted expansion, so bash word-splits on IFS -- space, tab AND newline --
-# and a `extra-args: |` YAML literal block (or anything with a tab, or with
-# another argument before it) produces a real `--write` token that a
-# literal-space substring check does not see (Codex review). It then injected
-# ours anyway and lost to the user's, which is precisely the case this guard
-# exists to prevent. `set --` reuses that identical splitting, so the guard
-# and the argv can never disagree about what a token is; it also inherits the
-# same pathname expansion, deliberately, for the same reason.
-#
-# Still not full shell-quoting parsing: an exotically quoted `--write` evades
-# this, matching this script's existing plain word-splitting handling of
-# extra-args everywhere else.
 _extra_args_has_write_flag() {
-  local _arg
-  # shellcheck disable=SC2086  # word-splitting is the point; see above.
-  set -- ${INPUT_EXTRA_ARGS:-}
-  for _arg in "$@"; do
-    case "$_arg" in
-      --write | --write=*)
-        return 0
-        ;;
-    esac
-  done
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    [[ "$_name" == "--write" ]] && return 0
+  done < <(_extra_args_options)
   return 1
 }
 
@@ -375,35 +450,11 @@ _extra_args_has_write_flag() {
 # dry-run preview into a usage error (exit 64). Checked before the PR_JSON
 # sidecar injection in both modes, the same way `_extra_args_has_write_flag`
 # already is.
-#
-# Skips the token right after a bare `-o`/`--output` (Codex review, P2,
-# fresh evidence): both are two-token forms of compare/scan's own `-o
-# PATH`/`--output PATH` option (`cli_options.py`'s `output_options`), so
-# `extra-args: --output --dry-run` means "write to a file literally named
-# --dry-run", not an effective dry run -- Click consumes the token as
-# `-o`'s value, never parses it as a flag. This is the one concrete
-# collision named by that review; it is not a general option/argument-aware
-# parser (matching this file's own established, documented limit for
-# `_extra_args_has_write_flag`/`_extra_args_write_json_path` above -- plain
-# word-splitting, not full CLI-grammar parsing). A `--dry-run` consumed as
-# the value of some other value-taking option this script doesn't forward
-# itself (e.g. `--policy --dry-run`) is not special-cased; that class of
-# false positive is safe by construction (it only suppresses `-o`/`--write`
-# unnecessarily, never causes a usage error), unlike the false negative
-# this function exists to close.
 _extra_args_has_dry_run_flag() {
-  local _arg _prev=""
-  # shellcheck disable=SC2086  # word-splitting is the point; see above.
-  set -- ${INPUT_EXTRA_ARGS:-}
-  for _arg in "$@"; do
-    if [[ "$_arg" == "--dry-run" ]]; then
-      case "$_prev" in
-        -o | --output) : ;; # consumed as -o/--output's own value, not a flag
-        *) return 0 ;;
-      esac
-    fi
-    _prev="$_arg"
-  done
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    [[ "$_name" == "--dry-run" ]] && return 0
+  done < <(_extra_args_options)
   return 1
 }
 
@@ -423,34 +474,18 @@ _extra_args_has_dry_run_flag() {
 # recovers that path so `_json_report_src` can read it directly, instead of
 # either rejecting the combination outright or (worse) silently doing
 # nothing.
-#
-# Same word-splitting caveat as `_extra_args_has_write_flag`: an exotically
-# quoted `--write` evades this. `--write` and its value can be one token
-# (`--write=json=PATH`) or two (`--write json=PATH`); both spellings are
-# documented and handled.
 _extra_args_write_json_path() {
-  local _arg _value _prev_was_write=0
-  # shellcheck disable=SC2086  # word-splitting is the point; see above.
-  set -- ${INPUT_EXTRA_ARGS:-}
-  for _arg in "$@"; do
-    if [[ "$_prev_was_write" == "1" ]]; then
-      _value="$_arg"
-      _prev_was_write=0
-    elif [[ "$_arg" == "--write" ]]; then
-      _prev_was_write=1
-      continue
-    elif [[ "$_arg" == --write=* ]]; then
-      _value="${_arg#--write=}"
-    else
-      continue
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    if [[ "$_name" == "--write" ]]; then
+      case "$_value" in
+        json=*)
+          printf '%s' "${_value#json=}"
+          return 0
+          ;;
+      esac
     fi
-    case "$_value" in
-      json=*)
-        printf '%s' "${_value#json=}"
-        return 0
-        ;;
-    esac
-  done
+  done < <(_extra_args_options)
   return 1
 }
 
@@ -471,24 +506,11 @@ _extra_args_write_json_path() {
 #
 # Falls back to the nominal `$FORMAT` when extra-args carries no `--format`
 # of its own -- the ordinary, unoverridden case.
-#
-# Same word-splitting/quoting caveat as `_extra_args_has_write_flag`: an
-# exotically quoted `--format` evades this, same as every other extra-args
-# scan in this file.
 _effective_format() {
-  local _arg _found="${FORMAT:-}" _prev_was_format=0
-  # shellcheck disable=SC2086  # word-splitting is the point; see above.
-  set -- ${INPUT_EXTRA_ARGS:-}
-  for _arg in "$@"; do
-    if [[ "$_prev_was_format" == "1" ]]; then
-      _found="$_arg"
-      _prev_was_format=0
-    elif [[ "$_arg" == "--format" ]]; then
-      _prev_was_format=1
-    elif [[ "$_arg" == --format=* ]]; then
-      _found="${_arg#--format=}"
-    fi
-  done
+  local _name _value _found="${FORMAT:-}"
+  while IFS=$'\t' read -r _name _value; do
+    [[ "$_name" == "--format" ]] && _found="$_value"
+  done < <(_extra_args_options)
   printf '%s' "$_found"
 }
 

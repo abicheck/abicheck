@@ -42,19 +42,30 @@ _END_MARKER = (
 #: immediately follow the ``scan --artifact-set`` block, up to (not
 #: including) the pull_request-event check.
 _VERDICT_GUARDS_END_MARKER = '[[ "$VERDICT" == "BUDGET_OVERFLOW" ]] && return 0\n'
-_DRY_RUN_FLAG_HELPER_MARKER = "_extra_args_has_dry_run_flag() {"
+#: Dependency order matters: `_extra_args_has_dry_run_flag` calls
+#: `_extra_args_options`, which calls `_extra_args_is_value_option`.
+_DRY_RUN_FLAG_HELPER_MARKERS = (
+    "_extra_args_is_value_option() {",
+    "_extra_args_options() {",
+    "_extra_args_has_dry_run_flag() {",
+)
 
 
 def _extra_args_has_dry_run_flag_source() -> str:
     """`_maybe_post_pr_comment`'s own dry-run guard (Codex review, P2, fresh
     evidence) now calls this helper too -- extracted verbatim, the same
-    discipline as the fragments below, and prepended so the isolated
-    function body doesn't hit "command not found" for a real caller it
-    depends on."""
+    discipline as the fragments below, and prepended (along with the two
+    functions it now calls in turn -- a later Codex review round made this
+    a shared, option/value-aware tokenizer instead of a standalone token
+    scan) so the isolated function body doesn't hit "command not found"
+    for a real caller it depends on."""
     text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_DRY_RUN_FLAG_HELPER_MARKER)
-    end = text.index("\n}\n", start) + len("\n}\n")
-    return text[start:end]
+    parts = []
+    for marker in _DRY_RUN_FLAG_HELPER_MARKERS:
+        start = text.index(marker)
+        end = text.index("\n}\n", start) + len("\n}\n")
+        parts.append(text[start:end])
+    return "\n".join(parts)
 
 
 def _mode_gate_fragment() -> str:

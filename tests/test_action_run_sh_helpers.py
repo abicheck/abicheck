@@ -533,6 +533,18 @@ class TestExtraArgsHasWriteFlag:
         # standalone token) must not trip the detector.
         assert not self._predicate("--not-a-write-flag")
 
+    def test_write_consumed_as_an_output_option_value_is_not_a_flag(self) -> None:
+        # A fourth Codex review round (fresh evidence): `extra-args:
+        # --output --write` means "write a file literally named --write"
+        # -- `--output` is the value-taking option here, so it consumes
+        # the literal token "--write" as its own filename, and there is no
+        # real `--write` flag in this invocation at all. Injecting the
+        # internal JSON sidecar on top of a false "the user already has a
+        # --write" belief would have left `_coverage_gated`/
+        # `_assurance_gated`/`_severity_gate_categories` without evidence
+        # for no reason.
+        assert not self._predicate("--output --write")
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestExtraArgsHasDryRunFlag:
@@ -584,6 +596,21 @@ class TestExtraArgsHasDryRunFlag:
         # `--output` is exempt. A `--dry-run` anywhere else, including
         # right after a real (non-flag-shaped) output path, is a real flag.
         assert self._predicate("--output out.json --dry-run")
+
+    def test_dry_run_after_an_unrelated_option_value_that_looks_like_o_is_still_a_flag(
+        self,
+    ) -> None:
+        # A third Codex review round (fresh evidence): the earlier fix's
+        # "skip the token right after -o/--output" rule was itself too
+        # naive -- it can't tell a real `-o` flag from some *other* option's
+        # value that happens to be spelled "-o" (e.g. a suppression file
+        # named "-o"). `--suppress` is the value-taking option here, so it
+        # consumes the literal "-o" as its own value, and the following
+        # `--dry-run` is a real, unconsumed flag -- exactly what Click
+        # itself would parse. The shared `_extra_args_options` tokenizer
+        # (rather than a bare "was the previous token -o?" check) is what
+        # gets this right.
+        assert self._predicate("--suppress -o --dry-run")
 
 
 def _run_value(call: str) -> str:
@@ -666,6 +693,18 @@ class TestEffectiveFormat:
 
     def test_does_not_false_positive_on_a_substring(self) -> None:
         assert self._value("text", "--not-a-format-flag") == "text"
+
+    def test_format_consumed_as_an_output_option_value_is_not_an_override(
+        self,
+    ) -> None:
+        # Same tokenizer, same class of bug as the sibling write/dry-run
+        # helpers: `--output --format` means "write a file literally named
+        # --format", not a `--format` override -- `--output` is the
+        # value-taking option here and consumes the literal token.
+        assert self._value("markdown", "--output --format") == "markdown"
+
+    def test_format_after_an_unrelated_option_value_still_overrides(self) -> None:
+        assert self._value("markdown", "--output out.md --format json") == "json"
 
 
 # `_text_report_content` (and its `TestTextReportContentEffectiveFormat`
