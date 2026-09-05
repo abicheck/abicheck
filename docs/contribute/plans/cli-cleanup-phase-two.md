@@ -134,9 +134,10 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > current total), `compare_bundle_operand_dispatch.py` wires it
 > into `compare_cmd`. **The full `BundleCompareRequest` unification is
 > still explicitly out of scope of #1042 and remains this row's open
-> item** — live/stored and stored/stored still have no execution engine,
-> and the evaluation/gate/report/dry-run surface is still answered per
-> operand-shape branch rather than once.
+> item** — live/stored still has no execution engine (stored/stored's own
+> landed 2026-09-04, see the Ordering block's PR I row below, Codex
+> review), and the evaluation/gate/report/dry-run surface is still
+> answered per operand-shape branch rather than once.
 >
 > **Corrected the "Ordering" block's PR C row**, which had gone stale in
 > the other direction from #1042/#1053 landing: it still read "ELF done,
