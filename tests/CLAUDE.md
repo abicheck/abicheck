@@ -119,3 +119,41 @@ finishes in ~45 seconds.
 - Don't read or regenerate `tests/golden/*` unless the output format
   intentionally changed.
 - Don't add network-dependent tests.
+
+## Scenario matrix for product invariants
+
+Root `AGENTS.md`'s "Product decisions and change routing" section names
+product rules that only hold if tests exercise the *combinations*, not one
+happy path each. When adding or changing behavior in that space, cover the
+relevant axes of this matrix (fixed examples plus a property-style
+statement of the invariant, per the root file's bug-class guidance):
+
+| Axis | States to exercise |
+|---|---|
+| Scope | one artifact · one-member package · multi-library package · selected variant against a multi-variant baseline · declared matrix with a missing cell |
+| Evidence per side | binary only · + headers · + DWARF · asymmetric (one side richer) · requested-but-failed · stored rich snapshot under a shallow request |
+| Policy state | none · suppression (per-finding and broad) · reclassification · scope exclusion · acknowledgment · relaxed versioning strictness |
+| Consumers | none supplied · unaffected consumer · affected consumer · unavailable advisory/required consumer |
+
+Invariants worth stating as properties over that matrix:
+
+- **Raw-change conservation:** policy, view, and report-format changes
+  never alter the observed change set or its evidence statuses; totals
+  reconcile across scalar, bundle, aggregate, and compact reports.
+- **Cardinality invariance:** a one-member package and the scalar path
+  yield the same applicable findings; adding an unrelated baseline variant
+  cannot change a selected comparison; input order cannot change pairing.
+- **Front-end and format parity:** equivalent *resolved* requests decide
+  identically across the CLI, typed API, and Action (test at the resolved
+  request, since the CLI and Action fold in `.abicheck.yml`, `--profile`,
+  and `--pack` that a bare API call does not); JSON, Markdown, HTML, SARIF,
+  and JUnit agree on every semantic field they carry.
+- **No manufactured findings:** swapping *unavailable* evidence for *empty*
+  evidence must fail a test; an unmatched member without inventory evidence
+  is never a removal; a run with zero comparisons never asserts success.
+
+Use real compiled fixtures (the `integration` marker, or committed
+`fixtures/` snapshots dumped from real binaries) for anything whose truth
+depends on compiler or binary facts, and the controlled-mutation catalogue
+above for breadth. This file stays the scoped test-instruction owner;
+don't add a parallel `tests/AGENTS.md`.

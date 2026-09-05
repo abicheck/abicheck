@@ -28,10 +28,20 @@ they are.
 
 ## What is abicheck?
 
-ABI compatibility checker for C/C++ shared libraries. Pure Python (3.10+).
-Detects 399 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
-categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`).
-Drop-in replacement for abi-compliance-checker (ABICC).
+abicheck helps library and package maintainers understand and validate
+API/ABI evolution. Grounded in ABI/API compatibility analysis, it makes
+additions, removals, modifications, relevant dependency changes, and
+deployment requirements visible; relates them to declared contracts and
+known consumers; and supports intentional, reviewable change in CI while
+showing what the available evidence could not establish. The canonical
+product direction is the repository-root [`vision.md`](vision.md); this
+file owns development procedure, not direction.
+
+Mechanically: pure Python (3.10+); reads ELF, PE/COFF, and Mach-O binaries
+plus optional debug info, public headers, build data, and sources (L0–L5);
+detects 399 ABI/API change types categorized into `BREAKING_KINDS`,
+`API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`);
+drop-in replacement for abi-compliance-checker (ABICC).
 
 **Two different Python version numbers matter here, don't conflate them:**
 `pyproject.toml`'s `requires-python = ">=3.10"` is the *minimum supported*
@@ -44,6 +54,68 @@ floor" below), and what the `ai-readiness` CI job (including its
 `lint-and-types` job that gates `mypy abicheck/` cleanliness on every PR
 runs on 3.14, matching the other non-canonical lanes. When in doubt about
 which Python to develop against locally, use 3.13.
+
+## Product decisions and change routing
+
+Compact consequences of `vision.md` for anyone adding behavior. Each is a
+stable product rule; where the current code does not yet satisfy one, the
+linked owner records the gap — do not read a rule here as a claim that
+every existing path already honors it.
+
+**Authority.** `vision.md` governs product *direction*. Accepted ADRs
+(`docs/contribute/adr/`) govern technical choices. Schemas, CLI `help=`
+text, and code describe the *current* public contract. Plans
+(`docs/contribute/plans/`) record implementation status. This file and its
+scoped siblings govern development procedure. A direction stated in the
+vision is **not** permission to change an existing default, exit code,
+schema, or public interface — that still needs its ADR and migration.
+
+Before adding behavior, establish, in this order: the **user task**
+(PR review, local check, release, audit), the **comparison scope** (one
+artifact, a package, a selected variant, a declared matrix), the
+**compatibility contract** it is judged against, the **evidence available**
+on each side, and the **platform**. A change that skips one of these is
+usually the one that later manufactures a finding.
+
+- **One model, any cardinality.** Single and multi-component analysis share
+  the same semantic owners (ADR-061/063). Scalar inputs stay simple: a bare
+  binary comparison never needs package metadata, a variant selector, or a
+  consumer artifact. A one-member package and the scalar path must yield
+  the same applicable findings.
+- **Record before disposing.** Observed changes are recorded before policy
+  (suppression, reclassification, scope exclusion, acknowledgment,
+  deduplication, display filtering) acts on them, and every disposition
+  keeps its rule and reason. Additions, accepted breaks, exclusions, and
+  unknowns never silently vanish — "100 removals detected, 100 suppressed
+  by rule X" stays visible on a passing run. Owner: [ADR-067](docs/contribute/adr/067-change-intent-acknowledgment-and-disposition-audit.md).
+- **Optional inputs stay optional.** DWARF, build data, sources, consumer
+  artifacts, and a complete build matrix add assurance; none may become an
+  accidental prerequisite of the standard binary-plus-headers path.
+- **Absent is not removed.** A selected local variant is not a complete
+  release. *Unselected*, *expected but not produced*, *failed*, and
+  *deliberately retired* are four different states with four different
+  outcomes; unmatched never implies deleted without inventory evidence,
+  and a run that completed zero comparisons never reads as a clean pass.
+  Owner: [ADR-065](docs/contribute/adr/065-comparison-scope-selection-and-completeness.md).
+- **Weaker evidence narrows conclusions.** A failed extractor is an error
+  or an explicit `FAILED` fact, never an empty surface. Missing evidence
+  lowers assurance and is reported; it never fabricates a break and never
+  upgrades to a clean compatibility claim (ADR-028/049/050/063/064).
+- **Policy decides acceptance, not facts.** Versioning model, enforcement
+  strictness, acknowledgment, and CI gate settings change whether a release
+  is *accepted*; they never change what was *observed* or its technical
+  compatibility. Owner: [ADR-066](docs/contribute/adr/066-longitudinal-history-and-versioning-policy.md).
+- **Finish the workflow.** Reuse the existing owner (request/plan/execute/
+  result, `ReportDocument`, `ExitDecision`, `SelectorSet`, storage v2) and
+  wire the consumer before claiming a feature; a parser-only or DTO-only
+  slice is not a shipped capability. Delete the superseded path per this
+  file's architecture rules rather than leaving two.
+- **Validate the user-facing result.** Prove a change through the public
+  workflow (CLI, typed API, Action) and the rendered report, across live and
+  stored operands, not only through an internal detector or a mocked test.
+
+Workstream status for all of the above:
+[`docs/contribute/plans/vision-api-abi-evolution.md`](docs/contribute/plans/vision-api-abi-evolution.md).
 
 ## Task routing and dependency direction
 

@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use abicheck, please cite it using the metadata in this file."
 title: "abicheck"
-abstract: "ABI and API compatibility checker for C/C++ shared libraries."
+abstract: "ABI and API compatibility checker for C/C++ libraries. Compares two builds using binary, debug-info, public-header, build-system, and optional source evidence; reports additions, removals, modifications, and breaks, and states what the supplied evidence could not establish."
 type: software
 authors:
   - family-names: Petrov

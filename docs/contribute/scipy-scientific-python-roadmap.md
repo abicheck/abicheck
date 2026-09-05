@@ -1,5 +1,11 @@
 # SciPy / Scientific-Python Roadmap
 
+**Priority context:** the canonical [vision](vision.md) places CPython
+extension modules and the scientific Python stack as the *next-priority
+optional provider domain* after Linux C/C++ — additive to abicheck's
+identity, not a replacement for it. Everything below is scoped under that
+priority.
+
 **Status:** Proposed — vision/roadmap doc. The three highest-priority items
 (§1 Cython API/ABI frontend, §2 NumPy C-API envelope, §3 wheel/deployment
 verification) are now gap-plan-ified as **G25**, **G26**, and **G27**

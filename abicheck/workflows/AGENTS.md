@@ -4,7 +4,7 @@
 
 This package owns operation orchestration: sequencing extraction, comparison,
 policy evaluation, resource lifetimes, and typed request/plan/result flows. It
-is the composition ring between domain packages and frontends.
+is the composition ring between domain packages and frontends. This layer's product invariant (the local consequence of root `AGENTS.md`'s "Product decisions and change routing") is stated once in `abicheck/AGENTS.md` "Product invariants by layer"; it is not restated here.
 
 ## Permitted imports
 
