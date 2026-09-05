@@ -41,6 +41,10 @@ _ADR_064_EXIT_FIELDS = (
     "budget_overflow_contribution",
     "not_comparable_contribution",
     "removed_required_library_contribution",
+    # ADR-065 S2 (schema 2.50): the same additive, always-0-when-absent
+    # treatment as the five ADR-064 fields above.
+    "incomplete_scope_contribution",
+    "no_comparison_completed_contribution",
 )
 
 
@@ -163,6 +167,8 @@ def test_advisory_preserves_operational_error_contribution_in_the_exit_block() -
             "budget_overflow_contribution": 0,
             "not_comparable_contribution": 0,
             "removed_required_library_contribution": 0,
+            "incomplete_scope_contribution": 0,
+            "no_comparison_completed_contribution": 0,
         },
     }
     out = augment_report(
@@ -204,6 +210,8 @@ def test_advisory_preserves_not_comparable_contribution_in_a_scan_diff_exit_bloc
             "budget_overflow_contribution": 0,
             "not_comparable_contribution": 6,
             "removed_required_library_contribution": 0,
+            "incomplete_scope_contribution": 0,
+            "no_comparison_completed_contribution": 0,
         },
     }
     report = {

@@ -188,6 +188,13 @@ def bundle_facts_to_dict(
             name: list(aliases) for name, aliases in facts.filesystem_aliases.items()
         },
         "library_filenames": dict(facts.library_filenames),
+        # ADR-065 D8: emitted unconditionally (`{}` when nothing degraded)
+        # so a reader can tell "captured clean" from "written by a pre-S2
+        # abicheck that could not say"; the key is additive, so a pre-S2
+        # reader still loads the document (and, being unable to see the
+        # marker, reads a degraded member impoverished -- which only a
+        # reader that has this key can ever fix).
+        "degraded_members": dict(facts.degraded_members),
         "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
     }
 
@@ -219,6 +226,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     from .serialization import snapshot_from_dict
     from .storage.bundle_facts_validation import (
         validated_alias_map,
+        validated_degraded_members,
         validated_filename_map,
         validated_variant_fingerprint,
     )
@@ -328,6 +336,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         },
         filesystem_aliases=validated_alias_map(d.get("filesystem_aliases", {})),
         library_filenames=validated_filename_map(d.get("library_filenames", {})),
+        degraded_members=validated_degraded_members(d.get("degraded_members")),
         manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )
 

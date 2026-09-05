@@ -1,3 +1,23 @@
+---
+doc_type: how-to
+level: intermediate
+audience:
+  - library-maintainer
+  - ci-owner
+canonical_for:
+  - comparison-scope-completeness
+depends_on:
+  - abicheck/model/scope_acquisition.py
+  - abicheck/policy/scope_completeness.py
+  - abicheck/workflows/release_scope.py
+  - abicheck/report/comparison_scope.py
+  - abicheck/frontends/cli/options/release.py
+  - abicheck/bundle.py
+  - abicheck/bundle_facts.py
+lifecycle: active
+generated: false
+---
+
 # Multi-binary (bundle) ABI analysis
 
 Most ABI tools answer one question: *"did this `.so` file's ABI change?"*
@@ -474,9 +494,11 @@ analysis ran:
 {
   "verdict": "BREAKING",                  // existing: worst of per-lib × bundle
   "libraries": [...],                     // existing
-  "unmatched_old": [],                    // existing
+  "unmatched_old": [],                    // existing -- the raw set difference (ADR-065 D2: unmatched, not removed)
   "unmatched_new": [],                    // existing
   "warnings": [],                         // existing
+  "comparison_scope": { ... },            // ADR-065 S2 (schema 2.50): per-member acquisition record,
+                                          //   completeness, policy, proven_removed/proven_added
   "bundle_verdict": "BREAKING",           // new (ADR-023)
   "bundle_findings": [                    // new (ADR-023)
     {
@@ -521,7 +543,8 @@ Same as before, but a bundle finding can promote the verdict:
 | 0 | All clear — no per-library or bundle findings above COMPATIBLE_WITH_RISK |
 | 2 | At least one library or bundle finding is API_BREAK |
 | 4 | At least one library or bundle finding is BREAKING |
-| 8 | Library removed from the bundle (only with `--fail-on-removed-library`) |
+| 1 | No compatibility break, but the completeness axis contributed (ADR-065): `--on-incomplete-scope block` with an unchecked member, or a run that completed no comparison at all (under either setting) |
+| 8 | Library **proven** removed from the bundle (only with `--fail-on-removed-library`, and only when NEW's inventory is proven complete — see [Comparison scope and completeness](#comparison-scope-and-completeness-adr-065)) |
 
 If you previously had a green CI on a release and bundle analysis now
 flips it red, the finding section in the markdown / JSON tells you what
@@ -531,6 +554,55 @@ can be silenced with a [suppression](suppressions.md) if it's expected; a
 `bundle_*` finding cannot be suppressed today (see above) — your options are
 to fix the intra-bundle contract, or fall back to `--no-bundle-analysis` /
 `.abicheck.yml`'s `bundle.system_providers:` as described below.
+
+## Comparison scope and completeness (ADR-065)
+
+A directory/package `compare` records, for every library discovered on
+either side, what happened to it in *this* run — its **acquisition state**
+— separately from any verdict:
+
+| State | Meaning |
+|---|---|
+| `available` | Both sides supplied it and the comparison completed |
+| `not_supplied` | One side has no counterpart, and the lacking side's inventory is not proven complete — so it is **unmatched, not removed/added** |
+| `unsupported` | An artifact this build cannot analyze (a stored snapshot newer than this reader, a container format with no backend) |
+| `failed` | Its extraction or comparison failed (also an operational `ERROR`) |
+| `out_of_scope` | Not selected by this run (see below); contributes nothing |
+
+The JSON report carries the whole record under `comparison_scope`
+(members, states, reasons, each side's inventory proof, and the proven
+`proven_removed`/`proven_added` sets), `run_outcome.scope` reads
+`complete`/`incomplete`, and the Markdown report and PR comment state the
+unchecked members and that the verdict covers the compared members only.
+
+**One candidate against a many-member baseline.** When NEW supplies exactly
+one artifact with exactly one OLD counterpart (and NEW's inventory is not
+proven complete), the run is a *current-artifact* comparison: the other OLD
+members are `out_of_scope`, the scope is complete, and nothing is reported
+as removed — a local single-variant build compared against a twelve-variant
+baseline no longer reads as eleven removals.
+
+**Policy.** `--on-incomplete-scope warn` (the default) reports every
+unchecked member and contributes `0` to the exit code; `block` contributes
+`1`, folded with `max` exactly like the contract-coverage axis (a clean `0`
+becomes `1`; a real `2`/`4` is never lowered). A run that completed **no**
+comparison at all exits `1` under either setting: a permissive policy can
+downgrade missing members, never "nothing compared".
+
+**Removals need proof.** `--fail-on-removed-library`'s exit `8` fires only
+for a *proven* removal: NEW's inventory must be proven complete, which in
+this release means a stored `ProjectSnapshot` package's declared
+composition (a live directory or an extracted archive cannot prove absence
+— `package.py` returns directories, not a declared component inventory).
+The JSON key `unmatched_old` keeps listing the raw old-minus-new set, as its
+name says. See the migration note in
+[Exit codes](../reference/exit-codes.md#the-completeness-axis-adr-065-d6d7-directorypackage-compare-only).
+
+**Stored baselines.** A `--bundle-facts-out` capture whose stranded library
+failed to dump records that member under `degraded_members` (with the
+failure) instead of persisting an ELF-only stand-in as if it were complete;
+a later stored/stored comparison skips such a member and says so in
+`bundle_analysis_errors`.
 
 ## Comparing against a stored bundle baseline (G38 Phase 2)
 

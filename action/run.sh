@@ -2165,6 +2165,32 @@ elif query == "coverage_where":
             )
         )
     )
+elif query == "scope_contribution":
+    # ADR-065 S2 (D6/D7): the completeness axis's two 0/1 fold participants,
+    # carried on a directory/package release report's root `exit` block (a
+    # scan never sets either). Printed as their max -- the same "did this
+    # axis contribute" answer `coverage_contribution` gives for its own.
+    ex = _either("exit", {})
+    ex = ex if isinstance(ex, dict) else {}
+
+    def _zero_or_one(value):
+        return 1 if value == 1 else 0
+
+    print(
+        max(
+            _zero_or_one(ex.get("incomplete_scope_contribution")),
+            _zero_or_one(ex.get("no_comparison_completed_contribution")),
+        )
+    )
+elif query == "scope_where":
+    # What went unchecked, from the release report's `comparison_scope`
+    # block -- the actionable half, the same way `coverage_where` names the
+    # provider that fell short.
+    cs = report.get("comparison_scope")
+    cs = cs if isinstance(cs, dict) else {}
+    parts = ["no comparison completed"] if cs.get("no_comparison_completed") else []
+    parts.extend(str(n) for n in (cs.get("unchecked") or []) if isinstance(n, str))
+    print(", ".join(parts))
 elif query == "assurance_notes":
     # `analysis_assurance.notes` — same field name and shape on both compare
     # (document root) and scan (nested under `diff`), read through the same
@@ -2447,6 +2473,23 @@ _assurance_gated() {
   fi
   echo "$STDERR_CONTENT" \
     | grep -q 'Analysis assurance incomplete .*under --require-complete-analysis'
+}
+
+# ADR-065 S2's completeness axis (D6 under --on-incomplete-scope block, D7
+# -- no comparison completed -- under every setting), read the way
+# `_coverage_gated` reads its own: the report's already-folded contribution
+# first, the CLI's stderr notice as the no-JSON fallback (a `warn`-accepted
+# gap says "Accepted by --on-incomplete-scope" in-band, so it is excluded).
+_scope_gated() {
+  local _src _contribution
+  _src=$(_json_report_src)
+  _contribution=$(_report_query "$_src" scope_contribution)
+  if [[ -n "$_contribution" ]]; then
+    [[ "$_contribution" == "1" ]]
+    return
+  fi
+  echo "$STDERR_CONTENT" | grep -q 'Comparison scope incompletely checked' \
+    && ! echo "$STDERR_CONTENT" | grep -q 'Accepted by --on-incomplete-scope'
 }
 
 # scan's own evidence-contract axis (ADR-037 D5 -- a *pinned*
@@ -2793,6 +2836,12 @@ _blocking_gate_note() {
     echo ">"
     echo "> ⚠️ Analysis assurance also contributed to this run's exit. Orthogonal to the compatibility verdict and to the severity policy — see \`analysis_assurance\` in the JSON report."
   fi
+  # ADR-065 S2's completeness axis, mirroring the two blocks above for the
+  # identical reason: orthogonal, so it is reported on its own terms.
+  if _scope_gated && [[ "$GATE_TIER" != "SCOPE_INCOMPLETE" ]]; then
+    echo ">"
+    echo "> ⚠️ The comparison scope also contributed to this run's exit (ADR-065: an unchecked selected member under --on-incomplete-scope block, or no comparison completed). Orthogonal to the compatibility verdict and to the severity policy — see \`comparison_scope\` in the JSON report."
+  fi
   [[ -n "$GATE_TIER" && "$GATE_TIER" != "$VERDICT" ]] || return 0
   echo ">"
   if [[ "$GATE_TIER" == "COVERAGE_INCOMPLETE" ]]; then
@@ -2803,6 +2852,10 @@ _blocking_gate_note() {
     # missing-provider explanation with it -- so render that here rather than
     # leave the reader with a bare tier name (Codex review).
     echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal contract-coverage axis$(_coverage_where_suffix). That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Supply the missing evidence, or accept incomplete assurance with \`contract.unresolved: warn\`."
+  elif [[ "$GATE_TIER" == "SCOPE_INCOMPLETE" ]]; then
+    # ADR-065's completeness axis, same orthogonal-axis shape as the two
+    # branches around it.
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal completeness axis (ADR-065: an unchecked selected member under --on-incomplete-scope block, or no comparison completed). That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict covers the compared members only. See \`comparison_scope\` in the JSON report."
   elif [[ "$GATE_TIER" == "ANALYSIS_INCOMPLETE" ]]; then
     # P0.4's assurance axis, mirroring the COVERAGE_INCOMPLETE branch
     # immediately above -- same orthogonal-axis shape, different evidence
@@ -3061,8 +3114,8 @@ else
           VERDICT="ERROR"
           echo "::error::abicheck failed due to a CLI argument or configuration error (exit code 1)."
           echo "::error::Check the command and inputs above."
-        elif _coverage_gated || _assurance_gated; then
-          # `compare` shares exit 1 between up to three independent axes
+        elif _coverage_gated || _assurance_gated || _scope_gated; then
+          # `compare` shares exit 1 between up to four independent axes
           # (severity policy, ADR-049 contract coverage, P0.4 analysis
           # assurance), so the report's pre-fold `severity.exit_code` is
           # what tells them apart rather than a guess. Only when the
@@ -3073,6 +3126,20 @@ else
             if _coverage_gated; then
               VERDICT="COVERAGE_INCOMPLETE"
               echo "::warning::abicheck could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged."
+              if _assurance_gated; then
+                echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+              fi
+              if _scope_gated; then
+                echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
+              fi
+            elif _scope_gated; then
+              # ADR-065 S2's completeness axis alone: an unchecked selected
+              # member under --on-incomplete-scope block, or a run that
+              # completed no comparison at all (D7, under every setting).
+              # Same "not a break, not a severity-policy failure" shape as
+              # the coverage branch above.
+              VERDICT="SCOPE_INCOMPLETE"
+              echo "::warning::abicheck's comparison scope was not fully checked (exit code 1): a selected member went unchecked under --on-incomplete-scope block, or no comparison completed at all. This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict covers the compared members only; see comparison_scope in the JSON report."
               if _assurance_gated; then
                 echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
               fi
@@ -3093,6 +3160,9 @@ else
             fi
             if _assurance_gated; then
               echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+            fi
+            if _scope_gated; then
+              echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
             fi
           fi
         else
@@ -3276,6 +3346,20 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
           echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete: \`$_assurance_notes\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Drop \`--require-complete-analysis\` to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for the full detail."
         else
           echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. See \`analysis_assurance\` in the JSON report."
+        fi
+        ;;
+      SCOPE_INCOMPLETE)
+        # ADR-065 S2's completeness axis (exit code 1). `comparison_scope`
+        # names the unchecked members (or says no comparison completed), the
+        # same way `coverage_where`/`assurance_notes` name what fell short
+        # for their siblings above.
+        _scope_where=""
+        _json_src=$(_json_report_src)
+        _scope_where=$(_report_query "$_json_src" scope_where)
+        if [[ -n "$_scope_where" ]]; then
+          echo "> **Verdict: SCOPE_INCOMPLETE** ⚠️ — The comparison scope was not fully checked: \`$_scope_where\` (ADR-065). This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict covers the compared members only. Supply the missing members, or accept an incompletely checked scope with \`--on-incomplete-scope warn\` (the default; a run that completed no comparison at all still fails)."
+        else
+          echo "> **Verdict: SCOPE_INCOMPLETE** ⚠️ — The comparison scope was not fully checked (ADR-065). This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict covers the compared members only. See \`comparison_scope\` in the JSON report."
         fi
         ;;
       PASS)
@@ -3873,6 +3957,15 @@ else
   # contract-coverage check immediately above and for the same reason.
   if _assurance_gated; then
     echo "::error::abicheck's own evidence was not fully complete under --require-complete-analysis; see analysis_assurance in the JSON report for what fell short."
+    FINAL_EXIT=1
+  fi
+
+  # ADR-065 S2's completeness axis, unconditional for the same reason: no
+  # fail-on-* input governs it -- `--on-incomplete-scope block` was the
+  # user's own choice, and a run that completed no comparison is never a
+  # pass under any setting (D7).
+  if _scope_gated; then
+    echo "::error::abicheck's comparison scope was not fully checked (an unchecked selected member under --on-incomplete-scope block, or no comparison completed at all); see comparison_scope in the JSON report."
     FINAL_EXIT=1
   fi
 fi

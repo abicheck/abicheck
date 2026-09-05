@@ -1172,7 +1172,9 @@
         "evidence_contract_error_contribution",
         "budget_overflow_contribution",
         "not_comparable_contribution",
-        "removed_required_library_contribution"
+        "removed_required_library_contribution",
+        "incomplete_scope_contribution",
+        "no_comparison_completed_contribution"
       ],
       "properties": {
         "code": {
@@ -1190,10 +1192,12 @@
               "contract_coverage",
               "analysis_assurance",
               "promoted_crosscheck",
-              "clean"
+              "clean",
+              "incomplete_scope",
+              "no_comparison_completed"
             ]
           },
-          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"scoped_gate\" replaces \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping is in effect (see compatibility_contribution). \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code."
+          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"incomplete_scope\"/\"no_comparison_completed\" (schema 2.50, ADR-065 S2) only ever appear on a directory/package release report. \"scoped_gate\" replaces \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping is in effect (see compatibility_contribution). \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code."
         },
         "compatibility_contribution": {
           "type": "integer",
@@ -1239,6 +1243,16 @@
           "type": "integer",
           "const": 0,
           "description": "schema 2.47 (ADR-064): a directory/package release comparison's removed-required-library dominant axis. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "incomplete_scope_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.50 (ADR-065 S2): a directory/package release comparison's incomplete-scope fold participant (0/1, folded with max like contract_coverage_contribution; 1 only under the block completeness policy). Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "no_comparison_completed_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 2.50 (ADR-065 S2, D7): a directory/package release comparison whose selected scope produced no valid comparison (0/1 fold participant, under every completeness policy). Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
         }
       },
       "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."
@@ -1517,7 +1531,8 @@
             "budget_overflow",
             "not_comparable",
             "evidence_contract_error",
-            "extraction_error"
+            "extraction_error",
+            "no_comparison_completed"
           ]
         },
         "lifecycle": {
@@ -1527,6 +1542,14 @@
             "bootstrap",
             "new_target"
           ]
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "incomplete"
+          ],
+          "description": "schema 2.50 (ADR-065 D6): the completeness axis -- whether every selected, expected member of the comparison scope reached a completed comparison. Optional rather than required so a pre-2.50 run_outcome block (every one of which described a scalar/synthetic report whose scope was the one pair it named) still validates; a reader treats absence as complete. incomplete is only ever produced by a directory/package release report, whose comparison_scope block carries the per-member evidence."
         }
       }
     },

@@ -1208,6 +1208,20 @@ Once a root command genuinely clears the bar above, pick the right home:
   exit `8` is checked ahead of this coverage-only fallback when both could
   apply, so a removed library's own signal is never masked by an unrelated
   coverage gap
+- **Orthogonal completeness axis (ADR-065 D6/D7, S2), directory/package
+  `compare` only:** a selected, expected member that never reached a
+  completed comparison (`not_supplied` with no completeness proof on the
+  lacking side, `unsupported`, `failed`) makes `run_outcome.scope` read
+  `incomplete` and contributes **`1`** under `--on-incomplete-scope block`
+  (`0` under the default `warn`), folded with `max` like the coverage axis;
+  a run that completed no comparison at all contributes `1` under either
+  setting (`no_comparison_completed`). Exit `8` requires a *proven*
+  removal (NEW's inventory proven complete -- a stored `ProjectSnapshot`
+  package); an unmatched library under an unproven inventory is never a
+  removal (`unmatched_old` keeps listing it). Owners:
+  `model/scope_acquisition.py` (the record), `policy/scope_completeness.py`
+  (the fold), `workflows/release_scope.py` (the release builder, with D9's
+  one-candidate narrowing), `report/comparison_scope.py` (the section)
 - `compat` command: 0 = compatible, 1 = BREAKING, 2 = API_BREAK (source-level), 3-11 = errors (see `compat/cli.py:_classify_compat_error_exit_code`)
 - `64` = usage error (bad flags/inputs; `cli._EXIT_USAGE_ERROR`) — applies across commands
 - Full per-command matrix: `docs/reference/exit-codes.md`

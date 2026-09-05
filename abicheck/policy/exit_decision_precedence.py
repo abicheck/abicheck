@@ -61,6 +61,8 @@ def _dominant_decision(
     contract_coverage_contribution: int = 0,
     analysis_assurance_contribution: int = 0,
     operational_error_contribution: int = 0,
+    incomplete_scope_contribution: int = 0,
+    no_comparison_completed_contribution: int = 0,
 ) -> ExitDecision:
     """One of ADR-064's four axes overrides whatever the ordinary
     gate/coverage/assurance fold would otherwise have decided.
@@ -112,6 +114,8 @@ def _dominant_decision(
             prior.analysis_assurance_contribution,
             prior.crosscheck_promotion_contribution,
             prior.operational_error_contribution,
+            prior.incomplete_scope_contribution,
+            prior.no_comparison_completed_contribution,
         )
     else:
         preserved = (
@@ -119,6 +123,8 @@ def _dominant_decision(
             contract_coverage_contribution,
             analysis_assurance_contribution,
             operational_error_contribution,
+            incomplete_scope_contribution,
+            no_comparison_completed_contribution,
         )
     if code <= max(preserved, default=0):
         raise ValueError(
@@ -138,6 +144,10 @@ def _dominant_decision(
             analysis_assurance_contribution=prior.analysis_assurance_contribution,
             crosscheck_promotion_contribution=prior.crosscheck_promotion_contribution,
             operational_error_contribution=prior.operational_error_contribution,
+            incomplete_scope_contribution=prior.incomplete_scope_contribution,
+            no_comparison_completed_contribution=(
+                prior.no_comparison_completed_contribution
+            ),
             **{dominant_field: code},
         )
     return ExitDecision(
@@ -147,6 +157,8 @@ def _dominant_decision(
         contract_coverage_contribution=contract_coverage_contribution,
         analysis_assurance_contribution=analysis_assurance_contribution,
         operational_error_contribution=operational_error_contribution,
+        incomplete_scope_contribution=incomplete_scope_contribution,
+        no_comparison_completed_contribution=no_comparison_completed_contribution,
         **{dominant_field: code},
     )
 
@@ -244,6 +256,8 @@ def resolve_release_exit_decision(
     removed_required_library: bool = False,
     contract_coverage_contribution: int = 0,
     operational_error_contribution: int = 0,
+    incomplete_scope_contribution: int = 0,
+    no_comparison_completed_contribution: int = 0,
     not_comparable_code: int = 16,
     removed_required_library_code: int = 8,
 ) -> ExitDecision:
@@ -330,6 +344,19 @@ def resolve_release_exit_decision(
     with `resolve_scan_exit_decision`, a custom `not_comparable_code`/
     `removed_required_library_code` that does not strictly exceed a
     preserved contribution raises `ValueError`.
+
+    *incomplete_scope_contribution*/*no_comparison_completed_contribution*
+    (ADR-065 D6/D7, S2) are two more ``0``/``1`` fold participants, shaped
+    exactly like *contract_coverage_contribution*: folded with ``max()``
+    in every non-dominant branch, in **both** schemes, so they raise a
+    clean ``0`` to ``1`` and never lower a real ``2``/``4`` -- and
+    preserved, never deciding, under a dominant ``16``/``8``. The
+    removed-required-library branch is the one place their rank differs
+    from coverage's: since S2 that branch fires only on a *proven*
+    removal (the caller derives *removed_required_library* from the
+    acquisition record's proven-complete new-side inventory, no longer
+    from a raw set difference), so an unproven unmatched member reaches
+    this resolver as the scope axis instead.
     """
     if not_comparable:
         # *verdict_or_severity_contribution*, *contract_coverage_
@@ -349,6 +376,8 @@ def resolve_release_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
             operational_error_contribution=operational_error_contribution,
+            incomplete_scope_contribution=incomplete_scope_contribution,
+            no_comparison_completed_contribution=no_comparison_completed_contribution,
         )
 
     if severity_scheme_active:
@@ -368,11 +397,15 @@ def resolve_release_exit_decision(
                 compatibility_contribution=verdict_or_severity_contribution,
                 contract_coverage_contribution=contract_coverage_contribution,
                 operational_error_contribution=operational_error_contribution,
+                incomplete_scope_contribution=incomplete_scope_contribution,
+                no_comparison_completed_contribution=no_comparison_completed_contribution,
             )
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
             operational_error_contribution=operational_error_contribution,
+            incomplete_scope_contribution=incomplete_scope_contribution,
+            no_comparison_completed_contribution=no_comparison_completed_contribution,
         )
 
     # Legacy scheme: a nonzero fold of the verdict/severity and operational-
@@ -383,6 +416,8 @@ def resolve_release_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
             operational_error_contribution=operational_error_contribution,
+            incomplete_scope_contribution=incomplete_scope_contribution,
+            no_comparison_completed_contribution=no_comparison_completed_contribution,
         )
     if removed_required_library:
         # Both axes are 0 here by construction (the branch above already
@@ -392,10 +427,14 @@ def resolve_release_exit_decision(
             removed_required_library_code,
             ExitReason.REMOVED_REQUIRED_LIBRARY,
             contract_coverage_contribution=contract_coverage_contribution,
+            incomplete_scope_contribution=incomplete_scope_contribution,
+            no_comparison_completed_contribution=no_comparison_completed_contribution,
         )
     return resolve_exit_decision(
         compatibility_contribution=0,
         contract_coverage_contribution=contract_coverage_contribution,
+        incomplete_scope_contribution=incomplete_scope_contribution,
+        no_comparison_completed_contribution=no_comparison_completed_contribution,
     )
 
 
@@ -466,9 +505,20 @@ def resolve_release_exit_decision_for_report(
     contract_coverage_exit_contribution: int,
     library_results: list[dict[str, object]],
     release_global_verdict: str = "NO_CHANGE",
+    *,
+    incomplete_scope_contribution: int = 0,
+    no_comparison_completed_contribution: int = 0,
 ) -> ExitDecision:
     """ADR-064 stage 1b: the release fan-out's persisted, explainable
     ``exit`` block.
+
+    *removed_keys* is, since ADR-065 S2, the release's **proven** removal
+    set (`ScopeAcquisitionRecord.proven_removed_members`), never the raw
+    old-minus-new set difference `_match_release_keys` still reports under
+    the JSON key ``unmatched_old`` -- an unmatched member whose absence
+    the new side's inventory cannot prove is the scope axis's business
+    (*incomplete_scope_contribution*), not exit ``8``'s.
+    *no_comparison_completed_contribution* is D7's own ``0``/``1``.
 
     Reproduces ``cli_compare_release_helpers._exit_compare_release``'s own
     precedence via :func:`resolve_release_exit_decision`, for **report
@@ -544,4 +594,6 @@ def resolve_release_exit_decision_for_report(
         removed_required_library=removed_required_library,
         contract_coverage_contribution=contract_coverage_exit_contribution,
         operational_error_contribution=operational_error_contribution,
+        incomplete_scope_contribution=incomplete_scope_contribution,
+        no_comparison_completed_contribution=no_comparison_completed_contribution,
     )

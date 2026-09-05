@@ -155,6 +155,19 @@ class CommentModel:
     library_rows: list[tuple[str, str, int, int, int]] = field(default_factory=list)
     removed_libraries: list[str] = field(default_factory=list)
     added_libraries: list[str] = field(default_factory=list)
+    # ADR-065 S2 (release mode). `removed_libraries`/`added_libraries` above
+    # hold the *inventory-proven* sets when the report carries a
+    # `comparison_scope` block (D2: unmatched is not removed); these two are
+    # the raw `unmatched_old`/`unmatched_new` lists, reported as such.
+    unmatched_old: list[str] = field(default_factory=list)
+    unmatched_new: list[str] = field(default_factory=list)
+    # `report.comparison_scope.comparison_scope_notice`'s one-line summary
+    # of an incompletely checked scope (`None` when fully checked), whether
+    # the scope axis actually contributed to the exit code (`block`, or a
+    # zero-comparison run), and D7's "no comparison completed" itself.
+    scope_notice: str | None = None
+    scope_blocking: bool = False
+    no_comparison_completed: bool = False
     # compare --used-by/--required-symbol(s) scoping (ADR-043): the headline
     # emoji/title and check gate follow *this* verdict when set, not the raw
     # bucket counts below (which stay the full, unscoped library diff, kept as

@@ -70,6 +70,44 @@ library`'s exit `8` is checked ahead of the coverage-only fallback, so a
 removed library's own signal is never masked by an unrelated coverage gap
 (and a real verdict-based `2`/`4` still wins outright over both, unchanged).
 
+## The completeness axis (ADR-065 D6/D7, directory/package `compare` only)
+
+Two more orthogonal `0`/`1` contributions, folded with `max` exactly like the
+contract-coverage axis above (a clean `0` becomes `1`; a `2`/`4` is never
+lowered; no finding's decision is rewritten):
+
+- **`incomplete_scope`** — a *selected, expected* member of the comparison
+  scope never reached a completed comparison: it had no counterpart on the
+  other side and that side's inventory is not proven complete
+  (`not_supplied`), this build cannot analyze it (`unsupported`), or its
+  extraction failed (`failed`). Contributes `0` under the default
+  `--on-incomplete-scope warn` and `1` under `--on-incomplete-scope block`.
+  Under `warn` the run still reports the scope as incomplete: the JSON
+  `run_outcome.scope` reads `incomplete`, the `comparison_scope` block names
+  every unchecked member and why, and the Markdown/PR-comment views say the
+  verdict covers the compared members only.
+- **`no_comparison_completed`** — the selected scope produced no valid
+  comparison at all (zero matched pairs, or every selected member
+  failed/unsupported). Contributes `1` under **either** setting: a
+  permissive policy can downgrade missing members, never "nothing compared".
+
+Both appear in the report's `exit` block (`incomplete_scope_contribution`,
+`no_comparison_completed_contribution`) and, when they decide the code, in
+`exit.reasons`. A scalar `compare` never sets either.
+
+**Migration note (exit `8`).** Before ADR-065 S2, `--fail-on-removed-library`
+exited `8` on the raw old-minus-new filename set difference, so a partial
+local build compared against a full baseline read as "N libraries removed".
+Exit `8` now requires the removal to be *proven*: the NEW side's inventory
+must be proven complete (a stored `ProjectSnapshot` package's declared
+composition; a live directory or extracted archive cannot prove absence). An
+unmatched library under an unproven inventory is reported as an incomplete
+scope instead — exit `0` under `warn`, `1` under `block` — and the JSON key
+`unmatched_old` keeps listing it. When NEW supplies exactly one artifact with
+exactly one OLD counterpart and NEW's inventory is unproven, the run is a
+current-artifact comparison (D9): the other OLD members are `out_of_scope`
+and the scope is complete.
+
 **Without `--contract` there is no selected domain, so the
 contribution is always `0`** and every other exit code below is unchanged.
 
@@ -303,7 +341,8 @@ below, plus a dedicated code for removed libraries:
 | `0` | All libraries compatible (no API/ABI break) |
 | `2` | Worst verdict is `API_BREAK` |
 | `4` | Worst verdict is `BREAKING`, **or** an operational `ERROR` (a library failed to dump/extract/compare) |
-| `8` | A library was removed between releases and `--fail-on-removed-library` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. |
+| `1` | No compatibility break, but the completeness axis contributed (ADR-065): `--on-incomplete-scope block` with an incompletely checked scope, or a run that completed no comparison at all (under either setting). Also the contract-coverage axis's own floor, as for single-pair `compare`. |
+| `8` | A library was **proven** removed between releases (NEW's inventory is proven complete — a stored `ProjectSnapshot` package; ADR-065 D2) and `--fail-on-removed-library` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. An unmatched library under an unproven inventory never exits `8`; see the completeness axis above. |
 | `16` | `not_comparable` (ADR-050 D2) — at least one library's OLD/NEW DSOs were not extracted under a comparable profile/scope contract. Takes precedence over **every** other outcome in the release, including `8` (removed-library) and a genuine `ERROR`: a not_comparable result means the comparison couldn't establish what changed at all, so it dominates in both the legacy and severity-aware schemes. Identical code to native `compare`'s own `16`. |
 
 On the release path the severity-aware code (`0/1/2/4`) replaces the

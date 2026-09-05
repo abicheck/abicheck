@@ -643,15 +643,17 @@ Every JSON report carries a top-level `report_schema_version` field
 > **`run_outcome`.** Every JSON report (`compare`/release, schema 2.48;
 > `scan`, schema 1.24; and the not-comparable refusal document alike)
 > carries an additive top-level `run_outcome` block —
-> `compatibility`/`assurance`/`gate`/`operational`/`lifecycle`, the
-> report's independent-axis outcome (ADR-063 D6) — alongside the unchanged
+> `compatibility`/`assurance`/`gate`/`operational`/`lifecycle`, plus
+> (schema 2.50, ADR-065) `scope` — the report's independent-axis outcome
+> (ADR-063 D6) — alongside the unchanged
 > `verdict`/`exit_code`/`severity` fields; nothing existing changes
 > meaning or is removed. `gate` is an exit-code-free category
 > (`none`/`addition_quality`/`potential_breaking`/`abi_breaking`).
 > `operational` is an **independent** axis, not proof that no compatibility
 > result exists: it is `none` when nothing operational went wrong, and any
 > other value (`budget_overflow`/`not_comparable`/`evidence_contract_error`/
-> `extraction_error`) flags an incomplete part of the run — but `compatibility`
+> `extraction_error`/`no_comparison_completed`) flags an incomplete part of
+> the run — but `compatibility`
 > can still be non-`null` alongside it, e.g. a late budget/evidence abort
 > that retains an already-completed verdict, or a release/scan set whose
 > reported `compatibility` is one member's real result while a *different*
@@ -691,7 +693,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "2.49",
+  "report_schema_version": "2.50",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }

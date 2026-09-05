@@ -39,10 +39,10 @@ from ..policy.outcome import (
     RunOutcome,
     TargetLifecycle,
     policy_gate_decision_for_exit_code,
-    run_outcome_dict_for_release,
     run_outcome_dict_for_scan,
     worst_real_verdict,
 )
+from ..policy.outcome_release import run_outcome_dict_for_release
 
 __all__ = ["backfill_run_outcome", "synthetic_run_outcome"]
 

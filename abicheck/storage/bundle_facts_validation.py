@@ -300,3 +300,26 @@ def validated_filename_map(raw: object) -> dict[str, str]:
             )
         filenames[name] = filename
     return filenames
+
+
+def validated_degraded_members(raw: object) -> dict[str, str]:
+    """Validate and convert a persisted ``degraded_members`` mapping
+    (ADR-065 D8: ``{library: failure reason}``) -- absent reads as empty,
+    a non-mapping or a non-string reason is rejected rather than coerced,
+    the same rule :func:`validated_filename_map` applies."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"bundle facts: 'degraded_members' must be a mapping, got "
+            f"{type(raw).__name__}"
+        )
+    out: dict[str, str] = {}
+    for name, reason in raw.items():
+        if not isinstance(name, str) or not isinstance(reason, str):
+            raise ValueError(
+                f"bundle facts: 'degraded_members[{name!r}]' must map a library "
+                f"name to a string reason, got {reason!r}"
+            )
+        out[name] = reason
+    return out

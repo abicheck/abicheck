@@ -102,6 +102,14 @@ from .frontends.cli.options import (
 )
 from .model import AbiSnapshot
 from .pack_application import resolve_bundle_policy_file
+from .report.comparison_scope import comparison_scope_terms
+from .workflows.release_scope import (
+    DIRECT_PAIR_KEY,
+    StrandedLibraryResolution,
+    build_release_scope_record,
+    release_inventory_evidence,
+)
+from .workflows.storage import is_project_snapshot_package_dir
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
@@ -148,7 +156,19 @@ if TYPE_CHECKING:
     "--fail-on-removed-library/--no-fail-on-removed-library",
     "fail_on_removed",
     default=False,
-    help="Exit 8 when a library present in old_dir is absent in new_dir.",
+    help="Exit 8 when a library present in old_dir is proven removed in new_dir "
+    "(ADR-065 D2: NEW's inventory must be proven complete; an unmatched "
+    "library under an unproven inventory is an incomplete scope instead).",
+)
+@click.option(
+    "--on-incomplete-scope",
+    "on_incomplete_scope",
+    type=click.Choice(["warn", "block"]),
+    default="warn",
+    show_default=True,
+    help="What an incompletely checked comparison scope does to the exit code "
+    "(ADR-065 D6): 'warn' reports every unchecked member and contributes 0; "
+    "'block' contributes 1, folded with max() like the contract-coverage axis.",
 )
 @click.option(
     "--debug-info1",
@@ -322,6 +342,7 @@ def compare_release_cmd(
     probe_matrix_old: Path | None,
     probe_matrix_new: Path | None,
     severity_preset: str | None,
+    on_incomplete_scope: str = "warn",
     # Not Click options: `compare`'s directory/package fan-out `ctx.invoke`s
     # this engine with the *already-merged* per-category severity levels it
     # resolved from `.abicheck.yml` (the four `--severity-<category>` CLI
@@ -530,6 +551,16 @@ def compare_release_cmd(
                 new_variant=new_variant,
                 make_temp_dir=_make_temp_dir,
             )
+            # ADR-065 D2's inventory proof for this release (S2): a stored
+            # ProjectSnapshot package's declared composition is complete;
+            # a live directory, extracted archive, or direct file pair is not.
+            inventory_evidence = release_inventory_evidence(
+                old_stored=old_dir.is_dir()
+                and is_project_snapshot_package_dir(old_dir),
+                new_stored=new_dir.is_dir()
+                and is_project_snapshot_package_dir(new_dir),
+                direct_pair=list(matched_keys) == [DIRECT_PAIR_KEY],
+            )
 
             if fmt != "json":
                 for msg in warning_msgs:
@@ -622,6 +653,19 @@ def compare_release_cmd(
                 depth=depth,
             )
 
+            # ADR-065 D1/D2/D6/D7 (S2): the per-member acquisition record.
+            # From here on `removed_keys`/`added_keys` are the *proven*
+            # sets (empty unless the lacking side's inventory is proven
+            # complete) -- what exit 8, the verdict bump, and the Markdown
+            # removed/added sections read; the raw set difference stays in
+            # the record and is reported as `unmatched_old`/`unmatched_new`.
+            scope_record = build_release_scope_record(
+                old_map, new_map, matched_keys, library_results, inventory_evidence
+            )
+            scope_terms = comparison_scope_terms(scope_record, on_incomplete_scope)
+            removed_keys = [m.member for m in scope_record.proven_removed_members]
+            added_keys = [m.member for m in scope_record.proven_added_members]
+
             if bundle_facts_out is not None and not no_bundle_analysis:
                 # Resolved here, not in the leaf write_bundle_facts_out() (see its docstring).
                 #
@@ -654,7 +698,9 @@ def compare_release_cmd(
                 # ELF-only entry with a warning, not a hard failure -- the
                 # migration changes *how* the input resolves, not this
                 # function's own degrade-rather-than-abort contract.
-                def _resolve_stranded_library(old_path: Path) -> AbiSnapshot:
+                def _resolve_stranded_library(
+                    old_path: Path,
+                ) -> StrandedLibraryResolution:
                     from .api_types import DumpRequest, InputSpec
                     from .service_dump_pipeline import (
                         execute_dump_request,
@@ -682,14 +728,24 @@ def compare_release_cmd(
                             depth=depth,
                         )
                         resolved = resolve_dump_request(dump_request)
-                        return execute_dump_request(resolved).snapshot
+                        return StrandedLibraryResolution(
+                            execute_dump_request(resolved).snapshot
+                        )
                     except Exception as exc:
-                        # Degrade rather than abort, but warn: lossy entry (Codex review).
+                        # Degrade rather than abort, but warn: lossy entry
+                        # (Codex review) -- and, since ADR-065 D8, carry the
+                        # failure with the snapshot so `write_bundle_facts_
+                        # out` persists this member as `failed` in-band
+                        # (`BundleFacts.degraded_members`), never as a
+                        # silently impoverished old side.
                         click.echo(f"{old_path.name}: ELF-only ({exc})", err=True)
-                        return AbiSnapshot(
-                            library=old_path.name,
-                            version="",
-                            elf=extraction.parse_elf_metadata(old_path),
+                        return StrandedLibraryResolution(
+                            AbiSnapshot(
+                                library=old_path.name,
+                                version="",
+                                elf=extraction.parse_elf_metadata(old_path),
+                            ),
+                            failure=f"ELF-only degraded capture: {exc}",
                         )
 
                 write_bundle_facts_out(
@@ -850,6 +906,7 @@ def compare_release_cmd(
                     suppress=suppress,
                     pack_application=pack_application,
                     scope_public_headers=scope_public_headers,
+                    scope_terms=scope_terms,
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -879,6 +936,7 @@ def compare_release_cmd(
                 suppress=suppress,
                 pack_application=pack_application,
                 scope_public_headers=scope_public_headers,
+                scope_terms=scope_terms,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)

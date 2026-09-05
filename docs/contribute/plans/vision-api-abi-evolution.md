@@ -85,16 +85,30 @@ boundary; the degraded stranded-library snapshot.
 catalogue). S1 selection by identity/coordinates with a `--dry-run` plan
 view, on the typed API and the release/bundle CLI. S2 acquisition states
 and the completeness axis on `RunOutcome`/`ExitDecision`; `no comparison
-completed` outcome; stranded-library persistence marked. S3 package
+completed` outcome; stranded-library persistence marked — **landed
+2026-09-05, ahead of S1** (it has the smallest surface and fixes the two
+worst behaviors with no new request field): `model/scope_acquisition.py`,
+`policy/scope_completeness.py`, `workflows/release_scope.py`,
+`report/comparison_scope.py`, `--on-incomplete-scope warn|block` on the
+release fan-out, `BundleFacts.degraded_members`; D9's narrow
+current-artifact inference is applied on the filename tier until S1
+replaces it with identity/coordinates. `bundle_variants_config` is *not*
+deleted or consumed by this slice (see the deletion gate below) — its
+`required:` consumer needs S1's declared selection, so that gate moves to
+S1. S3 package
 component inventories; support-promise findings under a contract-policy
 field. S4 Action/project/aggregate parity; scalar/bundle operand
 convergence as a slice of `cli-cleanup-phase-two.md` PR I/J; delete the
 set-difference pairing and the silent canonical fallback.
 
 **Deletion gates.** `_match_release_keys`'s set-difference removal path is
-deleted in S4 once every removal finding flows from proven completeness;
-`bundle_variants_config` either gains its consumer in S2 or is deleted in
-S2 — not left as dead code.
+deleted in S4 once every removal finding flows from proven completeness
+(S2 already stopped exit `8`, the verdict bump, and the Markdown/PR-comment
+"removed" sections from reading it; only the JSON `unmatched_old` key and
+the stderr warnings still do, by name); `bundle_variants_config` either
+gains its consumer in S1 (moved from S2, which introduced no declared
+selection to read `required:` against) or is deleted in S1 — not left as
+dead code.
 
 ### B. Longitudinal history and versioning policy — ADR-066
 

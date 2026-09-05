@@ -232,7 +232,28 @@ def compare_stored_bundle_facts_pair(
     }
 
     per_library_results: list[DiffResult] = []
+    # ADR-065 D8: a member whose capture degraded to an ELF-only snapshot
+    # is *failed* on that side -- its stored snapshot is not evidence of
+    # what the library declared, so diffing it would read every real
+    # declaration as an addition/removal. Skipped here and named in
+    # `analysis_errors` below; the graph-level bundle analysis still sees
+    # the member's ELF facts, which the degraded capture does carry.
+    degraded_notes = [
+        f"{key}: {side} side was captured degraded ({reason}); per-library "
+        "comparison skipped (ADR-065 D8)"
+        for key in matched_keys
+        for side, facts in (("OLD", old_facts), ("NEW", new_facts))
+        for reason in (facts.degraded_members.get(key),)
+        if reason is not None
+    ]
+    degraded_keys = {
+        key
+        for key in matched_keys
+        if key in old_facts.degraded_members or key in new_facts.degraded_members
+    }
     for key in matched_keys:
+        if key in degraded_keys:
+            continue
         raw_old = old_facts.per_library_snapshots[key]
         raw_new = new_facts.per_library_snapshots[key]
         # Codex review, PR #1060, round 6: the floor half of the same
@@ -291,7 +312,7 @@ def compare_stored_bundle_facts_pair(
         else (old_facts.manifest or new_facts.manifest)
     )
     new_bundle_snapshot = bundle_snapshot_from_facts(new_facts)
-    return compare_bundle_from_facts(
+    result = compare_bundle_from_facts(
         old_facts,
         new_bundle_snapshot,
         per_library_results,
@@ -310,3 +331,5 @@ def compare_stored_bundle_facts_pair(
         old_signature_evidence=dict(projected_old_snapshots),
         new_signature_evidence=dict(projected_new_snapshots),
     )
+    result.analysis_errors.extend(degraded_notes)
+    return result

@@ -83,11 +83,20 @@ from ..policy.gate_pack_fold import (
     fold_gate_pack_severity,
     gate_exit_code_scheme,
 )
+from ..policy.outcome import ScopeCompleteness
 from ..policy.release_gate_options import (
     GateOptions,
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064 (private; __all__ excludes it by convention)
     apply_release_gate_pack,
     resolve_release_gate_options,
+)
+from ..policy.scope_completeness import (
+    INCOMPLETE_SCOPE_POLICIES,
+    incomplete_scope_diagnostic,
+    incomplete_scope_exit_contribution,
+    no_comparison_completed_exit_contribution,
+    scope_completeness_for_record,
+    validate_incomplete_scope_policy,
 )
 from ..policy.severity import (
     PRESET_DEFAULT,
@@ -105,10 +114,12 @@ from ..policy.severity import (
 
 __all__ = [
     "GATE_SEVERITY_CATEGORIES",
+    "INCOMPLETE_SCOPE_POLICIES",
     "PRESET_DEFAULT",
     "ExitDecision",
     "GateOptions",
     "IssueCategory",
+    "ScopeCompleteness",
     "SeverityConfig",
     "SeverityLevel",
     "analysis_assurance_exit_contribution",
@@ -129,12 +140,17 @@ __all__ = [
     "fold_gate_pack_severity",
     "gate_decision_for_result",
     "gate_exit_code_scheme",
+    "incomplete_scope_diagnostic",
+    "incomplete_scope_exit_contribution",
     "legacy_exit_code",
     "missing_contract_exit_code",
+    "no_comparison_completed_exit_contribution",
     "note_if_same_binary_compared",
     "resolve_compare_exit_decision",
     "resolve_release_exit_decision",
     "resolve_release_exit_decision_for_report",
     "resolve_release_gate_options",
     "resolve_severity_config",
+    "scope_completeness_for_record",
+    "validate_incomplete_scope_policy",
 ]

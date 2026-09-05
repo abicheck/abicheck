@@ -749,7 +749,13 @@ outputs:
       COVERAGE_INCOMPLETE (with --contract via extra-args, when
       the selected contract domain cannot be closed on the available
       evidence -- ADR-049's orthogonal coverage axis, which leaves the
-      compatibility verdict unchanged), ANALYSIS_INCOMPLETE (single-pair
+      compatibility verdict unchanged), SCOPE_INCOMPLETE (directory/package
+      operands only, ADR-065: a selected member went unchecked under
+      `--on-incomplete-scope block` passed via extra-args, or the run
+      completed no comparison at all -- the completeness axis, orthogonal
+      to the compatibility verdict, which then covers the compared members
+      only; fails the step unconditionally, since no fail-on-* input governs
+      it), ANALYSIS_INCOMPLETE (single-pair
       operands only, with the require-complete-analysis input, when
       analysis_assurance.status is not "complete" -- P0.4's orthogonal
       assurance axis, which likewise leaves the compatibility verdict

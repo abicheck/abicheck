@@ -51,6 +51,7 @@ from .storage.bundle_facts_validation import (
     require_int_schema_version,
     validate_bundle_archive_artifact_type,
     validated_alias_map,
+    validated_degraded_members,
     validated_filename_map,
     validated_variant_fingerprint,
 )
@@ -154,6 +155,9 @@ class BundleFacts:
     manifest: InstantiationManifest | None = None
     filesystem_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
     library_filenames: dict[str, str] = field(default_factory=dict)
+    #: ADR-065 D8: ``{library: failure reason}`` for a member whose dump
+    #: failed at capture (its snapshot is the ELF-only degradation).
+    degraded_members: dict[str, str] = field(default_factory=dict)
     artifact_type: str = field(default=BUNDLE_FACTS_ARTIFACT_TYPE, init=False)
 
 
@@ -163,12 +167,12 @@ def capture_bundle_facts(
     manifest: InstantiationManifest | None = None,
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT,
     library_paths: dict[str, Path] | None = None,
+    degraded_members: dict[str, str] | None = None,
 ) -> BundleFacts:
     """Build a :class:`BundleFacts` from already-dumped per-library snapshots.
 
-    No new *ABI* extraction happens here -- *per_library_snapshots* is
-    exactly what a real ``dump``/``compare`` run already produced for each
-    member (each carrying its own ``AbiSnapshot.elf``).
+    No new *ABI* extraction happens here -- *per_library_snapshots* is what
+    a real ``dump``/``compare`` run already produced (each with its ``.elf``).
 
     *library_paths*, when given, is a ``{library_name: Path}`` map of each
     snapshot's real on-disk file (or a stored member's materialized
@@ -202,6 +206,7 @@ def capture_bundle_facts(
         manifest=manifest,
         filesystem_aliases=filesystem_aliases,
         library_filenames=library_filenames,
+        degraded_members=dict(degraded_members or {}),
     )
 
 
@@ -303,18 +308,10 @@ def compare_bundle_from_facts(
 
 
 # Note: `bundle_facts_to_dict`/`bundle_facts_from_dict` live in
-# `serialization.py`, not here — the same split `AbiSnapshot`/
-# `snapshot_to_dict`/`snapshot_from_dict` already use (the model module
-# stays a leaf; its serialization lives in the module that already owns
-# every other snapshot's serialization). Keeping them here instead would
-# create a real `bundle_facts <-> serialization` import cycle: this
-# module's own `capture_bundle_facts`/`compare_bundle_from_facts` are
-# needed by `serialization.py`'s docstrings/type hints only, but the
-# to_dict/from_dict pair would need `serialization.snapshot_to_dict`/
-# `snapshot_from_dict` at the same time `serialization.py` needs
-# `BundleFacts` for its own `save_bundle_facts`/`load_bundle_facts` --
-# see `scripts/check_ai_readiness.py`'s `import-cycle-growth` check, which
-# caught exactly this the first time this module was drafted.
+# `bundle_facts_serialization.py`, not here -- the same model/serialization
+# split `AbiSnapshot`/`snapshot_to_dict` use; keeping them here would close
+# a real `bundle_facts <-> serialization` import cycle (caught by
+# `check_ai_readiness.py`'s `import-cycle-growth` check on the first draft).
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +524,7 @@ def write_bundle_facts_archive(
             name: list(aliases) for name, aliases in sorted(facts.filesystem_aliases.items())
         },
         "library_filenames": dict(sorted(facts.library_filenames.items())),
+        "degraded_members": dict(sorted(facts.degraded_members.items())),
     }
     # A third cap: manifest.json's own reader-side size ceiling. Checked
     # incrementally via iterencode() (fully materializing the string
@@ -795,5 +793,8 @@ def read_bundle_facts_archive(
             ),
             library_filenames=validated_filename_map(
                 manifest.get("library_filenames", {})
+            ),
+            degraded_members=validated_degraded_members(
+                manifest.get("degraded_members", {})
             ),
         )

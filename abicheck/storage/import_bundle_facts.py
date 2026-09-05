@@ -173,22 +173,18 @@ def _validated_filesystem_aliases(raw: Any) -> dict[str, list[str]]:
 
 
 def _validated_library_filenames(raw: Any) -> dict[str, str]:
-    """`bundle_facts_to_dict()`'s own `library_filenames` shape
-    (`{library: filename}`), validated the same way
-    `_validated_filesystem_aliases` is, for the identical reason."""
+    """`bundle_facts_to_dict()`'s own `library_filenames` shape (`{library: filename}`) -- and, since ADR-065 D8, its identically-shaped `degraded_members` (`{library: failure reason}`) -- validated the same way `_validated_filesystem_aliases` is, for the identical reason."""
     if raw is _ABSENT:
         return {}
     if not isinstance(raw, Mapping):
         raise ValueError(
-            f"bundle_facts_document['library_filenames'] must be a mapping, "
-            f"not {type(raw).__name__} ({raw!r})"
+            f"bundle_facts_document str->str map must be a mapping, not {type(raw).__name__} ({raw!r})"
         )
     validated: dict[str, str] = {}
     for library, filename in raw.items():
         if not isinstance(library, str) or not isinstance(filename, str):
             raise ValueError(
-                "bundle_facts_document['library_filenames'] must map strings "
-                f"to strings, got {library!r}: {filename!r}"
+                f"bundle_facts_document str->str map must map strings to strings, got {library!r}: {filename!r}"
             )
         validated[library] = filename
     return validated
@@ -569,6 +565,9 @@ def import_bundle_facts(
         "library_filenames": _validated_library_filenames(
             bundle_facts_document.get("library_filenames", _ABSENT)
         ),
+        "degraded_members": _validated_library_filenames(  # ADR-065 D8, same shape
+            bundle_facts_document.get("degraded_members", _ABSENT)
+        ),
     }
     composition_dto = bundle_composition_to_dto(composition_payload)
     composition_ref = ObjectRef(
@@ -796,5 +795,6 @@ def export_bundle_facts(
         "per_library_snapshots": per_library_snapshots,
         "filesystem_aliases": composition.get("filesystem_aliases", {}),
         "library_filenames": composition.get("library_filenames", {}),
+        "degraded_members": composition.get("degraded_members", {}),
         "manifest": exported_manifest,
     }

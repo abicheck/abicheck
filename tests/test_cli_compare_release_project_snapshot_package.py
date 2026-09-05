@@ -742,7 +742,14 @@ class TestMultiVariantSingleArtifactClassification:
         doc = json.loads(out)
         assert doc["libraries"] == []
         assert doc["unmatched_new"] == ["liba.so.json"]
-        assert ec == 0
+        # ADR-065: the stored OLD package's declared (empty) composition is
+        # a proven-complete inventory, so the NEW-only library is a proven
+        # addition (D2) -- and a run that compared nothing exits 1 with a
+        # `no_comparison_completed` outcome (D7), never a clean 0.
+        assert doc["comparison_scope"]["proven_added"] == ["liba.so.json"]
+        assert doc["comparison_scope"]["old_inventory"]["completeness"] == "proven"
+        assert doc["run_outcome"]["operational"] == "no_comparison_completed"
+        assert ec == 1
 
 
 class TestMaterializationPreservesBundleComposition:
