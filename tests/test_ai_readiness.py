@@ -67,7 +67,7 @@ def test_script_imports(car):
 def test_examples_ground_truth_in_sync(car):
     f = car.Findings()
     car.check_examples_ground_truth(f)
-    assert f.errors == [], f"examples/ground_truth.json out of sync: {f.errors}"
+    assert f.errors == [], f"catalog/ground_truth.json out of sync: {f.errors}"
 
 
 def test_no_banned_imports(car):
@@ -1542,15 +1542,15 @@ def _write_synthetic_catalog(tmp_path, *, case02_verdict_cell):
         "This directory contains **2 cases**.\n\n"
         "| BREAKING | 1 |\n"
         "| COMPATIBLE (addition) | 1 |\n\n"
-        "| [01](case01_foo/README.md) | Foo | Breaking | 🔴 BREAKING |\n"
-        f"| [02](case02_bar/README.md) | Bar | Addition | {case02_verdict_cell} |\n",
+        "| [01](cases/case01_foo/README.md) | Foo | Breaking | 🔴 BREAKING |\n"
+        f"| [02](cases/case02_bar/README.md) | Bar | Addition | {case02_verdict_cell} |\n",
         encoding="utf-8",
     )
 
 
 def test_examples_readme_sync_passes_on_correct_synthetic(car, tmp_path, monkeypatch):
     """A synthetic catalog whose rows match ground_truth yields no errors."""
-    monkeypatch.setattr(car, "EXAMPLES", tmp_path)
+    monkeypatch.setattr(car, "CATALOG", tmp_path)
     _write_synthetic_catalog(tmp_path, case02_verdict_cell="🟢 COMPATIBLE")
     f = car.Findings()
     car.check_examples_readme_sync(f)
@@ -1560,7 +1560,7 @@ def test_examples_readme_sync_passes_on_correct_synthetic(car, tmp_path, monkeyp
 def test_examples_readme_sync_catches_swapped_row_verdict(car, tmp_path, monkeypatch):
     """A stale per-row verdict (counts unchanged) must fail — the drift the
     aggregate-count checks alone cannot see (Codex review, PR #318)."""
-    monkeypatch.setattr(car, "EXAMPLES", tmp_path)
+    monkeypatch.setattr(car, "CATALOG", tmp_path)
     # case02 is COMPATIBLE/addition in ground_truth, but its row claims BREAKING.
     # The distribution counts still tally, so only row-content parsing catches it.
     _write_synthetic_catalog(tmp_path, case02_verdict_cell="🔴 BREAKING")

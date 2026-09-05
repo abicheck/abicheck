@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Evidence-tier metadata gate.
 
-Keeps ``examples/ground_truth.json``'s per-case ``min_evidence`` field in sync
+Keeps ``catalog/ground_truth.json``'s per-case ``min_evidence`` field in sync
 with ``scripts/evidence_tiers.py`` (the single source of truth for the
 five-source / L0–L4 model) and guards the tier vocabulary. Pure-Python: no
 compiler, castxml, or external tool — the empirical per-tier detection is

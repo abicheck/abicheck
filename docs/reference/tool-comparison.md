@@ -5,7 +5,7 @@ This document explains how each ABI checking tool works, what it measured on the
 
 > **Note:** abicheck's exact, up-to-date change-kind count is tracked in the
 > [Change Kind Reference](change-kinds.md).
-> The `examples/` catalog currently has **197 cases** (`examples/ground_truth.json`
+> The `examples/` catalog currently has **197 cases** (`catalog/ground_truth.json`
 > is the source of truth — see `examples/README.md`). Two benchmarks run against it:
 >
 > - A **pinned 74-case cross-tool subset** (`case01`-`case73` + `case26b`),
@@ -31,7 +31,7 @@ This document explains how each ABI checking tool works, what it measured on the
 > ```bash
 > python3 -c "
 > import json
-> v = json.load(open('examples/ground_truth.json'))['verdicts']
+> v = json.load(open('catalog/ground_truth.json'))['verdicts']
 > special = sum(1 for e in v.values() if e.get('mode') == 'audit' or e.get('skip')
 >               or e.get('bundle') is True or e.get('category') == 'bundle'
 >               or e.get('mode') in ('snapshot-pair', 'reconcile')
@@ -59,7 +59,7 @@ interpretation rather than a second manual snapshot.
 
 | Scan | Scope | Execution | Result | Quality signal |
 |------|:-----:|-----------|--------|----------------|
-| Catalog metadata | 197 ground-truth entries | `examples/ground_truth.json` + `tests/test_evidence_tiers.py` | 159 binary competitor `.so` lanes + 38 dedicated non-`.so` lanes | Single source of truth for examples, verdicts, expected kinds, and minimum evidence; split recomputed directly from `ground_truth.json`'s `mode`/`bundle`/`fixtures`/`skip` fields (see the "Which denominator is which" note above) |
+| Catalog metadata | 197 ground-truth entries | `catalog/ground_truth.json` + `tests/test_evidence_tiers.py` | 159 binary competitor `.so` lanes + 38 dedicated non-`.so` lanes | Single source of truth for examples, verdicts, expected kinds, and minimum evidence; split recomputed directly from `ground_truth.json`'s `mode`/`bundle`/`fixtures`/`skip` fields (see the "Which denominator is which" note above) |
 | Build/autodiscovery | catalog integration suite | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Green default single-library build lane; skipped items are covered by dedicated bundle/source/audit/BTF tests |
 | Full example proof matrix | catalog cases | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + bundle/G20/L3-L5/BTF proofs | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Full-catalog source of truth; a `SKIP` in one lane is accepted only when a dedicated lane proves the case |
 | Default/debug verdicts | catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Single-library debug lane; dedicated non-`.so` cases skip here by design; XFAIL is not green full-matrix scope |
@@ -323,7 +323,7 @@ when each is given its best input?"* A second, orthogonal benchmark answers
 — i.e. how detection grows as you feed abicheck more of the
 [five sources](../learn/evidence-and-detectability.md#0-the-five-sources-of-information).
 
-This is tracked in two layers: `examples/ground_truth.json` records the minimum
+This is tracked in two layers: `catalog/ground_truth.json` records the minimum
 evidence layer for each case, while a dedicated benchmark mode empirically scans
 the runnable cases at progressively richer artifact layers:
 
@@ -363,7 +363,7 @@ pipeline four times:
 
 ### Which source discovers what
 
-Each case in `examples/ground_truth.json`
+Each case in `catalog/ground_truth.json`
 carries a `min_evidence` field — the weakest source at which abicheck reaches
 *every one of the case's cataloged `expected_kinds`*, not just its verdict —
 derived by
@@ -385,7 +385,7 @@ table directly from `ground_truth.json` any time with:
 python3 -c "
 import json
 from collections import Counter
-v = json.load(open('examples/ground_truth.json'))['verdicts']
+v = json.load(open('catalog/ground_truth.json'))['verdicts']
 cs = {k: e for k, e in v.items() if not (e.get('mode') == 'audit' or e.get('skip'))}
 counts = Counter(e.get('min_evidence') for e in cs.values() if e.get('min_evidence') not in (None, 'none'))
 total = sum(counts.values())

@@ -68,7 +68,7 @@ remains as a non-blocking compatibility-hardening lane.
 
 ## Example fixtures
 
-Reuse existing cases; add native build recipes to `examples/CMakeLists.txt`.
+Reuse existing cases; add native build recipes to `catalog/CMakeLists.txt`.
 
 ## Out of scope
 

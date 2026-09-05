@@ -7,9 +7,9 @@
 # environment rather than on a source change.
 #
 # Usage:
-#   abicheck probe run examples/probes/onedpl.yaml \
+#   abicheck probe run catalog/probes/onedpl.yaml \
 #       --library onedpl --version 2022.0 --out onedpl-2022.json
-#   abicheck probe run examples/probes/onedpl.yaml \
+#   abicheck probe run catalog/probes/onedpl.yaml \
 #       --library onedpl --version 2023.0 --out onedpl-2023.json
 #   abicheck probe compare onedpl-2022.json onedpl-2023.json
 #

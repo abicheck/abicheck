@@ -23,7 +23,7 @@
   "roots": [
     "agent-evals/skills/fixtures/plugin-required-symbol-loss",
     "agent-evals/skills/scenarios.yaml",
-    "examples/ground_truth.json"
+    "catalog/ground_truth.json"
   ],
   "skill": "check-abi-compatibility",
   "status": "ready"

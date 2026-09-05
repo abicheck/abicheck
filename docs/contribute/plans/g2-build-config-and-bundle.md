@@ -45,7 +45,7 @@ but were not reachable from the mainline gate:
       The check is **opt-in** via `--bundle-cohort PREFIX` (repeatable): cohorts
       are declared, never inferred from filenames, so an ordinary release that
       bumps one independent library while a sibling lags is not a false positive.
-- [x] Two additional self-contained probe specs under `examples/probes/`
+- [x] Two additional self-contained probe specs under `catalog/probes/`
       (`feature_macro.yaml`, `cxx_standard.yaml`) with an end-to-end test
       (stock `cc`/`c++`, no external toolchain).
 
@@ -69,7 +69,7 @@ but were not reachable from the mainline gate:
 - `abicheck/cli.py`, `abicheck/cli_compare_release.py` (`--probe-spec`, bundle wiring).
 - `abicheck/service.py` (`run_compare` accepts an optional matrix).
 - `abicheck/bundle.py` (cohort entry point from `compare-release`).
-- `examples/probes/*.yaml` (new specs); `examples/case84_bundle_soname_skew/`.
+- `catalog/probes/*.yaml` (new specs); `examples/case84_bundle_soname_skew/`.
 
 ## Tests
 

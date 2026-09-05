@@ -21,7 +21,7 @@ matrices across two versions. It surfaces three change kinds:
 
 A probe spec is a YAML file with `configurations`, `probes`, and an
 optional `defaults` map. See
-[`examples/probes/onedpl.yaml`](https://github.com/abicheck/abicheck/blob/main/examples/probes/onedpl.yaml)
+[`catalog/probes/onedpl.yaml`](https://github.com/abicheck/abicheck/blob/main/catalog/probes/onedpl.yaml)
 for a complete oneDPL manifest:
 
 ```yaml
@@ -66,7 +66,7 @@ configuration's C++ standard floor.
 from abicheck.probe_harness import load_probe_spec, run_probe_matrix
 from abicheck.diff_build_config import diff_matrix
 
-spec = load_probe_spec("examples/probes/onedpl.yaml")
+spec = load_probe_spec("catalog/probes/onedpl.yaml")
 
 # Compile every (configuration × probe) pair for each release.
 old = run_probe_matrix(spec, library_name="onedpl", version="2022.0")

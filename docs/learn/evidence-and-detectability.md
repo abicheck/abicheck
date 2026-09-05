@@ -236,7 +236,7 @@ every run, so each layer's contribution is a tracked number, not a claim.
 > declarations are genuinely reachable and exported (the cross-source checks —
 > `exported_not_public`, `private_header_leak`). Their accuracy is tracked
 > separately: by the cross-check FP/FN corpus (also in `check_fp_rate.py`) and by
-> each example's `min_evidence` tier in `examples/ground_truth.json`.
+> each example's `min_evidence` tier in `catalog/ground_truth.json`.
 >
 > **The derived sixth layer, `L5`.** Beyond the five sources above, abicheck
 > *derives* an `L5` source/build graph (include/type/call reachability, ADR-031)

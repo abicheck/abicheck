@@ -50,7 +50,7 @@ def _actual_digest(so_path: Path, header: Path, compiler: str) -> dict:
 def test_dumper_golden_fixture(fixture_path: Path) -> None:
     """Golden-file regression gate for the dumper pipeline.
 
-    Requires pre-built shared libraries (build with ``cmake`` in examples/).
+    Requires pre-built shared libraries (build with ``cmake`` in catalog/cases/).
     Also requires castxml in PATH. Skipped automatically when artifacts
     are missing so unit-test CI jobs are not broken.
 
@@ -65,7 +65,7 @@ def test_dumper_golden_fixture(fixture_path: Path) -> None:
     compiler = fixture.get("compiler", "c++")
 
     if not so_path.exists():
-        pytest.skip(f"pre-built artifact missing: {so_path}  (build with cmake in examples/)")
+        pytest.skip(f"pre-built artifact missing: {so_path}  (build with cmake in catalog/cases/)")
     if not header.exists():
         pytest.skip(f"header/source missing: {header}")
 

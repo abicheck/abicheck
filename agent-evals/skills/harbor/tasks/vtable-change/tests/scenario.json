@@ -4,16 +4,16 @@
   ],
   "architectures": [],
   "category": "A",
-  "digest": "sha256:b3a411931d9ac85031890464883bfbda6f3cb0af0c09e9be923b17ad5a1f1c5a",
+  "digest": "sha256:f11635e2a01c4b13ba80cc3751997a261372feb002b32880c4c26682e655bef1",
   "expected": {
     "kinds": [
       "type_vtable_changed"
     ],
     "min_evidence": "L1",
-    "resolved_from": "examples/ground_truth.json",
+    "resolved_from": "catalog/ground_truth.json",
     "verdict": "BREAKING"
   },
-  "inputs": "examples/case09_cpp_vtable",
+  "inputs": "catalog/cases/case09_cpp_vtable",
   "invocation": {},
   "platforms": [
     "linux"
@@ -21,8 +21,8 @@
   "prompt": "A virtual function was added to a class our users derive from. Review this for compatibility.",
   "roots": [
     "agent-evals/skills/scenarios.yaml",
-    "examples/case09_cpp_vtable",
-    "examples/ground_truth.json"
+    "catalog/cases/case09_cpp_vtable",
+    "catalog/ground_truth.json"
   ],
   "skill": "check-abi-compatibility",
   "status": "ready"

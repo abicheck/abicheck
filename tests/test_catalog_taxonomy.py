@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""examples/ground_truth.json's `taxonomy` block stays in sync with
+"""catalog/ground_truth.json's `taxonomy` block stays in sync with
 scripts/gen_catalog_taxonomy.py -- mirrors gen_platform_matrix.py's own
 test_platform_matrix.py pattern so drift fails the ordinary fast pytest
 lane, not just a --check someone has to remember to run (a real gap a
@@ -57,7 +57,7 @@ def test_taxonomy_is_in_sync_with_generator():
     current = gt.get("taxonomy")
     expected = gen.build_taxonomy(gt)
     assert current == expected, (
-        "examples/ground_truth.json's 'taxonomy' block is stale -- "
+        "catalog/ground_truth.json's 'taxonomy' block is stale -- "
         "regenerate with `python scripts/gen_catalog_taxonomy.py`"
     )
 

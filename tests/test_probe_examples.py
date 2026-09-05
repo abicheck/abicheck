@@ -8,7 +8,7 @@
 """End-to-end coverage for the shipped probe-harness manifests (G2).
 
 The repository ships self-contained probe manifests under
-``examples/probes/`` that, unlike ``onedpl.yaml``, need no external
+``catalog/probes/`` that, unlike ``onedpl.yaml``, need no external
 toolchain — stock ``cc`` / ``c++`` is enough. These tests drive them
 through the *mainline* ``compare`` command via the side-aware ``--probe-matrix`` (
 ) so the build-config matrix findings are proven to
@@ -45,7 +45,7 @@ pytestmark = pytest.mark.skipif(
     reason="probe-compare fixtures use GNU ld -Wl,-soname (Linux only)",
 )
 
-PROBES_DIR = Path(__file__).parent.parent / "examples" / "probes"
+PROBES_DIR = Path(__file__).parent.parent / "catalog" / "probes"
 
 
 def _build_trivial_so(out: Path, soname: str) -> None:
@@ -64,7 +64,7 @@ def _build_trivial_so(out: Path, soname: str) -> None:
 
 
 def test_shipped_probe_specs_parse() -> None:
-    """All manifests under examples/probes/ must parse (fast, no compiler)."""
+    """All manifests under catalog/probes/ must parse (fast, no compiler)."""
     specs = sorted(PROBES_DIR.glob("*.yaml"))
     assert specs, "expected at least one probe manifest"
     for path in specs:

@@ -4,16 +4,16 @@
   ],
   "architectures": [],
   "category": "A",
-  "digest": "sha256:37c3dacf5ab0c31a9987a3494072ed41fab4c298bae6ff6a076c97e5de30693c",
+  "digest": "sha256:5c85d1f4fca89c6f89d2e29ab51d27d6a7d92c023c3dfbc1a3e59778ff14673e",
   "expected": {
     "kinds": [
       "constant_changed"
     ],
     "min_evidence": "L2",
-    "resolved_from": "examples/ground_truth.json",
+    "resolved_from": "catalog/ground_truth.json",
     "verdict": "API_BREAK"
   },
-  "inputs": "examples/case124_header_constant_value_changed",
+  "inputs": "catalog/cases/case124_header_constant_value_changed",
   "invocation": {},
   "platforms": [
     "linux",
@@ -23,8 +23,8 @@
   "prompt": "We changed the value of a public constant in our headers \u2014 no function signatures moved. Can existing binaries keep running against the new library as-is, or do they need to be rebuilt?",
   "roots": [
     "agent-evals/skills/scenarios.yaml",
-    "examples/case124_header_constant_value_changed",
-    "examples/ground_truth.json"
+    "catalog/cases/case124_header_constant_value_changed",
+    "catalog/ground_truth.json"
   ],
   "skill": "check-abi-compatibility",
   "status": "ready"

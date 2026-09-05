@@ -11,7 +11,7 @@ Layout support:
   • good/bad  — examples/caseXX/bad.c (v1) + good.c (v2)  [bad=before, good=fixed]
   • libfoo    — examples/caseXX/libfoo_v1.c + libfoo_v2.c
 
-Expected verdicts are loaded from examples/ground_truth.json (single source
+Expected verdicts are loaded from catalog/ground_truth.json (single source
 of truth). Set a case to null in ground_truth.json to skip it entirely.
 
 Cross-platform: cases declare supported platforms in ground_truth.json.

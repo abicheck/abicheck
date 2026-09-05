@@ -22,7 +22,7 @@ if str(REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
-EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+EXAMPLES_DIR = example_catalog.CASES_DIR
 
 # (case_dir_name, expected_verdict, header_v1, header_v2)
 #

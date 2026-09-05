@@ -69,7 +69,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import example_catalog  # noqa: E402
 
-EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+EXAMPLES_DIR = example_catalog.CASES_DIR
 REPORT_DIR = REPO_DIR / "benchmark_reports"
 BUILD_DIR = REPORT_DIR / "_build"
 
@@ -130,7 +130,7 @@ DEFAULT_TIMEOUT = 90  # seconds; shared per-tool-call budget for one example run
 PINNED_74_CASE_RE = re.compile(r"^case(?:0[1-9]|[1-6][0-9]|7[0-3])_|^case26b_")
 
 # Expected verdicts loaded from ground_truth.json — single source of truth.
-# To add/change a verdict, edit examples/ground_truth.json only.
+# To add/change a verdict, edit catalog/ground_truth.json only.
 _GT_PATH = example_catalog.GROUND_TRUTH_PATH
 try:
     _gt_data = json.loads(_GT_PATH.read_text())
@@ -685,7 +685,7 @@ def _build_plugin_side(
     # (a common, legal pattern in these minimal test .c files) then fails to
     # compile with a hard redefinition error (case07/08/09/14/19/21-23/25/26
     # and others). The CMake macro already has a real, per-case opt-in for
-    # this (`V1_FORCE_INCLUDE`/`V2_FORCE_INCLUDE` in examples/CMakeLists.txt,
+    # this (`V1_FORCE_INCLUDE`/`V2_FORCE_INCLUDE` in catalog/CMakeLists.txt,
     # honored by this same target build), so duplicating it here blanket-wide
     # was both redundant for cases that need it and actively harmful for ones
     # that don't.
@@ -769,7 +769,7 @@ def _build_plugin_side(
 # plugin pack every other case in the 191-case catalog already passes with.
 _AST_BUILD_SOURCE_EXTRA_EVIDENCE_CASES: dict[str, tuple[str, str]] = {
     # case: (source_abi_extractor, source_abi_scope) — mirrors each case's
-    # examples/ground_truth.json entry (validate_examples.py reads the same
+    # catalog/ground_truth.json entry (validate_examples.py reads the same
     # fields for its build-source variant).
     "case98_cxx_standard_floor_raised": ("castxml", "full"),
     "case105_concept_tightening": ("clang", "headers-only"),
@@ -1964,7 +1964,7 @@ def _merge_frozen_into_results(
 
 
 def _ground_truth_digest() -> str | None:
-    """SHA-256 of examples/ground_truth.json so a benchmark run is pinned to it."""
+    """SHA-256 of catalog/ground_truth.json so a benchmark run is pinned to it."""
     gt = example_catalog.GROUND_TRUTH_PATH
     if not gt.is_file():
         return None
@@ -2195,7 +2195,7 @@ def _build_case_artifacts(
 
     if not used_prebuilt_artifacts:
         if not (cmake_file.exists() and shutil.which("cmake")):
-            # No CMakeLists.txt (optional per examples/CLAUDE.md) and no
+            # No CMakeLists.txt (optional per catalog/CLAUDE.md) and no
             # prebuilt artifact — fall back to compiling v1_src/v2_src
             # directly, same as the CMake-less cases the direct-compile path
             # was written for.

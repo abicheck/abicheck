@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # real fix (vendoring the runtime sources directly, or a published
 # release tag) is a bigger, cross-cutting change than this generator's
 # own scope; see agent-evals/skills/harbor/CLAUDE.md.
-ARG ABICHECK_REF=ebfdef9e8e29d161d38f6e8f1ded154c9d8ebaf8
+ARG ABICHECK_REF=370f1ddc67360112ac8859f2dffc15e758a0147d
 # ABICHECK_RUNTIME_DIGEST=180d964c18abac98965be45c8ab7f5b8072c62b80f979802ae9180062eca2ed2
 # ^ content digest of `_RUNTIME_RELEVANT_PATHS` at generation time -- what
 # `--check` (scripts/gen_harbor_tasks.py) actually compares to detect real
@@ -151,7 +151,7 @@ ENV ABICHECK_ALLOW_AST_FALLBACK=1
 # 12 scenarios turns out not to live in one place: `agent-evals/skills/
 # scenarios.yaml`/`skill-eval-pack.json` and every sibling task's own
 # generated `harbor/tasks/<id>/tests/scenario.json` carry it directly,
-# `examples/ground_truth.json` derives a Category A scenario's outcome,
+# `catalog/ground_truth.json` derives a Category A scenario's outcome,
 # the raw `fixtures/` sources are sometimes comment-annotated with the
 # answer, `agent-evals/skills/graders/` (`dimensions.py`/`evidence.py`)
 # itself contains scenario-identifying comments naming specific

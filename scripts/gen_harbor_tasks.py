@@ -348,7 +348,7 @@ ENV ABICHECK_ALLOW_AST_FALLBACK=1
 # 12 scenarios turns out not to live in one place: `agent-evals/skills/
 # scenarios.yaml`/`skill-eval-pack.json` and every sibling task's own
 # generated `harbor/tasks/<id>/tests/scenario.json` carry it directly,
-# `examples/ground_truth.json` derives a Category A scenario's outcome,
+# `catalog/ground_truth.json` derives a Category A scenario's outcome,
 # the raw `fixtures/` sources are sometimes comment-annotated with the
 # answer, `agent-evals/skills/graders/` (`dimensions.py`/`evidence.py`)
 # itself contains scenario-identifying comments naming specific
@@ -624,7 +624,7 @@ python3 /opt/abicheck-src/agent-evals/skills/harbor/verify_run.py \\
 def _readme_abicheck_command(fixture: Path) -> tuple[str, str] | None:
     """The case README's own build+compare recipe, split for reuse.
 
-    Category A scenarios are drawn straight from `examples/case*/`, whose
+    Category A scenarios are drawn straight from `catalog/cases/case*/`, whose
     README is the *validated* source of the case's own ground truth
     (`ground_truth.json` is checked against exactly this command, per
     `tests/validate_examples.py`) -- reusing it verbatim is strictly more

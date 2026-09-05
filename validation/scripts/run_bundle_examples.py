@@ -9,7 +9,7 @@ pairs.  Bundle examples use a release-directory shape instead:
 
 This runner builds those examples through the normal examples CMake project,
 runs ``abicheck compare-release`` on each old/new directory, and checks the
-bundle verdict/kinds declared in ``examples/ground_truth.json``.
+bundle verdict/kinds declared in ``catalog/ground_truth.json``.
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ if str(REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
-EXAMPLES_DIR = example_catalog.EXAMPLES_DIR
+EXAMPLES_DIR = example_catalog.CASES_DIR
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 SCHEMA_VERSION = "bundle_examples.v1"
 

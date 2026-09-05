@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "examples/**"
+      - "catalog/**"
       - "abicheck/**"
       - "tests/**"
       - "validation/scripts/**"
@@ -22,6 +23,7 @@ on:
     branches: [main]
     paths:
       - "examples/**"
+      - "catalog/**"
       - "abicheck/**"
       - "tests/**"
       - "validation/scripts/**"
@@ -174,8 +176,8 @@ jobs:
 
       - name: Validate ground_truth.json
         run: |
-          test -f examples/ground_truth.json || { echo "::error::ground_truth.json missing"; exit 1; }
-          python -c "import json; d=json.load(open('examples/ground_truth.json')); print('ground_truth.json OK:', len(d['verdicts']), 'cases')"
+          test -f catalog/ground_truth.json || { echo "::error::ground_truth.json missing"; exit 1; }
+          python -c "import json; d=json.load(open('catalog/ground_truth.json')); print('ground_truth.json OK:', len(d['verdicts']), 'cases')"
 
       # Both consumers below take the *same* shard assignment from one source,
       # so the pytest lane and the cross-check lane can never drift onto
@@ -205,7 +207,7 @@ jobs:
           echo "SHARD_K=$pytest_k" >> "$GITHUB_ENV"
 
       # NOTE on the -k filter's source of truth: the shard list comes from
-      # examples/ground_truth.json, while test_example_pipeline is parametrized
+      # catalog/ground_truth.json, while test_example_pipeline is parametrized
       # from the examples/case*/ directory listing. Those agree today, and the
       # ai-readiness `examples-ground-truth` check (ERROR severity) is what
       # keeps them agreeing — it fails when a case directory has no ground-truth

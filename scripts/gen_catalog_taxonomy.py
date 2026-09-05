@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the `taxonomy` block of examples/ground_truth.json.
+"""Generate the `taxonomy` block of catalog/ground_truth.json.
 
 Phase 1 (taxonomy metadata) and Phase 2 (rule/variant classification) of
 the examples/catalog split (see
@@ -20,7 +20,7 @@ generated into a `taxonomy` object in `ground_truth.json` (a sibling of the
 existing `verdicts` object, never merged into it, so every existing consumer
 of `verdicts` is unaffected). Each entry classifies its case along axes that
 are orthogonal to implementation language and independent of the physical
-`examples/caseNN_*/` directory layout:
+`catalog/cases/caseNN_*/` directory layout:
 
     entity          "rule" | "scenario"
     scenario_kind   set only for entity == "scenario":
@@ -41,7 +41,7 @@ are orthogonal to implementation language and independent of the physical
                      "stub-pair" | "btf-pair" | "kabi-pair" | "fixture-pair"
                      | "bundle"
     validation_owner the runner family that exercises this case (mirrors
-                     examples/CLAUDE.md's "owner families" list)
+                     catalog/CLAUDE.md's "owner families" list)
     related_rules   rule slugs a scenario composes -- populated for every
                      scenario case (see RELATED_RULES below)
     rule_slug       canonical slug for a rule family -- set on every
@@ -98,7 +98,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 import catalog_rule_registry  # noqa: E402
 import example_catalog  # noqa: E402
 
-EXAMPLES = example_catalog.EXAMPLES_DIR
+EXAMPLES = example_catalog.CASES_DIR
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 
 # ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ LINUX_KERNEL_CASE_STUDIES = {121, 175, 176}
 # no catalog rule_slug either). A `related_rules` entry is therefore
 # deliberately NOT required to name a rule *case* -- but it is required to
 # name a real rule: since the canonical rule registry landed, every slug
-# used here must resolve to an entry in `examples/catalog_rules.yaml`
+# used here must resolve to an entry in `catalog/catalog_rules.yaml`
 # (`catalog_rule_registry.validate_registry`, enforced by `main()` below and
 # by tests/test_catalog_rule_registry.py). Before that registry existed these
 # were unvalidated free-text strings that `docs/contribute/catalog-coverage.md`
@@ -487,14 +487,14 @@ def _artifact_shape(
         # A Python-stub-only fixture (no v1/v2 or old/new *compiled* pair) --
         # currently just case163. `old`/`new` subdirectories are also used as
         # a plain compiled-pair layout alternative to v1/v2 filename
-        # prefixes (examples/CLAUDE.md's "Per-case layout"), so their mere
+        # prefixes (catalog/CLAUDE.md's "Per-case layout"), so their mere
         # presence doesn't imply a stub pair.
         return "stub-pair"
     return "compiled-pair"
 
 
 def _validation_owner(artifact_shape: str, mode: str | None) -> str:
-    """The runner family that exercises this case (examples/CLAUDE.md's
+    """The runner family that exercises this case (catalog/CLAUDE.md's
     "owner families"). Derived from `artifact_shape`/`mode` alone, never
     from a case-number bucket: `CAPABILITY_SCENARIOS` groups cases by what
     they *demonstrate* (a capability), which isn't the same split as which
@@ -695,7 +695,7 @@ def main() -> int:
     new_taxonomy = build_taxonomy(gt)
 
     # Every rule slug the freshly-built taxonomy names must resolve to a
-    # definition in examples/catalog_rules.yaml, and every definition there
+    # definition in catalog/catalog_rules.yaml, and every definition there
     # must be used. Checked against `new_taxonomy` rather than the committed
     # block so a slug typo introduced by this very run fails before it is
     # written to disk.

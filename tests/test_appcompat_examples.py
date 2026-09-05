@@ -46,7 +46,7 @@ pytestmark = pytest.mark.skipif(
     reason="appcompat fixtures use GNU ld -Wl,-soname (Linux only)",
 )
 
-EXAMPLES = example_catalog.EXAMPLES_DIR
+EXAMPLES = example_catalog.CASES_DIR
 
 
 def _cc() -> str:
