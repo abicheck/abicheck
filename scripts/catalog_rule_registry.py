@@ -155,10 +155,12 @@ def build_families(
         for related in entry.get("related_rules") or []:
             family(str(related)).scenario_cases.append(case_id)
 
-    # Every family should be reachable from the registry's own keys too, so a
-    # rule defined but not yet used still renders (and is reported unused).
-    for slug in registry:
-        family(slug)
+    # Deliberately *not* seeded from the registry's own keys: a family exists
+    # because a case names it. A definition no case uses is an error
+    # `validate_registry()` reports, not a rule to render a page or a
+    # coverage row for -- and seeding from the registry would make this
+    # function's answer depend on the whole committed registry even when the
+    # caller passed a small, self-contained taxonomy.
     return families
 
 
