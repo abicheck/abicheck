@@ -22,7 +22,7 @@
   "roots": [
     "agent-evals/skills/fixtures/consumer-unaffected-despite-break",
     "agent-evals/skills/scenarios.yaml",
-    "examples/ground_truth.json"
+    "catalog/ground_truth.json"
   ],
   "skill": "check-abi-compatibility",
   "status": "ready"

@@ -446,7 +446,7 @@ def build_pack() -> dict[str, Any]:
                 "verdict": entry.get("expected"),
                 "kinds": entry.get("expected_kinds", []),
                 "min_evidence": entry.get("min_evidence"),
-                "resolved_from": "examples/ground_truth.json",
+                "resolved_from": "catalog/ground_truth.json",
             }
             # The catalog limits several cases to specific hosts. Dropping that
             # here would let a macOS or Windows runner execute a Linux-only

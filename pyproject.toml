@@ -376,7 +376,7 @@ version = "literal: pyproject.toml: project.version"
 # imports resolve, and is never mutated.
 source_paths = ["abicheck"]
 # mutmut runs the suite with `mutants/` as the working directory, so a test
-# that reads a repository file (`examples/ground_truth.json`,
+# that reads a repository file (`catalog/ground_truth.json`,
 # `.github/workflows/*.yml`, `scripts/*.py`, `docs/**`) resolves it relative to
 # that copy and fails at collection — 37 collection errors on the first run
 # that got this far, each of them a `FileNotFoundError`, and any one of them
@@ -403,6 +403,7 @@ also_copy = [
     "docs",
     "eval",
     "examples",
+    "catalog",
     "mkdocs.yml",
     "pixi.lock",
     "scripts",

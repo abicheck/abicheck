@@ -367,7 +367,7 @@ jobs:
     # apt/brew/choco + castxml + a full editable install, with macOS billed at
     # 10x and Windows at 2x runner minutes — and it was running in full on
     # documentation-only PRs. The gate's filter set (abicheck/**, tests/**,
-    # examples/**, .github/workflows/**) is exactly the input set that can
+    # examples/**, catalog/**, .github/workflows/**) is exactly the input set that can
     # change what these tests observe. Note this is deliberately NOT the same
     # call as cross-platform-e2e below, which stays always-on: that one is ~1
     # minute, so its runner cost never justified the skipped-check friction.
@@ -567,6 +567,7 @@ jobs:
               - 'abicheck/**'
               - 'tests/**'
               - 'examples/**'
+              - 'catalog/**'
               - '.github/workflows/**'
               # The gated jobs' *infrastructure*, not just their inputs. Every
               # one of them does `pip install -e ".[dev]"` and sets up CastXML
@@ -723,6 +724,7 @@ jobs:
               - 'docs/**'
               - 'abicheck/schemas/**'
               - 'examples/**'
+              - 'catalog/**'
               - 'mkdocs.yml'
               - 'scripts/gen_examples_docs.py'
               - 'scripts/publish_schemas.py'

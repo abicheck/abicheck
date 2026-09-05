@@ -132,7 +132,7 @@ Two observations shape the design.
 terminates in an abicheck invocation that produces a JSON report. If the run
 happens in a sandbox where `abicheck` is a *recording shim*, the harness gets
 the exact argv, exit code, and produced report of every call — and the ground
-truth for the fixture is already in `examples/ground_truth.json`, whose per-case
+truth for the fixture is already in `catalog/ground_truth.json`, whose per-case
 records carry `expected`, `expected_kinds`, `min_evidence` and `platforms`
 (the number of cases is owned by that file, not restated here). Most of the
 rubric is then a deterministic assertion, not a judge call. Only the residual —
@@ -215,7 +215,7 @@ abicheck's CI for a job that is not a merge gate.
 
 *Everything in agent-benchmark* fails on L2. The correctness gate must block a
 skill-content PR **in the repository where the skill source lives**, and it
-must be anchored to `examples/ground_truth.json` and the `examples/case*`
+must be anchored to `catalog/ground_truth.json` and the `examples/case*`
 fixtures, which live here. A cross-repo required check whose ground truth is in
 a third repo is exactly the drift ADR-058 and `docs/AGENTS.md` forbid.
 
@@ -228,7 +228,7 @@ only through its published CLI, the same way it drives any other product.
 abicheck                                          agent-benchmark
 ────────                                          ───────────────
 skills-src/ ──gen──► .agents/skills/  ┐
-examples/ground_truth.json            ├─► skill-eval-pack.json ──► subjects/ (kind: skill)
+catalog/ground_truth.json            ├─► skill-eval-pack.json ──► subjects/ (kind: skill)
 agent-evals/skills/scenarios.yaml     │   + fixtures manifest      arms run: baseline | docs | skill | skill-agent
 transcript bundles + rubric schema    ┘   + content hash           tasks run: harness × model matrix
         │                                                                   │
@@ -657,7 +657,7 @@ reader cannot infer a merge gate that no lane runs.
 
 ### D5 — Scenario corpus: two categories, as G36 P1.1 correctly identified
 
-**Category A — resolvable from `examples/ground_truth.json`.** Cases keyed
+**Category A — resolvable from `catalog/ground_truth.json`.** Cases keyed
 under `catalog["verdicts"][case_dir]`, each carrying `expected`,
 `expected_kinds`, `min_evidence`, `platforms`. A scenario names a case and a
 skill; expected outcome is derived from the catalog, never re-stated (one fact,

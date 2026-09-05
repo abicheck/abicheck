@@ -127,7 +127,7 @@ This means:
 ### Example cases as tests
 
 Real-world ABI/API scenario cases in `examples/` (181 as of this amendment;
-see `examples/ground_truth.json` for the current count — it is the
+see `catalog/ground_truth.json` for the current count — it is the
 generated source of truth the AI-readiness gate checks docs against) serve
 dual purpose:
 
@@ -207,7 +207,7 @@ tests/
 - Conditional gating means parity regressions can land if changes don't
   touch gated paths
 - A large and growing example-case set requires C/C++ compilation, adding
-  CI complexity (see `examples/ground_truth.json` for the current count)
+  CI complexity (see `catalog/ground_truth.json` for the current count)
 
 ---
 

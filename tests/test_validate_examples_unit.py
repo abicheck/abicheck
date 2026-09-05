@@ -42,7 +42,8 @@ from tests.validate_examples import (  # noqa: E402
 
 # ── ground_truth.json paths ───────────────────────────────────────────────
 
-_GROUND_TRUTH = Path(__file__).parent.parent / "examples" / "ground_truth.json"
+_GROUND_TRUTH = Path(__file__).parent.parent / "catalog" / "ground_truth.json"
+_CASES_DIR = _GROUND_TRUTH.parent / "cases"
 _VALID_CATEGORIES = frozenset(
     {"breaking", "addition", "quality", "no_change", "api_break", "risk", "bundle"}
 )
@@ -460,7 +461,7 @@ class TestBuildInfoPath:
         # per-side compile DBs or have a CMake fixture whose generated
         # compile_commands.json supplies the real build flags.
         gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
-        examples_dir = _GROUND_TRUTH.parent
+        examples_dir = _CASES_DIR
         bi_cases = [k for k, v in gt.items() if v.get("build_info")]
         assert bi_cases, "expected at least one build_info example case"
         for name in bi_cases:
@@ -498,7 +499,7 @@ class TestSourcesPath:
     def test_real_sources_cases_ship_both_sides(self) -> None:
         # Every ground_truth case flagged sources must ship both per-side trees.
         gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
-        examples_dir = _GROUND_TRUTH.parent
+        examples_dir = _CASES_DIR
         for name, v in gt.items():
             if not v.get("sources"):
                 continue

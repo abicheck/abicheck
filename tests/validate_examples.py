@@ -4,7 +4,7 @@
 # pylint: disable=too-many-branches,too-many-statements,too-many-locals,too-many-arguments,too-many-return-statements
 """validate_examples.py — standalone CLI validation of all abicheck example cases.
 
-Reads expected verdicts from examples/ground_truth.json, compiles each
+Reads expected verdicts from catalog/ground_truth.json, compiles each
 example with the platform's native compiler, runs abicheck dump+compare,
 and reports results.
 
@@ -45,7 +45,7 @@ REPO_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
-EXAMPLES_DIR = example_catalog.EXAMPLES_DIR  # monkeypatch seam: test_validate_examples_unit.py
+EXAMPLES_DIR = example_catalog.CASES_DIR  # monkeypatch seam: test_validate_examples_unit.py
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 ARTIFACT_VARIANTS = (
     "debug-headers",
@@ -412,7 +412,7 @@ def _build_with_cmake(
     build_type = "Release" if variant in {"release-headers", "build-source"} else "Debug"
 
     configure_cmd = [
-        cmake, "-S", str(case_dir.parent), "-B", str(build_dir),
+        cmake, "-S", str(example_catalog.CATALOG_DIR), "-B", str(build_dir),
         f"-DCMAKE_BUILD_TYPE={build_type}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     ]

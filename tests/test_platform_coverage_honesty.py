@@ -17,7 +17,7 @@
 Linux/ELF is the CI-validated baseline; macOS and Windows are parser-level and
 only partially exercised end-to-end (see docs/reference/platforms.md and
 docs/contribute/usecase-coverage-evaluation.md, gap G1). These tests keep the
-``examples/ground_truth.json`` ``platforms`` tags honest about that hierarchy so
+``catalog/ground_truth.json`` ``platforms`` tags honest about that hierarchy so
 a future case cannot silently claim e.g. Windows-only support that CI never
 runs.
 """

@@ -219,8 +219,8 @@ def test_diff_touches_outside_only_mutate_detects_a_non_python_fixture_input() -
         "diff --git a/abicheck/diff_types.py b/abicheck/diff_types.py\n"
         "--- a/abicheck/diff_types.py\n+++ b/abicheck/diff_types.py\n"
         "@@ -1,0 +2,1 @@\n+    pass\n"
-        "diff --git a/examples/ground_truth.json b/examples/ground_truth.json\n"
-        "--- a/examples/ground_truth.json\n+++ b/examples/ground_truth.json\n"
+        "diff --git a/catalog/ground_truth.json b/catalog/ground_truth.json\n"
+        "--- a/catalog/ground_truth.json\n+++ b/catalog/ground_truth.json\n"
         '@@ -1,0 +2,1 @@\n+  "x": 1,\n'
     )
     assert gate.diff_touches_outside_only_mutate(diff, _ONLY_MUTATE_TWO) is True

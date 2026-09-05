@@ -43,13 +43,17 @@ def test_examples_dir_matches_real_repo_layout():
     catalog = _catalog()
     assert catalog.EXAMPLES_DIR == REPO_DIR / "examples"
     assert catalog.EXAMPLES_DIR.is_dir()
+    assert catalog.CATALOG_DIR == REPO_DIR / "catalog"
+    assert catalog.CASES_DIR == REPO_DIR / "catalog" / "cases"
+    assert catalog.CASES_DIR.is_dir()
+    assert catalog.GROUND_TRUTH_PATH == REPO_DIR / "catalog" / "ground_truth.json"
     assert catalog.GROUND_TRUTH_PATH.is_file()
 
 
 def test_case_dir_is_byte_identical_to_the_hand_rolled_join():
     catalog = _catalog()
     for case_id in ("case01_symbol_removal", "case197_header_graph_identity_reconciled"):
-        assert catalog.case_dir(case_id) == catalog.EXAMPLES_DIR / case_id
+        assert catalog.case_dir(case_id) == catalog.CASES_DIR / case_id
 
 
 def test_all_case_ids_matches_ground_truth_verdicts_order():

@@ -187,7 +187,7 @@ comparing them.
 Every detected change maps to one of these families, each pointing to the
 Learning Series page that explains its mechanism. The verdict column shows
 the typical classification; the exact verdict per fixture lives in
-`examples/ground_truth.json` and the
+`catalog/ground_truth.json` and the
 [Examples Encyclopedia](../reference/examples/index.md). "mixed" means the
 verdict is case-dependent.
 

@@ -8,9 +8,9 @@
 # some configurations but not others and flags the dependency.
 #
 # Usage:
-#   abicheck probe run examples/probes/feature_macro.yaml \
+#   abicheck probe run catalog/probes/feature_macro.yaml \
 #       --library featuredemo --version 1.0 --out fm-1.0.json
-#   abicheck probe run examples/probes/feature_macro.yaml \
+#   abicheck probe run catalog/probes/feature_macro.yaml \
 #       --library featuredemo --version 2.0 --out fm-2.0.json
 #   abicheck compare libfeaturedemo.so.1 libfeaturedemo.so.2 \
 #       --probe-matrix-old fm-1.0.json --probe-matrix-new fm-2.0.json

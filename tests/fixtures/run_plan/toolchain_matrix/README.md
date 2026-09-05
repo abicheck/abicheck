@@ -80,6 +80,6 @@ apart.
 This fixture lives under `tests/fixtures/`, not `examples/case*/`, because
 it demonstrates *config/toolchain resolution*, not an ABI comparison —
 `examples/` is exclusively the compiled `v1`/`v2` ground-truth catalog
-tracked in `examples/ground_truth.json` (see `examples/CLAUDE.md`); a
+tracked in `catalog/ground_truth.json` (see `examples/CLAUDE.md`); a
 project-config artifact with no verdict/expected-kinds shape doesn't fit
 that schema.
