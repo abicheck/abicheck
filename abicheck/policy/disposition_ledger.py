@@ -341,16 +341,29 @@ class DispositionLedger:
 
         A :attr:`~DispositionRecord.legacy_gate_only` record is demoted
         outright rather than re-scored, because the question changes with the
-        scheme: the severity gate reads ``result.changes``, which does not
-        contain it, so under *any* severity configuration it is outside the
-        gate that decides the run -- however severe its own kind is.
+        scheme: the severity gate reads ``result.changes``, so a finding that
+        list does not contain is outside the gate that decides the run under
+        *any* severity configuration -- however severe its own kind is.
+
+        **Membership is re-read here, not trusted from recording time.** The
+        flag says the record came from the redundant bucket; whether the
+        severity gate's input contains the finding is answered from
+        ``result.changes`` at projection time, because a later pass can move
+        it there: ``scope.show_redundant`` folds redundant findings into
+        ``result.changes`` before a ``--used-by`` scoped gate selects them, so
+        a record that was legacy-only when the ledger closed can be squarely
+        inside the severity gate's final input by the time a report renders.
         """
         gate = _GateContext.of(result)
+        # The severity gate's own input, resolved once for the whole pass.
+        severity_input = {id(c) for c in getattr(result, "changes", None) or ()}
         gated = DispositionLedger()
         gated._anchors = list(self._anchors)
         gated._seen_ids = dict(self._seen_ids)
         gated._records = [
-            self._regated(record, change, result, severity_config, gate)
+            self._regated(
+                record, change, result, severity_config, gate, severity_input
+            )
             for record, change in zip(self._records, self._anchors)
         ]
         return gated
@@ -362,6 +375,7 @@ class DispositionLedger:
         result: DiffResult,
         severity_config: object,
         gate: _GateContext,
+        severity_input: set[int],
     ) -> DispositionRecord:
         """One record's label under the resolved gate. See :meth:`with_gate`."""
         if record.gate_excluded or record.disposition not in (
@@ -369,7 +383,11 @@ class DispositionLedger:
             Disposition.NON_GATING,
         ):
             return record
-        if record.legacy_gate_only and severity_config is not None:
+        if (
+            record.legacy_gate_only
+            and severity_config is not None
+            and id(change) not in severity_input
+        ):
             return replace(
                 record, disposition=Disposition.NON_GATING, gate_excluded=True
             )
@@ -415,10 +433,22 @@ class DispositionLedger:
         # instead of re-derived per finding (see ``_GateContext``).
         gate = _GateContext.of(result)
         for index, (record, change) in enumerate(zip(self._records, self._anchors)):
-            if (
-                record.verdict_class is not None
-                or record.disposition is not Disposition.SUPPRESSED
-            ):
+            if record.disposition is not Disposition.SUPPRESSED:
+                continue
+            if record.verdict_class is not None:
+                # A record can arrive here already carrying a class:
+                # `_verdict_class_of` reads whatever verdict was *stamped on
+                # the finding* at recording time, and a detector-produced or
+                # runtime-modulated finding is stamped before
+                # `ApplySuppression` runs. If contract evaluation later ruled
+                # that finding not-evaluated, the stamp is stale, and merely
+                # declining to *set* a class below leaves it standing --
+                # which routes a suppressed, proven-out-of-contract break
+                # straight back to `recommend_release` as a waived major
+                # break, bypassing the exclusion entirely. So the guard
+                # clears rather than skips (Codex review).
+                if not is_evaluated(change):
+                    self._records[index] = replace(record, verdict_class=None)
                 continue
             if not is_evaluated(change):
                 # ADR-049 D1: compatibility policy never scored this finding,

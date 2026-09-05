@@ -963,3 +963,149 @@ def test_an_unstamped_out_of_surface_finding_is_not_a_promotion() -> None:
         "a finding the gate never scored is not *excluded from* the gate by "
         "a consumer scope; its own disposition already says so"
     )
+
+
+# ---------------------------------------------------------------------------
+# Feature combinations: a later pass can change what an earlier one recorded
+# ---------------------------------------------------------------------------
+
+
+def test_a_redundant_finding_folded_into_changes_is_no_longer_legacy_only() -> None:
+    """`legacy_gate_only` is where the record *came from*, not a standing
+    claim about the severity gate's input.
+
+    `scope.show_redundant` folds redundant findings into `result.changes`
+    before a `--used-by` scoped gate selects them, so a record that was
+    legacy-only when the ledger closed can be squarely inside the severity
+    gate's final input by the time a report renders. Demoting it on the
+    recorded flag alone reported `effective_total: 0` beside a scoped exit
+    of 4.
+    """
+    from abicheck.checker_types import DiffResult
+    from abicheck.policy.disposition_close import finalize_ledger
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+
+    result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+    derived = Change(
+        kind=ChangeKind.FUNC_REMOVED, symbol="f", description="derived but relevant"
+    )
+    result.changes = []
+    result.redundant_changes = [derived]
+    result.redundant_count = 1
+    ledger = finalize_ledger(DispositionLedger(), result, verdict_scored=[derived])
+    assert ledger.record_for(derived).legacy_gate_only is True
+
+    strict = SeverityConfig(abi_breaking=SeverityLevel.ERROR)
+    assert ledger.with_gate(result, strict).effective_total == 0, (
+        "while it is outside `result.changes`, the severity gate does not score it"
+    )
+
+    # …and what `_finalize_compare_result` does under `show_redundant`.
+    result.changes = [derived]
+    assert ledger.with_gate(result, strict).effective_total == 1, (
+        "once the finding is in the severity gate's own input, the audit "
+        "must agree with the gate that scores it"
+    )
+
+
+def test_a_stale_pre_stamped_verdict_does_not_survive_a_contract_exclusion() -> None:
+    """A suppressed, proven-out-of-contract finding must not reach
+    `recommend_release` as a waived major break.
+
+    The earlier fix declined to *set* a verdict class for a non-evaluated
+    finding, which is only half the rule: a detector-produced or
+    runtime-modulated finding is stamped with an `effective_verdict` before
+    `ApplySuppression` runs, so the record arrives already carrying one and
+    the guard was never reached. The stale stamp then routed the exclusion
+    straight back into the release recommendation.
+    """
+    from abicheck.checker import Verdict
+    from abicheck.contract_relevance_types import ContractRelevance
+    from abicheck.policy.disposition_ledger import record_suppressed_change
+
+    result = _empty_result()
+    for relevance in (
+        ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+        ContractRelevance.UNKNOWN_UNPROVEN,
+        ContractRelevance.UNKNOWN_UNRESOLVED,
+    ):
+        excluded = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="gone", description="excluded"
+        )
+        # Stamped before suppression ran, which is what put a class on the
+        # record in the first place.
+        excluded.effective_verdict = Verdict.BREAKING
+        excluded.contract_relevance = relevance
+
+        ledger = DispositionLedger()
+        record_suppressed_change(
+            ledger, excluded, rule=None, application_point="matrix_suppression"
+        )
+        assert ledger.record_for(excluded).verdict_class == Verdict.BREAKING.value, (
+            "the precondition: the record really does arrive pre-stamped"
+        )
+        ledger.resolve_verdict_classes(result)
+        assert ledger.record_for(excluded).verdict_class is None, relevance
+        assert ledger.suppressed_gating_records() == (), (
+            "a suppressed contract exclusion is not a waived major break"
+        )
+
+
+def test_an_evaluated_pre_stamped_verdict_is_left_alone() -> None:
+    """The negative control for the clear above: an ordinary suppressed
+    break that *was* evaluated must keep its class, or the conserved delta
+    stops seeing real waived breaks at all."""
+    from abicheck.checker import Verdict
+    from abicheck.policy.disposition_ledger import record_suppressed_change
+
+    result = _empty_result()
+    waived = Change(kind=ChangeKind.FUNC_REMOVED, symbol="gone", description="waived")
+    waived.effective_verdict = Verdict.BREAKING
+    ledger = DispositionLedger()
+    record_suppressed_change(
+        ledger, waived, rule=None, application_point="matrix_suppression"
+    )
+    ledger.resolve_verdict_classes(result)
+    assert ledger.record_for(waived).verdict_class == Verdict.BREAKING.value
+    assert len(ledger.suppressed_gating_records()) == 1
+
+
+def test_a_scoped_run_gates_on_the_scoped_set_not_on_result_changes() -> None:
+    """The one place `gating` is correct for a finding outside
+    `result.changes`, recorded so it is not later "fixed" into a bug.
+
+    `test_a_severity_gating_record_is_in_the_severity_gates_own_input`
+    asserts that a severity-gating record is in `result.changes` — true for
+    an ordinary run, because `gate_decision_for_result` scores exactly that
+    list. A `--used-by`/`--required-symbol` run has a *different* gate:
+    `cli_helpers_compare._scoped_exit_code` computes the severity exit over
+    the consumer's own relevant set, which legitimately contains findings
+    that never reach `result.changes` (a synthesized missing entrypoint, a PE
+    ordinal retarget, a promoted out-of-surface finding).
+
+    Found by an exhaustive read-through of the module's state combinations
+    rather than by a report: it is exactly the shape that reads as a bug
+    against the unscoped invariant, so the distinction is stated here.
+    """
+    from abicheck.policy.disposition_close import finalize_ledger
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+
+    result, change, _ = _result_with_one_breaking_finding_in("out_of_surface_changes")
+    ledger = finalize_ledger(DispositionLedger(), result)
+    assert ledger.record_for(change).disposition is Disposition.OUT_OF_CONTRACT
+
+    # An explicit consumer contract promotes it and gates on it.
+    stamp_explicit_scope_contract_evaluation(change)
+    close_consumer_scope(ledger, result, gating=[change], also_detected=[change])
+
+    strict = SeverityConfig(abi_breaking=SeverityLevel.ERROR)
+    for config in (None, strict):
+        record = ledger.with_gate(result, config).record_for(change)
+        assert record.disposition is Disposition.GATING, (
+            "the scoped gate scores this finding, so the audit must count it "
+            "even though `result.changes` does not contain it"
+        )
+    assert not any(c is change for c in result.changes), (
+        "the precondition that makes this case distinct from the unscoped "
+        "invariant next door"
+    )
