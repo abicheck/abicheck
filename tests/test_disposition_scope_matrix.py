@@ -183,6 +183,11 @@ def _record_initially(
     producing the disposition it claims fails here rather than making the
     outcome assertion vacuous.
     """
+    # A kept finding lives in `result.changes` in every real run, and that is
+    # the severity gate's own input -- so the fixture has to put it there too,
+    # or the matrix would be exercising a state `compare()` never produces.
+    if initial not in (Disposition.SUPPRESSED, Disposition.DEDUPLICATED):
+        result.changes.append(change)
     if initial is Disposition.SUPPRESSED:
         record_suppressed_change(
             ledger, change, rule=None, application_point="matrix_suppression"
@@ -970,16 +975,18 @@ def test_an_unstamped_out_of_surface_finding_is_not_a_promotion() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_redundant_finding_folded_into_changes_is_no_longer_legacy_only() -> None:
-    """`legacy_gate_only` is where the record *came from*, not a standing
-    claim about the severity gate's input.
+def test_a_redundant_row_restored_into_changes_rejoins_the_severity_gate() -> None:
+    """Membership in the severity gate's input is re-read at projection time.
 
-    `scope.show_redundant` folds redundant findings into `result.changes`
-    before a `--used-by` scoped gate selects them, so a record that was
-    legacy-only when the ledger closed can be squarely inside the severity
-    gate's final input by the time a report renders. Demoting it on the
-    recorded flag alone reported `effective_total: 0` beside a scoped exit
-    of 4.
+    `scope.show_redundant` restores redundant rows into `result.changes` --
+    which is exactly what `gate_decision_for_result` scores -- so a record
+    that was outside the gate when the ledger closed can be squarely inside
+    the acting gate's input by the time a report renders. Freezing the answer
+    at recording time reported `effective_total: 0` beside a real exit 4.
+
+    Stated over *every* bucket that can be restored this way, not just the
+    policy-scored redundant one this was first found on: the same restore
+    reaches a deduplicated row and an opaque downgrade.
     """
     from abicheck.checker_types import DiffResult
     from abicheck.policy.disposition_close import finalize_ledger
@@ -993,7 +1000,6 @@ def test_a_redundant_finding_folded_into_changes_is_no_longer_legacy_only() -> N
     result.redundant_changes = [derived]
     result.redundant_count = 1
     ledger = finalize_ledger(DispositionLedger(), result, verdict_scored=[derived])
-    assert ledger.record_for(derived).legacy_gate_only is True
 
     strict = SeverityConfig(abi_breaking=SeverityLevel.ERROR)
     assert ledger.with_gate(result, strict).effective_total == 0, (
@@ -1006,6 +1012,23 @@ def test_a_redundant_finding_folded_into_changes_is_no_longer_legacy_only() -> N
         "once the finding is in the severity gate's own input, the audit "
         "must agree with the gate that scores it"
     )
+
+    # …and the same for a row the *legacy* verdict never scored either: a
+    # deduplicated one and an opaque downgrade, which `show_redundant`
+    # restores through the identical path.
+    for bucket in ("redundant_unscored", "opaque_filtered"):
+        restored_result, restored, scored = _result_with_one_breaking_finding_in(bucket)
+        restored_ledger = finalize_ledger(
+            DispositionLedger(), restored_result, verdict_scored=scored
+        )
+        assert restored_ledger.with_gate(restored_result, strict).effective_total == 0
+        restored_result.changes = [restored]
+        assert (
+            restored_ledger.with_gate(restored_result, strict).effective_total == 1
+        ), (
+            f"{bucket}: restored into the severity gate's input and still "
+            "reported as not gating"
+        )
 
 
 def test_a_stale_pre_stamped_verdict_does_not_survive_a_contract_exclusion() -> None:

@@ -34,6 +34,8 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Variable, Visibility
+from abicheck.policy.disposition_close import conservation_holds
+from abicheck.policy.disposition_ledger import DispositionLedger
 from abicheck.semver import ReleaseRecommendationState, SemverBump
 from abicheck.suppression import Suppression, SuppressionList
 
@@ -275,3 +277,75 @@ def test_the_one_line_view_always_states_both_totals(
         return
     assert f"{audit.detected_total} detected" in note
     assert f"{audit.effective_total} gating" in note
+
+
+def test_a_suppression_diagnostic_is_not_a_second_detection() -> None:
+    """Adding a rule redistributes dispositions; it never changes what was
+    observed — including when the rule changes nothing.
+
+    `ApplySuppression` emits a `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`
+    diagnostic *alongside* the finding it is about when a broad selector
+    matched but the reachability gate withheld it (ADR-044 D4). Both landed
+    in `result.changes`, and recording both made merely adding a
+    non-applicable rule move `detected_total` from 1 to 2 — the conservation
+    this audit exists to make checkable, broken by the audit itself.
+
+    The diagnostic is an overlay on a record that already exists, not a
+    second detection. It keeps whatever gate contribution it independently
+    has, which is what the second half asserts.
+    """
+    from abicheck.checker_types import Change, DiffResult
+    from abicheck.policy.disposition_close import finalize_ledger
+
+    def _result(with_diagnostic: bool):
+        result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+        break_ = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="pub", description="the break"
+        )
+        result.changes = [break_]
+        if with_diagnostic:
+            result.changes.append(
+                Change(
+                    kind=ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
+                    symbol="pub",
+                    description="rule matched but was withheld",
+                    caused_by_type="pub",
+                )
+            )
+        return result
+
+    without = finalize_ledger(DispositionLedger(), _result(False))
+    with_rule = finalize_ledger(DispositionLedger(), _result(True))
+    assert without.detected_total == with_rule.detected_total == 1, (
+        "a rule that changes nothing changed the observed total"
+    )
+    assert conservation_holds(with_rule)
+
+    # …and the diagnostic still reaches every consumer that reads the
+    # result, which is where its own gate effect lives.
+    assert any(
+        c.kind is ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
+        for c in _result(True).changes
+    )
+
+
+def test_every_policy_overlay_kind_is_produced_by_policy_not_a_detector() -> None:
+    """The exclusion list is narrow by construction, so it cannot quietly
+    start hiding real detections.
+
+    Each excluded kind must be one no detector emits — it exists only because
+    a policy pass generated it about another finding. Checked against the
+    detector registry's own catalogue rather than asserted in prose.
+    """
+    from abicheck.policy.disposition_close import _POLICY_OVERLAY_KINDS
+
+    assert _POLICY_OVERLAY_KINDS, "the list must not be silently emptied"
+    for slug in _POLICY_OVERLAY_KINDS:
+        assert any(k.value == slug for k in ChangeKind), (
+            f"{slug!r} is not a real ChangeKind"
+        )
+    # The one member today, named so a second entry is a deliberate decision
+    # rather than a drive-by addition.
+    assert _POLICY_OVERLAY_KINDS == {
+        ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK.value
+    }

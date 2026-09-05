@@ -76,6 +76,20 @@ def record_kept_change(
     )
 
 
+#: Findings *policy generated* about another finding, rather than changes any
+#: detector observed. They are real -- they carry their own gate contribution
+#: and appear in every report -- but they are not detections, so D1's raw
+#: total must not move when one appears (adding a rule redistributes
+#: dispositions; it never changes what was observed).
+_POLICY_OVERLAY_KINDS = frozenset({"suppression_would_hide_public_break"})
+
+
+def _is_policy_overlay(change: object) -> bool:
+    """Is *change* a policy-generated diagnostic rather than an observation?"""
+    kind = getattr(change, "kind", None)
+    return getattr(kind, "value", kind) in _POLICY_OVERLAY_KINDS
+
+
 def _record_bucket(
     ledger: DispositionLedger,
     changes: Iterable[Change],
@@ -119,6 +133,17 @@ def finalize_ledger(
 
     gate = _GateContext.of(result)
     for change in _bucket("changes"):
+        if _is_policy_overlay(change):
+            # D1 counts *observed* changes. A policy-generated diagnostic is
+            # not one: `ApplySuppression` emits
+            # SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK alongside the finding it is
+            # about when a broad selector matched but the reachability gate
+            # withheld it, so recording it here made merely *adding* a rule
+            # that changes nothing move `detected_total` from 1 to 2 -- the
+            # conservation this audit exists to make checkable, broken by the
+            # audit itself. It is an overlay on a record that already exists,
+            # not a second detection (Codex review).
+            continue
         ledger.record(
             change,
             _kept_disposition(change, result, severity_config, gate),
@@ -162,11 +187,6 @@ def finalize_ledger(
                 _kept_disposition(change, result, severity_config, gate),
                 application_point="redundancy_filter_scored",
                 from_gate=True,
-                # The legacy verdict scored it; the severity gate's input
-                # (`result.changes`) does not contain it. One boolean cannot
-                # say that, so the record carries the distinction and
-                # `with_gate` demotes it once a severity config is in effect.
-                legacy_gate_only=True,
             )
         else:
             ledger.record(
@@ -271,6 +291,9 @@ def close_consumer_scope(
             # one is -- whatever the gate said. Only this call site knows
             # both halves, so it states the answer instead of `from_gate`.
             gate_excluded=excluded,
+            # True whichever way the scope ruled: it marks *which gate*
+            # decided this record, not what it decided.
+            scope_decided=True,
         )
     # Promotion before narrowing: `_promote_scoped_contract` may have moved a
     # finding the `--contract` evaluator excluded into the contract, and

@@ -59,10 +59,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
-from enum import Enum
 from typing import TYPE_CHECKING
 
 from ..model.change_catalog.registry import Verdict
+from .disposition_gate import (
+    _GateContext as _GateContext,
+    _kept_disposition as _kept_disposition,
+)
+from .disposition_types import Disposition as Disposition
 from .rule_provenance import (
     RuleProvenance as RuleProvenance,
     rule_provenance as rule_provenance,
@@ -73,29 +77,16 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..suppression import Suppression
 
 
-class Disposition(str, Enum):
-    """ADR-067 D2's terminal effective-gate disposition of one change.
+#: The four D2 dispositions no gate can move: policy already disposed of the
+#: finding, and neither gate scheme ever scored it.
+_POLICY_TERMINAL_DISPOSITIONS = frozenset(
+    {
+        Disposition.SUPPRESSED,
+        Disposition.OUT_OF_CONTRACT,
+        Disposition.UNRESOLVED_RELEVANCE,
+    }
+)
 
-    Exactly one of these is recorded per atomically detected change. The
-    ``str`` mixin is deliberate: every value is emitted verbatim into the
-    JSON report, so the enum member and its wire spelling cannot drift.
-    """
-
-    #: Evaluated by policy and contributing to the compatibility gate.
-    GATING = "gating"
-    #: Evaluated by policy, contributing nothing to the gate.
-    NON_GATING = "non_gating"
-    #: Removed from the visible set by a ``--suppress`` rule.
-    SUPPRESSED = "suppressed"
-    #: Proven outside the selected contract/public surface (ADR-024/049).
-    OUT_OF_CONTRACT = "out_of_contract"
-    #: Relevance could not be resolved from the available evidence.
-    UNRESOLVED_RELEVANCE = "unresolved_relevance"
-    #: Collapsed into another finding by redundancy/root-cause grouping.
-    DEDUPLICATED = "deduplicated"
-
-
-#: The one disposition that counts towards the *effective* (gating) total.
 _EFFECTIVE_DISPOSITIONS = frozenset({Disposition.GATING})
 
 #: Verdict classes that drive the compatibility gate today. Read, never
@@ -144,23 +135,20 @@ class DispositionRecord:
     #: does not control", not "which mechanism withheld it" (that is the
     #: application point).
     gate_excluded: bool = False
-    #: The two gate schemes read *different inputs*, and one disposition
-    #: cannot describe both without saying which.
+    #: Set when a *consumer scope* (``--used-by``/``--required-symbol``)
+    #: ruled on this finding -- **in scope or out**, not only out.
     #:
-    #: ``checker.compare`` scores the legacy verdict over
-    #: ``kept + verdict_redundant``; ``policy.gate_decision.
-    #: gate_decision_for_result`` scores the severity gate over
-    #: ``result.changes`` alone. A redundant finding policy still scored is
-    #: therefore genuinely ``gating`` under the legacy scheme and genuinely
-    #: outside the gate once a severity configuration is in effect -- not a
-    #: contradiction, and not something ``gate_excluded`` can express, since
-    #: that flag says "no gate scored this" unconditionally.
-    #:
-    #: So this is the third state, and it is narrow on purpose: set only on a
-    #: record the legacy verdict scored and the severity gate's narrower input
-    #: does not contain. :meth:`with_gate` demotes it exactly when a severity
-    #: configuration is passed.
-    legacy_gate_only: bool = False
+    #: It marks which *gate* decided the record, which is why it is separate
+    #: from :attr:`gate_excluded` (whether that gate excluded it). A scoped
+    #: run is gated by ``cli_helpers_compare._scoped_exit_code`` over the
+    #: consumer's own relevant set, not by ``gate_decision_for_result`` over
+    #: ``result.changes`` -- so :meth:`with_gate`'s re-read of
+    #: ``result.changes`` membership, which is what lets a restored redundant
+    #: row rejoin the gate, must not touch a scope-decided record at all: it
+    #: would demote a scoped-only finding the scoped gate really does score
+    #: (a synthesized missing entrypoint is in no ``result.changes``), and
+    #: un-exclude one the consumer simply does not use.
+    scope_decided: bool = False
 
     def to_dict(self) -> dict[str, object]:
         entry: dict[str, object] = {
@@ -212,7 +200,7 @@ class DispositionLedger:
         rule: RuleProvenance | None = None,
         from_gate: bool = False,
         gate_excluded: bool | None = None,
-        legacy_gate_only: bool = False,
+        scope_decided: bool = False,
     ) -> None:
         """Record *change*'s single terminal *disposition*.
 
@@ -263,7 +251,7 @@ class DispositionLedger:
                 rule=rule,
                 reclassified_by=getattr(change, "reclassified_by", None),
                 gate_excluded=gate_excluded,
-                legacy_gate_only=legacy_gate_only,
+                scope_decided=scope_decided,
             )
         )
 
@@ -339,20 +327,16 @@ class DispositionLedger:
         severity says how severe a finding is, never whether the consumer
         this run gates on uses it at all.
 
-        A :attr:`~DispositionRecord.legacy_gate_only` record is demoted
-        outright rather than re-scored, because the question changes with the
-        scheme: the severity gate reads ``result.changes``, so a finding that
-        list does not contain is outside the gate that decides the run under
-        *any* severity configuration -- however severe its own kind is.
-
-        **Membership is re-read here, not trusted from recording time.** The
-        flag says the record came from the redundant bucket; whether the
-        severity gate's input contains the finding is answered from
-        ``result.changes`` at projection time, because a later pass can move
-        it there: ``scope.show_redundant`` folds redundant findings into
-        ``result.changes`` before a ``--used-by`` scoped gate selects them, so
-        a record that was legacy-only when the ledger closed can be squarely
-        inside the severity gate's final input by the time a report renders.
+        Under a **severity configuration** the acting gate is
+        ``policy.gate_decision.gate_decision_for_result``, which scores
+        ``result.changes`` and nothing else -- so membership in that list is
+        re-read here rather than trusted from recording time. Several later
+        passes move findings into it (``scope.show_redundant`` restores
+        redundant and opaque-downgraded rows; a scoped run folds its own),
+        and a record frozen at recording time then reported ``0 gating``
+        beside a real exit ``4``. One membership rule covers every such row,
+        whatever bucket it came from, which is what retired the narrower
+        ``legacy_gate_only`` flag this replaced.
         """
         gate = _GateContext.of(result)
         # The severity gate's own input, resolved once for the whole pass.
@@ -361,9 +345,7 @@ class DispositionLedger:
         gated._anchors = list(self._anchors)
         gated._seen_ids = dict(self._seen_ids)
         gated._records = [
-            self._regated(
-                record, change, result, severity_config, gate, severity_input
-            )
+            self._regated(record, change, result, severity_config, gate, severity_input)
             for record, change in zip(self._records, self._anchors)
         ]
         return gated
@@ -378,19 +360,60 @@ class DispositionLedger:
         severity_input: set[int],
     ) -> DispositionRecord:
         """One record's label under the resolved gate. See :meth:`with_gate`."""
-        if record.gate_excluded or record.disposition not in (
-            Disposition.GATING,
-            Disposition.NON_GATING,
-        ):
+        if record.disposition in _POLICY_TERMINAL_DISPOSITIONS:
+            # D2: policy already disposed of these, and no gate scores them.
             return record
-        if (
-            record.legacy_gate_only
-            and severity_config is not None
-            and id(change) not in severity_input
-        ):
+        if record.scope_decided:
+            # A scoped run gates on the consumer's own relevant set, so
+            # `result.changes` membership says nothing about it either way --
+            # but the scoped gate does apply the severity configuration to
+            # what it scores, so an included record is still re-answered by
+            # kind. Only the exclusion itself is untouchable.
+            if record.gate_excluded:
+                return record
+            return replace(
+                record,
+                disposition=_kept_disposition(
+                    change,  # type: ignore[arg-type]
+                    result,
+                    severity_config,
+                    gate,
+                ),
+            )
+        if severity_config is None:
+            # Legacy scheme: `checker.compare` scored `kept + verdict_scored`,
+            # which is what the recorded label already answers. A
+            # `deduplicated` record was never in that input either, so only
+            # the two evaluated labels are re-answered.
+            if record.gate_excluded or record.disposition not in (
+                Disposition.GATING,
+                Disposition.NON_GATING,
+            ):
+                return record
+            return replace(
+                record,
+                disposition=_kept_disposition(
+                    change,  # type: ignore[arg-type]
+                    result,
+                    None,
+                    gate,
+                ),
+            )
+        if id(change) not in severity_input:
+            if record.disposition not in (
+                Disposition.GATING,
+                Disposition.NON_GATING,
+            ):
+                # A deduplicated row the severity gate does not score keeps
+                # saying *why* it is out -- it was folded into another
+                # finding, which `non_gating` would not convey.
+                return record
             return replace(
                 record, disposition=Disposition.NON_GATING, gate_excluded=True
             )
+        # In the severity gate's own input, whatever bucket recorded it: the
+        # gate scores it, so the audit counts it. The mechanism that had held
+        # it out stays readable in `application_point`.
         return replace(
             record,
             disposition=_kept_disposition(
@@ -399,6 +422,7 @@ class DispositionLedger:
                 severity_config,
                 gate,
             ),
+            gate_excluded=False,
         )
 
     def resolve_verdict_classes(self, result: DiffResult) -> None:
@@ -528,6 +552,9 @@ class DispositionLedger:
                     gate,
                 ),
                 application_point="contract_promotion",
+                # Only an explicit consumer scope promotes, so the record is
+                # from here on decided by the *scoped* gate.
+                scope_decided=True,
             )
 
     def apply_scope(self, result: DiffResult, in_scope: Iterable[object]) -> None:
@@ -571,6 +598,7 @@ class DispositionLedger:
                     record,
                     disposition=Disposition.NON_GATING,
                     gate_excluded=True,
+                    scope_decided=True,
                 )
 
     def record_for(self, change: object) -> DispositionRecord | None:
@@ -693,86 +721,3 @@ def _verdict_class_of(change: object) -> str | None:
         if isinstance(value, Verdict):
             return value.value
     return None
-
-
-@dataclass(frozen=True, slots=True)
-class _GateContext:
-    """The per-*result* inputs every per-change gate question needs.
-
-    Resolved once per pass rather than per finding: ``DiffResult.
-    _effective_kind_sets()`` re-derives the policy's four kind sets (and
-    re-applies every policy-file override) on each call, and both
-    ``gate_contribution_for_change`` and ``effective_verdict_for_change``
-    want them. Hoisting cut the closing pass from ~19% of a 2000-symbol
-    ``compare()`` to a fraction of that, with no change to any answer -- the
-    values are constant for the whole pass by construction.
-    """
-
-    policy: str | None
-    kind_sets: object | None
-    policy_file: object | None
-
-    @classmethod
-    def of(cls, result: DiffResult) -> _GateContext:
-        kind_sets_of = getattr(result, "_effective_kind_sets", None)
-        return cls(
-            policy=getattr(result, "policy", None),
-            kind_sets=kind_sets_of() if callable(kind_sets_of) else None,
-            policy_file=getattr(result, "policy_file", None),
-        )
-
-
-def _kept_disposition(
-    change: Change,
-    result: DiffResult,
-    severity_config: object | None = None,
-    gate: _GateContext | None = None,
-) -> Disposition:
-    """The terminal disposition of a change that survived into ``changes``.
-
-    ``gating`` means *contributes to this run's gate*, and the answer to that
-    is ``severity.gate_contribution_for_change`` — the identical per-finding
-    function ``compute_exit_code``/``compute_gate_decision`` fold, so this
-    cannot become a second gate algorithm. With no severity configuration in
-    effect (*severity_config* ``None``) it returns the finding's own legacy
-    verdict exit code, which is what an ordinary ``compare`` is scored on;
-    with one, a category configured ``error`` gates and one configured
-    ``warning``/``info`` does not — so ``severity.addition: error`` correctly
-    reads ``gating`` for a lone addition, and ``abi_breaking: info`` correctly
-    reads ``non_gating`` for a break the run lets through.
-    """
-    from ..contract_gating import contract_relevance_of, is_evaluated
-    from ..contract_relevance_types import ContractRelevance
-
-    if not is_evaluated(change):
-        # Compared against the enum members themselves, never a spelling of
-        # them: ADR-049 splits "not evaluated" into a positive determination
-        # (PROVEN_OUT_OF_CONTRACT -- the finding really is outside the
-        # promised contract) and evidence running out (the two UNKNOWN_*
-        # values), and those are different dispositions with different
-        # consequences downstream.
-        return (
-            Disposition.UNRESOLVED_RELEVANCE
-            if contract_relevance_of(change)
-            in (
-                ContractRelevance.UNKNOWN_UNPROVEN,
-                ContractRelevance.UNKNOWN_UNRESOLVED,
-            )
-            else Disposition.OUT_OF_CONTRACT
-        )
-    from .severity import gate_contribution_for_change
-
-    # Read through ``getattr``, like every other finding-shaped input this
-    # module takes: several report paths (the HTML characterization goldens'
-    # own builders, for one) hand the renderers a duck-typed stand-in rather
-    # than a real ``DiffResult``, and an audit that raised on one of those
-    # would be a projection deciding whether a report can be produced at all.
-    gate = gate or _GateContext.of(result)
-    contribution = gate_contribution_for_change(
-        change,
-        severity_config,  # type: ignore[arg-type]
-        policy=gate.policy,
-        kind_sets=gate.kind_sets,  # type: ignore[arg-type]
-        policy_file=gate.policy_file,
-    )
-    return Disposition.GATING if contribution > 0 else Disposition.NON_GATING
