@@ -375,12 +375,34 @@ _extra_args_has_write_flag() {
 # dry-run preview into a usage error (exit 64). Checked before the PR_JSON
 # sidecar injection in both modes, the same way `_extra_args_has_write_flag`
 # already is.
+#
+# Skips the token right after a bare `-o`/`--output` (Codex review, P2,
+# fresh evidence): both are two-token forms of compare/scan's own `-o
+# PATH`/`--output PATH` option (`cli_options.py`'s `output_options`), so
+# `extra-args: --output --dry-run` means "write to a file literally named
+# --dry-run", not an effective dry run -- Click consumes the token as
+# `-o`'s value, never parses it as a flag. This is the one concrete
+# collision named by that review; it is not a general option/argument-aware
+# parser (matching this file's own established, documented limit for
+# `_extra_args_has_write_flag`/`_extra_args_write_json_path` above -- plain
+# word-splitting, not full CLI-grammar parsing). A `--dry-run` consumed as
+# the value of some other value-taking option this script doesn't forward
+# itself (e.g. `--policy --dry-run`) is not special-cased; that class of
+# false positive is safe by construction (it only suppresses `-o`/`--write`
+# unnecessarily, never causes a usage error), unlike the false negative
+# this function exists to close.
 _extra_args_has_dry_run_flag() {
-  local _arg
+  local _arg _prev=""
   # shellcheck disable=SC2086  # word-splitting is the point; see above.
   set -- ${INPUT_EXTRA_ARGS:-}
   for _arg in "$@"; do
-    [[ "$_arg" == "--dry-run" ]] && return 0
+    if [[ "$_arg" == "--dry-run" ]]; then
+      case "$_prev" in
+        -o | --output) : ;; # consumed as -o/--output's own value, not a flag
+        *) return 0 ;;
+      esac
+    fi
+    _prev="$_arg"
   done
   return 1
 }

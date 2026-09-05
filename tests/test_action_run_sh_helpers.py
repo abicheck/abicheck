@@ -534,6 +534,58 @@ class TestExtraArgsHasWriteFlag:
         assert not self._predicate("--not-a-write-flag")
 
 
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestExtraArgsHasDryRunFlag:
+    """Codex review, P2, fresh evidence: an effective dry run reached only
+    through ``extra-args --dry-run`` (the dedicated ``INPUT_DRY_RUN`` input
+    left false) must be recognized too, so the command-assembly branches
+    that only check ``INPUT_DRY_RUN`` don't inject `-o`/`--write` alongside
+    it -- a combination the CLI itself rejects.
+    """
+
+    def _predicate(self, extra_args: str) -> bool:
+        return _run_predicate(
+            f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_dry_run_flag"
+        )
+
+    def test_absent_extra_args(self) -> None:
+        assert not self._predicate("")
+
+    def test_unrelated_extra_args(self) -> None:
+        assert not self._predicate("--verbose --gate-api-break")
+
+    def test_bare_dry_run(self) -> None:
+        assert self._predicate("--dry-run")
+
+    def test_dry_run_after_another_flag(self) -> None:
+        assert self._predicate("--verbose --dry-run")
+
+    def test_does_not_false_positive_on_a_substring(self) -> None:
+        assert not self._predicate("--not-a-dry-run-flag")
+
+    def test_dry_run_consumed_as_a_bare_output_option_value_is_not_a_flag(
+        self,
+    ) -> None:
+        # A second Codex review round (fresh evidence): `extra-args:
+        # --output --dry-run` means "write to a file literally named
+        # --dry-run" -- Click's `-o`/`--output PATH` (two-token form)
+        # consumes the next token as its value, never parses it as a flag.
+        assert not self._predicate("--output --dry-run")
+
+    def test_dry_run_consumed_as_a_short_output_option_value_is_not_a_flag(
+        self,
+    ) -> None:
+        assert not self._predicate("-o --dry-run")
+
+    def test_a_real_dry_run_after_an_output_option_value_is_still_a_flag(
+        self,
+    ) -> None:
+        # The negative control: only the token immediately after `-o`/
+        # `--output` is exempt. A `--dry-run` anywhere else, including
+        # right after a real (non-flag-shaped) output path, is a real flag.
+        assert self._predicate("--output out.json --dry-run")
+
+
 def _run_value(call: str) -> str:
     """Source the real helper functions and return a value-printing call's
     stdout (e.g. an ``_effective_format`` invocation), stripped of the
