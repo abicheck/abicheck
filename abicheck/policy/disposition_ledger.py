@@ -461,13 +461,22 @@ def _verdict_class_of(change: object) -> str | None:
 def _kept_disposition(change: Change, result: DiffResult) -> Disposition:
     """The terminal disposition of a change that survived into ``changes``."""
     from ..contract_gating import contract_relevance_of, is_evaluated
+    from ..contract_relevance_types import ContractRelevance
 
     if not is_evaluated(change):
-        relevance = contract_relevance_of(change)
-        name = getattr(relevance, "value", "")
+        # Compared against the enum members themselves, never a spelling of
+        # them: ADR-049 splits "not evaluated" into a positive determination
+        # (PROVEN_OUT_OF_CONTRACT -- the finding really is outside the
+        # promised contract) and evidence running out (the two UNKNOWN_*
+        # values), and those are different dispositions with different
+        # consequences downstream.
         return (
             Disposition.UNRESOLVED_RELEVANCE
-            if str(name).startswith("unknown")
+            if contract_relevance_of(change)
+            in (
+                ContractRelevance.UNKNOWN_UNPROVEN,
+                ContractRelevance.UNKNOWN_UNRESOLVED,
+            )
             else Disposition.OUT_OF_CONTRACT
         )
     verdict = result._effective_verdict_for_change(change)

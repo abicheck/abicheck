@@ -415,6 +415,41 @@ def test_kept_findings_split_into_gating_and_non_gating() -> None:
     assert counts[Disposition.SUPPRESSED.value] == 0
 
 
+@pytest.mark.parametrize(
+    ("relevance", "expected"),
+    [
+        ("IN_CONTRACT", Disposition.GATING),
+        ("NOT_APPLICABLE", Disposition.GATING),
+        ("PROVEN_OUT_OF_CONTRACT", Disposition.OUT_OF_CONTRACT),
+        ("UNKNOWN_UNPROVEN", Disposition.UNRESOLVED_RELEVANCE),
+        ("UNKNOWN_UNRESOLVED", Disposition.UNRESOLVED_RELEVANCE),
+    ],
+)
+def test_every_contract_relevance_maps_to_its_own_disposition(
+    relevance, expected
+) -> None:
+    """ADR-049's split, exhaustively: "proven outside the contract" and
+    "the evidence ran out" are different dispositions with different
+    downstream consequences, and an evaluated finding is neither.
+
+    Enumerated over the whole (small) domain rather than one example, because
+    the mapping is exactly the kind of value-spelling comparison that fails
+    silently for the *other* members when written against one of them.
+    """
+    from abicheck.checker_types import Change, DiffResult
+    from abicheck.contract_relevance_types import ContractRelevance
+
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="gone", description="removed")
+    change.contract_relevance = ContractRelevance[relevance]
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libfoo", changes=[change]
+    )
+    ledger = ledger_for(result)
+    record = ledger.record_for(change)
+    assert record is not None and record.disposition is expected
+    assert conservation_holds(ledger)
+
+
 def test_ledger_for_a_hand_built_result_still_reconciles() -> None:
     """Every consumer must be able to state the counts unconditionally, even
     for a ``DiffResult`` no ``compare()`` produced."""
