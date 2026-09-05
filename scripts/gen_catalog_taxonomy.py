@@ -95,6 +95,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # identical sibling-import guard for the identical reason.
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+import catalog_rule_registry  # noqa: E402
 import example_catalog  # noqa: E402
 
 EXAMPLES = example_catalog.EXAMPLES_DIR
@@ -125,9 +126,15 @@ LINUX_KERNEL_CASE_STUDIES = {121, 175, 176}
 # mechanism no single-library rule case demonstrates on its own yet -- the
 # same asymmetry the four original entries already establish (e.g.
 # "virtual-dispatch-contract-removed" and "empty-tag-type-gains-state" name
-# no catalog rule_slug either). `related_rules` is deliberately not
-# validated against the rule_slug set for this reason -- see
-# tests/test_catalog_taxonomy.py's own `test_related_rules_are_non_empty_strings`.
+# no catalog rule_slug either). A `related_rules` entry is therefore
+# deliberately NOT required to name a rule *case* -- but it is required to
+# name a real rule: since the canonical rule registry landed, every slug
+# used here must resolve to an entry in `examples/catalog_rules.yaml`
+# (`catalog_rule_registry.validate_registry`, enforced by `main()` below and
+# by tests/test_catalog_rule_registry.py). Before that registry existed these
+# were unvalidated free-text strings that `docs/contribute/catalog-coverage.md`
+# nonetheless counted as distinct compatibility rules, so a typo, a synonym,
+# or an accidental rename silently became one more "rule" in that headline.
 RELATED_RULES: dict[str, list[str]] = {
     # -- oneTBB case studies --
     "case78_task_arena_attach_tag": [
@@ -637,6 +644,35 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             "relation_type": relation_type,
             "relation_axis": relation_axis,
         }
+    # A scenario is *defined* as several rules composed into one realistic
+    # problem, so a scenario with no `related_rules` is a contradiction the
+    # data should not be able to express. Left unchecked, `.get(name, [])`
+    # emits an empty list for a newly-classified scenario nobody added to
+    # RELATED_RULES -- generation and every drift gate pass while the case
+    # silently belongs to no rule family at all. The reverse (a mapping key
+    # for a case that is no longer a scenario, or was renamed) is checked
+    # too: it is dead configuration that looks like coverage.
+    scenarios_without_rules = sorted(
+        name
+        for name, entry in taxonomy.items()
+        if entry["entity"] == "scenario" and not entry["related_rules"]
+    )
+    if scenarios_without_rules:
+        raise ValueError(
+            "these scenario cases have no related_rules -- add them to "
+            f"RELATED_RULES: {scenarios_without_rules}"
+        )
+    unused_related_rules = sorted(
+        name
+        for name in RELATED_RULES
+        if taxonomy.get(name, {}).get("entity") != "scenario"
+    )
+    if unused_related_rules:
+        raise ValueError(
+            "these RELATED_RULES keys name no scenario case (renamed, "
+            f"removed, or reclassified): {unused_related_rules}"
+        )
+
     # Preserve the existing verdicts iteration order (already caseNN-ordered
     # in the committed file) rather than re-sorting -- keeps a regeneration
     # diff scoped to the new `taxonomy` key alone.
@@ -657,6 +693,21 @@ def main() -> int:
     # committed file's own byte-for-byte round trip through indent=1).
     gt: dict[str, object] = json.loads(GROUND_TRUTH.read_text())
     new_taxonomy = build_taxonomy(gt)
+
+    # Every rule slug the freshly-built taxonomy names must resolve to a
+    # definition in examples/catalog_rules.yaml, and every definition there
+    # must be used. Checked against `new_taxonomy` rather than the committed
+    # block so a slug typo introduced by this very run fails before it is
+    # written to disk.
+    registry_errors = catalog_rule_registry.validate_registry(new_taxonomy)
+    if registry_errors:
+        print(
+            f"{catalog_rule_registry.REGISTRY_PATH} disagrees with the taxonomy:",
+            file=sys.stderr,
+        )
+        for message in registry_errors:
+            print(f"  - {message}", file=sys.stderr)
+        return 1
 
     if args.check:
         if gt.get("taxonomy") != new_taxonomy:

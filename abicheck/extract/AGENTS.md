@@ -5,7 +5,7 @@
 This package owns reading binary, debug, header, build, and source evidence
 into the facts `abicheck.model` defines, per ADR-061 D1. It answers "what
 does this input actually contain" — never whether a fact matters, whether
-two facts differ, how a comparison is decided, or how a result is rendered.
+two facts differ, how a comparison is decided, or how a result is rendered. This layer's product invariant (the local consequence of root `AGENTS.md`'s "Product decisions and change routing") is stated once in `abicheck/AGENTS.md` "Product invariants by layer"; it is not restated here.
 
 The package is new and mostly empty: it is the target owner for a large set
 of still-flat modules (`elf_metadata.py`, `dwarf_metadata.py`,

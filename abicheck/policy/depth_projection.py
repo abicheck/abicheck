@@ -114,6 +114,7 @@ from typing import TYPE_CHECKING
 from ..buildsource.model import CoverageStatus, DataLayer, LayerCoverage
 from ..evidence_depth import DEPTH_RANK
 from ..model import ScopeOrigin, Visibility
+from ..model.export_index import build_raw_export_index, default_versioned_names
 
 if TYPE_CHECKING:
     from ..buildsource.pack import BuildSourcePack
@@ -178,43 +179,21 @@ def _structural_facts_are_dwarf_confirmed(snap: AbiSnapshot) -> bool:
 def _exported_symbol_names(snap: AbiSnapshot) -> frozenset[str] | None:
     """*snap*'s raw platform export-table names, or ``None`` with no table at all.
 
-    A small, local copy of the same "raw export table" read every other
-    consumer of this idea already keeps its own independent copy of
-    (``buildsource.crosscheck_base._exported_symbol_names``,
-    ``buildsource.snapshot_exports.exported_symbols_from_snapshot``,
-    ``post_manifest._exported_symbol_names``,
-    ``diff_unnamed_types._exported_symbol_names`` — see
-    ``buildsource/CLAUDE.md``'s own note that unifying these is a
-    deliberately separate slice, not folded in here): each has a slightly
-    different normalization/fallback need, and a ``policy``-layer caller
-    may import ``model``/``compare`` but not ``extract`` (ADR-061), where
-    most of those live. Matches ``crosscheck_base``'s own normalization
-    exactly (only default-versioned ELF exports; Mach-O's single leading
-    underscore stripped) since that is what must line up against
-    ``Function.mangled``/``Variable.mangled``'s own spelling.
-
-    ``None`` (never an empty ``frozenset``) when *snap* carries no platform
-    export table at all — a caller must treat "cannot confirm" differently
-    from "parsed and confirmed empty" (a real hidden-only library genuinely
-    exports nothing and that must still read as confirmed-empty, not as
-    "no evidence"), so :func:`_strip_header_and_above_evidence` skips this
-    check entirely rather than misreading an absent platform block as zero
-    exports.
+    ADR-063 T7: the "raw export table, default-versioned ELF, Mach-O
+    single-underscore-stripped" projection is now canonical
+    (``model.export_index.default_versioned_names``, over
+    ``model.export_index.build_raw_export_index``'s raw read) — this is a
+    thin wrapper preserving this module's own ``frozenset[str] | None``
+    signature (``None``, never an empty ``frozenset``, when *snap* carries
+    no platform export table at all — a caller must treat "cannot confirm"
+    differently from "parsed and confirmed empty," so
+    :func:`_strip_header_and_above_evidence` skips this check entirely
+    rather than misreading an absent platform block as zero exports).
     """
-    elf = snap.elf
-    if elf is not None:
-        return frozenset(s.name for s in elf.symbols if s.name and s.is_default)
-    pe = snap.pe
-    if pe is not None:
-        return frozenset(e.name for e in pe.exports if e.name)
-    macho = snap.macho
-    if macho is not None:
-        return frozenset(
-            e.name[1:] if e.name.startswith("_") else e.name
-            for e in macho.exports
-            if e.name
-        )
-    return None
+    index = build_raw_export_index(snap)
+    if index is None:
+        return None
+    return default_versioned_names(index)
 
 
 def _strip_header_and_above_evidence(snap: AbiSnapshot) -> None:

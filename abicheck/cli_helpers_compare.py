@@ -488,17 +488,6 @@ class ResolvedCompareConfig:
     public_symbols: tuple[str, ...]
     strict_suppressions: bool
     require_justification: bool
-    #: The one automatic gate algorithm (ADR-064/CLI cleanup phase two PR
-    #: G2): ``"severity"`` when a severity setting is in effect anywhere
-    #: (``severity_active``), else ``"legacy"``. Purely derived -- there is
-    #: no user-facing selector for this any more (the removed
-    #: ``--exit-code-scheme``/``.abicheck.yml``'s ``exit_code_scheme:`` key
-    #: used to let a caller force either value regardless of
-    #: ``severity_active``); kept as a named field because a large amount
-    #: of downstream reporting/dry-run code reads it as "which algorithm
-    #: did this run use", which is still a fact worth stating even though
-    #: it is no longer configurable.
-    exit_code_scheme: str
     source_method: str | None
     #: ADR-040 Lever 2: debug-resolution knobs demoted to the ``debug:`` config
     #: block (CLI flags still override). ``debug_format`` is ``None`` when unset.
@@ -523,6 +512,38 @@ class ResolvedCompareConfig:
     #: ``show_redundant`` above.
     bundle_system_providers: tuple[str, ...] = ()
     bundle_cohorts: tuple[str, ...] = ()
+
+    @property
+    def exit_code_scheme(self) -> str:
+        """The one automatic gate algorithm (ADR-064/CLI cleanup phase two PR
+        G2): ``"severity"`` when a severity setting is in effect anywhere
+        (``severity_active``), else ``"legacy"``.
+
+        A **derived property, not a field** (duplication-and-convergence-
+        assessment T6). There is no user-facing selector for this any more
+        (the removed ``--exit-code-scheme``/``.abicheck.yml``'s
+        ``exit_code_scheme:`` key used to let a caller force either value
+        regardless of ``severity_active``), so a settable field beside
+        ``severity_active`` only let the model express a disagreement no
+        resolution can produce -- and ``pack_application.
+        apply_to_compare_config`` was correspondingly obliged to set both,
+        in agreement, by hand. It stays a *named*, read-only member because a
+        large amount of downstream reporting/dry-run code reads it as "which
+        algorithm did this run use", which is still a fact worth stating even
+        though it is no longer configurable.
+
+        Derived through the one shared
+        :func:`~abicheck.policy.gate_pack_fold.gate_exit_code_scheme` rule
+        that ``policy.release_gate_options.GateOptions`` also states its
+        scheme with, so single-pair ``compare`` and the release fan-out
+        cannot drift. Reached through ``workflows.gate``'s re-export
+        surface, not imported from ``policy`` directly: this module is
+        ``frontends``-classified and ``frontends -> policy`` is forbidden
+        (ADR-061; see ``workflows/gate.py``'s own docstring).
+        """
+        from .workflows.gate import gate_exit_code_scheme
+
+        return gate_exit_code_scheme(self.severity_active)
 
 
 def resolve_compare_config(
@@ -587,12 +608,6 @@ def resolve_compare_config(
     strict = bool(cfg.suppression_strict) if cfg else False
     require_just = bool(cfg.suppression_require_justification) if cfg else False
 
-    # ADR-064/CLI cleanup phase two PR G2: no manual override any more --
-    # the algorithm is fully determined by whether a severity policy is in
-    # effect. `severity_active` is exactly that predicate (see its own
-    # comment above).
-    scheme = "severity" if severity_active else "legacy"
-
     source_method = cfg.source_method if cfg else None
 
     # ADR-040 Lever 2: debug-resolution demotion (CLI > config).
@@ -618,7 +633,6 @@ def resolve_compare_config(
         public_symbols=tuple(merged_public),
         strict_suppressions=strict,
         require_justification=require_just,
-        exit_code_scheme=scheme,
         source_method=source_method,
         debug_format=debug_format if isinstance(debug_format, str) else None,
         dwarf_only=dwarf_only,

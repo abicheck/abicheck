@@ -135,11 +135,11 @@ def test_mixed_family_counts_variant_and_duplicate_independently():
     }
     rendered = gen._rule_coverage(taxonomy)
     assert (
-        "**1 of the rule-entity-backed rules** have a demonstrated *variant*"
+        "**1 of the demonstrated rules** have a *variant*"
         in rendered
     )
     assert "1 variant cases total" in rendered
-    assert "**1 of the rule-entity-backed rules** also have a *duplicate*" in rendered
+    assert "**1 of the demonstrated rules** also have a *duplicate*" in rendered
     assert "1 duplicate cases total" in rendered
     assert "case901_variant" in rendered
     assert "case902_duplicate" in rendered

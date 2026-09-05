@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `internal-declaration-identity-reconciled`. [← back to all rules](index.md)
 
+> An internal declaration is matched across releases despite a changed spelling, so the reconciliation reports no public break.
+
 ## Canonical demonstration
 
 _No single-library case demonstrates this rule alone yet — referenced only by the scenario(s) below._

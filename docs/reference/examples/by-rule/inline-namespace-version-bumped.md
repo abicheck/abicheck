@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `inline-namespace-version-bumped`. [← back to all rules](index.md)
 
+> The library bumps its versioned inline namespace, remangling every symbol inside it so old imports no longer resolve.
+
 ## Canonical demonstration
 
 - [case101_inline_namespace_version_bumped](../case101_inline_namespace_version_bumped.md) — Inline Namespace Version Bumped (🔴 BREAKING)

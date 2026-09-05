@@ -309,7 +309,7 @@ if you can only obtain debug info as separate files.)
 `abicheck` analyses **single linkable images** — shared libraries (`.so`,
 `.dll`, `.dylib`) and individual object files — not static/import library
 archives (`.a` on Unix, `.lib` on Windows, both `ar`-format member
-containers). This is a deliberate non-goal: a static archive has no runtime
+containers). This is a current limitation, not a permanent exclusion (see the [vision](../contribute/vision.md) and [goals](../contribute/goals.md#non-goals) for the bounded investigation that is recorded): a static archive has no runtime
 ABI surface for abicheck's verdict semantics to be built on. See [Project
 Goals → Non-goals](../contribute/goals.md#non-goals) for the full reasoning.
 

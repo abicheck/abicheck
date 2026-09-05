@@ -49,8 +49,9 @@ boundary (e.g. ``service_scan.py``'s ``_find_compile_db_in_dir``).
 
 The no-collection-requested check (Codex review, fresh evidence) mirrors the
 precondition that must hold before *either* real call site can even reach
-``_resolve_compile_db``. There are two independent paths in
-(``cli_dump_helpers.perform_elf_dump``/``handle_non_elf_dump``):
+``_resolve_compile_db``. There are two independent paths in (both reached
+today from ``service_input_resolution._resolve_side_snapshot_impl``, and
+from the retired ``perform_elf_dump``/``handle_non_elf_dump`` before it):
 ``l2_seed.seed_includes_and_fold_compile_context`` (gated on ``headers`` being
 non-empty -- it returns immediately otherwise) and
 ``cli_buildsource.embed_build_source`` (gated on ``collection_for_ci_mode

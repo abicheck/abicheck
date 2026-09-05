@@ -484,10 +484,12 @@ def _seeded_includes_and_compile_context(
     ``applied`` came back ``False`` -- the fold's result wins and supersedes
     the legacy match whenever the fold *does* match a header, identical to
     ``perform_elf_dump``'s own reassignment. This is additive threading
-    only: no caller of this function is wired to actually pass a non-empty
-    tuple yet (that is ``dump_cmd``'s real-execution branch, which still
-    executes through ``perform_elf_dump``/``handle_non_elf_dump``, not this
-    typed pipeline -- see the known-gaps entry for what remains open).
+    only when this note was written -- no caller passed a non-empty tuple,
+    because ``dump_cmd``'s real-execution branch still went through
+    ``perform_elf_dump``/``handle_non_elf_dump`` rather than this typed
+    pipeline. That branch has since migrated (ADR-063 Phase 1, both binary
+    formats) and passes both parameters for real; the two functions it used
+    to call were deleted by Track 1.
 
     *legacy_compile_db_matched* (Codex review, fresh evidence): whether the
     legacy match actually matched a compile unit at all -- the second

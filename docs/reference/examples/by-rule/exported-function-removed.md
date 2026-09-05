@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `exported-function-removed`. [← back to all rules](index.md)
 
+> A function is no longer exported, so existing binaries that import it fail to resolve at load or call time.
+
 ## Canonical demonstration
 
 - [case01_symbol_removal](../case01_symbol_removal.md) — Symbol Removal (🔴 BREAKING)
@@ -17,17 +19,12 @@ _Same demonstration restated with no distinguishing condition — not additional
 
 - [case78_task_arena_attach_tag](../case78_task_arena_attach_tag.md) — `task_arena::attach` Tag Type Replaces Enum
 - [case82_sycl_overload_set_removed](../case82_sycl_overload_set_removed.md) — SYCL Overload Set Removed (DPC++ Build Withdrawn)
+- [case90_bundle_intra_dep_removed](../case90_bundle_intra_dep_removed.md) — Bundle — Intra-Bundle Removed Symbol
+- [case92_bundle_provider_changed](../case92_bundle_provider_changed.md) — Bundle — Symbol Provider Migration
+- [case93_bundle_manifest_drift](../case93_bundle_manifest_drift.md) — Bundle — Instantiation Manifest Drift
 - [case107_task_scheduler_init_removed](../case107_task_scheduler_init_removed.md) — `task_scheduler_init` Removed (historical ABI break)
 - [case108_task_class_removed](../case108_task_class_removed.md) — `task` Class Removed (historical ABI break — vtable angle)
 - [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md) — concurrent_unordered_map API Drift
 - [case192_call_graph_break_survives_suppression](../case192_call_graph_break_survives_suppression.md) — Call-Graph-Reachable Break Survives Suppression
 - [case193_ordinary_exported_fn_call_not_reachable](../case193_ordinary_exported_fn_call_not_reachable.md) — Ordinary Exported Function's Internal Call Is Not Public-Reachable
-
-## Used by multi-library bundle scenarios
-
-_ADR-023 bundle cases aren't part of this single-library catalog (see `examples/README.md`), so these aren't linked pages here — see the case's own README under `examples/`._
-
-- `case90_bundle_intra_dep_removed` — Bundle — Intra-Bundle Removed Symbol
-- `case92_bundle_provider_changed` — Bundle — Symbol Provider Migration
-- `case93_bundle_manifest_drift` — Bundle — Instantiation Manifest Drift
 

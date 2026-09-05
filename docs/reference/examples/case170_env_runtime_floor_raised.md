@@ -115,4 +115,4 @@ equivalent reproduction of this finding with either tool.
 - `new.abi.json`
 - `old.abi.json`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Env runtime floor raised](by-rule/env-runtime-floor-raised.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Runtime floor raised](by-rule/env-runtime-floor-raised.md)._

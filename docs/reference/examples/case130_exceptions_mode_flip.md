@@ -130,4 +130,4 @@ build-context layer.
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Exceptions mode flip](by-rule/exceptions-mode-flip.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Exceptions mode flipped](by-rule/exceptions-mode-flip.md)._

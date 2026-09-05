@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `embedded-type-size-increased`. [← back to all rules](index.md)
 
+> A type embedded by value in a public aggregate grows, changing the enclosing type's size and every subsequent field offset.
+
 ## Canonical demonstration
 
 - [case07_struct_layout](../case07_struct_layout.md) — Struct Layout Change (🔴 BREAKING)

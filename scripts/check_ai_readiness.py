@@ -764,10 +764,57 @@ def check_doc_count_sync(f: Findings) -> None:
 
     gt_path = EXAMPLES / "ground_truth.json"
     try:
-        verdicts = json.loads(_read(gt_path))["verdicts"]
+        ground_truth = json.loads(_read(gt_path))
+        verdicts = ground_truth["verdicts"]
     except Exception:
         return
     n_catalog = len(verdicts)
+
+    # Distinct rules with at least one canonical (non-variant, non-duplicate)
+    # rule-entity case -- the "demonstrated" half of the rule registry's own
+    # count (scripts/catalog_rule_registry.py). Re-derived from the taxonomy
+    # here rather than imported, because this module is pure-stdlib by
+    # contract (it is the first CI step, before `pip install`) and the
+    # registry loader needs PyYAML. The two derivations are checked against
+    # each other by tests/test_catalog_rule_registry.py, which has no such
+    # constraint.
+    taxonomy = ground_truth.get("taxonomy") or {}
+    n_demonstrated_rules = len(
+        {
+            entry["rule_slug"]
+            for entry in taxonomy.values()
+            if entry.get("rule_slug") and not entry.get("variant_of")
+        }
+    )
+    # The rest of README.md's per-dimension breakdown. Registering only the
+    # demonstrated-rule count would leave the other four as unchecked
+    # literals that a case addition or reclassification silently staled --
+    # every one of them is derived from the same taxonomy, so every one is
+    # anchorable.
+    n_variant_rules = len(
+        {
+            entry["rule_slug"]
+            for entry in taxonomy.values()
+            if entry.get("relation_type") == "variant" and entry.get("rule_slug")
+        }
+    )
+    n_duplicate_rules = len(
+        {
+            entry["rule_slug"]
+            for entry in taxonomy.values()
+            if entry.get("relation_type") == "duplicate" and entry.get("rule_slug")
+        }
+    )
+    n_scenarios = sum(
+        1 for entry in taxonomy.values() if entry.get("entity") == "scenario"
+    )
+    demonstrated_slugs = {
+        entry["rule_slug"] for entry in taxonomy.values() if entry.get("rule_slug")
+    }
+    referenced_slugs: set[str] = set()
+    for entry in taxonomy.values():
+        referenced_slugs.update(entry.get("related_rules") or [])
+    n_referenced_only = len(referenced_slugs - demonstrated_slugs)
 
     # (file, human label, expected value, regex capturing the documented number)
     #
@@ -816,10 +863,40 @@ def check_doc_count_sync(f: Findings) -> None:
             r"the full \*\*(\d+)-case catalog\*\*",
         ),
         (
+            ROOT / "README.md",
+            "demonstrated compatibility rules",
+            n_demonstrated_rules,
+            r"\*\*(\d+) demonstrated compatibility rules\*\*",
+        ),
+        (
+            ROOT / "README.md",
+            "rules with a demonstrated variant",
+            n_variant_rules,
+            r"\*\*(\d+) rules with a variant\*\*",
+        ),
+        (
+            ROOT / "README.md",
+            "rules with a duplicate",
+            n_duplicate_rules,
+            r"\*\*(\d+) rules with a duplicate\*\*",
+        ),
+        (
+            ROOT / "README.md",
+            "composed scenarios",
+            n_scenarios,
+            r"\*\*(\d+) composed scenarios\*\*",
+        ),
+        (
+            ROOT / "README.md",
+            "referenced-only rules",
+            n_referenced_only,
+            r"\*\*(\d+) referenced-only rules\*\*",
+        ),
+        (
             DOCS / "start" / "first-check.md",
             "catalog size",
             n_catalog,
-            r"repo includes (\d+) ABI scenario examples",
+            r"carries (\d+) calibration cases under `examples/case\*/`",
         ),
         (
             DOCS / "contribute/abicc-parity-status.md",
@@ -2539,17 +2616,16 @@ _RESOLVE_INPUT_WRAPPER_MODULES: frozenset[str] = frozenset({"cli_resolve"})
 # call is still there, not just that *some* finding exists at that site.
 # Pre-populated with the pre-existing, already-documented
 # `dumper.dump`/`service.resolve_input` direct-call sites Phase 1 of the
-# same plan names as duplication to converge
-# (`cli_dump_helpers.perform_elf_dump`, `appcompat.check_appcompat`,
+# same plan names as duplication to converge (`appcompat.check_appcompat`,
 # `cli_scan_baseline`'s baseline resolution) — a new entry beyond these
 # needs the same reviewed sign-off (mirrors the INTENTIONAL_SUBSET
-# philosophy of D10.2).
+# philosophy of D10.2). `cli_dump_helpers.perform_elf_dump`'s own entry was
+# the first to leave this list, and it left the way the plan intends one
+# to: not by rerouting the call, but by deleting the dead function that
+# made it (ADR-063 Track 1) once `dump_cmd` had already migrated onto the
+# shared typed executor.
 CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
     {
-        # Native ELF CLI dump (P0 item 2): calls `dumper.dump()` directly
-        # rather than through `service_dump_pipeline.run_dump_request` —
-        # tracked as Phase 1 item 1 of the convergence plan.
-        "abicheck/cli_dump_helpers.py:1299:19:dumper.dump",
         # Standalone application-compatibility (P0 item 6): dumps both
         # sides directly rather than through any of the other paths.
         "abicheck/appcompat.py:1604:19:dumper.dump",

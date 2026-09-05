@@ -25,12 +25,14 @@ AGENTS.md's "Known gaps" section documents this class of bug at length (the
 "The native ELF `abicheck dump` path never applies L3 build context to its
 own L2 header parse" entry) and records it closed via the P0.3 L3->L2 fold
 (``buildsource/l2_seed.py``'s ``seed_includes_and_fold_compile_context``),
-wired into both ``perform_elf_dump`` and ``handle_non_elf_dump``. The
-existing regression coverage for that fold
-(``tests/test_cli_dump_helpers_coverage.py::
-test_perform_elf_dump_folds_l3_compile_context_into_header_parse`` and
-siblings) verifies the mechanism with a stubbed ``dump()`` call, at the unit
-level. Per this file's own "Third-party-boundary tests must exercise the
+wired into both ``perform_elf_dump`` and ``handle_non_elf_dump`` at the time
+(both since retired -- ADR-063 Phase 1 moved ``dump``'s real run onto the
+shared typed executor, which does the identical fold in
+``service_input_resolution._resolve_side_snapshot_impl``, and Track 1 then
+deleted them). The existing regression coverage for that fold
+(``tests/test_header_compile_context.py``'s ``resolve_side_snapshot``
+stamp/context tests and ``tests/test_typed_dump_request.py``'s seed/fold
+class) verifies the mechanism with a stubbed parse, at the unit level. Per this file's own "Third-party-boundary tests must exercise the
 real public API at realistic scale" convention, this module adds the
 missing piece: a real ``abicheck dump`` CLI invocation, over a real
 g++-compiled library and a real ``compile_commands.json``, whose JSON

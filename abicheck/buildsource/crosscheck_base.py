@@ -30,6 +30,11 @@ from dataclasses import dataclass, field
 from ..checker_policy import ChangeKind, Confidence
 from ..checker_types import Change
 from ..model import AbiSnapshot
+from ..model.export_index import (
+    build_raw_export_index,
+    default_versioned_names,
+    linked_export_names,
+)
 
 # The §6.8 provider-agreement vocabulary (ADR-035 D4) — which evidence source
 # corroborates a finding, driving its confidence tag.
@@ -84,52 +89,33 @@ def _change(
 def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
     """The binary's exported symbol names, or ``None`` if no export table exists.
 
-    Only **default/unversioned** ELF exports count toward the obligation set: a
-    symbol that exists *only* as a non-default version alias (``foo@LIB_1``,
-    ``is_default == False``) does not satisfy an unversioned consumer link
-    (which needs ``foo@@…``), so including it would mask the exact
-    missing-export case this set feeds (Codex review).
-
+    ADR-063 T7: thin wrapper over the canonical
+    ``model.export_index.default_versioned_names`` projection (over
+    ``model.export_index.build_raw_export_index``'s raw read) — only
+    **default/unversioned** ELF exports count toward the obligation set, and
     Mach-O names are normalized the same way the dumper normalizes
-    ``Function.mangled`` (strip the platform's single leading underscore:
-    ``_foo`` → ``foo``, ``__Z...`` → ``_Z...``) so the comparison set matches the
-    header-side mangled spelling instead of flagging every C/C++ symbol as
-    missing (Codex review).
+    ``Function.mangled`` (its single leading underscore stripped), preserving
+    this module's own ``set[str] | None`` signature and ``None``-for-no-table
+    contract.
     """
-    if snapshot.elf is not None:
-        return {s.name for s in snapshot.elf.symbols if s.name and s.is_default}
-    if snapshot.pe is not None:
-        return {e.name for e in snapshot.pe.exports if e.name}
-    if snapshot.macho is not None:
-        return {
-            e.name[1:] if e.name.startswith("_") else e.name
-            for e in snapshot.macho.exports
-            if e.name
-        }
-    return None
+    index = build_raw_export_index(snapshot)
+    if index is None:
+        return None
+    return set(default_versioned_names(index))
 
 
 def _linked_export_symbols(snapshot: AbiSnapshot) -> set[str] | None:
     """Exported symbol names in the **L4 source-linker's** keyspace.
 
-    Matches ``cli_buildsource_merge._exported_symbols_from_snapshot`` — the set
-    that seeds ``source_link`` — so a comparison against the surface's
-    ``source_decl_to_binary_symbol`` mappings uses the *same spelling*. It reads
-    the raw platform dynamic-symbol-table names and, unlike
-    :func:`_exported_symbol_names`, does **not** apply the dumper's *second*
-    Mach-O underscore strip (``_Z…`` → ``Z…``). ``macho_metadata`` already strips
-    the one platform underscore, so a C++ export is stored as ``_Z…`` and the L4
-    linker keeps that form; stripping again (as ``_exported_symbol_names`` does,
-    to match the double-stripped ``Function.mangled`` the dumper produces) would
-    make a correctly relinked macOS C++ surface intersect nothing and falsely
-    trip ``source_surface_dso_mismatch`` (Codex review). ELF is still limited to
-    default-versioned exports — a non-default alias can't satisfy an unversioned
-    consumer link, mirroring both peers.
+    ADR-063 T7: thin wrapper over ``model.export_index.linked_export_names``
+    — matches ``cli_buildsource_merge._exported_symbols_from_snapshot`` (the
+    set that seeds ``source_link``), so a comparison against the surface's
+    ``source_decl_to_binary_symbol`` mappings uses the *same spelling*. Unlike
+    :func:`_exported_symbol_names`, Mach-O names are **not** re-normalized —
+    ``macho_metadata`` already strips the platform's one leading underscore,
+    and the L4 linker keeps that once-stripped form.
     """
-    if snapshot.elf is not None:
-        return {s.name for s in snapshot.elf.symbols if s.name and s.is_default}
-    if snapshot.pe is not None:
-        return {e.name for e in snapshot.pe.exports if e.name}
-    if snapshot.macho is not None:
-        return {e.name for e in snapshot.macho.exports if e.name}
-    return None
+    index = build_raw_export_index(snapshot)
+    if index is None:
+        return None
+    return set(linked_export_names(index))

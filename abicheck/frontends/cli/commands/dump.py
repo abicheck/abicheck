@@ -531,11 +531,13 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # below, and `docs/contribute/known-gaps.md`'s "PR C" entry for the
     # precise mechanism this closes. PE/Mach-O now executes through the
     # identical `execute_dump_request` pipeline too (ADR-063 Phase 1's own
-    # PE/Mach-O slice) -- see the PE/Mach-O branch below and
-    # `handle_non_elf_dump`'s own module docstring (it is retired for this
-    # call site, kept defined for its own direct unit tests only). Verified
-    # only via mock-based CLI/unit tests, not a real PE/Mach-O toolchain --
-    # none was available where this was done.
+    # PE/Mach-O slice) -- see the PE/Mach-O branch below. The separate
+    # `cli_dump_non_elf.handle_non_elf_dump` that used to serve this branch
+    # is gone (ADR-063 Track 1 deleted it, and the ELF
+    # `cli_dump_helpers.perform_elf_dump` with it, once neither had a
+    # production caller left). Verified only via mock-based CLI/unit tests,
+    # not a real PE/Mach-O toolchain -- none was available where this was
+    # done.
     _dump_request = build_dump_request(
         so_path=so_path, headers=headers, includes=includes,
         version=version, lang=lang, lang_explicit=lang_explicit,
@@ -665,8 +667,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     # ADR-063 Phase 1: both binary formats now execute through the identical
     # `execute_dump_request` pipeline (`perform_elf_dump`/`handle_non_elf_dump`
-    # are both retired for this call site, kept defined for their own direct
-    # unit tests) via the shared tail `dump_execute.
+    # were retired for this call site then, and deleted outright by ADR-063
+    # Track 1) via the shared tail `dump_execute.
     # execute_and_write_dump_cli_run` -- see that function's own docstring,
     # and `dump_execute.execute_dump_cli_run`'s docstring for the rest of
     # this call's design notes (pdb/depth/embed/legacy-token handling is

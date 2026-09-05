@@ -39,6 +39,29 @@ back — not a second explanation.
 `docs/_meta/topics.yaml` makes this split machine-checkable instead of a
 convention only documented in prose (see "Topic ownership registry" below).
 
+## Product direction versus current capability
+
+The repository-root `vision.md` is the **narrative owner of product
+direction** (registered as the `product-vision` topic; `contribute/vision.md`
+renders it verbatim through `pymdownx.snippets` — edit the root file, never
+the include page). Every other page may carry only a short, linked summary
+of the direction, the same rule as any registered topic.
+
+Two consequences for authoring:
+
+- **Keep claims of current capability separate from direction.** A page
+  describing what abicheck does today must not borrow the vision's future
+  tense; a page describing direction must say *planned*, name the owning
+  ADR/plan, and never present the capability as shipped. The
+  `contribute/adr/` and `contribute/plans/` trees own the status of each
+  workstream — link there rather than restating it (the in-progress-phrase
+  scan above exists because such restatements go stale silently).
+- **Teaching material stays tool-independent.** The educational track
+  (`learn/abi-series/` and its siblings) must remain useful to a reader who
+  never installs abicheck; do not turn it into promotional copy for the
+  vision. Mapping a concept to the exact `ChangeKind`s abicheck emits is
+  pedagogy; advertising a roadmap is not.
+
 ## Layout
 
 `docs/` is organized into five top-level trees plus one machine-only

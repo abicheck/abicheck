@@ -97,5 +97,5 @@ carries the PE/COFF and Mach-O parallels and the
   first check, wire it into CI.
 - [Choose Your Workflow](../start/choose-your-workflow.md) — maps your
   situation to the right command.
-- [Examples & Case Encyclopedia](../reference/examples/index.md) — every
+- [Compatibility Catalog](../reference/examples/index.md) — every
   break in this series as a compilable, runnable fixture.

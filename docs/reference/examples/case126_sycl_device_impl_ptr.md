@@ -145,4 +145,4 @@ trace at all, which `abidiff` cannot see regardless of flags.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: SYCL](by-ecosystem/sycl.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: SYCL](by-ecosystem/sycl.md)._

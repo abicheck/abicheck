@@ -149,4 +149,4 @@ though it doesn't carry abicheck's `VISIBILITY_LEAK`-style framing of the
 - `bad.c`
 - `good.c`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Visibility](by-rule/visibility.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Symbol visibility changed](by-rule/visibility.md)._

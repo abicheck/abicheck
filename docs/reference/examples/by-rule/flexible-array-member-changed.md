@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `flexible-array-member-changed`. [← back to all rules](index.md)
 
+> A trailing flexible array member is added, removed, or resized, changing how consumers must allocate and index the object.
+
 ## Canonical demonstration
 
 - [case70_flexible_array_member_changed](../case70_flexible_array_member_changed.md) — Flexible Array Member Element Type Changed (🔴 BREAKING)

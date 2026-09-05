@@ -145,4 +145,4 @@ place.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Vtable slot count binary only](by-rule/vtable-slot-count-binary-only.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Vtable slot count changed, binary evidence only](by-rule/vtable-slot-count-binary-only.md)._

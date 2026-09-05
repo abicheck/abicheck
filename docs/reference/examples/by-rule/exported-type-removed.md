@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `exported-type-removed`. [← back to all rules](index.md)
 
+> A type the library published is withdrawn, taking its RTTI and vtable exports with it.
+
 ## Canonical demonstration
 
 _No single-library case demonstrates this rule alone yet — referenced only by the scenario(s) below._

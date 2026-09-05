@@ -4,7 +4,7 @@
 
 This package owns immutable report documents, report schemas, grouping, and
 pure output projections. A renderer consumes completed workflow facts and
-returns text/structured data without changing compatibility decisions.
+returns text/structured data without changing compatibility decisions. This layer's product invariant (the local consequence of root `AGENTS.md`'s "Product decisions and change routing") is stated once in `abicheck/AGENTS.md` "Product invariants by layer"; it is not restated here. The detailed report-facing invariants (visible additions, raw-versus-effective totals in every view, qualified uncertainty, global-versus-consumer results, stated scope) live in workstream G of `docs/contribute/plans/vision-api-abi-evolution.md`.
 
 ## Permitted imports
 

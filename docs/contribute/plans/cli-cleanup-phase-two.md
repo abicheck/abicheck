@@ -4552,9 +4552,11 @@ note anticipated. ADR-064's own dedicated slice
 exit-code-scheme config into one typed object additively, without the
 raw-string call sites needing to change shape first — see that ADR's own
 "Landed" note. What genuinely remains, narrower than this note's framing:
-`apply_release_gate_pack` still mirrors, rather than calls,
-`pack_application.apply_to_compare_config`'s identical fold logic,
-deferred to the duplication-and-convergence-assessment plan's own P0
+`apply_release_gate_pack` still mirrored, rather than called,
+`pack_application.apply_to_compare_config`'s identical fold logic —
+closed 2026-09-05 by the duplication-and-convergence-assessment plan's
+track T6 (one shared `policy/gate_pack_fold.fold_gate_pack_severity`),
+leaving only the two callers' different fold targets for that plan's own P0
 `EffectiveGate`/`EffectiveEvaluationConfig` target — not PR G2, a
 different, narrower `ExitDecision`-precedence unification unrelated to
 this fold. Full current status: ADR-063 Track 4's 7B ledger entry,

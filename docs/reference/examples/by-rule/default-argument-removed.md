@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `default-argument-removed`. [← back to all rules](index.md)
 
+> A parameter loses its default, so consumer calls that omitted the argument no longer compile.
+
 ## Canonical demonstration
 
 - [case123_default_argument_removed](../case123_default_argument_removed.md) — Default Argument Removed (🟠 API_BREAK)

@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `no-change`. [← back to all rules](index.md)
 
+> The two releases are ABI- and API-identical -- a control case asserting the tool reports nothing.
+
 ## Canonical demonstration
 
 - [case04_no_change](../case04_no_change.md) — No Change (✅ NO_CHANGE)

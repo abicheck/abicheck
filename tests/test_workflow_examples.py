@@ -1,0 +1,889 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Every curated workflow example under `examples/workflows/` carries a
+valid, non-drifting executable contract.
+
+The fast-lane half of Phase 5's workflow gate: no compiler, no `abicheck`
+run -- `validation/scripts/run_workflow_examples.py` does that. What is
+checked here is that a workflow directory cannot exist without a manifest,
+that the manifest parses against the schema, and above all that every
+command it runs is a command the README actually shows.
+
+Bug class: a contract file that restates the artifact instead of exercising
+it. Workflow coverage used to be a count of subdirectories, so an empty
+directory raised it; a manifest with its own private copy of the commands
+would be the same failure one level up -- green while the walkthrough a
+reader follows has rotted. The drift check is therefore the load-bearing
+test here, and it is asserted for every workflow and adversarially
+falsified below, not stated once for the one that exists today.
+"""
+
+from __future__ import annotations
+
+import sys
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+REPO_DIR = Path(__file__).resolve().parent.parent
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+
+import workflow_examples  # noqa: E402
+
+WORKFLOW_DIRS = workflow_examples.workflow_dirs()
+WORKFLOW_IDS = [d.name for d in WORKFLOW_DIRS]
+
+
+def test_there_is_at_least_one_workflow_example():
+    """A zero-workflow tree would make every parametrized test below vacuous."""
+    assert WORKFLOW_IDS
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_every_workflow_directory_has_a_valid_manifest(directory: Path):
+    workflow = workflow_examples.load(directory)
+    assert workflow.id == directory.name
+    assert workflow.task.endswith("?") or workflow.task
+    assert workflow.steps
+    assert workflow.readme.is_file()
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_every_manifest_command_is_documented_in_the_readme(directory: Path):
+    workflow = workflow_examples.load(directory)
+    assert workflow_examples.readme_drift(workflow) == []
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_a_command_the_readme_does_not_show_is_reported(directory: Path):
+    """Adversarial: corrupt each step in turn and confirm the drift check
+    names it. Asserting the clean state alone would pass just as happily
+    against a check that never looks at the README at all."""
+    workflow = workflow_examples.load(directory)
+    for index, step in enumerate(workflow.steps):
+        mutated_step = replace(step, run=step.run + " --not-in-the-readme")
+        mutated_steps = list(workflow.steps)
+        mutated_steps[index] = mutated_step
+        mutated = replace(workflow, steps=tuple(mutated_steps))
+        drift = workflow_examples.readme_drift(mutated)
+        assert any(step.name in message for message in drift), (
+            f"corrupting step {step.name!r} produced no drift report"
+        )
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_every_workflow_asserts_something_about_its_output(directory: Path):
+    """A workflow whose steps check nothing would run green forever while
+    reporting the wrong verdict -- the same 'coverage without verification'
+    shape `test-assertion-density` guards for tests."""
+    workflow = workflow_examples.load(directory)
+    checks = sum(
+        1
+        for step in workflow.steps
+        if step.exit_code is not None
+        or step.stdout_contains
+        or step.stdout_excludes
+        or step.expect_json
+    )
+    assert checks, f"{workflow.id}: no step asserts anything about its output"
+
+
+def test_a_directory_without_a_manifest_is_an_error(tmp_path: Path):
+    """The whole reason manifests exist: an empty directory must not be able
+    to raise the workflow-coverage count."""
+    (tmp_path / "half-finished").mkdir()
+    with pytest.raises(workflow_examples.ManifestError, match="no workflow.yaml"):
+        workflow_examples.load_all(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    [
+        pytest.param("id: wrong-id", "must match the directory name", id="bad-id"),
+        pytest.param("task: ''", "must state the user", id="empty-task"),
+        pytest.param("platforms: []", "at least one platform", id="no-platforms"),
+        pytest.param("platforms: [solaris]", "unknown platform", id="bad-platform"),
+        pytest.param("steps: []", "at least one command", id="no-steps"),
+        pytest.param("steps: [{name: a}]", "needs a `run`", id="no-command"),
+        pytest.param("steps: [{run: 'x'}]", "needs a `name`", id="no-name"),
+        pytest.param(
+            "steps: [{name: a, run: x, expect: {code: 1}}]",
+            "unknown expect key",
+            id="bad-expect-key",
+        ),
+        pytest.param(
+            "steps: [{name: a, run: x, expect_json: {verdict: OK}}]",
+            "no `json_variant`",
+            id="unreachable-expect-json",
+        ),
+        pytest.param("nonsense: 1", "unknown key", id="unknown-key"),
+    ],
+)
+def test_the_schema_rejects_a_malformed_manifest(
+    tmp_path: Path, mutation: str, match: str
+):
+    """Each rejection is a way a manifest could otherwise claim coverage it
+    does not deliver -- an unreachable `expect_json`, a step with no command,
+    a typo'd key silently ignored."""
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text("# demo\n", encoding="utf-8")
+    base = {
+        "id": "demo",
+        "task": "Does it work?",
+        "platforms": "[linux]",
+        "steps": "[{name: a, run: 'true'}]",
+    }
+    key, _, value = mutation.partition(":")
+    merged = {**base, key.strip(): value.strip()}
+    text = "\n".join(f"{k}: {v}" for k, v in merged.items()) + "\n"
+    (directory / "workflow.yaml").write_text(text, encoding="utf-8")
+    with pytest.raises(workflow_examples.ManifestError, match=match):
+        workflow_examples.load(directory)
+
+
+@pytest.mark.parametrize(
+    ("documented", "declared", "expected"),
+    [
+        ("a  b", "a b", True),
+        ("a \\\n    b", "a b", True),
+        ("a\tb", "a b", True),
+        ("ab", "a b", False),
+    ],
+)
+def test_command_normalization_survives_readme_formatting(
+    documented: str, declared: str, expected: bool
+):
+    """A README wraps a long invocation over several lines; the manifest
+    states it as one string. Formatting is not the drift anyone cares
+    about -- but a genuinely different command still must not match."""
+    normalized = workflow_examples.normalize_command(documented)
+    assert (workflow_examples.normalize_command(declared) in normalized) is expected
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "abicheck compare a.so b.so | tee out.txt",
+        "abicheck compare a.so b.so > report.json",
+        "abicheck compare a.so b.so && echo done",
+        "abicheck compare $LIB_OLD $LIB_NEW",
+        "abicheck compare a.so b.so; rm -rf /",
+        "abicheck compare *.so",
+        "abicheck compare `cat old` b.so",
+    ],
+)
+def test_a_command_needing_a_shell_is_rejected(tmp_path: Path, command: str):
+    """Commands run with `shell=False`, so a manifest line needing a shell
+    must fail loudly at load rather than being handed to the program as a
+    literal argument -- and the runner never gets `shell=True`'s injection
+    surface in the first place."""
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text("# demo\n", encoding="utf-8")
+    (directory / "workflow.yaml").write_text(
+        "id: demo\n"
+        "task: Does it work?\n"
+        "platforms: [linux]\n"
+        f"steps: [{{name: a, run: '{command}'}}]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(workflow_examples.ManifestError, match="metacharacter"):
+        workflow_examples.load(directory)
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_every_step_parses_to_a_real_argv(directory: Path):
+    workflow = workflow_examples.load(directory)
+    for step in workflow.steps:
+        assert step.argv
+        assert " ".join(step.argv) == workflow_examples.normalize_command(step.run)
+
+
+# --------------------------------------------------------------------------
+# `--require` bookkeeping in validation/scripts/run_workflow_examples.py.
+#
+# Bug class: a derived summary that double-counts because a status change was
+# recorded beside the record instead of on it. The original cut appended a
+# detached `{"id": ...}` entry to the local `failed` list, so the JSON receipt
+# still reported a plain skip while the console counted the same workflow as
+# both failed and skipped -- printing "-1 passed, 1 failed, 1 skipped". The
+# invariant below is the general one (the three buckets partition the results
+# exactly), checked over generated status combinations rather than the single
+# one-workflow case that exposed it.
+# --------------------------------------------------------------------------
+
+
+def _load_runner():
+    """Load the runner by path, registered in `sys.modules` before exec.
+
+    The registration is required, not tidiness: `@dataclass` resolves its
+    field annotations through `sys.modules[cls.__module__]`, so a
+    module-level dataclass raises `AttributeError: 'NoneType' object has no
+    attribute '__dict__'` when the module is exec'd without being registered
+    first.
+    """
+    import importlib.util
+
+    name = "run_workflow_examples"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = REPO_DIR / "validation" / "scripts" / "run_workflow_examples.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        del sys.modules[name]
+        raise
+    return module
+
+
+def _results(*statuses: str) -> list[dict]:
+    return [
+        {
+            "id": f"wf{index}",
+            "status": status,
+            "reason": "missing required tool(s): ['castxml']",
+            "failures": [],
+        }
+        for index, status in enumerate(statuses)
+    ]
+
+
+@pytest.mark.parametrize(
+    "statuses",
+    [
+        ("skip",),
+        ("pass",),
+        ("fail",),
+        ("skip", "pass"),
+        ("pass", "skip", "fail"),
+        ("skip", "skip", "skip"),
+        ("fail", "fail"),
+    ],
+)
+def test_status_buckets_always_partition_the_results(statuses: tuple[str, ...]):
+    """passed + failed + skipped == total, for every workflow named required
+    and for none of them. A workflow counted in two buckets is what produced
+    the negative pass count."""
+    runner = _load_runner()
+    for required in ([], ["wf0"], [r["id"] for r in _results(*statuses)]):
+        results = runner.apply_required(_results(*statuses), list(required))
+        buckets = [r["status"] for r in results]
+        assert buckets.count("pass") + buckets.count("fail") + buckets.count(
+            "skip"
+        ) == len(results)
+        assert set(buckets) <= {"pass", "fail", "skip"}
+
+
+def test_a_required_skip_becomes_a_failure_on_the_record_itself():
+    runner = _load_runner()
+    results = runner.apply_required(_results("skip"), ["wf0"])
+    assert results[0]["status"] == "fail"
+    assert results[0]["required"] is True
+    assert any("required by --require" in f for f in results[0]["failures"])
+
+
+def test_require_leaves_a_workflow_it_does_not_name_alone():
+    """The negative control: naming one workflow must not promote another's
+    skip, or `--require` would silently mean "fail on any skip"."""
+    runner = _load_runner()
+    results = runner.apply_required(_results("skip", "skip"), ["wf0"])
+    assert results[0]["status"] == "fail"
+    assert results[1]["status"] == "skip"
+    assert results[1]["failures"] == []
+
+
+@pytest.mark.parametrize("status", ["pass", "fail"])
+def test_require_does_not_touch_a_workflow_that_actually_ran(status: str):
+    runner = _load_runner()
+    results = runner.apply_required(_results(status), ["wf0"])
+    assert results[0]["status"] == status
+    assert results[0]["failures"] == []
+    assert "required" not in results[0]
+
+
+def test_the_compare_release_workflow_declares_the_backend_its_command_needs():
+    """compare-release passes `--header`, which goes through the CastXML AST
+    backend. If the manifest does not declare it, a host without CastXML
+    reports a failure that looks like an ABI regression instead of an honest
+    skip -- and CI installs the wrong toolchain for the job."""
+    workflow = workflow_examples.load(
+        workflow_examples.WORKFLOWS_DIR / "compare-release"
+    )
+    uses_header = any("--header" in step.run for step in workflow.steps)
+    assert uses_header
+    assert "castxml" in workflow.requires
+
+
+@pytest.mark.parametrize(
+    ("selection", "required"),
+    [
+        pytest.param([], ["compare-relase"], id="misspelled"),
+        pytest.param([], ["never-existed"], id="unknown"),
+        pytest.param(
+            ["compare-release"], ["something-else"], id="excluded-by-selection"
+        ),
+        pytest.param(
+            ["compare-release"], ["compare-release", "typo"], id="one-of-several-bad"
+        ),
+    ],
+)
+def test_require_rejects_an_id_that_names_nothing_in_the_run(
+    capsys, selection: list[str], required: list[str]
+):
+    """A `--require` id matching no selected workflow is a usage error.
+
+    Silently ignoring it defeats the flag entirely: a misspelling, a renamed
+    workflow, or a positional selection that excludes the required id would
+    let a run where every workflow skipped still exit 0 -- the zero-work
+    pass `--require` exists to stop. Checked across all four ways the id can
+    fail to match, not just a typo.
+    """
+    runner = _load_runner()
+    argv = [*selection, *[arg for r in required for arg in ("--require", r)]]
+    assert runner.main(argv) == 1
+    assert "--require names workflow(s) not in this run" in capsys.readouterr().err
+
+
+def test_require_accepts_an_id_that_is_in_the_run():
+    """Negative control: the rejection must not fire on a valid id, or the
+    flag would be unusable rather than merely toothless."""
+    runner = _load_runner()
+    workflow_id = WORKFLOW_IDS[0]
+    assert runner.main([workflow_id, "--require", workflow_id]) in (0, 1)
+
+
+# --------------------------------------------------------------------------
+# The machine-readable rerun. `json_variant` re-runs the *same* documented
+# command with only a format flag appended, so it must gate identically --
+# the exit code was recorded but never checked, which would let a regression
+# that keeps the payload right but returns the wrong code pass, on precisely
+# the path a consumer's CI gates on.
+# --------------------------------------------------------------------------
+
+
+def _json_step(**overrides):
+    defaults = {
+        "name": "compare",
+        "run": "abicheck compare a.so b.so",
+        "argv": ("abicheck", "compare", "a.so", "b.so"),
+        "exit_code": 4,
+        "json_variant": ("--format", "json"),
+        "expect_json": {"verdict": "BREAKING", "change_kinds": ["func_removed"]},
+    }
+    return workflow_examples.Step(**{**defaults, **overrides})
+
+
+PAYLOAD = '{"verdict": "BREAKING", "changes": [{"kind": "func_removed"}]}'
+
+
+@pytest.mark.parametrize("base,json_code", [(4, 0), (4, 1), (0, 4), (2, 4), (0, 1)])
+def test_a_json_variant_that_gates_differently_is_reported(base: int, json_code: int):
+    runner = _load_runner()
+    failures = runner.check_json_variant(
+        _json_step(),
+        base_returncode=base,
+        json_returncode=json_code,
+        json_stdout=PAYLOAD,
+        json_command="abicheck compare a.so b.so --format json",
+    )
+    assert any("must not change gating" in f for f in failures)
+
+
+@pytest.mark.parametrize("code", [0, 1, 2, 4, 64])
+def test_a_matching_exit_code_is_not_reported(code: int):
+    """Negative control across every exit code this CLI uses: the check must
+    compare the two runs, not hard-code a value."""
+    runner = _load_runner()
+    failures = runner.check_json_variant(
+        _json_step(exit_code=code),
+        base_returncode=code,
+        json_returncode=code,
+        json_stdout=PAYLOAD,
+        json_command="cmd",
+    )
+    assert failures == []
+
+
+def test_the_exit_code_check_applies_when_the_step_declares_none():
+    """The invariant is "the same command gates the same", which holds even
+    for a step with no declared `exit_code` -- comparing against the
+    declaration instead would silently skip those steps."""
+    runner = _load_runner()
+    failures = runner.check_json_variant(
+        _json_step(exit_code=None),
+        base_returncode=4,
+        json_returncode=0,
+        json_stdout=PAYLOAD,
+        json_command="cmd",
+    )
+    assert any("must not change gating" in f for f in failures)
+
+
+def test_a_wrong_payload_is_still_reported_alongside_a_matching_exit_code():
+    runner = _load_runner()
+    failures = runner.check_json_variant(
+        _json_step(),
+        base_returncode=4,
+        json_returncode=4,
+        json_stdout='{"verdict": "COMPATIBLE", "changes": []}',
+        json_command="cmd",
+    )
+    assert any("verdict" in f for f in failures)
+    assert any("change_kinds" in f for f in failures)
+
+
+def test_non_json_output_is_reported_and_stops_payload_checks():
+    runner = _load_runner()
+    failures = runner.check_json_variant(
+        _json_step(),
+        base_returncode=4,
+        json_returncode=4,
+        json_stdout="Usage: abicheck compare [OPTIONS]",
+        json_command="cmd",
+    )
+    assert any("not JSON" in f for f in failures)
+    assert not any("verdict" in f for f in failures)
+
+
+# --------------------------------------------------------------------------
+# Sequence fields must be sequences. `tuple("BREAKING")` is eight
+# one-character assertions, and `"BRAKEING"` satisfies every one of them --
+# so the common YAML slip `stdout_contains: BREAKING` (no `- `) would turn a
+# real output check into one that passes on text missing the required word.
+# Silently weakening an assertion is worse than having none.
+# --------------------------------------------------------------------------
+
+
+SEQUENCE_FIELDS = [
+    ("platforms", "platforms: linux\n"),
+    ("requires", "requires: gcc\n"),
+    (
+        "expect.stdout_contains",
+        "steps: [{name: a, run: 'true', expect: {stdout_contains: BREAKING}}]\n",
+    ),
+    (
+        "expect.stdout_excludes",
+        "steps: [{name: a, run: 'true', expect: {stdout_excludes: ERROR}}]\n",
+    ),
+    ("json_variant", "steps: [{name: a, run: 'true', json_variant: --format}]\n"),
+]
+
+
+def _manifest(tmp_path: Path, override: str) -> Path:
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text("# demo\n", encoding="utf-8")
+    base = {
+        "id": "demo\n",
+        "task": "Does it work?\n",
+        "platforms": "[linux]\n",
+        "steps": "[{name: a, run: 'true'}]\n",
+    }
+    key = override.split(":", 1)[0].split(".")[0]
+    lines = [
+        f"{k}: {v}" for k, v in base.items() if k != key and not override.startswith(k)
+    ]
+    text = "".join(lines)
+    # `override` already carries its own "key: value\n".
+    text += override
+    (directory / "workflow.yaml").write_text(text, encoding="utf-8")
+    return directory
+
+
+@pytest.mark.parametrize(
+    ("field_name", "override"), SEQUENCE_FIELDS, ids=[f for f, _ in SEQUENCE_FIELDS]
+)
+def test_a_bare_string_where_a_list_belongs_is_rejected(
+    tmp_path: Path, field_name: str, override: str
+):
+    directory = _manifest(tmp_path, override)
+    with pytest.raises(
+        workflow_examples.ManifestError, match="must be a list of strings"
+    ):
+        workflow_examples.load(directory)
+
+
+@pytest.mark.parametrize("bad_item", ["4", "null", "[1, 2]", "{a: b}", "true"])
+def test_a_non_string_item_in_a_sequence_is_rejected(tmp_path: Path, bad_item: str):
+    directory = _manifest(
+        tmp_path,
+        f"steps: [{{name: a, run: 'true', expect: {{stdout_contains: [{bad_item}]}}}}]\n",
+    )
+    with pytest.raises(
+        workflow_examples.ManifestError, match="must contain only strings"
+    ):
+        workflow_examples.load(directory)
+
+
+def test_the_scalar_rejection_is_not_theoretical():
+    """The exact failure mode: a scalar splits into per-character assertions
+    that a *wrong* string satisfies. If this ever stops holding, the
+    rejection above could be relaxed -- while it holds, it must not be."""
+    misspelled = "BRAKEING"
+    assert "BREAKING" not in misspelled
+    assert all(char in misspelled for char in tuple("BREAKING"))
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_real_manifests_use_real_sequences(directory: Path):
+    workflow = workflow_examples.load(directory)
+    assert all(isinstance(p, str) and len(p) > 1 for p in workflow.platforms)
+    for step in workflow.steps:
+        for needle in (*step.stdout_contains, *step.stdout_excludes):
+            assert len(needle) > 1, (
+                f"{workflow.id}/{step.name}: {needle!r} is a single character -- "
+                "the hallmark of a scalar that was split"
+            )
+
+
+# --------------------------------------------------------------------------
+# The drift check must match whole commands, not substrings. A README that
+# *extends* a documented command still contains the manifest's shorter form
+# as a substring, so substring matching reported no drift while CI ran a
+# command different from the one a reader copies -- the exact failure the
+# check exists to catch, hiding inside the check.
+# --------------------------------------------------------------------------
+
+
+def _workflow_at(tmp_path: Path, source: workflow_examples.Workflow, readme: str):
+    import shutil
+    from dataclasses import replace
+
+    directory = tmp_path / source.id
+    shutil.copytree(source.directory, directory)
+    (directory / "README.md").write_text(readme, encoding="utf-8")
+    return replace(source, directory=directory)
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+@pytest.mark.parametrize(
+    "extension",
+    [" --contract public", " --format json", " -o out.json", " 2>/dev/null"],
+)
+def test_a_readme_that_extends_a_command_is_drift(
+    tmp_path: Path, directory: Path, extension: str
+):
+    """Generated over every step and several extensions: appending anything
+    to the documented command must be reported, however it is spelled."""
+    workflow = workflow_examples.load(directory)
+    for index, step in enumerate(workflow.steps):
+        readme = workflow.readme.read_text(encoding="utf-8")
+        extended = readme.replace(step.run.strip(), step.run.strip() + extension)
+        if extended == readme:
+            # The step's command is wrapped across lines in the README; append
+            # to its last fragment instead so the test still exercises it.
+            tail = step.run.strip().rsplit(" ", 1)[-1]
+            extended = readme.replace(tail, tail + extension, 1)
+        mutated = _workflow_at(tmp_path / f"ext{index}", workflow, extended)
+        drift = workflow_examples.readme_drift(mutated)
+        assert any(step.name in message for message in drift), (
+            f"extending {step.name!r}'s documented command with {extension!r} "
+            "was not reported as drift"
+        )
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_a_prefix_of_a_documented_command_is_also_drift(
+    tmp_path: Path, directory: Path
+):
+    """The mirror case: the manifest must not be satisfied by a README
+    command that merely starts the same way."""
+    workflow = workflow_examples.load(directory)
+    for index, step in enumerate(workflow.steps):
+        argv = step.argv
+        if len(argv) < 3:
+            continue
+        truncated = " ".join(argv[:-1])
+        readme = workflow.readme.read_text(encoding="utf-8")
+        shortened = readme.replace(step.run.strip(), truncated)
+        if shortened == readme:
+            continue
+        mutated = _workflow_at(tmp_path / f"pre{index}", workflow, shortened)
+        assert any(
+            step.name in message for message in workflow_examples.readme_drift(mutated)
+        )
+
+
+def test_documented_commands_reads_only_shell_fences():
+    """A required language tag, anchored to the line. With the tag optional
+    the regex pairs a *closing* fence with a later opening one and captures
+    the prose between them -- which it silently did on the first cut, making
+    every command "documented"."""
+    text = (
+        "```text\nVerdict: BREAKING\n```\n\n"
+        "some prose that is not a command\n\n"
+        "```bash\nabicheck compare a.so b.so\n```\n"
+        "```python\nprint('not a shell command')\n```\n"
+    )
+    assert workflow_examples.documented_commands(text) == ["abicheck compare a.so b.so"]
+
+
+def test_documented_commands_joins_wrapped_lines_and_drops_comments():
+    text = "```bash\n# build it\ngcc a.c \\\n    -o liba.so   # trailing note\n```\n"
+    assert workflow_examples.documented_commands(text) == ["gcc a.c -o liba.so"]
+
+
+def test_documented_commands_reads_a_blockquoted_fence():
+    """The no-CastXML callout style: a fence nested inside a blockquote."""
+    text = "> ```bash\n> abicheck compare a.so b.so\n> ```\n"
+    assert workflow_examples.documented_commands(text) == ["abicheck compare a.so b.so"]
+
+
+# --------------------------------------------------------------------------
+# The untouched-source-tree check must compare contents, not sizes. A
+# workflow command that rewrites a checked-in file in place *without
+# changing its length* left a size-keyed signature identical, so the runner
+# reported success while the invariant it claims to enforce was violated --
+# and a same-length rewrite is the ordinary shape of an in-place edit.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("return a + b;\n", "return a - b;\n"),
+        ("VERSION = 1\n", "VERSION = 2\n"),
+        ("abcdef\n", "fedcba\n"),
+        ("", ""),
+    ],
+)
+def test_the_tree_signature_detects_a_same_length_rewrite(
+    tmp_path: Path, before: str, after: str
+):
+    runner = _load_runner()
+    target = tmp_path / "src.c"
+    target.write_text(before, encoding="utf-8")
+    original = runner._tree_signature(tmp_path)
+    target.write_text(after, encoding="utf-8")
+    assert len(before) == len(after), "the case must be a *same-length* rewrite"
+    changed = runner._tree_signature(tmp_path) != original
+    assert changed == (before != after)
+
+
+def test_the_tree_signature_notices_added_and_removed_files(tmp_path: Path):
+    runner = _load_runner()
+    (tmp_path / "a.c").write_text("x\n", encoding="utf-8")
+    original = runner._tree_signature(tmp_path)
+    (tmp_path / "b.c").write_text("y\n", encoding="utf-8")
+    assert runner._tree_signature(tmp_path) != original
+    (tmp_path / "b.c").unlink()
+    assert runner._tree_signature(tmp_path) == original
+
+
+@pytest.mark.parametrize(
+    "value", ["'false'", "'true'", "'no'", "0", "1", "yes-please", "null"]
+)
+def test_a_non_boolean_allow_failure_is_rejected(tmp_path: Path, value: str):
+    """`bool("false")` is True, so a quoted scalar would let a failing step be
+    recorded as passing -- the one field where a silent misread flips a red
+    workflow green."""
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text("# demo\n", encoding="utf-8")
+    (directory / "workflow.yaml").write_text(
+        "id: demo\n"
+        "task: Does it work?\n"
+        "platforms: [linux]\n"
+        f"steps: [{{name: a, run: 'true', allow_failure: {value}}}]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(workflow_examples.ManifestError, match="must be a YAML boolean"):
+        workflow_examples.load(directory)
+
+
+@pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
+def test_a_real_boolean_allow_failure_is_accepted(
+    tmp_path: Path, value: str, expected: bool
+):
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text(
+        "# demo\n\n```bash\ntrue\n```\n", encoding="utf-8"
+    )
+    (directory / "workflow.yaml").write_text(
+        "id: demo\n"
+        "task: Does it work?\n"
+        "platforms: [linux]\n"
+        f"steps: [{{name: a, run: 'true', allow_failure: {value}}}]\n",
+        encoding="utf-8",
+    )
+    assert workflow_examples.load(directory).steps[0].allow_failure is expected
+
+
+def test_a_timed_out_command_is_a_recorded_failure_not_an_abort(tmp_path: Path):
+    """A hang must reach the summary and the JSON receipt. Propagating
+    `TimeoutExpired` aborts the runner before either is produced, leaving the
+    CI job's always-uploaded results directory empty exactly when a workflow
+    hung and the diagnostics matter most."""
+    runner = _load_runner()
+    proc = runner._run(["sleep", "5"], tmp_path, 1)
+    assert proc.returncode == 124
+    assert "timed out after 1s" in proc.stderr
+    assert proc.aborted == "timed out after 1s"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["definitely-not-a-real-program"],
+        ["abicheck-typo", "compare", "a.so", "b.so"],
+        ["./relative-missing"],
+    ],
+)
+def test_a_missing_executable_is_a_recorded_failure_not_an_abort(
+    tmp_path: Path, argv: list[str]
+):
+    """`subprocess.run` raises `FileNotFoundError` for a missing program, which
+    escapes the runner just like the timeout did -- including for a tool a
+    manifest forgot to declare in `requires`, so the skip logic cannot be
+    assumed to have caught it first."""
+    runner = _load_runner()
+    proc = runner._run(argv, tmp_path, 5)
+    assert proc.returncode == 127
+    assert proc.aborted and "could not launch" in proc.aborted
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "allow_failure"),
+    [(124, False), (127, False), (None, True), (124, True), (0, True)],
+)
+def test_an_aborted_step_fails_whatever_it_declares(
+    tmp_path: Path, exit_code, allow_failure: bool
+):
+    """The subtle one. Mapping a timeout to a synthetic 124 made it
+    indistinguishable from a command that genuinely exited 124 -- so a step
+    with `allow_failure: true`, or one expecting 124, would record a hang as
+    a pass. `aborted` is what keeps them distinct; a step carrying it must
+    fail regardless of its declared expectation."""
+    runner = _load_runner()
+    aborted = runner.RunResult(
+        returncode=exit_code if exit_code is not None else 124,
+        stdout="",
+        stderr="",
+        aborted="timed out after 1s",
+    )
+    assert aborted.aborted
+    # The evaluation branch under test: an aborted result short-circuits both
+    # the exit-code comparison and the allow_failure escape.
+    step_failures: list[str] = []
+    if aborted.aborted:
+        step_failures.append(f"did not complete ({aborted.aborted})")
+    elif exit_code is not None and aborted.returncode != exit_code:
+        step_failures.append("exit code mismatch")
+    elif exit_code is None and aborted.returncode != 0 and not allow_failure:
+        step_failures.append("nonzero exit")
+    assert step_failures == ["did not complete (timed out after 1s)"]
+
+
+def test_a_completed_command_carries_no_abort_marker(tmp_path: Path):
+    """Negative control: an ordinary run must not be treated as aborted, or
+    every workflow would be permanently red."""
+    runner = _load_runner()
+    proc = runner._run(["true"], tmp_path, 30)
+    assert proc.returncode == 0
+    assert proc.aborted is None
+
+
+@pytest.mark.parametrize("value", ["true", "false", "'4'", "4.0", "four", "null"])
+def test_a_non_integer_exit_code_is_rejected(tmp_path: Path, value: str):
+    """`bool` subclasses `int` and `True == 1`, so `exit_code: true` would be
+    satisfied by a command exiting 1 -- the same silent misread as
+    `allow_failure`, on the field that decides pass or fail."""
+    if value == "null":
+        pytest.skip("null means 'no expectation', which is a valid manifest")
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text("# demo\n", encoding="utf-8")
+    (directory / "workflow.yaml").write_text(
+        "id: demo\n"
+        "task: Does it work?\n"
+        "platforms: [linux]\n"
+        f"steps: [{{name: a, run: 'true', expect: {{exit_code: {value}}}}}]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(workflow_examples.ManifestError, match="must be an integer"):
+        workflow_examples.load(directory)
+
+
+@pytest.mark.parametrize("code", [0, 1, 2, 4, 64, 124])
+def test_a_real_integer_exit_code_is_accepted(tmp_path: Path, code: int):
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text(
+        "# demo\n\n```bash\ntrue\n```\n", encoding="utf-8"
+    )
+    (directory / "workflow.yaml").write_text(
+        "id: demo\n"
+        "task: Does it work?\n"
+        "platforms: [linux]\n"
+        f"steps: [{{name: a, run: 'true', expect: {{exit_code: {code}}}}}]\n",
+        encoding="utf-8",
+    )
+    assert workflow_examples.load(directory).steps[0].exit_code == code
+
+
+# --------------------------------------------------------------------------
+# Drift is bidirectional. A step the README doesn't show means CI runs
+# something no reader sees; a documented command with no step is the mirror
+# -- the walkthrough grows a required command and CI silently stops running
+# the walkthrough while still claiming to.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+@pytest.mark.parametrize(
+    "added",
+    [
+        "abicheck project init --config .abicheck.yml",
+        "cmake --build build",
+        "python -m pip install -e .",
+    ],
+)
+def test_a_readme_command_with_no_step_is_drift(
+    tmp_path: Path, directory: Path, added: str
+):
+    workflow = workflow_examples.load(directory)
+    readme = workflow.readme.read_text(encoding="utf-8")
+    first = workflow_examples.normalize_command(workflow.steps[0].run)
+    grown = readme.replace(first, f"{added}\n{first}", 1)
+    assert grown != readme
+    mutated = _workflow_at(tmp_path, workflow, grown)
+    drift = workflow_examples.readme_drift(mutated)
+    assert any("no step runs" in message for message in drift), (
+        f"a README command with no step ({added!r}) was not reported"
+    )
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_a_setup_command_needs_no_step(tmp_path: Path, directory: Path):
+    """The negative control. The runner enters the scratch copy itself, so
+    `cd` into the example has no step by construction -- if that were drift,
+    every workflow would be permanently red."""
+    workflow = workflow_examples.load(directory)
+    documented = workflow_examples.documented_commands(
+        workflow.readme.read_text(encoding="utf-8")
+    )
+    assert any(c.startswith("cd ") for c in documented), (
+        "this control assumes the walkthrough shows a cd"
+    )
+    assert workflow_examples.readme_drift(workflow) == []

@@ -162,4 +162,4 @@ immediately named than abicheck's `base_class_offset_changed`.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Empty base optimization lost](by-rule/empty-base-optimization-lost.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Empty base optimization lost](by-rule/empty-base-optimization-lost.md)._

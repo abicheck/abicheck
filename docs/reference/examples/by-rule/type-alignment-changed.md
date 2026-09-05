@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `type-alignment-changed`. [← back to all rules](index.md)
 
+> A type's alignment requirement changes, changing its placement in aggregates and how consumers must allocate it.
+
 ## Canonical demonstration
 
 - [case42_type_alignment_changed](../case42_type_alignment_changed.md) — Type Alignment Changed (standalone alignas) (🔴 BREAKING)

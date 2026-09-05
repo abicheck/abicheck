@@ -6,7 +6,7 @@ This package owns deciding relevance, suppression, classification,
 severity, and gate (exit-code) effect for an already-identified change. It
 answers "does this change matter, and how much" — never "are these two
 declarations the same entity" (that is `compare/`) and never "how is it
-reported" (that is `report/`).
+reported" (that is `report/`). This layer's product invariant (the local consequence of root `AGENTS.md`'s "Product decisions and change routing") is stated once in `abicheck/AGENTS.md` "Product invariants by layer"; it is not restated here.
 
 Most of that behavior still lives in flat root modules that
 `architecture/modules.yaml` lists as this layer's `legacy_paths`. Those stay
@@ -58,6 +58,10 @@ or a CLI flag directly is in the wrong layer.
   shared function instead of independently re-assembling
   `compute_gate_decision`'s arguments from the result. New module, not a
   moved one — no flat shim exists or is needed.
+- `gate_pack_fold.py` — track T6's dependency-free leaf owning the one
+  gate-pack severity fold and the one `"severity"`-iff-active scheme rule
+  (hence `GateOptions`/`ResolvedCompareConfig`'s derived `exit_code_scheme`),
+  shared by `release_gate_options.py` and the flat-root `pack_application.py`.
 - `public_surface.py` / `public_surface_closure.py` — ADR-063 Phase 3 D5's
   public-surface relevance query, split across two sibling leaf modules
   purely to keep each under the 800-line new-file cap (mechanical
@@ -81,13 +85,12 @@ or a CLI flag directly is in the wrong layer.
   (and `export_surface.py`'s own export-domain closure, which reuses
   `_walk_type_closure` verbatim) can depend on this package without a cycle.
   `surface.py` re-exports `PublicSurface` for its existing callers.
-  `resolve_public_surface`/`PublicSurfaceQuery` historically lived directly
-  in `public_surface.py` before this split; a lazy `__getattr__` shim at
-  the bottom of that module (the pattern below) resolves them via
-  `importlib.import_module` from their new homes, so `from abicheck.policy.
-  public_surface import resolve_public_surface, PublicSurfaceQuery` keeps
-  working (Codex review, PR #979) without a static import re-introducing
-  the cycle the split exists to avoid.
+  `resolve_public_surface`/`PublicSurfaceQuery` lived in `public_surface.py`
+  before this split; a lazy `__getattr__` shim at the bottom of that module
+  (the pattern below) resolves them from their new homes, so `from
+  abicheck.policy.public_surface import resolve_public_surface,
+  PublicSurfaceQuery` keeps working (Codex review, PR #979) without a static
+  import re-introducing the cycle the split exists to avoid.
 - `public_surface_query.py` — `PublicSurfaceQuery`, the orchestrator on top
   of the two modules above: the only place in this package that depends on
   *both* `public_surface_closure.py` (the public-domain query) and
@@ -116,9 +119,8 @@ or a CLI flag directly is in the wrong layer.
   have closed (`policy_file -> reclassify -> suppression -> checker_types
   -> policy_file`); now neither module needs to import the other.
   `selectors_namespace_glob.py` holds the fnmatch/regex namespace-glob
-  compilation machinery, split out purely to keep `selectors.py` itself
-  under the 800-line cap below (mechanical extraction, same pattern as
-  `public_surface.py`/`public_surface_closure.py` above).
+  compilation, split out purely to keep `selectors.py` under the 800-line
+  cap (mechanical extraction, same as `public_surface*.py` above).
 - `depth_projection.py` — ADR-063 Phase 8 follow-up: the `--depth`
   *ceiling* half `docs/contribute/known-gaps.md`'s "floor for live
   extraction, not a ceiling for a pre-built snapshot" entry named but did
@@ -130,14 +132,13 @@ or a CLI flag directly is in the wrong layer.
   `binary`/`headers`/`build`/`source` ladder (`evidence_depth.DEPTH_RANK`,
   a `model`-layer leaf, not `compare`). `service_compare_pipeline.
   classify_compare_pair` applies it as a view over what gets classified,
-  right after `workflows.artifact.execute.enforce_requested_depth`
-  confirms the floor — the two functions are deliberately kept separate
-  (floor vs. ceiling), not merged into one. `project_build_source_pack_to_
-  depth()` is the sibling entry point for a `BuildSourcePack` resolved
-  *out-of-band* (an explicit `--old/new-sources`/`--old/new-build-info`
-  pack, not a snapshot's embedded payload) — `cli_compare_helpers.
-  run_compare` is the one caller, since that pack never lives on the
-  snapshot object `project_snapshot_to_depth` itself projects.
+  right after `workflows.artifact.execute.enforce_requested_depth` confirms
+  the floor — deliberately separate functions (floor vs. ceiling), not one.
+  `project_build_source_pack_to_depth()` is the sibling entry point for a
+  `BuildSourcePack` resolved *out-of-band* (an explicit `--old/new-sources`/
+  `--old/new-build-info` pack, not a snapshot's embedded payload) —
+  `cli_compare_helpers.run_compare` is the one caller, since that pack never
+  lives on the snapshot object `project_snapshot_to_depth` projects.
 
 ## Conventions
 

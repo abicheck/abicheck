@@ -186,3 +186,35 @@ tracked as a gap in the Action's baseline-generation path, not yet closed
 here. If you're touching depth-related inputs or `run.sh`'s flag assembly,
 don't assume a successful exit implies the requested depth was achieved;
 check the report's own coverage/degradation fields.
+
+## Product invariants for CI integration
+
+Local consequences of root `AGENTS.md`'s "Product decisions and change
+routing" section for anything that runs abicheck from a workflow:
+
+- **Shared semantics.** Equivalent *resolved* requests produce the same
+  decision whether they came from the Action, a reusable workflow, the
+  CLI, or the Python API; a workflow may add convenience (baseline
+  resolution, PR comments, SARIF upload), never a second gate algorithm.
+  Raw-input resolution still differs by front end today — the CLI and
+  Action discover `.abicheck.yml` and apply `--profile`/`--pack`, a bare
+  typed-API call does not — and full configuration-resolution parity is
+  direction, not a shipped guarantee.
+- **Partial scope is normal.** A matrix cell or a local run checks its own
+  selected target/profile against the matching baseline member; other
+  variants are out of scope, and an expected-but-missing artifact is an
+  incompleteness signal (warn by default, block by configuration), never a
+  fabricated removal.
+- **Trusted baseline selection.** A baseline is chosen by identity and
+  coordinates (`channel × target × profile`, digests), never by a moving
+  "latest" without recording the exact resolved artifact.
+- **Prebuilt consumers are inputs, not builds.** A consumer artifact
+  supplied to a check is used as-is for static inspection; rebuilding or
+  executing it is a separately designed, explicitly opted-in validation
+  mode (ADR-060 remains deferred).
+- **Structured outcomes only.** New decision semantics travel through the
+  typed report/`ExitDecision` fields and Action outputs; never scrape log
+  text to derive a verdict or a gate.
+
+This section does not change the repository's own merge policy, which
+stays as recorded in `.github/AGENTS.md`.

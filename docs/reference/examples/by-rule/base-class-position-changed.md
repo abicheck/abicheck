@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `base-class-position-changed`. [← back to all rules](index.md)
 
+> The order of base classes changes, relocating base subobjects within the derived object and invalidating existing upcasts.
+
 ## Canonical demonstration
 
 - [case60_base_class_position_changed](../case60_base_class_position_changed.md) — Base Class Position Changed (Multiple Inheritance Reorder) (🔴 BREAKING)

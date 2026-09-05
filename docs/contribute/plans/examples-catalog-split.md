@@ -1,6 +1,6 @@
 # Examples/catalog split — taxonomy first, no directory move yet
 
-**Effort:** XL (six phases) · **Status:** Phase 1 implemented (now also distinguishing `operation` from `scenario_kind`); Phase 2 complete (every `rule`-entity case carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded — now split into 2 duplicates and 5 genuine variants via `relation_type`/`relation_axis`, see "What Phase 2 implements" below — and every one of the 30 `scenario`-entity cases now carries `related_rules`); Phase 3 complete (every path resolver in the codebase now routes through `example_catalog.case_dir`); Phase 6 implemented (now reporting duplicate/variant families separately); Phase 5 in progress; Phase 4 **redesigned, not started** — an external review found the original four-subtree target model unsound before any move landed; see "Corrected Phase 4 target model" below for the replacement flat `catalog/cases/` model. See the table below for per-phase detail.
+**Effort:** XL (six phases) · **Status:** Phase 4 is the only phase not started (and is now unblocked -- its target model was redesigned and its operational dependencies enumerated; see "Corrected Phase 4 target model"). Phase 1 implemented (now also distinguishing `operation` from `scenario_kind`); Phase 2 complete (every `rule`-entity case carries a `rule_slug`, seven confirmed duplicate/variant pairs found and recorded — now split into 2 duplicates and 5 genuine variants via `relation_type`/`relation_axis`, see "What Phase 2 implements" below — and every one of the 30 `scenario`-entity cases now carries `related_rules`); Phase 3 complete (every path resolver in the codebase now routes through `example_catalog.case_dir`); Phase 6 implemented (now reporting duplicate/variant families separately); Phase 5 in progress; Phase 4 **redesigned, not started** — an external review found the original four-subtree target model unsound before any move landed; see "Corrected Phase 4 target model" below for the replacement flat `catalog/cases/` model. See the table below for per-phase detail.
 
 ## Problem
 
@@ -215,8 +215,8 @@ A fifth Codex review round pointed at `.github/workflows/test-action.yml` (three
 
 A sixth Codex review round (on the PR that corrected Phase 4's target model, prompted by the corrected `catalog/ground_truth.json` path in the new diagram) found the "Complete" claim above still had two real, unmigrated readers: `benchmark_comparison.py` kept its own hardcoded `_GT_PATH = Path(__file__).parent.parent / "examples" / "ground_truth.json"` module-level constant even though it already imports `example_catalog` and uses `example_catalog.GROUND_TRUTH_PATH` elsewhere in the same file (line 1968) — an inconsistency within one file, not just a missed file; and `gen_repo_facts.py`'s `_example_cases()` read `(ROOT / "examples" / "ground_truth.json")` directly and had never imported `example_catalog` at all (it postdates the original Phase 3 migration pass). Both fixed by routing through `example_catalog.GROUND_TRUTH_PATH`, following the standard sys.path bootstrap guard every other script here uses. Verified: `python scripts/gen_repo_facts.py --check` and `tests/test_generate_benchmark_report.py` both still pass unchanged (behavior-preserving — same path, same content). | — | Make every path resolver in the codebase (`benchmark_comparison.py`, `gen_examples_docs.py`, `check_ai_readiness.py`, the various validators) go through a declarative `catalog.resolve(case_id)` rather than a hard-coded `EXAMPLES_DIR / case_name`, so Phase 4 doesn't require touching every consumer at once. |
 | 4 | **Redesigned, not started** — the original four-subtree target model below was found unsound by an external review before any directory moved (see "Corrected Phase 4 target model" below for the full argument and the replacement model) — physical work is now blocked on this redesign, not merely "not started" | Phase 3 | ~~The physical directory split (`catalog/rules/`, `catalog/patterns/`, `catalog/case-studies/`, `catalog/capabilities/`)~~ — superseded, see below. Also owns: updating the four named "bidirectional directory-sync audit" discovery steps (Phase 3's row above) to walk the corrected target layout instead of one flat root, and updating `case01_symbol_removal`'s literal path in `.github/workflows/test-action.yml`/`test-baseline-rotation.yml`/`test-baseline-publish-e2e.yml` (also Phase 3's row) to wherever that case lands, plus every other operational dependency the redesign section below names (CMake discovery, CI path filters, mutation `also_copy`, generated-doc path templates). |
-| 5 | In progress — `examples/workflows/compare-release/` added (1 of 8): a real, verified `gcc` + `abicheck compare` walkthrough, independent of the `caseNN_*` calibration catalog (see `examples/CLAUDE.md`'s `workflows/` section). Remaining: audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions. | — | Rebuild `examples/` as a small, curated, task-oriented set (compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions). Independent of Phase 4 — the curated set and the calibration catalog are different trees regardless of which one physically moves first. |
-| 6 | Implemented — `scripts/gen_catalog_coverage_report.py` generates `docs/contribute/catalog-coverage.md`, reporting rule/variant/scenario/ecosystem/workflow coverage independently. Workflow coverage is derived from `examples/workflows/`'s real subdirectory count (1 so far, tracking Phase 5's own progress) rather than a static placeholder, so the two phases' status can't go stale against each other. Report-only: no existing gate's case count changed. | — | Split benchmark/coverage reporting into separate rule, variant, scenario, ecosystem, and workflow dimensions instead of one flat case count, per this plan's "stop reporting all cases as semantically equal" motivation above. Depends on Phase 2's `related_rules`/`rule_slug` data (done) but not on Phases 3-5. |
+| 5 | In progress — 1 of 8 workflows, but the **contract is now complete**. `examples/workflows/compare-release/` is a real, verified `gcc` + `abicheck compare` walkthrough independent of the `caseNN_*` calibration catalog, and every workflow now carries a `workflow.yaml` (`scripts/workflow_examples.py`) stating its commands, exit code, output substrings and expected verdict/change kinds. `validation/scripts/run_workflow_examples.py` executes those documented commands in a scratch copy and checks all of it; the `workflow-examples` job in `examples-validation.yml` runs it with `--require compare-release` so the lane cannot pass having run nothing. The load-bearing rule is that every manifest command must appear verbatim in that workflow's own README (`readme_drift`, adversarially falsified per step in `tests/test_workflow_examples.py`) — without it the manifest is a second copy of the walkthrough, free to keep passing against commands the README no longer shows. A workflow directory with no manifest is now a hard error, and Phase 6's workflow-coverage figure counts validated manifests rather than subdirectories, so an empty directory can no longer raise it. Remaining: the seven other workflows (audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions) — each is now "add a directory with a README and a manifest", with the gate already in place. | — | Rebuild `examples/` as a small, curated, task-oriented set (compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions). Independent of Phase 4 — the curated set and the calibration catalog are different trees regardless of which one physically moves first. |
+| 6 | Implemented, and adopted beyond the report itself. `scripts/gen_catalog_coverage_report.py` generates `docs/contribute/catalog-coverage.md`, reporting rule/variant/scenario/ecosystem/workflow coverage independently, with the rule dimension now derived from `scripts/catalog_rule_registry.py`'s join rather than re-derived locally, duplicates reported separately from variants, and the 17 referenced-only rules listed by name rather than folded into one "177 rules" headline. Workflow coverage counts validated `workflow.yaml` manifests. The root `README.md` now states the same breakdown (160 demonstrated rules / 5 variants / 2 duplicates / 30 scenarios / 17 referenced-only) alongside the 197-case figure, with the demonstrated-rule count gated by `check_ai_readiness.py`'s `doc-count-sync` so it cannot drift. **Still flat-count-only:** `docs/reference/tool-comparison.md`'s benchmark tables and `scripts/generate_benchmark_report.py`'s own output — a benchmark measures per-case verdict accuracy, so adding a rule-family accuracy dimension there is a real change to what is measured, not a relabeling. Report-only for gating: no existing gate's case count changed. | — | Split benchmark/coverage reporting into separate rule, variant, scenario, ecosystem, and workflow dimensions instead of one flat case count, per this plan's "stop reporting all cases as semantically equal" motivation above. Depends on Phase 2's `related_rules`/`rule_slug` data (done) but not on Phases 3-5. |
 
 Each phase is its own PR against this plan, not a single follow-up commit —
 Phase 4 in particular touches every consumer that currently assumes
@@ -388,17 +388,44 @@ directly, no directory move required:
   for a flat nav list, matching the existing By Verdict/By Category
   pattern's own small-enumeration-only rule.
 
-**Deliberately still out of scope** (the review's remaining PR 2 items,
-not attempted here): the five bundle cases remain excluded from this
-generator's per-case pages (they use a different ground-truth shape --
-`library_assertions`, not a single `expected` verdict -- and rendering
-them needs its own page shape, a larger change than reusing the taxonomy
-this pass adds); the catalog's own top-level framing ("Examples & Case
-Encyclopedia") is unchanged, not yet renamed to "Compatibility Catalog";
-and `docs/start/first-check.md`/`examples/README.md` still lead with the
-calibration catalog rather than the Phase 5 `compare-release` workflow as
-the primary onboarding path. Each is real, separately-scoped follow-up
-work, not a Phase 3/4 dependency.
+A later pass closed the three items the paragraph here used to list as
+out of scope, and added four more views:
+
+- **All 197 cases are in the public catalog**, bundles included. The
+  exclusion rested on a claim that turned out to be false -- that a bundle
+  case had no single `expected` verdict. Every one carries a cohort-level
+  `expected` and `category: "bundle"`, and three additionally carry
+  per-library `library_assertions`, which the case page now renders as its
+  own table. Removing the exclusion also deleted the whole parallel
+  "unlinked bundle row" path (`RuleFamily.bundle_scenarios`,
+  `_render_group_index`'s `extra_unlinked`, two `_bundle_*` taxonomy
+  scans) that two earlier Codex rounds had patched *around* the exclusion
+  rather than removing it.
+- **Four more generated views**, all from data the taxonomy already
+  carried: `by-scenario/` (scenario kind), `by-operation/` (compare vs.
+  audit), `by-evidence/` (L0-L5 and "not currently detectable"), and
+  `by-language/`. Each is a view over the same cases, never a directory a
+  case lives under -- the same argument that produced the corrected Phase 4
+  model above.
+- **Renamed** from "Examples & Case Encyclopedia" to **Compatibility
+  Catalog**, in the page, the nav, and every doc that linked to it.
+- **Onboarding flipped**: `docs/start/first-check.md` and
+  `examples/README.md` now lead with the `compare-release` workflow and
+  present the 197 cases as the calibration material they are.
+
+**Still out of scope**, and the one navigation dimension the review asked
+for that is genuinely not buildable from today's metadata: a **by-subject**
+view and the **pattern** pages that go with it (e.g. one page grouping
+case74/75/76/77 as "leaked internal types"). Every other dimension above
+is a projection of a field the taxonomy already has; `subjects` is new,
+hand-authored, per-case semantic metadata -- `topics` is derived from the
+change-catalog's own detector-owner split (symbols/types/platform/build/
+source), which is the right partition for a detector author and too coarse
+for a reader (a `NO_CHANGE` control gets `topics: [controls]` and nothing
+else, so a C qualification control is not discoverable beside the
+function-signature cases it belongs with). Adding it means classifying 197
+cases by hand, the same way `RULE_FAMILIES` and `RELATED_RULES` were, and
+is its own pass.
 
 ## Files & surfaces
 
@@ -451,6 +478,70 @@ classification invariants directly — `scenario_kind` is set only for
 entries are non-empty strings. `scripts/gen_catalog_taxonomy.py --check` is
 the equivalent manual/CI drift gate; run either after any
 `ground_truth.json`/case change.
+
+## What is left
+
+Everything below is the complete remaining scope of this plan. Nothing else
+in it is open.
+
+1. **Phase 4 — the physical move.** `examples/case*` →
+   `catalog/cases/case*`, `examples/ground_truth.json` →
+   `catalog/ground_truth.json`, `examples/CMakeLists.txt` →
+   `catalog/CMakeLists.txt` (globbing `cases/case*`), `examples/probes` →
+   `catalog/probes`. The target model and the full list of operational
+   surfaces a real move must update are in "Corrected Phase 4 target model"
+   above — resolver, the four bidirectional directory-sync audits, CMake
+   discovery, every `examples/**` CI path filter, `mutation.yml`'s
+   `also_copy`, the three Action-test workflows' literal
+   `case01_symbol_removal` paths, `gen_examples_docs.py`'s path templates
+   and its `examples/README.md` vs. new `catalog/README.md` split,
+   committed skill-eval/Harbor artifacts, and a repository-wide link
+   migration. This is deliberately last: it is pure churn risk, and every
+   user-facing improvement the plan set out to deliver has now landed
+   without it.
+2. **Phase 5 — seven more workflow examples**: audit a release,
+   multi-library project, evidence depth, build/source evidence, Python
+   API, suppressions, GitHub Actions. The contract, runner, CI job and
+   coverage accounting are all in place, so each is now "add a directory
+   with a README and a `workflow.yaml`". Worth revisiting whether "evidence
+   depth" and "build/source evidence" are one progressive example rather
+   than two nearly identical projects, and grouping the published set
+   (core workflows / advanced analysis / ecosystem / operational recipes)
+   rather than presenting eight peers.
+3. **A by-subject view and the pattern pages that go with it** — the one
+   navigation dimension the review asked for that today's metadata cannot
+   project. See the end of "Taxonomy visibility on the public docs site"
+   for why `topics` is not a substitute and what adding `subjects` costs.
+4. **Benchmark reporting** (`docs/reference/tool-comparison.md`,
+   `scripts/generate_benchmark_report.py`) still reports per-case verdict
+   accuracy only. Adding a rule-family accuracy dimension there changes
+   what is measured, not just how it is labelled, so it is its own change.
+5. **A second semantic dedup pass.** Phase 2 clustered rule cases on their
+   exact `expected_kinds` set and hand-reviewed 13 clusters. That cannot
+   find a pair where one case emits an incidental secondary kind, one uses
+   a generic kind where the other uses a dedicated one, or the source and
+   binary manifestations differ. The seven confirmed pairs are an initial
+   confirmed set, not proof the catalog holds no more duplication — and
+   the canonical rule registry now gives such a pass a vocabulary to work
+   against. **Note the standing restraint before attempting one**: this
+   plan's own "clusters reviewed and deliberately *not* merged" list is
+   longer than its merge list, and `case74`/`75`/`76`/`77` in particular
+   are four distinct mechanisms kept as four rules on purpose.
+6. **Splitting `taxonomy` out of `ground_truth.json`** into its own
+   manifest, so a taxonomy-only edit stops changing the whole-file digest
+   that `scripts/frozen_competitor_results.json` pins the frozen
+   abidiff/ABICC cache to. Recorded in "Files & surfaces" above; it is a
+   shared computation with `tests/validate_examples.py` and
+   `tests/test_example_shards.py`, so it is wider than it looks. Naturally
+   done as part of Phase 4, since both touch the same file's location.
+7. **Making the generator's semantic classification declarative.**
+   `gen_catalog_taxonomy.py` still classifies scenarios by hard-coded case
+   *number* sets (`BUNDLE_SCENARIOS`, `CAPABILITY_SCENARIOS`, the four
+   ecosystem sets). A new oneTBB, SYCL, bundle or capability case is
+   silently classified as a generic rule unless someone remembers to edit
+   the generator. Mechanically-derived fields (languages, artifact shape)
+   should stay generated; the semantic ones belong in the manifest item 6
+   introduces.
 
 ## Out of scope
 

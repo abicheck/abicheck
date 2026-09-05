@@ -45,6 +45,7 @@ from . import stable_abi
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # detects them and re-exports them so the historical
 # ``from abicheck.python_ext import PythonExtMetadata`` spelling keeps resolving.
+from .model.export_index import all_export_names, build_raw_export_index
 from .model.python_facts import (
     PythonExtMetadata as PythonExtMetadata,
 )
@@ -87,15 +88,25 @@ def _is_cpython_dll(name: str) -> bool:
 
 
 def _iter_exported_names(snap: AbiSnapshot) -> list[str]:
-    """All exported symbol names across whichever binary metadata is present."""
-    names: list[str] = []
-    if snap.elf is not None:
-        names.extend(s.name for s in snap.elf.symbols if s.name)
-    if snap.pe is not None:
-        names.extend(e.name for e in snap.pe.exports if e.name)
-    if snap.macho is not None:
-        names.extend(e.name for e in snap.macho.exports if e.name)
-    return names
+    """All exported symbol names across whichever binary metadata is present.
+
+    ADR-063 T7: sources its raw names from
+    ``model.export_index.build_raw_export_index`` + ``all_export_names`` —
+    deliberately unfiltered by ELF default-version status, matching this
+    function's original "every raw table entry" contract (only a
+    ``PyInit_*``/``init<mod>`` pattern match on the result matters to its
+    caller, so no per-alias distinction is needed here). Sorted rather than
+    left in raw table order: ``all_export_names`` returns a ``frozenset``,
+    whose iteration order depends on ``PYTHONHASHSEED``, and
+    ``_detect_init_export`` (this function's one caller) returns the *first*
+    pattern match — when a shared object exports more than one ``PyInit_*``
+    function, an unsorted order would record a different ``module_name``/
+    ``init_symbol`` across runs of the same binary (Codex review).
+    """
+    index = build_raw_export_index(snap)
+    if index is None:
+        return []
+    return sorted(all_export_names(index))
 
 
 def _collect_cpython_imports(snap: AbiSnapshot) -> list[str]:

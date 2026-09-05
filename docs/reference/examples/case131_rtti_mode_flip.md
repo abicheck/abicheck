@@ -121,4 +121,4 @@ build-context layer.
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Rtti mode flip](by-rule/rtti-mode-flip.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: RTTI mode flipped](by-rule/rtti-mode-flip.md)._

@@ -3,8 +3,24 @@
 
 """Equivalence between `pack_application.apply_to_compare_config` (single-
 pair `compare`'s own gate-pack fold) and `policy.release_gate_options
-.apply_release_gate_pack` (the directory/package release fan-out's own
-mirror of that identical logic).
+.apply_release_gate_pack` (the directory/package release fan-out's own).
+
+**Update (2026-09-05): the two no longer contain two copies of the fold.**
+Duplication-and-convergence-assessment track T6 moved the fold rule itself
+into one shared leaf, `policy/gate_pack_fold.fold_gate_pack_severity`, which
+both callers now call -- so what this file guards has narrowed from "two
+independently-reasoned implementations of one algorithm" to "two different
+*shapes* around one shared implementation": `compare` folds onto an
+already-resolved `SeverityConfig`, the release fan-out onto four raw
+optional strings that may all still be `None`. That difference is real and
+deliberate (a release run must keep "no severity setting in effect"
+distinguishable from "the default levels", which a resolved config cannot
+express), so it is still exactly where an outcome disagreement could appear,
+and this property is still what would catch one. The shared primitive's own
+contract is stated separately, as invariants, in
+`tests/test_gate_pack_fold.py`. Collapsing the two *shapes* remains the
+duplication-and-convergence-assessment plan's P0
+`EffectiveGate`/`EffectiveEvaluationConfig` target.
 
 **Why this test exists (ADR-063 Track 4, 7B investigation, 2026-09-03).**
 7B's stated goal is a shared pair-operation executor closing the release
@@ -33,11 +49,13 @@ fold unification is the duplication-and-convergence-assessment plan's own
 P0 `EffectiveGate`/`EffectiveEvaluationConfig` target instead (not attempted
 here -- see ADR-063 Track 4's 7B ledger entry,
 `docs/_meta/one-semantic-pipeline-status.yaml`, for the full account, itself
-corrected on review after this test first landed). Two independently-reasoned implementations of one
-algorithm is exactly this repo's own AGENTS.md "Primitive-level property
-tests" case -- so rather than a risky, out-of-scope rewrite, this test pins
-the two implementations to agree on outcome, so a change to one that
-silently drifts from the other fails here first.
+corrected on review after this test first landed; T6 has since closed the
+fold half of it, per the update at the top of this docstring). Two
+independently-reasoned implementations of one algorithm is exactly this
+repo's own AGENTS.md "Primitive-level property tests" case -- so rather than
+a risky, out-of-scope rewrite, this test pinned the two implementations to
+agree on outcome, so a change to one that silently drifted from the other
+failed here first. It kept doing that job until the shared fold landed.
 
 **Update (2026-09-04): CLI cleanup phase two PR G2 deleted the manual
 `--exit-code-scheme` selector everywhere** (ADR-064's "Decision to encode"),
@@ -55,8 +73,9 @@ gone, `PackManifestError`-rejected at load time, covered by
 input to compare, so it is narrowed to what still applies: given the *same*
 severity preset and the *same* pack-supplied per-category severity levels,
 both fold functions must derive the identical (now purely-derived)
-`exit_code_scheme` and agree on the resulting severity content -- the
-`SeverityConfig` fold logic each still expresses independently (the P0
+`exit_code_scheme` and agree on the resulting severity content -- which
+each still reaches through its own pre-resolution shape, even now that the
+fold rule between those shapes is shared (the P0
 `EffectiveGate`/`EffectiveEvaluationConfig` target's own remaining job to
 unify for real, per the paragraph above).
 """

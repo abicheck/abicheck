@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `class-became-final`. [← back to all rules](index.md)
 
+> A class is marked final, so existing derived classes in consumer code no longer compile.
+
 ## Canonical demonstration
 
 - [case125_class_became_final](../case125_class_became_final.md) — Class Became `final` (🟠 API_BREAK)

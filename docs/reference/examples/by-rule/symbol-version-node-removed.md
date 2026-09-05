@@ -3,6 +3,8 @@
 
 _Canonical rule slug:_ `symbol-version-node-removed`. [← back to all rules](index.md)
 
+> A symbol version node is withdrawn, so existing binaries requesting that version fail to resolve even if the name still exists.
+
 ## Canonical demonstration
 
 - [case65_symbol_version_removed](../case65_symbol_version_removed.md) — Symbol Version Removed (🔴 BREAKING)

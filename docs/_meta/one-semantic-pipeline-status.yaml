@@ -455,10 +455,30 @@ concepts:
       owner for this concept per docs/AGENTS.md's fact-owner/narrative-owner
       split; not reproduced here in full, to avoid the exact
       ledger-vs-plan drift this same PR exists to fix.
+      **2026-09-05, T6 landed:** the raw-string mirror is gone. The fold
+      rule itself now lives once, in policy/gate_pack_fold.py's
+      fold_gate_pack_severity -- a leaf inward of both callers, which is the
+      shape that does not invert policy's permitted-import direction (policy
+      may not import the flat-root pack_application, which is why
+      release_gate_options.py takes a _GatePackApplication Protocol); both
+      apply_release_gate_pack and pack_application.apply_to_compare_config
+      call it. What is deliberately not collapsed is the two callers'
+      different fold *targets* (four raw optional strings before any
+      SeverityConfig exists vs. an already-resolved one) -- a real
+      distinction, since a release run must still separate "no severity
+      setting in effect" from "the default levels" -- which remains the P0
+      EffectiveGate/EffectiveEvaluationConfig target's job.
+      tests/test_gate_pack_fold.py states the shared primitive's contract as
+      invariants; tests/test_release_gate_pack_fold_parity.py now guards the
+      two surrounding shapes rather than two copies of the fold. T6's other
+      half landed with it: GateOptions.exit_code_scheme and
+      ResolvedCompareConfig.exit_code_scheme are derived properties rather
+      than settable fields, so the model can no longer express the
+      scheme-vs-severity disagreement both were already documented as
+      unable to have.
       **Track T8 landed 2026-09-05** (abicheck/abicheck#1071): the raw
-      process-exit/stderr-text reconstruction the 2026-09-05 re-assessment
-      correction above described is retired.
-      _report_compat_verdict/_severity_gate_exit/_coverage_gated/
+      process-exit/stderr-text reconstruction action/run.sh used to carry is
+      retired. _report_compat_verdict/_severity_gate_exit/_coverage_gated/
       _assurance_gated/_severity_gate_categories are JSON-only now
       (run_outcome's structured fields first, the legacy per-field JSON
       next, empty "no signal" otherwise) -- no rendered-markdown/text
@@ -481,8 +501,7 @@ concepts:
       non-JSON `--write` (e.g. `--write text=...`) still leaves those
       floors blind, since the CLI's single `--write` slot means this
       script's own JSON-targeted append always loses to the user's later,
-      non-JSON one. Track T8 is complete; the release fan-out's
-      apply_release_gate_pack raw-string mirror remains open as track T6.
+      non-JSON one. Both track T8 and track T6 are now complete.
   sectioned_storage:
     primitive: complete
     producers: complete

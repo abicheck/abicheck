@@ -56,3 +56,12 @@ severity, or a CLI flag is in the wrong layer.
   not only example tests written through one caller — see the root
   `AGENTS.md`'s "Primitive-level property tests" section for why that
   rule exists and what it has already caught.
+
+## Product invariant (local consequence)
+
+Comparison **finds every change in the selected scope and stops there**: it
+emits the complete observed change set with evidence, and leaves relevance,
+suppression, classification, and gating to `policy/`. A pairing algorithm
+reports *unmatched* with a reason; whether unmatched means *removed*
+requires inventory or selection evidence the workflow supplies. Root
+`AGENTS.md` "Product decisions and change routing" states the rule.
