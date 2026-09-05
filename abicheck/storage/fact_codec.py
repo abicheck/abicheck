@@ -55,6 +55,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
 )
+from .guards import provenance_text
 
 if TYPE_CHECKING:
     pass
@@ -258,7 +259,22 @@ def decode_fact(
         # (unlike `value`/`diagnostics`' own siblings above, whose *absence*
         # can mean something at an older schema version): `producer` was
         # never required for correctness, only ever additional attribution.
-        producer=raw.get("producer"),
+        # Codex review: rejected rather than coerced if not a string, the
+        # same discipline every other provenance-shaped field in this
+        # package already applies (`fact_availability.py`'s own
+        # `producer`/`recipe`/`scope`, `semantic_ir_codec.py`'s entity
+        # `producer`) -- `str(7)` and `str("7")` would otherwise
+        # deserialize identically, letting a malformed/hand-edited
+        # document's producer claim look like real attribution. `None`
+        # (absent key, or an explicit JSON `null`) is the field's own,
+        # legitimate "no attribution recorded" value and is passed through
+        # rather than into `provenance_text`, which rejects non-str
+        # unconditionally and would raise on this legitimate case.
+        producer=(
+            None
+            if raw.get("producer") is None
+            else provenance_text(raw["producer"], "fact producer")
+        ),
     )
 
 

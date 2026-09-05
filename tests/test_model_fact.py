@@ -477,3 +477,14 @@ class TestFactProducer:
         decoded = decode_fact(raw, schema_version=999)
         assert decoded is not None
         assert decoded.producer is None
+
+    def test_a_non_string_producer_is_rejected_not_coerced(self) -> None:
+        """A malformed/hand-edited document's non-string ``producer`` (e.g.
+        an int) must not silently pass through as if it were real
+        attribution -- the same discipline every other provenance-shaped
+        field in `storage/` already applies (Codex review, PR #1075)."""
+        from abicheck.storage.fact_codec import decode_fact
+
+        raw = {"status": "unsupported", "value": None, "diagnostics": [], "producer": 7}
+        with pytest.raises(TypeError):
+            decode_fact(raw, schema_version=999)
