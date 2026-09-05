@@ -738,56 +738,6 @@ def _add_dump_depth_feasibility(
         )
 
 
-def dry_run_build_context_preview(
-    compile_db_path: Path | None,
-    headers: tuple[Path, ...],
-    compile_db_filter: str | None,
-) -> tuple[list[str], bool] | None:
-    """Silent, non-raising sibling of
-    ``cli_helpers_compare._resolve_build_context_flags`` that also returns
-    the derived castxml flags themselves -- ``dump --dry-run``'s
-    :class:`~abicheck.service_dump_pipeline.DumpExecutionOptions` preview
-    (ADR-063 Track T4, "Dump request contract").
-
-    Lives here rather than alongside its sibling in ``cli_helpers_compare.py``
-    (only its own ``_matched_build_context`` core import crosses that
-    boundary -- the same pre-existing ``cli_dump_helpers -> cli_helpers_
-    compare`` edge ``discover_project_config`` already uses below, not a new
-    one) purely to keep that file's own `no_growth` debt entry
-    (``architecture/debt.yaml``) from tripping -- this function's own home
-    is ``render_dump_dry_run``'s module regardless, since it exists only to
-    feed that renderer's own "Execution options" section.
-
-    Same relationship to ``_resolve_build_context_flags`` that
-    ``cli_helpers_compare.dry_run_compile_db_matched`` already has (loading
-    and matching a compile database is cheap, deterministic, read-only
-    resolution, so a dry run may perform it) -- extended to return ``flags``
-    too, since a dry run reporting ``legacy_compile_db_tokens`` needs the
-    actual list, not just the match verdict. Never echoes to stderr and
-    never raises: an unreadable/malformed compile database folds to
-    ``([], False)`` rather than the ``click.ClickException`` the real run
-    would raise -- the same accepted imprecision
-    ``dry_run_compile_db_matched`` already documents for the identical
-    failure shape.
-
-    Returns ``None`` when no compile database was given at all (the ``dump``
-    CLI's dry-run preview reads this as "no legacy compile-db flags to
-    show", the same as an execution that never threads any).
-    """
-    if not compile_db_path:
-        return None
-    from .cli_helpers_compare import _matched_build_context
-    from .errors import AbicheckError
-
-    try:
-        ctx, _entry_count = _matched_build_context(
-            compile_db_path, headers, compile_db_filter
-        )
-        return ctx.to_castxml_flags(), ctx.compile_db_path is not None
-    except (AbicheckError, OSError, ValueError, click.ClickException):
-        return [], False
-
-
 def render_dump_dry_run(
     resolved: ResolvedDumpRequest,
     *,
@@ -924,29 +874,6 @@ def render_dump_dry_run(
         "Configuration and value origins",
         f".abicheck.yml: {cfg_path if cfg_path else '(none found)'}",
     )
-    # ADR-063 Track T4 ("Dump request contract"): render the nine execution
-    # kwargs `execute_dump_request` would receive, when the caller resolved
-    # them (`resolved.execution_options`, a preview for `--dry-run` -- see
-    # `frontends.cli.commands.dump.dump_cmd`'s own attach step). `None`
-    # (never resolved) renders nothing, same as every other optional section
-    # here -- an older caller that built a `ResolvedDumpRequest` without this
-    # field keeps seeing the unchanged report.
-    opts = resolved.execution_options
-    if opts is not None:
-        result.add(
-            "Execution options",
-            f"build config: {opts.build_config}" if opts.build_config else None,
-            f"allow build query: {opts.allow_build_query}",
-            f"legacy compile-db flags: {len(opts.legacy_compile_db_tokens)} "
-            f"derived ({'matched' if opts.legacy_compile_db_matched else 'no match'})"
-            if opts.legacy_compile_db_tokens or opts.legacy_compile_db_matched
-            else None,
-            f"seed collect mode: {opts.seed_collect_mode}"
-            if opts.seed_collect_mode
-            else None,
-            "source frontend from folded context: "
-            f"{opts.source_frontend_from_folded_context}",
-        )
     if output is not None:
         from .errors import SnapshotError
         from .workflows.storage import SnapshotCompression, resolve_write_compression

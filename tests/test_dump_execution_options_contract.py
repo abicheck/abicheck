@@ -160,20 +160,24 @@ class TestExecuteDumpRequestDefaultsToResolvedExecutionOptions:
 
 
 class TestDryRunBuildContextPreview:
-    """``cli_dump_helpers.dry_run_build_context_preview`` -- the
-    silent/non-raising sibling of ``_resolve_build_context_flags`` that also
-    returns the derived flags, used only for ``dump --dry-run``'s
+    """``frontends.cli.dump_build_context_preview.dry_run_build_context_preview``
+    -- the silent/non-raising sibling of ``_resolve_build_context_flags``
+    that also returns the derived flags, used only for ``dump --dry-run``'s
     ``execution_options`` preview."""
 
     def test_none_when_no_compile_db_given(self) -> None:
-        from abicheck.cli_dump_helpers import dry_run_build_context_preview
+        from abicheck.frontends.cli.dump_build_context_preview import (
+            dry_run_build_context_preview,
+        )
 
         assert dry_run_build_context_preview(None, (), None) is None
 
     def test_malformed_compile_db_folds_to_empty_rather_than_raising(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.cli_dump_helpers import dry_run_build_context_preview
+        from abicheck.frontends.cli.dump_build_context_preview import (
+            dry_run_build_context_preview,
+        )
 
         bad_db = tmp_path / "compile_commands.json"
         bad_db.write_text("not json{{{", encoding="utf-8")
@@ -187,8 +191,10 @@ class TestDryRunBuildContextPreview:
         documented "matched, flagless" case, without needing g++/castxml:
         loading and matching a compile database is pure JSON/path
         resolution, no compiler invocation."""
-        from abicheck.cli_dump_helpers import dry_run_build_context_preview
         from abicheck.cli_helpers_compare import _resolve_build_context_flags
+        from abicheck.frontends.cli.dump_build_context_preview import (
+            dry_run_build_context_preview,
+        )
 
         src = tmp_path / "a.cpp"
         src.write_text("int f() { return 1; }\n", encoding="utf-8")
@@ -211,19 +217,32 @@ class TestDryRunBuildContextPreview:
         assert preview == ([], True)
 
 
-class TestRenderDumpDryRunExecutionOptionsSection:
+class TestExecutionOptionsDryRunSection:
+    """``add_execution_options_dry_run_section`` -- the "Execution options"
+    section, appended onto a ``render_dump_dry_run`` result by the caller
+    (``frontends.cli.commands.dump.dump_cmd``) rather than built inline by
+    ``render_dump_dry_run`` itself, since ``cli_dump_helpers.py`` has no
+    line budget left for a new section (``architecture/debt.yaml``)."""
+
     def test_omitted_when_execution_options_not_resolved(self, tmp_path: Path) -> None:
         from abicheck.cli_dump_helpers import render_dump_dry_run
+        from abicheck.frontends.cli.dump_build_context_preview import (
+            add_execution_options_dry_run_section,
+        )
 
         resolved = _minimal_resolved(tmp_path)
         assert resolved.execution_options is None
         result = render_dump_dry_run(resolved, output=None)
+        add_execution_options_dry_run_section(result, resolved)
         assert "Execution options" not in result.sections
 
     def test_shown_when_execution_options_resolved(self, tmp_path: Path) -> None:
         import dataclasses
 
         from abicheck.cli_dump_helpers import render_dump_dry_run
+        from abicheck.frontends.cli.dump_build_context_preview import (
+            add_execution_options_dry_run_section,
+        )
         from abicheck.service_dump_pipeline import DumpExecutionOptions
 
         resolved = _minimal_resolved(tmp_path)
@@ -239,6 +258,7 @@ class TestRenderDumpDryRunExecutionOptionsSection:
             ),
         )
         result = render_dump_dry_run(resolved, output=None)
+        add_execution_options_dry_run_section(result, resolved)
         lines = result.sections["Execution options"]
         rendered = "\n".join(lines)
         assert "allow build query: True" in rendered

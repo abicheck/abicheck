@@ -1875,7 +1875,7 @@ assembling one fresh at `execute_dump_request`'s own call boundary;
 `execute_dump_cli_run`/`execute_and_write_dump_cli_run` no longer take the
 nine values as separate parameters at all — the `dump` CLI
 (`frontends/cli/commands/dump.py`) attaches a dry-run-safe *preview*
-(`cli_dump_helpers.dry_run_build_context_preview`, a new silent/
+(`frontends.cli.dump_build_context_preview.dry_run_build_context_preview`, a new silent/
 non-raising sibling of `_resolve_build_context_flags` that also returns
 the derived legacy compile-db flags) onto its `--dry-run` resolution, and
 the real (raise/echo-capable) values onto the request it actually

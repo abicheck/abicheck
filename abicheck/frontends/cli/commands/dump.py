@@ -555,19 +555,16 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # not already raise -- it raises the same ones from one place.
     _resolved = resolve_dump_request_for_cli(_dump_request)
 
-    # ADR-063 Track T4 ("Dump request contract"): attach a dry-run-safe
-    # *preview* of the nine execution-option values onto the resolved
-    # request, so `dump --dry-run` can render what the real run below would
-    # pass to `execute_dump_request`. `dry_run_build_context_preview` is the
-    # silent, non-raising sibling of `_resolve_build_context_flags` used
-    # below for the real run -- same inputs, so the preview agrees with the
-    # real run except for one accepted imprecision (a malformed compile
-    # database folds to `([], False)` here rather than raising -- see that
-    # function's own docstring). Every other field mirrors a CLI-invariant
-    # value the real run always attaches too (see `execute_dump_cli_run`'s
-    # own docstring), or a value already resolved above.
-    from ....cli_dump_helpers import dry_run_build_context_preview
+    # ADR-063 Track T4: attach a dry-run-safe *preview* of the execution
+    # options onto the resolved request, so `--dry-run` can render what the
+    # real run below would pass to `execute_dump_request` -- see
+    # `dry_run_build_context_preview`'s own docstring for the one accepted
+    # imprecision vs. the real run's `_resolve_build_context_flags`.
     from ....service_dump_pipeline import DumpExecutionOptions
+    from ..dump_build_context_preview import (
+        add_execution_options_dry_run_section,
+        dry_run_build_context_preview,
+    )
 
     _preview_flags, _preview_matched = dry_run_build_context_preview(
         compile_db_path, headers, compile_db_filter
@@ -623,6 +620,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             collect_mode=collect_mode, build_info=build_info,
             build_config=build_config,
         )
+        # ADR-063 Track T4: the execution-options preview attached onto
+        # `_resolved` above, rendered as its own section.
+        add_execution_options_dry_run_section(_dry_result, _resolved)
         emit_dry_run(_dry_result)
 
     # Source-only dump (no binary) for the parallel-baseline flow.
