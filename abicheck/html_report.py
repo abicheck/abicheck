@@ -650,6 +650,18 @@ def build_html_document(
                     else "compatible"
                 ),
                 "compat": _build_compat_problem_data(changed, added, removed),
+                # ADR-067 D3 applies to *every* projection, and the
+                # compatibility layout returned before the native branch's
+                # sole audit construction -- so a fully suppressed comparison
+                # rendered as ABICC-compatible HTML showed no raw total, no
+                # disposition counts and no coverage limitation at all, which
+                # is exactly the "looks clean" this audit exists to prevent
+                # (Codex review). Carried as its own document field rather
+                # than folded into the compat problem tables, so the required
+                # ABICC element ids are untouched.
+                "disposition_audit": compute_disposition_audit(
+                    result, severity_config
+                ).to_dict(),
             }
         )
 

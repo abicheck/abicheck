@@ -148,6 +148,12 @@ def _summary_table_from_mapping(d: Mapping[str, Any]) -> SummaryTableData:
         ),
         disposition_rules=tuple(d.get("disposition_rules") or ()),
         not_evaluated_detectors=tuple(d.get("not_evaluated_detectors") or ()),
+        # Reconstructed like every other audit field. Falling through to the
+        # dataclass default silently restored zero, so a run whose *only*
+        # gate contributor is a policy overlay rendered an irreconcilable
+        # summary -- "1 detected · 1 gating · 1 non gating" with nothing
+        # explaining the difference (Codex review).
+        policy_overlays=int(d.get("policy_overlays") or 0),
     )
 
 
@@ -376,6 +382,53 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
     )
 
 
+def _compat_audit_html(d: Mapping[str, Any]) -> str:
+    """ADR-067 D3's raw-versus-effective statement, for the ABICC layout.
+
+    Rendered *inside* the existing ``Summary`` div and as an ordinary
+    ``table.summary``, so no ABICC element id changes: consumers of this
+    layout key off `Summary`/`Added`/`Removed`/`TypeProblems_*`, and this adds
+    none of those.
+
+    D3 applies to every projection, and this one returned before the native
+    branch's audit was ever built -- so a fully suppressed comparison rendered
+    here showed no raw total, no disposition counts and no coverage
+    limitation, which is exactly the "looks clean" the audit exists to
+    prevent (Codex review).
+    """
+    audit = d.get("disposition_audit") or {}
+    detected = int(audit.get("detected_total") or 0)
+    effective = int(audit.get("effective_total") or 0)
+    overlays = int(audit.get("policy_overlays") or 0)
+    not_evaluated = audit.get("not_evaluated_detectors") or []
+    if not (detected or overlays or not_evaluated):
+        return ""
+    rows = [
+        f"<tr><th>Detected (raw)</th><td>{detected}</td></tr>",
+        f"<tr><th>Effective (gating)</th><td>{effective}</td></tr>",
+    ]
+    for name, count in (audit.get("counts") or {}).items():
+        if count and name != "gating":
+            label = html.escape(str(name).replace("_", " "))
+            rows.append(f"<tr><th>… {label}</th><td>{int(count)}</td></tr>")
+    if overlays:
+        rows.append(f"<tr><th>Policy overlays</th><td>{overlays}</td></tr>")
+    if not_evaluated:
+        names = ", ".join(
+            html.escape(str(det.get("name", ""))) for det in not_evaluated
+        )
+        rows.append(
+            f"<tr><th>Not evaluated</th><td>{len(not_evaluated)} detector(s) "
+            f"— {names}</td></tr>"
+        )
+    body = "\n".join(rows)
+    return f"""
+<h2>Disposition Audit</h2>
+<table class='summary'>
+{body}
+</table>"""
+
+
 def _render_compat_html_document(d: Mapping[str, Any]) -> str:
     h = html.escape
     compat = d["compat"]
@@ -466,6 +519,7 @@ def _render_compat_html_document(d: Mapping[str, Any]) -> str:
 <tr><th>Added Symbols</th><td colspan='3'>{len(added_rows)}</td></tr>
 <tr><th>Removed Symbols</th><td colspan='3'>{len(removed_rows)}</td></tr>
 </table>
+{_compat_audit_html(d)}
 </div>""")
 
     if added_rows:

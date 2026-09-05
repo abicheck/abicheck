@@ -588,3 +588,146 @@ def test_an_audit_without_overlays_says_nothing_about_them() -> None:
         "policy overlay" in line
         for line in render_disposition_audit_comment_lines(audit)
     )
+
+
+class TestEveryHtmlPathCarriesTheAudit:
+    """ADR-067 D3 applies to *every* projection, including the ones a native
+    HTML branch returns before.
+
+    `build_html_document` short-circuits into the ABICC-compatible layout
+    before the native branch's sole audit construction, so a fully suppressed
+    comparison rendered as `--compat-html` showed no raw total, no
+    disposition counts and no coverage limitation at all — the exact "looks
+    clean" the audit exists to prevent. Surveyed across every HTML entry
+    point rather than fixing the one reported.
+    """
+
+    @staticmethod
+    def _suppressed_run():
+        """A comparison whose every finding is withheld by one rule."""
+        from abicheck.checker import compare
+        from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old = AbiSnapshot(library="libfoo", version="1.0")
+        new = AbiSnapshot(library="libfoo", version="2.0")
+        for i in range(3):
+            old.functions.append(
+                Function(
+                    name=f"gone{i}",
+                    mangled=f"_Z4gone{i}v",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                )
+            )
+        rules = SuppressionList(
+            [
+                Suppression(
+                    symbol_pattern=".*",
+                    reason="bulk waiver",
+                    allow_public_break=True,
+                )
+            ]
+        )
+        return compare(old, new, rules)
+
+    @pytest.mark.parametrize("compat_html", [False, True])
+    def test_a_fully_suppressed_run_never_renders_as_clean(self, compat_html):
+        """Both layouts, one assertion: the raw total and the rule reach the
+        page. Parametrized rather than written twice, so a third layout is a
+        row here instead of another silently-missing branch."""
+        from abicheck.html_report import generate_html_report
+
+        result = self._suppressed_run()
+        assert result.changes == [], "the fixture's point: the gate is clean"
+
+        page = generate_html_report(result, compat_html=compat_html)
+        assert "3" in page
+        assert "Detected" in page or "detected" in page, (
+            "the raw total must be stated somewhere on the page"
+        )
+        assert "uppressed" in page
+
+    def test_the_compat_layout_adds_no_abicc_element_ids(self):
+        """The audit is rendered inside the existing `Summary` div and as an
+        ordinary `table.summary`, because ABICC consumers key off this
+        layout's element ids — adding one would be a compatibility break in a
+        report whose whole purpose is drop-in compatibility.
+
+        Compared against the *same layout with no audit to show* rather than
+        a hand-written id list, so the control moves with the template.
+        """
+        import re
+
+        from abicheck.html_report import build_html_document
+
+        def _ids(page: str) -> set[str]:
+            return set(re.findall(r"id='([^']+)'", page)) | set(
+                re.findall(r'id="([^"]+)"', page)
+            )
+
+        from abicheck.report.document import ReportDocument
+        from abicheck.report.render_html_document import render_html_document
+
+        document = build_html_document(self._suppressed_run(), compat_html=True)
+        with_audit = render_html_document(document)
+        # The same document with the audit removed: the exact control, since
+        # every other fact on the page is identical by construction.
+        stripped = dict(document.to_mapping())
+        stripped["disposition_audit"] = {}
+        without = render_html_document(ReportDocument.from_mapping(stripped))
+        assert "Disposition Audit" in with_audit, (
+            "the precondition: this page really does carry the audit"
+        )
+        assert "Disposition Audit" not in without, (
+            "with nothing to state, the section must not appear at all"
+        )
+        assert _ids(with_audit) == _ids(without), (
+            "the audit introduced an element id into the ABICC layout"
+        )
+
+    def test_the_overlay_total_survives_the_html_round_trip(self):
+        """`_summary_table_from_mapping` rebuilt every audit field but this
+        one, silently restoring the dataclass default of zero — so a run
+        whose only gate contributor is a policy overlay rendered an
+        irreconcilable summary with nothing explaining the difference."""
+        from abicheck.report.render_html_document import _summary_table_from_mapping
+
+        mapping = {
+            "rows": [],
+            "total_removed": 0,
+            "total_changed": 0,
+            "total_added": 0,
+            "suppressed_count": 0,
+            "detected_total": 1,
+            "effective_total": 1,
+            "disposition_counts": [("gating", 0), ("non_gating", 1)],
+            "disposition_rules": [],
+            "not_evaluated_detectors": [],
+            "policy_overlays": 1,
+        }
+        assert _summary_table_from_mapping(mapping).policy_overlays == 1
+        # …and every other field still round-trips, so the fix is additive.
+        rebuilt = _summary_table_from_mapping(mapping)
+        assert rebuilt.detected_total == 1 and rebuilt.effective_total == 1
+
+    def test_the_rendered_summary_explains_an_overlay_only_gate(self):
+        """End to end through the renderer: the anomalous shape reaches the
+        page with its explanation, not as an unaccountable difference."""
+        from abicheck.report.render_html import SummaryTableData, render_summary_table
+
+        page = render_summary_table(
+            SummaryTableData(
+                rows=(),
+                total_removed=0,
+                total_changed=0,
+                total_added=0,
+                suppressed_count=0,
+                detected_total=1,
+                effective_total=1,
+                disposition_counts=(("gating", 0), ("non_gating", 1)),
+                policy_overlays=1,
+            )
+        )
+        assert "1 detected" in page and "1 gating" in page
+        assert "policy overlay" in page
