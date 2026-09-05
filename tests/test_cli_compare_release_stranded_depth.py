@@ -167,3 +167,65 @@ class TestBundleFactsOutStrandedLibraryHonoursDepthBinary:
 
         assert code == 0
         assert captured["headers"] == [header]
+
+
+class TestStrandedResolverFallbackIsElfOnly:
+    def test_real_stranded_resolver_marks_the_fallback_snapshot_elf_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ADR-065 D8: the real ``_resolve_stranded_library`` closure inside
+        ``compare_release_cmd`` (not a hand-built test double) must mark its
+        own degrade-on-failure fallback ``elf_only_mode=True`` -- it carries
+        no header/DWARF evidence at all (only ``extraction.
+        parse_elf_metadata``), so every downstream detector that special-
+        cases ``elf_only_mode`` (``diff_symbols.py``, ``diff_types.py``,
+        ``bundle_signature_evidence.py``, ...) must see the same reduced
+        evidence tier every other ELF-only snapshot declares on a later
+        comparison against it -- not silently read it as a fully-dumped
+        snapshot just because ``failure``/``degraded_members`` (a separate,
+        storage-layer marker) says so instead."""
+        from abicheck.serialization import load_bundle_facts
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap(library="libfoo.so"))
+        _write_snap(new_dir / "libfoo.json", _snap(library="libfoo.so"))
+        # Present only on OLD -- write_bundle_facts_out's resolve_stranded_
+        # library callback is what resolves this one.
+        stranded = old_dir / "libbroken.so"
+        stranded.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        def _raise_for_stranded(request: object) -> object:
+            if request.input.path == stranded:  # type: ignore[attr-defined]
+                raise RuntimeError("boom")
+            from abicheck.service_dump_pipeline import (
+                resolve_dump_request as _real,
+            )
+
+            return _real(request)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(
+            "abicheck.service_dump_pipeline.resolve_dump_request",
+            _raise_for_stranded,
+        )
+
+        out_path = tmp_path / "old.bundlefacts.json"
+        # Exit code itself is orthogonal to this test -- an unmatched OLD-
+        # only member under the default `warn` incomplete-scope policy
+        # (ADR-065 D6) reports a clean 0; the point here is what the
+        # persisted stranded snapshot itself declares about its own
+        # evidence tier.
+        _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--bundle-facts-out",
+            str(out_path),
+        )
+
+        facts = load_bundle_facts(out_path)
+        assert facts.degraded_members and "libbroken.so" in facts.degraded_members
+        stranded_snap = facts.per_library_snapshots["libbroken.so"]
+        assert stranded_snap.elf_only_mode is True

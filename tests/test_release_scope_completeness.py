@@ -795,6 +795,11 @@ class TestDegradedStrandedCapture:
             "libcore.so" in msg and "degraded" in msg for msg in result.analysis_errors
         )
 
+    # `test_real_stranded_resolver_marks_the_fallback_snapshot_elf_only`
+    # lives in tests/test_cli_compare_release_stranded_depth.py -- the
+    # existing home for real-`_resolve_stranded_library`-closure tests --
+    # this file has no adoption-debt headroom left for a new CLI-level test.
+
 
 # ---------------------------------------------------------------------------
 # PR comment
