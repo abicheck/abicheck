@@ -373,12 +373,12 @@
     },
     {
       "path": "abicheck/checker_types.py",
-      "baseline_lines": 815,
+      "baseline_lines": 816,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1: CHECK_ID_PATTERN/validate_check_id() extended in lockstep with contracts.py's _CHECK_ID_RE and the JSON schema pattern (this plan's own required three-layer extension) -- reviewed growth, not a routine edit. Raised 810 -> 815 (same phase, Codex review, fresh evidence): fixed the environment_id group's charset to require an initial alphanumeric character (matching build_check_id's own validate_identifier(), which already enforced it -- the public CHECK_ID_PATTERN validator had drifted more permissive than the canonical constructor), and expanded the header comment explaining why this module's pattern is no longer byte-identical to the published JSON Schema's own ECMAScript-compatible pattern (Python-only \\\\Z vs. portable $(?!\\\\n)).",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised for G42 phase 1: CHECK_ID_PATTERN/validate_check_id() extended in lockstep with contracts.py's _CHECK_ID_RE and the JSON schema pattern (this plan's own required three-layer extension) -- reviewed growth, not a routine edit. Raised 810 -> 815 (same phase, Codex review, fresh evidence): fixed the environment_id group's charset to require an initial alphanumeric character (matching build_check_id's own validate_identifier(), which already enforced it -- the public CHECK_ID_PATTERN validator had drifted more permissive than the canonical constructor), and expanded the header comment explaining why this module's pattern is no longer byte-identical to the published JSON Schema's own ECMAScript-compatible pattern (Python-only \\\\Z vs. portable $(?!\\\\n)). Raised 815 -> 816 (ADR-063 Track T3, Codex review, PR #1078, seventeenth round): added `Change.disambiguator` (one field) so a post-processing dedup key can distinguish two genuine ODR/multi-TU occurrences that legitimately share one `entity_id` -- `entity_id` alone cannot, since `OccurrenceId.disambiguator` is what carries that distinction.",
       "review_by": "2026-11-30"
     },
     {
@@ -633,12 +633,12 @@
     },
     {
       "path": "abicheck/diff_filtering.py",
-      "baseline_lines": 1785,
+      "baseline_lines": 1793,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1785 -> 1793 (ADR-063 Track T3, Codex review, PR #1078, sixteenth/seventeenth rounds): `_dedup_exact`'s key was too weak -- (kind, description) alone silently collapsed distinct, independently-provable occurrence-level findings (compare.typedefs/compare.constants's own colliding-group removals/additions) sharing identical description text. Strengthened to also include symbol, old_value/new_value (via the existing compare.dedup_key.hashable_value), entity_id, and disambiguator (Change's own new field, carrying OccurrenceId.disambiguator -- entity_id alone cannot distinguish two genuine ODR/multi-TU occurrences sharing one identity).",
       "review_by": "2026-11-30"
     },
     {

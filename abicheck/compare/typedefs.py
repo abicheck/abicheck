@@ -63,6 +63,7 @@ from ..model.semantic_ir_legacy_adapter import (
     SYNTHETIC_IDENTITY_EXTRA,
     legacy_typedef_ir,
     producer_entity_id,
+    producer_occurrence_disambiguator,
     render_display_name_or_leaf,
 )
 
@@ -303,6 +304,9 @@ def diff_typedefs(
                             name=bare_alias,
                             old_value=_underlying(old_index, rotated_id),
                             entity_id=producer_entity_id(rotated_id.entity_id),
+                            disambiguator=producer_occurrence_disambiguator(
+                                rotated_id
+                            ),
                         )
                     )
                 continue
@@ -320,6 +324,9 @@ def diff_typedefs(
                         name=bare_alias,
                         old_value=_underlying(old_index, removed_id),
                         entity_id=producer_entity_id(removed_id.entity_id),
+                        disambiguator=producer_occurrence_disambiguator(
+                            removed_id
+                        ),
                         description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                     )
                 )
@@ -376,6 +383,9 @@ def diff_typedefs(
                     old_value=old_type,
                     new_value=new_type,
                     entity_id=producer_entity_id(shared_id.entity_id),
+                    disambiguator=producer_occurrence_disambiguator(
+                        shared_id
+                    ),
                     description=(
                         f"Typedef base type changed: {bare_alias}{qualified_suffix}"
                     ),
@@ -438,6 +448,11 @@ def diff_typedefs(
                     new_value=new_type,
                     entity_id=producer_entity_id(old_id.entity_id)
                     or producer_entity_id(new_id.entity_id),
+                    disambiguator=(
+                        producer_occurrence_disambiguator(old_id)
+                        if producer_entity_id(old_id.entity_id) is not None
+                        else producer_occurrence_disambiguator(new_id)
+                    ),
                     description=(
                         f"Typedef base type changed: {bare_alias}{qualified_suffix}"
                     ),
@@ -454,6 +469,9 @@ def diff_typedefs(
                     name=bare_alias,
                     old_value=leftover_old_value,
                     entity_id=producer_entity_id(leftover_old_id.entity_id),
+                    disambiguator=producer_occurrence_disambiguator(
+                        leftover_old_id
+                    ),
                     description=f"Typedef removed: {bare_alias}{qualified_suffix}",
                 )
             )

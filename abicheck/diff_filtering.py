@@ -1338,7 +1338,7 @@ def _filter_reserved_field_renames(changes: list[Change]) -> list[Change]:
 
 def _dedup_exact(changes: list[Change]) -> list[Change]:
     """Pass 1: collapse entries with the same (kind, description, symbol,
-    old_value, new_value, entity_id).
+    old_value, new_value, entity_id, disambiguator).
 
     **Not just (kind, description)** (Codex review, PR #1078, sixteenth
     round): `compare.typedefs`/`compare.constants`'s occurrence-level
@@ -1352,8 +1352,16 @@ def _dedup_exact(changes: list[Change]) -> list[Change]:
     findings). `old_value`/`new_value` go through `hashable_value` since
     they are not always hashable scalars (`diff_python.py` stores lists);
     `entity_id` uses the compare-time `EntityId`'s own `.key` when a
-    producer set one (`None` for a producer that doesn't, which degrades
-    this key to exactly the previous one plus the two value fields)."""
+    producer set one (`None` for a producer that doesn't, degrading this key
+    to exactly the previous one plus the two value fields).
+
+    **`entity_id` alone still isn't enough** (Codex review, PR #1078,
+    seventeenth round): two genuine ODR/multi-TU occurrences legitimately
+    share one `EntityId`, distinguished only by `OccurrenceId.disambiguator`
+    -- if both are removed with the same value, `entity_id.key` alone still
+    collapses them. `Change.disambiguator` carries that value (`None` for a
+    producer that predates occurrence-level identity), closing the residual
+    gap the sixteenth round's own fix left open."""
     result: list[Change] = []
     seen: set[tuple[object, ...]] = set()
     for c in changes:
@@ -1364,6 +1372,7 @@ def _dedup_exact(changes: list[Change]) -> list[Change]:
             hashable_value(c.old_value),
             hashable_value(c.new_value),
             c.entity_id.key if c.entity_id is not None else None,
+            c.disambiguator,
         )
         if key in seen:
             continue

@@ -57,6 +57,7 @@ from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
     legacy_constant_ir,
     producer_entity_id,
+    producer_occurrence_disambiguator,
     render_display_name_or_leaf,
 )
 
@@ -371,6 +372,9 @@ def diff_constants(
                         name=name,
                         old_value=old_value,
                         entity_id=producer_entity_id(old_id.entity_id),
+                        disambiguator=producer_occurrence_disambiguator(
+                            old_id
+                        ),
                     )
                 )
             continue
@@ -394,6 +398,11 @@ def diff_constants(
                     new_value=new_val,
                     entity_id=producer_entity_id(old_ids[0].entity_id)
                     or producer_entity_id(new_ids[0].entity_id),
+                    disambiguator=(
+                        producer_occurrence_disambiguator(old_ids[0])
+                        if producer_entity_id(old_ids[0].entity_id) is not None
+                        else producer_occurrence_disambiguator(new_ids[0])
+                    ),
                 )
             )
             continue
@@ -455,6 +464,9 @@ def diff_constants(
                     old_value=old_val,
                     new_value=new_val,
                     entity_id=producer_entity_id(shared_id.entity_id),
+                    disambiguator=producer_occurrence_disambiguator(
+                        shared_id
+                    ),
                 )
             )
         # A colliding group on at least one side (Codex review, PR #1078,
@@ -559,6 +571,11 @@ def diff_constants(
                         new_value=new_val,
                         entity_id=producer_entity_id(removed_id.entity_id)
                         or producer_entity_id(added_id.entity_id),
+                        disambiguator=(
+                            producer_occurrence_disambiguator(removed_id)
+                            if producer_entity_id(removed_id.entity_id) is not None
+                            else producer_occurrence_disambiguator(added_id)
+                        ),
                     )
                 )
         for leftover_old_value, leftover_old_id in removed_occurrences:
@@ -569,6 +586,9 @@ def diff_constants(
                     name=name,
                     old_value=_unresolved_to_none(leftover_old_value),
                     entity_id=producer_entity_id(leftover_old_id.entity_id),
+                    disambiguator=producer_occurrence_disambiguator(
+                        leftover_old_id
+                    ),
                 )
             )
         for leftover_new_value, leftover_new_id in added_occurrences:
@@ -579,6 +599,9 @@ def diff_constants(
                     name=name,
                     new_value=_unresolved_to_none(leftover_new_value),
                     entity_id=producer_entity_id(leftover_new_id.entity_id),
+                    disambiguator=producer_occurrence_disambiguator(
+                        leftover_new_id
+                    ),
                 )
             )
 
@@ -606,6 +629,9 @@ def diff_constants(
                     name=name,
                     new_value=new_value,
                     entity_id=producer_entity_id(new_id.entity_id),
+                    disambiguator=producer_occurrence_disambiguator(
+                        new_id
+                    ),
                 )
             )
     return changes

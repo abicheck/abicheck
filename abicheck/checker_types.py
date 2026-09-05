@@ -398,6 +398,7 @@ class Change:
     # findings stay equal regardless of identity coverage (Codex review).
     # Same field(kw_only=True)-appended-last convention as evidence_provenance.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+    disambiguator: str | None = field(default=None, kw_only=True, compare=False)
 
 
 @dataclass

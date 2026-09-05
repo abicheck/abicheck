@@ -41,13 +41,16 @@ from abicheck.diff_filtering import _dedup_exact
 from abicheck.model.identity import Namespace, entity_id_for_typedef
 
 
-def _removed(*, symbol: str, old_value: object, entity_id=None) -> Change:
+def _removed(
+    *, symbol: str, old_value: object, entity_id=None, disambiguator=None
+) -> Change:
     return Change(
         kind=ChangeKind.TYPEDEF_REMOVED,
         symbol=symbol,
         description=f"Typedef removed: {symbol}",
         old_value=old_value,
         entity_id=entity_id,
+        disambiguator=disambiguator,
     )
 
 
@@ -103,3 +106,38 @@ class TestDedupExactDistinguishesCollidingOccurrences:
         ]
         result = _dedup_exact(changes)
         assert len(result) == 2
+
+
+class TestDedupExactDistinguishesOccurrenceDisambiguators:
+    """Regression coverage for Codex review, PR #1078, seventeenth round:
+    two genuine ODR/multi-TU occurrences legitimately share one `entity_id`
+    (`OccurrenceId.disambiguator` is what tells them apart) -- the sixteenth
+    round's own `entity_id`-based fix alone still collapsed them when both
+    carried the same value.
+    """
+
+    def test_two_occurrences_sharing_entity_id_with_different_disambiguators_both_survive(
+        self,
+    ) -> None:
+        eid = entity_id_for_typedef((Namespace("a"),), "Alias")
+        changes = [
+            _removed(
+                symbol="Alias", old_value="int", entity_id=eid, disambiguator="tu-a"
+            ),
+            _removed(
+                symbol="Alias", old_value="int", entity_id=eid, disambiguator="tu-b"
+            ),
+        ]
+        result = _dedup_exact(changes)
+        assert len(result) == 2
+
+    def test_a_genuine_duplicate_with_no_disambiguator_still_collapses(self) -> None:
+        """The common case (no occurrence-level identity at all, both
+        `None`) is unaffected -- still a genuine duplicate."""
+        eid = entity_id_for_typedef((Namespace("a"),), "Alias")
+        changes = [
+            _removed(symbol="Alias", old_value="int", entity_id=eid),
+            _removed(symbol="Alias", old_value="int", entity_id=eid),
+        ]
+        result = _dedup_exact(changes)
+        assert len(result) == 1

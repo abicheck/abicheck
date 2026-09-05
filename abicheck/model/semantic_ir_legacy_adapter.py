@@ -115,6 +115,7 @@ __all__ = [
     "legacy_constant_ir",
     "legacy_typedef_ir",
     "producer_entity_id",
+    "producer_occurrence_disambiguator",
     "render_display_name",
     "render_display_name_or_leaf",
 ]
@@ -212,6 +213,20 @@ def producer_entity_id(entity_id: EntityId) -> EntityId | None:
     if tuple(entity_id.extra) == SYNTHETIC_IDENTITY_EXTRA:
         return None
     return entity_id
+
+
+def producer_occurrence_disambiguator(occurrence_id: OccurrenceId) -> str | None:
+    """*occurrence_id*'s own disambiguator for ``Change.disambiguator``, or
+    ``None`` when it carries none or its ``entity_id`` is synthetic (Codex
+    review, PR #1078, seventeenth round) -- ``entity_id`` alone cannot
+    distinguish two genuine ODR/multi-TU occurrences that legitimately
+    share one identity, which is exactly what ``OccurrenceId.disambiguator``
+    exists for. An empty disambiguator normalizes to ``None`` here, matching
+    ``OccurrenceId``'s own convention; a synthetic ``entity_id`` yields
+    ``None`` too, mirroring :func:`producer_entity_id`."""
+    if producer_entity_id(occurrence_id.entity_id) is None:
+        return None
+    return occurrence_id.disambiguator or None
 
 
 def _synthetic_entity_id(kind: EntityKind, display_name: str) -> EntityId:
@@ -362,7 +377,9 @@ def _assert_sidecar_identity_consistent(
     ``SemanticIR`` (this cohort's sole comparison-time source since T3)
     would see nothing for it, silently masking a real removal against any
     other snapshot that also lacks it. The one-way check above catches a
-    *wrong* id; this direction catches a *missing* one.
+    *wrong* id; this direction catches a *missing* one -- but only when
+    SemanticIR resolves *some* occurrence of `kind`; see this direction's
+    own gate below for why a producer that resolves none at all is exempt.
     """
     index = SemanticIRIndex(snapshot.semantic_ir) if snapshot.semantic_ir else None
     if index is None:
@@ -385,19 +402,31 @@ def _assert_sidecar_identity_consistent(
                 "can no longer be silently resolved by falling back to a "
                 "legacy projection)"
             )
-    for rendered, sidecar_id in sidecar.items():
-        if rendered not in by_rendered:
-            raise SemanticIrAuthorityError(
-                f"{family} {rendered!r}: the snapshot's own "
-                f"{family}_entity_ids sidecar records entity_id "
-                f"{sidecar_id!r} for this name, but SemanticIR has no "
-                "occurrence rendering to it at all -- the producer's two "
-                "identity representations disagree on whether this "
-                "declaration exists (ADR-063 Track T3: SemanticIR is the "
-                "sole comparison-time source for this cohort, so a "
-                "declaration the sidecar names but SemanticIR omits would "
-                "silently vanish from comparison)"
-            )
+    # Skipped entirely when SemanticIR has *no* occurrence of `kind` at all
+    # (Codex review, PR #1078, seventeenth round): a v38-v41 snapshot
+    # written between the identity-resolution slice and the *normalization*
+    # slice for this kind (see this module's own account of the third vs.
+    # fourth slice) legitimately carries a populated sidecar with zero
+    # matching SemanticIR occurrences -- indistinguishable, from stored data
+    # alone, from a snapshot that genuinely has none. Raising here would
+    # reject a real, valid historical snapshot as corrupt; every occurrence
+    # of `kind` is written from the same parse pass, so as soon as the
+    # producer resolves even one, a *specific* name's own absence is a real
+    # disagreement, not this ambiguity.
+    if by_rendered:
+        for rendered, sidecar_id in sidecar.items():
+            if rendered not in by_rendered:
+                raise SemanticIrAuthorityError(
+                    f"{family} {rendered!r}: the snapshot's own "
+                    f"{family}_entity_ids sidecar records entity_id "
+                    f"{sidecar_id!r} for this name, but SemanticIR has no "
+                    "occurrence rendering to it at all -- the producer's two "
+                    "identity representations disagree on whether this "
+                    "declaration exists (ADR-063 Track T3: SemanticIR is the "
+                    "sole comparison-time source for this cohort, so a "
+                    "declaration the sidecar names but SemanticIR omits would "
+                    "silently vanish from comparison)"
+                )
 
 
 def assert_typedef_ir_consistent(snapshot: AbiSnapshot) -> None:

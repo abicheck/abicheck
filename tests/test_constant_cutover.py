@@ -1141,3 +1141,37 @@ class TestWholeGroupRemovalSurvivesPostProcessingDedup:
         assert {c.old_value for c in changes} == {"1"}
         deduped = _dedup_exact(changes)
         assert len(deduped) == 2
+
+
+class TestOdrDuplicateRemovalsSurviveDedupExact:
+    """Regression coverage for Codex review, PR #1078, seventeenth round --
+    mirrors ``tests.test_typedef_cutover.
+    TestOdrDuplicateRemovalsSurviveDedupExact`` exactly; see that class's
+    own docstring for the full account.
+    """
+
+    def test_two_odr_duplicate_removals_with_the_same_value_both_survive(
+        self,
+    ) -> None:
+        from abicheck.diff_filtering import _dedup_exact
+
+        eid = entity_id_for_constant((Namespace("ns"),), "X")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("1")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 2
+        assert {c.old_value for c in changes} == {"1"}
+        assert {c.entity_id for c in changes} == {eid}
+        assert {c.disambiguator for c in changes} == {"tu-a", "tu-b"}
+        deduped = _dedup_exact(changes)
+        assert len(deduped) == 2

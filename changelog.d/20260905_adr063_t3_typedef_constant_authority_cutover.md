@@ -341,3 +341,30 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   `entity_id` degrades to exactly the previous key plus the two now-included
   value fields, so this is additive rather than a behavior change for any
   detector that predates entity identity.
+
+- **A dedup key built from `entity_id` alone still collapsed two genuine
+  ODR/multi-TU occurrences.** The sixteenth round's own `_dedup_exact` fix
+  used `entity_id.key` to distinguish colliding findings, but two occurrences
+  legitimately share one `EntityId` -- `OccurrenceId.disambiguator` is what
+  tells them apart -- so removing both with the same value still collapsed
+  them to one (Codex review, PR #1078, seventeenth round). `Change` gains a
+  new `disambiguator` field, populated by `compare.typedefs`/
+  `compare.constants` via the new `model.semantic_ir_legacy_adapter.
+  producer_occurrence_disambiguator` (mirroring `producer_entity_id`'s own
+  synthetic-vs-real gate), and `_dedup_exact`'s key now includes it too --
+  `None` for a producer that predates occurrence-level identity, which
+  degrades this key to exactly the sixteenth round's own.
+- **A stored snapshot written between two normalizer slices for the same
+  entity kind is no longer rejected as corrupt.** `_assert_sidecar_identity_
+  consistent`'s reverse-direction check (a sidecar entry with no matching
+  `SemanticIR` occurrence) used to fire unconditionally, but a v38-v41
+  snapshot written after the identity-resolution slice for a kind (which
+  always populates its sidecar) and before that kind's own *normalization*
+  slice (which populates matching `SemanticIR` occurrences) legitimately has
+  a populated sidecar with zero matching occurrences -- indistinguishable,
+  from stored data alone, from a snapshot that genuinely has none of that
+  kind (Codex review, PR #1078, seventeenth round). The check now only runs
+  this direction when `SemanticIR` resolves *some* occurrence of the kind in
+  question -- every occurrence of a kind is written from the same parse
+  pass, so a producer that resolves even one has no such ambiguity left, and
+  a specific missing name is then a real disagreement, not this gap.

@@ -719,6 +719,28 @@ class TestConstructionTimeConsistency:
                 },
             )
 
+    def test_a_populated_sidecar_with_zero_matching_kind_occurrences_is_not_a_failure(
+        self,
+    ) -> None:
+        """Codex review, PR #1078, seventeenth round: a v38-v41 snapshot
+        written between the identity-resolution slice (Phase 2, which
+        always populates ``constant_entity_ids``) and the *normalization*
+        slice for constants (which populates ``SemanticIR`` occurrences for
+        them) legitimately has a populated ``constant_entity_ids`` sidecar
+        while ``SemanticIR`` carries zero constant occurrences at all --
+        indistinguishable, from stored data alone, from a snapshot that
+        genuinely has none. This must construct cleanly rather than being
+        rejected as corrupt: the reverse-direction check only fires once
+        ``SemanticIR`` resolves *some* occurrence of the kind in question,
+        which it never does here for constants (only for typedefs)."""
+        typedef_eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        constant_eid = entity_id_for_constant((Namespace("ns"),), "K")
+        snap = _snap(
+            semantic_ir=_typedef_ir({typedef_eid: "int"}),
+            constant_entity_ids={"ns::K": constant_eid},
+        )
+        assert snap.semantic_ir is not None
+
     def test_the_constant_family_gets_the_identical_check(self) -> None:
         import pytest
 

@@ -830,3 +830,41 @@ class TestWholeGroupRemovalSurvivesPostProcessingDedup:
         assert {c.old_value for c in changes} == {"int"}
         deduped = _dedup_exact(changes)
         assert len(deduped) == 2
+
+
+class TestOdrDuplicateRemovalsSurviveDedupExact:
+    """Regression coverage for Codex review, PR #1078, seventeenth round:
+    the sixteenth round's own `entity_id`-based `_dedup_exact` fix still
+    collapsed two genuine ODR/multi-TU occurrences that legitimately share
+    one `EntityId` (distinguished only by `OccurrenceId.disambiguator`) when
+    both were removed with the same value -- `entity_id.key` alone cannot
+    tell them apart. `Change.disambiguator` closes that residual gap.
+    """
+
+    def test_two_odr_duplicate_removals_with_the_same_value_both_survive(
+        self,
+    ) -> None:
+        from abicheck.diff_filtering import _dedup_exact
+
+        eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(eid, "tu-a"): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                    OccurrenceId(eid, "tu-b"): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    ),
+                }
+            )
+        )
+        changes = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert len(changes) == 2
+        assert {c.old_value for c in changes} == {"int"}
+        # entity_id alone is identical for both -- only `disambiguator`
+        # distinguishes them.
+        assert {c.entity_id for c in changes} == {eid}
+        assert {c.disambiguator for c in changes} == {"tu-a", "tu-b"}
+        deduped = _dedup_exact(changes)
+        assert len(deduped) == 2
