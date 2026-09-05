@@ -1863,19 +1863,33 @@ the PR that landed this slice, correctly, caught an earlier draft of this
 row overclaiming):** `execute_dump_request`'s own nine keyword parameters
 are folded into one typed `service_dump_pipeline.DumpExecutionOptions`,
 passed as a single `options=` argument — that part of item 1 is done.
-**Not done**, and still fully open: `DumpExecutionOptions` is not a field
-on `DumpRequest` or `ResolvedDumpRequest` — it is assembled at the
-`execute_dump_request` call boundary itself
-(`frontends/cli/dump_execute.py`'s `execute_dump_cli_run`, which still
-takes the nine values as its own separate parameters and only builds the
-typed object immediately before calling `execute_dump_request`). So the
-*resolved plan* `dump --dry-run` renders from still cannot represent any of
-these nine values — a caller inspecting a `ResolvedDumpRequest` has no way
-to see what a real execution would pass. Closing that gap (folding the
-values into the typed request/resolved-request model itself, not just into
-one options value at the final call) is unstarted, as are item 1's other
-two clauses (splitting backend selection from fallback policy; a
-source-only dump execution variant).
+
+**Follow-up (2026-09-05): item 1's remaining gap is now closed too.**
+`ResolvedDumpRequest` gained its own `execution_options:
+DumpExecutionOptions | None` field, so a caller resolves and *attaches*
+its `DumpExecutionOptions` onto the request itself rather than only ever
+assembling one fresh at `execute_dump_request`'s own call boundary;
+`execute_dump_request`'s own `options=None` now falls back to
+`resolved.execution_options` before falling back to a bare
+`DumpExecutionOptions()`. `frontends/cli/dump_execute.py`'s
+`execute_dump_cli_run`/`execute_and_write_dump_cli_run` no longer take the
+nine values as separate parameters at all — the `dump` CLI
+(`frontends/cli/commands/dump.py`) attaches a dry-run-safe *preview*
+(`frontends.cli.dump_build_context_preview.dry_run_build_context_preview`, a new silent/
+non-raising sibling of `_resolve_build_context_flags` that also returns
+the derived legacy compile-db flags) onto its `--dry-run` resolution, and
+the real (raise/echo-capable) values onto the request it actually
+executes. `dump --dry-run` now renders an "Execution options" section
+from the preview (`cli_dump_helpers.render_dump_dry_run`) — the gap this
+note used to describe ("a caller inspecting a `ResolvedDumpRequest` has no
+way to see what a real execution would pass") no longer holds.
+
+**Still open, unstarted:** item 1's other two clauses — splitting backend
+selection from fallback policy, and a source-only dump execution variant
+(`execute_dump_request` still raises `ValidationError` for a binary-less
+`InputSpec.path is None` request; producing that snapshot is still
+`cli_buildsource.dump_source_only`'s own separate pipeline, per that
+function's own docstring reference).
 
 **Recommended first wave (fully parallel, no shared files):** ~~T1~~ (done),
 ~~T2~~ (done), T6, T7, T8. **Second wave:** ~~T3~~ (done), T4, T9 (each large
