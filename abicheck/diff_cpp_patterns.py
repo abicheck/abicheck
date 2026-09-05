@@ -72,6 +72,11 @@ from .diff_templates import (  # noqa: F401
 )
 from .model import AccessLevel, resolved_fact_value
 from .model.binary_naming import strip_vendor_hash
+from .model.export_index import (
+    all_export_names,
+    build_raw_export_index,
+    pe_export_ids_with_ordinal_placeholder as _pe_export_ids,
+)
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, Function, RecordType
@@ -376,21 +381,16 @@ def _build_all_surviving_stems(new_functions: Iterable[Function]) -> set[str]:
 
 
 def _raw_export_ids(snapshot: AbiSnapshot) -> set[str]:
-    """Return the raw PE/Mach-O export-table identifiers for *snapshot*.
+    """Raw PE/Mach-O export-table identifiers for *snapshot* (ADR-063 T7).
 
-    Mirrors exactly how ``diff_platform._diff_pe``/``_diff_macho_exports``
-    compute the ``Change.symbol``/``eid`` they emit for a removed export, so a
-    stem/token clustered from this set lines up with the suppression keys
-    those two functions' findings are matched against.
-    """
-    ids: set[str] = set()
-    pe = getattr(snapshot, "pe", None)
-    if pe is not None:
-        ids.update(e.name if e.name else f"ordinal:{e.ordinal}" for e in pe.exports)
-    macho = getattr(snapshot, "macho", None)
-    if macho is not None:
-        ids.update(e.name for e in macho.exports if e.name)
-    return ids
+    PE mirrors ``diff_platform._pe_export_id`` exactly (so a clustered
+    stem/token lines up with its suppression keys); Mach-O keeps every name."""
+    index = build_raw_export_index(snapshot)
+    if index is None:
+        return set()
+    if index.platform == "pe":
+        return set(_pe_export_ids(index))
+    return set(all_export_names(index)) if index.platform == "macho" else set()
 
 
 def _build_removed_by_isa_from_raw_exports(
