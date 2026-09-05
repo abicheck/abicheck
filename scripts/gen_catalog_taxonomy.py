@@ -644,6 +644,35 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             "relation_type": relation_type,
             "relation_axis": relation_axis,
         }
+    # A scenario is *defined* as several rules composed into one realistic
+    # problem, so a scenario with no `related_rules` is a contradiction the
+    # data should not be able to express. Left unchecked, `.get(name, [])`
+    # emits an empty list for a newly-classified scenario nobody added to
+    # RELATED_RULES -- generation and every drift gate pass while the case
+    # silently belongs to no rule family at all. The reverse (a mapping key
+    # for a case that is no longer a scenario, or was renamed) is checked
+    # too: it is dead configuration that looks like coverage.
+    scenarios_without_rules = sorted(
+        name
+        for name, entry in taxonomy.items()
+        if entry["entity"] == "scenario" and not entry["related_rules"]
+    )
+    if scenarios_without_rules:
+        raise ValueError(
+            "these scenario cases have no related_rules -- add them to "
+            f"RELATED_RULES: {scenarios_without_rules}"
+        )
+    unused_related_rules = sorted(
+        name
+        for name in RELATED_RULES
+        if taxonomy.get(name, {}).get("entity") != "scenario"
+    )
+    if unused_related_rules:
+        raise ValueError(
+            "these RELATED_RULES keys name no scenario case (renamed, "
+            f"removed, or reclassified): {unused_related_rules}"
+        )
+
     # Preserve the existing verdicts iteration order (already caseNN-ordered
     # in the committed file) rather than re-sorting -- keeps a regeneration
     # diff scoped to the new `taxonomy` key alone.

@@ -62,6 +62,13 @@ _MANIFEST_KEYS = frozenset({"id", "task", "platforms", "requires", "steps"})
 # workflow ever needs one, that is a deliberate decision to make then.
 _SHELL_METACHARACTERS = re.compile(r"[|&;<>$`(){}\[\]*?~\n]|\|\|")
 
+# Commands a README shows to orient the reader rather than to be executed as
+# a step. The runner enters the workflow's scratch copy itself, so `cd` into
+# the example directory has no manifest counterpart by construction -- it is
+# the one documented command that legitimately has no step. Anything else the
+# README shows must be a step, or CI is not running the walkthrough.
+_SETUP_PROGRAMS = frozenset({"cd"})
+
 
 class ManifestError(Exception):
     """A `workflow.yaml` that does not satisfy the schema above."""
@@ -218,6 +225,19 @@ def load(directory: Path) -> Workflow:
             raise ManifestError(
                 f"{manifest}: step {name!r}: unknown expect key(s) {unknown}"
             )
+        exit_code = expect.get("exit_code")
+        # `bool` is a subclass of `int` and `True == 1`, so an unvalidated
+        # `exit_code: true` would be satisfied by a command exiting 1 -- the
+        # same class of silent misread as `allow_failure` below.
+        if exit_code is not None and (
+            isinstance(exit_code, bool) or not isinstance(exit_code, int)
+        ):
+            raise ManifestError(
+                f"{manifest}: step {name!r}: `expect.exit_code` must be an "
+                f"integer, got {exit_code!r}. A YAML boolean is not an exit "
+                "code: True == 1, so `true` would be met by a command "
+                "exiting 1."
+            )
         allow_failure = entry.get("allow_failure", False)
         if not isinstance(allow_failure, bool):
             raise ManifestError(
@@ -240,7 +260,7 @@ def load(directory: Path) -> Workflow:
                 name=name,
                 run=command,
                 argv=tuple(argv),
-                exit_code=expect.get("exit_code"),
+                exit_code=exit_code,
                 stdout_contains=_string_list(
                     expect.get("stdout_contains"),
                     f"{manifest}: step {name!r}: `expect.stdout_contains`",
@@ -315,17 +335,43 @@ def documented_commands(text: str) -> list[str]:
     return commands
 
 
+def _is_setup_command(command: str) -> bool:
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return False
+    return bool(argv) and argv[0] in _SETUP_PROGRAMS
+
+
 def readme_drift(workflow: Workflow) -> list[str]:
-    """Return one message per `run:` command the README does not show."""
+    """Report any disagreement between the manifest and the README.
+
+    Both directions, because each catches a different rot. A step the README
+    doesn't show means CI runs something a reader never sees. A *documented
+    command with no step* is the mirror: the walkthrough grows a required
+    step -- generating a config, building a third library -- and CI keeps
+    passing while silently not running it, all the while claiming to execute
+    the walkthrough's exact commands. Only `_SETUP_PROGRAMS` is exempt.
+    """
     if not workflow.readme.is_file():
         return [f"{workflow.directory}: no {README_NAME}"]
     documented = documented_commands(workflow.readme.read_text(encoding="utf-8"))
-    missing = []
+    declared = {normalize_command(step.run) for step in workflow.steps}
+
+    problems = []
     for step in workflow.steps:
         wanted = normalize_command(step.run)
         if wanted not in documented:
-            missing.append(
+            problems.append(
                 f"{workflow.id}: step {step.name!r} runs a command the README "
                 f"does not show verbatim: {wanted!r}"
             )
-    return missing
+    for command in documented:
+        if command in declared or _is_setup_command(command):
+            continue
+        problems.append(
+            f"{workflow.id}: the README documents a command no step runs, so "
+            f"CI does not execute it: {command!r}. Add a step for it, or drop "
+            "it from the walkthrough."
+        )
+    return problems

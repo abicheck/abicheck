@@ -723,3 +723,88 @@ def test_a_timed_out_command_is_a_recorded_failure_not_an_abort(tmp_path: Path):
     proc = runner._run(["sleep", "5"], tmp_path, 1)
     assert proc.returncode == 124
     assert "timed out after 1s" in proc.stderr
+
+
+@pytest.mark.parametrize("value", ["true", "false", "'4'", "4.0", "four", "null"])
+def test_a_non_integer_exit_code_is_rejected(tmp_path: Path, value: str):
+    """`bool` subclasses `int` and `True == 1`, so `exit_code: true` would be
+    satisfied by a command exiting 1 -- the same silent misread as
+    `allow_failure`, on the field that decides pass or fail."""
+    if value == "null":
+        pytest.skip("null means 'no expectation', which is a valid manifest")
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text("# demo\n", encoding="utf-8")
+    (directory / "workflow.yaml").write_text(
+        "id: demo\n"
+        "task: Does it work?\n"
+        "platforms: [linux]\n"
+        f"steps: [{{name: a, run: 'true', expect: {{exit_code: {value}}}}}]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(workflow_examples.ManifestError, match="must be an integer"):
+        workflow_examples.load(directory)
+
+
+@pytest.mark.parametrize("code", [0, 1, 2, 4, 64, 124])
+def test_a_real_integer_exit_code_is_accepted(tmp_path: Path, code: int):
+    directory = tmp_path / "demo"
+    directory.mkdir()
+    (directory / "README.md").write_text(
+        "# demo\n\n```bash\ntrue\n```\n", encoding="utf-8"
+    )
+    (directory / "workflow.yaml").write_text(
+        "id: demo\n"
+        "task: Does it work?\n"
+        "platforms: [linux]\n"
+        f"steps: [{{name: a, run: 'true', expect: {{exit_code: {code}}}}}]\n",
+        encoding="utf-8",
+    )
+    assert workflow_examples.load(directory).steps[0].exit_code == code
+
+
+# --------------------------------------------------------------------------
+# Drift is bidirectional. A step the README doesn't show means CI runs
+# something no reader sees; a documented command with no step is the mirror
+# -- the walkthrough grows a required command and CI silently stops running
+# the walkthrough while still claiming to.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+@pytest.mark.parametrize(
+    "added",
+    [
+        "abicheck project init --config .abicheck.yml",
+        "cmake --build build",
+        "python -m pip install -e .",
+    ],
+)
+def test_a_readme_command_with_no_step_is_drift(
+    tmp_path: Path, directory: Path, added: str
+):
+    workflow = workflow_examples.load(directory)
+    readme = workflow.readme.read_text(encoding="utf-8")
+    first = workflow_examples.normalize_command(workflow.steps[0].run)
+    grown = readme.replace(first, f"{added}\n{first}", 1)
+    assert grown != readme
+    mutated = _workflow_at(tmp_path, workflow, grown)
+    drift = workflow_examples.readme_drift(mutated)
+    assert any("no step runs" in message for message in drift), (
+        f"a README command with no step ({added!r}) was not reported"
+    )
+
+
+@pytest.mark.parametrize("directory", WORKFLOW_DIRS, ids=WORKFLOW_IDS)
+def test_a_setup_command_needs_no_step(tmp_path: Path, directory: Path):
+    """The negative control. The runner enters the scratch copy itself, so
+    `cd` into the example has no step by construction -- if that were drift,
+    every workflow would be permanently red."""
+    workflow = workflow_examples.load(directory)
+    documented = workflow_examples.documented_commands(
+        workflow.readme.read_text(encoding="utf-8")
+    )
+    assert any(c.startswith("cd ") for c in documented), (
+        "this control assumes the walkthrough shows a cd"
+    )
+    assert workflow_examples.readme_drift(workflow) == []
