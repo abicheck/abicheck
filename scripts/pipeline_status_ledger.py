@@ -368,6 +368,18 @@ def _check_lifecycle(
     rung = _PIPELINE_LIFECYCLE_VALUES.index(lifecycle)
     consumers = entry.get("consumers")
     if rung >= _PIPELINE_LIFECYCLE_VALUES.index("wired"):
+        # `producers` is checked alongside `consumers` because the two are
+        # not independent: nothing downstream can read a concept that no
+        # extraction/construction site populates, so `producers:
+        # not_started` at this rung is internally impossible rather than
+        # merely optimistic (Codex review, PR #1066).
+        if entry.get("producers") == "not_started":
+            f.err(
+                "pipeline-status-ledger",
+                f"{rel}: concepts.{name}: lifecycle {lifecycle!r} means "
+                f"something downstream reads this concept, but producers is "
+                f"'not_started' -- nothing can read what nothing populates",
+            )
         if consumers == "not_started":
             f.err(
                 "pipeline-status-ledger",
@@ -376,6 +388,11 @@ def _check_lifecycle(
                 f"'not_started' -- that is 'introduced'",
             )
     elif isinstance(consumers, str) and consumers in _PIPELINE_STATUS_STATES:
+        # Deliberately asymmetric with `producers`, which gets no
+        # bottom-rung rule: `introduced` is defined by the absence of
+        # *readers*, not of writers, so a fully-populated concept nothing
+        # consumes yet is exactly what this rung is for. Only `consumers`
+        # distinguishes `introduced` from `wired`.
         if consumers != "not_started":
             f.err(
                 "pipeline-status-ledger",

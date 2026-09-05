@@ -402,6 +402,42 @@ def test_authority_lifecycle_agreement_over_the_whole_domain(
 
 
 @pytest.mark.parametrize("lifecycle", ["wired", "authoritative", "retired"])
+@pytest.mark.parametrize("field", ["producers", "consumers"])
+def test_a_rung_above_introduced_requires_a_started_producer_and_consumer(
+    lifecycle: str, field: str
+) -> None:
+    """Nothing downstream can read a concept no extraction site populates,
+    so `producers: not_started` above `introduced` is as impossible as
+    `consumers: not_started` there (Codex review, PR #1066). Exercised at
+    every affected rung, for both fields."""
+    data = _valid_ledger()
+    entry = data["concepts"]["facts"]
+    entry["authority"] = "self" if lifecycle != "wired" else "mixed"
+    entry["lifecycle"] = lifecycle
+    entry[field] = "not_started"
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert any(f"lifecycle {lifecycle!r}" in e and field in e for e in f.errors)
+
+
+@pytest.mark.parametrize("producers", ["not_started", "partial", "complete"])
+def test_introduced_accepts_any_producer_status(producers: str) -> None:
+    """The deliberate asymmetry: `introduced` is defined by the absence of
+    *readers*, not of writers, so a fully-populated concept nothing consumes
+    yet is exactly what the bottom rung is for. Guards against
+    over-generalizing the producer rule into a symmetric one."""
+    data = _valid_ledger()
+    entry = data["concepts"]["facts"]
+    entry["authority"] = "legacy"
+    entry["lifecycle"] = "introduced"
+    entry["consumers"] = "not_started"
+    entry["producers"] = producers
+    f = FakeFindings()
+    check_pipeline_status_ledger(f, data)
+    assert f.errors == []
+
+
+@pytest.mark.parametrize("lifecycle", ["wired", "authoritative", "retired"])
 def test_a_rung_above_introduced_requires_a_started_consumer(
     lifecycle: str,
 ) -> None:
