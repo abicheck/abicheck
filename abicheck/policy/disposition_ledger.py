@@ -63,6 +63,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from ..model.change_catalog.registry import Verdict
+from .rule_identity import rule_identity as rule_identity_of
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import Change, DiffResult
@@ -164,32 +165,17 @@ def rule_provenance(
 
 
 def _rule_identity(rule: object) -> str | None:
-    """The rule's canonical selector identity, when it can be derived.
+    """The rule's canonical selector-and-gate identity, when derivable.
 
-    Deliberately the *selector* spelling, not the free-form ``label``/
-    ``reason`` prose: two rules sharing a label must still be distinguishable
-    in the audit. Mirrors ``SuppressionList.rule_identities``' field set for
-    the handful of selectors a reader needs to recognize the rule, without
-    importing it (that method operates on a whole list, not one rule).
+    Deliberately not the free-form ``label``/``reason`` prose: two rules
+    sharing a label must still be distinguishable in the audit. Delegates to
+    :func:`abicheck.policy.rule_identity.rule_identity`, the *same* derivation
+    ``SuppressionList.rule_identities`` uses -- this used to be a second,
+    hand-picked field list here, which omitted the gate fields and so merged a
+    public-only waiver and a proven-unreachable-only waiver sharing one
+    ``symbol_pattern`` into a single audit row (Codex review).
     """
-    parts = [
-        f"{name}={value!r}"
-        for name, value in (
-            ("finding_id", getattr(rule, "finding_id", None)),
-            ("symbol", getattr(rule, "symbol", None)),
-            ("symbol_pattern", getattr(rule, "symbol_pattern", None)),
-            ("type_pattern", getattr(rule, "type_pattern", None)),
-            ("member_name", getattr(rule, "member_name", None)),
-            ("namespace", getattr(rule, "namespace", None)),
-            ("entity_namespace", getattr(rule, "entity_namespace", None)),
-            ("cause_namespace", getattr(rule, "cause_namespace", None)),
-            ("source_location", getattr(rule, "source_location", None)),
-            ("change_kind", getattr(rule, "change_kind", None)),
-            ("binding", getattr(rule, "binding", None)),
-        )
-        if value is not None
-    ]
-    return "|".join(parts) if parts else None
+    return rule_identity_of(rule)
 
 
 @dataclass(frozen=True, slots=True)

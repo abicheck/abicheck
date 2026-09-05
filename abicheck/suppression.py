@@ -31,7 +31,6 @@ the finding, YAML loading, audit/reporting, and suggestion generation.
 """
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -47,6 +46,7 @@ from .checker_policy import (
     Verdict,
 )
 from .checker_types import Change
+from .policy.rule_identity import rule_identity
 from .policy.selectors import _TYPE_CHANGE_KINDS, SelectorSet
 from .suppression_yaml import parse_finding_id, raw_finding_ids_by_index
 
@@ -846,17 +846,7 @@ class SuppressionList:
         (skipping the compiled/resolved ``init=False`` internals), so a rule
         field added later is covered without touching this method.
         """
-        identities: list[str] = []
-        for rule in self._suppressions:
-            parts = [
-                f"{f.name}={getattr(rule, f.name)!r}"
-                for f in dataclasses.fields(rule)
-                if f.init
-                and f.name != "reason"
-                and getattr(rule, f.name) not in (None, False)
-            ]
-            identities.append("|".join(parts))
-        return tuple(identities)
+        return tuple(rule_identity(rule) or "" for rule in self._suppressions)
 
     def audit(
         self,
