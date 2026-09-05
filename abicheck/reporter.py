@@ -40,7 +40,8 @@ from .checker_policy import (
 )
 from .checker_types import validate_check_id, validate_evidence_depth
 from .impact import assess_change
-from .policy.disposition_ledger import RuleProvenance, ledger_for
+from .policy.disposition_close import ledger_for
+from .policy.disposition_ledger import RuleProvenance
 from .policy.gate_decision import gate_decision_for_result
 from .report.contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,

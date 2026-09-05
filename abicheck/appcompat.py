@@ -34,12 +34,11 @@ from .checker_policy import ChangeKind, ReachabilityState, Verdict, compute_verd
 from .diff_helpers import make_change
 from .impact.engine import assess_change
 from .model import AbiSnapshot, Visibility
-from .policy.disposition_ledger import (
-    close_consumer_scope,
+from .policy.disposition_close import (
     ledger_for,
     record_kept_change,
-    record_suppressed_change,
 )
+from .policy.disposition_ledger import record_suppressed_change
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -1590,14 +1589,14 @@ def scope_diff_to_app(
         breaking_for_app, policy=policy, policy_file=policy_file, diff=diff
     )
 
-    # ADR-067: close the ledger again now that this scoping pass has finished
-    # adding to it. `compare()` closed it before this function ran, so the
-    # overlay findings recorded above still carry no verdict class, and every
-    # gating label still describes the whole-library gate rather than the
-    # scoped one that actually produces this run's exit code. One call fixes
-    # both, because both are the same root cause -- see
-    # `close_consumer_scope`.
-    close_consumer_scope(overlay_ledger, diff, gating=breaking_for_app)
+    # ADR-067: the ledger is *not* closed here, deliberately. This function
+    # runs once per `--used-by` consumer, and `apply_scope` only ever
+    # demotes -- so closing per consumer would intersect the consumers'
+    # relevant sets instead of unioning them, and a finding only the second
+    # consumer uses would be excluded by the first one's call. The whole
+    # scoped gate is resolved by `cli_helpers_compare._apply_used_by_scoping`
+    # (and its `--required-symbol` sibling), which owns the union and makes
+    # the single `close_consumer_scope` call.
 
     return AppCompatResult(
         app_path=str(app_path),

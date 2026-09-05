@@ -23,7 +23,7 @@ Architecture review: Problem C — explicit pipeline replaces imperative chain.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Protocol
 
 from .policy.disposition_ledger import Disposition, record_suppressed_change
@@ -762,9 +762,20 @@ def _record_collapsed_findings(
         )
 
 
+def _bucket_total(ctx: PipelineContext) -> int:
+    """How many findings the context's own side-output buckets hold."""
+    return (
+        len(ctx.suppressed)
+        + len(ctx.redundant)
+        + len(ctx.opaque_filtered)
+        + len(ctx.out_of_surface)
+    )
+
+
 def _record_dropped_duplicates(
-    before: dict[int, Change],
+    before: Sequence[Change],
     after: list[Change],
+    bucket_total_before: int,
     ctx: PipelineContext,
     step_name: str,
     disposition: Disposition | None = _DEFAULT_DROPPED_DISPOSITION,
@@ -795,16 +806,36 @@ def _record_dropped_duplicates(
     ledger = ctx.disposition_ledger
     if ledger is None or disposition is None:
         return
-    survived = {id(c) for c in after}
+    # Counting first, identity second. This runs once per step on every
+    # comparison, and a wide diff runs two dozen steps over thousands of
+    # findings, so the overwhelmingly common "this step changed nothing"
+    # case must cost O(1) rather than two identity sets per step.
+    #
+    # The count is a sound trigger because a step that removes a finding
+    # either drops it (shortening `changes`) or moves it into one of the
+    # buckets (growing them by the same amount). The one shape it cannot see
+    # is a step that adds and drops in the same call, so such a step records
+    # its own drops -- `_merge_findings_respecting_suppression` is the only
+    # one today and does exactly that. That is not an honour-system rule:
+    # `tests/test_disposition_audit.py::
+    # test_a_pipeline_step_can_never_drop_a_finding_unrecorded` runs the real
+    # pipeline and asserts every input finding is accounted for by the kept
+    # list, a bucket, or the ledger.
+    if len(after) + (_bucket_total(ctx) - bucket_total_before) >= len(before):
+        return
+    survived = set(map(id, after))
     for bucket in (
         ctx.suppressed,
         ctx.redundant,
         ctx.opaque_filtered,
         ctx.out_of_surface,
     ):
-        survived.update(id(c) for c in bucket)
-    for key, change in before.items():
-        if key not in survived:
+        survived.update(map(id, bucket))
+    missing = set(map(id, before)) - survived
+    if not missing:
+        return
+    for change in before:
+        if id(change) in missing:
             ledger.record(change, disposition, application_point=step_name)
 
 
@@ -1689,11 +1720,13 @@ class PostProcessingPipeline:
         # caller that did not opt into the audit pays nothing for it.
         auditing = ctx.disposition_ledger is not None
         for step in self.steps:
-            before = {id(c): c for c in changes} if auditing else {}
+            before = list(changes) if auditing else ()
+            bucket_total = _bucket_total(ctx) if auditing else 0
             changes = step.run(changes, ctx)
             _record_dropped_duplicates(
                 before,
                 changes,
+                bucket_total,
                 ctx,
                 step.name,
                 getattr(

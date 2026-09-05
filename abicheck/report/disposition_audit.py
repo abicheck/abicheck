@@ -45,7 +45,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..policy.disposition_ledger import Disposition, RuleProvenance, ledger_for
+from ..policy.disposition_close import ledger_for
+from ..policy.disposition_ledger import (
+    Disposition,
+    RuleProvenance,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import DiffResult

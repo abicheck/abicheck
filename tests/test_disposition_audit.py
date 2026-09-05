@@ -49,12 +49,14 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Variable, Visibility
-from abicheck.policy.disposition_ledger import (
-    Disposition,
-    DispositionLedger,
+from abicheck.policy.disposition_close import (
     conservation_holds,
     finalize_ledger,
     ledger_for,
+)
+from abicheck.policy.disposition_ledger import (
+    Disposition,
+    DispositionLedger,
     record_suppressed_change,
 )
 from abicheck.report.disposition_audit import compute_disposition_audit
@@ -904,8 +906,9 @@ def test_a_substituting_step_records_one_observation_not_two() -> None:
     ledger = DispositionLedger()
     ctx = PipelineContext(old=old, new=new, disposition_ledger=ledger)
     _record_dropped_duplicates(
-        {id(original): original},
+        [original],
         [replacement],
+        0,
         ctx,
         DowngradeOpaqueStructChanges.name,
         DowngradeOpaqueStructChanges.dropped_finding_disposition,
@@ -939,7 +942,7 @@ def test_a_steps_declared_drop_meaning_is_what_gets_recorded(
     dropped = Change(kind=ChangeKind.FUNC_REMOVED, symbol="gone", description="x")
     ledger = DispositionLedger()
     ctx = PipelineContext(old=old, new=new, disposition_ledger=ledger)
-    _record_dropped_duplicates({id(dropped): dropped}, [], ctx, "a_step", declared)
+    _record_dropped_duplicates([dropped], [], 0, ctx, "a_step", declared)
     assert ledger.detected_total == expected_records
     if expected_disposition is not None:
         assert ledger.record_for(dropped).disposition is expected_disposition
@@ -962,6 +965,84 @@ def test_the_one_line_view_states_a_support_gap_on_a_zero_change_run() -> None:
     assert f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated" in line
 
 
+def test_severity_cannot_un_demote_a_scope_excluded_finding() -> None:
+    """Scope and severity are different authorities, and the audit must not
+    let one overwrite the other: severity says *how severe* a finding is,
+    never whether the consumer this run gates on uses it at all. Without the
+    distinction, `abi_breaking: error` pulls a scope-excluded finding back
+    into the gate the scoped run already passed."""
+    from abicheck.policy.disposition_close import close_consumer_scope
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+
+    old, new = _snapshots(removed=2)
+    result = compare(old, new)
+    ledger = ledger_for(result)
+    result.disposition_ledger = ledger
+    close_consumer_scope(ledger, result, gating=[result.changes[0]])
+    assert ledger.effective_total == 1
+
+    strict = SeverityConfig(abi_breaking=SeverityLevel.ERROR)
+    assert compute_disposition_audit(result, strict).effective_total == 1
+    excluded = ledger_for(result, strict).record_for(result.changes[1])
+    assert excluded.disposition is Disposition.NON_GATING
+    assert excluded.scope_excluded is True
+
+
+def test_one_close_over_the_union_not_one_per_consumer() -> None:
+    """`apply_scope` only demotes, so closing once per consumer would
+    *intersect* the consumers' relevant sets: a finding only the second
+    consumer uses would already have been demoted by the first one's call.
+    The orchestrator therefore closes once over the union — asserted here as
+    the property, since the failure is silent (a passing gate with a real
+    break counted out of it).
+    """
+    from abicheck.policy.disposition_close import close_consumer_scope
+
+    old, new = _snapshots(removed=2)
+    result = compare(old, new)
+    ledger = ledger_for(result)
+    result.disposition_ledger = ledger
+    first, second = result.changes[0], result.changes[1]
+
+    # The union, as the orchestrator does it: both stay gating.
+    close_consumer_scope(ledger, result, gating=[first, second])
+    assert ledger.effective_total == 2
+
+    # …and per-consumer closes would have left one of them out, which is why
+    # the call belongs to the orchestrator that knows every consumer.
+    result_b = compare(old, new)
+    result_b.disposition_ledger = per_consumer = ledger_for(result_b)
+    close_consumer_scope(per_consumer, result_b, gating=[result_b.changes[0]])
+    close_consumer_scope(per_consumer, result_b, gating=[result_b.changes[1]])
+    assert per_consumer.effective_total == 0
+
+
+def test_synthesized_scoped_findings_join_the_audit() -> None:
+    """A missing entrypoint or a retargeted PE ordinal is a real detected
+    consumer finding that never reaches `result.changes`. Recording it is
+    what lets a scoped view state counts the audit agrees with."""
+    from abicheck.checker_types import Change
+    from abicheck.policy.disposition_close import close_consumer_scope
+
+    old, new = _snapshots(removed=1)
+    result = compare(old, new)
+    ledger = ledger_for(result)
+    result.disposition_ledger = ledger
+    before = ledger.detected_total
+
+    synthesized = Change(
+        kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+        symbol="entrypoint",
+        description="required by consumer",
+    )
+    close_consumer_scope(
+        ledger, result, gating=[synthesized], also_detected=[synthesized]
+    )
+    assert ledger.detected_total == before + 1
+    assert ledger.record_for(synthesized).disposition is Disposition.GATING
+    assert conservation_holds(ledger)
+
+
 class TestALateProducerClosesTheLedgerAgain:
     """`appcompat.scope_diff_to_app` joins *after* `compare()` closed the
     ledger, and every gap that produced had the same root cause: the two
@@ -976,7 +1057,7 @@ class TestALateProducerClosesTheLedgerAgain:
         invisible to `recommend_release`'s conserved-delta check — it looks
         for *gating* suppressed records, and `None` is not one."""
         from abicheck.checker_types import Change, DiffResult
-        from abicheck.policy.disposition_ledger import close_consumer_scope
+        from abicheck.policy.disposition_close import close_consumer_scope
         from abicheck.semver import recommend_release
 
         result = DiffResult(old_version="1.0", new_version="2.0", library="libfoo")
@@ -1011,7 +1092,7 @@ class TestALateProducerClosesTheLedgerAgain:
         """`--used-by` gates on the consumer's own subset, so a breaking
         removal the consumer never calls must not be counted `gating` while
         the gate it is supposedly counted in exits 0."""
-        from abicheck.policy.disposition_ledger import close_consumer_scope
+        from abicheck.policy.disposition_close import close_consumer_scope
 
         old, new = _snapshots(removed=2)
         result = compare(old, new)
@@ -1029,7 +1110,7 @@ class TestALateProducerClosesTheLedgerAgain:
     def test_scoping_never_promotes_a_finding_into_the_gate(self) -> None:
         """It only narrows: a suppressed or excluded finding is not pulled
         back into the gating set by being named in scope (D2)."""
-        from abicheck.policy.disposition_ledger import close_consumer_scope
+        from abicheck.policy.disposition_close import close_consumer_scope
 
         old, new = _snapshots(removed=1)
         result = compare(

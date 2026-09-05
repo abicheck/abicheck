@@ -133,9 +133,9 @@ from .dwarf_advanced import (
     diff_advanced_dwarf,  # noqa: F401 — re-export for monkeypatching
 )
 from .model import AbiSnapshot
+from .policy.disposition_close import finalize_ledger
 from .policy.disposition_ledger import (
     DispositionLedger,
-    finalize_ledger,
     record_suppressed_change,
 )
 from .policy_file import PolicyFile

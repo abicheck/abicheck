@@ -1036,6 +1036,7 @@ def _apply_used_by_scoping(
     """
     from .appcompat import scope_diff_to_app
     from .service import detect_binary_format
+    from .workflows.disposition import close_consumer_scope, ledger_for
 
     old_lib = old_input if detect_binary_format(old_input) is not None else old_snapshot
     new_lib = new_input if detect_binary_format(new_input) is not None else new_snapshot
@@ -1154,6 +1155,21 @@ def _apply_used_by_scoping(
     result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
         c for fid, c in relevant_changes_by_id.items() if fid not in _existing_ids
     )
+    # ADR-067: close the disposition ledger once, here, over the *union* of
+    # every consumer's relevant findings. `scope_diff_to_app` deliberately
+    # does not close it per app -- `apply_scope` only demotes, so a
+    # per-consumer close would intersect the consumers' relevant sets and
+    # exclude a finding only the second consumer uses. `scoped_only_changes`
+    # are passed as newly detected: they are real consumer findings that
+    # never reach `result.changes`, so without them the scoped views would
+    # count a population the audit does not.
+    close_consumer_scope(
+        ledger_for(result),
+        result,
+        gating=list(relevant_changes_by_id.values()),
+        also_detected=result.scoped_only_changes,
+    )
+
     if exit_code_scheme == "severity":
         categories, counts = _scoped_severity_summary(
             list(worst_changes.values()),
@@ -1181,6 +1197,7 @@ def _apply_required_symbol_scoping(
     """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
     from .appcompat import scope_diff_to_required_symbols, uncovered_missing_symbols
     from .reporter import _finding_id
+    from .workflows.disposition import close_consumer_scope, ledger_for
 
     scoped = scope_diff_to_required_symbols(
         result,
@@ -1212,6 +1229,16 @@ def _apply_required_symbol_scoping(
     result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
         c for c in scoped.breaking_for_host if _finding_id(c) not in _existing_ids
     )
+    # ADR-067: same single close as the `--used-by` orchestrator above --
+    # `--required-symbol` resolves one scope, but it is still the scope this
+    # run's exit code comes from, so the audit's gating set has to follow it.
+    close_consumer_scope(
+        ledger_for(result),
+        result,
+        gating=scoped.breaking_for_host,
+        also_detected=result.scoped_only_changes,
+    )
+
     exit_code = _scoped_exit_code(
         scoped,
         scoped.breaking_for_host,

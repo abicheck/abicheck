@@ -271,7 +271,7 @@ def _suppressed_major_class_recommendation(
     verdict is *already* major-class: the recommendation then names the break
     on its own, and this would only restate it.
     """
-    from .policy.disposition_ledger import ledger_for
+    from .policy.disposition_close import ledger_for
 
     if result.verdict in (Verdict.BREAKING, Verdict.API_BREAK):
         return None

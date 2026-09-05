@@ -102,7 +102,7 @@ _EFFECTIVE_DISPOSITIONS = frozenset({Disposition.GATING})
 _GATING_VERDICTS = frozenset({Verdict.BREAKING, Verdict.API_BREAK})
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RuleProvenance:
     """ADR-067 D3's "rule id, source file, reason, expiry" for one match.
 
@@ -192,7 +192,7 @@ def _rule_identity(rule: object) -> str | None:
     return "|".join(parts) if parts else None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DispositionRecord:
     """One atomically detected change and the single disposition it received."""
 
@@ -209,6 +209,14 @@ class DispositionRecord:
     #: D2 overlay attribute, independent of ``disposition``: the policy
     #: reclassification rule that moved this finding's verdict, if any.
     reclassified_by: str | None = None
+    #: Set when a consumer scope (``--used-by``/``--required-symbol``) put
+    #: this finding outside the gate that actually decides the run. Tracked
+    #: separately from the disposition because the two are decided by
+    #: different authorities and must not overwrite each other: severity says
+    #: *how severe* a finding is, and no severity can make a finding the
+    #: consumer never uses gate this run. Without it, resolving a severity
+    #: config would un-demote a scope-excluded finding back into ``gating``.
+    scope_excluded: bool = False
 
     def to_dict(self) -> dict[str, object]:
         entry: dict[str, object] = {
@@ -349,20 +357,26 @@ class DispositionLedger:
         Touches only ``gating``/``non_gating`` records: a suppressed,
         out-of-contract, unresolved or deduplicated finding never reached the
         gate at all, so no severity configuration can change its disposition
-        (D2 -- one change, one terminal disposition).
+        (D2 -- one change, one terminal disposition). A **scope-excluded**
+        record is skipped for the same reason under a different authority:
+        severity says how severe a finding is, never whether the consumer
+        this run gates on uses it at all.
         """
+        gate = _GateContext.of(result)
         gated = DispositionLedger()
         gated._anchors = list(self._anchors)
         gated._seen_ids = dict(self._seen_ids)
         gated._records = [
             record
-            if record.disposition not in (Disposition.GATING, Disposition.NON_GATING)
+            if record.scope_excluded
+            or record.disposition not in (Disposition.GATING, Disposition.NON_GATING)
             else replace(
                 record,
                 disposition=_kept_disposition(
                     change,  # type: ignore[arg-type]
                     result,
                     severity_config,
+                    gate,
                 ),
             )
             for record, change in zip(self._records, self._anchors)
@@ -370,7 +384,16 @@ class DispositionLedger:
         return gated
 
     def resolve_verdict_classes(self, result: DiffResult) -> None:
-        """Fill in the verdict class of every record that had none.
+        """Fill in the verdict class of every *suppressed* record that had none.
+
+        Scoped to the suppressed ones because they are the only records whose
+        class is read: ``suppressed_gating_records`` (hence
+        ``semver.recommend_release``'s conserved delta) is the one consumer,
+        and a kept finding's verdict is the report's own subject anyway.
+        Resolving it for every record instead cost a policy lookup and a
+        record rewrite per finding on a path that runs once per comparison --
+        measurable on a wide diff, for an answer nothing asked for.
+
 
         Most findings carry no *stamped* per-change verdict at all (the
         contract pipeline's ``compatibility_decision`` and ADR-027's
@@ -383,12 +406,19 @@ class DispositionLedger:
         ``semver.recommend_release``'s conserved delta) answerable at all.
         """
         from ..contract_gating import is_evaluated
+        from ..reclassify import effective_verdict_for_change
 
-        verdict_of = getattr(result, "_effective_verdict_for_change", None)
-        if not callable(verdict_of):
+        if not callable(getattr(result, "_effective_verdict_for_change", None)):
             return  # a duck-typed stand-in with no verdict to read
+        # The same function ``DiffResult._effective_verdict_for_change``
+        # delegates to, with the kind sets resolved once for the whole pass
+        # instead of re-derived per finding (see ``_GateContext``).
+        gate = _GateContext.of(result)
         for index, (record, change) in enumerate(zip(self._records, self._anchors)):
-            if record.verdict_class is not None:
+            if (
+                record.verdict_class is not None
+                or record.disposition is not Disposition.SUPPRESSED
+            ):
                 continue
             if not is_evaluated(change):
                 # ADR-049 D1: compatibility policy never scored this finding,
@@ -402,18 +432,29 @@ class DispositionLedger:
                 # contract exclusion.
                 continue
             self._records[index] = replace(
-                record, verdict_class=verdict_of(change).value
+                record,
+                verdict_class=effective_verdict_for_change(
+                    change,  # type: ignore[arg-type]
+                    policy=gate.policy,
+                    kind_sets=gate.kind_sets,  # type: ignore[arg-type]
+                    policy_file=gate.policy_file,
+                ).value,
             )
 
     def apply_scope(self, result: DiffResult, in_scope: Iterable[object]) -> None:
         """Narrow the gating set to the findings the *scoped* gate scores.
 
         ``compare --used-by``/``--required-symbol`` gates on a consumer's own
-        subset (``appcompat``'s ``breaking_for_app``), and that scoped
-        decision — not the whole-library verdict — is what produces the run's
-        exit code. Without this, a breaking removal the consumer never calls
-        stays ``gating`` and inflates ``effective_total`` while the gate it is
-        supposedly counted in passes with ``0``.
+        subset, and that scoped decision — not the whole-library verdict — is
+        what produces the run's exit code. Without this, a breaking removal
+        the consumer never calls stays ``gating`` and inflates
+        ``effective_total`` while the gate it is supposedly counted in passes
+        with ``0``.
+
+        *in_scope* must be the **union** across every consumer the run gates
+        on: this only ever demotes, so calling it once per consumer would
+        intersect their relevant sets instead, and a finding only the second
+        consumer uses would be excluded by the first one's call.
 
         Only ever *narrows*: a finding already outside the gate cannot be
         pulled into it by scoping, and a suppressed or excluded finding is
@@ -428,7 +469,9 @@ class DispositionLedger:
                 continue
             if id(change) not in scoped:
                 self._records[index] = replace(
-                    record, disposition=Disposition.NON_GATING
+                    record,
+                    disposition=Disposition.NON_GATING,
+                    scope_excluded=True,
                 )
 
     def record_for(self, change: object) -> DispositionRecord | None:
@@ -553,8 +596,38 @@ def _verdict_class_of(change: object) -> str | None:
     return None
 
 
+@dataclass(frozen=True, slots=True)
+class _GateContext:
+    """The per-*result* inputs every per-change gate question needs.
+
+    Resolved once per pass rather than per finding: ``DiffResult.
+    _effective_kind_sets()`` re-derives the policy's four kind sets (and
+    re-applies every policy-file override) on each call, and both
+    ``gate_contribution_for_change`` and ``effective_verdict_for_change``
+    want them. Hoisting cut the closing pass from ~19% of a 2000-symbol
+    ``compare()`` to a fraction of that, with no change to any answer -- the
+    values are constant for the whole pass by construction.
+    """
+
+    policy: str | None
+    kind_sets: object | None
+    policy_file: object | None
+
+    @classmethod
+    def of(cls, result: DiffResult) -> _GateContext:
+        kind_sets_of = getattr(result, "_effective_kind_sets", None)
+        return cls(
+            policy=getattr(result, "policy", None),
+            kind_sets=kind_sets_of() if callable(kind_sets_of) else None,
+            policy_file=getattr(result, "policy_file", None),
+        )
+
+
 def _kept_disposition(
-    change: Change, result: DiffResult, severity_config: object | None = None
+    change: Change,
+    result: DiffResult,
+    severity_config: object | None = None,
+    gate: _GateContext | None = None,
 ) -> Disposition:
     """The terminal disposition of a change that survived into ``changes``.
 
@@ -595,188 +668,12 @@ def _kept_disposition(
     # own builders, for one) hand the renderers a duck-typed stand-in rather
     # than a real ``DiffResult``, and an audit that raised on one of those
     # would be a projection deciding whether a report can be produced at all.
-    kind_sets_of = getattr(result, "_effective_kind_sets", None)
+    gate = gate or _GateContext.of(result)
     contribution = gate_contribution_for_change(
         change,
         severity_config,  # type: ignore[arg-type]
-        policy=getattr(result, "policy", None),
-        kind_sets=kind_sets_of() if callable(kind_sets_of) else None,
-        policy_file=getattr(result, "policy_file", None),
+        policy=gate.policy,
+        kind_sets=gate.kind_sets,  # type: ignore[arg-type]
+        policy_file=gate.policy_file,
     )
     return Disposition.GATING if contribution > 0 else Disposition.NON_GATING
-
-
-def record_kept_change(
-    ledger: DispositionLedger | None,
-    change: Change,
-    result: DiffResult,
-    *,
-    application_point: str,
-) -> None:
-    """Record a change that a caller *kept*, with its real gate disposition.
-
-    The counterpart of :func:`record_suppressed_change` for a call site that
-    produces a finding after ``compare()`` has already closed the ledger — the
-    consumer overlay is the one such site today. Recording both branches is
-    what keeps D1's raw-total conservation true there: adding a suppression
-    rule must move a finding between dispositions, never change how many were
-    detected.
-    """
-    if ledger is None:
-        return
-    ledger.record(
-        change,
-        _kept_disposition(change, result),
-        application_point=application_point,
-    )
-
-
-def _record_bucket(
-    ledger: DispositionLedger,
-    changes: Iterable[Change],
-    disposition: Disposition,
-    application_point: str,
-) -> None:
-    for change in changes:
-        ledger.record(change, disposition, application_point=application_point)
-
-
-def finalize_ledger(
-    ledger: DispositionLedger,
-    result: DiffResult,
-    severity_config: object | None = None,
-) -> DispositionLedger:
-    """Close *ledger* over *result*, labelling every not-yet-recorded change.
-
-    The suppression application points have already recorded their own
-    findings (with rule provenance); this pass covers the four buckets that
-    reach the report — kept, redundant/deduplicated, out-of-surface, and
-    build-context-reconciled — plus, as a fallback, any suppressed finding
-    that reached ``result`` without passing one of the recording call sites
-    (a ``DiffResult`` assembled by a caller other than ``checker.compare``).
-    After it returns, the per-disposition counts sum to the detected total.
-    """
-
-    # Every bucket read defensively, for the same reason ``_kept_disposition``
-    # reads its inputs that way: a report path may hand a projection a
-    # duck-typed stand-in for a ``DiffResult``, and a missing audit bucket is
-    # "this caller has none", not an error worth failing a report over.
-    def _bucket(name: str) -> list[Change]:
-        return list(getattr(result, name, None) or [])
-
-    for change in _bucket("changes"):
-        ledger.record(
-            change,
-            _kept_disposition(change, result, severity_config),
-            application_point="verdict",
-        )
-    # ``redundant_changes`` is two different populations concatenated, split at
-    # ``redundant_count`` (``checker.compare``: ``redundant + opaque_filtered``,
-    # with the count covering only the first half). They are not the same
-    # disposition: a display-dedup finding really was collapsed into another
-    # one, while an opaque-handle downgrade is a compatible change excluded
-    # from the verdict on its own merits -- calling that "deduplicated" would
-    # claim it was folded into a finding that does not exist.
-    redundant = _bucket("redundant_changes")
-    redundant_count = getattr(result, "redundant_count", len(redundant))
-    _record_bucket(
-        ledger,
-        redundant[:redundant_count],
-        Disposition.DEDUPLICATED,
-        "redundancy_filter",
-    )
-    _record_bucket(
-        ledger,
-        redundant[redundant_count:],
-        Disposition.NON_GATING,
-        "opaque_downgrade",
-    )
-    _record_bucket(
-        ledger,
-        _bucket("out_of_surface_changes"),
-        Disposition.OUT_OF_CONTRACT,
-        "surface_scope",
-    )
-    # ADR-039 reconciliation proves a finding is a context-free header-parse
-    # artifact rather than a real change, so it is evaluated-and-not-gating
-    # rather than a scope exclusion — D2 has no separate "reconciled" terminal
-    # disposition, and the application point below is what names the mechanism.
-    _record_bucket(
-        ledger,
-        _bucket("reconciled_changes"),
-        Disposition.NON_GATING,
-        "build_context_reconciliation",
-    )
-    for change in _bucket("suppressed_changes"):
-        ledger.record_suppression(
-            change, rule=None, application_point="unrecorded_suppression"
-        )
-    ledger.resolve_verdict_classes(result)
-    return ledger
-
-
-def close_consumer_scope(
-    ledger: DispositionLedger | None,
-    result: DiffResult,
-    *,
-    gating: Iterable[object],
-) -> None:
-    """Close the ledger again after a consumer-scoping pass added to it.
-
-    ``appcompat.scope_diff_to_app`` runs *after* ``checker.compare()``
-    finalized the ledger, so anything it records misses both closing passes:
-    the scoped findings it appends keep ``verdict_class=None`` (which hides a
-    suppressed consumer-breaking removal from
-    ``semver.recommend_release``), and the gating labels still describe the
-    whole-library gate rather than the scoped one that actually decides the
-    run. Both are the same root cause — a second producer joining after the
-    close — so both are fixed by one closing call rather than a patch per
-    symptom, and any future late producer has the same call available.
-    """
-    if ledger is None:
-        return
-    ledger.apply_scope(result, gating)
-    ledger.resolve_verdict_classes(result)
-
-
-def ledger_for(
-    result: DiffResult, severity_config: object | None = None
-) -> DispositionLedger:
-    """The conserved ledger for *result* — the one accessor every consumer uses.
-
-    Returns the ledger ``checker.compare`` built (with per-rule provenance
-    captured at each suppression application point) when there is one, and
-    otherwise finalizes a fresh ledger over the result's own buckets, so a
-    ``DiffResult`` produced by any other caller still reconciles. Never
-    ``None``: a report projection must be able to state D3's counts
-    unconditionally.
-
-    Never mutates *result*: a report projection that attached (or relabelled)
-    a ledger on the object it renders would break the "rendering changes
-    nothing" invariant the HTML renderer already tests for. A caller that
-    wants the ledger to *persist* on the result assigns it explicitly —
-    ``checker.compare()`` does, which is what gives every projection the
-    per-rule provenance recorded during the run.
-
-    *severity_config* is the run's resolved severity configuration, which
-    ``checker.compare()`` never sees — the gate is resolved by the front end
-    (ADR-064), strictly later. Passing it here is the audit *learning* the
-    gate the run was actually scored on; it is not a renderer changing a
-    gate, and it can only ever move a finding between ``gating`` and
-    ``non_gating`` (:meth:`DispositionLedger.with_gate`).
-    """
-    existing = getattr(result, "disposition_ledger", None)
-    if isinstance(existing, DispositionLedger):
-        return (
-            existing
-            if severity_config is None
-            else existing.with_gate(result, severity_config)
-        )
-    return finalize_ledger(DispositionLedger(), result, severity_config)
-
-
-def conservation_holds(ledger: DispositionLedger) -> bool:
-    """D3's executable invariant: the per-disposition counts sum to the
-    detected total. Exposed as a function (rather than only asserted in a
-    test) so any consumer can check it against a ledger it did not build."""
-    return sum(ledger.counts().values()) == ledger.detected_total
