@@ -81,6 +81,14 @@ from typing import Any
 
 import click
 
+from ....report.comparison_scope import ComparisonScopeTerms
+from .compare_bundle_facts_scope import (
+    has_failed_members,
+    json_scope_fields,
+    markdown_scope_lines,
+    scope_terms_for,
+)
+
 
 def _resolve_new_side_headers_includes(
     kwargs: dict[str, Any],
@@ -539,16 +547,10 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                     f"Extracted files kept in: {', '.join(_temp_dir_paths)}", err=True
                 )
 
-    if not result.per_library:
-        # Codex review: an empty NEW_INPUT (or one whose canonical library
-        # keys match none of OLD_FACTS's per_library_snapshots) makes
-        # compare_release_against_bundle_facts()/compare_stored_bundle_
-        # facts_pair() return with an empty per_library list -- nothing was
-        # actually compared, yet _exit_compare_release below would score
-        # that as NO_CHANGE (exit 0), reporting a successful compatibility
-        # result for a comparison that never ran. Fail loudly instead: this
-        # is a usage/operational error (a wrong NEW_INPUT, a canonical-key
-        # mismatch), not a clean bill of health.
+    scope_terms = scope_terms_for(result, kwargs)
+    if not result.per_library and not has_failed_members(result):
+        # Nothing matched -> usage error, not NO_CHANGE (Codex); a matched-but-
+        # degraded member (ADR-065 D8) instead flows through the completeness axis.
         _new_desc = (
             f"{new_dir}'s stored per_library_snapshots" if new_is_stored else str(new_dir)
         )
@@ -653,7 +655,8 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
             raise click.ClickException(f"Cannot create {output_dir}: {exc}") from exc
 
     text = _render(
-        result, fmt, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored
+        result, fmt, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored,
+        scope_terms=scope_terms,
     )
     if output is not None:
         _safe_write_output(Path(output), text)
@@ -671,6 +674,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
             old_facts_path=old_facts_path,
             new_dir=new_dir,
             new_is_stored=new_is_stored,
+            scope_terms=scope_terms,
         )
         _safe_write_output(Path(secondary_output), secondary_text)
     if output_dir is not None:
@@ -702,47 +706,41 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
             # fan-out uses for its own per-library artifacts.
             _safe_write_output(output_dir / f"{safe_name}.json", to_json(diff))
 
-    _exit_compare_release(result.verdict.value, fail_on_removed=False, removed_keys=[])
+    _exit_compare_release(
+        result.verdict.value,
+        fail_on_removed=False,
+        removed_keys=[],
+        incomplete_scope_exit_contribution=scope_terms.incomplete_scope_exit_contribution,
+        no_comparison_completed_exit_contribution=scope_terms.no_comparison_completed_exit_contribution,
+    )
 
 
 def _render(
-    result: Any, fmt: str, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False
+    result: Any, fmt: str, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False,
+    scope_terms: ComparisonScopeTerms | None = None,
 ) -> str:
     if fmt == "markdown":
         return _render_markdown(
-            result, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored
+            result, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored,
+            scope_terms=scope_terms,
         )
     return _render_json(
-        result, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored
+        result, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored,
+        scope_terms=scope_terms,
     )
 
 
 def _render_json(
-    result: Any, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False
+    result: Any, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False,
+    scope_terms: ComparisonScopeTerms | None = None,
 ) -> str:
     from ....report.run_outcome import run_outcome_dict_for_diff_result
     from ....reporter import to_json
 
     libraries = {diff.library: json.loads(to_json(diff)) for diff in result.per_library}
-    # ADR-063 Phase 7 (Codex review, fresh evidence): every compare/release
-    # JSON report carries `run_outcome`; this summary previously omitted it.
-    # `frontends` may not import `policy` directly (architecture/
-    # modules.yaml), so this reuses `run_outcome_dict_for_diff_result` --
-    # `report`-classified, already used by `reporter.py`'s own JSON entry
-    # points -- rather than `run_outcome_dict_for_release`/`legacy_exit_
-    # code`. It duck-types on `result.verdict`/`result.analysis_assurance`
-    # (absent here, so `assurance` stays `None`), which a `BundleDiffResult`
-    # satisfies the same way a `DiffResult` does. No `SeverityConfig`/gate is
-    # available here (this summary carries no `exit` block at all), so both
-    # are `None` -- the function's own documented "no severity_config"
-    # fallback to the legacy verdict->exit mapping. Unlike the live
-    # directory/package release fan-out, `result.verdict` here is always a
-    # real `Verdict` -- `BundleDiffResult.verdict`/`.per_library_verdict`/
-    # `.bundle_verdict` are each `max(...)` over real per-DiffResult/bundle-
-    # finding verdicts, never the "ERROR"/"not_comparable" operational
-    # sentinels a per-library dump failure would produce in the live fan-out
-    # -- so `operational` stays `none`.
+    # ADR-063 Phase 7 `run_outcome` (`report` builder); ADR-065 S2 adds `scope` + section.
     run_outcome = run_outcome_dict_for_diff_result(result, None, None)
+    terms = scope_terms if scope_terms is not None else scope_terms_for(result, {})
     summary: dict[str, object] = {
         "mode": "bundle_facts",
         "old_bundle_facts": str(old_facts_path),
@@ -757,7 +755,7 @@ def _render_json(
         "verdict": result.verdict.value,
         "per_library_verdict": result.per_library_verdict.value,
         "bundle_verdict": result.bundle_verdict.value,
-        "run_outcome": run_outcome,
+        **json_scope_fields(terms, run_outcome),
         "libraries": libraries,
         "bundle_findings": [
             {
@@ -778,7 +776,8 @@ def _render_json(
 
 
 def _render_markdown(
-    result: Any, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False
+    result: Any, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False,
+    scope_terms: ComparisonScopeTerms | None = None,
 ) -> str:
     from ....bundle import render_bundle_findings_markdown
 
@@ -793,6 +792,7 @@ def _render_markdown(
         f"- Bundle verdict: `{result.bundle_verdict.value}`",
         "",
     ]
+    lines += markdown_scope_lines(scope_terms if scope_terms is not None else scope_terms_for(result, {}))
     if result.analysis_errors:
         lines.append("## Bundle analysis errors")
         lines += [f"- {msg}" for msg in result.analysis_errors]

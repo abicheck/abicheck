@@ -117,6 +117,10 @@ def _invoke_json(*args: str) -> tuple[int, dict[str, object]]:
 
 
 _LIVE = release_inventory_evidence(old_stored=False, new_stored=False)
+# NEW named explicitly as one file: the only shape D9 may narrow from.
+_LIVE_SINGLE = release_inventory_evidence(
+    old_stored=False, new_stored=False, new_single_artifact=True
+)
 
 
 # ---------------------------------------------------------------------------
@@ -127,11 +131,35 @@ _LIVE = release_inventory_evidence(old_stored=False, new_stored=False)
 class TestTwelveVariantBaseline:
     @pytest.fixture
     def dirs(self, tmp_path: Path) -> tuple[Path, Path]:
+        """OLD is the twelve-variant baseline directory; NEW is the one
+        candidate *named as a file* -- D9 reads intent from that operand
+        shape, never from how many members a directory happened to hold."""
         old, new = tmp_path / "baseline", tmp_path / "candidate"
         for i in range(12):
             _write(old, f"libv{i}.json", _snap(f"libv{i}.so"))
         _write(new, "libv3.json", _snap("libv3.so"))
-        return old, new
+        return old, new / "libv3.json"
+
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    def test_one_member_directory_is_not_narrowed(
+        self, dirs: tuple[Path, Path], policy: str
+    ) -> None:
+        """Discovered cardinality is not intent: the same one candidate
+        supplied as a *directory* selects every baseline member, so the
+        eleven unmatched ones are unchecked and `block` still gates --
+        a PR-controlled NEW tree cannot trim itself into a clean pass."""
+        old, candidate = dirs
+        code, doc = _invoke_json(
+            "compare", str(old), str(candidate.parent), "--on-incomplete-scope", policy
+        )
+        scope = doc["comparison_scope"]
+        assert scope["selection"] == "all_expected"
+        assert scope["completeness"] == "incomplete"
+        assert scope["counts"]["out_of_scope"] == 0
+        assert scope["counts"]["not_supplied"] == 11
+        assert len(scope["unchecked"]) == 11
+        assert scope["proven_removed"] == []
+        assert code == (1 if policy == "block" else 0)
 
     @pytest.mark.parametrize("extra", [(), ("--fail-on-removed-library",)])
     def test_one_comparison_eleven_out_of_scope_zero_removals(
@@ -512,7 +540,7 @@ class TestRecordBuilderProperties:
         old_map, new_map = _maps(old_keys, [candidate])
         results = _results(old_map, [candidate], [verdict])
         record = build_release_scope_record(
-            old_map, new_map, [candidate], results, _LIVE
+            old_map, new_map, [candidate], results, _LIVE_SINGLE
         )
         assert record.selection == "current_artifact"
         others = [m for m in record.members if m.member != candidate]
@@ -522,10 +550,24 @@ class TestRecordBuilderProperties:
         assert record.is_incomplete == (
             verdict in ("ERROR", "not_comparable", "unsupported")
         )
+        # The same one-member NEW *discovered* in a directory is not intent:
+        # every other OLD member is unchecked, never out of scope.
+        discovered = build_release_scope_record(
+            old_map, new_map, [candidate], results, _LIVE
+        )
+        assert discovered.selection == "all_expected"
+        assert discovered.is_incomplete
+        assert {m.member for m in discovered.unchecked_members} >= set(old_keys[1:])
+        assert all(
+            m.state is AcquisitionState.NOT_SUPPLIED
+            for m in discovered.members
+            if m.member != candidate
+        )
         # A proven-complete NEW inventory switches the inference off (D2 wins).
         proven = ReleaseInventoryEvidence(
             old=_LIVE.old,
             new=SideInventory(InventoryCompleteness.PROVEN, "test"),
+            new_single_artifact=True,
         )
         strict = build_release_scope_record(
             old_map, new_map, [candidate], results, proven
@@ -839,3 +881,271 @@ class TestPrComment:
         model = build_model(report)
         assert model.removed_libraries == ["libgone.so"]
         assert model.scope_notice is None
+
+
+# ---------------------------------------------------------------------------
+# Codex review on PR #1079: persistence versioning, stored-baseline gating,
+# JUnit projection
+# ---------------------------------------------------------------------------
+
+
+class TestDegradedPersistenceVersioning:
+    def test_only_a_degraded_document_declares_the_reader_max(self) -> None:
+        from abicheck.bundle_facts import (
+            BUNDLE_FACTS_BASE_SCHEMA_VERSION,
+            BUNDLE_FACTS_SCHEMA_VERSION,
+            capture_bundle_facts,
+        )
+        from abicheck.bundle_facts_serialization import (
+            bundle_facts_from_dict,
+            bundle_facts_to_dict,
+        )
+
+        clean = capture_bundle_facts(
+            {"liba.so": AbiSnapshot(library="liba.so", version="")}
+        )
+        degraded = capture_bundle_facts(
+            {"liba.so": AbiSnapshot(library="liba.so", version="")},
+            degraded_members={"liba.so": "ELF-only: boom"},
+        )
+        assert (
+            bundle_facts_to_dict(clean)["schema_version"]
+            == BUNDLE_FACTS_BASE_SCHEMA_VERSION
+        )
+        assert (
+            bundle_facts_to_dict(degraded)["schema_version"]
+            == BUNDLE_FACTS_SCHEMA_VERSION
+        )
+        assert BUNDLE_FACTS_SCHEMA_VERSION > BUNDLE_FACTS_BASE_SCHEMA_VERSION
+        # A pre-S2 reader (max 2) rejects the degraded document outright;
+        # modelled by the rejection this reader applies one version up.
+        d = bundle_facts_to_dict(degraded)
+        d["schema_version"] = BUNDLE_FACTS_SCHEMA_VERSION + 1
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+
+        with pytest.raises(IncompatibleSnapshotSchemaError):
+            bundle_facts_from_dict(d)
+
+    def test_composition_section_stays_v1_without_a_degraded_member(self) -> None:
+        from abicheck.storage.dto import (
+            BUNDLE_COMPOSITION_SECTION_KIND,
+            SECTION_SCHEMA_VERSIONS,
+            SectionDTO,
+            bundle_composition_from_dto,
+            bundle_composition_to_dto,
+        )
+
+        base = {
+            "variant_fingerprint": "x",
+            "manifest": None,
+            "filesystem_aliases": {},
+            "library_filenames": {},
+        }
+        clean = bundle_composition_to_dto({**base, "degraded_members": {}})
+        assert clean.section_schema_version == 1
+        assert "degraded_members" not in clean.payload
+        assert bundle_composition_from_dto(clean)["degraded_members"] == {}
+        marked = bundle_composition_to_dto({**base, "degraded_members": {"a": "why"}})
+        assert (
+            marked.section_schema_version
+            == SECTION_SCHEMA_VERSIONS[BUNDLE_COMPOSITION_SECTION_KIND]
+            == 2
+        )
+        assert bundle_composition_from_dto(marked)["degraded_members"] == {"a": "why"}
+        # A genuine pre-S2 v1 document migrates to the current shape.
+        legacy = SectionDTO(
+            section_kind=BUNDLE_COMPOSITION_SECTION_KIND,
+            section_schema_version=1,
+            payload=base,
+        )
+        assert bundle_composition_from_dto(legacy)["degraded_members"] == {}
+
+
+def _facts_file(
+    tmp_path: Path,
+    name: str,
+    libs: dict[str, AbiSnapshot],
+    degraded: dict[str, str] | None = None,
+) -> Path:
+    from abicheck.bundle_facts import capture_bundle_facts
+    from abicheck.serialization import save_bundle_facts
+
+    path = tmp_path / name
+    save_bundle_facts(capture_bundle_facts(libs, degraded_members=degraded), path)
+    return path
+
+
+def _elf_snap(library: str) -> AbiSnapshot:
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+
+    return AbiSnapshot(
+        library=library,
+        version="1",
+        elf=ElfMetadata(
+            soname=library, symbols=[ElfSymbol(name="fn", visibility="default")]
+        ),
+        functions=[
+            Function(
+                name="fn", mangled="fn", return_type="int", visibility=Visibility.PUBLIC
+            )
+        ],
+    )
+
+
+class TestStoredBaselineGating:
+    def test_stored_pair_degraded_member_is_an_incomplete_scope(
+        self, tmp_path: Path
+    ) -> None:
+        libs = {"libok.so": _elf_snap("libok.so"), "libdeg.so": _elf_snap("libdeg.so")}
+        old = _facts_file(
+            tmp_path,
+            "old.bundlefacts.json",
+            libs,
+            degraded={"libdeg.so": "ELF-only: boom"},
+        )
+        new = _facts_file(tmp_path, "new.bundlefacts.json", libs)
+        code, doc = _invoke_json("compare", str(old), str(new))
+        assert code == 0
+        assert doc["run_outcome"]["scope"] == "incomplete"
+        assert doc["comparison_scope"]["unchecked"] == ["libdeg.so"]
+        assert doc["comparison_scope"]["counts"]["failed"] == 1
+        assert list(doc["libraries"]) == ["libok.so"]
+        code, doc = _invoke_json(
+            "compare", str(old), str(new), "--on-incomplete-scope", "block"
+        )
+        assert code == 1
+        assert doc["comparison_scope"]["incomplete_scope_exit_contribution"] == 1
+
+    def test_stored_pair_every_member_degraded_is_no_comparison_completed(
+        self, tmp_path: Path
+    ) -> None:
+        libs = {"libdeg.so": _elf_snap("libdeg.so")}
+        old = _facts_file(
+            tmp_path,
+            "old.bundlefacts.json",
+            libs,
+            degraded={"libdeg.so": "ELF-only: boom"},
+        )
+        new = _facts_file(tmp_path, "new.bundlefacts.json", libs)
+        code, doc = _invoke_json("compare", str(old), str(new))
+        assert code == 1
+        assert doc["run_outcome"]["scope"] == "incomplete"
+        assert doc["comparison_scope"]["no_comparison_completed"] is True
+
+    def test_stored_live_skips_a_degraded_member(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.package as package
+        from abicheck.bundle_side_input import compare_release_against_bundle_facts
+
+        # The live discovery looks for ELF objects; point it at the stored
+        # snapshot files so the driver's own matching/skip logic is exercised.
+        monkeypatch.setattr(
+            package,
+            "discover_shared_libraries",
+            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
+        )
+
+        libs = {"libok.so": _elf_snap("libok.so"), "libdeg.so": _elf_snap("libdeg.so")}
+        old = _facts_file(
+            tmp_path,
+            "old.bundlefacts.json",
+            libs,
+            degraded={"libdeg.so": "ELF-only: boom"},
+        )
+        new_dir = tmp_path / "new"
+        for name, snap in libs.items():
+            _write(new_dir, f"{name}.json", snap)
+        result = compare_release_against_bundle_facts(old, new_dir)
+        assert [d.library for d in result.per_library] == ["libok.so"]
+        assert any("libdeg.so" in m and "degraded" in m for m in result.analysis_errors)
+        assert result.scope_record is not None
+        assert [m.name for m in result.scope_record.unchecked_members] == ["libdeg.so"]
+
+
+class TestJunitScopeProjection:
+    def _junit(self, tmp_path: Path, *, policy: str, breaking: bool = False) -> str:
+        old, new = tmp_path / "old", tmp_path / "new"
+        _write(old, "liba.json", _snap("liba.so", ("foo", "bar")))
+        _write(
+            new, "liba.json", _snap("liba.so", ("foo",) if breaking else ("foo", "bar"))
+        )
+        _write(old, "libb.json", _snap("libb.so"))
+        _write_unreadable(new, "libb.json", _snap("libb.so"))
+        from abicheck.cli import main
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new),
+                "--format",
+                "junit",
+                "--on-incomplete-scope",
+                policy,
+            ],
+        )
+        return result.stdout
+
+    def test_warn_accepted_unsupported_member_is_skipped_not_errored(
+        self, tmp_path: Path
+    ) -> None:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(self._junit(tmp_path, policy="warn"))
+        assert root.get("errors") == "0"
+        scope = next(
+            s
+            for s in root.iter("testsuite")
+            if s.get("name") == "abicheck.comparison_scope"
+        )
+        assert scope.get("errors") == "0" and scope.get("skipped") == "1"
+        assert scope.find("testcase/skipped") is not None
+        assert not any(s.get("name") == "libb.json" for s in root.iter("testsuite"))
+
+    def test_block_errors_the_unsupported_member_and_the_scope_case(
+        self, tmp_path: Path
+    ) -> None:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(self._junit(tmp_path, policy="block"))
+        scope = next(
+            s
+            for s in root.iter("testsuite")
+            if s.get("name") == "abicheck.comparison_scope"
+        )
+        assert scope.get("errors") == "1"
+        assert any(
+            s.get("name") == "libb.json" and s.get("errors") == "1"
+            for s in root.iter("testsuite")
+        )
+        assert int(root.get("errors") or 0) >= 2
+
+    def test_zero_pair_release_errors_under_every_policy(self, tmp_path: Path) -> None:
+        import xml.etree.ElementTree as ET
+
+        old, new = tmp_path / "old", tmp_path / "new"
+        _write(old, "liba.json", _snap("liba.so"))
+        _write(new, "libb.json", _snap("libb.so"))
+        from abicheck.cli import main
+
+        for policy in ("warn", "block"):
+            result = CliRunner().invoke(
+                main,
+                [
+                    "compare",
+                    str(old),
+                    str(new),
+                    "--format",
+                    "junit",
+                    "--on-incomplete-scope",
+                    policy,
+                ],
+            )
+            root = ET.fromstring(result.stdout)
+            assert int(root.get("errors") or 0) >= 1, policy
+            assert any(
+                c.get("name") == "no_comparison_completed"
+                for c in root.iter("testcase")
+            ), policy

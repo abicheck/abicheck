@@ -450,10 +450,21 @@ def compare_release_against_bundle_facts(
 
     per_library_results: list[DiffResult] = []
     new_signature_evidence: dict[str, BundleSignatureEvidence] = {}
+    # ADR-065 D8: a member the capture recorded as degraded (its dump
+    # failed; the stored snapshot is an ELF-only stand-in) is *failed*, not
+    # evidence -- diffing it would read every real declaration on NEW as an
+    # addition. Skipped here, named below, and gated through `scope_record`.
+    degraded: dict[str, str] = {
+        key: reason
+        for key, reason in old_facts.degraded_members.items()
+        if key in new_map
+    }
+    compared: list[str] = []
     for key, old_snapshot in old_facts.per_library_snapshots.items():
         new_path = new_map.get(key)
-        if new_path is None:
+        if new_path is None or key in degraded:
             continue
+        compared.append(key)
         # Per-library overrides win over the uniform fallback -- a library
         # absent from a given override map still falls back to that map's
         # own uniform sibling (headers/includes/compile respectively), so a
@@ -489,7 +500,7 @@ def compare_release_against_bundle_facts(
 
     manifest = load_manifest(manifest_path) if manifest_path is not None else None
     new_bundle_snapshot = build_bundle_snapshot(new_map)
-    return compare_bundle_from_facts(
+    result = compare_bundle_from_facts(
         old_facts,
         new_bundle_snapshot,
         per_library_results,
@@ -500,3 +511,20 @@ def compare_release_against_bundle_facts(
         policy_file=policy_file,
         new_signature_evidence=dict(new_signature_evidence),
     )
+    from .workflows.release_scope import build_stored_baseline_scope_record
+
+    result.analysis_errors.extend(
+        f"{key}: OLD side was captured degraded ({reason}); per-library "
+        "comparison skipped (ADR-065 D8)"
+        for key, reason in sorted(degraded.items())
+    )
+    result.scope_record = build_stored_baseline_scope_record(
+        old_facts.per_library_snapshots,
+        new_map,
+        compared=compared,
+        degraded=degraded,
+        old_provenance="stored bundle-facts capture: the captured set is not a proven inventory",
+        new_provenance="live directory/archive listing: no declared inventory",
+        new_single_artifact=not new_dir.is_dir(),
+    )
+    return result

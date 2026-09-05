@@ -560,6 +560,9 @@ def compare_release_cmd(
                 new_stored=new_dir.is_dir()
                 and is_project_snapshot_package_dir(new_dir),
                 direct_pair=list(matched_keys) == [DIRECT_PAIR_KEY],
+                # D9 reads intent from the operand shape: a single-file NEW
+                # (not a directory/archive that discovered one member).
+                new_single_artifact=new_dir.is_file() and not is_package(new_dir),
             )
 
             if fmt != "json":

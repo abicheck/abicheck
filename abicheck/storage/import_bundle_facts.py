@@ -71,7 +71,6 @@ from typing import Any
 from ..errors import IncompatibleSnapshotSchemaError
 from .dto import (
     BUNDLE_COMPOSITION_SECTION_KIND,
-    SECTION_SCHEMA_VERSIONS,
     SectionDTO,
     bundle_composition_from_dto,
     bundle_composition_to_dto,
@@ -108,18 +107,11 @@ __all__ = [
 #: two cannot silently drift apart.
 BUNDLE_FACTS_ARTIFACT_TYPE = "abicheck.bundle-facts"
 
-#: `abicheck.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION`, duplicated for the
-#: identical reason as `BUNDLE_FACTS_ARTIFACT_TYPE` above -- required
-#: alongside it, since `bundle_facts_serialization.bundle_facts_from_dict`
-#: rejects a document declaring `artifact_type` at a `schema_version` below
-#: 2 (the version `artifact_type` itself was introduced at) as
-#: self-contradictory. `export_bundle_facts` always emits the *current*
-#: shape, exactly like `bundle_facts_to_dict()` itself does — never
-#: whatever version happened to be recorded on the package's own
-#: `StorageVersions.source_schema_version` axis, which tracks each
-#: per-library `AbiSnapshot`'s schema, a wholly independent axis from the
-#: `BundleFacts` container's own shape.
-_BUNDLE_FACTS_SCHEMA_VERSION = 2
+#: `abicheck.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION`/`..._BASE_SCHEMA_VERSION`, duplicated as
+#: `BUNDLE_FACTS_ARTIFACT_TYPE` is. `export_bundle_facts` applies `bundle_facts_to_dict()`'s
+#: writer rule (base, or 3 once `degraded_members` is non-empty -- ADR-065 D8).
+_BUNDLE_FACTS_SCHEMA_VERSION = 3
+_BUNDLE_FACTS_BASE_SCHEMA_VERSION = 2
 
 #: `abicheck.bundle_facts.DEFAULT_VARIANT_FINGERPRINT`, duplicated for the
 #: identical reason as `BUNDLE_FACTS_ARTIFACT_TYPE` above.
@@ -172,19 +164,21 @@ def _validated_filesystem_aliases(raw: Any) -> dict[str, list[str]]:
     return validated
 
 
-def _validated_library_filenames(raw: Any) -> dict[str, str]:
+def _validated_library_filenames(
+    raw: Any, field: str = "library_filenames"
+) -> dict[str, str]:
     """`bundle_facts_to_dict()`'s own `library_filenames` shape (`{library: filename}`) -- and, since ADR-065 D8, its identically-shaped `degraded_members` (`{library: failure reason}`) -- validated the same way `_validated_filesystem_aliases` is, for the identical reason."""
     if raw is _ABSENT:
         return {}
     if not isinstance(raw, Mapping):
         raise ValueError(
-            f"bundle_facts_document str->str map must be a mapping, not {type(raw).__name__} ({raw!r})"
+            f"bundle_facts_document['{field}'] must be a mapping, not {type(raw).__name__} ({raw!r})"
         )
     validated: dict[str, str] = {}
     for library, filename in raw.items():
         if not isinstance(library, str) or not isinstance(filename, str):
             raise ValueError(
-                f"bundle_facts_document str->str map must map strings to strings, got {library!r}: {filename!r}"
+                f"bundle_facts_document['{field}'] must map strings to strings, got {library!r}: {filename!r}"
             )
         validated[library] = filename
     return validated
@@ -566,7 +560,7 @@ def import_bundle_facts(
             bundle_facts_document.get("library_filenames", _ABSENT)
         ),
         "degraded_members": _validated_library_filenames(  # ADR-065 D8, same shape
-            bundle_facts_document.get("degraded_members", _ABSENT)
+            bundle_facts_document.get("degraded_members", _ABSENT), "degraded_members"
         ),
     }
     composition_dto = bundle_composition_to_dto(composition_payload)
@@ -574,9 +568,10 @@ def import_bundle_facts(
         kind=BUNDLE_COMPOSITION_SECTION_KIND,
         digest=store.put(composition_dto.to_dict()),
     )
-    section_schema_versions[BUNDLE_COMPOSITION_SECTION_KIND] = SECTION_SCHEMA_VERSIONS[
-        BUNDLE_COMPOSITION_SECTION_KIND
-    ]
+    # The DTO's own stamp (v1 without a degraded member, so pre-S2 readers still open it).
+    section_schema_versions[BUNDLE_COMPOSITION_SECTION_KIND] = (
+        composition_dto.section_schema_version
+    )
 
     variant = VariantRef(
         variant_id=variant_id,
@@ -788,13 +783,18 @@ def export_bundle_facts(
             "was hand-edited"
         )
 
+    degraded_members = composition.get("degraded_members", {})
     return {
         "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
-        "schema_version": _BUNDLE_FACTS_SCHEMA_VERSION,
+        "schema_version": (
+            _BUNDLE_FACTS_SCHEMA_VERSION
+            if degraded_members
+            else _BUNDLE_FACTS_BASE_SCHEMA_VERSION
+        ),
         "variant_fingerprint": raw_variant_fingerprint,
         "per_library_snapshots": per_library_snapshots,
         "filesystem_aliases": composition.get("filesystem_aliases", {}),
         "library_filenames": composition.get("library_filenames", {}),
-        "degraded_members": composition.get("degraded_members", {}),
+        "degraded_members": degraded_members,
         "manifest": exported_manifest,
     }

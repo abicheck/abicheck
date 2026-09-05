@@ -1054,14 +1054,11 @@ def _format_release_summary(
     scope_terms: ComparisonScopeTerms | None = None,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML.
-
-    *scope_terms* (ADR-065 S2) is the release's one resolved
-    :class:`~abicheck.report.comparison_scope.ComparisonScopeTerms`; every
-    format reads the same object, so they cannot disagree on the scope.
-    """
+    *scope_terms* (ADR-065 S2): the one resolved scope every format reads."""
     if fmt == "junit":
         return _format_release_junit(
             diff_pairs, matrix_result, library_results, severity_config=severity_config,
+            scope_terms=scope_terms,
         )
     if fmt == "json":
         return _format_release_json(
@@ -1090,8 +1087,12 @@ def _format_release_junit(
     library_results: list[dict[str, object]],
     *,
     severity_config: SeverityConfig | None = None,
+    scope_terms: ComparisonScopeTerms | None = None,
 ) -> str:
     """Render the release summary as a JUnit XML report.
+
+    *scope_terms* (ADR-065 S2): ``unsupported`` errors only when the
+    completeness decision blocks; see ``report.junit_scope`` otherwise.
 
     *severity_config*, when given, is forwarded to
     :func:`to_junit_xml_multi` (Codex review on #549) so a finding a severity
@@ -1116,17 +1117,20 @@ def _format_release_junit(
     # testsuite so CI dashboards reading the JUnit report see the failure.
     if matrix_result is not None:
         pairs.append((matrix_result, None))
+    scope_blocks = scope_terms is not None and scope_terms.incomplete_scope_exit_contribution == 1
     error_libs = [
         {**entry, "error": entry.get("reason", entry["verdict"])}
         if entry.get("verdict") in ("not_comparable", "unsupported")
         else entry
         for entry in library_results
-        if entry.get("verdict") in _RELEASE_OPERATIONAL_SENTINELS
+        if entry.get("verdict") in ("ERROR", "not_comparable")
+        or (entry.get("verdict") == "unsupported" and scope_blocks)
     ]
     return to_junit_xml_multi(
         pairs,
         severity_config=severity_config,
         error_libraries=error_libs if error_libs else None,
+        comparison_scope=scope_terms.section if scope_terms is not None else None,
     )
 
 
@@ -1151,14 +1155,9 @@ def _format_release_json(
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
 ) -> str:
-    """Render the release summary as a JSON document.
-
-    ``unmatched_old``/``unmatched_new`` keep their key and become what the
-    name says (ADR-065 D2): the raw set difference, read off the
-    acquisition record when one exists; *removed_keys*/*added_keys* are the
-    **proven** sets that feed ``exit``. ``comparison_scope`` is the record
-    itself plus the policy and the two contributions ``exit`` folded.
-    """
+    """Render the release summary as a JSON document. ``unmatched_old``/
+    ``unmatched_new`` are the raw set difference (ADR-065 D2), read off the
+    record; *removed_keys*/*added_keys* are the **proven** sets ``exit`` reads."""
     changed_libraries = [
         str(lib["library"])
         for lib in library_results

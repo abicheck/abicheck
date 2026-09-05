@@ -27,15 +27,20 @@ ScopeAcquisitionRecord.proven_removed_members`, which is empty unless the
 NEW side's inventory is proven complete (D2).
 
 **D9's narrow-task inference** is applied here, deliberately conservative:
-when NEW supplied exactly one artifact and it matched exactly one OLD
-member, the run is a *current-artifact* task -- every other OLD member is
-``out_of_scope`` and contributes nothing (the "one candidate against a
-twelve-variant baseline yields one comparison and eleven out-of-scope
-members, zero removals" acceptance case). Any other shape selects every
-discovered member on either side, so an unmatched member is
-``not_supplied`` and flows into D6's incompleteness outcome. S1 replaces
-the filename tier with identity/coordinate selection and a ``--dry-run``
-plan view; the record shape it populates is this one.
+when the caller *named* exactly one NEW artifact (a single-file operand,
+not a directory or archive that happened to contain one member) and it
+matched exactly one OLD member, the run is a *current-artifact* task --
+every other OLD member is ``out_of_scope`` and contributes nothing (the
+"one candidate against a twelve-variant baseline yields one comparison and
+eleven out-of-scope members, zero removals" acceptance case). The intent
+has to be explicit in the operand shape: a one-member *discovered* NEW
+directory selects every member on either side like any other directory,
+so its unmatched OLD members are ``not_supplied`` and flow into D6's
+incompleteness outcome -- otherwise a PR-controlled NEW tree could trim
+itself to one library and turn ``--on-incomplete-scope block`` into a
+clean pass. S1 replaces the filename tier with identity/coordinate
+selection and a ``--dry-run`` plan view; the record shape it populates is
+this one.
 
 **Inventory proof in S2.** A stored ``ProjectSnapshot`` package operand
 carries its own declared variant composition, which is a trusted complete
@@ -50,7 +55,7 @@ directory listing order (an ADR-065 acceptance invariant).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,6 +74,7 @@ __all__ = [
     "ReleaseInventoryEvidence",
     "StrandedLibraryResolution",
     "build_release_scope_record",
+    "build_stored_baseline_scope_record",
     "release_global_ran",
     "release_inventory_evidence",
     "unmatched_names",
@@ -106,6 +112,9 @@ class ReleaseInventoryEvidence:
     old: SideInventory
     new: SideInventory
     direct_pair: bool = False
+    #: The caller named NEW as one explicit artifact (a file operand), the
+    #: only shape D9's current-artifact narrowing may read intent from.
+    new_single_artifact: bool = False
 
 
 @dataclass(frozen=True)
@@ -126,7 +135,11 @@ class StrandedLibraryResolution:
 
 
 def release_inventory_evidence(
-    *, old_stored: bool, new_stored: bool, direct_pair: bool = False
+    *,
+    old_stored: bool,
+    new_stored: bool,
+    direct_pair: bool = False,
+    new_single_artifact: bool = False,
 ) -> ReleaseInventoryEvidence:
     """S2's inventory-proof rule, in one place."""
 
@@ -142,7 +155,10 @@ def release_inventory_evidence(
         return SideInventory(InventoryCompleteness.UNPROVEN, _LIVE_PROVENANCE)
 
     return ReleaseInventoryEvidence(
-        old=_side(old_stored), new=_side(new_stored), direct_pair=direct_pair
+        old=_side(old_stored),
+        new=_side(new_stored),
+        direct_pair=direct_pair,
+        new_single_artifact=new_single_artifact,
     )
 
 
@@ -206,12 +222,18 @@ def build_release_scope_record(
             selection_reason="two files: the one pair is the whole scope",
         )
 
-    # D9's narrow inference applies only while NEW's inventory is *unproven*:
-    # a proven-complete NEW side that lists exactly one member is a
-    # one-member release, and its unmatched OLD members are exactly what
-    # D2 lets a proof turn into removals -- never demoted to out-of-scope.
+    # D9's narrow inference reads intent from the operand shape only: the
+    # caller named one NEW artifact explicitly. Discovered cardinality is
+    # not intent -- a one-member NEW directory is a partial release until
+    # proven otherwise, and demoting its unmatched OLD members to
+    # out-of-scope would let a PR-controlled tree bypass `block`. It also
+    # applies only while NEW's inventory is *unproven*: a proven-complete
+    # NEW side that lists exactly one member is a one-member release, and
+    # its unmatched OLD members are exactly what D2 lets a proof turn into
+    # removals -- never demoted to out-of-scope.
     narrow = (
-        len(new_map) == 1
+        evidence.new_single_artifact
+        and len(new_map) == 1
         and len(matched) == 1
         and len(old_map) > 1
         and evidence.new.completeness is not InventoryCompleteness.PROVEN
@@ -227,8 +249,8 @@ def build_release_scope_record(
         elif old_present and narrow:
             state, reason = (
                 AcquisitionState.OUT_OF_SCOPE,
-                f"unselected baseline member: NEW supplied one artifact ({candidate}), "
-                "so this run is a current-artifact comparison (ADR-065 D9)",
+                f"unselected baseline member: NEW named one artifact ({candidate}) "
+                "explicitly, so this run is a current-artifact comparison (ADR-065 D9)",
             )
         elif old_present:
             state, reason = (
@@ -263,9 +285,9 @@ def build_release_scope_record(
     if narrow:
         selection, selection_reason = (
             "current_artifact",
-            f"NEW supplied exactly one artifact ({candidate}) with exactly one OLD "
-            f"counterpart; the other {len(old_map) - 1} OLD member(s) are out of "
-            "scope (ADR-065 D9)",
+            f"NEW named exactly one artifact ({candidate}) explicitly, with exactly "
+            f"one OLD counterpart; the other {len(old_map) - 1} OLD member(s) are "
+            "out of scope (ADR-065 D9)",
         )
     else:
         selection, selection_reason = (
@@ -279,6 +301,46 @@ def build_release_scope_record(
         selection=selection,
         selection_reason=selection_reason,
     )
+
+
+def build_stored_baseline_scope_record(
+    old_keys: Iterable[str],
+    new_keys: Iterable[str],
+    *,
+    compared: Iterable[str],
+    degraded: Mapping[str, str],
+    old_provenance: str,
+    new_provenance: str,
+    new_single_artifact: bool = False,
+) -> ScopeAcquisitionRecord:
+    """The record for a stored-baseline driver (`bundle_side_input` /
+    `bundle_stored_pair_compare`), through the same builder the live
+    fan-out uses so D9's narrowing and D2's reading are one rule.
+
+    *compared* are the matched keys whose per-library diff ran; *degraded*
+    maps a matched key skipped for a D8 marker (on either side) to the
+    reason, recorded `failed`. Both inventories are unproven in S2: a
+    captured `BundleFacts` document records what was captured, not that
+    the capture was complete (S3 owns declared inventories).
+    *new_single_artifact* is the stored/live driver's "NEW was named as one
+    file" signal, the only shape D9's narrowing may read intent from.
+    """
+    old_map = {k: Path(k) for k in old_keys}
+    new_map = {k: Path(k) for k in new_keys}
+    matched = sorted(set(old_map) & set(new_map))
+    results: list[Mapping[str, object]] = [
+        {"library": k, "verdict": "ERROR", "error": degraded[k]}
+        if k in degraded
+        else {"library": k, "verdict": "NO_CHANGE"}
+        for k in matched
+        if k in degraded or k in set(compared)
+    ]
+    evidence = ReleaseInventoryEvidence(
+        old=SideInventory(InventoryCompleteness.UNPROVEN, old_provenance),
+        new=SideInventory(InventoryCompleteness.UNPROVEN, new_provenance),
+        new_single_artifact=new_single_artifact,
+    )
+    return build_release_scope_record(old_map, new_map, matched, results, evidence)
 
 
 def release_global_ran(

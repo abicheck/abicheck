@@ -1221,7 +1221,10 @@ Once a root command genuinely clears the bar above, pick the right home:
   removal (`unmatched_old` keeps listing it). Owners:
   `model/scope_acquisition.py` (the record), `policy/scope_completeness.py`
   (the fold), `workflows/release_scope.py` (the release builder, with D9's
-  one-candidate narrowing), `report/comparison_scope.py` (the section)
+  one-candidate narrowing -- applied only when NEW is *named* as a single
+  file, never from a discovered one-member directory, so a PR-controlled
+  NEW tree cannot narrow its way past `block`), `report/comparison_scope.py`
+  (the section)
 - `compat` command: 0 = compatible, 1 = BREAKING, 2 = API_BREAK (source-level), 3-11 = errors (see `compat/cli.py:_classify_compat_error_exit_code`)
 - `64` = usage error (bad flags/inputs; `cli._EXIT_USAGE_ERROR`) — applies across commands
 - Full per-command matrix: `docs/reference/exit-codes.md`

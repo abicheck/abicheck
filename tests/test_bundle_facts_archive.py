@@ -31,6 +31,7 @@ import pytest
 
 from abicheck.bundle_facts import (
     BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+    BUNDLE_FACTS_BASE_SCHEMA_VERSION,
     BundleFacts,
     capture_bundle_facts,
 )
@@ -846,8 +847,6 @@ class TestBundleFactsArchiveArtifactTypeDiscriminator:
         import json as _json
         import zipfile as _zipfile
 
-        from abicheck.bundle_facts import BUNDLE_FACTS_SCHEMA_VERSION
-
         facts = capture_bundle_facts(_per_library_snapshots(_old_metadata()))
         facts.schema_version = 1  # simulate a loaded legacy v1 document
         out = tmp_path / "stamped.bundlefacts.archive.zip"
@@ -855,12 +854,14 @@ class TestBundleFactsArchiveArtifactTypeDiscriminator:
 
         with _zipfile.ZipFile(out) as zf:
             manifest = _json.loads(zf.read("manifest.json"))
-        assert manifest["bundle_facts_schema_version"] == BUNDLE_FACTS_SCHEMA_VERSION
+        assert (
+            manifest["bundle_facts_schema_version"] == BUNDLE_FACTS_BASE_SCHEMA_VERSION
+        )
 
         # And the reloaded object reflects the stamped, current version --
         # not the preserved 1 the in-memory facts object claimed.
         reloaded = load_bundle_facts(out, format="archive")
-        assert reloaded.schema_version == BUNDLE_FACTS_SCHEMA_VERSION
+        assert reloaded.schema_version == BUNDLE_FACTS_BASE_SCHEMA_VERSION
 
     def test_load_rejects_a_non_string_variant_fingerprint(
         self, tmp_path: Path

@@ -103,10 +103,13 @@ must be proven complete (a stored `ProjectSnapshot` package's declared
 composition; a live directory or extracted archive cannot prove absence). An
 unmatched library under an unproven inventory is reported as an incomplete
 scope instead — exit `0` under `warn`, `1` under `block` — and the JSON key
-`unmatched_old` keeps listing it. When NEW supplies exactly one artifact with
-exactly one OLD counterpart and NEW's inventory is unproven, the run is a
-current-artifact comparison (D9): the other OLD members are `out_of_scope`
-and the scope is complete.
+`unmatched_old` keeps listing it. When NEW is *named as a single file* (not a
+directory or archive that happens to hold one member) with exactly one OLD
+counterpart and NEW's inventory is unproven, the run is a current-artifact
+comparison (D9): the other OLD members are `out_of_scope` and the scope is
+complete. A one-member NEW directory is not narrowed: its unmatched OLD
+members stay unchecked, so `block` still gates — discovered cardinality is
+never read as intent.
 
 **Without `--contract` there is no selected domain, so the
 contribution is always `0`** and every other exit code below is unchanged.

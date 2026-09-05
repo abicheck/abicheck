@@ -36,6 +36,7 @@ from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
 from .model import AbiSnapshot, Function, Variable
 from .model.elf_facts import ElfMetadata, SymbolBinding
+from .model.scope_acquisition import ScopeAcquisitionRecord
 
 if TYPE_CHECKING:
     from .policy_file import PolicyFile
@@ -672,6 +673,13 @@ class BundleDiffResult:
     #: coverage ledger (mirroring `contract_coverage_ledger.py`) would add
     #: beyond this.
     analysis_errors: list[str] = field(default_factory=list)
+    #: ADR-065 S2: the acquisition record a stored-baseline driver
+    #: (`bundle_side_input`/`workflows.bundle_stored_pair_compare`) builds
+    #: for its members -- a degraded (D8) member is `failed` here, so the
+    #: dispatcher's completeness axis gates on it instead of reading a
+    #: clean `per_library` list as a fully checked scope. `None` for the
+    #: live `compare_bundle` path, whose own fan-out owns its record.
+    scope_record: ScopeAcquisitionRecord | None = None
     #: Optional :class:`~abicheck.policy_file.PolicyFile`, applied on top of
     #: *policy* when scoring ``bundle_verdict`` -- previously bundle-level
     #: findings were always scored under the bare *policy* name alone, even

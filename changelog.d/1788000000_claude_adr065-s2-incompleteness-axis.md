@@ -13,12 +13,21 @@
   with `max` like the contract-coverage axis). A release whose selected scope
   completed **no** comparison exits `1` with a `no_comparison_completed`
   operational outcome under either setting instead of the previous silent
-  `NO_CHANGE`/exit `0`. One candidate against a many-member baseline is a
-  current-artifact comparison: the other baseline members are `out_of_scope`,
-  not "removed". A stored bundle-facts baseline now records a stranded
+  `NO_CHANGE`/exit `0`. One candidate *named as a single file* against a
+  many-member baseline is a current-artifact comparison: the other baseline
+  members are `out_of_scope`, not "removed". A one-member NEW *directory* is
+  not narrowed (its unmatched baseline members stay unchecked), so
+  discovered cardinality can never bypass `--on-incomplete-scope block`. A stored bundle-facts baseline now records a stranded
   library whose dump failed as a degraded member (`degraded_members`), and a
-  stored/stored comparison skips such a member and says so, instead of
-  diffing an ELF-only stand-in. An artifact this build cannot analyze is
+  stored/stored or stored/live comparison skips such a member, says so, and
+  gates on it through the completeness axis instead of diffing an ELF-only
+  stand-in. A bundle-facts document carrying a degraded member declares
+  `schema_version: 3` (and its `ProjectSnapshot` composition section
+  version 2), so a pre-S2 reader rejects it rather than misreads it; a
+  document with no degraded member keeps declaring the previous version and
+  stays readable by older readers. JUnit output carries the scope decision
+  as an `abicheck.comparison_scope` suite (skipped cases under `warn`,
+  errors under `block` or when no comparison completed). An artifact this build cannot analyze is
   recorded `unsupported` (an incompleteness signal) rather than an `ERROR`
   floored to exit `4`.
 - **`--fail-on-removed-library` exit `8` migration.** Exit `8` now requires the

@@ -4143,9 +4143,9 @@ class TestCompareReleaseDsoOnly:
             "compare", str(old_dir), str(new_dir),
             "--format", "json", "--dso-only",
         ])
-        # With --dso-only, JSON snapshots are not ELF DSOs, so no pairs found
-        # but the command should still succeed
-        assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
+        # Flag accepted (no usage error); zero pairs is exit 1 `no_comparison_completed` (ADR-065 D7)
+        assert result.exit_code == 1, f"Exit {result.exit_code}: {result.output}"
+        assert '"reasons": [\n      "no_comparison_completed"\n    ]' in result.stdout
 
 
 class TestKeepExtractedActuallyKeeps:

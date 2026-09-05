@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..policy_file import PolicyFile
     from .suppression import SuppressionList
+from .release_scope import build_stored_baseline_scope_record
 
 
 def compare_stored_bundle_facts_pair(
@@ -332,4 +333,21 @@ def compare_stored_bundle_facts_pair(
         new_signature_evidence=dict(projected_new_snapshots),
     )
     result.analysis_errors.extend(degraded_notes)
+    # ADR-065 S2: the skipped member is `failed` on the record, so the
+    # dispatcher's completeness axis gates on it (Codex review: a nonempty
+    # `per_library` alone read a partially unchecked bundle as complete).
+    result.scope_record = build_stored_baseline_scope_record(
+        old_facts.per_library_snapshots,
+        new_facts.per_library_snapshots,
+        compared=[key for key in matched_keys if key not in degraded_keys],
+        degraded={
+            key: str(
+                old_facts.degraded_members.get(key)
+                or new_facts.degraded_members.get(key)
+            )
+            for key in sorted(degraded_keys)
+        },
+        old_provenance="stored bundle-facts capture: the captured set is not a proven inventory",
+        new_provenance="stored bundle-facts capture: the captured set is not a proven inventory",
+    )
     return result

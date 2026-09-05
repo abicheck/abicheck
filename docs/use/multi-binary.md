@@ -575,12 +575,18 @@ The JSON report carries the whole record under `comparison_scope`
 `complete`/`incomplete`, and the Markdown report and PR comment state the
 unchecked members and that the verdict covers the compared members only.
 
-**One candidate against a many-member baseline.** When NEW supplies exactly
-one artifact with exactly one OLD counterpart (and NEW's inventory is not
-proven complete), the run is a *current-artifact* comparison: the other OLD
-members are `out_of_scope`, the scope is complete, and nothing is reported
-as removed — a local single-variant build compared against a twelve-variant
-baseline no longer reads as eleven removals.
+**One candidate against a many-member baseline.** When NEW is named as a
+*single file* (`abicheck compare baseline/ build/libfoo.so`) with exactly one
+OLD counterpart (and NEW's inventory is not proven complete), the run is a
+*current-artifact* comparison: the other OLD members are `out_of_scope`, the
+scope is complete, and nothing is reported as removed — a local
+single-variant build compared against a twelve-variant baseline no longer
+reads as eleven removals. The intent has to be in the operand shape: the
+same one library supplied as a *directory* is treated like any other
+directory, so the eleven unmatched members are unchecked and
+`--on-incomplete-scope block` still gates. Otherwise a pull request that
+controls the NEW tree could trim it to one library and turn a blocking
+incomplete scope into a clean pass.
 
 **Policy.** `--on-incomplete-scope warn` (the default) reports every
 unchecked member and contributes `0` to the exit code; `block` contributes
@@ -601,8 +607,11 @@ name says. See the migration note in
 **Stored baselines.** A `--bundle-facts-out` capture whose stranded library
 failed to dump records that member under `degraded_members` (with the
 failure) instead of persisting an ELF-only stand-in as if it were complete;
-a later stored/stored comparison skips such a member and says so in
-`bundle_analysis_errors`.
+a later stored/stored or stored/live comparison skips such a member, says so
+in `bundle_analysis_errors`, and records it as `failed` on the completeness
+axis. Such a document declares `schema_version: 3` (a clean document keeps
+`2`), so an older abicheck rejects it instead of comparing the stand-in as
+real evidence.
 
 ## Comparing against a stored bundle baseline (G38 Phase 2)
 

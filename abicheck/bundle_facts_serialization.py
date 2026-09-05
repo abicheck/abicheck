@@ -168,7 +168,7 @@ def bundle_facts_to_dict(
     member of a possibly-large ``BundleFacts`` has already been converted
     and retained in one combined document (Codex review) -- raise from the
     callback to abort before the next snapshot is converted."""
-    from .bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE, BUNDLE_FACTS_SCHEMA_VERSION
+    from .bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE, document_schema_version
     from .bundle_manifest import manifest_to_dict
     from .serialization import snapshot_to_dict
 
@@ -181,19 +181,18 @@ def bundle_facts_to_dict(
 
     return {
         "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
-        "schema_version": BUNDLE_FACTS_SCHEMA_VERSION,
+        # 2 for a clean document, 3 once `degraded_members` carries a
+        # decision-bearing marker (ADR-065 D8) -- see `document_schema_version`.
+        "schema_version": document_schema_version(facts),
         "variant_fingerprint": facts.variant_fingerprint,
         "per_library_snapshots": per_library_snapshots,
         "filesystem_aliases": {
             name: list(aliases) for name, aliases in facts.filesystem_aliases.items()
         },
         "library_filenames": dict(facts.library_filenames),
-        # ADR-065 D8: emitted unconditionally (`{}` when nothing degraded)
-        # so a reader can tell "captured clean" from "written by a pre-S2
-        # abicheck that could not say"; the key is additive, so a pre-S2
-        # reader still loads the document (and, being unable to see the
-        # marker, reads a degraded member impoverished -- which only a
-        # reader that has this key can ever fix).
+        # ADR-065 D8: `{}` when nothing degraded (a pre-S2 reader still
+        # loads that document); non-empty only under schema_version 3 above,
+        # which a pre-S2 reader rejects rather than misreads.
         "degraded_members": dict(facts.degraded_members),
         "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
     }
