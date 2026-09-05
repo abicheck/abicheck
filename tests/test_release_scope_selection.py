@@ -48,6 +48,7 @@ from abicheck.model.scope_acquisition import (
     SideInventory,
 )
 from abicheck.workflows.release_scope import (
+    ReleaseInventoryEvidence,
     build_release_scope_record,
     build_stored_baseline_scope_record,
     bundle_analysis_members,
@@ -711,3 +712,186 @@ class TestDirectBundleApiHonorsDegradation:
         )
         snapshot = bundle_snapshot_from_facts(restrict_bundle_facts(facts, record))
         assert set(snapshot.libraries) == {"libalgo.so"}
+
+
+class TestNarrowingOutranksAnUnrelatedOldFailure:
+    """D9's out-of-scope demotion is decided before D1's `failed` state for
+    an OLD-only member: when NEW names one artifact explicitly, a baseline
+    member `--dso-only` could not classify is *unselected* first -- its
+    failure is named on the record but never poisons the current-artifact
+    comparison's completeness under `block`. A NEW-side failure is still
+    `failed`: it concerns the very artifact the caller selected (Codex
+    review, sixteenth round)."""
+
+    @staticmethod
+    def _evidence(*, new_single_artifact: bool) -> ReleaseInventoryEvidence:
+        return ReleaseInventoryEvidence(
+            old=SideInventory(InventoryCompleteness.UNPROVEN, "t"),
+            new=SideInventory(InventoryCompleteness.UNPROVEN, "t"),
+            new_single_artifact=new_single_artifact,
+        )
+
+    @pytest.mark.parametrize(
+        "failed_keys",
+        [("libbroken.so",), ("libbroken.so", "libworse.so"), ()],
+        ids=["one", "two", "none"],
+    )
+    @pytest.mark.parametrize("other_old", [(), ("libother.so",)], ids=["no", "yes"])
+    def test_record_keeps_a_narrowed_comparison_complete(
+        self, failed_keys: tuple[str, ...], other_old: tuple[str, ...]
+    ) -> None:
+        old_map = {k: Path(k) for k in ("libsel.so", *other_old)}
+        old_failed = {k: "--dso-only could not read it" for k in failed_keys}
+        if not failed_keys and not other_old:
+            pytest.skip("nothing to narrow away")
+        record = build_release_scope_record(
+            old_map,
+            {"libsel.so": Path("libsel.so")},
+            ["libsel.so"],
+            [{"library": "libsel.so", "verdict": "NO_CHANGE"}],
+            self._evidence(new_single_artifact=True),
+            old_failed=old_failed,
+        )
+        by_key = {m.member: m for m in record.members}
+        assert record.selection == "current_artifact"
+        assert (
+            f"other {len(failed_keys) + len(other_old)} OLD" in record.selection_reason
+        )
+        assert by_key["libsel.so"].state is AcquisitionState.AVAILABLE
+        for key in (*failed_keys, *other_old):
+            assert by_key[key].state is AcquisitionState.OUT_OF_SCOPE
+            assert (by_key[key].old_present, by_key[key].new_present) == (True, False)
+            assert ("could not read it" in by_key[key].reason) is (key in old_failed)
+        assert not record.is_incomplete
+        assert record.unchecked_members == ()
+
+    def test_without_narrowing_the_failure_is_still_failed(self) -> None:
+        record = build_release_scope_record(
+            {"libsel.so": Path("libsel.so")},
+            {"libsel.so": Path("libsel.so")},
+            ["libsel.so"],
+            [{"library": "libsel.so", "verdict": "NO_CHANGE"}],
+            self._evidence(new_single_artifact=False),
+            old_failed={"libbroken.so": "--dso-only could not read it"},
+        )
+        by_key = {m.member: m for m in record.members}
+        assert by_key["libbroken.so"].state is AcquisitionState.FAILED
+        assert record.is_incomplete
+
+    def test_a_new_side_failure_is_never_narrowed_away(self) -> None:
+        """A NEW-side unclassified member is the selected artifact's own
+        side failing; nothing was narrowed and the record is incomplete."""
+        record = build_release_scope_record(
+            {"libsel.so": Path("libsel.so"), "libother.so": Path("libother.so")},
+            {"libsel.so": Path("libsel.so")},
+            ["libsel.so"],
+            [{"library": "libsel.so", "verdict": "NO_CHANGE"}],
+            self._evidence(new_single_artifact=True),
+            new_failed={"libnew.so": "--dso-only could not read it"},
+        )
+        by_key = {m.member: m for m in record.members}
+        assert record.selection == "all_expected"
+        assert by_key["libnew.so"].state is AcquisitionState.FAILED
+        assert by_key["libother.so"].state is AcquisitionState.NOT_SUPPLIED
+        assert record.is_incomplete
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    def test_dso_only_current_artifact_compare_exits_0(
+        self, tmp_path: Path, policy: str
+    ) -> None:
+        """OLD stored package: the real DSO's own dump plus a member
+        `--dso-only` cannot classify; NEW named as that one current artifact
+        (a real ELF shared object, since `--dso-only` keeps only those)."""
+        import shutil
+        import subprocess
+
+        gcc = shutil.which("gcc")
+        if gcc is None:
+            pytest.skip("gcc is not available")
+        src = tmp_path / "libdso.c"
+        src.write_text("int dso_fn(void) { return 1; }\n")
+        so = tmp_path / "new" / "libdso.so"
+        so.parent.mkdir()
+        res = subprocess.run(
+            [gcc, "-shared", "-fPIC", str(src), "-o", str(so), "-Wl,-soname,libdso.so"],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode != 0:
+            pytest.fail(f"gcc failed: {res.stderr}")
+        from abicheck import service
+
+        old = tmp_path / "old_pkg"
+        _write_stored_package(
+            old,
+            {
+                "libdso.so": service.resolve_input(so),
+                "libnoelf.so": AbiSnapshot(library="libnoelf.so", version="1"),
+            },
+        )
+        code, doc = _invoke_json(
+            "compare",
+            str(old),
+            str(so),
+            "-j",
+            "1",
+            "--dso-only",
+            "--on-incomplete-scope",
+            policy,
+        )
+        scope = doc["comparison_scope"]
+        assert scope["selection"] == "current_artifact"
+        assert scope["completeness"] == "complete"
+        assert scope["counts"]["failed"] == 0
+        assert [n.split("-")[0] for n in scope["out_of_scope"]] == ["libnoelf.so"]
+        assert scope["unchecked"] == []
+        assert doc["run_outcome"]["scope"] == "complete"
+        assert doc["exit"]["incomplete_scope_contribution"] == 0
+        assert code == 0
+
+
+class TestStoredLiveDriverSurvivesAMemberExtractionFailure:
+    """`compare_release_against_bundle_facts`: a NEW member whose extraction
+    fails outright (a damaged snapshot file) is `failed` on the record and
+    named, and every sibling's completed comparison is kept -- the native
+    fan-out's per-member handling, not an exception escaping before the
+    record exists (Codex review, sixteenth round)."""
+
+    @pytest.mark.parametrize(
+        "damage",
+        [b"{not json", b'{"schema_version": 1}', b""],
+        ids=["syntax", "missing-fields", "empty"],
+    )
+    def test_sibling_comparisons_survive(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: bytes
+    ) -> None:
+        import abicheck.package as package
+        from abicheck.bundle_side_input import compare_release_against_bundle_facts
+
+        monkeypatch.setattr(
+            package,
+            "discover_shared_libraries",
+            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
+        )
+        libs = {
+            "libok.so": _lib("libok.so", exports=("ok_fn",)),
+            "libbad.so": _lib("libbad.so", exports=("bad_fn",)),
+        }
+        old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
+        new_dir = tmp_path / "new"
+        _write(new_dir, "libok.so.json", libs["libok.so"])
+        (new_dir / "libbad.so.json").write_bytes(damage)
+        result = compare_release_against_bundle_facts(old, new_dir)
+        assert [d.library for d in result.per_library] == ["libok.so"]
+        assert any(
+            "libbad.so" in m and "failed extraction" in m
+            for m in result.analysis_errors
+        ), result.analysis_errors
+        record = result.scope_record
+        assert record is not None
+        by_key = {m.member: m for m in record.members}
+        assert by_key["libok.so"].state is AcquisitionState.AVAILABLE
+        assert by_key["libbad.so"].state is AcquisitionState.FAILED
+        assert [m.member for m in record.unchecked_members] == ["libbad.so"]
+        assert record.is_incomplete and not record.no_comparison_completed

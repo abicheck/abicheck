@@ -406,7 +406,11 @@ def compare_release_against_bundle_facts(
     from .bundle_facts import compare_bundle_from_facts
     from .bundle_manifest import load_manifest
     from .bundle_models import BundleSignatureEvidence
-    from .errors import IncompatibleSnapshotSchemaError, UnsupportedArtifactError
+    from .errors import (
+        IncompatibleSnapshotSchemaError,
+        SnapshotError,
+        UnsupportedArtifactError,
+    )
     from .package import discover_shared_libraries
     from .serialization import load_bundle_facts
     from .workflows.bundle_facts_library_overrides import (
@@ -465,6 +469,12 @@ def compare_release_against_bundle_facts(
     # `unsupported` on the scope record (the live fan-out's own per-member
     # rule), not a generic error that escapes before any record exists.
     unsupported: dict[str, str] = {}
+    # ADR-065 D1: a NEW artifact whose extraction *fails* (a damaged
+    # snapshot file, an unreadable binary) is `failed` on the record, the
+    # same per-member handling the native fan-out applies -- never an
+    # exception that escapes before the record exists and discards every
+    # sibling's completed comparison (Codex review).
+    failed: dict[str, str] = {}
     for key, old_snapshot in old_facts.per_library_snapshots.items():
         new_path = new_map.get(key)
         if new_path is None or key in degraded:
@@ -492,6 +502,9 @@ def compare_release_against_bundle_facts(
             )
         except (IncompatibleSnapshotSchemaError, UnsupportedArtifactError) as exc:
             unsupported[key] = str(exc)
+            continue
+        except (SnapshotError, OSError, ValueError) as exc:
+            failed[key] = str(exc)
             continue
         compared.append(key)
         diff = service.compare_snapshots(
@@ -523,6 +536,7 @@ def compare_release_against_bundle_facts(
         new_provenance="live directory/archive listing: no declared inventory",
         new_single_artifact=not new_dir.is_dir(),
         unsupported=unsupported,
+        failed=failed,
     )
     # ADR-065 D2: the bundle graph sees matched members and proven
     # removals/additions only (Codex review) -- see bundle_analysis_members.
@@ -563,6 +577,11 @@ def compare_release_against_bundle_facts(
         f"{key}: NEW artifact is unsupported by this build ({reason}); "
         "per-library comparison skipped (ADR-065 D6)"
         for key, reason in sorted(unsupported.items())
+    )
+    result.analysis_errors.extend(
+        f"{key}: NEW artifact failed extraction ({reason}); per-library "
+        "comparison skipped (ADR-065 D1)"
+        for key, reason in sorted(failed.items())
     )
     if manifest_note is not None:
         result.analysis_errors.append(manifest_note)

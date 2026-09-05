@@ -275,11 +275,15 @@ def build_release_scope_record(
     # NEW side that lists exactly one member is a one-member release, and
     # its unmatched OLD members are exactly what D2 lets a proof turn into
     # removals -- never demoted to out-of-scope.
+    # An OLD member whose acquisition failed still counts toward OLD's
+    # cardinality here: it is a baseline member the caller did not select.
+    old_unselected = (set(old_map) | set(old_failed)) - set(new_map) - set(new_failed)
     narrow = (
         evidence.new_single_artifact
         and len(new_map) == 1
+        and not new_failed
         and len(matched) == 1
-        and len(old_map) > 1
+        and bool(old_unselected)
         and evidence.new.completeness is not InventoryCompleteness.PROVEN
     )
     candidate = next(iter(new_map.values())).name if narrow else ""
@@ -288,7 +292,20 @@ def build_release_scope_record(
         old_present = key in old_map or key in old_failed
         new_present = key in new_map or key in new_failed
         display = (old_map.get(key) or new_map.get(key) or Path(key)).name
-        if key in old_failed or key in new_failed:
+        if narrow and key in old_unselected:
+            # D9 first: an unselected baseline member is out of scope
+            # whether or not OLD could classify it -- an OLD-only
+            # acquisition failure unrelated to the selected artifact must
+            # not poison the current-artifact comparison's completeness
+            # under `block` (Codex review). The failure is still named.
+            failure = old_failed.get(key)
+            state, reason = (
+                AcquisitionState.OUT_OF_SCOPE,
+                f"unselected baseline member: NEW named one artifact ({candidate}) "
+                "explicitly, so this run is a current-artifact comparison (ADR-065 D9)"
+                + (f"; OLD acquisition also failed: {failure}" if failure else ""),
+            )
+        elif key in old_failed or key in new_failed:
             state, reason = (
                 AcquisitionState.FAILED,
                 "; ".join(
@@ -302,12 +319,6 @@ def build_release_scope_record(
             )
         elif key in matched:
             state, reason = _state_for_result(results_by_name.get(old_map[key].name))
-        elif old_present and narrow:
-            state, reason = (
-                AcquisitionState.OUT_OF_SCOPE,
-                f"unselected baseline member: NEW named one artifact ({candidate}) "
-                "explicitly, so this run is a current-artifact comparison (ADR-065 D9)",
-            )
         elif old_present:
             state, reason = (
                 AcquisitionState.NOT_SUPPLIED,
@@ -342,7 +353,7 @@ def build_release_scope_record(
         selection, selection_reason = (
             "current_artifact",
             f"NEW named exactly one artifact ({candidate}) explicitly, with exactly "
-            f"one OLD counterpart; the other {len(old_map) - 1} OLD member(s) are "
+            f"one OLD counterpart; the other {len(old_unselected)} OLD member(s) are "
             "out of scope (ADR-065 D9)",
         )
     else:
@@ -369,6 +380,7 @@ def build_stored_baseline_scope_record(
     new_provenance: str,
     new_single_artifact: bool = False,
     unsupported: Mapping[str, str] | None = None,
+    failed: Mapping[str, str] | None = None,
 ) -> ScopeAcquisitionRecord:
     """The record for a stored-baseline driver (`bundle_side_input` /
     `bundle_stored_pair_compare`), through the same builder the live
@@ -384,17 +396,23 @@ def build_stored_baseline_scope_record(
     *unsupported* maps a matched key whose NEW artifact this build cannot
     analyze (an unsupported container format, a stored snapshot newer than
     this reader) to the reason, recorded `unsupported` -- the same state
-    the live fan-out's per-member handler assigns (D6).
+    the live fan-out's per-member handler assigns (D6). *failed* maps a
+    matched key whose NEW artifact's extraction failed outright (a damaged
+    file, an unreadable binary) to the reason, recorded `failed` -- the
+    live fan-out's own per-member ``ERROR`` result (D1).
     """
     old_map = {k: Path(k) for k in old_keys}
     new_map = {k: Path(k) for k in new_keys}
     matched = sorted(set(old_map) & set(new_map))
     unsupported = dict(unsupported or {})
+    failed = dict(failed or {})
     compared_set = set(compared)
     results: list[Mapping[str, object]] = []
     for k in matched:
         if k in degraded:
             results.append({"library": k, "verdict": "ERROR", "error": degraded[k]})
+        elif k in failed:
+            results.append({"library": k, "verdict": "ERROR", "error": failed[k]})
         elif k in unsupported:
             results.append(
                 {"library": k, "verdict": "unsupported", "reason": unsupported[k]}
