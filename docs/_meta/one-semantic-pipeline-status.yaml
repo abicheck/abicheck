@@ -123,9 +123,13 @@ concepts:
       once, canonically, in diff_types_vtable.py's own module docstring
       ("Track 4, 5B final closure" section) — not repeated here. The PDB
       fabrication that closure's second round found remains real,
-      reachable, and open, not fixed. This closes the
-      removal gate for every one of the five originally-named fields
-      (bases/virtual_bases/vtable/vptr_offset_bits/is_va_list). Residual,
+      reachable, and open, not fixed. This closes the Phase 5B
+      *behavioral-investigation* gate for every one of the five
+      originally-named fields
+      (bases/virtual_bases/vtable/vptr_offset_bits/is_va_list) -- not the
+      implementation-consolidation removal gate, which stays open for the
+      vtable/TYPE_VTABLE_CHANGED cluster (see the 2026-09-05 re-assessment
+      correction below). Residual,
       separately tracked: seven case-(a) fields (default, the five
       deprecated/is_scoped surfaces) left on the existing fact_provenance
       mechanism after their own fourth-through-seventh-slice investigation
@@ -369,9 +373,12 @@ concepts:
       call site landed 2026-09-03: service_compare_pipeline.
       resolve_compare_request builds one from its own already-resolved
       AnalysisPlan and attaches it on ResolvedComparePair, additive and
-      unread by any consumer -- resolve_dump_request remains unwired, and
-      no evaluation_config/compile_contexts/with_assurance() caller exists
-      yet, so this gate stays open.
+      unread by any consumer. The dump path is built too, not unwired:
+      execute_dump_request calls with_assurance() (landed 2026-09-03) and
+      both paths now thread per-side compile_contexts, so what stays open
+      is consumption, not construction -- nothing downstream reads either
+      object back, and evaluation_config is still None on every real
+      ResolvedComparePair/ResolvedDumpRequest, so this gate stays open.
       **2026-09-05 re-assessment correction:** unread, not unwired, on both
       paths -- compare classification still separately loads suppression and
       policy, applies pack contributions, prepares source evidence, resolves
