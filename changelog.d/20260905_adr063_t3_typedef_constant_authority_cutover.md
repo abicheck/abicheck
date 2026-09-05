@@ -594,3 +594,15 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   DWARF-only side, and misclassifying it fabricated a removal for an
   entirely unchanged typedef. Now also checks `not snapshot.from_headers`
   (Codex review).
+- **A genuine typedef removal on a BTF/CTF-sourced side is no longer
+  silently missed.** A BTF/CTF snapshot sets `dwarf` and a real
+  `semantic_ir` (`extract.debug_layout_semantic_ir.
+  semantic_ir_from_debug_metadata`) that deliberately never covers
+  typedefs, while its own flat `typedefs` map is populated independently
+  and can carry real data (`workflows/input_resolution.py`'s raw-blob
+  assembler). Unconditionally skipping the leftover-reconciliation
+  fallback under `qualified_keys` (the twenty-sixth round's own fix)
+  silently dropped every one of this side's typedefs, including a
+  genuine removal -- a missed BREAKING change, not merely a false one.
+  The leftover fallback now also runs whenever the side itself is
+  DWARF-qualified (CodeRabbit review).

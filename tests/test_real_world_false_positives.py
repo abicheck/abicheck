@@ -1059,3 +1059,50 @@ def test_header_backed_snapshot_with_incidental_dwarf_stays_bare_keyed():
         f"this side happens to also carry DWARF metadata; changes: "
         f"{[(c.kind.value, c.symbol) for c in result.changes]}"
     )
+
+
+def test_btf_ctf_typedef_removal_still_reported_via_leftover_fallback():
+    """Regression coverage for Codex/CodeRabbit review, PR #1078, twenty-eighth
+    round (fresh evidence): a BTF/CTF-sourced snapshot sets `dwarf` (via
+    `to_dwarf_metadata()`) and a real `semantic_ir`
+    (`extract.debug_layout_semantic_ir.semantic_ir_from_debug_metadata`) that
+    deliberately never covers typedefs, while its own flat `typedefs` map is
+    populated independently and can carry real data
+    (`workflows/input_resolution.py`'s raw-blob assembler,
+    `typedefs=dict(btf.typedefs)`). Skipping the leftover-reconciliation
+    fallback whenever `qualified_keys` was set (the twenty-sixth round's own
+    fix) silently dropped every one of this side's typedefs, including a
+    genuine removal -- a missed BREAKING change, not merely a false one.
+    """
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.dwarf_metadata import DwarfMetadata
+    from abicheck.extract.debug_layout_semantic_ir import (
+        semantic_ir_from_debug_metadata,
+    )
+    from abicheck.model.fact import Fact
+    from abicheck.model.identity import entity_id_for_typedef
+    from abicheck.model.occurrence import OccurrenceId
+    from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
+
+    dwarf_meta = DwarfMetadata()
+    old = _elf_snapshot(functions=[_exported_func("use_alias")])
+    old.typedefs = {"kept_typedef": "int", "removed_typedef": "long"}
+    old.dwarf = dwarf_meta
+    old.semantic_ir = semantic_ir_from_debug_metadata(dwarf_meta, "btf")
+
+    eid = entity_id_for_typedef((), "kept_typedef")
+    new = _elf_snapshot(functions=[_exported_func("use_alias")])
+    new.typedefs_qualified = {"kept_typedef": "int"}
+    new.typedef_entity_ids = {"kept_typedef": eid}
+    new.semantic_ir = SemanticIR(
+        occurrences={
+            OccurrenceId(eid): CanonicalEntity(canonical_spelling=Fact.present("int"))
+        }
+    )
+
+    result = compare(old, new)
+    removed = [c for c in result.changes if c.kind == ChangeKind.TYPEDEF_REMOVED]
+    assert len(removed) == 1 and removed[0].symbol == "removed_typedef", (
+        "a genuine typedef removal on a BTF/CTF-sourced side must still be "
+        f"reported; changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )

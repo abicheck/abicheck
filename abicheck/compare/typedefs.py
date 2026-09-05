@@ -586,12 +586,10 @@ def _bare_typedef_side_index(
     A genuinely pre-v25 snapshot (no ``typedefs_qualified``, hence no
     ``semantic_ir``) falls through to the plain legacy-adapter path below
     unaffected. But a real ``SemanticIR`` with typedef occurrences and an
-    empty bare *typedefs* map is not hypothetical (this module's own
-    per-side-independence design already rejects relying on the two always
-    agreeing) -- without this projection such a side's real evidence was
-    silently discarded the moment the *other* side forced bare-key
-    comparison, fabricating a removal for every typedef only this side's
-    IR carries.
+    empty bare *typedefs* map is not hypothetical -- without this
+    projection such a side's real evidence was silently discarded the
+    moment the *other* side forced bare-key comparison, fabricating a
+    removal for every typedef only this side's IR carries.
 
     **Preserves ambiguity rather than picking a last-wins winner** (Codex
     review, PR #1078, twelfth round): projecting straight into a
@@ -682,10 +680,15 @@ def _bare_typedef_side_index(
     # doesn't cover at all still needs representation -- delegate to the
     # legacy adapter's own single-occurrence-per-alias construction for
     # exactly those leftover aliases (no collision risk: the caller-supplied
-    # map is already single-valued per key). Skipped under qualified_keys:
-    # *typedefs* stays bare-keyed regardless, so comparing it against
-    # covered_aliases's now-qualified strings would misfire.
-    if not qualified_keys:
+    # map is already single-valued per key). Skipped under qualified_keys
+    # *unless this side is itself DWARF-qualified* (Codex/CodeRabbit review,
+    # PR #1078, twenty-eighth round): a header-AST side's *typedefs* stays
+    # bare-keyed, mismatching covered_aliases's qualified strings -- but a
+    # genuinely DWARF-qualified side's flat map already matches, and
+    # BTF/CTF's own `semantic_ir` never covers typedefs at all, so skipping
+    # unconditionally silently dropped every one of its real typedefs,
+    # including a genuine removal.
+    if not qualified_keys or typedef_flat_map_is_dwarf_qualified(snapshot):
         leftover = {k: v for k, v in typedefs.items() if k not in covered_aliases}
         if leftover:
             occurrences.update(legacy_typedef_ir(snapshot, leftover).occurrences)
