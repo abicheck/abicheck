@@ -45,6 +45,7 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.scope_acquisition import (
     AcquisitionState,
     InventoryCompleteness,
+    ScopeAcquisitionRecord,
     SideInventory,
 )
 from abicheck.policy.outcome import (
@@ -677,3 +678,101 @@ class TestStoredPackageDegradedMember:
         )
         assert set(degraded) <= set(released)
         assert list(degraded.values()) == ["boom"]
+
+
+class TestMarkdownAndNoticeRenderResolvedUnchecked:
+    """The Markdown table and the compact notice project exactly the
+    section's resolved `unchecked` names, like the JUnit suite: a proven
+    removal/addition keeps its `not_supplied` state but is a finding the
+    record already answered for, never an unchecked member (Codex review,
+    seventh round)."""
+
+    @staticmethod
+    def _record(
+        states: list[AcquisitionState], *, new_proven: bool
+    ) -> ScopeAcquisitionRecord:
+        from abicheck.model.scope_acquisition import MemberAcquisition
+
+        members = []
+        for i, state in enumerate(states):
+            old_present = state is not AcquisitionState.EXPECTED_NOT_PRODUCED
+            new_present = state is not AcquisitionState.NOT_SUPPLIED
+            members.append(
+                MemberAcquisition(f"lib{i}.so", state, old_present, new_present, "why")
+            )
+        return ScopeAcquisitionRecord(
+            tuple(members),
+            SideInventory(InventoryCompleteness.UNPROVEN, "test"),
+            SideInventory(
+                InventoryCompleteness.PROVEN
+                if new_proven
+                else InventoryCompleteness.UNPROVEN,
+                "test",
+            ),
+            "all_expected",
+        )
+
+    @staticmethod
+    def _table_names(lines: list[str]) -> list[str]:
+        return [
+            line.split("`")[1]
+            for line in lines
+            if line.startswith("| `") and line.count("|") == 6
+        ]
+
+    @pytest.mark.parametrize("new_proven", [False, True])
+    @pytest.mark.parametrize("state", list(AcquisitionState))
+    def test_every_state_renders_iff_resolved_unchecked(
+        self, state: AcquisitionState, new_proven: bool
+    ) -> None:
+        import re
+
+        from abicheck.report.comparison_scope import (
+            comparison_scope_notice,
+            comparison_scope_terms,
+            render_comparison_scope_markdown,
+        )
+
+        record = self._record(
+            [state, AcquisitionState.AVAILABLE], new_proven=new_proven
+        )
+        terms = comparison_scope_terms(record, "warn")
+        assert terms.section is not None
+        expected = [m.name for m in record.unchecked_members]
+        assert (
+            self._table_names(render_comparison_scope_markdown(terms.section))
+            == expected
+        )
+        notice = comparison_scope_notice(terms.section)
+        assert (notice is None) == (not expected)
+        if notice is not None:
+            assert re.findall(r"(lib\d\.so) \(", notice) == expected
+
+    def test_proven_removal_never_reads_as_unchecked(self) -> None:
+        from abicheck.report.comparison_scope import (
+            comparison_scope_notice,
+            comparison_scope_terms,
+            render_comparison_scope_markdown,
+        )
+
+        record = self._record(
+            [
+                AcquisitionState.NOT_SUPPLIED,
+                AcquisitionState.UNSUPPORTED,
+                AcquisitionState.AVAILABLE,
+            ],
+            new_proven=True,
+        )
+        assert [m.name for m in record.proven_removed_members] == ["lib0.so"]
+        terms = comparison_scope_terms(record, "warn")
+        assert terms.section is not None
+        assert terms.section["unchecked"] == ["lib1.so"]
+        lines = render_comparison_scope_markdown(terms.section)
+        assert self._table_names(lines) == ["lib1.so"]
+        assert any(
+            "Removed libraries (inventory-proven):** `lib0.so`" in ln for ln in lines
+        )
+        notice = comparison_scope_notice(terms.section)
+        assert notice is not None
+        assert "lib1.so (unsupported)" in notice
+        assert "lib0.so" not in notice

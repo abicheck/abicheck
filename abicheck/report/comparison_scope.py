@@ -148,16 +148,20 @@ def build_comparison_scope_section(
 
 
 def _unchecked_rows(section: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    """The member rows the unchecked list renders, from the section's own ``members``."""
+    """The member rows the unchecked list renders: exactly the section's own
+    resolved ``unchecked`` names, never re-derived from acquisition state.
+    A proven removal/addition keeps its ``not_supplied`` state but is a
+    finding the record already answered for, not a member that went
+    unchecked (the same projection the JUnit scope suite applies)."""
     members = section.get("members")
-    if not isinstance(members, list):
+    names = section.get("unchecked")
+    if not isinstance(members, list) or not isinstance(names, list):
         return []
+    unchecked_names = set(names)
     return [
         m
         for m in members
-        if isinstance(m, Mapping)
-        and m.get("state")
-        not in (AcquisitionState.AVAILABLE.value, AcquisitionState.OUT_OF_SCOPE.value)
+        if isinstance(m, Mapping) and m.get("name") in unchecked_names
     ]
 
 
