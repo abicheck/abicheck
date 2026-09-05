@@ -36,14 +36,17 @@ the same shape ``type_reachability.py``'s own
 from __future__ import annotations
 
 from .comparability import (
+    _ALL_PROFILE_DIMENSIONS,
     _BUILD_CONTEXT_FIELDS,
     _FRONTEND_CONTEXT_PROFILE_FIELD_KEYS,
     _PLATFORM_IDENTITY_FIELDS,
+    _PROFILE_FIELD_DIMENSIONS,
     _PROFILE_FINGERPRINT_KEY_SETS,
     ComparabilityMismatch,
     _binary_platform_components,
     _build_context_corroborated,
     _differing_keys,
+    _dimensions_for_fields,
     _fingerprint_is_authentic,
     _scope_growth_corroborated,
     _unknown_differing_keys,
@@ -340,6 +343,9 @@ def _check_profile_fingerprint_comparable(
         # profile_fingerprint (Codex review, PR #641 follow-up, sixth
         # P1) -- see _fingerprint_matches_fields's own docstring, and
         # the scope-side equivalent check above.
+        # Opaque/unauthenticated fingerprint: same fail-closed "affects
+        # every dimension this axis can ever affect" default as
+        # comparability.py's scope-side equivalent branch.
         return ComparabilityMismatch(
             kind="profile",
             reason=(
@@ -349,6 +355,7 @@ def _check_profile_fingerprint_comparable(
                 "profile_fingerprint — the comparison cannot be verified "
                 "safe."
             ),
+            dimensions=_ALL_PROFILE_DIMENSIONS,
         )
 
     differing = _differing_keys(
@@ -370,4 +377,15 @@ def _check_profile_fingerprint_comparable(
     reason = _profile_mismatch_reason(unknown_differing, differing, unexplained)
     if reason is None:
         return None
-    return ComparabilityMismatch(kind="profile", reason=reason)
+    # Mirrors _profile_mismatch_reason's own three cases (Codex-review-style
+    # fail-closed default first): an unrecognized differing field, or an
+    # entirely empty `differing` (profile_fields absent/malformed), can never
+    # be attributed to a specific dimension, so both fall back to "every
+    # dimension this axis can affect". Only the genuinely-narrowed
+    # `unexplained` case gets a per-field dimension set.
+    dimensions = (
+        _ALL_PROFILE_DIMENSIONS
+        if (unknown_differing or not differing)
+        else _dimensions_for_fields(unexplained, _PROFILE_FIELD_DIMENSIONS)
+    )
+    return ComparabilityMismatch(kind="profile", reason=reason, dimensions=dimensions)
