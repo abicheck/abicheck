@@ -516,6 +516,13 @@ class ResolvedCompareConfig:
     merged_severity_potential_breaking: str | None = None
     merged_severity_quality_issues: str | None = None
     merged_severity_addition: str | None = None
+    #: CLI cleanup phase two, PR J: ``bundle.system_providers``/
+    #: ``bundle.cohorts`` demoted off the CLI entirely (no
+    #: ``--bundle-system-providers``/``--bundle-cohort`` flags any more) —
+    #: ``.abicheck.yml`` is these two fields' only source, same shape as
+    #: ``show_redundant`` above.
+    bundle_system_providers: tuple[str, ...] = ()
+    bundle_cohorts: tuple[str, ...] = ()
 
 
 def resolve_compare_config(
@@ -600,6 +607,8 @@ def resolve_compare_config(
         cli_debuginfod_url, cfg.debug_debuginfod_url if cfg else None, None
     )
     show_redundant = bool(cfg.scope_show_redundant) if cfg else False
+    bundle_system_providers = tuple(cfg.bundle_system_providers) if cfg else ()
+    bundle_cohorts = tuple(cfg.bundle_cohorts) if cfg else ()
 
     return ResolvedCompareConfig(
         severity=severity,
@@ -621,6 +630,8 @@ def resolve_compare_config(
         merged_severity_potential_breaking=eff_pot,
         merged_severity_quality_issues=eff_qual,
         merged_severity_addition=eff_add,
+        bundle_system_providers=bundle_system_providers,
+        bundle_cohorts=bundle_cohorts,
     )
 
 

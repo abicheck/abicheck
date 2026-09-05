@@ -82,7 +82,8 @@ Field names and the exit-code table are owned by
 ## The five cross-library findings
 
 - **SONAME skew** — one member of a declared cohort changed its SONAME
-  while its siblings kept theirs. Declared with `--bundle-cohort`; fixture
+  while its siblings kept theirs. Declared with `.abicheck.yml`'s
+  `bundle.cohorts:`; fixture
   [`case84_bundle_soname_skew`](https://github.com/abicheck/abicheck/tree/main/examples/case84_bundle_soname_skew).
 - **Intra-bundle dependency removed** — a symbol one sibling imports from
   another disappeared from the provider. The consumer library is
@@ -103,17 +104,17 @@ in [Multi-binary § References](../use/multi-binary.md#references).
 
 ## Declaring what the bundle promises
 
-`--manifest` names the symbols the release publicly promises, in three
+`--instantiation-manifest` names the symbols the release publicly promises, in three
 entry shapes: a `pattern:` over demangled names (one line freezes a
 namespace), `template:` with an `instantiations:` matrix (the shape a
 template library needs — [Template- and Header-Heavy Libraries](template-heavy-libraries.md)
-is about exactly that), and a literal `symbol:`. Two more flags shape the
-resolution graph: `--bundle-system-providers` for libraries the bundle
-imports from but does not ship (libc, libstdc++ and their kin are built
-in; add your own), and `--bundle-cohort` for the SONAME cohort above. The
-file format, verdict rules and a bootstrap script that produces a first
-over-broad manifest from a release are owned by
-[Multi-binary § `--manifest`](../use/multi-binary.md#-manifest-path-experimental).
+is about exactly that), and a literal `symbol:`. Two more `.abicheck.yml`
+keys shape the resolution graph: `bundle.system_providers:` for libraries
+the bundle imports from but does not ship (libc, libstdc++ and their kin
+are built in; add your own), and `bundle.cohorts:` for the SONAME cohort
+above. The file format, verdict rules and a bootstrap script that
+produces a first over-broad manifest from a release are owned by
+[Multi-binary § `--instantiation-manifest`](../use/multi-binary.md#-instantiation-manifest-path-experimental).
 
 ## Comparing against stored facts
 

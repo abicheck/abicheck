@@ -72,8 +72,9 @@ def _soname_skew_findings(
     *cohorts* list this returns nothing: there is no implicit lockstep
     invariant to infer from filenames alone.
     """
-    # An empty prefix (e.g. --bundle-cohort "" from an unset shell var) would
-    # be treated as "no filter" by the detector and compare every DSO —
+    # An empty prefix (e.g. a blank entry in .abicheck.yml's `bundle.cohorts:`
+    # list) would be treated as "no filter" by the detector and compare
+    # every DSO —
     # reintroducing the global false positive the opt-in exists to prevent.
     # Strip and drop blanks so only genuine cohort prefixes are honoured.
     prefixes = [p.strip() for p in cohorts if p and p.strip()]
@@ -109,7 +110,9 @@ def _detect_soname_skew(
     """Detect inconsistent SONAME major bumps within declared cohorts.
 
     *cohorts* is the explicit opt-in: a list of cohort-key prefixes naming
-    co-versioned library sets (from ``compare-release --bundle-cohort``).
+    co-versioned library sets (from ``.abicheck.yml``'s ``bundle.cohorts:``
+    -- CLI cleanup phase two, PR J; formerly ``compare-release
+    --bundle-cohort``).
     When it is empty/None nothing is emitted — there is no auto-grouping of
     independent libraries by filename, which avoids false positives on
     normal multi-library releases.

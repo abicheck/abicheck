@@ -353,91 +353,23 @@ class TestScanNewLibrarySet:
         assert "::warning::" in result.stdout
         assert "new-library-set" in result.stdout
 
-    def test_bundle_system_providers_silent_on_compare(self) -> None:
-        result = _run_validate(
-            {"INPUT_MODE": "compare", "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1"}
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
-
-    def test_bundle_system_providers_silent_on_scan_with_new_library_set(
-        self,
-    ) -> None:
-        result = _run_validate(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
-                "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
-
-    def test_bundle_system_providers_warns_on_scalar_scan(self) -> None:
-        # P2 regression (Codex review): run.sh's scan branch only forwards
-        # --bundle-system-providers inside the new-library-set branch, so a
-        # scalar new-library scan silently drops it -- must warn.
-        result = _run_validate(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-        assert "bundle-system-providers" in result.stdout
-
-    def test_bundle_system_providers_warns_outside_compare_and_scan(self) -> None:
-        result = _run_validate(
-            {"INPUT_MODE": "dump", "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1"}
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-        assert "bundle-system-providers" in result.stdout
-
-    def test_bundle_system_providers_warns_on_scalar_compare(
-        self, tmp_path: Path
-    ) -> None:
-        # P2 regression (Codex review): cli_compare_helpers.py only reaches
-        # bundle analysis on the directory/package dispatch --
-        # bundle-system-providers with single-file old-library/new-library
-        # operands is silently discarded the same way a scalar scan is,
-        # but this check previously treated any mode: compare as
-        # meaningful regardless of operand style.
-        old = tmp_path / "old.so"
-        new = tmp_path / "new.so"
-        old.write_bytes(b"")
-        new.write_bytes(b"")
-        result = _run_validate(
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": str(old),
-                "INPUT_NEW_LIBRARY": str(new),
-                "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-        assert "bundle-system-providers" in result.stdout
-
-    def test_bundle_system_providers_silent_on_directory_compare(
-        self, tmp_path: Path
-    ) -> None:
-        old_dir = tmp_path / "old"
-        new_dir = tmp_path / "new"
-        old_dir.mkdir()
-        new_dir.mkdir()
-        result = _run_validate(
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": str(old_dir),
-                "INPUT_NEW_LIBRARY": str(new_dir),
-                "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
+    def test_bundle_system_providers_input_no_longer_validated(self) -> None:
+        # PR J: bundle-system-providers is no longer an Action input at all
+        # (topology moved to .abicheck.yml's `bundle:` block) -- setting the
+        # stray env var validate-inputs.sh once special-cased is now a no-op,
+        # never a warning, on every mode this class used to check.
+        for mode_env in (
+            {"INPUT_MODE": "compare"},
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "a.so,b.so"},
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so"},
+            {"INPUT_MODE": "dump"},
+        ):
+            result = _run_validate(
+                {**mode_env, "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1"}
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "::warning::" not in result.stdout
+            assert "bundle-system-providers" not in result.stdout
 
 
 @pytest.mark.skipif(

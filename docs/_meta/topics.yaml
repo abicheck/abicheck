@@ -199,6 +199,8 @@ topics:
       - abicheck/workflows/bundle_stored_pair_compare.py
       - abicheck/frontends/cli/commands/compare_bundle_facts.py
       - abicheck/frontends/cli/options/bundle_facts.py
+      - abicheck/buildsource/build_config.py
+      - abicheck/buildsource/build_config_schema.py
     reference_page: reference/cli-reference.md
     task_pages:
       - use/multi-binary.md
@@ -234,6 +236,8 @@ topics:
     canonical_page: reference/config-file.md
     fact_sources:
       - abicheck/buildsource/inline.py
+      - abicheck/buildsource/build_config.py
+      - abicheck/buildsource/build_config_schema.py
     reference_page: reference/config-keys-reference.md
     allowed_summaries:
       - skills-src/shared/compiler-and-build-profiles.md

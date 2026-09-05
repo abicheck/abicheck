@@ -218,7 +218,12 @@ class TestScanArtifactSetForwarding:
         assert cmd[j + 1] == "z.so"
         assert "decoy.so" not in cmd
 
-    def test_new_library_set_forwards_bundle_system_providers(self) -> None:
+    def test_new_library_set_no_longer_forwards_bundle_system_providers(self) -> None:
+        """CLI cleanup phase two, PR J: the bundle-system-providers Action
+        input and its forwarding were removed along with the CLI flag -- the
+        system-provider allow-list extension is sourced only from
+        build-config's own .abicheck.yml `bundle:` block now (forwarded via
+        --config/--build-config, which this env var stands in for)."""
         cmd = _run_cmd(
             {
                 "INPUT_MODE": "scan",
@@ -226,8 +231,7 @@ class TestScanArtifactSetForwarding:
                 "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
             }
         )
-        i = cmd.index("--bundle-system-providers")
-        assert cmd[i + 1] == "libvendor.so.1"
+        assert "--bundle-system-providers" not in cmd
 
     def test_new_library_set_maps_new_header_to_bare_flag(self) -> None:
         # P2 regression (Codex review): _run_artifact_set rejects old=/new=
@@ -383,7 +387,12 @@ class TestScanPolicyFlagsOmittedWithoutBaseline:
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestCompareBundleSystemProvidersForwarding:
-    def test_forwarded_for_single_pair_compare(self) -> None:
+    """CLI cleanup phase two, PR J: --bundle-system-providers and its Action
+    input were both removed -- the system-provider allow-list extension is
+    sourced only from build-config's own .abicheck.yml `bundle:` block now
+    (forwarded via --config/--build-config, unaffected by this env var)."""
+
+    def test_never_forwarded_for_single_pair_compare(self) -> None:
         cmd = _run_cmd(
             {
                 "INPUT_MODE": "compare",
@@ -392,8 +401,7 @@ class TestCompareBundleSystemProvidersForwarding:
                 "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
             }
         )
-        i = cmd.index("--bundle-system-providers")
-        assert cmd[i + 1] == "libvendor.so.1"
+        assert "--bundle-system-providers" not in cmd
 
     def test_absent_when_unset(self) -> None:
         cmd = _run_cmd(

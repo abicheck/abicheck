@@ -130,7 +130,7 @@ class TestRunBundleAnalysisSignatureEvidenceWiring:
             new_map,
             [_diff("libcore.so"), _diff("libconsumer.so")],
             manifest_path=None,
-            bundle_system_providers="",
+            bundle_system_providers=(),
             old_snapshots=old_snapshots,
             new_snapshots=new_snapshots,
         )
@@ -159,7 +159,7 @@ class TestRunBundleAnalysisSignatureEvidenceWiring:
             new_map,
             [_diff("libcore.so"), _diff("libconsumer.so")],
             manifest_path=None,
-            bundle_system_providers="",
+            bundle_system_providers=(),
         )
 
         assert result is not None
@@ -221,7 +221,7 @@ class TestCollectBundleResultBuildsSnapshotMapsFromBundleKey:
             new_map,
             "NO_CHANGE",
             manifest_path=None,
-            bundle_system_providers="",
+            bundle_system_providers=(),
         )
 
         assert bundle_result is not None
@@ -298,7 +298,7 @@ class TestCollectBundleResultAcceptsCompactBundleEvidence:
             new_map,
             "NO_CHANGE",
             manifest_path=None,
-            bundle_system_providers="",
+            bundle_system_providers=(),
         )
         full_result, _ = _collect_bundle_result(
             _entries(old_snap, new_snap),
@@ -306,7 +306,7 @@ class TestCollectBundleResultAcceptsCompactBundleEvidence:
             new_map,
             "NO_CHANGE",
             manifest_path=None,
-            bundle_system_providers="",
+            bundle_system_providers=(),
         )
 
         assert compact_result is not None and full_result is not None
@@ -360,7 +360,7 @@ class TestBundleAnalysisErrorsAreStructural:
             new_map,
             [_diff("libcore.so"), _diff("libconsumer.so")],
             manifest_path=None,
-            bundle_system_providers="",
+            bundle_system_providers=(),
         )
 
         assert result is not None
@@ -405,7 +405,7 @@ class TestBundleAnalysisErrorsAreStructural:
             new_map,
             [_diff("libcore.so"), _diff("libconsumer.so")],
             manifest_path=None,
-            bundle_system_providers="",
+            bundle_system_providers=(),
             old_snapshots=old_snapshots,
             new_snapshots=new_snapshots,
         )
@@ -429,7 +429,7 @@ class TestBundleAnalysisErrorsAreStructural:
             new_map,
             [_diff("libcore.so")],
             manifest_path=None,
-            bundle_system_providers="",
+            bundle_system_providers=(),
         )
         assert result is not None
 
@@ -551,7 +551,7 @@ class TestBundleAnalysisForwardsPolicyFile:
             new_map,
             "NO_CHANGE",
             manifest_path=None,
-            bundle_system_providers="",
+            bundle_system_providers=(),
         )
         assert unmodified is not None
         assert any(
@@ -575,7 +575,7 @@ class TestBundleAnalysisForwardsPolicyFile:
             new_map,
             "NO_CHANGE",
             manifest_path=None,
-            bundle_system_providers="",
+            bundle_system_providers=(),
             policy_file=pf,
         )
         assert overridden is not None
@@ -610,7 +610,7 @@ class TestBundleAnalysisForwardsPolicyFile:
             new_map,
             "NO_CHANGE",
             manifest_path=None,
-            bundle_system_providers="",
+            bundle_system_providers=(),
             policy_file=sentinel_pf,
         )
 

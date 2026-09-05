@@ -317,7 +317,7 @@ def _run_bundle_analysis(
     per_lib_results: list[DiffResult],
     *,
     manifest_path: Path | None,
-    bundle_system_providers: str,
+    bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...] = (),
     policy: str = "strict_abi",
     old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
@@ -362,7 +362,7 @@ def _run_bundle_analysis(
     stored-baseline comparison -- rather than being sequenced by hand here.
     This function's own job narrows to what only the live release path
     needs: building the two live ``BundleSnapshot``\\ s, loading an
-    explicit ``--manifest``, and re-surfacing ``analyze_bundle``'s
+    explicit ``--instantiation-manifest``, and re-surfacing ``analyze_bundle``'s
     structured ``analysis_errors`` as the same ``click.echo(...,
     err=True)`` warnings this function has always emitted.
 
@@ -408,9 +408,10 @@ def _run_bundle_analysis(
         click.echo(f"Warning: bundle analysis skipped: {exc}", err=True)
         return None
 
-    system_extra: list[str] = [
-        s.strip() for s in bundle_system_providers.split(",") if s.strip()
-    ]
+    # Consumed directly as a sequence -- no comma-join/split round trip
+    # (Codex review: that would corrupt a provider entry containing a comma;
+    # entries are already stripped/filtered once, at BuildConfig.from_dict()).
+    system_extra: list[str] = list(bundle_system_providers)
     result = analyze_bundle(
         old_snap,
         new_snap,
@@ -745,7 +746,7 @@ def _collect_bundle_result(
     new_map: dict[str, Path],
     worst_verdict: str,
     manifest_path: Path | None,
-    bundle_system_providers: str,
+    bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...] = (), policy: str = "strict_abi", policy_file: PolicyFile | None = None,
     old_root: Path | None = None,
     new_root: Path | None = None,

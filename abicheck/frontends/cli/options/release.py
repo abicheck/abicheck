@@ -62,11 +62,19 @@ def release_options(func: F) -> F:
     The release-only options the removed ``compare-release`` command exposed:
     package extraction (``--debug-info*``/``--devel-pkg*``), DSO selection
     (``--include-private-dso``/``--keep-extracted``), the removed-library gate, and
-    the ADR-023 bundle/manifest analysis. They bite only when ``compare``'s
+    the ADR-023 instantiation-manifest analysis. They bite only when ``compare``'s
     operands are directories or packages (the per-library fan-out); on single-file
     inputs they are inert. Declared once here so ``compare`` and the internal
     release engine share one surface (ADR-037 D7). Applied bottom-up, so listed in
     reverse of displayed order.
+
+    CLI cleanup phase two, PR J: ``--bundle-system-providers``/
+    ``--bundle-cohort`` are gone from this group -- topology, not a per-run
+    input, per this plan's "belongs somewhere else" test. Sourced only from
+    ``.abicheck.yml``'s ``bundle:`` block now
+    (:data:`abicheck.buildsource.build_config.BuildConfig.bundle_system_providers`/
+    ``bundle_cohorts``, resolved onto
+    :class:`abicheck.cli_helpers_compare.ResolvedCompareConfig`).
     """
     func = click.option(
         "--no-bundle-analysis",
@@ -79,29 +87,16 @@ def release_options(func: F) -> F:
         "and manifest mismatches. (directory/package inputs only)",
     )(func)
     func = click.option(
-        "--bundle-cohort",
-        "bundle_cohorts",
-        multiple=True,
-        metavar="PREFIX",
-        help="Declare a co-versioned library cohort by name prefix (e.g. "
-        "'libfoo_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check. "
-        "(directory/package inputs only)",
-    )(func)
-    func = click.option(
-        "--bundle-system-providers",
-        "bundle_system_providers",
-        default="",
-        help="Comma-separated extra sonames to treat as system-provided "
-        "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list). "
-        "(directory/package inputs only)",
-    )(func)
-    func = click.option(
-        "--manifest",
+        "--instantiation-manifest",
         "manifest_path",
         type=click.Path(exists=True, path_type=Path),
         default=None,
         help="ABI instantiation manifest (YAML/JSON) listing symbols the release "
-        "publicly promises (ADR-023). (directory/package inputs only)",
+        "publicly promises (ADR-023). Renamed from --manifest (CLI cleanup "
+        "phase two, PR J): the bare spelling collided with aggregate's own "
+        "--manifest and the product's several other manifest-shaped concepts "
+        "(dump manifest, run plan, bundle facts, project config). "
+        "(directory/package inputs only)",
     )(func)
     func = click.option(
         "--bundle-facts-out",

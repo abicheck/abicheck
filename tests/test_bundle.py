@@ -3670,7 +3670,7 @@ class TestCompareReleaseBundleE2E:
                 "compare",
                 str(old),
                 str(new),
-                "--manifest",
+                "--instantiation-manifest",
                 str(manifest),
                 "--format",
                 "json",
@@ -3739,12 +3739,20 @@ class TestCompareReleaseBundleE2E:
                 capture_output=True,
             )
 
+        cfg = self._write_cohorts_config(old.parent, ["lib"])
         result = CliRunner().invoke(
             main,
-            ["compare", str(old), str(new), "--bundle-cohort", "lib"],
+            ["compare", str(old), str(new), "--config", str(cfg)],
         )
         assert "Bundle (Cross-Library) Findings" in result.stdout
         assert "bundle_intra_dep_removed" in result.stdout
+
+    def _write_cohorts_config(self, release_dir: Path, cohorts: list[str]) -> Path:
+        """PR J: cohorts are .abicheck.yml's `bundle.cohorts:` now, not --bundle-cohort."""
+        cfg = release_dir / ".abicheck.yml"
+        prefixes = ", ".join(f'"{c}"' for c in cohorts)
+        cfg.write_text(f"bundle:\n  cohorts: [{prefixes}]\n", encoding="utf-8")
+        return cfg
 
     def _build_versioned_so(
         self,
@@ -3814,6 +3822,7 @@ class TestCompareReleaseBundleE2E:
         )
         self._build_versioned_so(new, case_dir / "onedal_dpc.c", "libonedal_dpc.so.2")
 
+        cfg = self._write_cohorts_config(old.parent, ["libonedal_"])
         result = CliRunner().invoke(
             main,
             [
@@ -3822,8 +3831,8 @@ class TestCompareReleaseBundleE2E:
                 str(new),
                 "--format",
                 "json",
-                "--bundle-cohort",
-                "libonedal_",
+                "--config",
+                str(cfg),
             ],
         )
         # Bundle BREAKING → exit 4 (matches ground_truth.json case84 == BREAKING).
@@ -3865,6 +3874,7 @@ class TestCompareReleaseBundleE2E:
             new, case_dir / "onedal_thread.c", "libonedal_thread.so.2"
         )
 
+        cfg = self._write_cohorts_config(old.parent, ["libonedal_"])
         result = CliRunner().invoke(
             main,
             [
@@ -3873,8 +3883,8 @@ class TestCompareReleaseBundleE2E:
                 str(new),
                 "--format",
                 "json",
-                "--bundle-cohort",
-                "libonedal_",
+                "--config",
+                str(cfg),
             ],
         )
         data = _json.loads(result.stdout)
@@ -3882,8 +3892,8 @@ class TestCompareReleaseBundleE2E:
         assert "bundle_soname_skew" not in kinds
 
     def test_compare_release_skew_is_opt_in(self, tmp_path: Path) -> None:
-        # Without --bundle-cohort the skew check never runs: the case84 skew
-        # layout must produce NO bundle_soname_skew finding (opt-in default).
+        # Without a declared .abicheck.yml `bundle.cohorts:` entry the skew
+        # check never runs: case84's layout must produce no finding (opt-in).
         import json as _json
 
         from click.testing import CliRunner
@@ -3998,9 +4008,9 @@ class TestSonameSkewCohortScoping:
         assert _soname_skew_findings(old, new, ["libonedal_"]) == []
 
     def test_blank_cohort_prefix_is_rejected(self) -> None:
-        # An empty/whitespace prefix (e.g. --bundle-cohort "" from an unset
-        # var) must NOT degrade into "compare every DSO": independent libfoo
-        # bumping while libbar stays must stay clean.
+        # An empty/whitespace prefix (e.g. a blank entry in .abicheck.yml's
+        # `bundle.cohorts:` list) must NOT degrade into "compare every DSO":
+        # independent libfoo bumping while libbar stays must stay clean.
         from abicheck.bundle import _soname_skew_findings
 
         old = [self._member("libfoo.so.1", 1), self._member("libbar.so.1", 1)]

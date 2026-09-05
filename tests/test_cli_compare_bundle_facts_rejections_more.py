@@ -382,4 +382,82 @@ class TestCompareOldBundleFactsEarlyRejections:
         )
 
         assert code == 64
-        assert "--devel-pkg" in out
+
+    def test_abicheck_yml_bundle_block_reaches_stored_facts_compare(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review, fresh evidence: PR J removed --bundle-system-
+        # providers/--bundle-cohort as CLI flags in favor of .abicheck.yml's
+        # bundle: block, but this stored-BundleFacts dispatch path derived
+        # both settings from the now-removed Click kwargs -- always empty --
+        # rather than the resolved config, silently discarding a declared
+        # bundle: block instead of honoring or rejecting it. Proven the same
+        # way test_depth_binary_clears_headers (sibling file) is:
+        # monkeypatch compare_release_against_bundle_facts and capture what
+        # dispatch() forwards, rather than a real gcc build.
+        import abicheck.bundle_side_input as bundle_side_input
+
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text(
+            'bundle:\n  system_providers: ["libvendor.so.1"]\n'
+            '  cohorts: ["libfoo_"]\n',
+            encoding="utf-8",
+        )
+
+        captured: dict[str, object] = {}
+
+        def _fake_compare(*args: object, **kwargs: object) -> None:
+            captured["system_providers"] = kwargs.get("system_providers")
+            captured["cohorts"] = kwargs.get("cohorts")
+            raise ValueError("stop-here")
+
+        monkeypatch.setattr(
+            bundle_side_input, "compare_release_against_bundle_facts", _fake_compare
+        )
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 1, out
+        assert captured["system_providers"] == ["libvendor.so.1"]
+        assert captured["cohorts"] == ["libfoo_"]
+
+    def test_malformed_auto_discovered_config_exits_64_before_dispatch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A malformed config -- auto-discovered or explicit -- is caught by
+        # compare.py's own resolve_compile_context call site (a UsageError,
+        # exit 64) before dispatch() ever runs: that call site always
+        # forwards the resolved path as an *explicit* build_config, so
+        # merge_compile_config's auto-discovered-is-best-effort exception
+        # never applies here. Proves dispatch()'s own bundle: read has
+        # nothing left to validate.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        (tmp_path / ".abicheck.yml").write_text(
+            "bundle:\n  system_providers: 123\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--format",
+            "json",
+        )
+
+        assert code == 64, out

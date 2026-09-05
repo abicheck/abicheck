@@ -725,7 +725,6 @@ def _run_artifact_set(
     *,
     artifact_set: tuple[str, ...],
     dry_run: bool,
-    bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
     public_header_dirs: tuple[Path, ...],
@@ -838,7 +837,9 @@ def _run_artifact_set(
     budget_s = _parse_budget(budget)
     abi3_floor = _parse_abi3_floor(abi3)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
-    bsp = tuple(s.strip() for s in bundle_system_providers.split(",") if s.strip())
+    # PR J: --bundle-system-providers -> .abicheck.yml bundle: (Codex review).
+    _, _bundle_cfg, _ = _discover_scan_project_config(build_config, sources, None, allow_cwd_discovery=True, require_parseable=True)
+    bsp = tuple(_bundle_cfg.bundle_system_providers) if _bundle_cfg else ()
 
     req = ScanRequest(
         binaries=list(discovered.values()),
@@ -1049,21 +1050,25 @@ def _resolve_scan_evaluation_config(
 
 def _discover_scan_project_config(
     build_config: Path | None, sources: Path | None, against: Path | None,
+    *, allow_cwd_discovery: bool = False, require_parseable: bool = False
 ) -> tuple[Path | None, Any, str | None]:
     """Resolve the project config for this scan, with the digest that parsed it.
 
     Returns ``(cfg_path, project_cfg, sha256)``. An explicitly-bound
     ``--build-config`` that cannot be parsed is a usage error; an
     auto-discovered one is best-effort and degrades to a warning with
-    ``cfg_path`` cleared, matching ``merge_compile_config``'s own convention --
-    a config the user never explicitly bound to shouldn't fail a run it wasn't
-    asked to affect.
+    ``cfg_path`` cleared, matching ``merge_compile_config``'s own convention
+    -- unless *require_parseable* (Codex review: ``bundle:`` has no CLI-flag
+    fallback any more, so a malformed ambient config must fail loud too).
+    The cwd-upward fallback runs only when *against* is given (a plain audit
+    never needs severity/scope/suppression) or *allow_cwd_discovery* opts in
+    -- the artifact-set audit path does this for ``bundle:`` alone, no other consumer widening it.
     """
     from .workflows.extraction import discover_build_config
 
     explicit_config = build_config is not None
     cfg_path = build_config if explicit_config else discover_build_config(sources)
-    if cfg_path is None and not explicit_config and against is not None:
+    if cfg_path is None and not explicit_config and (against is not None or allow_cwd_discovery):
         from .cli_helpers_compare import discover_project_config
 
         cfg_path = discover_project_config()
@@ -1079,7 +1084,7 @@ def _discover_scan_project_config(
 
             project_cfg, _project_sha256 = load_build_config_with_digest(cfg_path)
         except ValueError as exc:
-            if explicit_config:
+            if explicit_config or require_parseable:
                 raise click.UsageError(
                     f"cannot parse build config {cfg_path}: {exc}"
                 ) from exc
@@ -1353,7 +1358,6 @@ def _discover_scan_project_config(
 def scan_cmd(
     artifact: Path | None,
     artifact_set: tuple[str, ...],
-    bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
     public_header_dirs: tuple[Path, ...],
@@ -1455,8 +1459,7 @@ def scan_cmd(
     _setup_verbosity(verbose)
 
     # ADR-056: --artifact-set is mutually exclusive with the positional
-    # ARTIFACT, with --against (audit-only -- no old side for a set), and
-    # --bundle-system-providers is meaningless without --artifact-set.
+    # ARTIFACT and with --against (audit-only -- no old side for a set).
     #
     # --artifact-set is now a repeatable option (CLI cleanup phase two, PR
     # 5): `artifact_set` is the tuple Click collects, empty when unset, so
@@ -1470,7 +1473,6 @@ def scan_cmd(
     # historical) -- a tuple has no such falsy-but-present state.
     _reject_incoherent_scan_operands(
         artifact=artifact, artifact_set=artifact_set, against=against,
-        bundle_system_providers=bundle_system_providers,
     )
     _reject_incoherent_secondary_output(
         dry_run=dry_run, output=output, secondary_fmt=secondary_fmt,
@@ -1482,7 +1484,6 @@ def scan_cmd(
         _run_artifact_set(
             artifact_set=artifact_set,
             dry_run=dry_run,
-            bundle_system_providers=bundle_system_providers,
             header_pairs=header_pairs,
             include_pairs=include_pairs,
             public_header_dirs=public_header_dirs,

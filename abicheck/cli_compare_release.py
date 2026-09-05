@@ -205,32 +205,16 @@ if TYPE_CHECKING:
     "the default). An explicit positive value is never memory-clamped.",
 )
 @click.option(
-    "--manifest",
+    "--instantiation-manifest",
     "manifest_path",
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help="ABI instantiation manifest (YAML/JSON) listing symbols the "
-    "release publicly promises. See ADR-023.",
-)
-@click.option(
-    "--bundle-system-providers",
-    "bundle_system_providers",
-    default="",
-    help="Comma-separated extra sonames to treat as system-provided "
-    "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list). "
-    "Matched against the real DT_NEEDED soname either exactly or by its "
-    "version-suffix-stripped stem (e.g. 'libmkl_core' matches a real "
-    "'libmkl_core.so.2' DT_NEEDED entry); matching is case-sensitive.",
-)
-@click.option(
-    "--bundle-cohort",
-    "bundle_cohorts",
-    multiple=True,
-    metavar="PREFIX",
-    help="Declare a co-versioned library cohort by name prefix (e.g. "
-    "'libfoo_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check, "
-    "which flags when some members of the cohort bump their major SONAME "
-    "while siblings lag.",
+    "release publicly promises. See ADR-023. Renamed from --manifest "
+    "(CLI cleanup phase two, PR J) -- inert here (ADR-037 D7, see this "
+    "module's own release_input_options docstring), kept in sync with "
+    "the real, user-facing spelling on frontends/cli/options/release.py "
+    "purely for reader consistency.",
 )
 @click.option(
     "--no-bundle-analysis",
@@ -329,7 +313,7 @@ def compare_release_cmd(
     verbose: bool,
     jobs: int,
     manifest_path: Path | None,
-    bundle_system_providers: str,
+    bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...],
     no_bundle_analysis: bool,
     bundle_facts_out: Path | None,

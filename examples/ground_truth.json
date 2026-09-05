@@ -3586,7 +3586,7 @@
    "bad_practice": false,
    "bundle": true,
    "category": "bundle",
-   "description": "Bundle (ADR-023): manifest.yaml promises four train_* instantiations; the new bundle silently drops train_double_sparse. With --manifest, the bundle layer emits bundle_manifest_instantiation_removed. Without --manifest, the per-library func_removed already covers it but cannot distinguish 'promised' from 'incidental'.",
+   "description": "Bundle (ADR-023): manifest.yaml promises four train_* instantiations; the new bundle silently drops train_double_sparse. With --instantiation-manifest, the bundle layer emits bundle_manifest_instantiation_removed. Without --instantiation-manifest, the per-library func_removed already covers it but cannot distinguish 'promised' from 'incidental'.",
    "expected": "BREAKING",
    "manifest_file": "manifest.yaml",
    "min_evidence": "L0",

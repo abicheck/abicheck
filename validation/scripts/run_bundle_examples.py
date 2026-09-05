@@ -181,13 +181,23 @@ def _compare_release(build_dir: Path, case_name: str, entry: dict) -> tuple[dict
     manifest_file = entry.get("manifest_file")
     if manifest_file:
         cmd.extend(
-            ["--manifest", str(example_catalog.case_dir(case_name) / str(manifest_file))]
+            [
+                "--instantiation-manifest",
+                str(example_catalog.case_dir(case_name) / str(manifest_file)),
+            ]
         )
     bundle_cohort = entry.get("bundle_cohort")
     if not bundle_cohort and "bundle_soname_skew" in (entry.get("expected_kinds") or []):
         bundle_cohort = "libonedal_"
     if bundle_cohort:
-        cmd.extend(["--bundle-cohort", str(bundle_cohort)])
+        # PR J: cohorts are .abicheck.yml's `bundle.cohorts:` now, not
+        # --bundle-cohort -- write a throwaway config alongside the release
+        # and point --config at it.
+        config_path = build_dir / case_name / ".abicheck.yml"
+        config_path.write_text(
+            f'bundle:\n  cohorts: ["{bundle_cohort}"]\n', encoding="utf-8"
+        )
+        cmd.extend(["--config", str(config_path)])
     result = _run(cmd, cwd=REPO_DIR, timeout=240)
     if not result.stdout.strip():
         return None, result.stderr[:1000]

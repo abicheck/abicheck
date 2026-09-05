@@ -124,9 +124,9 @@ def _takes_a_value(command: click.Command, token: str) -> bool:
 def _operands(command: click.Command, words: list[str]) -> list[str]:
     """The positional operands in `words`, with option values removed.
 
-    An option's *value* looks exactly like an operand (`--manifest t.json`),
-    so counting bare words would badly miscount. Click knows which options
-    consume a following word; ask it rather than guessing.
+    An option's *value* looks exactly like an operand (`--instantiation-manifest
+    t.json`), so counting bare words would badly miscount. Click knows which
+    options consume a following word; ask it rather than guessing.
     """
     out: list[str] = []
     index = 0

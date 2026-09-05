@@ -164,7 +164,12 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: like the severity family), so they leave the visible surface (−5). The coarse
 #: ``--debug-root`` stays visible; the toolchain family and ``--scope-public-headers``
 #: are documented carve-outs (shared with dump/scan / everyday on-off switch).
-COMPARE_FLAG_BUDGET_BASE = 57
+#: Lowered 57→55 by CLI cleanup phase two, PR J: ``--bundle-system-providers``/
+#: ``--bundle-cohort`` demoted to ``.abicheck.yml``'s ``bundle:`` block, with
+#: no CLI override at all (like ``--show-redundant`` above) — a stable,
+#: reviewed-in-a-PR release-topology property, not a per-run input, per this
+#: plan's own "belongs somewhere else" test.
+COMPARE_FLAG_BUDGET_BASE = 55
 
 #: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
 #: flag spelling → rationale (why it is a per-run analysis input, not a stable
@@ -181,7 +186,7 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
     "--post-manifest": (
         "G23 / #492: scopes the comparison to a POST Python export manifest's "
         "committed ABI surface. A per-run scoping input (which manifest to hold "
-        "the release to), not a stable project setting — like --manifest."
+        "the release to), not a stable project setting — like --instantiation-manifest."
     ),
     "--reconcile-build-context": (
         "ADR-039: clears context-free header-parse false positives using the "

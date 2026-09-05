@@ -1209,15 +1209,12 @@ elif [[ "$MODE" == "compare" ]]; then
   # rejected flags and silently dropped a bundle caller's build-config
   # (Codex review, second round).
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  # bundle-system-providers reaches the cross-library bundle-analysis layer
-  # (ADR-023) the same way --config does above: unconditional, since the CLI
-  # itself already treats it as a no-op (silently ignored) for a single-pair
-  # operand rather than rejecting it outright. Previously not wired to the
-  # Action at all, even though compare's CLI has carried
-  # --bundle-system-providers since ADR-023 (a pre-existing gap, not scoped
-  # to ADR-056 — added here since this pass is wiring the input from scratch
-  # anyway; see ADR-056/G34's Action-wiring correction).
-  add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
+  # CLI cleanup phase two, PR J: --bundle-system-providers/--bundle-cohort
+  # removed from the CLI (and this Action input retired with them) -- the
+  # cross-library bundle-analysis layer's system-provider allow-list
+  # extension and cohort declarations are sourced only from
+  # build-config's own .abicheck.yml `bundle:` block now, which --config
+  # above already forwards unconditionally.
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
     # Case-insensitive, matching the CLI's own DepthParam.convert() (Codex
@@ -1555,7 +1552,10 @@ elif [[ "$MODE" == "scan" ]]; then
       fi
       CMD+=(--artifact-set "$_scan_artifact_set_dir")
     fi
-    add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
+    # CLI cleanup phase two, PR J: --bundle-system-providers removed from
+    # scan's CLI too -- sourced only from build-config's own .abicheck.yml
+    # `bundle.system_providers:` now (forwarded via --config/--build-config
+    # elsewhere in this script for scan mode).
   else
     SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode, unless new-library-set is given}"
     # scan has no per-library fan-out (unlike compare) — a directory/package

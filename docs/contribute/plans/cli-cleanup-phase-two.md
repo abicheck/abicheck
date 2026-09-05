@@ -114,6 +114,100 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > is already tracked here and is re-confirmed still open. Two of its items
 > were already fixed in `94be22ad..2598d0d` and are corrected rather than
 > re-opened. Full account: **"Review checkpoint (2026-09-01)"** below.
+>
+> **Update (2026-09-04, fresh re-review, `main` at `23c7808`, merge of
+> [#1042](https://github.com/abicheck/abicheck/pull/1042)).** A broader
+> architecture review (not scoped to this plan) was cross-checked against
+> this file; the parts of it that bear on this plan are recorded here so
+> a future pass does not re-derive them.
+>
+> **PR I's classification + flag deletion is confirmed actually landed on
+> `main`**, not merely landed on its own branch as the 2026-09-03 update
+> above states — #1042 (`feat(compare): classify a stored BundleFacts
+> OLD_INPUT automatically, delete --old-bundle-facts`) merged into `main`
+> at `23c7808`, base `48152645` (#1052). `--old-bundle-facts` is gone,
+> `workflows/bundle_compare_operand.py`/`bundle_compare_operand_marker.py`
+> do the classification (hardened across many adversarial review rounds,
+> each with its own fix and regression test — the module's own docstring
+> keeps accumulating new rounds after #1042 merged, so this note
+> deliberately names no count at all; see that module's docstring for the
+> current total), `compare_bundle_operand_dispatch.py` wires it
+> into `compare_cmd`. **The full `BundleCompareRequest` unification is
+> still explicitly out of scope of #1042 and remains this row's open
+> item** — live/stored still has no execution engine (stored/stored's own
+> landed 2026-09-04, see the Ordering block's PR I row below, Codex
+> review), and the evaluation/gate/report/dry-run surface is still
+> answered per operand-shape branch rather than once.
+>
+> **Corrected the "Ordering" block's PR C row**, which had gone stale in
+> the other direction from #1042/#1053 landing: it still read "ELF done,
+> PE/Mach-O open" and named `handle_non_elf_dump` as unmigrated, but the
+> 2026-08-27 checkpoint above already recorded PE/Mach-O's migration via
+> #980. Re-verified directly against `service_dump_pipeline.py`'s own
+> docstring on current `main`: both binary formats now route through
+> `execute_dump_request` via `frontends.cli.dump_execute.
+> execute_dump_cli_run`, and `handle_non_elf_dump` is kept only for its own
+> direct unit tests — that part of the row is DONE. (PR C's
+> config-discovery half is a separate, narrower story — see the "Net
+> effect" paragraph below and the row itself, not restated here.) This is
+> exactly the "generated status, not hand-kept prose" gap the 2026-09-01
+> checkpoint's "Generated plan status" bullet already named as a durable
+> problem, caught here as a live instance of it.
+>
+> **New context for PR I/PR J from #1053** (merged the same day, just
+> before #1042, base also `48152645`): ADR-062/ADR-063 Track C 8B folded
+> persisted `BundleFacts` documents and `actions/baseline`-produced
+> baseline sets into `ProjectSnapshot`'s sectioned representation
+> (`storage/import_bundle_facts.py`, `storage/import_baseline_set.py`,
+> `VariantRef.sections`). This does not change anything this plan commits
+> to, but it is a live candidate for what `BundleCompareRequest`'s
+> `StoredBundleFactsInput` side eventually reads once storage v2's own
+> "standard CLI input" gap (`abicheck compare old.project.zst
+> new.project.zst`, tracked in `docs/contribute/plans/storage-format-v2.md`,
+> not here) closes — worth a cross-reference when PR I's full unification
+> is actually scoped, not a reason to change PR I's own target shape today.
+> Likewise relevant background for PR J's "topology out of CLI flags": a
+> `ProjectSnapshot`-shaped bundle artifact is now a real storage primitive,
+> which is one more reason `BundleSpec`/`.abicheck.yml` topology (not a
+> flag) should be what a bundle comparison resolves against, rather than
+> designing PR J's topology model in ignorance of where the stored side is
+> headed.
+>
+> **Everything else the broader review raised — `ResolvedExecutionContext`
+> authority, `RunOutcome`/gate unification beyond PR G2's own scope,
+> SemanticIR consumer authority, the producer/consumer compiler split
+> (G34), storage v2 scale work — is real but is not this plan's scope**;
+> it belongs to `docs/contribute/plans/one-semantic-pipeline.md`,
+> `duplication-and-convergence-assessment.md`,
+> `g34-producer-consumer-compiler-profile-separation.md` (per
+> `plans/index.md`'s own G34 row — not one of the other three plans named
+> here, corrected 2026-09-04), and `storage-format-v2.md` respectively, and
+> is not duplicated here.
+> One item from that review *is* already tracked here and re-confirmed
+> unchanged: `contract=public`'s remaining unresolved-loss count (see the
+> 2026-09-01 checkpoint's own bullet) — still blocked on the same
+> `EntityId`-based public-closure work, still not a string-heuristic fix.
+>
+> **Net effect on "what remains" in this plan, unchanged in shape from the
+> 2026-09-01 checkpoint, narrower in substance:** PR G2 (delete
+> `--exit-code-scheme`, most of the prerequisite work landed, see PR 4's
+> own section for the exact remaining `--format text`/`--artifact-set`
+> signal gap), PR H (artifact-set provider-ownership semantics — not
+> started), PR I's full `BundleCompareRequest` unification (classification
+> + flag deletion done; the unification itself not started), and PR J
+> (bundle topology out of CLI flags — the `--manifest` rename and the
+> `--bundle-system-providers`/`--bundle-cohort` → `.abicheck.yml` move both
+> landed 2026-09-04, see PR J's own row for the account; per-library
+> header/compile-context topology and `--max-json-object-nodes` remain
+> open). PR C is done for binary-format migration and for `scan`'s
+> config-discovery dry-run parity, with one real, narrower open residual
+> (`dump`/`compare`'s explicit-`--config` case) — see the "Configuration
+> discovery (PR C's tail)" bullet under "Re-verified, unchanged, still
+> open" below for the single full account; reaching that precise a
+> statement took repeated review on this PR (recorded so a future pass
+> doesn't re-litigate it, and this paragraph deliberately doesn't restate
+> the account itself, per the same review's DRY finding). PR A/B/D/E/F and
+> PR 1/1b/2 are done.
 
 ## Problem
 
@@ -4883,6 +4977,12 @@ at all.
 
 ### Bundle topology keeps arriving as CLI flags
 
+**Status (2026-09-04): the `--bundle-system-providers`/`--bundle-cohort` →
+config row and the `--manifest` rename row below are both done — see the
+Ordering block's PR J row for the live account, not restated here.** The
+per-library bundle configuration gap this section's own "open half"
+paragraph describes remains open.
+
 The release/bundle option group has grown `--bundle-system-providers`,
 `--bundle-cohort`, `--manifest`, `--include-private-dso`,
 `--bundle-facts-out`, `--old-bundle-facts`, `--max-json-object-nodes`. Not
@@ -4953,13 +5053,21 @@ the agreement so a future pass does not re-derive them as new:
   migration — every persisted identity carrier (flat entities, source-graph
   nodes, surface-graph nodes, consumer-graph nodes, proof-path references,
   impact ids), not one regex per graph format.
-- **Configuration discovery still happens too late (PR C's tail).** A
-  `.abicheck.yml`-only `build: targets:` can be discovered only during real
-  execution, so `dump --dry-run` / `compare --dry-run` / `scan --dry-run` can
-  answer "valid" for a request the real run then rejects. The convergence
-  target: configuration discovery, build-target resolution, toolchain
-  selection and evidence requirements belong to ADR-063 Phase 4's
-  `AnalysisPlan`, *before* extraction — not inside an extraction adapter.
+- **Configuration discovery (PR C's tail) — corrected precisely 2026-09-04,
+  third pass, after this bullet was wrong in both directions across two
+  earlier corrections.** The full mechanism (`12492deb`'s auto-discovery
+  fix, the precedence rule, the per-call-site rollout across `dump`/
+  `compare`/`scan`) is maintained once, in
+  `docs/contribute/known-gaps.md` and `docs/contribute/plans/
+  one-semantic-pipeline.md`'s Phase 4 section — not restated here, so this
+  plan can't drift from that account the way it just did. **This plan's
+  own status, precisely:** closed for `scan` (both the auto-discovery and
+  explicit-`--config` cases — `ScanRequest` carries `build_config` as a
+  real field); closed for `dump`/`compare`'s auto-discovery case only —
+  their explicit-`--config` case is a real, narrower, still-open residual
+  of PR C's own tail, since `dump`/`compare` have no `build_config` field
+  on `InputSpec` at the request level at all. PR C's row above reflects
+  this precisely rather than either "fully open" or "fully done".
 - **The ADR-061 move is directionally right and carries one visible debt.**
   #972 put the new command in `frontends/cli/commands/` instead of a new flat
   `cli_compare_bundle_facts.py`, which is exactly ADR-061's direction — but
@@ -5099,17 +5207,41 @@ PR B  effective configuration parity  — packs resolved once into one
                                        deliberately reassigned to PR G2,
                                        see PR B's own section for why
 PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
-      (ELF done, PE/Mach-O open)       ResolvedDumpRequest → DumpResult, one
-                                       resolver for dump CLI/Python/Action
-                                       *and* scan_engine's candidate
-                                       resolution, JSON dry-run rendered
-                                       from that object. The real ELF `dump`
-                                       run now executes through
-                                       execute_dump_request (scan's
-                                       candidate resolution already did);
-                                       handle_non_elf_dump (PE/Mach-O) is
-                                       unmigrated -- no PE/Mach-O toolchain
-                                       was available to verify against
+      (binary-format migration DONE;   ResolvedDumpRequest → DumpResult, one
+       config-discovery dry-run parity resolver for dump CLI/Python/Action
+       DONE for scan, DONE for         *and* scan_engine's candidate
+       dump/compare's auto-discovery   resolution, JSON dry-run rendered
+       case only — explicit --config   from that object. The real ELF `dump`
+       still a real, narrower open     run now executes through
+       residual for dump/compare)      execute_dump_request (scan's
+                                       candidate resolution already did),
+                                       and PE/Mach-O followed via #980 (see
+                                       the 2026-09-04 checkpoint above):
+                                       `frontends.cli.dump_execute.
+                                       execute_dump_cli_run` routes both
+                                       binary formats through the same
+                                       function, so `cli_dump_non_elf.
+                                       handle_non_elf_dump` is no longer
+                                       called from `dump_cmd` for either
+                                       format (kept only for its own direct
+                                       unit tests) — verified only via
+                                       mock-based CLI/unit tests, no real
+                                       PE/Mach-O toolchain was available to
+                                       verify against a real binary.
+                                       Config-discovery dry-run/execution
+                                       parity is closed for `scan` (both
+                                       cases) and for `dump`/`compare`'s
+                                       auto-discovery case, with one real,
+                                       narrower residual for their explicit
+                                       `--config` case — see the
+                                       "Configuration discovery (PR C's
+                                       tail)" bullet under "Re-verified,
+                                       unchanged, still open" below for the
+                                       single full account (this row no
+                                       longer restates it, to stop the two
+                                       copies drifting apart the way they
+                                       did across three corrections on
+                                       #1059)
 PR D  build-context completeness      = PR 3B — matched compile-unit
       (DONE)                           selection, forced includes, provenance
                                        tests
@@ -5303,14 +5435,69 @@ PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
                                        one.
       └─ DELETE compare --old-bundle-facts — DONE 2026-09-03
 PR J  bundle topology out of the CLI  — NEW (2026-09-01 checkpoint):
-      (NEW, not started)                --bundle-system-providers/--bundle-
-                                       cohort and per-library header/compile
-                                       context move into BundleSpec /
-                                       .abicheck.yml referencing existing
-                                       targets; release --manifest renamed;
-                                       --max-json-object-nodes re-expressed as
+      (--manifest rename DONE;          --bundle-system-providers/--bundle-
+       --bundle-system-providers/       cohort and per-library header/compile
+       --bundle-cohort → config DONE;   context move into BundleSpec /
+       per-library header/compile       .abicheck.yml referencing existing
+       context and --max-json-object-   targets; release --manifest renamed;
+       nodes still open) 2026-09-04:    --max-json-object-nodes re-expressed as
                                        a resource limit. Depends on G42 for
-                                       provider resolution
+                                       provider resolution. **Two of four
+                                       sub-items landed**: `--manifest`
+                                       renamed to `--instantiation-manifest`
+                                       (no alias, matches the collision this
+                                       row already named); `--bundle-system-
+                                       providers`/`--bundle-cohort` deleted
+                                       from `compare`'s release fan-out and
+                                       `scan --artifact-set` alike, replaced
+                                       by a new `.abicheck.yml` `bundle:`
+                                       block (`system_providers:`/
+                                       `cohorts:`) -- `compare`'s directory/
+                                       package fan-out reads it through the
+                                       same `ResolvedCompareConfig` merge
+                                       point `severity:`/`scope:`/
+                                       `suppression:` already use, but `scan
+                                       --artifact-set` resolves it through
+                                       its own, separate
+                                       `_discover_scan_project_config` +
+                                       raw `BuildConfig` read (Codex review,
+                                       fresh evidence -- correcting an
+                                       earlier overstatement here that both
+                                       paths share one merge point; unifying
+                                       them behind one workflow-owned
+                                       resolved-bundle-topology object is a
+                                       real, separate cleanup this pass did
+                                       not attempt). A new, independent
+                                       top-level key, deliberately *not*
+                                       folded into the existing plural
+                                       `bundles:`/`BundleSpec` block
+                                       (`project_targets.py`, ADR-047 §3),
+                                       since that schema serves the `project`
+                                       command family's target-declaration
+                                       model and would have forced every
+                                       `compare`/`scan --artifact-set` caller
+                                       to first declare `targets:`/`bundles:`
+                                       just to extend a system-provider
+                                       allow-list — a materially bigger
+                                       config-shape change than this slice
+                                       set out to make. Per-library header/
+                                       compile-context topology (the
+                                       `BundleSpec`-referencing-targets end
+                                       state this row's own body still
+                                       describes) and `--max-json-object-
+                                       nodes` → `--resource-limit` remain
+                                       genuinely open — the former needs the
+                                       G42 environment-aware provider work
+                                       this row already named as a
+                                       dependency, the latter needs a real,
+                                       calibrated bytes-per-JSON-container-
+                                       node conversion this pass did not
+                                       attempt (inventing one uncalibrated
+                                       would be exactly the kind of
+                                       false-precision heuristic this
+                                       codebase's own conventions warn
+                                       against — see AGENTS.md's "Decision-
+                                       making principles").
 ```
 
 Independent of the chain, unblocked at any time: PR 1 (**done**), PR 2

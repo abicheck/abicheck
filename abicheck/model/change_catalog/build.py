@@ -106,10 +106,10 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
        impact="A symbol present in the new manifest is not in the old one; "
               "new instantiation now publicly promised."),
     _E("bundle_manifest_instantiation_removed", _B,
-       impact="A symbol listed in the supplied --manifest as a public ABI "
-              "promise is not exported by any library in the new bundle. "
-              "Consumers of the previously-promised template instantiation will "
-              "fail to link or load."),
+       impact="A symbol listed in the supplied --instantiation-manifest as a "
+              "public ABI promise is not exported by any library in the new "
+              "bundle. Consumers of the previously-promised template "
+              "instantiation will fail to link or load."),
     _E("bundle_provider_changed", _R,
        impact="A symbol moved from one library in this bundle to another. "
               "Downstream binaries that had DT_NEEDED on the old provider may "

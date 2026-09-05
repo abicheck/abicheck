@@ -312,11 +312,22 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         kwargs.get("suppress"), kwargs["policy"], kwargs.get("policy_file_path")
     )
 
-    bundle_system_providers = [
-        s.strip()
-        for s in str(kwargs.get("bundle_system_providers") or "").split(",")
-        if s.strip()
-    ]
+    # PR J: bundle: replaces --bundle-system-providers/--bundle-cohort.
+    # kwargs["config"] is already resolved (explicit/auto-discovered) by
+    # compare.py's dispatch call site -- read the same field
+    # ResolvedCompareConfig would, off the loaded BuildConfig directly.
+    # Not re-validated: that call site already raises a UsageError for a
+    # malformed config before dispatch() ever runs. workflows.extraction,
+    # not buildsource.build_config_io: frontends may import workflows but
+    # not extract (build_config_io.py's own package).
+    from ....workflows.extraction import load_build_config_with_digest
+
+    _bundle_cfg_path = kwargs.get("config")
+    _bundle_cfg = (
+        load_build_config_with_digest(_bundle_cfg_path)[0] if _bundle_cfg_path else None
+    )
+    bundle_system_providers = list(_bundle_cfg.bundle_system_providers) if _bundle_cfg else []
+    bundle_cohorts = list(_bundle_cfg.bundle_cohorts) if _bundle_cfg else []
 
     if new_is_stored:
         # PR I stored/stored: NEW_INPUT is itself a stored BundleFacts
@@ -334,7 +345,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 new_dir,
                 manifest_path=kwargs.get("manifest_path"),
                 system_providers=bundle_system_providers or None,
-                cohorts=list(kwargs.get("bundle_cohorts") or ()) or None,
+                cohorts=bundle_cohorts or None,
                 policy=kwargs["policy"],
                 policy_file=policy_file,
                 suppress=suppression,
@@ -469,7 +480,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                     include_private_dso=bool(kwargs.get("include_private_dso", False)),
                     manifest_path=kwargs.get("manifest_path"),
                     system_providers=bundle_system_providers or None,
-                    cohorts=list(kwargs.get("bundle_cohorts") or ()) or None,
+                    cohorts=bundle_cohorts or None,
                     policy=kwargs["policy"],
                     policy_file=policy_file,
                     suppress=suppression,

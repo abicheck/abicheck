@@ -29,8 +29,9 @@ No source changes — only the linked SONAME differs per library:
 
 ```bash
 bash examples/case84_bundle_soname_skew/gen_bundle.sh
+printf 'bundle:\n  cohorts: ["libonedal_"]\n' > /tmp/case84.abicheck.yml
 abicheck compare examples/case84_bundle_soname_skew/v1 examples/case84_bundle_soname_skew/v2 \
-    --bundle-cohort libonedal_ --format json
+    --config /tmp/case84.abicheck.yml --format json
 ```
 
 ## Expected abicheck finding
@@ -51,11 +52,12 @@ Bundle (cross-library) findings:
     metadata; mixed loads can corrupt internal cross-library state.
 ```
 
-`--bundle-cohort libonedal_` is required: SONAME-skew detection is opt-in.
-You declare which libraries are co-versioned by name prefix; without it
-abicheck never infers a lockstep invariant from filenames, so an ordinary
-release that bumps one independent library while another (unrelated) one
-stays put is not flagged.
+`.abicheck.yml`'s `bundle.cohorts: ["libonedal_"]` is required:
+SONAME-skew detection is opt-in. You declare which libraries are
+co-versioned by name prefix; without it abicheck never infers a lockstep
+invariant from filenames, so an ordinary release that bumps one
+independent library while another (unrelated) one stays put is not
+flagged.
 
 ## Minimum evidence
 
@@ -97,8 +99,9 @@ packaging bug that caused it.
 Treat a declared cohort's SONAME bump as one atomic release action: a
 packaging/CI gate should refuse to publish if any member of a declared
 cohort is missing the version bump the rest of the set received.
-`abicheck compare --bundle-cohort` is exactly that gate — wire it into the
-release pipeline so a skew like this fails CI instead of shipping.
+`abicheck compare --config .abicheck.yml` with a declared `bundle.cohorts:`
+is exactly that gate — wire it into the release pipeline so a skew like
+this fails CI instead of shipping.
 
 **Real-world example:** projects that ship several co-versioned `.so`s from
 one build (oneDAL's `libonedal_*` set, ffmpeg's `libavcodec`/`libavutil`/
