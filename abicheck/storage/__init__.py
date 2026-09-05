@@ -144,6 +144,7 @@ from .sectioned_document import (
 )
 from .variant_composition import (
     read_variant_composition_degraded_members,
+    read_variant_composition_inventory_complete,
     read_variant_composition_library_filenames,
     read_variant_composition_manifest_payload,
 )
@@ -240,6 +241,7 @@ __all__ = [
     "provenance_to_dto",
     "raw_digest",
     "read_variant_composition_degraded_members",
+    "read_variant_composition_inventory_complete",
     "read_variant_composition_library_filenames",
     "read_variant_composition_manifest_payload",
     "semantic_digest",

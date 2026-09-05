@@ -41,6 +41,8 @@ can reach it through ``workflows.gate`` without a new import-cycle member.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from ..model.scope_acquisition import (
     AcquisitionState,
     MemberAcquisition,
@@ -52,9 +54,11 @@ __all__ = [
     "CLI_MITIGATION",
     "DEFAULT_INCOMPLETE_SCOPE_POLICY",
     "INCOMPLETE_SCOPE_POLICIES",
+    "ScopeDecision",
     "incomplete_scope_diagnostic",
     "incomplete_scope_exit_contribution",
     "no_comparison_completed_exit_contribution",
+    "resolve_scope_decision",
     "scope_completeness_for_record",
     "validate_incomplete_scope_policy",
 ]
@@ -125,6 +129,48 @@ def no_comparison_completed_exit_contribution(
     if record is None:
         return 0
     return 1 if record.no_comparison_completed else 0
+
+
+@dataclass(frozen=True)
+class ScopeDecision:
+    """The completeness axis, *decided*: one record, the policy it was
+    judged under, the ``run_outcome.scope`` value, and the two ``0``/``1``
+    exit contributions the exit fold reads. Resolved once per run by
+    :func:`resolve_scope_decision` and carried, unchanged, to every
+    consumer -- the exit decision, ``run_outcome``, and the report
+    projections -- so reporting renders a decision this module made and
+    never re-derives one (``report/AGENTS.md``: a renderer decides nothing).
+
+    ``record`` is ``None`` for a scalar comparison (no inventory to fall
+    short of): every contribution is ``0`` and ``completeness`` is
+    ``COMPLETE``.
+    """
+
+    record: ScopeAcquisitionRecord | None
+    policy: str
+    completeness: ScopeCompleteness
+    incomplete_scope_exit_contribution: int
+    no_comparison_completed_exit_contribution: int
+
+
+def resolve_scope_decision(
+    record: ScopeAcquisitionRecord | None, policy: str | None
+) -> ScopeDecision:
+    """Decide the completeness axis for *record* under *policy* (``None``
+    means the default) -- the one place the three answers above are
+    computed together."""
+    effective = validate_incomplete_scope_policy(policy)
+    return ScopeDecision(
+        record=record,
+        policy=effective,
+        completeness=scope_completeness_for_record(record),
+        incomplete_scope_exit_contribution=incomplete_scope_exit_contribution(
+            record, effective
+        ),
+        no_comparison_completed_exit_contribution=(
+            no_comparison_completed_exit_contribution(record)
+        ),
+    )
 
 
 def incomplete_scope_diagnostic(

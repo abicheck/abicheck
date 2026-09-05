@@ -337,8 +337,10 @@ def compare_stored_bundle_facts_pair(
             )
             for key in sorted(degraded_keys)
         },
-        old_provenance="stored bundle-facts capture: the captured set is not a proven inventory",
-        new_provenance="stored bundle-facts capture: the captured set is not a proven inventory",
+        old_provenance="stored bundle-facts capture that made no complete-inventory assertion",
+        new_provenance="stored bundle-facts capture that made no complete-inventory assertion",
+        old_complete=old_facts.inventory_complete,
+        new_complete=new_facts.inventory_complete,
     )
     # ADR-065 D2 (Codex review): a promise only an excluded member could
     # answer is withheld, not reported as manifest drift.

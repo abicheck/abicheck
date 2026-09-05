@@ -96,11 +96,16 @@ def _write_release_summary_file(
         _release_global_verdict,
     )
     from ...report.not_comparable import run_outcome_dict_for_release
-    from ...workflows.gate import resolve_release_exit_decision_for_report
+    from ...workflows.gate import (
+        resolve_release_exit_decision_for_report,
+        resolve_scope_decision,
+    )
     from ...workflows.release_scope import release_global_ran, unmatched_names
 
     terms = (
-        scope_terms if scope_terms is not None else comparison_scope_terms(None, None)
+        scope_terms
+        if scope_terms is not None
+        else comparison_scope_terms(resolve_scope_decision(None, None))
     )
 
     digest, fields = _release_summary_effective_config_block(
@@ -121,8 +126,8 @@ def _write_release_summary_file(
         contract_coverage_exit_contribution,
         library_results,
         release_global_verdict,
-        incomplete_scope_contribution=terms.incomplete_scope_exit_contribution,
-        no_comparison_completed_contribution=terms.no_comparison_completed_exit_contribution,
+        incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
+        no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
     ).to_dict()
     record = terms.record
     summary_data: dict[str, object] = {

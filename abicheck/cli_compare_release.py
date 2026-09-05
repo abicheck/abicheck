@@ -105,6 +105,7 @@ from .model import AbiSnapshot
 from .model.scope_acquisition import AcquisitionState
 from .pack_application import resolve_bundle_policy_file
 from .report.comparison_scope import comparison_scope_terms
+from .workflows.gate import resolve_scope_decision
 from .workflows.release_scope import (
     DIRECT_PAIR_KEY,
     StrandedLibraryResolution,
@@ -114,6 +115,7 @@ from .workflows.release_scope import (
     scoped_bundle_maps,
     stored_degraded_members,
     stored_side_degraded_members,
+    stored_side_inventory_complete,
 )
 from .workflows.storage import is_project_snapshot_package_dir
 
@@ -560,13 +562,26 @@ def compare_release_cmd(
                 make_temp_dir=_make_temp_dir,
             )
             # ADR-065 D2's inventory proof for this release (S2): a stored
-            # ProjectSnapshot package's declared composition is complete;
-            # a live directory, extracted archive, or direct file pair is not.
+            # ProjectSnapshot package whose capture asserted a complete
+            # inventory (`inventory_complete`, persisted with its
+            # composition); the package type alone, a live directory, an
+            # extracted archive, or a direct file pair never proves it.
+            old_stored = old_dir.is_dir() and is_project_snapshot_package_dir(old_dir)
+            new_stored = new_dir.is_dir() and is_project_snapshot_package_dir(new_dir)
+            try:
+                old_complete = old_stored and stored_side_inventory_complete(
+                    old_dir, variant_id=old_variant
+                )
+                new_complete = new_stored and stored_side_inventory_complete(
+                    new_dir, variant_id=new_variant
+                )
+            except SnapshotError as exc:  # a damaged composition (fail closed)
+                raise click.UsageError(str(exc)) from exc
             inventory_evidence = release_inventory_evidence(
-                old_stored=old_dir.is_dir()
-                and is_project_snapshot_package_dir(old_dir),
-                new_stored=new_dir.is_dir()
-                and is_project_snapshot_package_dir(new_dir),
+                old_stored=old_stored,
+                new_stored=new_stored,
+                old_complete=old_complete,
+                new_complete=new_complete,
                 direct_pair=list(matched_keys) == [DIRECT_PAIR_KEY],
                 # D9 reads intent from the operand shape: a single-file NEW
                 # (not a directory/archive that discovered one member).
@@ -733,7 +748,11 @@ def compare_release_cmd(
                 ):
                     worst_verdict = "ERROR"
                 click.echo(f"Failed: {key}: {reason}", err=True)
-            scope_terms = comparison_scope_terms(scope_record, on_incomplete_scope)
+            # Decided by policy once; every consumer below (the writers, the
+            # sidecar, the stderr notice, the exit) reads this one decision.
+            scope_terms = comparison_scope_terms(
+                resolve_scope_decision(scope_record, on_incomplete_scope)
+            )
             removed_keys = [m.member for m in scope_record.proven_removed_members]
             added_keys = [m.member for m in scope_record.proven_added_members]
 
@@ -830,6 +849,12 @@ def compare_release_cmd(
                     inherited_degraded=stored_side_degraded_members(
                         old_dir, variant_id=old_variant
                     ),
+                    # ADR-065 D2: this capture walked every member the
+                    # release enumerated on OLD (matched or stranded, a
+                    # degraded one marked), so it asserts a complete
+                    # inventory -- unless --dso-only left a member
+                    # unclassified, which the assertion must not paper over.
+                    inventory_complete=not old_unclassified,
                     # ADR-062 A1.7: the same explicit-or-embedded manifest
                     # resolution the bundle-analysis call below applies, so
                     # a stored OLD side's own manifest-drift contract is

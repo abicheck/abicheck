@@ -597,9 +597,15 @@ downgrade missing members, never "nothing compared".
 
 **Removals need proof.** `--fail-on-removed-library`'s exit `8` fires only
 for a *proven* removal: NEW's inventory must be proven complete, which in
-this release means a stored `ProjectSnapshot` package's declared
-composition (a live directory or an extracted archive cannot prove absence
-— `package.py` returns directories, not a declared component inventory).
+this release means a stored baseline whose capture **asserted** it — a
+`--bundle-facts-out` document, or a `ProjectSnapshot` package imported from
+one, carrying `inventory_complete: true` (the fan-out asserts it when its
+capture covered every library the OLD release enumerated and `--dso-only`
+left none unclassified). Being stored proves nothing by itself: a package
+or document without the assertion is as unproven as a live directory or an
+extracted archive (`package.py` returns directories, not a declared
+component inventory), and the same document decides identically whether
+compared directly or after import into a package.
 The JSON key `unmatched_old` keeps listing the raw old-minus-new set, as its
 name says. See the migration note in
 [Exit codes](../reference/exit-codes.md#the-completeness-axis-adr-065-d6d7-directorypackage-compare-only).

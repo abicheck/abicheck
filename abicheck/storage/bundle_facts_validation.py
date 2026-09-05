@@ -373,6 +373,19 @@ def require_degraded_members_known(
         )
 
 
+def validated_inventory_complete(raw: object) -> bool:
+    """Validate a persisted ``inventory_complete`` assertion (ADR-065 D2):
+    a JSON boolean only. A caller defaults an *absent* key to ``False``
+    itself; anything else present (``null``, ``1``, ``"true"``) is
+    rejected rather than coerced, since ``True`` is what lets a later
+    comparison prove a removal or an addition."""
+    if isinstance(raw, bool):
+        return raw
+    raise ValueError(
+        f"bundle facts: 'inventory_complete' must be a boolean, got {raw!r}"
+    )
+
+
 def validated_degraded_members(raw: object) -> dict[str, str]:
     """Validate and convert a persisted ``degraded_members`` mapping
     (ADR-065 D8: ``{library: failure reason}``). A caller distinguishes an

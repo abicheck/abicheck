@@ -1217,7 +1217,9 @@ Once a root command genuinely clears the bar above, pick the right home:
   a run that completed no comparison at all contributes `1` under either
   setting (`no_comparison_completed`). Exit `8` requires a *proven*
   removal (NEW's inventory proven complete -- a stored `ProjectSnapshot`
-  package); an unmatched library under an unproven inventory is never a
+  package or bundle-facts document whose capture asserted
+  `inventory_complete`; the container type alone proves nothing); an
+  unmatched library under an unproven inventory is never a
   removal (`unmatched_old` keeps listing it). Owners:
   `model/scope_acquisition.py` (the record), `policy/scope_completeness.py`
   (the fold), `workflows/release_scope.py` (the release builder, with D9's

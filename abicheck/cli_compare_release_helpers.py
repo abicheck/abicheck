@@ -64,6 +64,7 @@ from .workflows.gate import (
     apply_release_gate_pack as apply_release_gate_pack,  # re-exported, ADR-064
     resolve_release_exit_decision_for_report,
     resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
+    resolve_scope_decision,
 )
 from .workflows.release_scope import (
     StrandedLibraryResolution,
@@ -619,6 +620,7 @@ def write_bundle_facts_out(
     resolve_stranded_library: Callable[[Path], AbiSnapshot | StrandedLibraryResolution],
     inherited_degraded: Mapping[str, str] | None = None,
     resolved_manifest: InstantiationManifest | None = None,
+    inventory_complete: bool = False,
 ) -> None:
     """Persist the OLD side's per-library snapshots (plus manifest, if any)
     to *bundle_facts_out* as a :class:`~abicheck.bundle_facts.BundleFacts`
@@ -704,11 +706,11 @@ def write_bundle_facts_out(
     `None`. *inherited_degraded* (ADR-065 D8) is a stored OLD package's own
     persisted marker, keyed like *old_map*: it stays marked in this recapture
     even though its ELF-only stand-in reloads fine (Codex review).
+    *inventory_complete* (ADR-065 D2): the caller asserts this capture covers
+    every member OLD enumerated (``BundleFacts.inventory_complete``).
 
     Failure here (a bad *manifest_path*, an unwritable *bundle_facts_out*)
-    is a usage error, unlike bundle *analysis* (which degrades to a warning):
-    an explicitly requested baseline that silently fails to write would leave
-    a user believing it was captured.
+    is a usage error, unlike bundle *analysis* (which degrades to a warning).
     """
     from .bundle_facts import capture_bundle_facts
     from .bundle_manifest import load_manifest
@@ -722,12 +724,10 @@ def write_bundle_facts_out(
         else:
             manifest = load_manifest(manifest_path) if manifest_path is not None else None
 
-        # Canonicalize DiffResult.library the same way old_map's keys were
-        # derived, not by basename against old_map's *values* -- a stored
-        # operand's value is a materialized sub-package dirname, which a
-        # basename match misses, so the pair also read as "stranded" below
-        # and was captured twice (Codex review). Basename fallback only if
-        # truly unmatched (degrades safely).
+        # Canonicalize DiffResult.library the way old_map's keys were derived,
+        # not by basename against old_map's *values* -- a stored operand's value
+        # is a materialized sub-package dirname a basename match misses, so the
+        # pair read as "stranded" too and was captured twice (Codex review).
         per_library_snapshots: dict[str, AbiSnapshot] = {}
         for diff, old_snapshot in diff_pairs:
             key = _canonical_library_key(Path(diff.library))
@@ -754,6 +754,7 @@ def write_bundle_facts_out(
             manifest=manifest,
             library_paths=dict(old_map),
             degraded_members=degraded_members,
+            inventory_complete=inventory_complete,
         )
         save_bundle_facts(facts, bundle_facts_out)
     except (OSError, ValueError, SnapshotError) as exc:
@@ -1167,13 +1168,13 @@ def _format_release_json(
     ]
     from .report.not_comparable import run_outcome_dict_for_release
     from .workflows.release_scope import release_global_ran, unmatched_names
-    terms = scope_terms if scope_terms is not None else comparison_scope_terms(None, None)
+    terms = scope_terms if scope_terms is not None else comparison_scope_terms(resolve_scope_decision(None, None))
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
     exit_dict = resolve_release_exit_decision_for_report(
         worst_verdict, fail_on_removed, removed_keys, severity_exit_code,
         contract_coverage_exit_contribution, library_results, release_global_verdict,
-        incomplete_scope_contribution=terms.incomplete_scope_exit_contribution,
-        no_comparison_completed_contribution=terms.no_comparison_completed_exit_contribution,
+        incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
+        no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
     ).to_dict()
     record = terms.record
     summary: dict[str, object] = {

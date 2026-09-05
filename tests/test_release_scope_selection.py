@@ -311,6 +311,8 @@ class TestDsoOnlyUnclassifiedIsFailed:
         evidence = release_inventory_evidence(
             old_stored=True,
             new_stored=True,
+            old_complete=True,
+            new_complete=True,
             old_unclassified=unclassified if side == "old" else None,
             new_unclassified=unclassified if side == "new" else None,
         )

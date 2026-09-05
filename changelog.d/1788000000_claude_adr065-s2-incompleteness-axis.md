@@ -53,7 +53,9 @@
   than to a green target.
 - **`--fail-on-removed-library` exit `8` migration.** Exit `8` now requires the
   removal to be *proven* — the NEW side's inventory must be proven complete
-  (a stored `ProjectSnapshot` package's declared composition). A partial
+  (a stored `ProjectSnapshot` package or bundle-facts document whose capture
+  asserted `inventory_complete`, persisted with its composition — being a
+  stored package proves nothing by itself). A partial
   release directory no longer exits `8`: its unmatched libraries are reported
   as an incomplete scope (exit `0` under `warn`, `1` under `block`), and the
   JSON key `unmatched_old` keeps listing them. See

@@ -67,6 +67,7 @@ from ..errors import IncompatibleSnapshotSchemaError
 from .bundle_facts_validation import (
     require_degraded_marker_version,
     require_degraded_members_known,
+    validated_inventory_complete,
 )
 from .dto import (
     BUNDLE_COMPOSITION_SECTION_KIND,
@@ -558,6 +559,8 @@ def import_bundle_facts(
             bundle_facts_document.get("library_filenames", _ABSENT)
         ),
         "degraded_members": degraded_members,
+        # ADR-065 D2: verbatim -- the package proves what the capture asserted.
+        "inventory_complete": validated_inventory_complete(bundle_facts_document.get("inventory_complete", False)),
     }
     composition_dto = bundle_composition_to_dto(composition_payload)
     composition_ref = ObjectRef(
@@ -792,5 +795,6 @@ def export_bundle_facts(
         "filesystem_aliases": composition.get("filesystem_aliases", {}),
         "library_filenames": composition.get("library_filenames", {}),
         "degraded_members": degraded_members,
+        "inventory_complete": validated_inventory_complete(composition.get("inventory_complete", False)),
         "manifest": exported_manifest,
     }

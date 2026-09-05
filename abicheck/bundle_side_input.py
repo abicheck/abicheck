@@ -532,11 +532,12 @@ def compare_release_against_bundle_facts(
         new_map,
         compared=compared,
         degraded=degraded,
-        old_provenance="stored bundle-facts capture: the captured set is not a proven inventory",
+        old_provenance="stored bundle-facts capture that made no complete-inventory assertion",
         new_provenance="live directory/archive listing: no declared inventory",
         new_single_artifact=not new_dir.is_dir(),
         unsupported=unsupported,
         failed=failed,
+        old_complete=old_facts.inventory_complete,
     )
     # ADR-065 D2: the bundle graph sees matched members and proven
     # removals/additions only (Codex review) -- see bundle_analysis_members.

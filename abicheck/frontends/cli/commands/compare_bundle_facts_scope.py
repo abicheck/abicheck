@@ -35,6 +35,7 @@ from ....report.comparison_scope import (
     render_comparison_scope_markdown,
 )
 from ....report.not_comparable import OperationalStatus
+from ....workflows.gate import resolve_scope_decision
 
 __all__ = [
     "has_unchecked_matched_members",
@@ -46,9 +47,13 @@ __all__ = [
 
 def scope_terms_for(result: Any, kwargs: Mapping[str, Any]) -> ComparisonScopeTerms:
     """The dispatch's resolved terms, under `compare`'s own
-    `--on-incomplete-scope` value (absent -> the default `warn`)."""
+    `--on-incomplete-scope` value (absent -> the default `warn`): the
+    decision is policy's (`resolve_scope_decision`), the projection the
+    report's."""
     return comparison_scope_terms(
-        getattr(result, "scope_record", None), kwargs.get("on_incomplete_scope")
+        resolve_scope_decision(
+            getattr(result, "scope_record", None), kwargs.get("on_incomplete_scope")
+        )
     )
 
 
@@ -88,7 +93,7 @@ def json_scope_fields(
     name that cause rather than let the exit read as a break (Codex
     review, twenty-first round); D7 stays recorded in the section."""
     run_outcome["scope"] = terms.completeness.value
-    if terms.no_comparison_completed_exit_contribution == 1:
+    if terms.decision.no_comparison_completed_exit_contribution == 1:
         run_outcome["operational"] = OperationalStatus.NO_COMPARISON_COMPLETED.value
         run_outcome["compatibility"] = None
     if extraction_failures:

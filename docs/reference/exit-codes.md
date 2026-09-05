@@ -99,8 +99,9 @@ Both appear in the report's `exit` block (`incomplete_scope_contribution`,
 exited `8` on the raw old-minus-new filename set difference, so a partial
 local build compared against a full baseline read as "N libraries removed".
 Exit `8` now requires the removal to be *proven*: the NEW side's inventory
-must be proven complete (a stored `ProjectSnapshot` package's declared
-composition; a live directory or extracted archive cannot prove absence). An
+must be proven complete (a stored `ProjectSnapshot` package or bundle-facts
+document whose capture asserted `inventory_complete`; a package without the
+assertion, a live directory, or an extracted archive cannot prove absence). An
 unmatched library under an unproven inventory is reported as an incomplete
 scope instead — exit `0` under `warn`, `1` under `block` — and the JSON key
 `unmatched_old` keeps listing it. When NEW is *named as a single file* (not a
@@ -345,7 +346,7 @@ below, plus a dedicated code for removed libraries:
 | `2` | Worst verdict is `API_BREAK` |
 | `4` | Worst verdict is `BREAKING`, **or** an operational `ERROR` (a library failed to dump/extract/compare) |
 | `1` | No compatibility break, but the completeness axis contributed (ADR-065): `--on-incomplete-scope block` with an incompletely checked scope, or a run that completed no comparison at all (under either setting). Also the contract-coverage axis's own floor, as for single-pair `compare`. |
-| `8` | A library was **proven** removed between releases (NEW's inventory is proven complete — a stored `ProjectSnapshot` package; ADR-065 D2) and `--fail-on-removed-library` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. An unmatched library under an unproven inventory never exits `8`; see the completeness axis above. |
+| `8` | A library was **proven** removed between releases (NEW's inventory is proven complete — a stored `ProjectSnapshot` package or bundle-facts document whose capture asserted `inventory_complete`; ADR-065 D2) and `--fail-on-removed-library` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. An unmatched library under an unproven inventory never exits `8`; see the completeness axis above. |
 | `16` | `not_comparable` (ADR-050 D2) — at least one library's OLD/NEW DSOs were not extracted under a comparable profile/scope contract. Takes precedence over **every** other outcome in the release, including `8` (removed-library) and a genuine `ERROR`: a not_comparable result means the comparison couldn't establish what changed at all, so it dominates in both the legacy and severity-aware schemes. Identical code to native `compare`'s own `16`. |
 
 On the release path the severity-aware code (`0/1/2/4`) replaces the

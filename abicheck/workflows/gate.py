@@ -92,9 +92,11 @@ from ..policy.release_gate_options import (
 )
 from ..policy.scope_completeness import (
     INCOMPLETE_SCOPE_POLICIES,
+    ScopeDecision,
     incomplete_scope_diagnostic,
     incomplete_scope_exit_contribution,
     no_comparison_completed_exit_contribution,
+    resolve_scope_decision,
     scope_completeness_for_record,
     validate_incomplete_scope_policy,
 )
@@ -113,13 +115,14 @@ from ..policy.severity import (
 )
 
 __all__ = [
-    "GATE_SEVERITY_CATEGORIES",
-    "INCOMPLETE_SCOPE_POLICIES",
-    "PRESET_DEFAULT",
     "ExitDecision",
+    "GATE_SEVERITY_CATEGORIES",
     "GateOptions",
+    "INCOMPLETE_SCOPE_POLICIES",
     "IssueCategory",
+    "PRESET_DEFAULT",
     "ScopeCompleteness",
+    "ScopeDecision",
     "SeverityConfig",
     "SeverityLevel",
     "analysis_assurance_exit_contribution",
@@ -150,6 +153,7 @@ __all__ = [
     "resolve_release_exit_decision",
     "resolve_release_exit_decision_for_report",
     "resolve_release_gate_options",
+    "resolve_scope_decision",
     "resolve_severity_config",
     "scope_completeness_for_record",
     "validate_incomplete_scope_policy",

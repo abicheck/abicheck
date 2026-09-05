@@ -34,6 +34,7 @@ from abicheck.model.scope_acquisition import (
     ScopeAcquisitionRecord,
     SideInventory,
 )
+from abicheck.policy.scope_completeness import resolve_scope_decision
 from abicheck.report.comparison_scope import comparison_scope_terms
 from abicheck.schemas import load_compare_report_schema
 from abicheck.workflows.release_scope import (
@@ -57,7 +58,7 @@ def _scope_validator() -> Any:
 
 
 def _section(record: ScopeAcquisitionRecord, policy: str) -> dict[str, Any]:
-    section = comparison_scope_terms(record, policy).section
+    section = comparison_scope_terms(resolve_scope_decision(record, policy)).section
     assert section is not None
     return json.loads(json.dumps(section))
 

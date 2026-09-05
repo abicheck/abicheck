@@ -90,6 +90,7 @@ __all__ = [
     "StoredDegradedMembers",
     "stored_degraded_members",
     "stored_side_degraded_members",
+    "stored_side_inventory_complete",
     "scoped_bundle_maps",
     "unmatched_names",
 ]
@@ -113,8 +114,18 @@ RELEASE_OPERATIONAL_VERDICTS: Mapping[str, AcquisitionState] = {
 }
 
 _STORED_PACKAGE_PROVENANCE = (
-    "stored project snapshot package: the selected variant's declared "
-    "composition is a complete inventory"
+    "stored project snapshot package whose capture asserted a complete "
+    "inventory (inventory_complete): the selected variant's declared "
+    "composition is the whole release"
+)
+_STORED_PACKAGE_UNASSERTED_PROVENANCE = (
+    "stored project snapshot package whose capture made no complete-inventory "
+    "assertion (imported or captured without inventory_complete), so absence "
+    "cannot be proven"
+)
+_STORED_FACTS_PROVENANCE = (
+    "stored bundle-facts capture asserting a complete inventory "
+    "(inventory_complete): the captured set is the whole release"
 )
 _LIVE_PROVENANCE = (
     "live directory/archive listing: no declared inventory, so absence cannot be proven"
@@ -156,12 +167,22 @@ def release_inventory_evidence(
     *,
     old_stored: bool,
     new_stored: bool,
+    old_complete: bool = False,
+    new_complete: bool = False,
     direct_pair: bool = False,
     new_single_artifact: bool = False,
     old_unclassified: Mapping[str, str] | None = None,
     new_unclassified: Mapping[str, str] | None = None,
 ) -> ReleaseInventoryEvidence:
     """S2's inventory-proof rule, in one place.
+
+    A side is ``PROVEN`` only when it is a stored package *and* its capture
+    asserted a complete inventory (*old_complete*/*new_complete*, the
+    persisted ``inventory_complete`` flag read by
+    :func:`stored_side_inventory_complete`). Being stored proves nothing
+    by itself: a document imported into a package without the assertion
+    is exactly as unproven as it is when compared directly (Codex review,
+    twenty-eighth round).
 
     *old_unclassified*/*new_unclassified* (ADR-065 D2, Codex review) name
     the stored members a lossy selection (``--dso-only``) could not
@@ -171,8 +192,10 @@ def release_inventory_evidence(
     unmatched, never proven removed/added.
     """
 
-    def _side(stored: bool, unclassified: Mapping[str, str] | None) -> SideInventory:
-        """One side's inventory proof from whether it is a stored package (or a direct file pair)."""
+    def _side(
+        stored: bool, complete: bool, unclassified: Mapping[str, str] | None
+    ) -> SideInventory:
+        """One side's inventory proof from its container, assertion, and selection."""
         if direct_pair:
             return SideInventory(
                 InventoryCompleteness.UNPROVEN, _DIRECT_PAIR_PROVENANCE
@@ -184,15 +207,19 @@ def release_inventory_evidence(
                 f"classify {len(unclassified)} declared member(s) "
                 f"({', '.join(sorted(unclassified))}), so the proof is withheld",
             )
-        if stored:
+        if stored and complete:
             return SideInventory(
                 InventoryCompleteness.PROVEN, _STORED_PACKAGE_PROVENANCE
+            )
+        if stored:
+            return SideInventory(
+                InventoryCompleteness.UNPROVEN, _STORED_PACKAGE_UNASSERTED_PROVENANCE
             )
         return SideInventory(InventoryCompleteness.UNPROVEN, _LIVE_PROVENANCE)
 
     return ReleaseInventoryEvidence(
-        old=_side(old_stored, old_unclassified),
-        new=_side(new_stored, new_unclassified),
+        old=_side(old_stored, old_complete, old_unclassified),
+        new=_side(new_stored, new_complete, new_unclassified),
         direct_pair=direct_pair,
         new_single_artifact=new_single_artifact,
     )
@@ -371,6 +398,13 @@ def build_release_scope_record(
     )
 
 
+def _stored_facts_inventory(complete: bool, provenance: str) -> SideInventory:
+    """One stored-facts side: ``PROVEN`` iff its capture asserted completeness."""
+    if complete:
+        return SideInventory(InventoryCompleteness.PROVEN, _STORED_FACTS_PROVENANCE)
+    return SideInventory(InventoryCompleteness.UNPROVEN, provenance)
+
+
 def build_stored_baseline_scope_record(
     old_keys: Iterable[str],
     new_keys: Iterable[str],
@@ -382,6 +416,8 @@ def build_stored_baseline_scope_record(
     new_single_artifact: bool = False,
     unsupported: Mapping[str, str] | None = None,
     failed: Mapping[str, str] | None = None,
+    old_complete: bool = False,
+    new_complete: bool = False,
 ) -> ScopeAcquisitionRecord:
     """The record for a stored-baseline driver (`bundle_side_input` /
     `bundle_stored_pair_compare`), through the same builder the live
@@ -389,9 +425,12 @@ def build_stored_baseline_scope_record(
 
     *compared* are the matched keys whose per-library diff ran; *degraded*
     maps a matched key skipped for a D8 marker (on either side) to the
-    reason, recorded `failed`. Both inventories are unproven in S2: a
-    captured `BundleFacts` document records what was captured, not that
-    the capture was complete (S3 owns declared inventories).
+    reason, recorded `failed`. A stored side is proven complete only by
+    its own capture's ``inventory_complete`` assertion (*old_complete*/
+    *new_complete*, `BundleFacts.inventory_complete`) -- the same flag a
+    `ProjectSnapshot` package carries, so the two storage forms of one
+    document decide identically (Codex review, twenty-eighth round);
+    otherwise *old_provenance*/*new_provenance* say why it is unproven.
     *new_single_artifact* is the stored/live driver's "NEW was named as one
     file" signal, the only shape D9's narrowing may read intent from.
     *unsupported* maps a matched key whose NEW artifact this build cannot
@@ -421,8 +460,8 @@ def build_stored_baseline_scope_record(
         elif k in compared_set:
             results.append({"library": k, "verdict": "NO_CHANGE"})
     evidence = ReleaseInventoryEvidence(
-        old=SideInventory(InventoryCompleteness.UNPROVEN, old_provenance),
-        new=SideInventory(InventoryCompleteness.UNPROVEN, new_provenance),
+        old=_stored_facts_inventory(old_complete, old_provenance),
+        new=_stored_facts_inventory(new_complete, new_provenance),
         new_single_artifact=new_single_artifact,
     )
     return build_release_scope_record(old_map, new_map, matched, results, evidence)
@@ -642,6 +681,28 @@ class StoredDegradedMembers:
     matched: dict[str, str] = field(default_factory=dict)
     old_unmatched: dict[str, str] = field(default_factory=dict)
     new_unmatched: dict[str, str] = field(default_factory=dict)
+
+
+def stored_side_inventory_complete(side_dir: Path, *, variant_id: str | None) -> bool:
+    """One side's own persisted ADR-065 D2 ``inventory_complete`` assertion
+    -- ``True`` only for a stored ``ProjectSnapshot`` package whose capture
+    made it (a live directory or archive never does). Fails closed the way
+    :func:`stored_side_degraded_members` does: a damaged composition must
+    not read as "unasserted" any more than as "nothing is degraded"."""
+    from .release_package import resolve_release_package_inventory_complete
+    from .storage import is_project_snapshot_package_dir
+
+    if not (side_dir.is_dir() and is_project_snapshot_package_dir(side_dir)):
+        return False
+    try:
+        return resolve_release_package_inventory_complete(
+            side_dir, variant_id=variant_id
+        )
+    except (SnapshotError, OSError, ValueError, TypeError, KeyError) as exc:
+        raise SnapshotError(
+            f"{side_dir}: the stored package's inventory assertion could not "
+            f"be read ({exc}); refusing to compare its members as complete evidence"
+        ) from exc
 
 
 def stored_degraded_members(

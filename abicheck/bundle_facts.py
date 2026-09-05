@@ -55,6 +55,7 @@ from .storage.bundle_facts_validation import (
     validated_alias_map,
     validated_degraded_members,
     validated_filename_map,
+    validated_inventory_complete,
     validated_variant_fingerprint,
 )
 
@@ -160,6 +161,9 @@ class BundleFacts:
     #: ADR-065 D8: ``{library: failure reason}`` for a member whose dump
     #: failed at capture (its snapshot is the ELF-only degradation).
     degraded_members: dict[str, str] = field(default_factory=dict)
+    #: ADR-065 D2: the capture's own assertion that ``per_library_snapshots`` is
+    #: the whole release; ``False`` (every pre-field document) proves nothing.
+    inventory_complete: bool = False
     artifact_type: str = field(default=BUNDLE_FACTS_ARTIFACT_TYPE, init=False)
 
 
@@ -170,6 +174,7 @@ def capture_bundle_facts(
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT,
     library_paths: dict[str, Path] | None = None,
     degraded_members: dict[str, str] | None = None,
+    inventory_complete: bool = False,
 ) -> BundleFacts:
     """Build a :class:`BundleFacts` from already-dumped per-library snapshots.
 
@@ -211,6 +216,7 @@ def capture_bundle_facts(
         filesystem_aliases=filesystem_aliases,
         library_filenames=library_filenames,
         degraded_members=dict(degraded_members or {}),
+        inventory_complete=inventory_complete,
     )
 
 
@@ -322,13 +328,10 @@ def compare_bundle_from_facts(
 #
 # This glue takes `snapshot_to_dict`/`snapshot_from_dict` as *parameters*
 # rather than importing them from `serialization.py`: that module already
-# imports `BundleFacts` from here, so importing back -- even function-
-# scoped -- makes the two mutually dependent, which `scripts/
-# check_ai_readiness.py`'s `import-cycle-growth` check flags via static
-# AST scanning regardless of laziness (caught on this module's first
-# draft, not assumed). `validated_alias_map`/`validated_filename_map`
-# (`bundle_facts_validation.py`, a dependency-free leaf) duplicate
-# `serialization`'s own private validators for the same reason.
+# imports `BundleFacts` from here, so importing back (even function-scoped)
+# is a cycle `check_ai_readiness.py`'s `import-cycle-growth` check flags.
+# `validated_alias_map`/`validated_filename_map` (`bundle_facts_validation.
+# py`, a dependency-free leaf) duplicate `serialization`'s for the same reason.
 def maybe_write_bundle_facts_archive(
     facts: BundleFacts,
     path: str | Path,
@@ -520,6 +523,7 @@ def write_bundle_facts_archive(
         },
         "library_filenames": dict(sorted(facts.library_filenames.items())),
         "degraded_members": dict(sorted(facts.degraded_members.items())),
+        "inventory_complete": facts.inventory_complete,
     }
     # A third cap: manifest.json's own reader-side size ceiling. Checked
     # incrementally via iterencode() (fully materializing the string
@@ -792,4 +796,5 @@ def read_bundle_facts_archive(
                 manifest.get("library_filenames", {})
             ),
             degraded_members=degraded_members,
+            inventory_complete=validated_inventory_complete(manifest.get("inventory_complete", False)),
         )

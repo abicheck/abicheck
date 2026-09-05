@@ -194,6 +194,10 @@ def bundle_facts_to_dict(
         # loads that document); non-empty only under schema_version 3 above,
         # which a pre-S2 reader rejects rather than misreads.
         "degraded_members": dict(facts.degraded_members),
+        # ADR-065 D2: the capture's own complete-inventory assertion; a
+        # reader that predates it ignores the key and, as before, proves
+        # nothing from this document.
+        "inventory_complete": facts.inventory_complete,
         "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
     }
 
@@ -228,6 +232,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         validated_alias_map,
         validated_degraded_members,
         validated_filename_map,
+        validated_inventory_complete,
         validated_variant_fingerprint,
     )
 
@@ -345,6 +350,9 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         filesystem_aliases=validated_alias_map(d.get("filesystem_aliases", {})),
         library_filenames=validated_filename_map(d.get("library_filenames", {})),
         degraded_members=degraded_members,
+        inventory_complete=validated_inventory_complete(
+            d.get("inventory_complete", False)
+        ),
         manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )
 

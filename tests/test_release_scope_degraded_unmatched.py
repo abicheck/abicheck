@@ -137,7 +137,9 @@ class TestRecordBuilderNeverPromotesAFailedMember:
             new_map,
             matched,
             results,
-            release_inventory_evidence(old_stored=True, new_stored=True),
+            release_inventory_evidence(
+                old_stored=True, new_stored=True, old_complete=True, new_complete=True
+            ),
             old_failed=bucket.old_unmatched,
             new_failed=bucket.new_unmatched,
         )

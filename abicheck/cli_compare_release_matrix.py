@@ -346,10 +346,10 @@ def _finalize_release_output(
         severity_exit_code,
         contract_coverage_exit_contribution=contract_coverage_exit_contribution,
         incomplete_scope_exit_contribution=(
-            scope_terms.incomplete_scope_exit_contribution if scope_terms else 0
+            scope_terms.decision.incomplete_scope_exit_contribution if scope_terms else 0
         ),
         no_comparison_completed_exit_contribution=(
-            scope_terms.no_comparison_completed_exit_contribution if scope_terms else 0
+            scope_terms.decision.no_comparison_completed_exit_contribution if scope_terms else 0
         ),
     )
 

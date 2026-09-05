@@ -35,6 +35,7 @@ from typing import Any
 from .bundle_facts_validation import (
     require_degraded_members_known,
     validated_degraded_members,
+    validated_inventory_complete,
 )
 from .dto import (
     BUNDLE_COMPOSITION_SECTION_KIND,
@@ -45,6 +46,7 @@ from .import_bundle_facts import _LIBRARY_NAME_KEY, _manifest_entry_for_export
 
 __all__ = [
     "read_variant_composition_degraded_members",
+    "read_variant_composition_inventory_complete",
     "read_variant_composition_library_filenames",
     "read_variant_composition_manifest_payload",
 ]
@@ -152,6 +154,21 @@ def _variant_member_keys(
         if isinstance(name, str):
             keys.add(name)
     return keys
+
+
+def read_variant_composition_inventory_complete(
+    root: str | Path, variant_id: str
+) -> bool:
+    """Whether *variant_id*'s composition carries the capture's own
+    ``inventory_complete`` assertion (ADR-065 D2), ``False`` if absent or
+    unasserted -- the one thing that lets a comparison against this
+    package prove a removal or an addition. Being a stored package proves
+    nothing by itself: a document imported without the assertion stays
+    unproven here exactly as it is when compared directly (Codex review)."""
+    composition = _read_variant_composition(root, variant_id)
+    if composition is None:
+        return False
+    return validated_inventory_complete(composition.get("inventory_complete", False))
 
 
 def read_variant_composition_library_filenames(

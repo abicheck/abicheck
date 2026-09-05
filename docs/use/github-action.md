@@ -274,7 +274,7 @@ operands themselves, so there is no separate mode to select.
 | `dso-only` | `false` | Only compare shared objects, skip executables |
 | `include-private-dso` | `false` | Include private (non-public) shared objects |
 | `keep-extracted` | `false` | Keep extracted temp files for debugging |
-| `fail-on-removed-library` | `false` | Exit 8 when a library present in old is *proven* removed in new (NEW must be a stored `ProjectSnapshot` package with a complete declared inventory, ADR-065); an unmatched library under an unproven inventory is an incomplete scope instead, governed by `--on-incomplete-scope` |
+| `fail-on-removed-library` | `false` | Exit 8 when a library present in old is *proven* removed in new (NEW must be a stored `ProjectSnapshot` package or bundle-facts document whose capture asserted a complete inventory, `inventory_complete`, ADR-065); an unmatched library under an unproven inventory is an incomplete scope instead, governed by `--on-incomplete-scope` |
 
 ## Outputs
 

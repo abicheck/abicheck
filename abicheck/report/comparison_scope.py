@@ -16,13 +16,19 @@
 """ADR-065 S2's report section: ``comparison_scope``.
 
 The ``compute_*``/``render_*`` split this package's ``AGENTS.md`` asks for:
-:func:`build_comparison_scope_section` turns the typed acquisition record
-plus the two already-resolved exit contributions into one JSON-shaped
-mapping (the *fact* -- what every format carries, the release JSON verbatim
-as its ``comparison_scope`` key), and :func:`render_comparison_scope_markdown`
-/ :func:`comparison_scope_notice` format that mapping and decide nothing.
-The PR-comment renderer reads the same mapping back off the JSON, so the
-three views cannot disagree about which member went unchecked or why.
+the completeness axis is *decided* by ``policy.scope_completeness.
+resolve_scope_decision`` (the record, the policy, ``run_outcome.scope``,
+and the two exit contributions, as one :class:`~abicheck.policy.
+scope_completeness.ScopeDecision`); :func:`build_comparison_scope_section`
+projects that already-made decision into one JSON-shaped mapping (the
+*fact* -- what every format carries, the release JSON verbatim as its
+``comparison_scope`` key), and :func:`render_comparison_scope_markdown` /
+:func:`comparison_scope_notice` format that mapping. Nothing here computes
+a contribution or a policy: a caller that needs the exit values reads them
+off the decision it resolved, never off this module (Codex review,
+twenty-eighth round). The PR-comment renderer reads the same mapping back
+off the JSON, so the three views cannot disagree about which member went
+unchecked or why.
 
 Every view states the incompleteness (ADR-065's reporting rule): the
 top-level wording never says "compatible" for the whole scope, only for the
@@ -42,12 +48,7 @@ from ..model.scope_acquisition import (
     ScopeAcquisitionRecord,
 )
 from ..policy.outcome import ScopeCompleteness
-from ..policy.scope_completeness import (
-    incomplete_scope_exit_contribution,
-    no_comparison_completed_exit_contribution,
-    scope_completeness_for_record,
-    validate_incomplete_scope_policy,
-)
+from ..policy.scope_completeness import ScopeDecision
 
 __all__ = [
     "ComparisonScopeTerms",
@@ -60,45 +61,44 @@ __all__ = [
 
 @dataclass(frozen=True)
 class ComparisonScopeTerms:
-    """Everything a release writer needs from one acquisition record,
-    derived exactly once so the exit fold, ``run_outcome.scope``, the JSON
-    section, and the Markdown section cannot disagree.
+    """One resolved :class:`ScopeDecision` plus its JSON projection, built
+    exactly once so ``run_outcome.scope``, the JSON section, and the
+    Markdown section cannot disagree with the decision the exit fold read.
 
-    ``record``/``section`` are ``None`` for a caller with no record (a
-    direct unit-test call, a legacy path); every contribution is then
-    ``0`` and ``completeness`` is ``COMPLETE`` -- the scalar reading.
+    ``section`` is ``None`` when the decision carries no record (a scalar
+    comparison, a direct unit-test call, a legacy path). The exit
+    contributions are deliberately *not* mirrored here: read them off
+    ``decision``, the policy-owned object.
     """
 
-    record: ScopeAcquisitionRecord | None
-    policy: str
-    completeness: ScopeCompleteness
-    incomplete_scope_exit_contribution: int
-    no_comparison_completed_exit_contribution: int
+    decision: ScopeDecision
     section: dict[str, Any] | None
 
+    @property
+    def record(self) -> ScopeAcquisitionRecord | None:
+        """The decided record (``None`` for a scalar comparison)."""
+        return self.decision.record
 
-def comparison_scope_terms(
-    record: ScopeAcquisitionRecord | None, policy: str | None
-) -> ComparisonScopeTerms:
-    """Resolve :class:`ComparisonScopeTerms` for *record* under *policy*."""
-    effective = validate_incomplete_scope_policy(policy)
-    isc = incomplete_scope_exit_contribution(record, effective)
-    ncc = no_comparison_completed_exit_contribution(record)
+    @property
+    def policy(self) -> str:
+        """The effective ``--on-incomplete-scope`` policy the decision applied."""
+        return self.decision.policy
+
+    @property
+    def completeness(self) -> ScopeCompleteness:
+        """The decided ``run_outcome.scope`` value."""
+        return self.decision.completeness
+
+
+def comparison_scope_terms(decision: ScopeDecision) -> ComparisonScopeTerms:
+    """Project an already-resolved *decision* (never a record + policy: the
+    deciding happened in ``policy``) into :class:`ComparisonScopeTerms`."""
     return ComparisonScopeTerms(
-        record=record,
-        policy=effective,
-        completeness=scope_completeness_for_record(record),
-        incomplete_scope_exit_contribution=isc,
-        no_comparison_completed_exit_contribution=ncc,
+        decision=decision,
         section=(
             None
-            if record is None
-            else build_comparison_scope_section(
-                record,
-                policy=effective,
-                incomplete_scope_exit_contribution=isc,
-                no_comparison_completed_exit_contribution=ncc,
-            )
+            if decision.record is None
+            else build_comparison_scope_section(decision)
         ),
     )
 
@@ -114,25 +114,24 @@ _STATE_LABEL = {
 }
 
 
-def build_comparison_scope_section(
-    record: ScopeAcquisitionRecord,
-    *,
-    policy: str,
-    incomplete_scope_exit_contribution: int,
-    no_comparison_completed_exit_contribution: int,
-) -> dict[str, Any]:
+def build_comparison_scope_section(decision: ScopeDecision) -> dict[str, Any]:
     """The ``comparison_scope`` mapping: the record, the policy it was
     judged under, and the two contributions the exit decision actually
-    folded (read from the caller, never recomputed here)."""
-    completeness = scope_completeness_for_record(record)
+    folded -- every value copied off *decision*, none recomputed here.
+    *decision* must carry a record."""
+    record = decision.record
+    if record is None:
+        raise ValueError(
+            "build_comparison_scope_section needs a decision with a record"
+        )
     return {
         "schema_version": SCOPE_ACQUISITION_SCHEMA_VERSION,
-        "completeness": completeness.value,
-        "policy": policy,
-        "incomplete_scope_exit_contribution": incomplete_scope_exit_contribution,
+        "completeness": decision.completeness.value,
+        "policy": decision.policy,
+        "incomplete_scope_exit_contribution": decision.incomplete_scope_exit_contribution,
         "no_comparison_completed": record.no_comparison_completed,
         "no_comparison_completed_exit_contribution": (
-            no_comparison_completed_exit_contribution
+            decision.no_comparison_completed_exit_contribution
         ),
         "selection": record.selection,
         "selection_reason": record.selection_reason,

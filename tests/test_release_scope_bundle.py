@@ -56,6 +56,7 @@ from abicheck.policy.outcome import (
     ScopeCompleteness,
     TargetLifecycle,
 )
+from abicheck.policy.scope_completeness import resolve_scope_decision
 from abicheck.workflows.release_scope import (
     ReleaseInventoryEvidence,
     build_release_scope_record,
@@ -784,7 +785,7 @@ class TestMarkdownAndNoticeRenderResolvedUnchecked:
         record = self._record(
             [state, AcquisitionState.AVAILABLE], new_proven=new_proven
         )
-        terms = comparison_scope_terms(record, "warn")
+        terms = comparison_scope_terms(resolve_scope_decision(record, "warn"))
         assert terms.section is not None
         expected = [m.name for m in record.unchecked_members]
         assert (
@@ -812,7 +813,7 @@ class TestMarkdownAndNoticeRenderResolvedUnchecked:
             new_proven=True,
         )
         assert [m.name for m in record.proven_removed_members] == ["lib0.so"]
-        terms = comparison_scope_terms(record, "warn")
+        terms = comparison_scope_terms(resolve_scope_decision(record, "warn"))
         assert terms.section is not None
         assert terms.section["unchecked"] == ["lib1.so"]
         lines = render_comparison_scope_markdown(terms.section)
@@ -965,7 +966,9 @@ class TestNoticeAttributesTheFailureToTheRightPolicy:
             comparison_scope_terms,
         )
 
-        terms = comparison_scope_terms(self._record(states), policy)
+        terms = comparison_scope_terms(
+            resolve_scope_decision(self._record(states), policy)
+        )
         assert terms.section is not None
         assert terms.section["no_comparison_completed"] is True
         assert terms.section["no_comparison_completed_exit_contribution"] == 1
@@ -984,7 +987,7 @@ class TestNoticeAttributesTheFailureToTheRightPolicy:
         )
 
         record = self._record([AcquisitionState.AVAILABLE, AcquisitionState.FAILED])
-        terms = comparison_scope_terms(record, policy)
+        terms = comparison_scope_terms(resolve_scope_decision(record, policy))
         assert terms.section is not None
         notice = comparison_scope_notice(terms.section)
         assert notice is not None
@@ -1033,7 +1036,7 @@ class TestScopeMarkdownEscapesUncontrolledValues:
             render_comparison_scope_markdown,
         )
 
-        terms = comparison_scope_terms(self._record(), "warn")
+        terms = comparison_scope_terms(resolve_scope_decision(self._record(), "warn"))
         assert terms.section is not None
         lines = render_comparison_scope_markdown(terms.section)
         assert not any("\n" in ln or "\r" in ln for ln in lines)
@@ -1059,7 +1062,7 @@ class TestScopeMarkdownEscapesUncontrolledValues:
             comparison_scope_terms,
         )
 
-        terms = comparison_scope_terms(self._record(), "warn")
+        terms = comparison_scope_terms(resolve_scope_decision(self._record(), "warn"))
         assert terms.section is not None
         notice = comparison_scope_notice(terms.section)
         assert notice is not None

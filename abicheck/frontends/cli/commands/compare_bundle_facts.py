@@ -703,8 +703,8 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         _reported_verdict(result),
         fail_on_removed=False,
         removed_keys=[],
-        incomplete_scope_exit_contribution=scope_terms.incomplete_scope_exit_contribution,
-        no_comparison_completed_exit_contribution=scope_terms.no_comparison_completed_exit_contribution,
+        incomplete_scope_exit_contribution=scope_terms.decision.incomplete_scope_exit_contribution,
+        no_comparison_completed_exit_contribution=scope_terms.decision.no_comparison_completed_exit_contribution,
     )
 
 
