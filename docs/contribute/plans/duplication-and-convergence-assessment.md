@@ -1854,7 +1854,7 @@ track, the steps are ordered.
 | **T6 — Effective gate/policy convergence** ✅ *(landed 2026-09-05; the shared fold and the derived scheme are done, the two runtime shapes remain P0's own job)* | Collapse `apply_release_gate_pack`'s raw-string mirror of `pack_application.apply_to_compare_config` onto one shared fold **without inverting the dependency direction** — `policy/release_gate_options.py` deliberately consumes a `_GatePackApplication` `Protocol` rather than importing the flat-root `pack_application`, since `policy` may not import it (ADR-061; `policy/AGENTS.md`'s "Permitted imports"), so the shared fold belongs in an inward module both may import, or an outer layer invokes both halves — never a `policy → legacy root` call. Also make `GateOptions.exit_code_scheme` derived rather than independently constructible | `policy/release_gate_options.py`, `pack_application.py`, a new inward fold owner, `tests/test_release_gate_pack_fold_parity.py` | nothing |
 | **T7 — Canonical export index** | One raw export index plus named projections (versioned ELF / default versions / Mach-O normalization / named PE / ordinal imports / missing-vs-empty); delete the five sibling implementations | `policy/depth_projection.py`, `buildsource/crosscheck_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, `diff_unnamed_types.py` | nothing |
 | **T8 — Action boundary** | Remove the residual raw-exit/stderr verdict reconstruction; keep only a transport-level no-result fallback; keep `fail-on-*` as step policy that never rewrites the verdict | `action/run.sh`, `action/` tests | nothing |
-| **T9 — Fact provenance and scope** (first slice landed 2026-09-05 — see note below the table) | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, the import adapter | ~~T2~~ — satisfied (T2 landed 2026-09-05, so the ladder and `investigated_declined` are available to record this work's status); otherwise independent |
+| **T9 — Fact provenance and scope** (first and second slices landed 2026-09-05 — see notes below the table) | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, `storage/fact_backfill.py`, the import adapter | ~~T2~~ — satisfied (T2 landed 2026-09-05, so the ladder and `investigated_declined` are available to record this work's status); otherwise independent |
 | **T10 — Shared report preparation** | Compute evaluated findings/outcomes once ahead of format-specific construction; remove **both** runtime cycle escape hatches, which are distinct sites with distinct fixes: `render_markdown_document._reporter_markdown()`'s `..reporter_markdown` load (the Markdown cycle) and `report/scoped_gate.py`'s `..reporter` load (scoped-JSON construction, whose cycle exists only because `apply_scoped_gate` mutates an already-built payload); give consumer scoping an explicit finalization boundary instead of mutating shared changes | `report/render_markdown_document.py`, `report/render_markdown_alternate.py`, `report/scoped_gate.py`, `reporter_markdown.py`, `appcompat.py`'s `scope_diff_to_app` | T5's appcompat half for the scoping item |
 
 **T4 status note (2026-09-05, stated precisely rather than as a blanket
@@ -1914,14 +1914,51 @@ genuinely `PRESENT`, for a class whose virtuals live in a TU only the
 `producer`/`UNSUPPORTED` cannot express this, since DWARF genuinely can
 capture the family; the gap is per-TU *scope*, which is the
 observed-vs-inferred / positive-observation-vs-completeness half of this
-item's own stated scope, still unimplemented. Also untouched: the
-legacy-hybrid backfill blocker holding the seven `fact_provenance`-gated
-case-(a) fields (5B's own fourth-through-seventh-slice finding), and the
-shared analysis accounting for declined comparisons (`observed changes` /
+item's own stated scope, still unimplemented. Also untouched: the shared
+analysis accounting for declined comparisons (`observed changes` /
 `evaluated requirements` / `unresolved requirements` / `unsupported
 requirements`) this item's own text calls for. Each remains real,
 scoped, separately-actionable work — recorded here rather than implied
 closed by the row above.
+
+**T9's second slice (2026-09-05): the legacy-hybrid backfill blocker is
+closed too.** `storage/fact_backfill.py`'s `CaseAFactRule` gained a fifth,
+optional field, `fact_provenance_kind` (`"type"`/`"enum"`/`"field"`/
+`"func"`/`"var"`) — additive, defaulting to `None`, so every pre-existing
+rule and call site is unaffected. Set on the seven rules the "legacy-hybrid
+backfill blocker" note above named (`RecordType.deprecated`,
+`EnumType.deprecated`/`is_scoped`, `Function.deprecated`,
+`Variable.deprecated`, `TypeField.deprecated`/`default`), it makes
+`apply_case_a_fact_backfill` consult the document's own per-declaration
+`AbiSnapshot.fact_provenance` map — passed through from `serialization.py`'s
+existing `d.get("fact_provenance", {})` — whenever the document's
+`ast_producer` is exactly `"hybrid"`: a declaration with no recorded
+provenance entry (probed namespace-qualified first, falling back to the
+former bare key only when this document's own side has no other declaration
+sharing that bare name — the same shape `fact_provenance.
+resolved_fact_producer` already applies at compare time) downgrades the
+claim to `NOT_COLLECTED`, following the module's own pre-existing
+"downgrade the claim, never the value" rule (a real non-resting legacy
+value is left untouched either way). This is exactly the correction the
+5B investigation described as blocked: `clang_deprecation_facts_reliable`
+reads `True` unconditionally for a hybrid producer, so only a real
+per-declaration provenance lookup — not that flag — can tell "neither
+backend's merge ever recorded looking here" apart from "confirmed,
+genuinely resting-default" on a document predating this fact family's own
+schema version. Verified against the full fast unit suite (no regressions,
+including the exact end-to-end scenario the original investigation's
+attempted fix broke,
+`test_dumper_hybrid.py::TestNamespaceQualifiedMerging::
+test_legacy_bare_keyed_hybrid_baseline_still_detects_transition` — which,
+on inspection, never exercises this JSON-load-time code path at all, since
+it constructs its snapshot in-memory rather than through
+`snapshot_from_dict`) plus a new, dedicated test class,
+`tests/test_deprecation_family_facts.py::TestLegacyHybridProvenanceBackfill`,
+covering the qualified-key, bare-key-fallback (both unambiguous and
+ambiguous), mangled-name-keyed, value-preserving, and non-hybrid-producer-
+unaffected shapes directly. Still open, unchanged by this slice: the DWARF
+per-TU completeness gap and the shared declined-comparison accounting
+named above.
 
 ## Acceptance tests
 
