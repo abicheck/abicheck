@@ -224,8 +224,12 @@ stays as recorded in `.github/AGENTS.md`.
 `_scope_gated()` mirrors `_coverage_gated()` exactly (report contribution
 first -- `_report_query ... scope_contribution`, the max of the release
 `exit` block's `incomplete_scope_contribution`/`no_comparison_completed_
-contribution` -- then the CLI's stderr notice, minus its `warn`-accepted
-form). It feeds the compare exit-1 dispatch (verdict `SCOPE_INCOMPLETE`),
+contribution`, printing *nothing* when the report carries neither key, so
+a scope-less document -- an older abicheck, a scalar report, or the
+`{}`-shaped placeholder the PR-comment re-run leaves in `PR_JSON` when the
+primary run wrote no report -- is "cannot tell", not "did not fire" -- then
+the CLI's stderr notice, minus its `warn`-accepted form). It feeds the
+compare exit-1 dispatch (verdict `SCOPE_INCOMPLETE`),
 the job-summary case (`scope_where` names the unchecked members), the
 "also contributed" note, and an unconditional `FINAL_EXIT=1`, since no
 `fail-on-*` input governs the axis. Tests: `tests/test_action_scope_verdict.py`.

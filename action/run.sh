@@ -2371,18 +2371,24 @@ elif query == "scope_contribution":
     # carried on a directory/package release report's root `exit` block (a
     # scan never sets either). Printed as their max -- the same "did this
     # axis contribute" answer `coverage_contribution` gives for its own.
+    # A report carrying *neither* key has no scope axis to answer from (an
+    # older abicheck, a scalar report, or the `{}`-shaped placeholder a
+    # PR-comment re-run can leave in PR_JSON when the primary run wrote no
+    # report), so it prints nothing -- "cannot tell" -- and `_scope_gated`
+    # falls back to the CLI's stderr notice rather than reading an absent
+    # axis as "did not fire" (a macOS CI lane caught exactly that: the
+    # final gate consulted a `{}` PR_JSON and dropped the scope error the
+    # dispatch above had already announced).
     ex = _either("exit", {})
     ex = ex if isinstance(ex, dict) else {}
+    _keys = ("incomplete_scope_contribution", "no_comparison_completed_contribution")
+    if not any(k in ex for k in _keys):
+        raise SystemExit(1)
 
     def _zero_or_one(value):
         return 1 if value == 1 else 0
 
-    print(
-        max(
-            _zero_or_one(ex.get("incomplete_scope_contribution")),
-            _zero_or_one(ex.get("no_comparison_completed_contribution")),
-        )
-    )
+    print(max(_zero_or_one(ex.get(k)) for k in _keys))
 elif query == "scope_where":
     # What went unchecked, from the release report's `comparison_scope`
     # block -- the actionable half, the same way `coverage_where` names the

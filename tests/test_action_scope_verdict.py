@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from test_action_coverage_verdict import (  # noqa: F401
     _lib,
     _run_action,
@@ -141,7 +142,15 @@ class TestCompareMapsTheCompletenessExit:
         assert outputs["_exit"] == 0, outputs
         assert "SCOPE_INCOMPLETE" not in outputs["_summary"]
 
-    def test_the_stderr_notice_is_the_no_json_fallback(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("event", ["push", "pull_request"])
+    def test_the_stderr_notice_is_the_no_json_fallback(
+        self, tmp_path: Path, event: str
+    ) -> None:
+        """Under a `pull_request` event the PR-comment step re-runs the CLI
+        for JSON and can leave a `{}`-shaped placeholder in PR_JSON when the
+        primary run wrote no report; the final gate must not read that
+        scope-less document as "the axis did not fire" (a macOS CI lane
+        caught exactly that -- the runner's ambient GITHUB_EVENT_NAME)."""
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=1,
@@ -152,16 +161,21 @@ class TestCompareMapsTheCompletenessExit:
                 "(ADR-065 completeness axis)."
             ),
         )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "markdown",
-            },
-            bindir,
-        )
+        env = {
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "markdown",
+            "GITHUB_EVENT_NAME": event,
+        }
+        if event == "pull_request":
+            event_path = tmp_path / "event.json"
+            event_path.write_text(
+                '{"pull_request": {"number": 7, "head": {"sha": "abc123"}}}',
+                encoding="utf-8",
+            )
+            env["GITHUB_EVENT_PATH"] = str(event_path)
+        outputs = _run_action(tmp_path, env, bindir)
         # With no JSON to read the severity gate from, the exit-1 dispatch
         # keeps its established label (exactly as the coverage axis's own
         # no-JSON fallback does) -- but the axis is still enforced and named.
