@@ -2845,15 +2845,16 @@ _severity_gate_categories() {
 # `case $ABICHECK_EXIT in ...` dispatch established from the process exit
 # code is published unchanged. A verdict is stated by the report or not at
 # all -- it is never guessed from prose.
-# Prints `run_outcome.operational` and succeeds when it names a current-run
-# operational failure (anything but `none`/absent and ADR-065 D7's own
-# `no_comparison_completed`, which the scope axis already reports); fails
-# otherwise. Read from the report, never inferred from the exit code.
+# Prints `run_outcome.operational` and succeeds when it names an operational
+# status at all (anything but `none`/absent -- ADR-065 D7's own
+# `no_comparison_completed` included: an exit 4 whose report says nothing
+# was compared cannot be a compatibility break either); fails otherwise.
+# Read from the report, never inferred from the exit code.
 _operational_failure_status() {
   local _op
   _op=$(_report_query "$(_json_report_src)" run_outcome operational 2>/dev/null || true)
   case "$_op" in
-    ""|none|no_comparison_completed) return 1 ;;
+    ""|none) return 1 ;;
     *) echo "$_op"; return 0 ;;
   esac
 }

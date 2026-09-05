@@ -81,14 +81,18 @@ def json_scope_fields(
     *extraction_failures* (ADR-065 D1, Codex review) are the matched
     members whose NEW artifact failed extraction in *this* run: an
     operational `extraction_error` whatever the completeness policy
-    accepted (the native fan-out's per-library `ERROR`), stated unless the
-    stronger D7 status applies because nothing at all was compared."""
+    accepted (the native fan-out's per-library `ERROR`). It outranks D7's
+    `no_comparison_completed` exactly as `run_outcome_dict_for_release`
+    ranks the two contributions: when every member failed extraction the
+    run exits 4 *because* extraction failed, and the operational axis must
+    name that cause rather than let the exit read as a break (Codex
+    review, twenty-first round); D7 stays recorded in the section."""
     run_outcome["scope"] = terms.completeness.value
-    if extraction_failures:
-        run_outcome["operational"] = OperationalStatus.EXTRACTION_ERROR.value
     if terms.no_comparison_completed_exit_contribution == 1:
         run_outcome["operational"] = OperationalStatus.NO_COMPARISON_COMPLETED.value
         run_outcome["compatibility"] = None
+    if extraction_failures:
+        run_outcome["operational"] = OperationalStatus.EXTRACTION_ERROR.value
     fields: dict[str, Any] = {"run_outcome": run_outcome}
     if terms.section is not None:
         fields["comparison_scope"] = terms.section

@@ -366,13 +366,14 @@ class TestOperationalFailureIsNeverWaivedAsABreak:
         )
         return report
 
+    @pytest.mark.parametrize(
+        "operational", ["extraction_error", "no_comparison_completed"]
+    )
     @pytest.mark.parametrize("fail_on_breaking", ["true", "false"])
     def test_extraction_error_at_exit_4_fails_the_step(
-        self, tmp_path: Path, fail_on_breaking: str
+        self, tmp_path: Path, fail_on_breaking: str, operational: str
     ) -> None:
-        bindir = _stub_abicheck(
-            tmp_path, exit_code=4, report=self._report("extraction_error")
-        )
+        bindir = _stub_abicheck(tmp_path, exit_code=4, report=self._report(operational))
         outputs = _run_action(
             tmp_path,
             {

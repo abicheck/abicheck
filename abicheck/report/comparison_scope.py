@@ -147,6 +147,25 @@ def build_comparison_scope_section(
     }
 
 
+def _md_cell(value: object) -> str:
+    """One Markdown table-cell/code-span-safe line for a value the report
+    does not control (a member's file name, an extractor's error text):
+    control characters flattened to spaces, a table pipe escaped, a
+    backtick neutralized, so neither can close a span, end a row, or start
+    a heading of its own (Codex review, twenty-first round)."""
+    out: list[str] = []
+    for ch in str(value):
+        if ch == "|":
+            out.append("\\|")
+        elif ch == "`":
+            out.append("'")
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append(" ")
+        else:
+            out.append(ch)
+    return " ".join("".join(out).split())
+
+
 def _unchecked_rows(section: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     """The member rows the unchecked list renders: exactly the section's own
     resolved ``unchecked`` names, never re-derived from acquisition state.
@@ -172,7 +191,7 @@ def comparison_scope_notice(section: Mapping[str, Any]) -> str | None:
         return None
     rows = _unchecked_rows(section)
     names = ", ".join(
-        f"{m.get('name')} ({_STATE_LABEL.get(str(m.get('state')), m.get('state'))})"
+        f"{_md_cell(m.get('name'))} ({_STATE_LABEL.get(str(m.get('state')), m.get('state'))})"
         for m in rows
     )
     # D7 first: a zero-comparison run fails under either policy (its own
@@ -220,7 +239,7 @@ def render_comparison_scope_markdown(section: Mapping[str, Any]) -> list[str]:
     lines.insert(len(lines) - 1, "| | |")
     lines.insert(len(lines) - 1, "|---|---|")
     lines.append(
-        f"| **Selection** | {section.get('selection_reason') or section.get('selection')} |"
+        f"| **Selection** | {_md_cell(section.get('selection_reason') or section.get('selection'))} |"
     )
     lines.append(
         f"| **Policy** | `--on-incomplete-scope {section.get('policy', 'warn')}` "
@@ -244,9 +263,9 @@ def render_comparison_scope_markdown(section: Mapping[str, Any]) -> list[str]:
         ]
         for m in rows:
             lines.append(
-                f"| `{m.get('name')}` | {_STATE_LABEL.get(str(m.get('state')), m.get('state'))} "
+                f"| `{_md_cell(m.get('name'))}` | {_STATE_LABEL.get(str(m.get('state')), m.get('state'))} "
                 f"| {'✓' if m.get('old_present') else '—'} | {'✓' if m.get('new_present') else '—'} "
-                f"| {m.get('reason', '')} |"
+                f"| {_md_cell(m.get('reason', ''))} |"
             )
     for key, title in (
         ("proven_removed", "Removed libraries (inventory-proven)"),
@@ -254,5 +273,8 @@ def render_comparison_scope_markdown(section: Mapping[str, Any]) -> list[str]:
     ):
         names = section.get(key)
         if isinstance(names, list) and names:
-            lines += ["", f"**{title}:** " + ", ".join(f"`{n}`" for n in names)]
+            lines += [
+                "",
+                f"**{title}:** " + ", ".join(f"`{_md_cell(n)}`" for n in names),
+            ]
     return lines

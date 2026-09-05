@@ -997,6 +997,9 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         assert code == 4, doc
         assert doc["comparison_scope"]["no_comparison_completed"] is True
         assert doc["run_outcome"]["compatibility"] is None
+        # The exit is 4 *because* extraction failed: the operational axis
+        # names that cause, outranking D7's status (twenty-first round).
+        assert doc["run_outcome"]["operational"] == "extraction_error"
         assert doc["extraction_failures"] == {
             "libbad.so": doc["extraction_failures"]["libbad.so"]
         }

@@ -994,3 +994,74 @@ class TestNoticeAttributesTheFailureToTheRightPolicy:
             assert notice.endswith("fails the run (--on-incomplete-scope block)")
         else:
             assert notice.endswith("accepted as a warning (--on-incomplete-scope warn)")
+
+
+class TestScopeMarkdownEscapesUncontrolledValues:
+    """A member's file name and an extractor's error text reach the scope
+    Markdown table, the proven-removal list, and the compact notice
+    verbatim from the input. A pipe, a backtick, or a line break in either
+    must not end the row, close the code span, or start a heading of its
+    own (Codex review, twenty-first round)."""
+
+    _HOSTILE = "lib`x.so\n## Verdict: COMPATIBLE\n| forged | row |\r| a |"
+    _REASON = "boom `\n| injected | cell |\n# heading"
+
+    def _record(self) -> ScopeAcquisitionRecord:
+        from abicheck.model.scope_acquisition import MemberAcquisition
+
+        return ScopeAcquisitionRecord(
+            (
+                MemberAcquisition(
+                    self._HOSTILE, AcquisitionState.FAILED, True, True, self._REASON
+                ),
+                MemberAcquisition(
+                    "libgone.so", AcquisitionState.NOT_SUPPLIED, True, False, ""
+                ),
+                MemberAcquisition(
+                    "libok.so", AcquisitionState.AVAILABLE, True, True, ""
+                ),
+            ),
+            SideInventory(InventoryCompleteness.UNPROVEN, "t"),
+            SideInventory(InventoryCompleteness.PROVEN, "t"),
+            "current_artifact",
+            selection_reason=f"NEW named one artifact ({self._HOSTILE}) explicitly",
+        )
+
+    def test_markdown_rows_and_lists_stay_on_one_line_each(self) -> None:
+        from abicheck.report.comparison_scope import (
+            comparison_scope_terms,
+            render_comparison_scope_markdown,
+        )
+
+        terms = comparison_scope_terms(self._record(), "warn")
+        assert terms.section is not None
+        lines = render_comparison_scope_markdown(terms.section)
+        assert not any("\n" in ln or "\r" in ln for ln in lines)
+        assert [ln for ln in lines if ln.startswith("#")] == ["## 🧭 Comparison Scope"]
+        assert not any(
+            ln.startswith("| forged") or ln.startswith("| injected") for ln in lines
+        )
+        rows = [ln for ln in lines if ln.startswith("| `")]
+        assert len(rows) == 1 and rows[0].count("`") == 2
+        # Every pipe the value carried is escaped, so the row still has its
+        # five cells once escaped pipes are discounted.
+        unescaped = rows[0].replace("\\|", "")
+        assert len([c for c in unescaped.split("|") if c.strip()]) == 5
+        assert "lib'x.so" in rows[0] and "boom '" in rows[0]
+        removed = next(ln for ln in lines if "Removed libraries" in ln)
+        assert "`libgone.so`" in removed
+        selection = next(ln for ln in lines if "**Selection**" in ln)
+        assert "\\|" in selection and selection.count("\n") == 0
+
+    def test_notice_is_one_line(self) -> None:
+        from abicheck.report.comparison_scope import (
+            comparison_scope_notice,
+            comparison_scope_terms,
+        )
+
+        terms = comparison_scope_terms(self._record(), "warn")
+        assert terms.section is not None
+        notice = comparison_scope_notice(terms.section)
+        assert notice is not None
+        assert "\n" not in notice and "`" not in notice
+        assert "lib'x.so" in notice and "\\|" in notice
