@@ -7,8 +7,10 @@ generated: false
 
 # Vision workstreams — visible, intentional, traceable API/ABI evolution
 
-**Status:** Proposed — planning document. Nothing in this plan is
-implemented; each workstream below records what *already exists* (verified
+**Status:** Proposed — planning document. One slice has landed since it was
+written (**workstream C's S1**, the scalar policy-disposition audit — see that
+section); everything else here is unimplemented. Each workstream below records
+what *already exists* (verified
 against the tree at `2f5ef696` on 2026-09-05, file references included),
 what is missing, the ADR that owns the decision, the slices, and the
 acceptance tests. The product decisions themselves are in the repository
@@ -169,7 +171,13 @@ degrades the release recommendation silently); a unique-per-run,
 backend-stable acknowledgment key; the suppression file path in the
 report; base/head policy-delta analysis.
 
-**Slices.** S1 (audit, first): inventory the four application points
+**Slices.** **S1 landed** (scalar `compare` only): one conserved ledger
+(`abicheck/policy/disposition_ledger.py`) behind all five application points
+— the four below plus `post_processing._merge_findings_respecting_suppression`
+— raw-versus-effective counts and rule provenance in every scalar projection
+(`abicheck/report/disposition_audit.py`, report schema 2.50), a
+`not_evaluated` detector state, and `semver.recommend_release` reading the
+conserved delta. S2-S4 unimplemented. S1 (audit, first): inventory the four application points
 above and route each through one ledger-recording primitive (converging
 them where the call shapes allow, covering each explicitly where they do
 not) so the raw-versus-effective totals reconcile by construction; then

@@ -1320,17 +1320,54 @@ def _diff_abi_surface(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 # ── Sprint 3: DWARF-aware layout diff ────────────────────────────────────────
 
 
-@registry.detector("dwarf")
+def _has_any_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str | None]:
+    """Support gate for the ``dwarf`` detector (ADR-067 D3).
+
+    The two cases that produce no layout comparison at all used to be in-body
+    ``return []``s, which the registry recorded as ``enabled=True,
+    changes_count=0`` — a real, evaluated zero. Neither is one:
+
+    - *neither side* carries debug info, so there is nothing to compare;
+    - the *old* side does not, so a new-side layout has no baseline to be
+      compared against (the detector's own long-standing "can't compare
+      without old baseline → skip" rule).
+
+    Both now read ``not_evaluated`` with the reason below. The remaining
+    degradation rule — old has DWARF, new is stripped — deliberately stays in
+    the body and keeps the gate open, because it *does* produce a finding
+    (``DWARF_INFO_MISSING``): that is an evaluated comparison reporting a
+    real loss of evidence, not an unperformed one.
+
+    Expressed through the registry's own ``requires_support`` mechanism rather
+    than a second skip vocabulary.
+    """
+    from .model.dwarf_facts import DwarfMetadata
+
+    o = getattr(old, "dwarf", None) or DwarfMetadata()
+    n = getattr(new, "dwarf", None) or DwarfMetadata()
+    if not o.has_dwarf and not n.has_dwarf:
+        return False, "no DWARF debug info on either side"
+    if not o.has_dwarf:
+        return False, (
+            "old snapshot has no DWARF debug info, so the new side's layout "
+            "has no baseline to be compared against"
+        )
+    return True, None
+
+
+@registry.detector("dwarf", requires_support=_has_any_dwarf)
 def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """DWARF-aware struct/enum layout detectors (Sprint 3).
 
     Requires binaries compiled with -g.
 
     Graceful degradation rules:
-    - Neither side has DWARF → skip silently (no false positives)
+    - Neither side has DWARF → the ``_has_any_dwarf`` support gate above keeps
+      this detector from running at all, recorded as ``not_evaluated``
     - Old has DWARF, new is stripped → emit DWARF_INFO_MISSING warning change
       so callers know the comparison is incomplete (not silently COMPATIBLE)
-    - Only new has DWARF → can't compare without old baseline → skip
+    - Only new has DWARF → the same support gate keeps this detector from
+      running (no baseline to compare against), also ``not_evaluated``
 
     Important: we diff only ABI-reachable types/enums discovered from the
     header model (castxml layer). This avoids flagging private implementation
@@ -1344,9 +1381,6 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     o: DwarfMetadata = getattr(old, "dwarf", None) or DwarfMetadata()
     n: DwarfMetadata = getattr(new, "dwarf", None) or DwarfMetadata()
-
-    if not o.has_dwarf and not n.has_dwarf:
-        return []  # neither side has DWARF — nothing to compare
 
     if o.has_dwarf and not n.has_dwarf:
         _log.warning(

@@ -55,6 +55,7 @@ from .policy.gate_decision import gate_decision_for_result
 # than leaving them here, is what avoids a same-layer import cycle) -- every
 # existing caller and its direct test coverage resolves through these
 # aliases unchanged.
+from .report.disposition_audit import compute_disposition_audit
 from .report.document import ReportDocument
 from .report.render_html import (
     ChangeRow,
@@ -232,6 +233,7 @@ def compute_summary_table(
     changed: list[object],
     added: list[object],
     suppressed_count: int,
+    audit: object | None = None,
 ) -> SummaryTableData:
     """Bucket the three change lists by category (mirrors ABICC's overview).
 
@@ -271,6 +273,23 @@ def compute_summary_table(
         total_changed=len(changed),
         total_added=len(added),
         suppressed_count=suppressed_count,
+        detected_total=getattr(audit, "detected_total", None),
+        effective_total=getattr(audit, "effective_total", None),
+        disposition_counts=getattr(audit, "counts", ()),
+        policy_overlays=int(getattr(audit, "policy_overlays", 0) or 0),
+        # Formatted here, compute-side: the renderer decides nothing, and a
+        # rule line is one already-resolved sentence either way.
+        disposition_rules=tuple(
+            f"{rule.rule_id or 'rule'} — {rule.reason or rule.label or 'no reason given'}"
+            f" [intent: {rule.intent}"
+            f"{f', expires {rule.expires}' if rule.expires else ''}"
+            f"{f', from {rule.source_file}' if rule.source_file else ''}]"
+            f" — {count} finding(s)"
+            for rule, count in getattr(audit, "rules", ())
+        ),
+        not_evaluated_detectors=tuple(
+            det.name for det in getattr(audit, "not_evaluated_detectors", ())
+        ),
     )
 
 
@@ -631,6 +650,18 @@ def build_html_document(
                     else "compatible"
                 ),
                 "compat": _build_compat_problem_data(changed, added, removed),
+                # ADR-067 D3 applies to *every* projection, and the
+                # compatibility layout returned before the native branch's
+                # sole audit construction -- so a fully suppressed comparison
+                # rendered as ABICC-compatible HTML showed no raw total, no
+                # disposition counts and no coverage limitation at all, which
+                # is exactly the "looks clean" this audit exists to prevent
+                # (Codex review). Carried as its own document field rather
+                # than folded into the compat problem tables, so the required
+                # ABICC element ids are untouched.
+                "disposition_audit": compute_disposition_audit(
+                    result, severity_config
+                ).to_dict(),
             }
         )
 
@@ -681,7 +712,13 @@ def build_html_document(
                 compute_nav_bar(removed, changed, added, suppressed_count)
             ),
             "summary_table": dataclasses.asdict(
-                compute_summary_table(removed, changed, added, suppressed_count)
+                compute_summary_table(
+                    removed,
+                    changed,
+                    added,
+                    suppressed_count,
+                    compute_disposition_audit(result, severity_config),
+                )
             ),
             "confidence": (
                 dataclasses.asdict(confidence) if confidence is not None else None

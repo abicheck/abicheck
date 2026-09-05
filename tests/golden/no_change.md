@@ -20,10 +20,10 @@
 | Coverage gap | Detector 'elf_layout' disabled: missing ELF metadata on one side |
 | Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
 | Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
-| Coverage gap | Detector 'dwarf_layout_coherence' disabled: neither snapshot has a DWARF-vs-header-AST layout coherence mismatch |
 | Coverage gap | Detector 'long_double' disabled: missing ELF metadata on one side |
 | Coverage gap | Detector 'pe' disabled: missing PE metadata |
 | Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
+| Coverage gap | Detector 'dwarf' disabled: no DWARF debug info on either side |
 | Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
 | Coverage gap | Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered) |
 | Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
@@ -35,6 +35,21 @@
 > **Policy**: `strict_abi`
 
 _No ABI changes detected._
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 0 |
+| Effective (gating) | 0 |
+| … non gating | 0 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 13 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `pe`, `macho`, … and 7 more
+
 ---
 ## Legend
 

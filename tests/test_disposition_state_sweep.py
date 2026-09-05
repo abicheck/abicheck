@@ -1,0 +1,733 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""ADR-067 C-S1: the disposition mechanism's whole state space, swept.
+
+The sibling `test_disposition_scope_matrix.py` states each mechanism's
+contract in a readable, named test. This file is the other half: the full
+cross-product of every axis the mechanism actually has --
+
+    bucket x contract relevance x explicit-scope promotion
+      x (unscoped | in the consumer scope | excluded by it)
+      x (a severity configuration is resolved | not)
+      x (`show_redundant` restored the row into `result.changes` | not)
+
+= 504 cells, each checked against four invariants that read no ledger
+reasoning of their own. It exists because the last several defects in this
+mechanism were *combinations* -- each read correctly in every state a named
+test covered, and failed in one nobody had written down. An ad-hoc version
+of this sweep found two of them before review did; running it as a test is
+what makes the next one fail locally instead.
+
+Split from the matrix file at the architecture gate's 1200-line test cap.
+Registered as a seed test of the `policy.disposition_conservation` bug class.
+"""
+
+from __future__ import annotations
+
+import itertools
+
+import pytest
+
+from abicheck.checker_policy import ChangeKind
+from abicheck.checker_types import Change
+from abicheck.contract_relevance_types import ContractRelevance
+from abicheck.contract_scoped_promotion import (
+    stamp_explicit_scope_contract_evaluation,
+)
+from abicheck.policy.disposition_close import (
+    close_consumer_scope,
+    conservation_holds,
+)
+from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
+
+# ---------------------------------------------------------------------------
+# The whole state space, in one place
+# ---------------------------------------------------------------------------
+
+
+def _sweep_result():
+    """An empty real `DiffResult`, for the gate context alone."""
+    from abicheck.checker import compare
+    from abicheck.model import AbiSnapshot
+
+    return compare(
+        AbiSnapshot(library="libmatrix", version="1.0"),
+        AbiSnapshot(library="libmatrix", version="2.0"),
+    )
+
+
+def _sweep_case(bucket, relevance, promote, scoped, severity, restore):
+    """Build one cell of the sweep: a single finding, driven through the real
+    recording, closing, scoping and gate-projection path."""
+    from abicheck.checker_types import DiffResult
+    from abicheck.policy.disposition_close import finalize_ledger
+    from abicheck.policy.disposition_ledger import record_suppressed_change
+
+    result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="s", description="d")
+    if relevance is not None:
+        change.contract_relevance = relevance
+    scored: list[Change] = []
+    ledger = DispositionLedger()
+    if bucket == "changes":
+        result.changes = [change]
+    elif bucket == "redundant_scored":
+        result.redundant_changes = [change]
+        result.redundant_count = 1
+        scored = [change]
+    elif bucket == "redundant_unscored":
+        result.redundant_changes = [change]
+        result.redundant_count = 1
+    elif bucket == "opaque_filtered":
+        result.redundant_changes = [change]
+        result.redundant_count = 0
+    elif bucket == "suppressed":
+        record_suppressed_change(ledger, change, rule=None, application_point="sweep")
+        result.suppressed_changes = [change]
+    else:
+        setattr(result, bucket, [change])
+
+    ledger = finalize_ledger(ledger, result, verdict_scored=scored)
+    if promote:
+        stamp_explicit_scope_contract_evaluation(change)
+    if scoped is not None:
+        close_consumer_scope(
+            ledger,
+            result,
+            gating=[change] if scoped == "in" else [],
+            also_detected=[change],
+        )
+    if restore and bucket not in ("changes", "suppressed"):
+        # What `scope.show_redundant` does: restore the row into the list the
+        # severity gate scores.
+        result.changes = [change]
+    return result, change, ledger, severity
+
+
+_SWEEP = tuple(
+    itertools.product(
+        (
+            "changes",
+            "redundant_scored",
+            "redundant_unscored",
+            "opaque_filtered",
+            "reconciled_changes",
+            "out_of_surface_changes",
+            "suppressed",
+        ),
+        (
+            None,
+            ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+            ContractRelevance.UNKNOWN_UNPROVEN,
+        ),
+        (False, True),  # explicit-scope promotion
+        (None, "in", "out"),  # unscoped / in the consumer scope / excluded
+        (False, True),  # severity configuration resolved
+        (False, True),  # restored into `result.changes` by show_redundant
+    )
+)
+
+
+def test_the_sweep_covers_the_declared_state_space() -> None:
+    """504 cells: 7 buckets x 3 relevances x promote x 3 scope answers x
+    severity x restore. Asserted so the enumeration cannot silently shrink."""
+    assert len(_SWEEP) == 7 * 3 * 2 * 3 * 2 * 2 == 504
+
+
+@pytest.mark.parametrize(
+    ("bucket", "relevance", "promote", "scoped", "severity", "restore"), _SWEEP
+)
+def test_the_whole_state_space_holds_four_invariants(
+    bucket, relevance, promote, scoped, severity, restore
+) -> None:
+    """Every combination of the six axes this mechanism actually has, against
+    the four invariants ten review rounds each broke one instance of.
+
+    This is the standing form of the ad-hoc sweep that found the last two
+    bugs in this file (a `deduplicated` row a consumer scope excluded and
+    `show_redundant` then restored; a promoted out-of-surface finding read
+    against the wrong gate). Running it as a test is what makes the next one
+    fail locally instead of in review.
+
+    The four, none of which reads the ledger's own reasoning:
+
+    1. **Conservation.** One finding in, one record out, counts summing to it.
+    2. **The severity gate's input.** `gate_decision_for_result` scores
+       `result.changes`; a record the audit calls `gating` under a severity
+       configuration must be in it — unless a consumer scope decided the
+       record, in which case a *different* gate applies.
+    3. **Scope authority.** A finding a consumer scope excluded never gates,
+       whatever severity says about its kind.
+    4. **No resurrected exclusion.** A suppressed finding compatibility
+       policy never scored carries no verdict class, so it cannot reach
+       `recommend_release` as a waived break.
+    """
+    from abicheck.contract_gating import is_evaluated
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+
+    result, change, ledger, sev = _sweep_case(
+        bucket, relevance, promote, scoped, severity, restore
+    )
+    strict = SeverityConfig(
+        abi_breaking=SeverityLevel.ERROR,
+        potential_breaking=SeverityLevel.ERROR,
+        quality_issues=SeverityLevel.ERROR,
+        addition=SeverityLevel.ERROR,
+    )
+    gated = ledger.with_gate(result, strict if sev else None)
+
+    assert gated.detected_total == 1
+    assert sum(gated.counts().values()) == 1
+    assert conservation_holds(gated)
+
+    record = gated.record_for(change)
+    if record.disposition is Disposition.GATING:
+        if sev and not record.scope_decided:
+            assert any(c is change for c in result.changes), (
+                f"{record.application_point}: gating under a severity "
+                "configuration, but the severity gate scores "
+                "`result.changes` and this finding is not in it"
+            )
+        assert scoped != "out", (
+            f"{record.application_point}: gating while the consumer scope excluded it"
+        )
+    if record.disposition is Disposition.SUPPRESSED and not is_evaluated(change):
+        assert record.verdict_class is None, (
+            "a suppressed finding policy never scored must not reach the "
+            "release recommendation as a waived break"
+        )
+
+
+def test_one_export_named_twice_is_one_detection() -> None:
+    """The overlay path runs once per `--used-by` consumer and builds a fresh
+    object each time, so the ledger's identity key alone can disagree with
+    the scoped view's finding-id key.
+
+    Two *different* consumers needing the same export are genuinely two
+    observations — each overlay names its own consumer, so both the report
+    and the audit show two, and they agree. The case that did not agree is
+    the same consumer reaching the path twice (a repeated `--used-by`
+    operand, or one app resolved through two library aliases): the
+    orchestrator's `relevant_changes_by_id` collapses those to one entry
+    while the identity-keyed ledger counted two, making the raw total move
+    with *how the run was invoked* rather than with what was observed.
+    """
+    from abicheck.policy.disposition_close import record_consumer_overlay
+
+    result = _sweep_result()
+    ledger = DispositionLedger()
+    # The very shape the overlay path produces, built three times over -- as
+    # a repeated consumer operand does.
+    consumers = [
+        Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="shared_export",
+            description="Consumer 'app' requires symbol 'shared_export'",
+        )
+        for _ in range(3)
+    ]
+    for overlay in consumers:
+        record_consumer_overlay(ledger, overlay, result)
+
+    assert ledger.detected_total == 1, "one missing export, one observation"
+    assert conservation_holds(ledger)
+    # …and every one of the three objects still resolves to that record, so a
+    # consumer-scoped report can join on whichever it holds.
+    assert {id(ledger.record_for(c)) for c in consumers} == {
+        id(ledger.record_for(consumers[0]))
+    }
+
+    # A different export is a second detection -- and so is the *same* export
+    # required by a genuinely different consumer, whose overlay names it and
+    # which the scoped view therefore also shows separately. The key is the
+    # report's own finding id, so the audit and the report cannot disagree
+    # about which of these is one finding and which is two.
+    for other in (
+        Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="other_export",
+            description="Consumer 'app' requires symbol 'other_export'",
+        ),
+        Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="shared_export",
+            description="Consumer 'other_app' requires symbol 'shared_export'",
+        ),
+    ):
+        record_consumer_overlay(ledger, other, result)
+    assert ledger.detected_total == 3
+
+
+def test_the_first_consumers_rule_provenance_is_the_one_kept() -> None:
+    """Deduping must not silently re-record: the disposition and rule the
+    *first* producer resolved are the ones that applied to the run."""
+    from abicheck.policy.disposition_close import record_consumer_overlay
+    from abicheck.suppression import Suppression, SuppressionList
+
+    result = _sweep_result()
+    ledger = DispositionLedger()
+    rule = Suppression(symbol_pattern=".*", reason="first consumer's rule")
+    first, second = (
+        Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="shared_export",
+            description="Consumer 'app' requires symbol 'shared_export'",
+        )
+        for _ in range(2)
+    )
+    record_consumer_overlay(
+        ledger, first, result, rule=rule, suppression=SuppressionList([rule])
+    )
+    record_consumer_overlay(ledger, second, result)
+
+    assert ledger.detected_total == 1
+    record = ledger.record_for(second)
+    assert record.disposition is Disposition.SUPPRESSED
+    assert record.rule is not None
+    assert record.rule.reason == "first consumer's rule"
+
+
+def test_a_restored_row_inside_the_consumer_scope_rejoins_the_gate() -> None:
+    """The scoped-gate sibling of the restored-row rule.
+
+    `scope.show_redundant` restores a redundant finding into `result.changes`
+    *before* `--used-by`/`--required-symbol` scoping runs, so the scoped
+    severity gate does score it — but a guard that refused to re-answer
+    anything a scope had touched left it `deduplicated`, reporting
+    `effective_total: 0` beside a scoped exit 4. `scope_decided` marks *which
+    gate* decides a record, never that the record is frozen: only a genuinely
+    scope-*excluded* row is untouchable.
+    """
+    from abicheck.checker_types import DiffResult
+    from abicheck.policy.disposition_close import finalize_ledger
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+
+    strict = SeverityConfig(abi_breaking=SeverityLevel.ERROR)
+    for in_scope in (True, False):
+        result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+        restored = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="f", description="redundant"
+        )
+        result.redundant_changes = [restored]
+        result.redundant_count = 1
+        ledger = finalize_ledger(DispositionLedger(), result)
+        assert ledger.record_for(restored).disposition is Disposition.DEDUPLICATED
+
+        # …then `show_redundant` restores it, and the scope rules on it.
+        result.changes = [restored]
+        close_consumer_scope(ledger, result, gating=[restored] if in_scope else [])
+        gated = ledger.with_gate(result, strict)
+        assert gated.effective_total == int(in_scope), (
+            "in scope: the scoped severity gate scores the restored row, so "
+            "the audit must count it; out of scope: it must not, whatever "
+            "severity says about its kind"
+        )
+        assert conservation_holds(gated)
+
+
+def test_a_scoped_alias_resolves_to_its_canonical_record() -> None:
+    """Membership must be resolved the same way on both sides of the ledger.
+
+    The overlay path's `dedupe_key` collapses several equal-but-not-identical
+    objects of one observation onto a single record, keeping the *first* as
+    the anchor. The orchestrator's `relevant_changes_by_id` keeps whichever
+    alias it saw *last* for its gating union. Comparing anchor identity
+    against that union read the record as out of scope and demoted it to
+    `non_gating` — while the scoped gate could still fail on the alias the
+    union actually holds, so the audit said `effective_total: 0` beside a
+    real scoped failure.
+
+    Stated for every alias position, not just the reported last-wins one: any
+    of them naming the finding must put the record in scope.
+    """
+    from abicheck.policy.disposition_close import record_consumer_overlay
+
+    for union_position in (0, 1, 2):
+        result = _sweep_result()
+        ledger = DispositionLedger()
+        aliases = [
+            Change(
+                kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+                symbol="shared_export",
+                description="Consumer 'app' requires symbol 'shared_export'",
+            )
+            for _ in range(3)
+        ]
+        for alias in aliases:
+            record_consumer_overlay(ledger, alias, result)
+        assert ledger.detected_total == 1
+
+        # The union holds exactly one of them — the orchestrator keeps the
+        # last it saw, but the rule cannot depend on which.
+        close_consumer_scope(ledger, result, gating=[aliases[union_position]])
+        record = ledger.record_for(aliases[0])
+        assert record.disposition is Disposition.GATING, (
+            f"alias {union_position} names this finding in the scoped gating "
+            "union, so its record is in scope"
+        )
+        assert record.gate_excluded is False
+        assert ledger.effective_total == 1
+        assert conservation_holds(ledger)
+
+
+def test_an_alias_absent_from_the_union_is_still_excluded() -> None:
+    """The negative control: resolving aliases must not make everything
+    in-scope. A finding no alias of which appears in the union is excluded,
+    exactly as before."""
+    from abicheck.policy.disposition_close import record_consumer_overlay
+
+    result = _sweep_result()
+    ledger = DispositionLedger()
+    used = Change(
+        kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+        symbol="used",
+        description="Consumer 'app' requires symbol 'used'",
+    )
+    unused_aliases = [
+        Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="unused",
+            description="Consumer 'app' requires symbol 'unused'",
+        )
+        for _ in range(2)
+    ]
+    for overlay in (used, *unused_aliases):
+        record_consumer_overlay(ledger, overlay, result)
+    assert ledger.detected_total == 2
+
+    close_consumer_scope(ledger, result, gating=[used])
+    assert ledger.record_for(used).disposition is Disposition.GATING
+    excluded = ledger.record_for(unused_aliases[1])
+    assert excluded.disposition is Disposition.NON_GATING
+    assert excluded.gate_excluded is True
+    assert ledger.effective_total == 1
+
+
+def test_a_policy_overlay_keeps_its_own_gate_contribution() -> None:
+    """An overlay is not a detection, but it *is* a finding the gate scores.
+
+    `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK` must not move `detected_total` (its
+    existence depends on a rule, not on what was observed) — but severity
+    settings can gate on it independently of the break it describes:
+    `abi_breaking: info` demotes the original while `potential_breaking:
+    error` promotes the diagnostic. Skipping the record outright kept the raw
+    total honest and dropped that real contribution, so the record exists and
+    is excluded from the *counts* instead.
+    """
+    from abicheck.checker_types import DiffResult
+    from abicheck.policy.disposition_close import conservation_holds, finalize_ledger
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+
+    result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+    break_ = Change(kind=ChangeKind.FUNC_REMOVED, symbol="pub", description="the break")
+    overlay = Change(
+        kind=ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
+        symbol="pub",
+        description="rule matched but was withheld",
+        caused_by_type="pub",
+    )
+    result.changes = [break_, overlay]
+    ledger = finalize_ledger(DispositionLedger(), result)
+
+    assert ledger.detected_total == 1, "one observation, plus a diagnostic"
+    assert sum(ledger.counts().values()) == 1
+    assert conservation_holds(ledger)
+    assert ledger.record_for(overlay) is not None, (
+        "the overlay still needs a record, or its own gate effect is unrepresentable"
+    )
+    assert ledger.to_dict()["policy_overlays"] == 1
+
+    # The configuration the finding describes: the break demoted, the
+    # diagnostic promoted. The audit must show the diagnostic gating.
+    inverted = SeverityConfig(
+        abi_breaking=SeverityLevel.INFO,
+        potential_breaking=SeverityLevel.ERROR,
+        quality_issues=SeverityLevel.ERROR,
+        addition=SeverityLevel.ERROR,
+    )
+    gated = ledger.with_gate(result, inverted)
+    assert gated.record_for(break_).disposition is Disposition.NON_GATING
+    assert gated.record_for(overlay).disposition is Disposition.GATING
+    assert gated.effective_total == 1, (
+        "the run gates on the diagnostic alone, and the audit says so"
+    )
+    assert gated.detected_total == 1, "…without it becoming an observation"
+    assert conservation_holds(gated)
+
+
+def test_a_late_policy_overlay_is_not_a_detection_either() -> None:
+    """The scoped path appends its own diagnostics (`scope_diff_to_app`'s
+    suppression-overreach advisory reaches `scoped_only_changes`), which
+    bypassed the rule entirely — so a consumer-only missing export with a
+    withheld broad suppression double-counted exactly as the ordinary path
+    used to."""
+    from abicheck.policy.disposition_close import conservation_holds
+
+    result = _sweep_result()
+    ledger = DispositionLedger()
+    missing = Change(
+        kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+        symbol="pub",
+        description="Consumer 'app' requires symbol 'pub'",
+    )
+    advisory = Change(
+        kind=ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
+        symbol="pub",
+        description="rule matched but was withheld",
+        caused_by_type="pub",
+    )
+    close_consumer_scope(
+        ledger,
+        result,
+        gating=[missing, advisory],
+        also_detected=[missing, advisory],
+    )
+    assert ledger.detected_total == 1
+    assert conservation_holds(ledger)
+    assert ledger.record_for(advisory) is not None
+
+
+def test_the_public_audit_carries_the_overlay_total() -> None:
+    """The `DispositionAudit` projection must explain its own arithmetic.
+
+    An overlay is in `effective_total` and in neither `detected_total` nor
+    `counts`, so a consumer reconciling the three sees an effective finding
+    that appears nowhere — and cannot tell an overlay from a bug. The ledger
+    said `policy_overlays`; the public projection dropped it, taking the
+    explanation out of every JSON-derived format.
+
+    Asserted through the full round trip, not just construction, because the
+    Markdown views reach their renderer through a `ReportDocument` mapping —
+    a field that survived `to_dict` but not `from_dict` would be lost exactly
+    where it is needed.
+    """
+    from abicheck.checker_types import DiffResult
+    from abicheck.policy.disposition_close import finalize_ledger
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
+    from abicheck.report.disposition_audit import (
+        DispositionAudit,
+        compute_disposition_audit,
+        render_disposition_audit_comment_lines,
+        render_disposition_audit_lines,
+        render_disposition_audit_note,
+    )
+
+    result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
+    break_ = Change(kind=ChangeKind.FUNC_REMOVED, symbol="pub", description="the break")
+    overlay = Change(
+        kind=ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
+        symbol="pub",
+        description="rule matched but was withheld",
+        caused_by_type="pub",
+    )
+    result.changes = [break_, overlay]
+    result.disposition_ledger = finalize_ledger(DispositionLedger(), result)
+
+    inverted = SeverityConfig(
+        abi_breaking=SeverityLevel.INFO,
+        potential_breaking=SeverityLevel.ERROR,
+        quality_issues=SeverityLevel.ERROR,
+        addition=SeverityLevel.ERROR,
+    )
+    audit = compute_disposition_audit(result, inverted)
+    # The exact shape that needs explaining: an effective finding in no count.
+    assert audit.detected_total == 1
+    assert audit.effective_total == 1
+    assert dict(audit.counts)["gating"] == 0
+    assert audit.policy_overlays == 1
+
+    assert audit.to_dict()["policy_overlays"] == 1
+    assert DispositionAudit.from_dict(audit.to_dict()).policy_overlays == 1
+
+    # …and every renderer that surfaces per-disposition counts says so.
+    assert "1 policy overlay(s)" in render_disposition_audit_note(audit)
+    assert any(
+        "Policy overlays" in line for line in render_disposition_audit_lines(audit)
+    )
+    assert any(
+        "policy overlay(s)" in line
+        for line in render_disposition_audit_comment_lines(audit)
+    )
+
+
+def test_an_audit_without_overlays_says_nothing_about_them() -> None:
+    """The negative control: the field is an explanation for an anomaly, so a
+    run with no overlays must not grow a `0 policy overlay(s)` row in every
+    view."""
+    from abicheck.report.disposition_audit import (
+        compute_disposition_audit,
+        render_disposition_audit_comment_lines,
+        render_disposition_audit_lines,
+        render_disposition_audit_note,
+    )
+
+    result, _change, ledger, _sev = _sweep_case(
+        "changes", None, False, None, False, False
+    )
+    result.disposition_ledger = ledger
+    audit = compute_disposition_audit(result)
+    assert audit.policy_overlays == 0
+    assert "policy overlay" not in render_disposition_audit_note(audit)
+    assert not any(
+        "Policy overlays" in line for line in render_disposition_audit_lines(audit)
+    )
+    assert not any(
+        "policy overlay" in line
+        for line in render_disposition_audit_comment_lines(audit)
+    )
+
+
+class TestEveryHtmlPathCarriesTheAudit:
+    """ADR-067 D3 applies to *every* projection, including the ones a native
+    HTML branch returns before.
+
+    `build_html_document` short-circuits into the ABICC-compatible layout
+    before the native branch's sole audit construction, so a fully suppressed
+    comparison rendered as `--compat-html` showed no raw total, no
+    disposition counts and no coverage limitation at all — the exact "looks
+    clean" the audit exists to prevent. Surveyed across every HTML entry
+    point rather than fixing the one reported.
+    """
+
+    @staticmethod
+    def _suppressed_run():
+        """A comparison whose every finding is withheld by one rule."""
+        from abicheck.checker import compare
+        from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old = AbiSnapshot(library="libfoo", version="1.0")
+        new = AbiSnapshot(library="libfoo", version="2.0")
+        for i in range(3):
+            old.functions.append(
+                Function(
+                    name=f"gone{i}",
+                    mangled=f"_Z4gone{i}v",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                )
+            )
+        rules = SuppressionList(
+            [
+                Suppression(
+                    symbol_pattern=".*",
+                    reason="bulk waiver",
+                    allow_public_break=True,
+                )
+            ]
+        )
+        return compare(old, new, rules)
+
+    @pytest.mark.parametrize("compat_html", [False, True])
+    def test_a_fully_suppressed_run_never_renders_as_clean(self, compat_html):
+        """Both layouts, one assertion: the raw total and the rule reach the
+        page. Parametrized rather than written twice, so a third layout is a
+        row here instead of another silently-missing branch."""
+        from abicheck.html_report import generate_html_report
+
+        result = self._suppressed_run()
+        assert result.changes == [], "the fixture's point: the gate is clean"
+
+        page = generate_html_report(result, compat_html=compat_html)
+        assert "3" in page
+        assert "Detected" in page or "detected" in page, (
+            "the raw total must be stated somewhere on the page"
+        )
+        assert "uppressed" in page
+
+    def test_the_compat_layout_adds_no_abicc_element_ids(self):
+        """The audit is rendered inside the existing `Summary` div and as an
+        ordinary `table.summary`, because ABICC consumers key off this
+        layout's element ids — adding one would be a compatibility break in a
+        report whose whole purpose is drop-in compatibility.
+
+        Compared against the *same layout with no audit to show* rather than
+        a hand-written id list, so the control moves with the template.
+        """
+        import re
+
+        from abicheck.html_report import build_html_document
+
+        def _ids(page: str) -> set[str]:
+            return set(re.findall(r"id='([^']+)'", page)) | set(
+                re.findall(r'id="([^"]+)"', page)
+            )
+
+        from abicheck.report.document import ReportDocument
+        from abicheck.report.render_html_document import render_html_document
+
+        document = build_html_document(self._suppressed_run(), compat_html=True)
+        with_audit = render_html_document(document)
+        # The same document with the audit removed: the exact control, since
+        # every other fact on the page is identical by construction.
+        stripped = dict(document.to_mapping())
+        stripped["disposition_audit"] = {}
+        without = render_html_document(ReportDocument.from_mapping(stripped))
+        assert "Disposition Audit" in with_audit, (
+            "the precondition: this page really does carry the audit"
+        )
+        assert "Disposition Audit" not in without, (
+            "with nothing to state, the section must not appear at all"
+        )
+        assert _ids(with_audit) == _ids(without), (
+            "the audit introduced an element id into the ABICC layout"
+        )
+
+    def test_the_overlay_total_survives_the_html_round_trip(self):
+        """`_summary_table_from_mapping` rebuilt every audit field but this
+        one, silently restoring the dataclass default of zero — so a run
+        whose only gate contributor is a policy overlay rendered an
+        irreconcilable summary with nothing explaining the difference."""
+        from abicheck.report.render_html_document import _summary_table_from_mapping
+
+        mapping = {
+            "rows": [],
+            "total_removed": 0,
+            "total_changed": 0,
+            "total_added": 0,
+            "suppressed_count": 0,
+            "detected_total": 1,
+            "effective_total": 1,
+            "disposition_counts": [("gating", 0), ("non_gating", 1)],
+            "disposition_rules": [],
+            "not_evaluated_detectors": [],
+            "policy_overlays": 1,
+        }
+        assert _summary_table_from_mapping(mapping).policy_overlays == 1
+        # …and every other field still round-trips, so the fix is additive.
+        rebuilt = _summary_table_from_mapping(mapping)
+        assert rebuilt.detected_total == 1 and rebuilt.effective_total == 1
+
+    def test_the_rendered_summary_explains_an_overlay_only_gate(self):
+        """End to end through the renderer: the anomalous shape reaches the
+        page with its explanation, not as an unaccountable difference."""
+        from abicheck.report.render_html import SummaryTableData, render_summary_table
+
+        page = render_summary_table(
+            SummaryTableData(
+                rows=(),
+                total_removed=0,
+                total_changed=0,
+                total_added=0,
+                suppressed_count=0,
+                detected_total=1,
+                effective_total=1,
+                disposition_counts=(("gating", 0), ("non_gating", 1)),
+                policy_overlays=1,
+            )
+        )
+        assert "1 detected" in page and "1 gating" in page
+        assert "policy overlay" in page

@@ -31,3 +31,12 @@ class DetectorResult:
     changes_count: int
     enabled: bool = True
     coverage_gap: str | None = None
+    #: ADR-067 D3: True when this detector did **not run** — its
+    #: ``requires_support`` gate refused it — as opposed to running and
+    #: finding nothing. ``changes_count`` is ``0`` in both cases, which is
+    #: exactly the ambiguity this field removes: "0 changes" and "not
+    #: evaluated" are different statements about assurance, and a report may
+    #: not present the second as the first. ``coverage_gap`` carries the gate's
+    #: own reason (why it did not run); this flag carries the *state*, so a
+    #: consumer never has to infer one from the presence of the other.
+    not_evaluated: bool = False

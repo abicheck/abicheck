@@ -377,8 +377,16 @@ class TestBaselineSummaryKeysArePinned:
             compatible=additions + quality,
             not_evaluated=[breaking[0]],
             detector_results=[
+                # Mirrors the real ``DetectorResult`` field-for-field,
+                # ``not_evaluated`` (ADR-067 D3) included: a stand-in missing a
+                # field of the shape it stands in for is how this pinning test
+                # started failing on a change that was correct in production.
                 types.SimpleNamespace(
-                    name="d1", changes_count=1, enabled=True, coverage_gap=None
+                    name="d1",
+                    changes_count=1,
+                    enabled=True,
+                    coverage_gap=None,
+                    not_evaluated=False,
                 )
             ],
             suppressed_changes=suppressed,

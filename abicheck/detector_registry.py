@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 class _DetectorEntry:
     """Internal representation of a registered detector."""
 
-    __slots__ = ("name", "fn", "support_fn", "order")
+    __slots__ = ("name", "fn", "support_fn", "support_is_trigger", "order")
 
     def __init__(
         self,
@@ -71,10 +71,31 @@ class _DetectorEntry:
         fn: DetectorFn,
         support_fn: SupportFn | None,
         order: int,
+        support_is_trigger: bool = False,
     ) -> None:
         self.name = name
         self.fn = fn
         self.support_fn = support_fn
+        #: ADR-067 D3: what a ``False`` from ``support_fn`` *means*.
+        #:
+        #: The default is an **evidence gate** -- "the input this detector
+        #: needs is absent" (no PE metadata, no SYCL section, no DWARF on the
+        #: old side), which is a genuine coverage limitation and is recorded
+        #: ``not_evaluated``.
+        #:
+        #: A **trigger** predicate is the opposite: the evidence is present
+        #: and conclusive, and it says there is nothing here to report. The
+        #: layout-coherence detector's "neither snapshot records a
+        #: DWARF-vs-header mismatch" is one -- both snapshots state their
+        #: coherence, and *matched* is an answer, not a gap. Recording that as
+        #: ``not_evaluated`` claims a coverage limitation for a detector that
+        #: effectively ran and correctly found zero, which is exactly the
+        #: distinction `not_evaluated` exists to make (Codex review).
+        #:
+        #: Declared at registration rather than inferred, because the boolean
+        #: is identical either way -- only the predicate's *meaning* differs,
+        #: and only its author knows it.
+        self.support_is_trigger = support_is_trigger
         self.order = order
 
 
@@ -152,6 +173,7 @@ class DetectorRegistry:
         name: str,
         *,
         requires_support: SupportFn | None = None,
+        support_is_trigger: bool = False,
     ) -> Callable[[DetectorFn], DetectorFn]:
         """Decorator to register a detector function.
 
@@ -159,6 +181,13 @@ class DetectorRegistry:
             name: Unique detector name (used in DetectorResult and reporting).
             requires_support: Optional callable ``(old, new) -> (bool, reason)``
                 that gates whether this detector runs.
+            support_is_trigger: What a ``False`` from *requires_support*
+                means. ``False`` (the default) -- the evidence this detector
+                needs is absent, a real coverage gap, recorded
+                ``not_evaluated``. ``True`` -- the evidence is present and
+                conclusively says there is nothing to report, so the detector
+                is recorded as an ordinary evaluated zero. See
+                :attr:`_DetectorEntry.support_is_trigger`.
 
         Returns:
             The original function, unmodified.
@@ -167,7 +196,13 @@ class DetectorRegistry:
             if name in self._names:
                 raise ValueError(f"Duplicate detector name: {name!r}")
             self._names.add(name)
-            entry = _DetectorEntry(name, fn, requires_support, self._counter)
+            entry = _DetectorEntry(
+                name,
+                fn,
+                requires_support,
+                self._counter,
+                support_is_trigger=support_is_trigger,
+            )
             self._counter += 1
             self._detectors.append(entry)
             return fn
@@ -190,6 +225,21 @@ class DetectorRegistry:
             # Check support gate
             if entry.support_fn is not None:
                 enabled, reason = entry.support_fn(old, new)
+                if not enabled and entry.support_is_trigger:
+                    # A conclusive trigger, not an evidence gate: the detector
+                    # effectively ran and the answer is zero. Recorded as an
+                    # ordinary evaluated zero, with no coverage gap -- and
+                    # deliberately `enabled=True`, since `confidence.py` reads
+                    # that flag and a "nothing to report" answer is not a
+                    # reason to lower a run's analysis confidence.
+                    detector_results.append(
+                        DetectorResult(
+                            name=entry.name,
+                            changes_count=0,
+                            enabled=True,
+                        )
+                    )
+                    continue
                 if not enabled:
                     detector_results.append(
                         DetectorResult(
@@ -197,6 +247,11 @@ class DetectorRegistry:
                             changes_count=0,
                             enabled=False,
                             coverage_gap=reason,
+                            # ADR-067 D3: the support gate refused this
+                            # detector, so it produced no evidence at all --
+                            # recorded as "not evaluated", never as a real
+                            # zero. `reason` is *why*; this is the state.
+                            not_evaluated=True,
                         )
                     )
                     continue

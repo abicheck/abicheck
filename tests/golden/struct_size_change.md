@@ -20,10 +20,10 @@
 | Coverage gap | Detector 'elf_layout' disabled: missing ELF metadata on one side |
 | Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
 | Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
-| Coverage gap | Detector 'dwarf_layout_coherence' disabled: neither snapshot has a DWARF-vs-header-AST layout coherence mismatch |
 | Coverage gap | Detector 'long_double' disabled: missing ELF metadata on one side |
 | Coverage gap | Detector 'pe' disabled: missing PE metadata |
 | Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
+| Coverage gap | Detector 'dwarf' disabled: no DWARF debug info on either side |
 | Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
 | Coverage gap | Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered) |
 | Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
@@ -42,6 +42,21 @@
 
 - **type_field_added_compatible**: Field added: Point::z
   > Field appended without changing existing offsets; old code works but won't initialize the new field.
+
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 2 |
+| Effective (gating) | 1 |
+| … non gating | 1 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 12 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `pe`, `macho`, … and 6 more
 
 ---
 ## Legend

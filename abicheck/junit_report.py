@@ -588,7 +588,13 @@ def _build_testsuite(
     ts.set("failures", str(failure_count))
     ts.set("errors", "0")
 
-    _add_scoped_properties(ts, result)
+    # One <properties> element per testsuite (the JUnit convention, and what
+    # every existing consumer of the scoped block already looks for): the
+    # ADR-067 audit rows are appended into the same element rather than a
+    # second one beside it.
+    props = ET.SubElement(ts, "properties")
+    _add_disposition_audit_properties(props, result, severity_config)
+    _add_scoped_properties(props, result)
 
     # G29 Phase 3 (ADR-052 follow-up): --report-mode root-cause adds
     # rootCauseId/rootCause attributes to each <failure> rather than
@@ -666,9 +672,55 @@ def _emit_missing_contract_testcases(
                     fail.set("rootCause", entry[1])
 
 
-def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
-    """Append a ``<properties>`` block when ``--used-by``/``--required-symbol(s)``
-    scoping was requested (ADR-043 + CLI-audit P1).
+def _add_disposition_audit_properties(
+    props: ET.Element, result: DiffResult, severity_config: object | None = None
+) -> None:
+    """Append ADR-067 D3's raw-versus-effective counts as testsuite properties.
+
+    A JUnit consumer reads ``tests``/``failures``, which are the *effective*
+    numbers by construction -- a fully suppressed comparison reports zero
+    failures and would otherwise carry no trace that anything was detected at
+    all. These properties are that trace, in the one mechanism JUnit gives for
+    suite-level metadata; the per-disposition counts are emitted individually
+    so a dashboard can chart one without parsing a blob.
+
+    Unconditional, unlike the sibling scoped block, which is emitted only
+    under ``--used-by``/``--required-symbol(s)``: a raw-versus-effective
+    count a view can drop is not the invariant D3 states.
+    """
+    from .report.disposition_audit import compute_disposition_audit
+
+    audit = compute_disposition_audit(result, severity_config)
+
+    def _prop(name: str, value: str) -> None:
+        p = ET.SubElement(props, "property")
+        p.set("name", name)
+        p.set("value", value)
+
+    _prop("abicheck.detected_total", str(audit.detected_total))
+    _prop("abicheck.effective_total", str(audit.effective_total))
+    for name, count in audit.counts:
+        _prop(f"abicheck.disposition.{name}", str(count))
+    for rule, count in audit.rules:
+        _prop(
+            f"abicheck.disposition_rule.{rule.rule_id or 'rule'}",
+            f"{count} finding(s); reason={rule.reason or 'none'}; "
+            f"intent={rule.intent}; source={rule.source_file or 'inline'}",
+        )
+    if audit.policy_overlays:  # findings the gate scores that are not detections
+        _prop("abicheck.policy_overlays", str(audit.policy_overlays))
+    if audit.not_evaluated_detectors:
+        names = ",".join(d.name for d in audit.not_evaluated_detectors)
+        _prop("abicheck.not_evaluated_detectors", names)
+
+
+def _add_scoped_properties(props: ET.Element, result: DiffResult) -> None:
+    """Append the ``--used-by``/``--required-symbol(s)`` scoping properties
+    into the testsuite's ``<properties>`` element (ADR-043 + CLI-audit P1).
+
+    *props* is created by the caller and shared with the ADR-067 disposition
+    audit above; this function adds nothing at all when no scoping was
+    requested, which is the pre-existing behaviour of its own rows.
 
     The scoped gate is authoritative for this testsuite's own ``failures``
     count and each ``<testcase>``'s pass/fail status -- ``result.verdict``
@@ -679,7 +731,6 @@ def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
     scoped_verdict = getattr(result, "scoped_verdict", None)
     if scoped_verdict is None:
         return
-    props = ET.SubElement(ts, "properties")
 
     def _prop(name: str, value: str) -> None:
         p = ET.SubElement(props, "property")

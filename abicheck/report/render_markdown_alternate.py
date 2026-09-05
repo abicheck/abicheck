@@ -65,6 +65,11 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
 
+from .disposition_audit import (
+    DispositionAudit,
+    compute_disposition_audit,
+    render_disposition_audit_section,
+)
 from .document import ReportDocument
 from .render_markdown import (
     OutOfSurfaceNote,
@@ -133,6 +138,7 @@ def _view_preamble_mapping(
     *,
     show_only: str | None,
     show_recommendation: bool,
+    severity_config: Any = None,
 ) -> tuple[dict[str, Any], list[Any]]:
     """JSON-safe fields for the opening block ``--report-mode leaf``/
     ``root-cause`` share (title/verdict table, coverage-warning banner,
@@ -175,6 +181,12 @@ def _view_preamble_mapping(
             else None
         ),
         "show_only_note": show_only_note,
+        # ADR-067 D3: both alternate modes carry the same counts the full
+        # view and the digest do -- computed here, in the one preamble the
+        # two share, rather than twice at their own call sites.
+        "disposition_audit": compute_disposition_audit(
+            result, severity_config
+        ).to_dict(),
     }
     return d, changes
 
@@ -206,6 +218,9 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
             f"({note['shown']} of {note['total']} changes shown)"
         )
         lines.append("")
+    audit = d.get("disposition_audit")
+    if isinstance(audit, Mapping):
+        lines += render_disposition_audit_section(DispositionAudit.from_dict(audit))
     return lines
 
 
@@ -231,6 +246,7 @@ def build_leaf_document(
         "leaf-change view",
         show_only=show_only,
         show_recommendation=show_recommendation,
+        severity_config=severity_config,
     )
 
     from ..checker import _ROOT_TYPE_CHANGE_KINDS
@@ -382,6 +398,7 @@ def build_root_cause_document(
         "root-cause view",
         show_only=show_only,
         show_recommendation=show_recommendation,
+        severity_config=severity_config,
     )
 
     # G29 Phase 3 slice 3 follow-up: merge --used-by/--required-symbol

@@ -43,6 +43,10 @@ from .checker_policy import (
 from .contract_gating import is_evaluated
 from .finding_identity import missing_contract_kind, report_finding_id
 from .report import render_markdown as _rmd
+from .report.disposition_audit import (
+    compute_disposition_audit,
+    render_disposition_audit_note,
+)
 from .report.render_markdown import (
     _contract_decision_text as _contract_decision_text,
     _format_change_md as _format_change_md,
@@ -102,6 +106,12 @@ def to_stat(
             "total_changes": summary.total_changes,
         },
         "redundant_count": result.redundant_count,
+        # ADR-067 D3: even the one-line view carries the raw-versus-effective
+        # counts -- a fully-suppressed comparison must not read as "no
+        # changes".
+        "disposition_audit_note": render_disposition_audit_note(
+            compute_disposition_audit(result, severity_config)
+        ),
     }
     if severity_config is not None:
         from .severity import compute_exit_code
@@ -1484,6 +1494,7 @@ def compute_review_digest(
             _rmd.ImpactedSymbol(symbol=c.symbol or "?", kind=c.kind.value)
             for c in impacted
         ),
+        disposition_audit=compute_disposition_audit(result, severity_config),
     )
 
 

@@ -9,16 +9,31 @@
 > ⚠️ Detector 'elf_layout' disabled: missing ELF metadata on one side
 > ⚠️ Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode
 > ⚠️ Detector 'kabi' disabled: missing Module.symvers (kABI) metadata
-> ⚠️ Detector 'dwarf_layout_coherence' disabled: neither snapshot has a DWARF-vs-header-AST layout coherence mismatch
 > ⚠️ Detector 'long_double' disabled: missing ELF metadata on one side
 > ⚠️ Detector 'pe' disabled: missing PE metadata
 > ⚠️ Detector 'macho' disabled: missing Mach-O metadata
+> ⚠️ Detector 'dwarf' disabled: no DWARF debug info on either side
 > ⚠️ Detector 'python_ext' disabled: missing CPython extension metadata
 > ⚠️ Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered)
 > ⚠️ Detector 'sycl' disabled: missing SYCL metadata
 > ⚠️ Detector 'unnamed_types' disabled: missing ELF metadata on one side
 > ⚠️ Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata
 > ⚠️ No binary metadata available; verdict is based on header analysis only
+
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 2 |
+| Effective (gating) | 1 |
+| … non gating | 1 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 12 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `pe`, `macho`, … and 6 more
 
 ## Root Causes (2)
 

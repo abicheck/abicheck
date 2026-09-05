@@ -273,6 +273,10 @@ class _ScopedFold:
         import json
 
         from .checker_policy import EvidenceStatus
+        from .report.disposition_audit import (
+            compute_disposition_audit,
+            render_disposition_audit_note,
+        )
         from .report.render_text import format_stat_line
         from .reporter import _change_to_dict, _finding_id, to_stat_json
         from .reporter_markdown import _VERDICT_LABEL
@@ -371,6 +375,19 @@ class _ScopedFold:
             total_changes=sum(counts.values()),
             redundant_count=0,
             gate_note=gate_note,
+            # ADR-067 D3: this is the only thing a `--profile quick
+            # --used-by`/`--required-symbol` run prints, so it carries the
+            # counts like every other projection. They are the *scoped*
+            # counts by construction: the scoped-gate orchestrator closed the
+            # ledger over the union of relevant findings and recorded the
+            # synthesized scoped-only ones into it
+            # (`policy.disposition_ledger.close_consumer_scope`), so the
+            # audit's population is the same one the counts to its left come
+            # from -- which is what makes stating it here honest rather than
+            # a second, disagreeing tally.
+            audit_note=render_disposition_audit_note(
+                compute_disposition_audit(self.result, self.severity_config)
+            ),
         )
 
     # ── markdown / text / review ───────────────────────────

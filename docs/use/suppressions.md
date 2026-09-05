@@ -356,3 +356,33 @@ This ensures that:
 1. Every suppression has a documented reason (audit trail).
 2. No suppression lives forever without review (expiry enforcement).
 3. Expired rules are not silently ignored — they break the build, forcing action.
+
+## What the report says about a suppressed finding
+
+A suppression never removes a finding from the run's own accounting. Every
+report projection carries a **disposition audit** (report schema 2.50)
+reconciling the *detected* total with the *effective* (gating) one, so "100
+removals detected, 100 suppressed by rule X" stays visible on a passing run —
+see [The Disposition Audit](disposition-audit.md) for the model and the full
+set of dispositions:
+
+```console
+$ abicheck compare old.so new.so --suppress suppressions.yaml --profile quick
+NO_CHANGE: no changes (0 total) [audit: 100 detected, 0 gating, 100 suppressed]
+```
+
+The JSON report's `disposition_audit` block carries the same counts plus the
+rules that produced them, and each `suppression.suppressed_changes[]` entry
+records the rule that actually hid it — its selector identity, the suppression
+document's path, its `reason`, `label` and `expires`. The audit is derived
+from the run's conserved change ledger rather than from the post-suppression
+change list, so a rule cannot hide its own audit record.
+
+One consequence worth knowing before writing a broad
+`allow_public_break: true` rule: the release recommendation
+(`abicheck compare`'s "Recommended release" line) reads that conserved ledger
+too. A
+suppressed ABI/API break is reported as a `major`-class finding needing
+review — *"suppressed (intent: unspecified), not compatible"* — never as "no
+version bump required". A suppression records that a finding was withheld; it
+is not evidence that the finding was wrong.
