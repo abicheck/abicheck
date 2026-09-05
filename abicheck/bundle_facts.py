@@ -48,6 +48,7 @@ from .model import AbiSnapshot
 from .storage.bundle_facts_validation import (
     BUNDLE_ARCHIVE_ARTIFACT_TYPE,
     load_bundle_facts_blob_json,
+    require_degraded_marker_version,
     require_int_schema_version,
     validate_bundle_archive_artifact_type,
     validated_alias_map,
@@ -781,6 +782,8 @@ def read_bundle_facts_archive(
                     )
                 total_decoded += copy_bytes
             instantiation_manifest = manifest_from_dict(_load_blob_json(raw_manifest, "manifest_blob"))
+        degraded_members = validated_degraded_members(manifest.get("degraded_members", {}))
+        require_degraded_marker_version(degraded_members, bundle_facts_schema_version, what=f"{path}: bundle archive")
         return BundleFacts(
             schema_version=bundle_facts_schema_version,
             variant_fingerprint=validated_variant_fingerprint(manifest.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)),
@@ -792,7 +795,5 @@ def read_bundle_facts_archive(
             library_filenames=validated_filename_map(
                 manifest.get("library_filenames", {})
             ),
-            degraded_members=validated_degraded_members(
-                manifest.get("degraded_members", {})
-            ),
+            degraded_members=degraded_members,
         )

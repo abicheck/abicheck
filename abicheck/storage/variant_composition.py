@@ -40,6 +40,7 @@ from .dto import (
 from .import_bundle_facts import _manifest_entry_for_export
 
 __all__ = [
+    "read_variant_composition_degraded_members",
     "read_variant_composition_library_filenames",
     "read_variant_composition_manifest_payload",
 ]
@@ -98,6 +99,19 @@ def read_variant_composition_manifest_payload(
             _manifest_entry_for_export(entry) for entry in raw_manifest["provides"]
         ],
     }
+
+
+def read_variant_composition_degraded_members(
+    root: str | Path, variant_id: str
+) -> dict[str, str]:
+    """*variant_id*'s own composition `degraded_members` mapping (bundle
+    key -> capture failure reason; ADR-065 D8), `{}` if absent -- the
+    marker a stored package preserves so a later comparison records the
+    member `failed` instead of diffing its ELF-only stand-in."""
+    composition = _read_variant_composition(root, variant_id)
+    if composition is None:
+        return {}
+    return dict(composition.get("degraded_members", {}))
 
 
 def read_variant_composition_library_filenames(

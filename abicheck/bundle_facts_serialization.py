@@ -224,6 +224,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     from .bundle_manifest import manifest_from_dict
     from .serialization import snapshot_from_dict
     from .storage.bundle_facts_validation import (
+        require_degraded_marker_version,
         validated_alias_map,
         validated_degraded_members,
         validated_filename_map,
@@ -325,6 +326,8 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
             f"{type(raw_snapshots).__name__}"
         )
     raw_manifest = d.get("manifest")
+    degraded_members = validated_degraded_members(d.get("degraded_members"))
+    require_degraded_marker_version(degraded_members, schema_version)
     return BundleFacts(
         schema_version=schema_version,
         variant_fingerprint=validated_variant_fingerprint(
@@ -335,7 +338,7 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         },
         filesystem_aliases=validated_alias_map(d.get("filesystem_aliases", {})),
         library_filenames=validated_filename_map(d.get("library_filenames", {})),
-        degraded_members=validated_degraded_members(d.get("degraded_members")),
+        degraded_members=degraded_members,
         manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )
 

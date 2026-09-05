@@ -624,6 +624,8 @@ def _compare_release_libraries(
             click.echo(
                 f"Unsupported: {entry['library']}: {entry.get('reason', '')}", err=True
             )
+        elif v == "failed":
+            click.echo(f"Failed: {entry['library']}: {entry.get('reason', '')}", err=True)
         if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(
             worst_verdict, 0
         ):

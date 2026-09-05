@@ -84,6 +84,7 @@ __all__ = [
     "release_global_ran",
     "release_inventory_evidence",
     "restrict_bundle_facts",
+    "stored_degraded_matched_members",
     "scoped_bundle_maps",
     "unmatched_names",
 ]
@@ -101,6 +102,9 @@ RELEASE_OPERATIONAL_VERDICTS: Mapping[str, AcquisitionState] = {
     "ERROR": AcquisitionState.FAILED,
     "not_comparable": AcquisitionState.FAILED,
     "unsupported": AcquisitionState.UNSUPPORTED,
+    # ADR-065 D8: a member a stored package marks degraded (its capture's
+    # dump failed) -- skipped before comparison, never an ELF-only diff.
+    "failed": AcquisitionState.FAILED,
 }
 
 _STORED_PACKAGE_PROVENANCE = (
@@ -464,6 +468,42 @@ def restrict_bundle_facts(facts: BundleFacts, members: frozenset[str]) -> Bundle
             k: v for k, v in facts.degraded_members.items() if k in members
         },
     )
+
+
+def stored_degraded_matched_members(
+    old_dir: Path,
+    new_dir: Path,
+    matched_keys: Iterable[str],
+    *,
+    old_variant: str | None,
+    new_variant: str | None,
+) -> dict[str, str]:
+    """``{matched key: reason}`` for every matched member either side's
+    stored ``ProjectSnapshot`` package marks degraded (ADR-065 D8), so the
+    fan-out skips it and records it ``failed`` -- the same treatment the
+    stored/stored and stored/live drivers give the marker. A live directory
+    or archive side carries no marker and contributes nothing.
+    """
+    from .release_package import resolve_release_package_degraded_members
+    from .storage import is_project_snapshot_package_dir
+
+    found: dict[str, str] = {}
+    for label, side_dir, variant in (
+        ("OLD", old_dir, old_variant),
+        ("NEW", new_dir, new_variant),
+    ):
+        if not (side_dir.is_dir() and is_project_snapshot_package_dir(side_dir)):
+            continue
+        degraded = resolve_release_package_degraded_members(
+            side_dir, variant_id=variant
+        )
+        for key, reason in degraded.items():
+            found.setdefault(
+                key,
+                f"{label} side was captured degraded ({reason}); comparison skipped (ADR-065 D8)",
+            )
+    matched = set(matched_keys)
+    return {k: v for k, v in found.items() if k in matched}
 
 
 def unmatched_names(record: ScopeAcquisitionRecord, *, side: str) -> list[str]:

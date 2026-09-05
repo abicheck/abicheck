@@ -27,7 +27,12 @@
   `schema_version: 3` (and its `ProjectSnapshot` composition section
   version 2), so a pre-S2 reader rejects it rather than misreads it; a
   document with no degraded member keeps declaring the previous version and
-  stays readable by older readers. JUnit output carries the scope decision
+  stays readable by older readers. Every reader (JSON, archive,
+  `ProjectSnapshot` import, and the composition section itself) refuses a
+  non-empty marker declared under a pre-marker version. A stored
+  `ProjectSnapshot` package's own marker is read back by the directory/
+  package `compare` fan-out: a marked member is recorded `failed` (JSON
+  verdict `failed`) and skipped, never diffed as an ELF-only stand-in. JUnit output carries the scope decision
   as an `abicheck.comparison_scope` suite (skipped cases under `warn`,
   errors under `block` or when no comparison completed). An artifact this build cannot analyze is
   recorded `unsupported` (an incompleteness signal) rather than an `ERROR`

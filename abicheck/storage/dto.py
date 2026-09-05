@@ -209,7 +209,14 @@ SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
 
 
 def _bundle_composition_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    return {**payload, "degraded_members": {}}  # v1 predates the marker
+    # v1 predates the marker; a v1 section *carrying* one would still open in
+    # a pre-S2 reader that ignores it, so it is refused, not migrated (Codex).
+    if payload.get("degraded_members"):
+        raise ValueError(
+            f"{BUNDLE_COMPOSITION_SECTION_KIND!r} section v1 carries a non-empty "
+            "'degraded_members' marker, which requires section version 2 (ADR-065 D8)"
+        )
+    return {**payload, "degraded_members": {}}
 
 
 #: Per-section-kind migration chains, keyed by the DTO version a step reads
@@ -496,23 +503,14 @@ def bundle_composition_to_dto(payload: Mapping[str, Any]) -> SectionDTO:
     `manifest`, `filesystem_aliases`, `library_filenames` -- as a
     `SectionDTO` (ADR-063 Track C 8B).
 
-    ADR-062's D8 vocabulary is scoped to a single `ArtifactRef`'s own
-    sections; none of these four facts names one particular library, so this
-    is a new, independent section kind rather than a squeeze into one of
-    D8's eight. `storage.import_bundle_facts.import_bundle_facts` attaches
-    the resulting object to the `VariantRef` that owns every per-library
-    `ArtifactRef` the same bundle produced, the same way
-    `variant_fingerprint` alone would already be a `VariantRef.captured`
-    coordinate if it stood alone.
+    None of these facts names one particular library, so this is its own
+    section kind (not one of ADR-062 D8's eight per-`ArtifactRef` ones),
+    attached by `import_bundle_facts` to the owning `VariantRef`.
 
-    There is nothing to encode beyond the version stamp, for the same
-    reason `legacy_section_to_dto` gives: `bundle_manifest.manifest_to_dict()`/
-    `bundle_facts_serialization.bundle_facts_to_dict()` already produce this
-    payload as flat JSON, and `storage/` may not import either module to
-    re-derive it (`storage/AGENTS.md`, "Permitted imports") -- the caller
-    hands this function the already-produced sub-mapping, the same
-    "storage takes an already-serialized document" contract `import_v1.py`'s
-    own module docstring establishes for the whole legacy document.
+    Nothing to encode beyond the version stamp, for `legacy_section_to_dto`'s
+    reason: the caller hands over the already-serialized sub-mapping
+    (`storage/` may not import the modules that produce it -- `storage/
+    AGENTS.md`, "Permitted imports").
     """
     degraded = payload.get("degraded_members")
     if degraded:

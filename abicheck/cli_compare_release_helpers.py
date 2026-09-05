@@ -109,7 +109,9 @@ def _release_global_verdict(bundle_result: BundleDiffResult | None, matrix_resul
 #: dominates the release's own reported "verdict"), which is exactly the
 #: right behavior for the *reported* release verdict but the wrong one for
 #: `run_outcome.compatibility`, a genuinely separate axis.
-_RELEASE_OPERATIONAL_SENTINELS = frozenset({"ERROR", "not_comparable", "unsupported"})
+_RELEASE_OPERATIONAL_SENTINELS = frozenset(
+    {"ERROR", "not_comparable", "unsupported", "failed"}
+)
 
 
 def _release_completed_compatibility_verdict(
@@ -1120,11 +1122,11 @@ def _format_release_junit(
     scope_blocks = scope_terms is not None and scope_terms.incomplete_scope_exit_contribution == 1
     error_libs = [
         {**entry, "error": entry.get("reason", entry["verdict"])}
-        if entry.get("verdict") in ("not_comparable", "unsupported")
+        if entry.get("verdict") in ("not_comparable", "unsupported", "failed")
         else entry
         for entry in library_results
         if entry.get("verdict") in ("ERROR", "not_comparable")
-        or (entry.get("verdict") == "unsupported" and scope_blocks)
+        or (entry.get("verdict") in ("unsupported", "failed") and scope_blocks)
     ]
     return to_junit_xml_multi(
         pairs,
@@ -1365,6 +1367,7 @@ def _format_release_markdown(
         "ERROR": "💥",
         "not_comparable": "❓",
         "unsupported": "🚫",
+        "failed": "💥",
     }
     verdict_cell = f"{_VERDICT_EMOJI.get(worst_verdict, '?')} `{worst_verdict}`"
     if scope_section is not None and scope_section.get("no_comparison_completed"):

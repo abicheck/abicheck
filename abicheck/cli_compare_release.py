@@ -110,6 +110,7 @@ from .workflows.release_scope import (
     out_of_scope_provider_names,
     release_inventory_evidence,
     scoped_bundle_maps,
+    stored_degraded_matched_members,
 )
 from .workflows.storage import is_project_snapshot_package_dir
 
@@ -616,8 +617,18 @@ def compare_release_cmd(
             # the enclosing dedup_validate_overrides_warnings() scope above
             # is what keeps a single risky override from logging its
             # validate_overrides() warning once per library (Codex review).
-            library_results, worst_verdict, diff_pairs = _compare_release_libraries(
+            # ADR-065 D8 (Codex review): a matched member either stored
+            # package marks degraded is not compared -- its snapshot is the
+            # ELF-only stand-in -- but recorded `failed` on the scope axis.
+            degraded_matched = stored_degraded_matched_members(
+                old_dir,
+                new_dir,
                 matched_keys,
+                old_variant=old_variant,
+                new_variant=new_variant,
+            )
+            library_results, worst_verdict, diff_pairs = _compare_release_libraries(
+                [k for k in matched_keys if k not in degraded_matched],
                 old_map,
                 new_map,
                 old_debug_dir,
@@ -657,6 +668,19 @@ def compare_release_cmd(
                 compile_context=compile_context,
                 depth=depth,
             )
+
+            for key in matched_keys:
+                if key in degraded_matched:
+                    library_results.append(
+                        {
+                            "library": old_map[key].name,
+                            "verdict": "failed",
+                            "reason": degraded_matched[key],
+                        }
+                    )
+                    click.echo(
+                        f"Failed: {old_map[key].name}: {degraded_matched[key]}", err=True
+                    )
 
             # ADR-065 D1/D2/D6/D7 (S2): the per-member acquisition record.
             # From here on `removed_keys`/`added_keys` are the *proven*

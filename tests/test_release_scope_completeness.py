@@ -327,7 +327,11 @@ class TestZeroPairRelease:
 # ---------------------------------------------------------------------------
 
 
-def _write_stored_package(root: Path, libraries: dict[str, AbiSnapshot]) -> None:
+def _write_stored_package(
+    root: Path,
+    libraries: dict[str, AbiSnapshot],
+    degraded: dict[str, str] | None = None,
+) -> None:
     from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
     from abicheck.bundle_facts_store import write_bundle_facts_package
     from abicheck.project_snapshot_store import (
@@ -340,6 +344,7 @@ def _write_stored_package(root: Path, libraries: dict[str, AbiSnapshot]) -> None
         variant_fingerprint=facts.variant_fingerprint,
         per_library_snapshots=facts.per_library_snapshots,
         library_filenames={name: name for name in facts.per_library_snapshots},
+        degraded_members=dict(degraded or {}),
     )
     store = DirectoryObjectStore(root)
     manifest = write_bundle_facts_package(facts, store=store, variant_id="default")

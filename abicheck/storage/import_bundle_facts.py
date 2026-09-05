@@ -52,15 +52,10 @@ addition to that dataclass) rather than squeezed into any single
 
 **Why every per-library snapshot must agree on one `source_schema_version`.**
 `PackageManifest.versions` carries exactly one `StorageVersions` for the
-whole package — there is no per-artifact schema-version axis for
-`export_bundle_facts` to read back from later. Every real `BundleFacts`
-producer (`bundle_facts.capture_bundle_facts`) captures every member
-snapshot from the same in-process `dump`/`compare` run, so this is not a
-narrowing of what can actually occur — a hand-edited or corrupted document
-mixing schema versions across libraries is refused outright (fail closed,
-matching this package's own established convention) rather than silently
-picking one arbitrarily and lying about the other library's real
-provenance.
+whole package (no per-artifact axis to read back later), and every real
+producer captures every member in one run -- so a document mixing schema
+versions across libraries is hand-edited or corrupt and is refused (fail
+closed) rather than one version being picked arbitrarily.
 """
 
 from __future__ import annotations
@@ -69,6 +64,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..errors import IncompatibleSnapshotSchemaError
+from .bundle_facts_validation import require_degraded_marker_version
 from .dto import (
     BUNDLE_COMPOSITION_SECTION_KIND,
     SectionDTO,
@@ -96,15 +92,10 @@ __all__ = [
 ]
 
 #: Self-describing document-type marker, duplicated here rather than
-#: imported — the same reason `storage.bundle_facts_validation
-#: .BUNDLE_ARCHIVE_ARTIFACT_TYPE` duplicates the plain-JSON marker's sibling
-#: value for the G40 archive *container* instead of importing
-#: `bundle_facts.py`: `storage/` may depend only on `model`
-#: (`storage/AGENTS.md`), so it cannot import the module that owns this
-#: constant. Must always equal `abicheck.bundle_facts
-#: .BUNDLE_FACTS_ARTIFACT_TYPE` — pinned by
-#: `tests/unit/storage/test_import_bundle_facts.py`'s own cross-check so the
-#: two cannot silently drift apart.
+#: imported (`storage/` may depend only on `model` -- `storage/AGENTS.md`),
+#: the same reason `bundle_facts_validation.BUNDLE_ARCHIVE_ARTIFACT_TYPE`
+#: duplicates its sibling. Must equal `abicheck.bundle_facts
+#: .BUNDLE_FACTS_ARTIFACT_TYPE`; `tests/unit/storage/test_import_bundle_facts.py` pins it.
 BUNDLE_FACTS_ARTIFACT_TYPE = "abicheck.bundle-facts"
 
 #: `abicheck.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION`/`..._BASE_SCHEMA_VERSION`, duplicated as
@@ -563,6 +554,11 @@ def import_bundle_facts(
             bundle_facts_document.get("degraded_members", _ABSENT), "degraded_members"
         ),
     }
+    require_degraded_marker_version(
+        composition_payload["degraded_members"],
+        raw_container_schema_version,
+        what="bundle_facts_document",
+    )
     composition_dto = bundle_composition_to_dto(composition_payload)
     composition_ref = ObjectRef(
         kind=BUNDLE_COMPOSITION_SECTION_KIND,

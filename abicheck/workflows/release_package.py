@@ -50,6 +50,7 @@ from ..project_snapshot_legacy import (
 )
 from ..project_snapshot_store import read_manifest_summary
 from ..storage.variant_composition import (
+    read_variant_composition_degraded_members,
     read_variant_composition_library_filenames,
     read_variant_composition_manifest_payload,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "is_project_snapshot_package_dir",
     "is_multi_artifact_package",
     "read_embedded_manifest",
+    "resolve_release_package_degraded_members",
     "resolve_release_package_map",
 ]
 
@@ -216,6 +218,39 @@ def _release_match_key(
     if name:
         return _canonical_library_key(Path(name))
     return artifact.artifact_id
+
+
+def resolve_release_package_degraded_members(
+    root: str | Path, *, variant_id: str | None
+) -> dict[str, str]:
+    """The selected variant's ADR-065 D8 ``degraded_members`` marker,
+    re-keyed the way :func:`resolve_release_package_map` keys the map --
+    ``{release match key: capture failure reason}`` -- so the fan-out can
+    look a matched key up directly and record the member ``failed``
+    instead of comparing its ELF-only stand-in (Codex review: the marker
+    survived the package round trip but nothing on this path read it).
+
+    The bundle key resolves through the same ``library_filenames`` lookup
+    :func:`_release_match_key` applies (real on-disk filename first, else
+    the bundle key itself), then ``_canonical_library_key`` -- one rule,
+    so a degraded member can never be keyed differently from its own
+    materialized artifact.
+    """
+    from ..binary_utils import _canonical_library_key
+
+    resolved_variant_id = variant_id
+    if resolved_variant_id is None:
+        resolved_variant_id = read_manifest_summary(root).variant_ids[0]
+    degraded = read_variant_composition_degraded_members(root, resolved_variant_id)
+    if not degraded:
+        return {}
+    library_filenames = read_variant_composition_library_filenames(
+        root, resolved_variant_id
+    )
+    return {
+        _canonical_library_key(Path(library_filenames.get(bundle_key) or bundle_key)): reason
+        for bundle_key, reason in degraded.items()
+    }
 
 
 def resolve_release_package_map(

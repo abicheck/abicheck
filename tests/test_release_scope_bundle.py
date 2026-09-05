@@ -25,6 +25,7 @@ finding; proven: the finding stays).
 
 from __future__ import annotations
 
+from json import dumps as json_dumps
 from pathlib import Path
 
 import pytest
@@ -364,3 +365,165 @@ class TestRunOutcomeSchemaVersion:
         parsed = RunOutcome.from_dict(legacy)
         assert parsed is not None
         assert parsed.scope is ScopeCompleteness.COMPLETE
+
+
+# ---------------------------------------------------------------------------
+# Third review round: the marker is version-gated on read; a stored
+# ProjectSnapshot package's marker reaches the live fan-out (D8)
+# ---------------------------------------------------------------------------
+
+
+def _degraded_facts_dict() -> dict[str, object]:
+    from abicheck.bundle_facts import capture_bundle_facts
+    from abicheck.bundle_facts_serialization import bundle_facts_to_dict
+
+    facts = capture_bundle_facts(
+        {"liba.so": AbiSnapshot(library="liba.so", version="")},
+        degraded_members={"liba.so": "ELF-only: boom"},
+    )
+    return dict(bundle_facts_to_dict(facts))
+
+
+class TestDegradedMarkerVersionGate:
+    """Every reader refuses a non-empty marker under a pre-marker version:
+    such a document would still open in a pre-S2 reader (which ignores the
+    key), the exact failure the writer-side bump exists to prevent."""
+
+    @pytest.mark.parametrize("version", [1, 2])
+    def test_json_reader_rejects_the_marker_below_version_3(self, version: int) -> None:
+        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
+
+        d = _degraded_facts_dict()
+        assert d["schema_version"] == 3
+        d["schema_version"] = version
+        if version == 1:
+            del d["artifact_type"]  # v1 predates the marker key too
+        with pytest.raises(ValueError, match="degraded_members.*schema_version 3"):
+            bundle_facts_from_dict(d)
+        # And the writer's own stamp reads back.
+        assert bundle_facts_from_dict(_degraded_facts_dict()).degraded_members == {
+            "liba.so": "ELF-only: boom"
+        }
+
+    def test_archive_reader_rejects_the_marker_below_version_3(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.bundle_facts import BUNDLE_ARCHIVE_ARTIFACT_TYPE
+        from abicheck.serialization import load_bundle_facts
+        from abicheck.storage.bundle_archive import BundleArchiveWriter
+
+        out = tmp_path / "old.bundlefacts.archive.zip"
+        with BundleArchiveWriter(out) as writer:
+            writer.write_manifest(
+                {
+                    "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+                    "schema_version": 1,
+                    "bundle_facts_schema_version": 2,
+                    "library_blobs": {},
+                    "degraded_members": {"liba.so": "ELF-only: boom"},
+                }
+            )
+        with pytest.raises(ValueError, match="degraded_members.*schema_version 3"):
+            load_bundle_facts(out, format="archive")
+
+    def test_project_snapshot_import_rejects_the_marker_below_version_3(self) -> None:
+        from abicheck.serialization import SCHEMA_VERSION
+        from abicheck.storage.import_bundle_facts import import_bundle_facts
+        from abicheck.storage.package import InMemoryObjectStore
+
+        def _import(doc: dict[str, object]) -> object:
+            return import_bundle_facts(
+                doc,
+                store=InMemoryObjectStore(),
+                max_known_schema_version=SCHEMA_VERSION,
+            )
+
+        d = _degraded_facts_dict()
+        d["schema_version"] = 2
+        with pytest.raises(ValueError, match="degraded_members.*schema_version 3"):
+            _import(d)
+        assert _import(_degraded_facts_dict()) is not None
+
+    def test_composition_section_v1_rejects_the_marker(self) -> None:
+        from abicheck.storage.dto import (
+            BUNDLE_COMPOSITION_SECTION_KIND,
+            SectionDTO,
+            bundle_composition_from_dto,
+        )
+
+        forged = SectionDTO(
+            section_kind=BUNDLE_COMPOSITION_SECTION_KIND,
+            section_schema_version=1,
+            payload={
+                "variant_fingerprint": "x",
+                "manifest": None,
+                "filesystem_aliases": {},
+                "library_filenames": {},
+                "degraded_members": {"a": "why"},
+            },
+        )
+        with pytest.raises(ValueError, match="degraded_members"):
+            bundle_composition_from_dto(forged)
+
+
+class TestStoredPackageDegradedMember:
+    """A ProjectSnapshot package preserves the marker; the live fan-out
+    must read it back through package resolution and record the member
+    `failed` rather than diffing an empty stand-in as evidence."""
+
+    @pytest.mark.parametrize("degraded_side", ["old", "new"])
+    @pytest.mark.parametrize("policy", ["warn", "block"])
+    def test_marked_member_is_failed_not_compared(
+        self, tmp_path: Path, degraded_side: str, policy: str
+    ) -> None:
+        healthy = {
+            "libfoo.so": _lib("libfoo.so", exports=("foo",)),
+            "libbar.so": _lib("libbar.so", exports=("bar",)),
+        }
+        # The degraded side holds an *empty* ELF-only stand-in for libfoo:
+        # compared as evidence it would read as `func_removed`/BREAKING.
+        degraded = {**healthy, "libfoo.so": _lib("libfoo.so")}
+        old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+        marker = {"libfoo.so": "dump failed: boom"}
+        if degraded_side == "old":
+            _write_stored_package(old, degraded, degraded=marker)
+            _write_stored_package(new, healthy)
+        else:
+            _write_stored_package(old, healthy)
+            _write_stored_package(new, degraded, degraded=marker)
+        code, doc = _invoke_json(
+            "compare", str(old), str(new), "-j", "1", "--on-incomplete-scope", policy
+        )
+        by_name = {lib["library"].split("-")[0]: lib for lib in doc["libraries"]}
+        assert by_name["libfoo.so"]["verdict"] == "failed"
+        assert degraded_side.upper() in by_name["libfoo.so"]["reason"]
+        assert by_name["libbar.so"]["verdict"] == "NO_CHANGE"
+        assert "func_removed" not in json_dumps(doc)
+        assert doc["verdict"] != "BREAKING"
+        scope = doc["comparison_scope"]
+        assert scope["completeness"] == "incomplete"
+        assert [n.split("-")[0] for n in scope["unchecked"]] == ["libfoo.so"]
+        assert scope["counts"]["failed"] == 1
+        assert doc["run_outcome"]["scope"] == "incomplete"
+        assert code == (1 if policy == "block" else 0)
+
+    def test_package_degraded_members_are_keyed_like_the_release_map(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.workflows.release_package import (
+            resolve_release_package_degraded_members,
+            resolve_release_package_map,
+        )
+
+        root = tmp_path / "pkg"
+        _write_stored_package(
+            root,
+            {"libfoo.so": _lib("libfoo.so"), "libbar.so": _lib("libbar.so")},
+            degraded={"libfoo.so": "boom"},
+        )
+        degraded = resolve_release_package_degraded_members(root, variant_id=None)
+        released = resolve_release_package_map(
+            root, variant_id=None, dest_root=tmp_path / "materialized"
+        )
+        assert set(degraded) <= set(released)
+        assert list(degraded.values()) == ["boom"]

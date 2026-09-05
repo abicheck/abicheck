@@ -609,7 +609,9 @@ failed to dump records that member under `degraded_members` (with the
 failure) instead of persisting an ELF-only stand-in as if it were complete;
 a later stored/stored or stored/live comparison skips such a member, says so
 in `bundle_analysis_errors`, and records it as `failed` on the completeness
-axis. Such a document declares `schema_version: 3` (a clean document keeps
+axis; a stored `ProjectSnapshot` package carries the same marker, and the
+directory/package `compare` fan-out skips a marked member on either side and
+reports it with verdict `failed`. Such a document declares `schema_version: 3` (a clean document keeps
 `2`), so an older abicheck rejects it instead of comparing the stand-in as
 real evidence.
 

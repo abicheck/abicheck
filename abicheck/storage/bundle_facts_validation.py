@@ -41,7 +41,7 @@ before this module existed.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -300,6 +300,36 @@ def validated_filename_map(raw: object) -> dict[str, str]:
             )
         filenames[name] = filename
     return filenames
+
+
+#: The `BundleFacts` document schema version that introduced the
+#: decision-bearing `degraded_members` marker (ADR-065 D8). Mirrors
+#: `bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION`, kept here so every reader
+#: (JSON, G40 archive, ProjectSnapshot import) enforces one rule without
+#: `storage/` importing the flat-root module.
+DEGRADED_MARKER_SCHEMA_VERSION = 3
+
+
+def require_degraded_marker_version(
+    degraded_members: Mapping[str, str], schema_version: int, *, what: str = "bundle facts"
+) -> None:
+    """Reject a non-empty ``degraded_members`` marker on a document declaring
+    a schema version that predates it.
+
+    The writer stamps version 3 on exactly such a document so a pre-S2
+    reader (max 2) refuses it instead of ignoring the unknown key and
+    comparing the ELF-only stand-in as complete evidence. A document carrying
+    the marker under version 1 or 2 is therefore self-contradictory -- it
+    would still open in that older reader, which is the failure the version
+    exists to prevent -- so this reader refuses it too (Codex review).
+    """
+    if degraded_members and schema_version < DEGRADED_MARKER_SCHEMA_VERSION:
+        raise ValueError(
+            f"{what}: a non-empty 'degraded_members' marker requires "
+            f"schema_version {DEGRADED_MARKER_SCHEMA_VERSION} (ADR-065 D8); "
+            f"this document declares schema_version {schema_version}, which a "
+            "reader that cannot honor the marker would still accept"
+        )
 
 
 def validated_degraded_members(raw: object) -> dict[str, str]:
