@@ -109,6 +109,7 @@ def aggregate(
             contract_coverage_declared=report.contract_coverage_declared,
             analysis_assurance_exit=report.analysis_assurance_exit,
             scope_completeness_exit=report.scope_completeness_exit,
+            scope_completeness_incomplete=report.scope_completeness_incomplete,
             findings=report.findings,
             effective_config_digest=report.effective_config_digest,
         )

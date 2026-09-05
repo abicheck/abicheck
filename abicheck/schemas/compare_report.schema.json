@@ -1290,6 +1290,7 @@
         "gate.severity.potential_breaking",
         "gate.severity.quality_issues",
         "gate.severity.addition",
+        "gate.on_incomplete_scope",
         "assurance.require_evidence",
         "suppressions",
         "packs"
@@ -1322,6 +1323,7 @@
         "gate.severity.potential_breaking": { "type": "string" },
         "gate.severity.quality_issues": { "type": "string" },
         "gate.severity.addition": { "type": "string" },
+        "gate.on_incomplete_scope": { "type": "string", "description": "ADR-065 D6 (schema 2.50): the --on-incomplete-scope policy (warn/block) a directory/package release resolved, empty for a scalar comparison, to which the policy does not apply. Two otherwise identical incomplete releases exit 0 and 1 under the two values, so the digest tells them apart." },
         "assurance.require_evidence": { "type": "string" },
         "suppressions": { "type": "string" },
         "packs": { "type": "string" }

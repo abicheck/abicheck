@@ -60,7 +60,7 @@ from .gate import (
     contract_coverage_blocks,
 )
 from .reconcile import ReportFindings, parse_report_findings
-from .scope_axis import scope_completeness_exit
+from .scope_axis import scope_completeness_exit, scope_completeness_incomplete
 
 
 def parse_report_verdict(data: Mapping[str, Any]) -> Verdict | None:
@@ -101,10 +101,8 @@ class _LoadedReport:
     #: Whether the report stated a usable contribution at all -- see
     #: :func:`_contract_coverage_declared`.
     contract_coverage_declared: bool = False
-    #: ``None`` on every failure branch below (unreadable, malformed gate,
-    #: operational error, not comparable), since none of those establish what
-    #: the comparison did or did not find. Otherwise the report's own
-    #: :func:`~abicheck.aggregate_findings.parse_report_findings` result.
+    #: ``None`` on every failure branch below (none establishes what the
+    #: comparison found); otherwise ``parse_report_findings``'s result.
     findings: ReportFindings | None = None
     #: P0.4's orthogonal analysis-assurance contribution, read off the
     #: report's own ``analysis_assurance_exit_contribution``; ``0`` for a run
@@ -113,11 +111,10 @@ class _LoadedReport:
     #: ADR-065's scope-completeness contribution (``scope_axis``); ``0`` for
     #: every scalar comparison and every complete release.
     scope_completeness_exit: int = 0
-    #: Phase 0 item 6 ("every effective evaluation carries a digest"): read
-    #: straight off the per-target report's own ``effective_config_digest``
-    #: — never recomputed here. ``None`` for a report that carries none (a
-    #: pre-digest report, or one written with ``include_exit_decision=False``
-    #: — same fail-open default as the coverage/assurance fields above.
+    #: Whether the report recorded an incomplete scope, gating or accepted.
+    scope_completeness_incomplete: bool = False
+    #: Phase 0 item 6: the report's own ``effective_config_digest``, never
+    #: recomputed; ``None`` when it carries none (fail-open like the above).
     effective_config_digest: str | None = None
 
 
@@ -449,6 +446,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             contract_coverage_declared=_contract_coverage_declared(data),
             analysis_assurance_exit=_analysis_assurance_exit(data),
             scope_completeness_exit=scope_completeness_exit(data),
+            scope_completeness_incomplete=scope_completeness_incomplete(data),
             # An operational ERROR means *a* library failed, not that nothing
             # was compared: real `bundle_findings`/`matrix_findings` from
             # whatever did complete are worth keeping, but never complete --
@@ -543,6 +541,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             ),
             analysis_assurance_exit=max(_analysis_assurance_exit(data), assurance_axis),
             scope_completeness_exit=scope_completeness_exit(data),
+            scope_completeness_incomplete=scope_completeness_incomplete(data),
             # No comparison ran at all for a true abort -- no partial finding
             # set to preserve. `BUNDLE_INCOMPLETE` (compat_verdict resolved
             # above) is the exception: its members did complete.
@@ -607,6 +606,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             contract_coverage_declared=_contract_coverage_declared(data),
             analysis_assurance_exit=_analysis_assurance_exit(data),
             scope_completeness_exit=scope_completeness_exit(data),
+            scope_completeness_incomplete=scope_completeness_incomplete(data),
             # A completed sibling/global comparison still leaves real
             # bundle_findings/matrix_findings even though this library
             # refused -- mirrors the ERROR/scan-abort branches.
@@ -703,6 +703,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 contract_coverage_declared=_contract_coverage_declared(data),
                 analysis_assurance_exit=_analysis_assurance_exit(data),
                 scope_completeness_exit=scope_completeness_exit(data),
+                scope_completeness_incomplete=scope_completeness_incomplete(data),
                 effective_config_digest=effective_config_digest,
             )
     verdict = parse_report_verdict(data)
@@ -783,6 +784,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         contract_coverage_declared=_contract_coverage_declared(data),
         analysis_assurance_exit=_analysis_assurance_exit(data),
         scope_completeness_exit=scope_completeness_exit(data),
+        scope_completeness_incomplete=scope_completeness_incomplete(data),
         # Only a report that produced a real verdict has a finding set worth
         # reading: a verdictless one is unavailable, and its `changes` array
         # (if any) describes a comparison that never reached a conclusion.

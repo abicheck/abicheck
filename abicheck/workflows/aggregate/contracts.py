@@ -134,7 +134,9 @@ from .resolve import (
 #: ``1.8`` (ADR-065 S2) adds the top-level ``scope_completeness`` block, a
 #: ``scope_completeness_exit`` field on every target entry, and
 #: ``scope_incomplete_profiles`` on every profile-matrix entry -- the third
-#: orthogonal exit-floor axis, the exact sibling of ``1.3``/``1.5``
+#: orthogonal exit-floor axis, the exact sibling of ``1.3``/``1.5``; like
+#: ``1.3``, its incomplete lists also name a target that *accepted* the gap
+#: (``--on-incomplete-scope warn``, contribution ``0``)
 #: (Codex review: a release whose scope was incomplete under
 #: ``--on-incomplete-scope block``, or that completed no comparison,
 #: published ``run_outcome.scope`` while its canonical consumer folded only
@@ -402,6 +404,10 @@ class TargetReport:
     #: orthogonal exit-floor axis (aggregate schema 1.8); same
     #: positional-safety reason for its position.
     scope_completeness_exit: int = 0
+    #: Whether the report recorded an incomplete scope at all -- true even
+    #: when ``--on-incomplete-scope warn`` zeroed the contribution above.
+    #: Reported, never folded into an exit code (the contract-coverage rule).
+    scope_completeness_incomplete: bool = False
     #: Phase 0 item 6 of docs/contribute/plans/duplication-and-convergence-
     #: assessment.md: this target's own already-computed
     #: ``effective_config_digest``, read straight off its report by

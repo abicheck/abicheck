@@ -1306,7 +1306,7 @@ def _format_release_json(
     digest, fields = _release_summary_effective_config_block(
         severity_config, policy=policy, policy_file_path=policy_file_path,
         suppress=suppress, pack_application=pack_application,
-        scope_public_headers=scope_public_headers,
+        scope_public_headers=scope_public_headers, on_incomplete_scope=terms.policy,
     )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields

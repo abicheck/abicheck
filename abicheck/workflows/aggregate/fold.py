@@ -208,13 +208,10 @@ class AggregateResult:
     @property
     def contract_coverage_targets(self) -> tuple[str, ...]:
         """Targets whose contract coverage was incomplete -- the *why*
-        behind :attr:`contract_coverage_exit`, but also every target that
+        behind :attr:`contract_coverage_exit`, plus every target that
         accepted incomplete coverage via ``contract.unresolved=warn``
-        (contribution ``0``, failures still listed): ADR-049 Section 6.2
-        accepts incomplete assurance without hiding it, and deriving this
-        from the contribution alone hid it (Codex review). Which of these
-        gated stays readable per target from its own ``contract_coverage_exit``.
-        """
+        (contribution ``0``): ADR-049 Section 6.2 accepts incomplete
+        assurance without hiding it (Codex review)."""
         gated = list(self._gated)
         return tuple(
             sorted(
@@ -244,20 +241,24 @@ class AggregateResult:
 
     @property
     def scope_completeness_exit(self) -> int:
-        """ADR-065's scope-completeness contribution -- the third orthogonal
-        floor, sibling of the two above. Without it a release that exited
-        ``1`` for an incomplete scope under ``--on-incomplete-scope block``
-        (or for completing no comparison) fed this aggregate a green ``0``,
-        since ``run_outcome.gate``/``operational`` stay ``none`` for that
-        axis (Codex review)."""
+        """ADR-065's scope-completeness contribution, the third orthogonal
+        floor: a release that exited ``1`` for an incomplete scope under
+        ``block`` (or no completed comparison) otherwise fed this aggregate
+        a green ``0`` (Codex review)."""
         return max((t.scope_completeness_exit for t in self._gated), default=0)
 
     @property
     def scope_completeness_targets(self) -> tuple[str, ...]:
-        """Targets whose comparison scope gated -- the *why* behind
-        :attr:`scope_completeness_exit`."""
+        """Targets whose comparison scope was incomplete -- the *why* behind
+        :attr:`scope_completeness_exit`, plus every target that accepted the
+        gap under ``warn`` (contribution ``0``): the
+        :attr:`contract_coverage_targets` rule (Codex review)."""
         return tuple(
-            sorted(t.target_id for t in self._gated if t.scope_completeness_exit > 0)
+            sorted(
+                t.target_id
+                for t in self._gated
+                if t.scope_completeness_incomplete or t.scope_completeness_exit > 0
+            )
         )
 
     def exit_code(self) -> int:
@@ -344,7 +345,10 @@ class AggregateResult:
                 # evidence still needs profile-level attribution here.
                 if any(r.analysis_assurance_exit > 0 for r in reports):
                     analysis_incomplete.append(pid)
-                if any(r.scope_completeness_exit > 0 for r in reports):
+                if any(
+                    r.scope_completeness_incomplete or r.scope_completeness_exit > 0
+                    for r in reports
+                ):
                     scope_incomplete.append(pid)
                 verdicts = [
                     r.compatibility_verdict
@@ -530,10 +534,7 @@ class AggregateResult:
     def _render_floor_axis_lines(
         title: str, incomplete: tuple[str, ...], contribution: int, axis: str
     ) -> list[str]:
-        """One plain satisfied/not exit-floor axis (analysis assurance,
-        scope completeness) -- unlike contract coverage, neither has an
-        "accepted, listed but not gated" state, so only the incomplete
-        targets and the contribution are worth stating."""
+        """One exit-floor axis block: its incomplete targets and contribution."""
         if not incomplete:
             return []
         return [

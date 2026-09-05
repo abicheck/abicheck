@@ -71,7 +71,7 @@
     },
     "scope_completeness": {
       "type": "object",
-      "description": "Added in schema 1.8. ADR-065's orthogonal scope-completeness axis for the whole target set -- the third sibling of contract_coverage and analysis_assurance: did a directory/package release target check every member it selected (--on-incomplete-scope block), and did it complete at least one comparison at all (never a clean pass, under either policy)? Read from each target report's own exit block (incomplete_scope_contribution / no_comparison_completed_contribution), never recomputed. Present in every document; exit_contribution is 0 and incomplete_targets empty for every scalar comparison and every complete release.",
+      "description": "Added in schema 1.8. ADR-065's orthogonal scope-completeness axis for the whole target set -- the third sibling of contract_coverage and analysis_assurance: did a directory/package release target check every member it selected (--on-incomplete-scope block), and did it complete at least one comparison at all (never a clean pass, under either policy)? Read from each target report's own exit block (incomplete_scope_contribution / no_comparison_completed_contribution) or, for the stored/stored and stored/live drivers that emit no exit block, its comparison_scope section (incomplete_scope_exit_contribution / no_comparison_completed_exit_contribution), never recomputed. Present in every document; exit_contribution is 0 and incomplete_targets empty for every scalar comparison and every complete release.",
       "required": ["exit_contribution", "incomplete_targets"],
       "properties": {
         "exit_contribution": {
@@ -84,7 +84,7 @@
         },
         "incomplete_targets": {
           "type": "array",
-          "description": "The target ids whose comparison scope gated -- the why behind a non-zero exit_contribution.",
+          "description": "The target ids whose comparison scope was incomplete: the why behind a non-zero exit_contribution, plus every target that accepted the gap under --on-incomplete-scope warn (contribution 0) -- like contract_coverage.incomplete_targets, accepting an evidence gap is not hiding it. Which of these gated is readable per target from its own scope_completeness_exit.",
           "items": {"type": "string"}
         }
       }
@@ -287,7 +287,7 @@
         "scope_incomplete_profiles": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "Added in schema 1.8. The third sibling, for ADR-065's scope-completeness axis -- the profile-level view of the top-level scope_completeness.incomplete_targets, using the same predicate. A profile can appear here and in the other lists at once."
+          "description": "Added in schema 1.8. The third sibling, for ADR-065's scope-completeness axis -- the profile-level view of the top-level scope_completeness.incomplete_targets, using the same predicate (a profile that accepted the gap under --on-incomplete-scope warn is listed too, with a contribution of 0). A profile can appear here and in the other lists at once."
         },
         "verdict_by_profile": {
           "type": "object",

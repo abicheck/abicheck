@@ -110,6 +110,7 @@ def _write_release_summary_file(
         suppress=suppress,
         pack_application=pack_application,
         scope_public_headers=scope_public_headers,
+        on_incomplete_scope=terms.policy,
     )
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
     exit_dict = resolve_release_exit_decision_for_report(
