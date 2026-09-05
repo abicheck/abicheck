@@ -35,6 +35,7 @@ from .diff_helpers import make_change
 from .impact.engine import assess_change
 from .model import AbiSnapshot, Visibility
 from .policy.disposition_close import (
+    close_consumer_scope,
     ledger_for,
     record_kept_change,
 )
@@ -1689,13 +1690,26 @@ def check_appcompat(
     from .service import compare_snapshots
     diff = compare_snapshots(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file, scope_to_public_surface=scope_to_public_surface)
 
-    return scope_diff_to_app(
+    scoped = scope_diff_to_app(
         diff, app_path, old_lib_path, new_lib_path,
         policy=policy, policy_file=policy_file, suppression=suppression,
         # ADR-057: old_lib_path is a real binary, so the graph the dump above
         # already attached is only reachable through the snapshot itself.
         old_snapshot=old_snap,
     )
+    # ADR-067: `scope_diff_to_app` deliberately leaves the ledger open, since
+    # the `compare --used-by` path calls it once per consumer and only the
+    # orchestrator knows the union. This standalone entry point *is* that
+    # orchestrator for its own single consumer, so it makes the one closing
+    # call here -- otherwise a caller that reads `result.full_diff` (the
+    # release recommendation, say) would see this scoping's own overlay
+    # findings with no verdict class and the whole-library gating labels.
+    # Found by sweeping every consumer-scoping entry point rather than by a
+    # report of it.
+    close_consumer_scope(
+        ledger_for(diff), diff, gating=scoped.breaking_for_app
+    )
+    return scoped
 
 
 # ---------------------------------------------------------------------------
