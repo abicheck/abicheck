@@ -164,7 +164,21 @@ precedence, extended, not a second gate scheme), and it is raised
 independently of how many *other* selected members compared cleanly: a
 matrix with one clean pair and one unsupported or ambiguous selected
 member is an incompletely checked scope, never a clean pass. It never
-becomes an ABI finding. A **retired support promise** is
+becomes an ABI finding.
+
+The two settings are defined exactly like ADR-049 Phase 7's coverage axis
+(`contract_coverage_exit.py`), so there is one fold shape, not two:
+
+| Setting | `RunOutcome` | `ExitDecision` contribution | Exit status | Report |
+|---|---|---|---|---|
+| `warn` (default) | The scope axis reads `incomplete` (members and reasons listed); the outcome is *not* "scope fully checked" | `0` | Unchanged: `0` when the compared members are clean, the gate's own `2`/`4` otherwise | The compact and full views state the unchecked members and that the scope was incompletely checked; the top-level decision wording never says "compatible" for the whole scope, only for the compared members |
+| `block` | Same axis value | `1`, folded with `max` | A clean `0` becomes `1`; a `2`/`4` is never lowered | Same wording plus the reason the gate failed |
+
+`warn` therefore permits a successful exit for the compared members while
+the outcome and the report remain honest about the scope; it never
+silently upgrades an incomplete scope into a clean one, and the axis is
+persisted in the typed result so a downstream consumer can gate on it
+even when the process exit was `0`. A **retired support promise** is
 configured separately (a contract-policy field), so a project can say
 "macOS is no longer supported" and have that evaluated as a contract
 change, while a missing macOS job stays an incomplete run.
@@ -259,9 +273,11 @@ the replaced set-difference and canonical-fallback paths.
   (warn by default, block when configured) and no invented API deletion.
 - A mixed matrix — one selected member compared cleanly, another selected
   member `unsupported` (or ambiguously matched) — reports the clean pair's
-  findings *and* an incomplete-scope outcome; under `block` it is not a
-  clean pass, and under `warn` the report still states the unchecked
-  member.
+  findings *and* an incomplete-scope outcome. Under `warn` the exit status
+  is `0`, the `RunOutcome` scope axis reads `incomplete`, and every view
+  names the unchecked member; under `block` the same run exits `1`, and a
+  run whose compared members already exit `4` still exits `4` under either
+  setting.
 - A run with zero valid comparisons reports `no comparison completed`
   under every completeness policy.
 - Replacing unavailable evidence with empty evidence fails a test.
