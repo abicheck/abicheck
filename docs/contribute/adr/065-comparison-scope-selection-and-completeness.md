@@ -102,14 +102,18 @@ inferred from acquisition state alone.
 
 A member present on one side and absent on the other is `unmatched` with a
 recorded reason. It becomes a *removal* finding only when the selected
-domain's completeness is proven: the new side's inventory is complete for
-the boundary (a full package inventory, a matrix whose expected members all
-resolved, or an explicit user statement that the new side is complete). In
-a partial or selected run, an unmatched baseline member is `out_of_scope`
-and contributes nothing to the verdict. The existing
-`BUNDLE_LIBRARY_REMOVED`/`_ADDED` kinds and `--fail-on-removed-library`
-keep their meaning and become consumers of the proven-complete state
-rather than of a raw set difference.
+domain's completeness is proven on the side that lacks it: the new side's
+inventory is complete for the boundary (a full package inventory, a matrix
+whose expected members all resolved, or an explicit user statement that
+the new side is complete). The rule is symmetric: a new-only member becomes
+an *addition* finding only when the **old** side's inventory is proven
+complete, since a partial old input cannot prove the member was absent from
+the old release. In a partial or selected run, an unmatched member on
+either side is `out_of_scope` and contributes nothing to the verdict. The
+existing `BUNDLE_LIBRARY_REMOVED`/`_ADDED` kinds and
+`--fail-on-removed-library` keep their meaning and become consumers of the
+proven-complete state of the relevant side rather than of a raw set
+difference.
 
 ### D3 — Ambiguity is a diagnostic, never a guess
 
@@ -236,6 +240,9 @@ the replaced set-difference and canonical-fallback paths.
 - A complete old/new package with a library absent from the new inventory
   yields a component-removal finding with inventory evidence, without a
   sibling consumer.
+- A partial old input against a complete new package yields no addition
+  finding for a new-only member (old-side completeness unproven); the same
+  pair with a complete old inventory does.
 - A declared matrix with a failed expected member yields incompleteness
   (warn by default, block when configured) and no invented API deletion.
 - A run with zero valid comparisons reports `no comparison completed`

@@ -66,10 +66,19 @@ generalizes G38 Phase 14's fix for public-surface scoping).
 
 ### D2 — One change, one terminal disposition, many matches
 
-Each atomic detected change carries exactly one terminal **policy**
-disposition for counting: `gating`, `suppressed`, `reclassified`,
-`acknowledged`, `out_of_contract`, `unresolved_relevance`, or
-`deduplicated`. It may additionally record every rule that matched, the
+Each atomic detected change carries exactly one terminal **effective gate
+disposition** for counting: `gating`, `non_gating` (evaluated by policy,
+contributes nothing to the gate), `suppressed`, `out_of_contract`,
+`unresolved_relevance`, or `deduplicated`. Two *transformations* are
+recorded as independent attributes on the same change, never as
+alternatives to that disposition: `reclassified` (from → to, with the
+rule) and `acknowledged` (with the record). A change reclassified from
+`COMPATIBLE` to `BREAKING` is `reclassified` **and** `gating`; the reverse
+is `reclassified` and `non_gating`; an acknowledged break is `acknowledged`
+and whatever the policy makes its gate contribution (D5). Disposition
+counts therefore sum to the detected total, while reclassified and
+acknowledged counts are reported as overlays on that total, not added to
+it. The change may additionally record every rule that matched, the
 winning rule and why it won (precedence), and every consumer it affects.
 Presentation is a separate, per-view attribute — `shown`, `collapsed`, or
 `filtered` by `--show-only`, a report mode, or truncation — recorded
