@@ -1854,13 +1854,54 @@ track, the steps are ordered.
 | **T6 — Effective gate/policy convergence** ✅ *(landed 2026-09-05; the shared fold and the derived scheme are done, the two runtime shapes remain P0's own job)* | Collapse `apply_release_gate_pack`'s raw-string mirror of `pack_application.apply_to_compare_config` onto one shared fold **without inverting the dependency direction** — `policy/release_gate_options.py` deliberately consumes a `_GatePackApplication` `Protocol` rather than importing the flat-root `pack_application`, since `policy` may not import it (ADR-061; `policy/AGENTS.md`'s "Permitted imports"), so the shared fold belongs in an inward module both may import, or an outer layer invokes both halves — never a `policy → legacy root` call. Also make `GateOptions.exit_code_scheme` derived rather than independently constructible | `policy/release_gate_options.py`, `pack_application.py`, a new inward fold owner, `tests/test_release_gate_pack_fold_parity.py` | nothing |
 | **T7 — Canonical export index** | One raw export index plus named projections (versioned ELF / default versions / Mach-O normalization / named PE / ordinal imports / missing-vs-empty); delete the five sibling implementations | `policy/depth_projection.py`, `buildsource/crosscheck_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, `diff_unnamed_types.py` | nothing |
 | **T8 — Action boundary** | Remove the residual raw-exit/stderr verdict reconstruction; keep only a transport-level no-result fallback; keep `fail-on-*` as step policy that never rewrites the verdict | `action/run.sh`, `action/` tests | nothing |
-| **T9 — Fact provenance and scope** | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, the import adapter | ~~T2~~ — satisfied (T2 landed 2026-09-05, so the ladder and `investigated_declined` are available to record this work's status); otherwise independent |
+| **T9 — Fact provenance and scope** (first slice landed 2026-09-05 — see note below the table) | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, the import adapter | ~~T2~~ — satisfied (T2 landed 2026-09-05, so the ladder and `investigated_declined` are available to record this work's status); otherwise independent |
 | **T10 — Shared report preparation** | Compute evaluated findings/outcomes once ahead of format-specific construction; remove **both** runtime cycle escape hatches, which are distinct sites with distinct fixes: `render_markdown_document._reporter_markdown()`'s `..reporter_markdown` load (the Markdown cycle) and `report/scoped_gate.py`'s `..reporter` load (scoped-JSON construction, whose cycle exists only because `apply_scoped_gate` mutates an already-built payload); give consumer scoping an explicit finalization boundary instead of mutating shared changes | `report/render_markdown_document.py`, `report/render_markdown_alternate.py`, `report/scoped_gate.py`, `reporter_markdown.py`, `appcompat.py`'s `scope_diff_to_app` | T5's appcompat half for the scoping item |
 
 **Recommended first wave (fully parallel, no shared files):** ~~T1~~ (done),
 ~~T2~~ (done), T6, T7, T8. **Second wave:** T3, T4, T9 (each large enough to be its own
 multi-PR effort). **Third wave:** T5, T10, once T4/T5's shared surfaces
 settle.
+
+**T9's first slice (2026-09-05): the PDB `vtable` fabrication is closed;
+the rest of the item's scope is not.** `Fact[T]` gained a `producer: str |
+None` field (`model/fact.py`) — additive, defaulting to `None`, and
+round-tripped through `storage/fact_codec.py` unversioned (a document
+predating the field simply has no key, decoding to the same default every
+pre-existing construction site already carries). `pdb_model.py`'s
+`_record_from_layout` now constructs every record's `vtable_fact`/
+`vptr_offset_bits_fact` as an explicit `Fact.unsupported(...,
+producer="pdb")` rather than omitting the fields — closing the exact gap
+the 2026-09-04 5B closure diagnosed: PDB's own structural non-evidence and
+a hand-built/typed-API `RecordType`'s `vtable=` omission previously both
+resolved to the identical `NOT_COLLECTED` status, which is why a blanket
+`FactStatus` pre-check (round 2 of that closure) could not tell them apart
+and had to be reverted. `compare/vtable_evidence.
+vtable_transition_is_evidenced` now declines outright, before consulting
+either fallback evidence stream, whenever either side's
+`vtable_fact.status is FactStatus.UNSUPPORTED` — a status a typed-API
+omission never produces, only an explicit incapability claim does — which
+closes both fabrication paths the 2026-09-04 closure named (the size/base
+fallback, and the owned-virtual-function fallback, since PE/PDB's own
+`Function.is_virtual` also defaults `False` unobserved and that stream is
+gated by the identical check). `NOT_COLLECTED`/`FAILED` handling is
+untouched, so the leaf-class regression that closure's round 3 protects
+stays exactly as it was.
+
+**What this slice does not close, left for the item's remaining scope:**
+the DWARF per-translation-unit completeness gap (`Fact.present([])`,
+genuinely `PRESENT`, for a class whose virtuals live in a TU only the
+*other* side's debug info covers) — a producer-*capability* signal like
+`producer`/`UNSUPPORTED` cannot express this, since DWARF genuinely can
+capture the family; the gap is per-TU *scope*, which is the
+observed-vs-inferred / positive-observation-vs-completeness half of this
+item's own stated scope, still unimplemented. Also untouched: the
+legacy-hybrid backfill blocker holding the seven `fact_provenance`-gated
+case-(a) fields (5B's own fourth-through-seventh-slice finding), and the
+shared analysis accounting for declined comparisons (`observed changes` /
+`evaluated requirements` / `unresolved requirements` / `unsupported
+requirements`) this item's own text calls for. Each remains real,
+scoped, separately-actionable work — recorded here rather than implied
+closed by the row above.
 
 ## Acceptance tests
 
