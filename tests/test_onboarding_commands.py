@@ -38,11 +38,16 @@ from __future__ import annotations
 
 import re
 import shlex
+import sys
 from pathlib import Path
 
 import pytest
 
 REPO_DIR = Path(__file__).resolve().parent.parent
+if str(REPO_DIR / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_DIR / "scripts"))
+
+import workflow_examples  # noqa: E402
 
 #: (page, marker at which the runnable walkthrough ends).
 ONBOARDING_PAGES = [
@@ -53,7 +58,6 @@ ONBOARDING_PAGES = [
     ),
 ]
 
-_FENCE_RE = re.compile(r"```(?:bash|sh|shell|console)\n(.*?)```", re.DOTALL)
 #: A local artifact: `libfoo.so`, `libfoo.so.1`, no directory component.
 _LOCAL_LIB_RE = re.compile(r"^lib[\w.+-]*\.so(?:\.\d+)*$")
 
@@ -64,20 +68,14 @@ def _runnable_section(text: str, end_marker: str) -> str:
 
 
 def _commands(section: str) -> list[str]:
-    commands: list[str] = []
-    for block in _FENCE_RE.findall(section):
-        # Blockquoted fences (the "No castxml?" callout) carry a "> " prefix.
-        cleaned = "\n".join(
-            line[2:] if line.startswith("> ") else line.removeprefix(">")
-            for line in block.splitlines()
-        )
-        # Join shell line continuations, drop comments and prompts.
-        cleaned = cleaned.replace("\\\n", " ")
-        for line in cleaned.splitlines():
-            line = line.split("#", 1)[0].strip().removeprefix("$ ").strip()
-            if line:
-                commands.append(line)
-    return commands
+    """Delegates to `workflow_examples.documented_commands`.
+
+    Deliberately not a second parser. This file originally carried its own
+    copy, which is the same "second copy free to drift" smell these tests
+    exist to catch -- and the two would have had to be fixed in lockstep
+    when the shared one's fence regex was corrected.
+    """
+    return workflow_examples.documented_commands(section)
 
 
 def _built_and_used(commands: list[str]) -> tuple[set[str], set[str]]:
@@ -138,22 +136,23 @@ def test_the_first_check_page_and_the_workflow_agree_on_the_build_commands():
     """The page is a second copy of the workflow's own commands. It may show
     fewer of them, but it must not show a *different* one -- that is the
     drift `workflow_examples.readme_drift` prevents inside the workflow
-    directory and cannot see from here."""
-    import sys
+    directory and cannot see from here.
 
-    if str(REPO_DIR / "scripts") not in sys.path:
-        sys.path.insert(0, str(REPO_DIR / "scripts"))
-    import workflow_examples
-
+    Whole normalized command lines, never a substring of the page: a
+    substring test passes when the page *extends* a command (the page shows
+    `... --contract public`, the manifest still runs the shorter form), which
+    is exactly the hole this PR closed in `readme_drift` and then
+    reintroduced here at the second synchronization boundary.
+    """
     workflow = workflow_examples.load(
         workflow_examples.WORKFLOWS_DIR / "compare-release"
     )
     page = REPO_DIR / "docs" / "start" / "first-check.md"
-    documented = workflow_examples.normalize_command(
+    documented = _commands(
         _runnable_section(page.read_text(encoding="utf-8"), "For your own library:")
     )
     for step in workflow.steps:
         assert workflow_examples.normalize_command(step.run) in documented, (
-            f"first-check.md does not show the workflow's {step.name!r} command; "
-            "the two would drift silently"
+            f"first-check.md does not show the workflow's {step.name!r} command "
+            f"verbatim; the two would drift silently. Page shows: {documented}"
         )

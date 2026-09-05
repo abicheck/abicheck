@@ -631,3 +631,44 @@ def test_documented_commands_reads_a_blockquoted_fence():
     """The no-CastXML callout style: a fence nested inside a blockquote."""
     text = "> ```bash\n> abicheck compare a.so b.so\n> ```\n"
     assert workflow_examples.documented_commands(text) == ["abicheck compare a.so b.so"]
+
+
+# --------------------------------------------------------------------------
+# The untouched-source-tree check must compare contents, not sizes. A
+# workflow command that rewrites a checked-in file in place *without
+# changing its length* left a size-keyed signature identical, so the runner
+# reported success while the invariant it claims to enforce was violated --
+# and a same-length rewrite is the ordinary shape of an in-place edit.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("return a + b;\n", "return a - b;\n"),
+        ("VERSION = 1\n", "VERSION = 2\n"),
+        ("abcdef\n", "fedcba\n"),
+        ("", ""),
+    ],
+)
+def test_the_tree_signature_detects_a_same_length_rewrite(
+    tmp_path: Path, before: str, after: str
+):
+    runner = _load_runner()
+    target = tmp_path / "src.c"
+    target.write_text(before, encoding="utf-8")
+    original = runner._tree_signature(tmp_path)
+    target.write_text(after, encoding="utf-8")
+    assert len(before) == len(after), "the case must be a *same-length* rewrite"
+    changed = runner._tree_signature(tmp_path) != original
+    assert changed == (before != after)
+
+
+def test_the_tree_signature_notices_added_and_removed_files(tmp_path: Path):
+    runner = _load_runner()
+    (tmp_path / "a.c").write_text("x\n", encoding="utf-8")
+    original = runner._tree_signature(tmp_path)
+    (tmp_path / "b.c").write_text("y\n", encoding="utf-8")
+    assert runner._tree_signature(tmp_path) != original
+    (tmp_path / "b.c").unlink()
+    assert runner._tree_signature(tmp_path) == original

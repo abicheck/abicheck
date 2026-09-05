@@ -35,6 +35,7 @@ guard exists for).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -62,9 +63,18 @@ def _missing_tools(workflow: workflow_examples.Workflow) -> list[str]:
     return [tool for tool in workflow.requires if shutil.which(tool) is None]
 
 
-def _tree_signature(root: Path) -> dict[str, int]:
+def _tree_signature(root: Path) -> dict[str, str]:
+    """path -> content hash, for the untouched-source-tree check.
+
+    Contents, not `st_size`: a workflow command that rewrites a checked-in
+    file *in place without changing its length* leaves a size-keyed
+    signature identical, so the runner would report success while the
+    byte-identical-source-tree invariant it claims to enforce had been
+    violated. Same-length rewrites are the ordinary shape of an in-place
+    edit (a flag flipped, a version bumped, a name swapped).
+    """
     return {
-        str(p.relative_to(root)): p.stat().st_size
+        str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
         for p in sorted(root.rglob("*"))
         if p.is_file()
     }
