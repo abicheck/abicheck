@@ -192,16 +192,13 @@ _SPECIALIZED_SECTION_KINDS = frozenset(
 #: under, independent of every other axis.
 SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
     SEMANTIC_IR_SECTION_KIND: 1,
-    # ADR-063 Phase 8's full D8 split: every `storage.legacy_sections
-    # .LEGACY_SECTION_KINDS` entry starts at version 1, the same way
-    # `SEMANTIC_IR_SECTION_KIND` did before it shipped its own first real
-    # producer — each is its own independent axis from here on, so a future
-    # `"binary"` schema change never forces a bump on `"declarations"`.
+    # ADR-063 Phase 8's full D8 split: every `LEGACY_SECTION_KINDS` entry is
+    # its own independent axis from version 1 on, so a future `"binary"`
+    # schema change never forces a bump on `"declarations"`.
     **{kind: 1 for kind in LEGACY_SECTION_KINDS},
-    # ADR-063 Track C 8B: the two variant-level section kinds, independent
-    # of every axis above for the identical reason. Composition v2 (ADR-065
-    # D8) adds the decision-bearing `degraded_members` map; a composition
-    # with no degraded member is still *written* at v1 (see
+    # ADR-063 Track C 8B: the two variant-level kinds, independent likewise.
+    # Composition v2 (ADR-065 D8) adds the decision-bearing `degraded_members`
+    # map; a composition with none is still *written* at v1 (see
     # `bundle_composition_to_dto`) so a pre-S2 reader keeps opening it.
     BUNDLE_COMPOSITION_SECTION_KIND: 2,
     BASELINE_SET_SECTION_KIND: 1,
@@ -209,14 +206,22 @@ SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
 
 
 def _bundle_composition_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    # v1 predates the marker; a v1 section *carrying* one would still open in
-    # a pre-S2 reader that ignores it, so it is refused, not migrated (Codex).
-    """Composition v1 -> v2: supply the empty ``degraded_members`` map v1 predates."""
-    if payload.get("degraded_members"):
-        raise ValueError(
-            f"{BUNDLE_COMPOSITION_SECTION_KIND!r} section v1 carries a non-empty "
-            "'degraded_members' marker, which requires section version 2 (ADR-065 D8)"
-        )
+    """Composition v1 -> v2: supply the empty ``degraded_members`` map v1
+    predates. A v1 section *carrying* a marker would still open in a pre-S2
+    reader that ignores it, so it is refused, not migrated (Codex); so is a
+    present non-mapping (``null``, a list) -- only absent or ``{}`` is v1."""
+    if "degraded_members" in payload:
+        raw = payload["degraded_members"]  # frozen: a MappingProxyType, not a dict
+        if not isinstance(raw, Mapping):
+            raise ValueError(
+                f"{BUNDLE_COMPOSITION_SECTION_KIND!r} section v1 'degraded_members' "
+                f"must be a mapping, got {type(raw).__name__}"
+            )
+        if raw:
+            raise ValueError(
+                f"{BUNDLE_COMPOSITION_SECTION_KIND!r} section v1 carries a non-empty "
+                "'degraded_members' marker, which requires section version 2 (ADR-065 D8)"
+            )
     return {**payload, "degraded_members": {}}
 
 
@@ -504,14 +509,10 @@ def bundle_composition_to_dto(payload: Mapping[str, Any]) -> SectionDTO:
     `manifest`, `filesystem_aliases`, `library_filenames` -- as a
     `SectionDTO` (ADR-063 Track C 8B).
 
-    None of these facts names one particular library, so this is its own
-    section kind (not one of ADR-062 D8's eight per-`ArtifactRef` ones),
-    attached by `import_bundle_facts` to the owning `VariantRef`.
-
-    Nothing to encode beyond the version stamp, for `legacy_section_to_dto`'s
-    reason: the caller hands over the already-serialized sub-mapping
-    (`storage/` may not import the modules that produce it -- `storage/
-    AGENTS.md`, "Permitted imports").
+    None of these facts names one library, so this is its own section kind
+    (not one of ADR-062 D8's per-`ArtifactRef` ones), attached by
+    `import_bundle_facts` to the owning `VariantRef`. Nothing to encode
+    beyond the version stamp, for `legacy_section_to_dto`'s reason.
     """
     degraded = payload.get("degraded_members")
     if degraded:

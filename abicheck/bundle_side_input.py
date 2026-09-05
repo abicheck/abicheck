@@ -538,6 +538,13 @@ def compare_release_against_bundle_facts(
         unsupported=unsupported,
         failed=failed,
         old_complete=old_facts.inventory_complete,
+        # An OLD-only degraded member is `failed` on OLD, never `not_supplied`
+        # (Codex review, twenty-ninth round).
+        old_failed={
+            k: f"OLD side was captured degraded ({v}); comparison skipped (ADR-065 D8)"
+            for k, v in old_facts.degraded_members.items()
+            if k not in new_map
+        },
     )
     # ADR-065 D2: the bundle graph sees matched members and proven
     # removals/additions only (Codex review) -- see bundle_analysis_members.

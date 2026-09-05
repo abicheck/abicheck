@@ -418,6 +418,8 @@ def build_stored_baseline_scope_record(
     failed: Mapping[str, str] | None = None,
     old_complete: bool = False,
     new_complete: bool = False,
+    old_failed: Mapping[str, str] | None = None,
+    new_failed: Mapping[str, str] | None = None,
 ) -> ScopeAcquisitionRecord:
     """The record for a stored-baseline driver (`bundle_side_input` /
     `bundle_stored_pair_compare`), through the same builder the live
@@ -439,7 +441,13 @@ def build_stored_baseline_scope_record(
     the live fan-out's per-member handler assigns (D6). *failed* maps a
     matched key whose NEW artifact's extraction failed outright (a damaged
     file, an unreadable binary) to the reason, recorded `failed` -- the
-    live fan-out's own per-member ``ERROR`` result (D1).
+    live fan-out's own per-member ``ERROR`` result (D1). *old_failed*/
+    *new_failed* name an *unmatched* member that side captured degraded:
+    `failed` there too, so a proven inventory on the other side never turns
+    a degraded capture into a removal or an addition -- and the marker is
+    dropped with the member by `restrict_bundle_facts` instead of reaching
+    `bundle_snapshot_from_facts`, which refuses it (Codex review,
+    twenty-ninth round; the fan-out's own rule since the twenty-seventh).
     """
     old_map = {k: Path(k) for k in old_keys}
     new_map = {k: Path(k) for k in new_keys}
@@ -464,7 +472,15 @@ def build_stored_baseline_scope_record(
         new=_stored_facts_inventory(new_complete, new_provenance),
         new_single_artifact=new_single_artifact,
     )
-    return build_release_scope_record(old_map, new_map, matched, results, evidence)
+    return build_release_scope_record(
+        old_map,
+        new_map,
+        matched,
+        results,
+        evidence,
+        old_failed=old_failed,
+        new_failed=new_failed,
+    )
 
 
 def release_global_ran(

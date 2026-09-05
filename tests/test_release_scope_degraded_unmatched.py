@@ -22,6 +22,8 @@ from hypothesis import given, settings, strategies as st
 from test_release_scope_bundle import _lib
 from test_release_scope_completeness import _invoke_json, _write_stored_package
 
+from abicheck.bundle_facts import capture_bundle_facts
+from abicheck.model import AbiSnapshot
 from abicheck.model.scope_acquisition import AcquisitionState
 from abicheck.workflows.release_scope import (
     StoredDegradedMembers,
@@ -151,3 +153,99 @@ class TestRecordBuilderNeverPromotesAFailedMember:
         assert not (removed & marked) and not (added & marked)
         assert removed == (old - new) - marked
         assert added == (new - old) - marked
+
+
+class TestStoredDriversFailAnUnmatchedDegradedMember:
+    """The two stored-baseline drivers (Codex review, twenty-ninth round):
+    an unmatched degraded member is `failed` on its own side, never a
+    proven removal/addition, and its marker never reaches
+    `bundle_snapshot_from_facts` -- the sibling comparison survives."""
+
+    @staticmethod
+    def _elf(name: str) -> AbiSnapshot:
+        from test_release_scope_completeness import _elf_snap
+
+        return _elf_snap(name)
+
+    @pytest.mark.parametrize("degraded_side", ["old", "new"])
+    def test_stored_pair(self, tmp_path: Path, degraded_side: str) -> None:
+        from abicheck.serialization import save_bundle_facts
+        from abicheck.workflows.bundle_stored_pair_compare import (
+            compare_stored_bundle_facts_pair,
+        )
+
+        shared = {"libok.so": self._elf("libok.so")}
+        only = {"libonly.so": self._elf("libonly.so")}
+        marker = {"libonly.so": "ELF-only: boom"}
+        old = tmp_path / "old.bundlefacts.json"
+        new = tmp_path / "new.bundlefacts.json"
+        # Both sides assert a complete inventory: the strongest proof the
+        # lacking side can offer, which must still not promote the member.
+        if degraded_side == "old":
+            save_bundle_facts(
+                capture_bundle_facts(
+                    {**shared, **only}, degraded_members=marker, inventory_complete=True
+                ),
+                old,
+            )
+            save_bundle_facts(
+                capture_bundle_facts(shared, inventory_complete=True), new
+            )
+        else:
+            save_bundle_facts(
+                capture_bundle_facts(shared, inventory_complete=True), old
+            )
+            save_bundle_facts(
+                capture_bundle_facts(
+                    {**shared, **only}, degraded_members=marker, inventory_complete=True
+                ),
+                new,
+            )
+        result = compare_stored_bundle_facts_pair(old, new)
+        assert [d.library for d in result.per_library] == ["libok.so"]
+        record = result.scope_record
+        assert record is not None
+        by_key = {m.member: m for m in record.members}
+        assert by_key["libonly.so"].state is AcquisitionState.FAILED
+        assert "degraded" in by_key["libonly.so"].reason
+        assert by_key["libok.so"].state is AcquisitionState.AVAILABLE
+        assert record.proven_removed_members == ()
+        assert record.proven_added_members == ()
+        assert record.is_incomplete and not record.no_comparison_completed
+        assert not any(
+            "bundle_library_removed" in str(f) for f in result.bundle_findings
+        )
+
+    def test_stored_live(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import abicheck.package as package
+        from abicheck.bundle_side_input import compare_release_against_bundle_facts
+        from abicheck.serialization import save_bundle_facts, save_snapshot
+
+        monkeypatch.setattr(
+            package,
+            "discover_shared_libraries",
+            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
+        )
+        libs = {
+            "libok.so": self._elf("libok.so"),
+            "libonly.so": self._elf("libonly.so"),
+        }
+        old = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(
+            capture_bundle_facts(
+                libs,
+                degraded_members={"libonly.so": "ELF-only: boom"},
+                inventory_complete=True,
+            ),
+            old,
+        )
+        new = tmp_path / "new"
+        new.mkdir()
+        save_snapshot(libs["libok.so"], new / "libok.so.json")
+        result = compare_release_against_bundle_facts(old, new)
+        assert [d.library for d in result.per_library] == ["libok.so"]
+        record = result.scope_record
+        assert record is not None
+        by_key = {m.member: m for m in record.members}
+        assert by_key["libonly.so"].state is AcquisitionState.FAILED
+        assert record.proven_removed_members == ()

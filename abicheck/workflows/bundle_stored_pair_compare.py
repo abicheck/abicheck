@@ -341,6 +341,19 @@ def compare_stored_bundle_facts_pair(
         new_provenance="stored bundle-facts capture that made no complete-inventory assertion",
         old_complete=old_facts.inventory_complete,
         new_complete=new_facts.inventory_complete,
+        # An unmatched degraded member is `failed` on its own side (Codex
+        # review, twenty-ninth round): never a proven removal/addition, and
+        # dropped with the member before the bundle graph is rebuilt.
+        old_failed={
+            k: f"OLD side was captured degraded ({v}); comparison skipped (ADR-065 D8)"
+            for k, v in old_facts.degraded_members.items()
+            if k not in new_facts.per_library_snapshots
+        },
+        new_failed={
+            k: f"NEW side was captured degraded ({v}); comparison skipped (ADR-065 D8)"
+            for k, v in new_facts.degraded_members.items()
+            if k not in old_facts.per_library_snapshots
+        },
     )
     # ADR-065 D2 (Codex review): a promise only an excluded member could
     # answer is withheld, not reported as manifest drift.
