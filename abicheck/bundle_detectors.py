@@ -273,8 +273,10 @@ def _detect_unresolved_intra_dependency(
        intra-set library that simply stopped exporting the symbol has a
        real, in-set candidate provider this coarse check cannot rule out.
        Deliberately has **no** symbol-name-shape fallback
-       (``_looks_system_symbol``): ``--bundle-system-providers`` exists
-       specifically to cover a legitimate, non-system-shaped custom export
+       (``_looks_system_symbol``): ``.abicheck.yml``'s ``bundle.
+       system_providers:`` (CLI cleanup phase two, PR J; formerly
+       ``--bundle-system-providers``) exists specifically to cover a
+       legitimate, non-system-shaped custom export
        (e.g. ``vendor_init``) that a shape heuristic would never match.
     3. Emits ``ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY`` (not
        ``BUNDLE_INTRA_DEP_REMOVED`` — that kind implies a diff-confirmed
@@ -416,8 +418,7 @@ def _detect_duplicate_providers(new: BundleSnapshot) -> list[BundleFinding]:
     symbol as their own strong (``STB_GLOBAL``), default-bound export means
     an unversioned reference resolves to whichever the dynamic linker's
     load-order rules pick first, not a declared contract. Only
-    ``is_default`` providers count (mirrors
-    :class:`~abicheck.bundle_models.ProviderEntry.is_default`).
+    ``is_default`` providers count (mirrors ``ProviderEntry.is_default``).
 
     **Only strong providers count** (Codex review, fresh evidence): a
     weak/``STB_GNU_UNIQUE`` copy is ordinary C++ vague linkage (an inline

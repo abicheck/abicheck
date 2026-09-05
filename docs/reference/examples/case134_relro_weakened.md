@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `relro_weakened` |
 | **Source files** | `examples/case134_relro_weakened/` |
+| **Rule family** | [`relro-weakened`](by-rule/relro-weakened.md) |
 
 **Category:** ELF / Security | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -107,4 +109,4 @@ one pass over the binary.
 - `v1.c`
 - `v2.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Relro weakened](by-rule/relro-weakened.md)._

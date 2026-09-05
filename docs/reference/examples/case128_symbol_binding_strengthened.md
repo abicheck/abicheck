@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `symbol_binding_strengthened` |
 | **Source files** | `examples/case128_symbol_binding_strengthened/` |
+| **Rule family** | [`symbol-binding-strengthened`](by-rule/symbol-binding-strengthened.md) |
 
 **Category:** Symbol Binding | **Verdict:** 🟢 COMPATIBLE
 
@@ -104,4 +106,4 @@ same field.
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Symbol binding strengthened](by-rule/symbol-binding-strengthened.md)._

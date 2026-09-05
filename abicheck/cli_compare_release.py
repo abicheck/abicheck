@@ -58,6 +58,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _release_md_changed_libraries,
     _release_md_libraries_table,
     _release_md_matrix_findings,
+    _resolve_bundle_manifest,
     _resolve_release_headers,
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
     _run_bundle_analysis,
@@ -204,32 +205,16 @@ if TYPE_CHECKING:
     "the default). An explicit positive value is never memory-clamped.",
 )
 @click.option(
-    "--manifest",
+    "--instantiation-manifest",
     "manifest_path",
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help="ABI instantiation manifest (YAML/JSON) listing symbols the "
-    "release publicly promises. See ADR-023.",
-)
-@click.option(
-    "--bundle-system-providers",
-    "bundle_system_providers",
-    default="",
-    help="Comma-separated extra sonames to treat as system-provided "
-    "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list). "
-    "Matched against the real DT_NEEDED soname either exactly or by its "
-    "version-suffix-stripped stem (e.g. 'libmkl_core' matches a real "
-    "'libmkl_core.so.2' DT_NEEDED entry); matching is case-sensitive.",
-)
-@click.option(
-    "--bundle-cohort",
-    "bundle_cohorts",
-    multiple=True,
-    metavar="PREFIX",
-    help="Declare a co-versioned library cohort by name prefix (e.g. "
-    "'libfoo_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check, "
-    "which flags when some members of the cohort bump their major SONAME "
-    "while siblings lag.",
+    "release publicly promises. See ADR-023. Renamed from --manifest "
+    "(CLI cleanup phase two, PR J) -- inert here (ADR-037 D7, see this "
+    "module's own release_input_options docstring), kept in sync with "
+    "the real, user-facing spelling on frontends/cli/options/release.py "
+    "purely for reader consistency.",
 )
 @click.option(
     "--no-bundle-analysis",
@@ -276,6 +261,23 @@ if TYPE_CHECKING:
     default=None,
     help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).",
 )
+@click.option(
+    "--old-variant",
+    "old_variant",
+    default=None,
+    metavar="VARIANT_ID",
+    help="Which build variant to compare when OLD_DIR is a stored "
+    "ProjectSnapshot package declaring more than one (ADR-062 A1.7). "
+    "Defaults to the package's only variant when it declares exactly one; "
+    "a usage error otherwise. No-op for a live directory/archive operand.",
+)
+@click.option(
+    "--new-variant",
+    "new_variant",
+    default=None,
+    metavar="VARIANT_ID",
+    help="The --old-variant counterpart for NEW_DIR.",
+)
 # ── Severity (shared family, ADR-037 D3; mirrors `compare`) ───────────────────
 @severity_options
 def compare_release_cmd(
@@ -311,7 +313,7 @@ def compare_release_cmd(
     verbose: bool,
     jobs: int,
     manifest_path: Path | None,
-    bundle_system_providers: str,
+    bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...],
     no_bundle_analysis: bool,
     bundle_facts_out: Path | None,
@@ -330,7 +332,6 @@ def compare_release_cmd(
     severity_potential_breaking: str | None = None,
     severity_quality_issues: str | None = None,
     severity_addition: str | None = None,
-    release_exit_code_scheme: str | None = None,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     # CLI cleanup phase two, PR B slice 1: `compare`'s directory/package
@@ -356,6 +357,12 @@ def compare_release_cmd(
     # (`_prepare_compare_release_inputs`). `()` (the default) is a true
     # no-op.
     config_includes: tuple[Path, ...] = (),
+    # ADR-062 A1.7: which `VariantRef` to resolve on each side, when that
+    # side is a stored `ProjectSnapshot` package directory declaring more
+    # than one -- a true no-op (`None`) for every live directory/archive
+    # operand and for a package declaring exactly one variant.
+    old_variant: str | None = None,
+    new_variant: str | None = None,
     # D1: `compare`'s directory/package fan-out forwards the one `--depth`
     # value it can actually honour on this path -- `"binary"` (an explicit
     # assertion that clears header/build/source evidence, matching a
@@ -414,6 +421,24 @@ def compare_release_cmd(
         is_package,
         resolve_package_debug_info as resolve_debug_info,
     )
+
+    # ADR-062 A1.7: --old-variant/--new-variant are declared on `compare`
+    # itself (`cli_options.variant_options`, `expose_value=False` + a
+    # `ctx.meta` stash) rather than on this unregistered internal command,
+    # so a caller reaching this function via `.callback(**kwargs)` -- every
+    # real caller -- never has them in `kwargs` at all; recovered here from
+    # the still-current Click context instead, so `frontends/cli/commands/
+    # compare.py`'s own already-capped `_dispatch_release_compare` doesn't
+    # have to grow to inject them (Codex review: keep the variant-plumbing
+    # responsibility off that file's own line budget).
+    if old_variant is None and new_variant is None:
+        from .cli_options import variant_kwargs_from_context
+
+        ctx = click.get_current_context(silent=True)
+        if ctx is not None:
+            variant_kwargs = variant_kwargs_from_context(ctx)
+            old_variant = variant_kwargs["old_variant"]
+            new_variant = variant_kwargs["new_variant"]
 
     _setup_verbosity(verbose)
 
@@ -501,6 +526,9 @@ def compare_release_cmd(
                 discover_shared_libraries,
                 is_package,
                 _is_elf_shared_object,
+                old_variant=old_variant,
+                new_variant=new_variant,
+                make_temp_dir=_make_temp_dir,
             )
 
             if fmt != "json":
@@ -513,22 +541,21 @@ def compare_release_cmd(
 
             # CLI cleanup phase two, ADR-064 "GateOptions" rewrite: one
             # resolution replaces the release fan-out's previous three
-            # independent re-derivations of the same SeverityConfig from six
-            # raw preset/category/scheme strings. `resolve_release_gate_options`
-            # folds a selected `kind: gate` pack's gate.exit_code_scheme/
-            # gate.severity.<category> contribution
-            # (`apply_release_gate_pack`), then resolves the severity config
-            # and applies the same `.abicheck.yml`-only `exit_code_scheme:
-            # severity` default-preset fallback and forced-`legacy` clearing
-            # this call site used to apply itself. Every downstream consumer
-            # (this function's own `severity_config`, the per-library JSON
-            # write inside `_compare_release_libraries`,
+            # independent re-derivations of the same SeverityConfig from
+            # five raw preset/category strings. `resolve_release_gate_
+            # options` folds a selected `kind: gate` pack's gate.severity.
+            # <category> contribution (`apply_release_gate_pack`), then
+            # resolves the severity config -- since PR G2 removed the
+            # manual algorithm selector, `gate.exit_code_scheme` is purely
+            # derived from whether `gate.severity` ended up non-`None`, not
+            # a fourth independent input any more. Every downstream
+            # consumer (this function's own `severity_config`, the
+            # per-library JSON write inside `_compare_release_libraries`,
             # `_compute_release_severity_exit_code`,
             # `_fold_release_global_severity`) now reads the resulting
             # `GateOptions` instead of independently re-deriving it.
             gate = resolve_release_gate_options(
                 pack_application,
-                release_exit_code_scheme=release_exit_code_scheme,
                 severity_preset=severity_preset,
                 severity_abi_breaking=severity_abi_breaking,
                 severity_potential_breaking=severity_potential_breaking,
@@ -540,10 +567,8 @@ def compare_release_cmd(
             # (schema 2.43/2.44, computed inside _compare_release_libraries's
             # primary pass and read by the Action, not the CLI) reflect the same
             # severity-aware gate as the exit code below, instead of the legacy
-            # kind-set mapping. `None` when no severity setting was in effect,
-            # or when the resolved scheme pins legacy for set inputs.
+            # kind-set mapping. `None` when no severity setting was in effect.
             severity_config = gate.severity
-            release_exit_code_scheme = gate.exit_code_scheme
             severity_preset = gate.severity_preset
 
             # JUnit, bundle analysis, and annotations all reuse the
@@ -673,6 +698,23 @@ def compare_release_cmd(
                     manifest_path,
                     old_map,
                     resolve_stranded_library=_resolve_stranded_library,
+                    # ADR-062 A1.7: the same explicit-or-embedded manifest
+                    # resolution the bundle-analysis call below applies, so
+                    # a stored OLD side's own manifest-drift contract is
+                    # captured into this baseline too -- old_side_only=True
+                    # (Codex review, fresh evidence): this baseline
+                    # describes OLD alone, so NEW's own embedded manifest
+                    # must never be attributed to it.
+                    resolved_manifest=_resolve_bundle_manifest(
+                        manifest_path,
+                        old_dir,
+                        new_dir,
+                        old_map,
+                        new_map,
+                        old_variant=old_variant,
+                        new_variant=new_variant,
+                        old_side_only=True,
+                    ),
                 )
 
             # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
@@ -734,6 +776,10 @@ def compare_release_cmd(
                     policy_file=resolve_bundle_policy_file(
                         suppress, policy, policy_file_path, pack_application
                     ),
+                    old_root=old_dir,
+                    new_root=new_dir,
+                    old_variant=old_variant,
+                    new_variant=new_variant,
                 )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.

@@ -130,7 +130,10 @@ def attach_prior_on_budget_overflow(
 
 
 def scan_abort_result_fields(
-    axis: ScanAbortAxis, *, prior_decision: dict[str, Any] | None = None
+    axis: ScanAbortAxis,
+    *,
+    prior_decision: dict[str, Any] | None = None,
+    msg: str | None = None,
 ) -> ScanAbortResultFields:
     """Every `ScanResult` field `service_scan.run_scan`/
     `_run_scan_one_member` need for one of `run_scan_core`'s two abort
@@ -157,6 +160,14 @@ def scan_abort_result_fields(
     coverage/assurance decision before `_BudgetOverflow` fired should pass
     it so the persisted report still shows those contributions, matching
     that resolver's own "budget discards, but preserves" contract.
+
+    *msg* is `_EvidenceContractError.message` (Codex review, PR #1062): every
+    caller used to drop it on the floor, so an ``EVIDENCE_CONTRACT_ERROR``
+    report (single-binary or one ``--artifact-set`` member) carried the
+    verdict but never *why* -- which of ADR-037 D5's two raise sites fired.
+    Stored under ``report["evidence_contract_error_message"]``, not folded
+    into `ExitDecision` itself (a plain string, no stable reason-code shape);
+    `None` for `budget_overflow`, which carries no such message.
     """
     prior = ExitDecision.from_dict(prior_decision) if prior_decision else None
     decision = resolve_scan_exit_decision(
@@ -170,6 +181,8 @@ def scan_abort_result_fields(
         "scan_schema_version": SCAN_SCHEMA_VERSION,
         "exit": decision.to_dict(),
     }
+    if axis == "evidence_contract_error" and msg:
+        report["evidence_contract_error_message"] = msg
     return ScanAbortResultFields(verdict=verdict, exit_code=exit_code, report=report)
 
 

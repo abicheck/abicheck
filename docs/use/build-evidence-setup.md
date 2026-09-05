@@ -203,8 +203,14 @@ source:
   method: s4               # legacy S-axis escape hatch (deprecated; prefer the --depth dial)
 sources:
   graph: summary           # summary | full — L5 source-graph detail (the key is sources.graph)
-exit_code_scheme: auto     # auto | legacy | severity (ADR-037 D12)
 ```
+
+There is no `exit_code_scheme:` key any more (CLI cleanup phase two PR G2
+removed it, along with `--exit-code-scheme`): the gate algorithm is fully
+automatic, determined by whether the `severity:` block above (or a
+`--severity-preset`/`kind: gate` pack) puts a severity setting in effect —
+see [CI Gating → the two exit-code
+schemes](ci-gating.md#the-two-exit-code-schemes).
 
 These keys are the **only** spelling for those settings: the hidden per-run
 CLI flags that used to shadow them were removed, so a project states each

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Scenario — Capability / evidence demonstration |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `func_removed`, `internal_symbol_required_by_public_api` |
 | **Source files** | `examples/case192_call_graph_break_survives_suppression/` |
+| **Related rules** | [`exported-function-removed`](by-rule/exported-function-removed.md), [`internal-symbol-required-by-public-api`](by-rule/internal-symbol-required-by-public-api.md) |
 
 **Category:** Breaking (Source Graph / Suppression) | **Verdict:** 🔴 BREAKING
 

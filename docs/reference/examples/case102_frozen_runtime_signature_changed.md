@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_params_changed`, `func_return_changed` |
 | **Source files** | `examples/case102_frozen_runtime_signature_changed/` |
+| **Rule family** | [`frozen-runtime-signature-changed`](by-rule/frozen-runtime-signature-changed.md) |
 
 **Category:** Runtime contract | **Verdict:** ❌ BREAKING
 
@@ -159,4 +161,4 @@ environment (`abidiff` is not installed here).
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Frozen runtime signature changed](by-rule/frozen-runtime-signature-changed.md)._

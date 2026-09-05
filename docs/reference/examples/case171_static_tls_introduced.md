@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `static_tls_introduced` |
 | **Source files** | `examples/case171_static_tls_introduced/` |
+| **Rule family** | [`static-tls-introduced`](by-rule/static-tls-introduced.md) |
 
 **Category:** Deployment Risk (ELF/Loader) | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -141,4 +143,4 @@ fact above, not whether this particular run happens to fail.
 - `v1.c`
 - `v2.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Static tls introduced](by-rule/static-tls-introduced.md)._

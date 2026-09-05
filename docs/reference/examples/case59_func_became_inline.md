@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `func_removed_elf_only`, `func_visibility_changed` |
 | **Source files** | `examples/case59_func_became_inline/` |
+| **Rule family** | [`func-became-inline`](by-rule/func-became-inline.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +142,4 @@ the symbol-table regression is easy to miss in review.
 - `good.c`
 - `good.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Func became inline](by-rule/func-became-inline.md)._

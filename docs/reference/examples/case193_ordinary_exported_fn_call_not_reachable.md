@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Scenario — Capability / evidence demonstration |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `func_removed` |
 | **Source files** | `examples/case193_ordinary_exported_fn_call_not_reachable/` |
+| **Related rules** | [`exported-function-removed`](by-rule/exported-function-removed.md) |
 
 **Category:** Breaking (Source Graph / Suppression) | **Verdict:** 🔴 BREAKING (without suppression)
 

@@ -15,6 +15,13 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 | `system` | str |
 | `targets` | list[str] (or a single str) |
 
+### `bundle:`
+
+| Sub-key | Type |
+|---|---|
+| `cohorts` | list[str] (or a single str) |
+| `system_providers` | list[str] (or a single str) |
+
 ### `compile:`
 
 | Sub-key | Type |
@@ -79,7 +86,6 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 
 | Key | Type |
 |---|---|
-| `exit_code_scheme` | str |
 | `version` | int |
 
 ## Other recognized top-level keys

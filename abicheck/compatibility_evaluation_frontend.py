@@ -39,7 +39,7 @@ the CLI's own ``compare`` kwargs against the equivalent
 
 - :func:`compare_cli_inputs` -- the ``compare`` command's real kwargs
   (``cli.py``'s option destinations: ``--contract``, ``--scope-public-headers``,
-  ``--policy``/``--policy-file``, ``--severity-preset``, ``--exit-code-scheme``,
+  ``--policy``/``--policy-file``, ``--severity-preset``,
   ``--public-symbol``, ``--suppress``), plus the set of parameters the user
   *actually typed* (Click's ``ctx.get_parameter_source(...)`` is what a live
   caller would pass), since several of those options carry a non-``None``
@@ -128,7 +128,6 @@ POLICY_PACKS_FIELD = "policy.packs"
 POLICY_OVERRIDES_FIELD = "policy.overrides"
 EXPLICIT_SCOPE_FIELD = "surface.explicit_scope"
 REQUIRE_EVIDENCE_FIELD = "assurance.require_evidence"
-EXIT_CODE_SCHEME_FIELD = "gate.exit_code_scheme"
 GATE_PRESET_FIELD = "gate.preset"
 GATE_PACKS_FIELD = "gate.packs"
 SUPPRESSIONS_FIELD = "suppressions"
@@ -468,10 +467,6 @@ class ExplicitCompatibilityInputs:
     public_symbols_list: PublicSymbolsList | None = None
     #: An already-read ``--suppress`` source.
     suppression: SuppressionSource | None = None
-    #: ``--exit-code-scheme``. ``"auto"`` is a stated selection whose value is
-    #: resolved at resolution time (see
-    #: :func:`resolve_compatibility_evaluation_config`).
-    exit_code_scheme: str | None = None
     severity_preset: str | None = None
     severity_abi_breaking: str | None = None
     severity_potential_breaking: str | None = None
@@ -518,13 +513,6 @@ class ProjectCompatibilityInputs:
     scope_public: bool | None = None
     #: ``scope.public_symbols``.
     public_symbols: tuple[str, ...] = ()
-    #: ``exit_code_scheme:`` (``"auto"``/``None`` = unset).
-    exit_code_scheme: str | None = None
-    #: Whether the project literally wrote ``exit_code_scheme:`` -- lets a
-    #: stated ``auto`` outrank a lower-precedence gate pack instead of
-    #: reading as unstated (``BuildConfig.exit_code_scheme`` alone can't
-    #: tell an explicit ``auto`` apart from an absent key).
-    exit_code_scheme_explicit: bool = False
     severity_preset: str | None = None
     severity_abi_breaking: str | None = None
     severity_potential_breaking: str | None = None
@@ -561,8 +549,6 @@ class ProjectCompatibilityInputs:
             sha256=sha256,
             scope_public=cfg.scope_public,
             public_symbols=tuple(cfg.public_symbols),
-            exit_code_scheme=cfg.exit_code_scheme,
-            exit_code_scheme_explicit=cfg.exit_code_scheme_explicit,
             severity_preset=cfg.severity_preset,
             severity_abi_breaking=cfg.severity_abi_breaking,
             severity_potential_breaking=cfg.severity_potential_breaking,
@@ -581,13 +567,14 @@ class RunProfileInputs:
     indistinguishable from a built-in default. Resolving the receipt without
     this layer therefore did not merely under-claim the source -- it produced
     a *wrong* value: ``--profile ci-gate`` runs with
-    ``exit_code_scheme="severity"``, while a resolution that never saw the
-    profile answers ``"legacy"`` for a run stating no severity flag.
+    ``severity_preset="default"``, while a resolution that never saw the
+    profile answers "no severity setting in effect" for a run stating no
+    severity flag.
 
     **A deliberate deviation from D7, recorded rather than smoothed over.**
     ADR-049 scopes ``run_profile`` to execution fields (depth, format,
-    budget, workflow) and assigns the exit-code scheme to the *gate*
-    namespace -- yet the pre-existing ``ci-gate`` bundle
+    budget, workflow) and assigns severity to the *gate* namespace -- yet
+    the pre-existing ``ci-gate`` bundle
     (:data:`~abicheck.cli_options.COMPARE_PROFILES`) really does select it.
     Encoding what the bundle does today is the honest receipt; the two ways
     to remove the deviation (move the key out of ``ci-gate`` into a gate
@@ -595,6 +582,15 @@ class RunProfileInputs:
     neither belongs in the wiring change that found it. Only this one field
     passes ``allow_run_profile=True``; a profile assigning any other field
     still raises, which is what keeps the deviation from spreading.
+
+    (Before CLI cleanup phase two PR G2, this field was ``exit_code_scheme``
+    -- ``ci-gate`` forced ``--exit-code-scheme severity`` directly. PR G2
+    deleted that manual selector everywhere, so ``ci-gate`` was migrated to
+    state ``severity_preset: "default"`` instead: the identical
+    ``SeverityConfig`` the old forced scheme paired with, but expressed as
+    an actual severity setting -- which is what now drives the one
+    automatic algorithm to ``"severity"``, preserving this profile's exact
+    pre-PR-G2 behavior. This field renamed to match.)
 
     The remaining ``ci-gate``/``release-cut``/``quick`` keys (``depth``,
     ``fmt``, ``recommend``, ``stat``) are execution/report concerns with no
@@ -604,10 +600,10 @@ class RunProfileInputs:
     #: The profile's own name (``ci-gate``/``release-cut``/``quick``), for
     #: the receipt's ``reference``.
     name: str | None = None
-    #: ``exit_code_scheme``, only when the profile actually supplied it --
-    #: an explicitly typed flag is filtered out by ``apply_compare_profile``
+    #: ``severity_preset``, only when the profile actually supplied it -- an
+    #: explicitly typed flag is filtered out by ``apply_compare_profile``
     #: before it ever reaches here.
-    exit_code_scheme: str | None = None
+    severity_preset: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -994,19 +990,12 @@ def resolve_compatibility_evaluation_config(
     layers. See :class:`RunProfileInputs` for the one field it can state and
     the ADR deviation that field records.
 
-    ``"auto"`` never reaches a resolved *value*: ADR-037 D12's third
-    ``--exit-code-scheme`` choice means "decide from whether a severity
-    setting is in effect", and
-    :class:`~abicheck.compatibility_evaluation_config.GateConfig` rejects it
-    for that reason. It is still a stated *selection* where a front end can
-    really state it, though: an explicit ``--exit-code-scheme auto``
-    contributes a candidate carrying that decision's answer and outranks a
-    lower layer's concrete scheme, matching
-    ``cli_helpers_compare.resolve_compare_config``. A project config's
-    ``auto`` contributes the same way, but only when
-    :attr:`ProjectCompatibilityInputs.exit_code_scheme_explicit` says the
-    key was literally written -- ``BuildConfig``'s own default for that key
-    *is* ``"auto"``, otherwise indistinguishable from an absent one.
+    There is no ``exit_code_scheme``/``--exit-code-scheme`` field to resolve
+    any more (CLI cleanup phase two PR G2 deleted the manual algorithm
+    selector everywhere): the gate algorithm is fully determined by whether
+    a severity setting is in effect, resolved the identical way
+    ``cli_helpers_compare.resolve_compare_config`` computes it, so there is
+    nothing left for this D7 resolution to decide about it.
 
     Raises :class:`~abicheck.compatibility_evaluation_resolver.FieldResolutionError`
     (D7 usage errors), :class:`~abicheck.compatibility_evaluation_resolver.PackConflictError`
@@ -1059,25 +1048,11 @@ def resolve_compatibility_evaluation_config(
     # and what a front end treats as shadowing cannot drift apart.
     if policy_file_pins_internal_namespaces(explicit.policy_file):
         pinned_contract[INTERNAL_NAMESPACES_FIELD] = _STATED_ELSEWHERE
+    # No `gate.exit_code_scheme` pinning any more (CLI cleanup phase two PR
+    # G2): the manual algorithm selector is not a pack-assignable field at
+    # all (`compatibility_evaluation_wiring.GATE_PACK_FIELD_ROUTES`), so
+    # there is nothing for a pack to conflict about here.
     pinned_gate: dict[str, Hashable] = {}
-    if (
-        explicit.exit_code_scheme is not None
-        or (profile is not None and profile.exit_code_scheme is not None)
-        or (
-            project is not None
-            and (
-                _stated_exit_code_scheme(project.exit_code_scheme) is not None
-                # An explicit project-config `auto` is also a real statement
-                # (see `project_scheme`'s own derivation below) -- without
-                # this, two conflicting gate packs assigning
-                # `gate.exit_code_scheme` were never flagged as conflicting
-                # when the project had explicitly pinned `auto`, since this
-                # check alone couldn't see that pin either.
-                or project.exit_code_scheme_explicit
-            )
-        )
-    ):
-        pinned_gate[EXIT_CODE_SCHEME_FIELD] = _STATED_ELSEWHERE
     # A stated preset owns *every* category it expands into, so those fields
     # are exempt too: without this, two gate packs disagreeing about a
     # category raised a conflict the resolution would then have ignored
@@ -1085,8 +1060,32 @@ def resolve_compatibility_evaluation_config(
     # (Codex review, fresh evidence). One expression decides this and the
     # `default_is_stated` gate below, so the exemption and the precedence it
     # anticipates cannot drift apart.
-    preset_stated = explicit.severity_preset is not None or (
-        project is not None and project.severity_preset is not None
+    # Computed here (not just below, next to the candidate list it also
+    # gates) because `preset_stated`'s own profile clause needs it: a
+    # profile's placeholder preset is discarded once the project states its
+    # own severity policy (see the candidate-building comment below), so
+    # counting the placeholder as "stated" here regardless would pin every
+    # category as `_STATED_ELSEWHERE` even though nothing downstream ever
+    # used the profile's value -- silently blocking a gate pack's own
+    # category assignment from applying (Codex review, fresh evidence).
+    project_states_severity = project is not None and any(
+        getattr(project, attr) is not None
+        for attr in (
+            "severity_preset",
+            "severity_abi_breaking",
+            "severity_potential_breaking",
+            "severity_quality_issues",
+            "severity_addition",
+        )
+    )
+    preset_stated = (
+        explicit.severity_preset is not None
+        or (
+            profile is not None
+            and profile.severity_preset is not None
+            and not project_states_severity
+        )
+        or (project is not None and project.severity_preset is not None)
     )
     for category, field_name in SEVERITY_CATEGORY_FIELDS.items():
         if (
@@ -1337,6 +1336,40 @@ def resolve_compatibility_evaluation_config(
                 sha256=explicit_preset.sha256,
             )
         )
+    # A `--profile` fills `severity_preset` in only where the user left the
+    # flag alone, so it never ties with the explicit candidate above -- it
+    # sits between that and the project config, exactly where D7 puts
+    # `run_profile` (the same deliberate D7 exception `RunProfileInputs`'s
+    # own docstring records, generalized from the removed
+    # `exit_code_scheme` field to `severity_preset`: `ci-gate` states this
+    # field now, per CLI cleanup phase two PR G2's migration, since the
+    # manual algorithm selector `ci-gate` used to set no longer exists).
+    # Codex review, PR #1062, fresh evidence: `ci-gate`'s injected
+    # `"default"` is a placeholder that only exists to activate the
+    # algorithm (see `cli_compare_options._resolve_profile_severity_preset`,
+    # which the live gate computation already discards this candidate to
+    # match) -- once the project states its own severity policy, THAT is
+    # what actually scores the run, so omit the placeholder here too rather
+    # than let the receipt record a `run_profile`-attributed value the live
+    # gate never used. `project_states_severity` is computed once, above
+    # (next to `preset_stated`, which needs the identical predicate).
+    if (
+        profile is not None
+        and profile.severity_preset is not None
+        and not project_states_severity
+    ):
+        profile_preset = severity_preset_identity(profile.severity_preset)
+        preset_candidates.append(
+            _candidate(
+                SelectorLayer.RUN_PROFILE,
+                profile_preset,
+                option="--profile",
+                source_kind="run_profile",
+                reference=profile.name,
+                version=profile_preset.version,
+                sha256=profile_preset.sha256,
+            )
+        )
     if project is not None and project.severity_preset is not None:
         project_preset = severity_preset_identity(project.severity_preset)
         preset_candidates.append(
@@ -1353,7 +1386,10 @@ def resolve_compatibility_evaluation_config(
             )
         )
     gate_preset, prov[GATE_PRESET_FIELD] = _resolve(
-        GATE_PRESET_FIELD, preset_candidates, default=_default(None)
+        GATE_PRESET_FIELD,
+        preset_candidates,
+        default=_default(None),
+        allow_run_profile=True,
     )
 
     preset_base = (
@@ -1424,77 +1460,20 @@ def resolve_compatibility_evaluation_config(
             )
         levels[category] = cast(SeverityLevel, value)
 
-    severity_active = _severity_active(explicit, project, gate_pack_fields)
+    # The one automatic gate algorithm (ADR-064/CLI cleanup phase two PR
+    # G2): purely derived from whether a severity setting ended up in
+    # effect anywhere (CLI, profile, project config, or a gate pack's own
+    # severity level -- all already folded into `levels`/`severity_active`
+    # above). No candidates, no D7 resolution, and no provenance entry of
+    # its own to compute -- there is no longer a selector any front end,
+    # profile, project config, or pack can state to move this value in
+    # either direction.
+    severity_active = _severity_active(explicit, project, gate_pack_fields, profile)
     auto_scheme = "severity" if severity_active else "legacy"
-    scheme_candidates: list[FieldCandidate] = []
-    if explicit.exit_code_scheme is not None:
-        # An explicit `--exit-code-scheme auto` is a *stated selection* --
-        # "decide from whether a severity setting is in effect" -- so it
-        # contributes a candidate carrying that decision's answer, and
-        # outranks a lower layer's concrete scheme exactly as any other
-        # explicit value would. Treating it as "not stated" instead let a
-        # project config's concrete scheme win, diverging from
-        # `cli_helpers_compare.resolve_compare_config`, where the CLI value
-        # wins whatever it is (Codex review).
-        scheme_candidates.append(
-            _candidate(
-                layer,
-                _stated_exit_code_scheme(explicit.exit_code_scheme) or auto_scheme,
-                option="--exit-code-scheme",
-                source_kind="exit_code_scheme",
-                reference=explicit.exit_code_scheme,
-            )
-        )
-    # A `--profile` fills this in only where the user left the flag alone, so
-    # it never ties with the explicit candidate above -- it sits between that
-    # and the project config, exactly where D7 puts `run_profile`. See
-    # `RunProfileInputs` for why a gate field accepts that layer at all.
-    profile_scheme = (
-        _stated_exit_code_scheme(profile.exit_code_scheme) if profile else None
-    )
-    if profile_scheme is not None:
-        scheme_candidates.append(
-            _candidate(
-                SelectorLayer.RUN_PROFILE,
-                profile_scheme,
-                option="--profile",
-                source_kind="run_profile",
-                reference=profile.name if profile is not None else None,
-            )
-        )
-    # `BuildConfig.exit_code_scheme` defaults to the *string* "auto" when
-    # absent, so unlike the CLI flag, a bare `"auto"` is only a real
-    # statement when `exit_code_scheme_explicit` confirms the key was
-    # actually written -- mirroring the explicit-CLI branch above.
-    project_scheme = (
-        _stated_exit_code_scheme(project.exit_code_scheme) or auto_scheme
-        if project is not None and project.exit_code_scheme_explicit
-        else (_stated_exit_code_scheme(project.exit_code_scheme) if project else None)
-    )
-    if project_scheme is not None:
-        scheme_candidates.append(
-            _candidate(
-                SelectorLayer.PROJECT_CONFIG,
-                project_scheme,
-                option="exit_code_scheme",
-                source_kind="exit_code_scheme",
-                sha256=project.sha256 if project is not None else None,
-                path=project.path if project is not None else None,
-            )
-        )
-    exit_code_scheme, prov[EXIT_CODE_SCHEME_FIELD] = _resolve(
-        EXIT_CODE_SCHEME_FIELD,
-        scheme_candidates,
-        default=_default(auto_scheme, source_kind="auto"),
-        pack=gate_pack_fields.get(EXIT_CODE_SCHEME_FIELD),
-        pack_layer=layer,
-        pack_option=pack_option,
-        allow_run_profile=True,
-    )
 
     gate_packs, prov[GATE_PACKS_FIELD] = packs_by_field[GATE_PACKS_FIELD]
     gate = GateConfig(
-        exit_code_scheme=cast(str, exit_code_scheme),
+        exit_code_scheme=auto_scheme,
         preset=cast("ImmutableIdentity | None", gate_preset),
         packs=gate_packs,
         severity=SeverityConfig(**levels),
@@ -1538,34 +1517,24 @@ def resolve_compatibility_evaluation_config(
     )
 
 
-def _stated_exit_code_scheme(value: str | None) -> str | None:
-    """``None`` unless *value* names a real, already-resolved scheme.
-
-    ``"auto"`` is a resolution-time choice, not a value (ADR-037 D12), so it
-    never passes through as one. Whether *selecting* ``auto`` still counts as
-    stating the field depends on the layer, and is decided by the caller --
-    see :func:`resolve_compatibility_evaluation_config`.
-    """
-    if value is None or value == "auto":
-        return None
-    return value
-
-
 def _severity_active(
     explicit: ExplicitCompatibilityInputs,
     project: ProjectCompatibilityInputs | None,
     gate_pack_fields: Mapping[str, Hashable],
+    profile: RunProfileInputs | None = None,
 ) -> bool:
     """Whether *any* severity setting is in effect (drives ``auto``).
 
     Mirrors ``cli_helpers_compare.resolve_compare_config``'s own
-    ``severity_active`` -- a preset or any per-category value, from the CLI or
-    the project config -- and additionally counts a ``kind: gate`` pack that
-    assigns a category, since a pack-supplied severity is no less "in effect"
-    than a config-supplied one.
+    ``severity_active`` -- a preset or any per-category value, from the CLI,
+    a ``--profile``, or the project config -- and additionally counts a
+    ``kind: gate`` pack that assigns a category, since a pack-supplied
+    severity is no less "in effect" than a config-supplied one.
     """
-    if explicit.severity_preset is not None or (
-        project is not None and project.severity_preset is not None
+    if (
+        explicit.severity_preset is not None
+        or (profile is not None and profile.severity_preset is not None)
+        or (project is not None and project.severity_preset is not None)
     ):
         return True
     for category, field_name in SEVERITY_CATEGORY_FIELDS.items():
@@ -1745,7 +1714,6 @@ def compare_cli_inputs(
         public_symbols=tuple(kwargs.get("public_symbols") or ()),
         public_symbols_list=symbols_list,
         suppression=suppression,
-        exit_code_scheme=kwargs.get("exit_code_scheme"),
         severity_preset=kwargs.get("severity_preset"),
         severity_abi_breaking=kwargs.get("severity_abi_breaking"),
         severity_potential_breaking=kwargs.get("severity_potential_breaking"),
@@ -1771,11 +1739,14 @@ def compare_request_inputs(
     and for the same reason (see ``_apply_contract_evaluation_shadow``'s
     ``scope_public_headers_is_explicit=True``).
 
-    ``severity_preset``/``exit_code_scheme`` forward too -- else this
-    receipt's ``gate.*`` block could disagree with ``CompareResult.
-    exit_decision``, which reads them directly. Neither has a per-category
-    or pack field on ``CompareRequest``, so both resolve to built-in
-    defaults, matching a CLI run stating neither (:func:`cross_front_end_differences`).
+    ``severity_preset`` forwards too -- else this receipt's ``gate.*``
+    block could disagree with ``CompareResult.exit_decision``, which reads
+    it directly. It has no per-category or pack field on ``CompareRequest``,
+    so it resolves to a built-in default, matching a CLI run stating none
+    (:func:`cross_front_end_differences`). There is no ``exit_code_scheme``
+    field on ``CompareRequest`` to forward at all (CLI cleanup phase two PR
+    G2 deleted it) -- the gate algorithm is purely derived from whether a
+    severity setting is in effect, the identical computation on both sides.
 
     ``policy_file_path`` and ``suppress`` *are* request fields, though, and
     are loaded from the request when the caller does not pass an
@@ -1798,7 +1769,6 @@ def compare_request_inputs(
         policy_file=policy_file,
         public_symbols=tuple(sorted(request.force_public_symbols or ())),
         suppression=suppression,
-        exit_code_scheme=request.exit_code_scheme,
         severity_preset=request.severity_preset,
     )
 

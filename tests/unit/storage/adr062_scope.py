@@ -53,13 +53,19 @@ import pathlib
 #: container. `snapshot_load_normalization` is a fourth, equally unrelated
 #: body of work: `serialization.snapshot_from_dict`'s on-load legacy-format
 #: migrations (ADR-061 D1's storage-owns-migrations rule), not a Phase 0
-#: identity/availability/versioning primitive.
+#: identity/availability/versioning primitive. `native_identity_aliases` is
+#: a fifth: the same class as `bundle_facts_validation` above -- a
+#: `BundleFacts`-adjacent storage helper (the `ArtifactRef.native_identity`
+#: filename/alias key contract `bundle_facts_store.py`'s writer stamps, plus
+#: `abicheck.bundle`'s own reader), not one of the original Phase 0
+#: identity/availability/versioning/package primitives this scope tracks.
 NON_ADR062_MODULES = frozenset(
     {
         "bundle_archive",
         "bundle_archive_cd_guard",
         "bundle_archive_json_guard",
         "bundle_facts_validation",
+        "native_identity_aliases",
         "json_budget",
         "zstd_frame_guard",
         "fact_codec",

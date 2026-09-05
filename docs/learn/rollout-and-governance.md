@@ -194,9 +194,12 @@ severity:
 suppression:
   require_justification: true   # a rule with no `reason` fails at load time
   strict: true                  # an expired rule fails the run instead of silently reappearing
-
-exit_code_scheme: severity  # 0/1/2/4 from the severity tiers above, not the legacy verdict codes
 ```
+
+The `severity:` block above is itself what selects 0/1/2/4 from the severity
+tiers rather than the legacy 0/2/4 verdict codes — there is no separate
+`exit_code_scheme:` key to set: the scheme is fully automatic, determined by
+whether a severity setting is in effect at all.
 
 There is no `policy:` key: the profile is selected per run with `--policy`
 (or the Action's `policy` input), so that the same repository can be

@@ -1209,15 +1209,12 @@ elif [[ "$MODE" == "compare" ]]; then
   # rejected flags and silently dropped a bundle caller's build-config
   # (Codex review, second round).
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  # bundle-system-providers reaches the cross-library bundle-analysis layer
-  # (ADR-023) the same way --config does above: unconditional, since the CLI
-  # itself already treats it as a no-op (silently ignored) for a single-pair
-  # operand rather than rejecting it outright. Previously not wired to the
-  # Action at all, even though compare's CLI has carried
-  # --bundle-system-providers since ADR-023 (a pre-existing gap, not scoped
-  # to ADR-056 — added here since this pass is wiring the input from scratch
-  # anyway; see ADR-056/G34's Action-wiring correction).
-  add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
+  # CLI cleanup phase two, PR J: --bundle-system-providers/--bundle-cohort
+  # removed from the CLI (and this Action input retired with them) -- the
+  # cross-library bundle-analysis layer's system-provider allow-list
+  # extension and cohort declarations are sourced only from
+  # build-config's own .abicheck.yml `bundle:` block now, which --config
+  # above already forwards unconditionally.
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
     # Case-insensitive, matching the CLI's own DepthParam.convert() (Codex
@@ -1555,7 +1552,10 @@ elif [[ "$MODE" == "scan" ]]; then
       fi
       CMD+=(--artifact-set "$_scan_artifact_set_dir")
     fi
-    add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
+    # CLI cleanup phase two, PR J: --bundle-system-providers removed from
+    # scan's CLI too -- sourced only from build-config's own .abicheck.yml
+    # `bundle.system_providers:` now (forwarded via --config/--build-config
+    # elsewhere in this script for scan mode).
   else
     SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode, unless new-library-set is given}"
     # scan has no per-library fan-out (unlike compare) — a directory/package
@@ -2461,6 +2461,17 @@ _assurance_gated() {
 # review rounds, PR #1032 -- see ADR-064 for the full account). A process's
 # own exit code, reported to its parent by the OS kernel via `wait()`, is
 # the one channel nothing this run spawns can forge.
+#
+# `--artifact-set` shares the identical code 7 as of 2026-09-04
+# (`service_scan._aggregate_scan_set_verdict`) rather than the generic exit
+# 1 it used to floor at for this axis -- the cli-cleanup-phase-two plan had
+# recorded this as "does NOT generalize" (no per-member OS exit code to
+# report for a multi-member in-process scan), but that reasoning conflated
+# "the set has no per-*member* exit code" with "the set process itself has
+# no room for a dedicated code" -- the *set's* own single process exit was
+# never anything but this generic 1 with no other consumer, so redirecting
+# it to 7 needed no new design, only re-checking an old conclusion against
+# the actual code.
 
 # The compatibility axis's own exit code, from the JSON report's severity gate
 # (`severity.exit_code`, schema 2.3). Computed by abicheck *before* the
@@ -2907,7 +2918,7 @@ elif [[ "$MODE" == "scan" ]]; then
     case $ABICHECK_EXIT in
       0) _resolve_clean_exit_verdict ;;
       1)
-        # `scan` exit 1 has four possible sources, not one: it used to be
+        # `scan` exit 1 has three possible sources, not one: it used to be
         # coverage-only ("scan's own verdict codes are 0/2/4/5, so 1 can
         # only come from the orthogonal contract-coverage axis"), but a
         # severity-scheme `scan --against` gates natively at 1 on an
@@ -2916,32 +2927,25 @@ elif [[ "$MODE" == "scan" ]]; then
         # gate when coverage happened to contribute too (Codex review).
         # A crash also exits 1 and must still stay ERROR.
         #
-        # ADR-037 D5's evidence-contract axis moved off this code for a
-        # *single* ARTIFACT (its own dedicated exit code, 7, checked in its
-        # own arm below -- see `cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_
-        # ERROR` for why), but `--artifact-set` still floors *its* own exit
-        # code at 1 for exactly this axis
-        # (`service_scan._aggregate_scan_set_verdict`, since a member's own
-        # abort is caught inside `_run_scan_one_member` and never reaches
-        # `cli_scan.py`'s single-binary catch site at all -- a separate,
-        # not-yet-closed half of this same gap, see ADR-064). Only the JSON
-        # report can tell that case apart from a real CLI error at exit 1
-        # (Codex review, fresh evidence -- restoring the check an earlier
-        # revision of this fix dropped entirely, regressing the
-        # `--artifact-set` case): `_json_report_src`/`_report_query` are the
-        # same primitives every other exit-1 disambiguation here already
-        # uses, so this needs no new helper.
+        # ADR-037 D5's evidence-contract axis is off this code entirely as
+        # of 2026-09-04 — both a single ARTIFACT and every `--artifact-set`
+        # member now share the one dedicated exit code, 7, checked in its
+        # own arm below (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`;
+        # `--artifact-set`'s own aggregation,
+        # `service_scan._aggregate_scan_set_verdict`, was changed to match
+        # rather than floor at this generic 1 — see that function's own
+        # docstring "Design decision" note for why the earlier "does NOT
+        # generalize" conclusion in the cli-cleanup-phase-two plan turned
+        # out to be an under-verified guess). So exit 1 here no longer
+        # needs a JSON-report disambiguation for that axis at all — a bad
+        # flag/crash, a severity gate, contract coverage, or analysis
+        # assurance are the only remaining sources.
         #
         # Resolved the same way, and in the same order, as the compare branch
         # below: the report's pre-fold `severity.exit_code` tells the axes
         # apart rather than a guess.
         _sev_exit=$(_severity_gate_exit)
-        _src=$(_json_report_src)
-        _verdict=$(_report_query "$_src" compat_verdict)
-        if [[ "$_verdict" == "EVIDENCE_CONTRACT_ERROR" ]]; then
-          VERDICT="EVIDENCE_CONTRACT_ERROR"
-          echo "::error::abicheck scan aborted: at least one --artifact-set member's evidence contract could not be satisfied (ADR-037 D5, exit code 1). This is NOT a CLI usage error and NOT an ABI/API break — see the JSON report's per_artifact entries for which member and why."
-        elif _is_cli_error; then
+        if _is_cli_error; then
           VERDICT="ERROR"
           echo "::error::abicheck scan failed due to a CLI error (exit code 1)."
         elif [[ "$_sev_exit" != "0" && -n "$_sev_exit" ]]; then
@@ -2975,13 +2979,7 @@ elif [[ "$MODE" == "scan" ]]; then
         # (Codex review). ERROR is left alone -- that is an operational
         # failure, not a gated compatibility result, and `_verdict_rank`
         # ranks it 0 only because it must never be escalated *from* here.
-        # EVIDENCE_CONTRACT_ERROR (the restored --artifact-set case above)
-        # is the same shape: no comparison ever ran, so there is no
-        # compatibility verdict to escalate to (harmless either way, since
-        # `_escalate_verdict_to_report`'s own guard only fires on a
-        # BREAKING/API_BREAK report -- excluded here for the same reason
-        # ERROR is, not because it would misbehave).
-        if [[ "$VERDICT" != "ERROR" && "$VERDICT" != "EVIDENCE_CONTRACT_ERROR" ]]; then
+        if [[ "$VERDICT" != "ERROR" ]]; then
           _escalate_verdict_to_report
         fi
         ;;
@@ -3000,17 +2998,31 @@ elif [[ "$MODE" == "scan" ]]; then
         # shown forgeable). No comparison ever ran, so there is no
         # compatibility verdict to escalate to -- same shape as ERROR in
         # that respect, deliberately not escalated.
+        #
+        # `--artifact-set` shares this exact code too, as of 2026-09-04
+        # (`service_scan._aggregate_scan_set_verdict`'s own "Design
+        # decision" note): closing the last `--artifact-set`/`format: text`
+        # signal gap this axis had (the set has no single-artifact stderr
+        # to point at, so its own message below names the JSON report's
+        # per_artifact entries instead).
         VERDICT="EVIDENCE_CONTRACT_ERROR"
-        # Generic on purpose (Codex review, fresh evidence): scan_engine's
-        # _EvidenceContractError has two independent raise sites -- a
-        # pinned --depth/--source-method with no source evidence, and
-        # --abi3 targeting a binary _run_abi3_audit can't recognise as a
-        # CPython extension module -- and this exit code alone doesn't say
-        # which fired. Naming the depth/evidence cause here would
-        # misdiagnose the abi3 case, which has nothing to do with a pin or
-        # missing evidence; the command's own stderr (printed above) names
-        # the exact cause.
-        echo "::error::abicheck scan aborted: this scan's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected, or --abi3 targeting a binary that isn't a recognisable CPython extension module)."
+        if [[ -n "${SCAN_ARTIFACT_SET:-}" ]]; then
+          # Generic on the specific cause for the same reason as the
+          # single-artifact message below -- which member and why lives in
+          # the report, not one shared stderr line.
+          echo "::error::abicheck scan aborted: at least one --artifact-set member's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the JSON/text report's per_artifact entries for which member and why (e.g. a pinned --depth/--source-method needing source evidence that was never collected, or --abi3 targeting a binary that isn't a recognisable CPython extension module)."
+        else
+          # Generic on purpose (Codex review, fresh evidence): scan_engine's
+          # _EvidenceContractError has two independent raise sites -- a
+          # pinned --depth/--source-method with no source evidence, and
+          # --abi3 targeting a binary _run_abi3_audit can't recognise as a
+          # CPython extension module -- and this exit code alone doesn't say
+          # which fired. Naming the depth/evidence cause here would
+          # misdiagnose the abi3 case, which has nothing to do with a pin or
+          # missing evidence; the command's own stderr (printed above) names
+          # the exact cause.
+          echo "::error::abicheck scan aborted: this scan's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected, or --abi3 targeting a binary that isn't a recognisable CPython extension module)."
+        fi
         ;;
       6)
         # NOT_COMPARABLE (ADR-050 D2: a scope/profile mismatch between the

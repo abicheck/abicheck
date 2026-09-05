@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case48_leaf_struct_through_pointer/` |
+| **Rule family** | [`leaf-struct-through-pointer`](by-rule/leaf-struct-through-pointer.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -136,4 +138,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Leaf struct through pointer](by-rule/leaf-struct-through-pointer.md)._

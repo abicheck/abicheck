@@ -55,7 +55,6 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `pack_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 | `severity_preset` | `str \| None` | `None` |
-| `exit_code_scheme` | `str \| None` | `None` |
 
 ## `CompareResult`
 
@@ -253,7 +252,6 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `max_findings` | `int \| None` | `None` |
 | `build_targets` | `tuple[str, ...]` | `()` |
 | `severity_preset` | `str \| None` | `None` |
-| `exit_code_scheme` | `str \| None` | `None` |
 | `bundle_manifest` | `InstantiationManifest \| None` | `None` |
 
 ## `ScanResult`
@@ -500,7 +498,6 @@ Compare two ABI inputs and return the classified diff result.
 | `depth` | `str \| None` | `None` |
 | *(keyword-only below)* | | |
 | `severity_preset` | `str \| None` | `None` |
-| `exit_code_scheme` | `str \| None` | `None` |
 
 **Returns:** `CompareResult`
 

@@ -2826,19 +2826,22 @@ class TestCompareReleaseExtraFlows:
         assert any(out_dir.iterdir())
 
     def test_bundle_cohort_runs_bundle_analysis(self, tmp_path) -> None:
-        # --bundle-cohort requests bundle analysis, driving the
+        # PR J: cohorts are .abicheck.yml's `bundle.cohorts:` now, not
+        # --bundle-cohort. Requesting one still drives the
         # _collect_bundle_result path and bundle markdown section.
         old_dir, new_dir = self._make_dirs(tmp_path)
         _write_snap(old_dir / "libfoo.json", _snap(library="libfoo.so"))
         _write_snap(new_dir / "libfoo.json", _snap(library="libfoo.so"))
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text('bundle:\n  cohorts: ["lib"]\n', encoding="utf-8")
         result = _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
             "--format",
             "markdown",
-            "--bundle-cohort",
-            "lib",
+            "--config",
+            str(cfg),
         )
         # Runs to completion; the bundle row appears in the markdown table.
         assert result.exit_code in (0, 4)

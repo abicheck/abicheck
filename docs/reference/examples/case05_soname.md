@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Quality (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `soname_missing` |
 | **Source files** | `examples/case05_soname/` |
+| **Rule family** | [`soname`](by-rule/soname.md) |
 
 **Category:** ELF/Linker | **Verdict:** ✅ COMPATIBLE (bad practice)
 
@@ -126,4 +128,4 @@ readelf -d libfoo_v2.so | grep SONAME   # → (SONAME) Library soname: [libv2.so
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Soname](by-rule/soname.md)._

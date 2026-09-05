@@ -52,7 +52,6 @@ def reject_incoherent_scan_operands(
     artifact: Path | None,
     artifact_set: tuple[str, ...],
     against: Path | None,
-    bundle_system_providers: str,
     manifest_path: Path | None = None,
 ) -> None:
     """Reject operand/flag combinations ``scan`` cannot serve.
@@ -73,10 +72,15 @@ def reject_incoherent_scan_operands(
     PR 5's set-mode-semantics slice) -- see
     :func:`abicheck.frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`
     -- so it is no longer rejected here.
-    ``--bundle-system-providers`` is the mirror case: it only means
-    something *for* a set. ``--manifest`` (PR H, ADR-056 D2) is the same
-    shape again -- an expected-provider ownership assertion only means
-    something checked against a declared set.
+
+    ``--bundle-system-providers`` was the mirror case (it only meant
+    something *for* a set) until CLI cleanup phase two, PR J removed the
+    flag entirely -- the system-provider allow-list extension is sourced
+    only from ``.abicheck.yml``'s ``bundle:`` block now, which has no
+    per-run "supplied without --artifact-set" state to reject.
+    ``--manifest`` (PR H, ADR-056 D2) is the one remaining mirror case: an
+    expected-provider ownership assertion only means something checked
+    against a declared set.
     """
     if any(not member.strip() for member in artifact_set):
         raise click.UsageError("--artifact-set must not be empty.")
@@ -92,10 +96,6 @@ def reject_incoherent_scan_operands(
                 "(audit-only -- no old side for a set)."
             )
     else:
-        if bundle_system_providers:
-            raise click.UsageError(
-                "--bundle-system-providers requires --artifact-set."
-            )
         if manifest_path is not None:
             raise click.UsageError("--manifest requires --artifact-set.")
 

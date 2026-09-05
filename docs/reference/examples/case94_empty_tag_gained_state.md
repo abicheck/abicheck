@@ -5,10 +5,13 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Scenario — Ecosystem case study |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_size_changed`, `type_field_added_compatible` |
 | **Source files** | `examples/case94_empty_tag_gained_state/` |
+| **Ecosystem** | [oneTBB](by-ecosystem/onetbb.md) |
+| **Related rules** | [`embedded-type-size-increased`](by-rule/embedded-type-size-increased.md), [`empty-tag-type-gains-state`](by-rule/empty-tag-type-gains-state.md), [`type-field-added-compatible`](by-rule/type-field-added-compatible.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -135,4 +138,4 @@ comparison on the same class of change (a plain struct size growth).
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md)._

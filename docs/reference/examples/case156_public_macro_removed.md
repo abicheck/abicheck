@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `public_macro_removed` |
 | **Source files** | `examples/case156_public_macro_removed/` |
+| **Rule family** | [`public-macro-removed`](by-rule/public-macro-removed.md) |
 
 **Category:** API Break | **Verdict:** 🟠 API_BREAK
 
@@ -126,4 +128,4 @@ the macro-removal fact at all.
 - `new.json`
 - `old.json`
 
-_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public macro removed](by-rule/public-macro-removed.md)._

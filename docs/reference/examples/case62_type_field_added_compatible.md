@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Addition (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case62_type_field_added_compatible/` |
+| **Rule family** | [`type-field-added-compatible`](by-rule/type-field-added-compatible.md) |
 
 **Category:** Addition | **Verdict:** 🟢 COMPATIBLE
 
@@ -123,4 +125,4 @@ without breaking callers.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Type field added compatible](by-rule/type-field-added-compatible.md)._

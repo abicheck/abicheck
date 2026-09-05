@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_base_changed`, `type_vtable_changed`, `func_return_changed` |
 | **Source files** | `examples/case72_covariant_return_changed/` |
+| **Rule family** | [`covariant-return-changed`](by-rule/covariant-return-changed.md) |
 
 **Category:** VTable / Inheritance | **Verdict:** 🔴 BREAKING
 
@@ -157,4 +159,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Covariant return changed](by-rule/covariant-return-changed.md)._

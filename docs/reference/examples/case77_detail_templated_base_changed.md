@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_field_added`, `type_field_offset_changed`, `type_size_changed` |
 | **Source files** | `examples/case77_detail_templated_base_changed/` |
+| **Rule family** | [`detail-templated-base-changed`](by-rule/detail-templated-base-changed.md) |
 
 **Category:** Internal Leak | **Verdict:** 🔴 BREAKING
 
@@ -153,4 +155,4 @@ layout of every shipped algorithm descriptor built on it.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Detail templated base changed](by-rule/detail-templated-base-changed.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_cv_changed` |
 | **Source files** | `examples/case22_method_const_changed/` |
+| **Rule family** | [`method-const-changed`](by-rule/method-const-changed.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -135,4 +137,4 @@ indistinguishable from removing one function and adding an unrelated one.
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Method const changed](by-rule/method-const-changed.md)._

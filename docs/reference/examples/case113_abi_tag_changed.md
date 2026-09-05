@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `abi_tag_changed` |
 | **Source files** | `examples/case113_abi_tag_changed/` |
+| **Rule family** | [`abi-tag-changed`](by-rule/abi-tag-changed.md) |
 
 **Category:** Binary ABI break / C++ mangling | **Verdict:** 🔴 BREAKING
 
@@ -135,4 +137,4 @@ the same underlying mechanism down to one symbol.
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Abi tag changed](by-rule/abi-tag-changed.md)._

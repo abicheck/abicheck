@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `field_bitfield_changed` |
 | **Source files** | `examples/case63_bitfield_changed/` |
+| **Rule family** | [`bitfield-changed`](by-rule/bitfield-changed.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +142,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Bitfield changed](by-rule/bitfield-changed.md)._

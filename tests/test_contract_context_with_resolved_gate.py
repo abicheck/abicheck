@@ -32,11 +32,10 @@ from abicheck.compatibility_evaluation_config import (
     CompatibilityEvaluationConfig,
     GateConfig,
     ScopedGateSelection,
-    ValueProvenance,
 )
 from abicheck.contract_context import build_persisted_context, with_resolved_gate
 from abicheck.contract_evidence import ContractEvidenceBlock, PersistedContractContext
-from abicheck.contract_relevance_types import ContractMode, SelectorLayer
+from abicheck.contract_relevance_types import ContractMode
 from abicheck.severity import SeverityConfig, SeverityLevel
 
 
@@ -69,7 +68,6 @@ def _apply(ctx: PersistedContractContext) -> PersistedContractContext:
             quality_issues=SeverityLevel.WARNING,
             addition=SeverityLevel.INFO,
         ),
-        scheme_provenance=ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI),
         severity_provenance={},
     )
 

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `symbol_binding_lost_unique` |
 | **Source files** | `examples/case180_symbol_binding_lost_unique/` |
+| **Rule family** | [`symbol-binding-lost-unique`](by-rule/symbol-binding-lost-unique.md) |
 
 **Category:** Deployment Risk (ELF/Loader) | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -137,4 +139,4 @@ difference abicheck's `symbol_binding_lost_unique` detector reads.
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Symbol binding lost unique](by-rule/symbol-binding-lost-unique.md)._

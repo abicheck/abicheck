@@ -60,8 +60,6 @@ from .build_config_schema import (
 _SEVERITY_LEVELS = ("error", "warning", "info")
 #: Valid severity presets (mirror of ``severity.SEVERITY_PRESETS`` spelling).
 _SEVERITY_PRESETS = ("default", "strict", "info-only")
-#: Valid exit-code schemes (ADR-037 D12 ``exit_code_scheme:``).
-_EXIT_CODE_SCHEMES = ("auto", "legacy", "severity")
 
 # ── strict-schema knowledge (ADR-043 CLI reset: no separate `config validate`
 # command — every real ingestion path enforces this) ─────────────────────────
@@ -150,8 +148,12 @@ class BuildConfig:
     settings that are stable, reviewed-in-a-PR properties rather than per-run
     invocation flags: ``severity:`` (per-category levels + preset), ``scope:``
     (public-surface FP tuning), ``suppression:`` (hygiene policy), ``source:``
-    (precise S-axis), plus the top-level ``exit_code_scheme:`` and ``version:``.
-    CLI flags override these; see :func:`abicheck.cli_helpers_compare.resolve_compare_config`
+    (precise S-axis), plus the top-level ``version:``. CLI cleanup phase two
+    PR G2 removed the top-level ``exit_code_scheme:`` key -- the one
+    automatic gate algorithm (ADR-064) is no longer user-selectable; see
+    :func:`abicheck.cli_helpers_compare.resolve_compare_config`'s own
+    ``exit_code_scheme`` field docstring for the replacement, purely-derived
+    computation. CLI flags override these; see :func:`abicheck.cli_helpers_compare.resolve_compare_config`
     for the precedence resolver (CLI > config > built-in default).
 
     A field left at its ``None`` / ``""`` / empty default means "unset — inherit
@@ -211,11 +213,17 @@ class BuildConfig:
     debug_dwarf_only: bool | None = None
     debug_debuginfod: bool | None = None
     debug_debuginfod_url: str | None = None
-    #: ``exit_code_scheme:`` — ADR-037 D12; CI keys on it, so it lives in config.
-    exit_code_scheme: str = "auto"
-    #: Whether ``exit_code_scheme:`` was literally present -- it defaults to
-    #: ``"auto"`` either way, so this lets a stated ``auto`` outrank a pack.
-    exit_code_scheme_explicit: bool = False
+    #: ``bundle:`` — release/scan bundle topology (CLI cleanup phase two,
+    #: PR J), demoted off the CLI from ``--bundle-system-providers``/
+    #: ``--bundle-cohort``: a project's system-provider allow-list extension
+    #: and co-versioned library cohort prefixes are stable, reviewed-in-a-PR
+    #: properties of the release/bundle, not a per-run invocation flag —
+    #: unlike ``severity:``/``scope:`` above, there is no CLI override at
+    #: all, so ``.abicheck.yml`` is these two fields' only source. Empty =
+    #: no extension beyond the built-in system-provider allow-list / no
+    #: declared cohorts.
+    bundle_system_providers: list[str] = field(default_factory=list)
+    bundle_cohorts: list[str] = field(default_factory=list)
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
@@ -239,7 +247,7 @@ class BuildConfig:
             "source",
             "compile",
             "debug",
-            "exit_code_scheme",
+            "bundle",
             "version",
             "risk_rules",
             "crosschecks",
@@ -278,6 +286,13 @@ class BuildConfig:
             }
         ),
         "debug": frozenset({"format", "dwarf_only", "debuginfod", "debuginfod_url"}),
+        # Distinct from the plural `bundles:` block (`project_targets.py`,
+        # ADR-047 §3 — named release groups of project *targets*, consumed
+        # only by the `project` command family). This singular `bundle:`
+        # block is release/scan-wide topology consumed directly by
+        # `compare`'s directory/package fan-out and `scan --artifact-set`,
+        # with no dependency on any `targets:`/`bundles:` declaration.
+        "bundle": frozenset({"system_providers", "cohorts"}),
     }
 
     @classmethod
@@ -387,6 +402,7 @@ class BuildConfig:
         source = _block(top, "source")
         compile_blk = _block(top, "compile")
         debug = _block(top, "debug")
+        bundle = _block(top, "bundle")
 
         def _safe_compile_atoms(key: str) -> list[str]:
             return [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
@@ -448,13 +464,20 @@ class BuildConfig:
             debug_dwarf_only=_opt_bool(debug, "dwarf_only"),
             debug_debuginfod=_opt_bool(debug, "debuginfod"),
             debug_debuginfod_url=_opt_str(debug, "debuginfod_url"),
-            exit_code_scheme=_one_of(
-                _str(top, "exit_code_scheme", "auto") or "auto",
-                _EXIT_CODE_SCHEMES,
-                "exit_code_scheme",
-            )
-            or "auto",
-            exit_code_scheme_explicit="exit_code_scheme" in top,
+            # Stripped here, once, at the single choke point every consumer
+            # (compare's fan-out, scan --artifact-set, stored-BundleFacts
+            # compare) reads through -- compare's own fan-out incidentally
+            # stripped via a comma-join/split round trip through a legacy
+            # string parameter, but the other two forwarded the raw tuple
+            # unchanged, so a quoted entry with stray whitespace matched one
+            # consumer's SONAME comparison and silently missed another's
+            # (Codex review, fresh evidence).
+            bundle_system_providers=[
+                s.strip() for s in _strs(bundle, "system_providers") if s.strip()
+            ],
+            bundle_cohorts=[
+                s.strip() for s in _strs(bundle, "cohorts") if s.strip()
+            ],
             version=(
                 version_raw
                 if isinstance(version_raw, int) and not isinstance(version_raw, bool)
@@ -557,6 +580,16 @@ class BuildConfig:
             debug["debuginfod_url"] = self.debug_debuginfod_url
         return debug
 
+    def _bundle_block(self) -> dict[str, Any]:
+        """Non-default ``bundle:`` keys (release/scan topology; CLI cleanup
+        phase two, PR J)."""
+        bundle: dict[str, Any] = {}
+        if self.bundle_system_providers:
+            bundle["system_providers"] = list(self.bundle_system_providers)
+        if self.bundle_cohorts:
+            bundle["cohorts"] = list(self.bundle_cohorts)
+        return bundle
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
 
@@ -576,15 +609,11 @@ class BuildConfig:
             ("source", self._source_block()),
             ("compile", self._compile_block()),
             ("debug", self._debug_block()),
+            ("bundle", self._bundle_block()),
         ):
             if block:
                 out[key] = block
 
-        # An explicit `auto` round-trips too, not just a non-`auto` value.
-        if self.exit_code_scheme and (
-            self.exit_code_scheme != "auto" or self.exit_code_scheme_explicit
-        ):
-            out["exit_code_scheme"] = self.exit_code_scheme
         if self.version:
             out["version"] = self.version
         return out

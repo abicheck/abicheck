@@ -47,6 +47,7 @@ import click
 from .bundle import BundleDiffResult, render_bundle_findings_markdown
 from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
+from .errors import SnapshotError
 from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 from .model import AbiSnapshot
 from .workflows.gate import (
@@ -58,6 +59,7 @@ from .workflows.gate import (
 )
 
 if TYPE_CHECKING:
+    from .bundle_manifest import InstantiationManifest
     from .pack_application import PackApplication
     from .workflows.extraction import PackageExtractor
     from .workflows.gate import SeverityConfig
@@ -240,17 +242,90 @@ def _collect_release_warnings(
         )
 
 
+def _resolve_bundle_manifest(
+    manifest_path: Path | None,
+    old_root: Path | None,
+    new_root: Path | None,
+    old_map: dict[str, Path],
+    new_map: dict[str, Path],
+    *,
+    old_variant: str | None = None,
+    new_variant: str | None = None,
+    old_side_only: bool = False,
+) -> InstantiationManifest | None:
+    """The one place `--manifest`/embedded-manifest resolution happens for
+    a release comparison -- shared by `_run_bundle_analysis` and
+    `cli_compare_release.py`'s own `--bundle-facts-out` call site (Codex
+    review, fresh evidence: the embedded-manifest resolution this function
+    performs was previously computed only for the local bundle-analysis
+    result and never reached `write_bundle_facts_out`, so a captured
+    baseline silently lost the manifest-drift contract even when the
+    release comparison itself enforced it).
+
+    An explicit *manifest_path* always wins and fails loudly on a bad file
+    (a user error, not an environmental quirk). Otherwise falls back to a
+    stored side's own embedded `InstantiationManifest`
+    (`materialize_release_variant_artifacts` already preserves the selected
+    variant's own composition section on disk):
+    *old_root*/*new_root* (the release operands themselves) are checked
+    directly first, so a package whose selected variant carries zero
+    artifacts still has its own manifest consulted; *old_map*/*new_map*'s
+    member sub-packages are the fallback for a caller that predates the
+    root parameters. `old_root`/`old_map` before `new_root`/`new_map` (the
+    side a manifest more naturally describes as a baseline).
+    *old_variant*/*new_variant* select the matching root's own variant.
+    *old_side_only*, when true (`write_bundle_facts_out`'s own baseline
+    capture, Codex review), restricts the fallback to OLD alone -- the
+    shared search could otherwise attribute NEW's manifest to an OLD baseline lacking its own; live-comparison enforcement keeps both.
+    """
+    from .bundle import load_manifest
+
+    if manifest_path is not None:
+        try:
+            return load_manifest(manifest_path)
+        except Exception as exc:
+            raise click.ClickException(
+                f"Failed to load manifest {manifest_path}: {exc}",
+            ) from exc
+
+    all_roots = ((old_root, old_variant), (new_root, new_variant))
+    roots = all_roots[:1] if old_side_only else all_roots
+    candidates: list[tuple[Path, str | None]] = [(r, v) for r, v in roots if r is not None]
+    if not candidates:
+        maps = (old_map,) if old_side_only else (old_map, new_map)
+        candidates = [(p, None) for m in maps for p in m.values()]
+    from .workflows.release_package import read_embedded_manifest
+
+    for candidate_root, candidate_variant in candidates:
+        if not candidate_root.is_dir():
+            continue
+        try:
+            manifest = read_embedded_manifest(candidate_root, candidate_variant)
+        except Exception as exc:
+            raise click.UsageError(
+                f"{candidate_root}: embedded instantiation manifest is "
+                f"declared but could not be decoded: {exc}"
+            ) from exc
+        if manifest is not None:
+            return manifest
+    return None
+
+
 def _run_bundle_analysis(
     old_map: dict[str, Path],
     new_map: dict[str, Path],
     per_lib_results: list[DiffResult],
     *,
     manifest_path: Path | None,
-    bundle_system_providers: str,
+    bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...] = (),
     policy: str = "strict_abi",
     old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
     new_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] | None = None,
+    old_root: Path | None = None,
+    new_root: Path | None = None,
+    old_variant: str | None = None,
+    new_variant: str | None = None,
 ) -> BundleDiffResult | None:
     """Run bundle-level (ADR-023) analysis on a compare-release run.
 
@@ -287,18 +362,43 @@ def _run_bundle_analysis(
     stored-baseline comparison -- rather than being sequenced by hand here.
     This function's own job narrows to what only the live release path
     needs: building the two live ``BundleSnapshot``\\ s, loading an
-    explicit ``--manifest``, and re-surfacing ``analyze_bundle``'s
+    explicit ``--instantiation-manifest``, and re-surfacing ``analyze_bundle``'s
     structured ``analysis_errors`` as the same ``click.echo(...,
     err=True)`` warnings this function has always emitted.
+
+    *old_root*/*new_root* (ADR-062 A1.7) are the two release operands
+    themselves (a stored ``ProjectSnapshot`` package directory or a live
+    directory), used only for the embedded-``InstantiationManifest``
+    fallback below -- a package whose selected variant carries zero
+    artifacts has no entry in *old_map*/*new_map* at all to search for one
+    (Codex review, fresh evidence: a valid empty ``BundleFacts`` package
+    can still carry a manifest, and the required-symbol check was silently
+    skipped for it). *old_variant*/*new_variant* select which variant's manifest that fallback reads.
     """
-    from .bundle import build_bundle_snapshot, load_manifest
+    from .bundle import build_bundle_snapshot_mixed
     from .bundle_analysis import analyze_bundle
 
-    if not old_map and not new_map:
+    # Resolved before the empty-maps check: an empty BundleFacts package can still declare a required-symbol manifest (Codex review).
+    manifest = _resolve_bundle_manifest(
+        manifest_path,
+        old_root,
+        new_root,
+        old_map,
+        new_map,
+        old_variant=old_variant,
+        new_variant=new_variant,
+    )
+    if not old_map and not new_map and manifest is None:
         return None
     try:
-        old_snap = build_bundle_snapshot(dict(old_map))
-        new_snap = build_bundle_snapshot(dict(new_map))
+        # ADR-062 A1.7: old_map/new_map may hold a stored ProjectSnapshot
+        # sub-package directory for some (or all) libraries, not only live
+        # binary paths -- build_bundle_snapshot_mixed resolves either kind,
+        # rather than build_bundle_snapshot's live-only ELF parse, which
+        # would otherwise silently drop every stored-side library from
+        # bundle-level analysis (Codex review, security finding); an empty map still builds a valid, empty BundleSnapshot.
+        old_snap = build_bundle_snapshot_mixed(dict(old_map))
+        new_snap = build_bundle_snapshot_mixed(dict(new_map))
     except Exception as exc:
         # Treat snapshot-build failures as additive degradation: the
         # per-library compare-release report is still useful, and the
@@ -308,21 +408,10 @@ def _run_bundle_analysis(
         click.echo(f"Warning: bundle analysis skipped: {exc}", err=True)
         return None
 
-    manifest = None
-    if manifest_path is not None:
-        try:
-            manifest = load_manifest(manifest_path)
-        except Exception as exc:
-            # Manifest is an *explicit* user input. A malformed --manifest
-            # is a user error, not an environmental quirk; fail loudly so
-            # the contract violation isn't hidden behind a stderr warning.
-            raise click.ClickException(
-                f"Failed to load manifest {manifest_path}: {exc}",
-            ) from exc
-
-    system_extra: list[str] = [
-        s.strip() for s in bundle_system_providers.split(",") if s.strip()
-    ]
+    # Consumed directly as a sequence -- no comma-join/split round trip
+    # (Codex review: that would corrupt a provider entry containing a comma;
+    # entries are already stripped/filtered once, at BuildConfig.from_dict()).
+    system_extra: list[str] = list(bundle_system_providers)
     result = analyze_bundle(
         old_snap,
         new_snap,
@@ -515,6 +604,7 @@ def write_bundle_facts_out(
     old_map: dict[str, Path],
     *,
     resolve_stranded_library: Callable[[Path], AbiSnapshot],
+    resolved_manifest: InstantiationManifest | None = None,
 ) -> None:
     """Persist the OLD side's per-library snapshots (plus manifest, if any)
     to *bundle_facts_out* as a :class:`~abicheck.bundle_facts.BundleFacts`
@@ -588,6 +678,17 @@ def write_bundle_facts_out(
     hard-linked siblings) are captured while the files still exist on
     disk -- see that function's own docstring.
 
+    *resolved_manifest*, when given, is used as-is instead of loading
+    *manifest_path* here -- the caller's own already-resolved manifest
+    (`_resolve_bundle_manifest`, which also covers the embedded-manifest
+    fallback `--manifest` alone does not), so a stored side's manifest-
+    drift contract is captured into this baseline too, not just enforced
+    against the live comparison this call runs alongside (Codex review,
+    fresh evidence: this parameter's absence meant a captured
+    ``--bundle-facts-out`` baseline silently dropped that contract).
+    *manifest_path* is still respected when *resolved_manifest* is
+    `None`, for a caller that predates this parameter.
+
     Failure here (a bad *manifest_path*, an unwritable *bundle_facts_out*)
     is a genuine usage error -- unlike bundle *analysis* itself, which
     degrades to a warning on failure (see ``_run_bundle_analysis``'s own
@@ -598,21 +699,34 @@ def write_bundle_facts_out(
     from .bundle_facts import capture_bundle_facts
     from .bundle_manifest import load_manifest
     from .serialization import save_bundle_facts
+    from .workflows.extraction import _canonical_library_key
 
     try:
-        manifest = load_manifest(manifest_path) if manifest_path is not None else None
-        # Basename -> canonical key, so a matched pair's DiffResult.library
-        # (the real, possibly-versioned filename) maps back onto the same
-        # key old_map/build_bundle_snapshot() would use for it. Falls back
-        # to the basename itself only if truly unmatched (shouldn't happen
-        # for a genuine diff_pairs entry, but degrades safely either way).
-        basename_to_key = {path.name: key for key, path in old_map.items()}
+        manifest: InstantiationManifest | None
+        if resolved_manifest is not None:
+            manifest = resolved_manifest
+        else:
+            manifest = load_manifest(manifest_path) if manifest_path is not None else None
+
+        # Canonicalize DiffResult.library itself (the real, possibly-
+        # versioned filename each compared snapshot reports) the same way
+        # old_map's own keys were derived, rather than matching by basename
+        # against old_map's *values* -- a stored operand's value is a
+        # materialized sub-package directory (its own display dirname, not
+        # the real library filename), which a basename match silently
+        # misses; the same successful diff pair then also (wrongly) reads
+        # as "stranded" below and gets appended a second time under its
+        # real canonical key (Codex review, fresh evidence: a stored
+        # comparison's captured baseline could contain the same library
+        # twice, reading as false library/provider findings). Falls back to
+        # the basename itself only if truly unmatched (shouldn't happen for
+        # a genuine diff_pairs entry, but degrades safely either way).
         per_library_snapshots: dict[str, AbiSnapshot] = {}
         for diff, old_snapshot in diff_pairs:
-            basename = Path(diff.library).name
-            per_library_snapshots[basename_to_key.get(basename, basename)] = (
-                old_snapshot
-            )
+            key = _canonical_library_key(Path(diff.library))
+            if key not in old_map:
+                key = Path(diff.library).name
+            per_library_snapshots[key] = old_snapshot
         for key, old_path in old_map.items():
             if key in per_library_snapshots:
                 continue
@@ -621,7 +735,8 @@ def write_bundle_facts_out(
             per_library_snapshots, manifest=manifest, library_paths=dict(old_map)
         )
         save_bundle_facts(facts, bundle_facts_out)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, SnapshotError) as exc:
+        # SnapshotError too -- a declared-but-malformed filesystem_aliases array (Codex review).
         raise click.UsageError(f"--bundle-facts-out {bundle_facts_out}: {exc}") from exc
 
 
@@ -631,8 +746,12 @@ def _collect_bundle_result(
     new_map: dict[str, Path],
     worst_verdict: str,
     manifest_path: Path | None,
-    bundle_system_providers: str,
+    bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...] = (), policy: str = "strict_abi", policy_file: PolicyFile | None = None,
+    old_root: Path | None = None,
+    new_root: Path | None = None,
+    old_variant: str | None = None,
+    new_variant: str | None = None,
 ) -> tuple[BundleDiffResult | None, str]:
     """Extract stashed DiffResults, run bundle analysis, update worst verdict.
 
@@ -646,6 +765,7 @@ def _collect_bundle_result(
     :func:`~abicheck.bundle_signature_evidence.find_unverified_signature_
     findings` reads, so both are folded into the same ``old_snapshots``/
     ``new_snapshots`` mapping this function has always built. *policy_file* (G38 Phase 16) is set on the result before ``bundle_verdict`` is read.
+    *old_root*/*new_root*/*old_variant*/*new_variant* (ADR-062 A1.7) forward unchanged to :func:`_run_bundle_analysis`'s own fallback.
     """
     stashed_diffs: list[DiffResult] = []
     old_snapshots: dict[str, AbiSnapshot | BundleSignatureEvidence] = {}
@@ -676,6 +796,10 @@ def _collect_bundle_result(
         policy=policy,
         old_snapshots=old_snapshots,
         new_snapshots=new_snapshots,
+        old_root=old_root,
+        new_root=new_root,
+        old_variant=old_variant,
+        new_variant=new_variant,
     )
     if bundle_result is not None:
         bundle_result.policy_file = policy_file  # G38 Phase 16

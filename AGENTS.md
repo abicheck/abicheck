@@ -395,7 +395,10 @@ Core pipeline (in order of data flow):
      value D7 precedence ruled out is unreachable from here, and folds them
      into the two objects the run is scored from: a `PolicyFile`
      (`policy.overrides`, `surface.internal_namespaces`) and the resolved
-     compare config (`gate.exit_code_scheme`, `gate.severity.*`). Ordering
+     compare config (`gate.severity.*` — `gate.exit_code_scheme` was a
+     pack-assignable field here too until CLI cleanup phase two PR G2
+     deleted it along with `--exit-code-scheme`; a pack asserting it is
+     now rejected at load time, ADR-064). Ordering
      matters: the config is resolved from the *explicitly given*
      `--policy` document and only then folded, since folding first would present
      a pack's override to the resolver as an explicit one.
@@ -413,16 +416,16 @@ Core pipeline (in order of data flow):
      nothing, which is the single failure all of these guard. `compare`
      takes all three kinds; `scan --against` now takes all three too (CLI
      cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's
-     `gate.exit_code_scheme`/`gate.severity.*` fold onto the real
+     `gate.severity.*` folds onto the real
      `ResolvedCompareConfig` `resolve_compare_config` already produces
      (`pack_application.apply_to_compare_config`, the identical function
      single-pair `compare` uses, called from `cli_scan._resolve_scan_
      evaluation_config`), since `scan`'s exit code has honored the resolved
-     severity/exit-code-scheme config since the fix that closed the "scan
+     severity config since the fix that closed the "scan
      never consults severity" gap below. The directory/package
      release fan-out (`cli_compare_release.py`) takes all three kinds too,
      since CLI cleanup phase two's "PR B" slice 2 — a `kind: gate` pack's
-     `gate.exit_code_scheme`/`gate.severity.*` fold into the fan-out's own
+     `gate.severity.*` folds into the fan-out's own
      resolved `GateOptions` (`policy.release_gate_options.
      resolve_release_gate_options`, which ADR-064 landed 2026-09-02 —
      closing the "no `GateOptions`-shaped object of its own" gap this note
@@ -441,11 +444,14 @@ Core pipeline (in order of data flow):
      the native compare/release JSON path, the `--stat` JSON summary, and
      `scan --against` JSON -- non-JSON renderers (Markdown, review, SARIF,
      JUnit, HTML) and `compat check` don't carry it, see that plan
-     section's own PR B note for the exact scope). Two review findings
-     worth not rediscovering: the gate application must *read* the resolved
-     `gate.exit_code_scheme` rather than re-derive one (re-deriving let a
-     severity-only gate pack override an explicit `--exit-code-scheme
-     legacy`), and manifest validity is checked ahead of `compare`'s
+     section's own PR B note for the exact scope). One review finding
+     worth not rediscovering (historical — `--exit-code-scheme` itself is
+     gone, but the underlying "read, don't re-derive" principle still
+     governs the surviving `gate.severity.*` fold): the gate application
+     must *read* the resolved gate config rather than re-derive one
+     (re-deriving used to let a severity-only gate pack silently override
+     an explicit `--exit-code-scheme legacy`, back when that flag
+     existed). Manifest validity is checked ahead of `compare`'s
      `--dry-run` emit — but pack-vs-pack conflict detection is not, since
      D8 exempts a field another layer states and those layers aren't
      resolved that early
@@ -1101,7 +1107,7 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - `compare` command (legacy, with no severity setting in effect): 0 = compatible, 2 = source break, 4 = ABI break
 - `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
-- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme), 7 = evidence-contract error (ADR-037 D5 — a pinned `--depth`/`--source-method` with no source evidence collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module; no comparison ever ran). Like `compare`, it also accepts `--severity-preset`/`--exit-code-scheme` (and `.abicheck.yml`'s `severity:`/`exit_code_scheme`); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above. `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's assignments apply the same way an explicit `--severity-preset`/`--exit-code-scheme` does, and cannot override one that was actually given (CLI or `.abicheck.yml`).
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme), 7 = evidence-contract error (ADR-037 D5 — a pinned `--depth`/`--source-method` with no source evidence collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module; no comparison ever ran; also reported for `--artifact-set` when a member's own evidence-contract abort is the worst signal in the set, CLI cleanup phase two PR G2). Like `compare`, it also accepts `--severity-preset` (and `.abicheck.yml`'s `severity:` block); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above — there is no manual scheme selector any more (`--exit-code-scheme`/`exit_code_scheme:` were deleted, CLI cleanup phase two PR G2, ADR-064: the algorithm is purely derived from whether a severity setting is in effect). `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's `gate.severity.<category>` assignments apply the same way an explicit `--severity-preset` does, and cannot override one that was actually given (CLI or `.abicheck.yml`); a pack assigning `gate.exit_code_scheme` is rejected at load time.
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
   `scan --against` alike:** under `--contract`, the selected
   domain whose required evidence is incomplete contributes

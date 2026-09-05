@@ -175,7 +175,7 @@ drift, SONAME skew, manifest enforcement), there is no per-library `Change`
 to suppress upstream of them at all, so the only levers are
 `--no-bundle-analysis` (turns off bundle analysis for the whole run — see
 below) and, for a symbol that genuinely comes from outside the release,
-`--bundle-system-providers` (see below).
+`.abicheck.yml`'s `bundle.system_providers:` (see below).
 
 **The sibling-consumption gate covers most, but not all, kinds — and even
 those are gated only inside `compare_bundle()` itself.** Within
@@ -247,12 +247,12 @@ summary and new top-level keys in the JSON output:
 
 ## The bundle-analysis flags
 
-### `--manifest PATH` *(Experimental)*
+### `--instantiation-manifest PATH` *(Experimental)*
 
 > **You probably don't need this flag.** For 95% of releases the
 > headers passed to `-H include/` already define the public ABI
 > contract, and the bundle layer derives the rest from ELF resolution.
-> `--manifest` covers a narrow set of cases where the contract lives
+> `--instantiation-manifest` covers a narrow set of cases where the contract lives
 > *outside* the headers. The manifest schema is still being shaped —
 > expect changes between minor versions.
 
@@ -264,7 +264,7 @@ summary and new top-level keys in the JSON output:
   still imports, `extern "C"` signature drift, provider migration.
 - Type drift propagated through template-instantiated symbols.
 
-**When `--manifest` actually adds something:**
+**When `--instantiation-manifest` actually adds something:**
 
 - **Template instantiation lists.** `extern template foo<int>;` in a
   header is just a declaration; the contract is *which specific
@@ -380,7 +380,7 @@ raises a `ValueError`.
 | Matched in new bundle but not in old bundle | `bundle_manifest_instantiation_added` | COMPATIBLE (addition) |
 
 A malformed manifest aborts the run with a `ClickException`. A failing
-`--manifest` is treated as a user error, not an environmental quirk —
+`--instantiation-manifest` is treated as a user error, not an environmental quirk —
 unlike the bundle-engine-internal failures, which degrade to per-library
 results with a warning.
 
@@ -410,30 +410,37 @@ You don't have to do this all at once. The minimal useful manifest is
 one entry per library covering the namespaces you actually want to
 freeze.
 
-### `--bundle-system-providers libfoo,libbar`
+### `.abicheck.yml`'s `bundle.system_providers:`
 
 The bundle layer needs to distinguish *intra-bundle imports* (a sibling
 should be providing this symbol) from *external imports* (the symbol
 comes from the system loader: libc, libstdc++, libgcc_s, libpthread,
 libtbb, libsycl, OpenCL, ...). The built-in allow-list handles the
-canonical set; this flag extends it.
+canonical set; this config key extends it.
 
 When to use it:
 
 - Your bundle uses an external SDK shipped outside the release tarball
   (e.g. a vendor library like `libvpl.so.2` that consumers install
   separately).
-- A `--manifest`-free workflow keeps emitting `bundle_intra_dep_removed`
+- A `--instantiation-manifest`-free workflow keeps emitting `bundle_intra_dep_removed`
   findings against symbols you know are external.
 
-Example:
+Example (`.abicheck.yml`):
 
-```bash
-abicheck compare old/ new/ \
-    --bundle-system-providers libvpl.so.2,libcuda.so.1
+```yaml
+bundle:
+  system_providers: [libvpl.so.2, libcuda.so.1]
 ```
 
-These sonames are appended to the built-in allow-list for this run only.
+```bash
+abicheck compare old/ new/
+```
+
+These sonames are appended to the built-in allow-list for every run in this
+project — a stable, reviewed-in-a-PR property of the release, not a
+per-invocation flag (CLI cleanup phase two, PR J; formerly
+`--bundle-system-providers libfoo,libbar`, one run at a time).
 
 ### `--no-bundle-analysis`
 
@@ -523,7 +530,7 @@ finding fired: a per-library finding (something in `libraries[].changes`)
 can be silenced with a [suppression](suppressions.md) if it's expected; a
 `bundle_*` finding cannot be suppressed today (see above) — your options are
 to fix the intra-bundle contract, or fall back to `--no-bundle-analysis` /
-`--bundle-system-providers` as described below.
+`.abicheck.yml`'s `bundle.system_providers:` as described below.
 
 ## Comparing against a stored bundle baseline (G38 Phase 2)
 
@@ -553,15 +560,30 @@ abicheck compare release-1.0.bundlefacts.json release-3.0/
 `OLD_INPUT` being a stored `BundleFacts` document (from a prior
 `--bundle-facts-out` run) is detected automatically, the same way `compare`
 already classifies a directory vs. a package vs. a single binary — there is
-no separate flag to pass. `NEW_INPUT` stays a live release directory or
-package (extracted the same way the ordinary release fan-out extracts one).
-Only `--format json`/`markdown` are available in this mode, and most of the
-~44 flags the live release fan-out accepts have no channel into a
+no separate flag to pass. `NEW_INPUT` can be either a live release
+directory/package (extracted the same way the ordinary release fan-out
+extracts one) or a *second* stored `BundleFacts` document — comparing two
+previously-captured documents with no binaries reopened on either side, e.g.
+`abicheck compare release-1.0.bundlefacts.json release-2.0.bundlefacts.json`.
+Only `--format json`/`markdown` are available in either mode, and most of
+the ~44 flags the live release fan-out accepts have no channel into a
 stored-facts comparison and are rejected explicitly (exit 64) rather than
 silently ignored — see `abicheck compare --help-all` for the full, current
-list. Internally it routes through `abicheck.bundle_side_input.
-compare_release_against_bundle_facts()`, the same driver the paragraph
-below describes.
+list. When `NEW_INPUT` is also stored, every flag that would only ever
+apply to a *live* `NEW_INPUT` (`--header`/`--include`, `--ast-frontend`,
+`--compiler`/`--sysroot`, `--devel-pkg new=`,
+`--bundle-facts-library-manifest`, an explicit `--version new=`, ...) is
+rejected too, alongside a mismatched build variant between the two
+documents (`BundleFacts.variant_fingerprint`, a stable build-identity
+fingerprint each captured document carries): two documents captured from
+different logical builds (a CPU-only build vs. a SYCL/DPC build of the
+same source tree, say) are refused outright rather than silently diffed as
+if they were the same release. Internally, OLD-stored/NEW-live routes
+through
+`abicheck.bundle_side_input.compare_release_against_bundle_facts()` (the
+same driver the paragraph below describes); OLD-stored/NEW-stored routes
+through `abicheck.workflows.bundle_stored_pair_compare.
+compare_stored_bundle_facts_pair()`.
 
 `compare_bundle_from_facts()` reconstructs a live-equivalent
 `BundleSnapshot` from the stored per-library `AbiSnapshot.elf` metadata (no

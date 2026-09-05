@@ -120,7 +120,7 @@ report *renders*, never the verdict or the exit code.
 
 !!! tip "Shortcut: `--profile ci-gate`"
     A single `--profile ci-gate` bundles the common gating knobs
-    (`--depth headers --format review --exit-code-scheme severity`) so you
+    (`--depth headers --format review --severity-preset default`) so you
     don't retype them — an explicit flag still overrides the profile. It is a
     single-pair convenience; for a directory/package (release) gate, configure
     the same defaults in `.abicheck.yml`. See the `--profile` section of the
@@ -128,25 +128,25 @@ report *renders*, never the verdict or the exit code.
 
 ## The two exit-code schemes
 
-`compare` has two exit-code regimes. **When the exit-code scheme resolves to
-`auto`** (no explicit `--exit-code-scheme`/`exit_code_scheme` pin), **any
-active severity setting — a `--severity-*` flag *or* a severity value in
-`.abicheck.yml` — silently switches from the first to the second** — the
-most common source of confusion when wiring up CI. An explicit
-`--exit-code-scheme legacy|severity` (or the `exit_code_scheme` config key)
-is authoritative and overrides this auto-detection entirely — a severity
-setting alongside a pinned `legacy` scheme does **not** flip anything:
+`compare` has two exit-code regimes, and the choice between them is fully
+automatic: **any active severity setting — a `--severity-*` flag *or* a
+severity value in `.abicheck.yml` (or a `kind: gate` pack's
+`gate.severity.<category>`) — switches from the first to the second.** There
+is no manual override any more (a `--exit-code-scheme`/`exit_code_scheme`
+selector previously let you pin one scheme regardless of severity
+configuration; it was removed — the algorithm now always follows whether a
+severity setting is in effect, and nothing else):
 
 | Scheme | Active when | Codes |
 |---|---|---|
-| **Legacy (verdict-based)** | Explicitly pinned `legacy`, or `auto` with no severity setting active | `0` compatible / `2` `API_BREAK` / `4` `BREAKING` |
-| **Severity-based** | Explicitly pinned `severity`, or `auto` with any severity setting active (CLI flag or `.abicheck.yml` value) | `0` no error-level findings / `1` error in `addition`·`quality_issues` only / `2` error in `potential_breaking` / `4` error in `abi_breaking` |
+| **Legacy (verdict-based)** | No severity setting active anywhere | `0` compatible / `2` `API_BREAK` / `4` `BREAKING` |
+| **Severity-based** | Any severity setting active (CLI flag, `.abicheck.yml` value, or gate pack) | `0` no error-level findings / `1` error in `addition`·`quality_issues` only / `2` error in `potential_breaking` / `4` error in `abi_breaking` |
 
 In both schemes `0` passes and `4` is worst — but under the severity scheme
 exit `1` means an error-level *finding*, whereas under the legacy scheme `1`
-is a tool/runtime error, never a verdict (usage errors exit `64`). Pin the
-regime explicitly with `--exit-code-scheme legacy|severity` (or the
-`exit_code_scheme` config key) so a later flag change can't silently flip it.
+is a tool/runtime error, never a verdict (usage errors exit `64`). Since
+there is no pin, the way to guarantee a given scheme is to control whether a
+severity setting is present at all — see the recipes below.
 Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
 `--required-symbol`), `deps`, `compat`, and multi-library codes:
 [Exit Codes](../reference/exit-codes.md).
@@ -194,12 +194,12 @@ severity:
 abicheck compare baseline.json build/libfoo.so --header new=include/
 ```
 
-**Fail on source-level breaks too** (the legacy default behaviour, pinned
-explicitly):
+**Fail on source-level breaks too** (the legacy scheme, active by default
+whenever no severity setting is configured — nothing to pin):
 
 ```bash
-abicheck compare baseline.json build/libfoo.so --header new=include/ \
-  --exit-code-scheme legacy    # 0 / 2 (API_BREAK) / 4 (BREAKING)
+abicheck compare baseline.json build/libfoo.so --header new=include/
+  # 0 / 2 (API_BREAK) / 4 (BREAKING)
 ```
 
 **Strict API-surface governance** — also fail when new public API appears.

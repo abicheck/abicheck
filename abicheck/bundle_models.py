@@ -332,6 +332,25 @@ class BundleSnapshot:
     # tests -- since the default preserves the prior always-resolve
     # behavior).
     filesystem_backed: bool = True
+    # Per-member override of `filesystem_backed` above, when a snapshot
+    # mixes live and non-resolvable members (`bundle.build_bundle_snapshot_
+    # mixed`'s own stored/live mix -- CodeRabbit review, fresh evidence: the
+    # single snapshot-wide flag forced every live member to also be treated
+    # as non-resolvable whenever at least one stored member participated,
+    # so a live symlink with no DT_SONAME lost its resolved target name in
+    # `bundle._detect_soname_skew`'s own cohort-major fallback). `None`
+    # (the default) means every member follows `filesystem_backed` above,
+    # unchanged for every pre-existing caller; when given, a member's own
+    # membership in this set decides, not the snapshot-wide flag.
+    filesystem_backed_names: frozenset[str] | None = None
+
+    def member_is_filesystem_backed(self, name: str) -> bool:
+        """Whether *name*'s own `.libraries[name]` path is safe to
+        re-resolve against the real filesystem -- `filesystem_backed_names`
+        when given, else the snapshot-wide `filesystem_backed` flag."""
+        if self.filesystem_backed_names is not None:
+            return name in self.filesystem_backed_names
+        return self.filesystem_backed
 
     @property
     def library_names(self) -> list[str]:

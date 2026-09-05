@@ -65,12 +65,12 @@ dropped a line
 Parameter order in each entry must match the template's own; the shapes,
 matching rules and the bootstrap script that produces a first manifest
 from a release are owned by
-[Multi-binary § `--manifest`](../use/multi-binary.md#-manifest-path-experimental),
+[Multi-binary § `--instantiation-manifest`](../use/multi-binary.md#-instantiation-manifest-path-experimental),
 and the manifest is applied on a product comparison
 ([Products, Not Libraries](products-not-libraries.md)):
 
 ```bash
-abicheck compare release-1.0/ release-2.0/ -H include/ --manifest manifest.yaml
+abicheck compare release-1.0/ release-2.0/ -H include/ --instantiation-manifest manifest.yaml
 ```
 
 ## What the header side can and cannot see

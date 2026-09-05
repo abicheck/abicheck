@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `enum_member_removed` |
 | **Source files** | `examples/case19_enum_member_removed/` |
+| **Rule family** | [`enum-member-removed`](by-rule/enum-member-removed.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -115,4 +117,4 @@ codes.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enum member removed](by-rule/enum-member-removed.md)._

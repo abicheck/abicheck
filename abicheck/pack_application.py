@@ -69,7 +69,6 @@ from typing import TYPE_CHECKING, Any
 from .change_registry_types import Verdict
 from .checker_policy import ChangeKind
 from .compatibility_evaluation_frontend import (
-    EXIT_CODE_SCHEME_FIELD,
     SEVERITY_CATEGORY_FIELDS,
 )
 from .compatibility_evaluation_packs import PackKind
@@ -235,17 +234,13 @@ class PackApplication:
     policy_overrides: Mapping[ChangeKind, Verdict]
     #: ``surface.internal_namespaces`` when a contract pack supplied it.
     internal_namespaces: tuple[str, ...] | None = None
-    #: ``gate.exit_code_scheme`` when a gate pack supplied it.
-    exit_code_scheme: str | None = None
     #: ``gate.severity.<category>`` levels a gate pack supplied, keyed by the
-    #: :class:`~abicheck.severity.SeverityConfig` field name.
+    #: :class:`~abicheck.severity.SeverityConfig` field name. No
+    #: ``exit_code_scheme`` field here any more (CLI cleanup phase two PR
+    #: G2): a gate pack can no longer assign the manual algorithm selector
+    #: at all, since it was deleted everywhere -- see
+    #: ``compatibility_evaluation_wiring.GATE_PACK_FIELD_ROUTES``.
     severity_levels: Mapping[str, Any] = field(default_factory=dict)
-    #: The resolver's own ``gate.exit_code_scheme``, whoever supplied it.
-    #: Not a pack contribution and never applied on its own -- carried so
-    #: :func:`apply_to_compare_config` can *read* the resolved answer when a
-    #: pack severity level would otherwise make it re-derive one. See that
-    #: function for why re-deriving was wrong.
-    resolved_exit_code_scheme: str | None = None
     #: The full, already-resolved ``CompatibilityEvaluationConfig`` this
     #: application was built from (CLI cleanup phase two, "PR B" effective-
     #: config parity). Not a pack *contribution* -- ``is_empty()`` below
@@ -268,7 +263,6 @@ class PackApplication:
         return not (
             self.policy_overrides
             or self.internal_namespaces is not None
-            or self.exit_code_scheme is not None
             or self.severity_levels
         )
 
@@ -309,10 +303,6 @@ def pack_application(config: Any, *, policy_file: PolicyFile | None) -> PackAppl
     if _pack_supplied(config, INTERNAL_NAMESPACES_FIELD):
         namespaces = tuple(config.surface.internal_namespaces)
 
-    scheme: str | None = None
-    if _pack_supplied(config, EXIT_CODE_SCHEME_FIELD):
-        scheme = config.gate.exit_code_scheme
-
     severity_levels: dict[str, Any] = {}
     for category, field_name in SEVERITY_CATEGORY_FIELDS.items():
         if _pack_supplied(config, field_name):
@@ -321,11 +311,7 @@ def pack_application(config: Any, *, policy_file: PolicyFile | None) -> PackAppl
     return PackApplication(
         policy_overrides=pack_overrides,
         internal_namespaces=namespaces,
-        exit_code_scheme=scheme,
         severity_levels=severity_levels,
-        resolved_exit_code_scheme=getattr(
-            getattr(config, "gate", None), "exit_code_scheme", None
-        ),
         resolved_config=config,
     )
 
@@ -419,62 +405,40 @@ def resolve_bundle_policy_file(
 
 
 def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> Any:
-    """*resolved_cfg* with the gate packs' contributions folded in.
+    """*resolved_cfg* with a gate pack's severity contribution folded in.
 
-    A no-op unless a gate pack supplied a value. Only reachable for a field
-    ``resolve_compare_config`` left at its built-in default: the resolver
-    exempts ``gate.exit_code_scheme``/``gate.severity.*`` from pack
-    assignment whenever the CLI, a ``--profile``, or ``.abicheck.yml`` stated
-    it (or stated a preset that owns it), so overwriting here can never
-    displace a value the run was configured with.
+    A no-op unless a gate pack supplied a severity level. Only reachable for
+    a field ``resolve_compare_config`` left at its built-in default: the
+    resolver exempts ``gate.severity.*`` from pack assignment whenever the
+    CLI, a ``--profile``, or ``.abicheck.yml`` stated it (or stated a preset
+    that owns it), so overwriting here can never displace a value the run
+    was configured with.
 
-    A severity level *is* severity being configured, so it can move an
-    unstated ``--exit-code-scheme auto``, exactly as a level set in
-    ``.abicheck.yml`` already does. Without that, a gate pack's severity
-    would resolve, be reported, and then be scored under the legacy scheme
-    that never reads it.
-
-    **Which way it moves is the resolver's answer, not one re-derived here.**
-    An earlier revision wrote ``"severity" if severity_active else ...``,
-    which silently overrode an explicitly selected ``--exit-code-scheme
-    legacy`` whenever a gate pack assigned a severity level -- a
-    warning-level pack turned a BREAKING comparison's exit 4 into 0, exactly
-    the "a pack never overrides a stated value" rule D8 exists to enforce
-    (Codex review, reproduced). The resolver already decides this correctly:
-    its ``auto`` default is computed by ``_severity_active``, which *includes*
-    the gate pack's own levels, while an explicit ``--exit-code-scheme``
-    contributes an ``EXPLICIT_CLI`` candidate that outranks it. So the fix is
-    the same one this module's docstring states as its first rule -- read the
-    resolved value instead of re-deriving one.
-
-    This scheme resolution is shared, not re-derived a second time for this
-    shape: :func:`~abicheck.policy.release_gate_options.
-    resolve_gate_pack_exit_code_scheme` is the identical function the
-    release fan-out's own :func:`~abicheck.policy.release_gate_options.
-    apply_release_gate_pack` calls for its raw-string equivalent of this
-    same fold (ADR-063 Track A, 7B) -- see that function's own docstring
-    for the three-tier precedence this paragraph restates in prose.
+    A severity level *is* severity being configured, so it makes
+    ``severity_active`` true -- which is what now drives the one automatic
+    gate algorithm (ADR-064/CLI cleanup phase two PR G2) to ``"severity"``,
+    exactly as a level set in ``.abicheck.yml`` already does. Without that,
+    a gate pack's severity would resolve, be reported, and then be scored
+    under the legacy scheme that never reads it. There is no
+    ``exit_code_scheme`` to fold any more -- ``resolved_cfg.exit_code_scheme``
+    is purely derived from ``severity_active`` (see
+    ``cli_helpers_compare.resolve_compare_config``'s own field docstring),
+    so setting ``severity_active`` here is the whole fold: the field
+    recomputes itself, with no separate three-tier precedence to
+    re-implement (the manual selector this docstring used to describe --
+    an explicit pack ``gate.exit_code_scheme`` outranking a pack severity
+    level outranking the pre-pack value -- no longer exists at all: a pack
+    asserting ``gate.exit_code_scheme`` is rejected at load time, see
+    ``compatibility_evaluation_wiring.GATE_PACK_FIELD_ROUTES``).
     """
-    if application.exit_code_scheme is None and not application.severity_levels:
+    if not application.severity_levels:
         return resolved_cfg
-    severity = resolved_cfg.severity
-    severity_active = resolved_cfg.severity_active
-    if application.severity_levels:
-        severity = replace(severity, **application.severity_levels)
-        severity_active = True
-    from .policy.release_gate_options import resolve_gate_pack_exit_code_scheme
-
-    scheme = resolve_gate_pack_exit_code_scheme(
-        pack_exit_code_scheme=application.exit_code_scheme,
-        pack_resolved_exit_code_scheme=application.resolved_exit_code_scheme,
-        severity_levels_present=bool(application.severity_levels),
-        current_scheme=resolved_cfg.exit_code_scheme,
-    )
+    severity = replace(resolved_cfg.severity, **application.severity_levels)
     return replace(
         resolved_cfg,
         severity=severity,
-        severity_active=severity_active,
-        exit_code_scheme=scheme,
+        severity_active=True,
+        exit_code_scheme="severity",
     )
 
 

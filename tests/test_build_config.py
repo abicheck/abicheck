@@ -109,7 +109,10 @@ class TestBuildConfigFromDictRejects:
             )
 
     def test_wrong_top_level_scalar_string(self) -> None:
-        with pytest.raises(ValueError, match="exit_code_scheme must be a string"):
+        # exit_code_scheme itself no longer exists as a top-level key at all
+        # (CLI cleanup phase two PR G2) -- any presence of it, wrong type or
+        # not, is now an unknown-key error rather than a type error.
+        with pytest.raises(ValueError, match="exit_code_scheme"):
             BuildConfig.from_dict({"exit_code_scheme": 123})
 
     def test_wrong_top_level_scalar_int(self) -> None:
@@ -182,15 +185,68 @@ class TestBuildConfigFromDictRejects:
                     "debuginfod": True,
                     "debuginfod_url": "https://example.invalid",
                 },
-                "exit_code_scheme": "severity",
+                "bundle": {
+                    "system_providers": ["libvendor.so.1"],
+                    "cohorts": ["libfoo_"],
+                },
                 # Keys parsed by sibling modules, not from_dict itself.
                 "risk_rules": {},
                 "crosschecks": {},
             }
         )
         assert cfg.version == 1
-        assert cfg.exit_code_scheme == "severity"
         assert cfg.compile_frontend == "clang"
+        assert cfg.bundle_system_providers == ["libvendor.so.1"]
+        assert cfg.bundle_cohorts == ["libfoo_"]
+
+
+class TestBuildConfigBundleBlock:
+    """CLI cleanup phase two, PR J: `bundle.system_providers`/`bundle.cohorts`
+    are the sole source for both settings now, read by three independent
+    consumers (compare's fan-out, scan --artifact-set, stored-BundleFacts
+    compare) -- each must see the identical, normalized list (Codex review,
+    fresh evidence: a quoted entry with stray whitespace matched one
+    consumer's exact-string SONAME comparison, via compare's own incidental
+    comma-join/split/strip round trip, while silently missing the other two,
+    which forwarded the raw config value unchanged)."""
+
+    def test_entries_are_stripped_once_at_the_source(self) -> None:
+        cfg = BuildConfig.from_dict(
+            {
+                "bundle": {
+                    "system_providers": [" libvendor.so.1 ", "libcuda.so.1"],
+                    "cohorts": [" libfoo_ "],
+                },
+            }
+        )
+        assert cfg.bundle_system_providers == ["libvendor.so.1", "libcuda.so.1"]
+        assert cfg.bundle_cohorts == ["libfoo_"]
+
+    def test_whitespace_only_entries_are_dropped(self) -> None:
+        cfg = BuildConfig.from_dict(
+            {"bundle": {"system_providers": ["libvendor.so.1", "   "]}}
+        )
+        assert cfg.bundle_system_providers == ["libvendor.so.1"]
+
+    def test_cohorts_whitespace_only_entries_are_dropped(self) -> None:
+        # Symmetric with the system_providers case above -- cohorts goes
+        # through the identical strip-and-filter comprehension.
+        cfg = BuildConfig.from_dict({"bundle": {"cohorts": ["libfoo_", "   "]}})
+        assert cfg.bundle_cohorts == ["libfoo_"]
+
+    def test_to_dict_round_trips_the_bundle_block(self) -> None:
+        # Codecov patch-coverage gap: _bundle_block() (to_dict()'s own
+        # serialization half) had no test at all.
+        cfg = BuildConfig.from_dict(
+            {"bundle": {"system_providers": ["libvendor.so.1"], "cohorts": ["libfoo_"]}}
+        )
+        assert cfg.to_dict()["bundle"] == {
+            "system_providers": ["libvendor.so.1"],
+            "cohorts": ["libfoo_"],
+        }
+
+    def test_to_dict_omits_bundle_block_when_empty(self) -> None:
+        assert "bundle" not in BuildConfig().to_dict()
 
 
 # ── end-to-end: a bad .abicheck.yml exits 64 through a real command ─────────

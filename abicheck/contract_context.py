@@ -413,7 +413,6 @@ def with_resolved_gate(
     *,
     exit_code_scheme: str,
     severity: SeverityConfig,
-    scheme_provenance: ValueProvenance,
     severity_provenance: Mapping[str, ValueProvenance],
 ) -> PersistedContractContext:
     """Return *context* with the front end's real gate configuration recorded.
@@ -448,14 +447,15 @@ def with_resolved_gate(
 
     The gate is still ``NOT_APPLICABLE`` to contract membership
     (:class:`GateConfig`): nothing here changes a relevance decision, a
-    closure, or the receipt's per-finding map. It changes only what the
-    audit record says about how the run was gated.
+    closure, or the receipt's per-finding map -- only what the audit record
+    says about how the run was gated. *exit_code_scheme* itself carries no
+    provenance entry any more (PR G2 deleted the manual selector; purely
+    derived now).
     """
     from .compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
 
     config = context.evaluation_context.resolved_config
     provenance = dict(config.provenance)
-    provenance["gate.exit_code_scheme"] = scheme_provenance
     for category, entry in severity_provenance.items():
         provenance[SEVERITY_CATEGORY_FIELDS[category]] = entry
     return replace(

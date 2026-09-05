@@ -12,10 +12,10 @@ reports): a bundle is **one report**, with cross-library findings (soname
 skew, provider-set changes, missing-library detection) as first-class
 results, not N reports someone has to manually cross-reference.
 
-This is the existing directory/`--manifest` bundle-analysis capability
+This is the existing directory/`--instantiation-manifest` bundle-analysis capability
 `abicheck compare` already provides — see
 [Multi-Binary Releases](../../use/multi-binary.md) for the full
-model (what counts as a bundle, `--manifest` vs. plain directory mode, and
+model (what counts as a bundle, `--instantiation-manifest` vs. plain directory mode, and
 the cross-library findings it produces). This page covers only how a bundle
 fits into the project-integration model above that.
 

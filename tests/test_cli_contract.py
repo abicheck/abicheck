@@ -1442,6 +1442,11 @@ def test_contract_evaluation_no_longer_rejected_for_directory_comparisons() -> N
     params = inspect.signature(_reject_set_input_flags).parameters
     assert "contract_evaluation" not in params
     assert "contract_mode" not in params
-    # Passes through untouched -- neither kwarg exists on this function
-    # anymore, so there is nothing left here to reject.
-    _reject_set_input_flags(None, False, None)
+    # exit_code_scheme also no longer exists on this function at all (CLI
+    # cleanup phase two PR G2 deleted the flag entirely, so there is
+    # nothing left to reject it against here either) -- the signature now
+    # starts at reconcile_build_context.
+    assert "exit_code_scheme" not in params
+    # Passes through untouched -- none of these kwargs exist on this
+    # function anymore, so there is nothing left here to reject.
+    _reject_set_input_flags(False, None)

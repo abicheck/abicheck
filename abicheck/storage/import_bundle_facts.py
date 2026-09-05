@@ -65,7 +65,7 @@ provenance.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..errors import IncompatibleSnapshotSchemaError
@@ -127,14 +127,11 @@ _DEFAULT_VARIANT_FINGERPRINT = "default"
 
 
 #: Sentinel distinguishing "key absent from the document" from "key present
-#: with an explicit `None`/`null` value" -- `bundle_facts_from_dict`'s own
-#: `validated_alias_map`/`validated_filename_map` reject a present `None`
-#: (it fails their `isinstance(raw, dict)` check) while `.get(key, {})`
-#: only ever defaults a truly *absent* key. Passing `None` through
-#: unconditionally for both cases would silently launder an explicit-null
-#: document -- one the canonical reader rejects -- into a valid empty
-#: mapping (Codex review, fresh evidence beyond the non-mapping-value
-#: finding this same pair of functions already fixed).
+#: with an explicit `None`/`null` value" -- `validated_alias_map`/
+#: `validated_filename_map` reject a present `None` but `.get(key, {})`
+#: alone only defaults a truly *absent* key; passing `None` through
+#: unconditionally would launder an explicit-null document into a valid
+#: empty mapping (Codex review, fresh evidence).
 _ABSENT = object()
 
 
@@ -274,6 +271,47 @@ def _validated_manifest_entry(raw: Any) -> dict[str, Any]:
     return normalized
 
 
+def _decode_template_instantiation_pairs(pairs: Any) -> dict[str, str]:
+    """One stored `[[key, value], ...]` template-instantiation pair list
+    (`_validated_manifest_entry`'s own order-preserving encoding), decoded
+    back to `{key: value}` -- strictly, since this reads untrusted stored
+    content back into contract evidence a comparison scores findings
+    against.
+
+    A plain `dict(pairs)` conversion silently keeps only the *last* value
+    for a repeated parameter name, collapsing e.g. two `T` entries into one
+    and describing a different promised template signature than the one
+    actually stored (Codex review) -- rejected here instead, alongside a
+    malformed pair (not a two-element `[key, value]` list of strings).
+    """
+    if not isinstance(pairs, list):
+        raise ValueError(
+            "a stored template instantiation must be a list of [key, value] "
+            f"pairs, not {type(pairs).__name__} ({pairs!r})"
+        )
+    decoded: dict[str, str] = {}
+    for pair in pairs:
+        if (
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or not isinstance(pair[0], str)
+            or not isinstance(pair[1], str)
+        ):
+            raise ValueError(
+                "a stored template instantiation pair must be "
+                f"[<str parameter>, <str value>], got {pair!r}"
+            )
+        parameter, value = pair
+        if parameter in decoded:
+            raise ValueError(
+                f"a stored template instantiation names parameter "
+                f"{parameter!r} more than once: {pairs!r} -- the package is "
+                "corrupted or was hand-edited"
+            )
+        decoded[parameter] = value
+    return decoded
+
+
 def _manifest_entry_for_export(entry: Mapping[str, Any]) -> dict[str, Any]:
     """Inverse of `_validated_manifest_entry`'s order-preserving
     `instantiations` encoding: reconstructs each *template* entry's
@@ -289,11 +327,31 @@ def _manifest_entry_for_export(entry: Mapping[str, Any]) -> dict[str, Any]:
     "not decoded, only partitioned" contract for content it doesn't
     itself own), so it is never in the pair-list shape here. Decoding it
     unconditionally would raise on export for a document that import
-    itself accepted unchanged (Codex review, fresh evidence)."""
+    itself accepted unchanged (Codex review, fresh evidence).
+
+    *entry* itself is checked against `Mapping` before conversion (a stored
+    `[[key, value], ...]` list would otherwise convert via a plain
+    `dict(entry)` into a valid-looking mapping, Codex review), and
+    `exported["instantiations"]` is checked against `list` the same way
+    before iterating it -- a stored scalar (e.g. `1`) would otherwise raise
+    an unhandled `TypeError` instead of this function's own `ValueError`
+    (CodeRabbit review)."""
+    if not isinstance(entry, Mapping):
+        raise ValueError(
+            "a stored manifest 'provides' entry must be a mapping, not "
+            f"{type(entry).__name__} ({entry!r})"
+        )
     exported = dict(entry)
     if "template" in exported and "instantiations" in exported:
+        instantiations = exported["instantiations"]
+        if not isinstance(instantiations, list):
+            raise ValueError(
+                "a stored manifest template entry's 'instantiations' must "
+                f"be a list, not {type(instantiations).__name__} "
+                f"({instantiations!r})"
+            )
         exported["instantiations"] = [
-            dict(pairs) for pairs in exported["instantiations"]
+            _decode_template_instantiation_pairs(pairs) for pairs in instantiations
         ]
     return exported
 
@@ -538,7 +596,11 @@ def import_bundle_facts(
 
 
 def export_bundle_facts(
-    manifest: PackageManifest, *, store: ObjectStore, variant_id: str = "default"
+    manifest: PackageManifest,
+    *,
+    store: ObjectStore,
+    variant_id: str = "default",
+    on_document: Callable[[Any, str], None] | None = None,
 ) -> dict[str, Any]:
     """The exact inverse of `import_bundle_facts`: every artifact under
     *variant_id* is read back via `export_legacy_snapshot`, the variant's own
@@ -546,11 +608,29 @@ def export_bundle_facts(
     `bundle_composition_from_dto`, and both are reassembled into one
     `bundle_facts_serialization.bundle_facts_from_dict()`-shaped document.
 
-    Raises `ValueError` if *variant_id* names no variant in *manifest*, or if
-    that variant carries no `BUNDLE_COMPOSITION_SECTION_KIND` section (never
-    produced by anything but `import_bundle_facts` itself, so this means the
-    manifest was not built by it, or was hand-edited).
-    """
+    *on_document*, when given, is called once per reconstructed piece --
+    the bundle-composition section first, then each artifact -- with a
+    short description of what it is. This module has no size/count budget
+    of its own (see its own module docstring); a caller wanting to bound
+    aggregate decoded size *as* each piece is reconstructed, rather than
+    only after every member of a possibly-untrusted `manifest` has already
+    been retained in memory, raises from this callback to abort before the
+    next piece is fetched. For an artifact, the callback receives
+    `{"library_name": ..., "snapshot": ...}` rather than the bare snapshot
+    document, so a caller charging its bytes also charges the recovered
+    library name -- itself a `per_library_snapshots` key in the returned
+    document (Codex review).
+
+    Raises `ValueError` for a manifest not produced by `import_bundle_facts`
+    (no variant matching *variant_id*, no `BUNDLE_COMPOSITION_SECTION_KIND`
+    section, that section's `ObjectRef.kind` disagreeing with its own key,
+    or a section -- the composition one or any artifact's -- absent from
+    `section_schema_versions`), or for untrusted stored content that fails
+    validation this reader applies symmetrically with its own import-side
+    counterpart (a non-string `variant_fingerprint`, a `manifest` that isn't
+    a mapping with a list-valued `provides`, a `provides` entry that isn't a
+    mapping, or a template instantiation naming one parameter twice) -- or
+    whatever *on_document* itself raises."""
     variant = next(
         (v for v in manifest.variant_refs if v.variant_id == variant_id), None
     )
@@ -562,15 +642,61 @@ def export_bundle_facts(
             f"variant {variant_id!r} has no {BUNDLE_COMPOSITION_SECTION_KIND!r} "
             "section -- this manifest was not produced by import_bundle_facts"
         )
+    # `variant.sections`' own key and its `ObjectRef.kind` are independent
+    # fields -- checked before `store.get()` runs, not only via the fetched
+    # `SectionDTO`'s own `section_kind` afterward (Codex review).
+    if composition_ref.kind != BUNDLE_COMPOSITION_SECTION_KIND:
+        raise ValueError(
+            f"variant {variant_id!r}'s {BUNDLE_COMPOSITION_SECTION_KIND!r} "
+            f"section names an ObjectRef of kind {composition_ref.kind!r}, not "
+            f"{BUNDLE_COMPOSITION_SECTION_KIND!r} -- the package is corrupted "
+            "or was hand-edited"
+        )
+    # A package this module writes advertises the *union* of every library's
+    # own section kinds, plus `BUNDLE_COMPOSITION_SECTION_KIND`, in
+    # `manifest.versions.section_schema_versions` -- one artifact carrying
+    # *fewer* kinds than the union is expected (a header-only library has
+    # no "binary" section), but a kind the union never advertises at all is
+    # unambiguous corruption, on an artifact or the variant's own
+    # `bundle_composition` section alike (Codex review, both directions).
+    # Checked before this section is ever decoded: unversioned contract
+    # evidence must never reach a comparison even transiently.
+    advertised_sections = set(manifest.versions.section_schema_versions)
+    if BUNDLE_COMPOSITION_SECTION_KIND not in advertised_sections:
+        raise ValueError(
+            f"variant {variant_id!r}'s {BUNDLE_COMPOSITION_SECTION_KIND!r} "
+            "section is not in this package's section_schema_versions -- "
+            "the package is corrupted or was hand-edited"
+        )
     composition_dto = SectionDTO.from_dict(store.get(composition_ref.digest))
     composition = bundle_composition_from_dto(composition_dto)
+    if on_document is not None:
+        on_document(
+            composition,
+            f"variant {variant_id!r}'s {BUNDLE_COMPOSITION_SECTION_KIND!r} section",
+        )
 
     source_schema_version = manifest.versions.source_schema_version
+    # Built once, up front -- a fresh linear scan *inside* the loop below
+    # (an earlier version) makes reconstruction quadratic in artifact count
+    # (Codex review).
+    artifacts_by_id = {a.artifact_id: a for a in manifest.artifact_refs}
     per_library_snapshots: dict[str, Any] = {}
     for artifact_id in variant.artifact_ids:
-        artifact = next(
-            a for a in manifest.artifact_refs if a.artifact_id == artifact_id
-        )
+        artifact = artifacts_by_id.get(artifact_id)
+        if artifact is None:
+            raise ValueError(
+                f"variant {variant_id!r} names artifact_id {artifact_id!r}, "
+                "which is not among this manifest's artifact_refs -- the "
+                "package is corrupted or was hand-edited"
+            )
+        extra_sections = set(artifact.sections) - advertised_sections
+        if extra_sections:
+            raise ValueError(
+                f"artifact {artifact_id!r} has section(s) {sorted(extra_sections)} "
+                "that this package's section_schema_versions does not "
+                "advertise -- the package is corrupted or was hand-edited"
+            )
         # `artifact_id` itself may be an opaque `resolve_ref_ids`-generated
         # id, not the real library name -- `native_identity` is where
         # `import_bundle_facts` stashed the real one. Falling back to
@@ -610,14 +736,33 @@ def export_bundle_facts(
                 "manifest was not produced by import_bundle_facts, or was "
                 "hand-edited"
             )
-        per_library_snapshots[library_name] = export_legacy_snapshot(
+        snapshot_document = export_legacy_snapshot(
             artifact, store=store, source_schema_version=source_schema_version
         )
+        if on_document is not None:
+            on_document(
+                {"library_name": library_name, "snapshot": snapshot_document},
+                f"artifact {artifact_id!r} (library {library_name!r})",
+            )
+        per_library_snapshots[library_name] = snapshot_document
 
     raw_manifest = composition.get("manifest")
     if raw_manifest is None:
         exported_manifest = None
     else:
+        # Mirrors `_validated_manifest`'s own import-side shape check: a
+        # stored `manifest` that is not a mapping, or has no list-valued
+        # `provides` key, must raise the documented `ValueError` rather
+        # than an unhandled `TypeError`/`KeyError` from the dict-spread/
+        # subscript below (Codex review).
+        if not isinstance(raw_manifest, Mapping) or not isinstance(
+            raw_manifest.get("provides"), list
+        ):
+            raise ValueError(
+                f"variant {variant_id!r}'s stored manifest must be a mapping "
+                f"with a list-valued 'provides' key, not {raw_manifest!r} -- "
+                "the package is corrupted or was hand-edited"
+            )
         exported_manifest = {
             **raw_manifest,
             "provides": [
@@ -625,12 +770,29 @@ def export_bundle_facts(
             ],
         }
 
+    # `import_bundle_facts` rejects a non-string `variant_fingerprint` on
+    # the way in, but that check never runs for a `VariantRef.sections
+    # [BUNDLE_COMPOSITION_SECTION_KIND]` object built or stored some other
+    # way. `bundle_facts_from_dict()` unconditionally coerces this field
+    # via `str(...)`, so a stored non-string (e.g. the JSON number `1`)
+    # would otherwise silently become `"1"` -- possibly colliding with a
+    # genuinely distinct, already-string `"1"` fingerprint elsewhere and
+    # letting `pair_variants()` compare the wrong variants (Codex review).
+    raw_variant_fingerprint = composition.get(
+        "variant_fingerprint", _DEFAULT_VARIANT_FINGERPRINT
+    )
+    if not isinstance(raw_variant_fingerprint, str):
+        raise ValueError(
+            f"variant {variant_id!r}'s stored variant_fingerprint must be a "
+            f"string, not {type(raw_variant_fingerprint).__name__} "
+            f"({raw_variant_fingerprint!r}) -- the package is corrupted or "
+            "was hand-edited"
+        )
+
     return {
         "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
         "schema_version": _BUNDLE_FACTS_SCHEMA_VERSION,
-        "variant_fingerprint": composition.get(
-            "variant_fingerprint", _DEFAULT_VARIANT_FINGERPRINT
-        ),
+        "variant_fingerprint": raw_variant_fingerprint,
         "per_library_snapshots": per_library_snapshots,
         "filesystem_aliases": composition.get("filesystem_aliases", {}),
         "library_filenames": composition.get("library_filenames", {}),

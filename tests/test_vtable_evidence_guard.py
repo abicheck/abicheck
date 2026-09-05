@@ -21,7 +21,7 @@ from abicheck.diff_types_vtable import (
     _owned_virtual_signatures,
     _vtable_transition_is_evidenced,
 )
-from abicheck.model import Function, RecordType, Visibility
+from abicheck.model import Fact, FactStatus, Function, RecordType, Visibility
 
 NAME = "Abstract"
 
@@ -227,6 +227,157 @@ class TestPreExistingSignalsStillHold:
         assert not _vtable_transition_is_evidenced(
             NAME, _cls([]), _cls([f"{NAME}::f()"]), {}, {}
         )
+
+
+class TestExplicitFactStatusWouldNotSafelyGateThisGuard:
+    """ADR-063 Track 4, 5B final closure: an early decline keyed off
+    ``vtable_fact.status`` (``NOT_COLLECTED``/``FAILED``) was investigated,
+    landed, and then reverted for this guard — a three-round account, not a
+    two-round one. Full history: ``diff_types_vtable.py``'s own module
+    docstring ("Track 4, 5B final closure" section), the canonical writeup.
+
+    Round 1 declined this on the (too-narrow) theory that no real producer
+    sets a non-present ``vtable_fact`` at all. Round 2 landed a decline
+    anyway once Codex review found a real one — ``pdb_model.py``'s PDB
+    extractor, unconditionally ``NOT_COLLECTED`` on every record — and
+    confirmed DWARF/header-AST backends never produce that status. Round 3
+    reverted round 2: the same status is *also* what a hand-constructed
+    ``RecordType`` gets from simply omitting the ``vtable=`` field (a
+    public, positional constructor argument), which is exactly how a
+    non-polymorphic class is spelled throughout this codebase's own test
+    fixtures and any external typed-API caller — the decline could not
+    tell that apart from PDB's own structural non-evidence, and silently
+    regressed a previously-passing scenario
+    (``TestOmittedVtableStillDetectsARealAddition`` below is the pin for
+    that regression). This guard's heuristic is therefore unchanged from
+    before this closure: it still treats ``NOT_COLLECTED``/``FAILED``
+    identically to a confirmed-empty ``PRESENT([])`` read via
+    ``resolved_fact_value``'s default collapse, and still lets both
+    fallback evidence streams run regardless of ``vtable_fact``'s own
+    status — these tests pin that (reverted-to) contract, not a proposal.
+    """
+
+    _BAD_FACTS = [Fact.not_collected(), Fact.failed("simulated producer error")]
+    _BAD_FACT_IDS = ["not_collected", "failed"]
+
+    @pytest.mark.parametrize("bad_fact", _BAD_FACTS, ids=_BAD_FACT_IDS)
+    @pytest.mark.parametrize("bad_side", ["old", "new"])
+    def test_own_functions_fallback_still_fires(
+        self, bad_side: str, bad_fact: Fact[list[str]]
+    ) -> None:
+        """The exact mixed shape a real capture gap (or a PDB-vs-other-
+        backend comparison) produces: one side genuinely populated, the
+        other carrying an explicit ``NOT_COLLECTED``/``FAILED`` status
+        rather than a confirmed-empty ``PRESENT([])``. The class's own
+        retained virtual-function stream must still settle it regardless
+        of which side carries the bad status -- declining here would
+        reintroduce the round-3 regression, just for a real capture-gap
+        shape instead of an omitted-field one."""
+        populated = RecordType(
+            name=NAME, kind="class", size_bits=64, vtable=[f"{NAME}::f()"]
+        )
+        uncollected = RecordType(
+            name=NAME, kind="class", size_bits=64, vtable_fact=bad_fact
+        )
+        assert uncollected.vtable_fact is not None
+        assert uncollected.vtable_fact.status is bad_fact.status
+        old, old_funcs = (
+            (uncollected, {}) if bad_side == "old" else (populated, _virtual())
+        )
+        new, new_funcs = (
+            (populated, _virtual()) if bad_side == "old" else (uncollected, {})
+        )
+        assert _vtable_transition_is_evidenced(NAME, old, new, old_funcs, new_funcs)
+
+    @pytest.mark.parametrize("bad_fact", _BAD_FACTS, ids=_BAD_FACT_IDS)
+    @pytest.mark.parametrize("bad_side", ["old", "new"])
+    def test_size_delta_fallback_still_fires(
+        self, bad_side: str, bad_fact: Fact[list[str]]
+    ) -> None:
+        """Same mixed populated/uncollected shape as above, but with no
+        owned-function evidence on either side, so only the ``size_bits``
+        delta can settle it -- and must, regardless of which side's
+        ``vtable_fact`` carries the bad status. This is the exact shape
+        PR #1057's own round-2 review found reachable via PDB and
+        fabricating a ``TYPE_VTABLE_CHANGED`` finding -- still a real,
+        open gap (see the module docstring), just not one this guard can
+        close without conflating it with the round-3 regression shape."""
+        populated = RecordType(
+            name=NAME, kind="class", size_bits=64, vtable=[f"{NAME}::f()"]
+        )
+        uncollected = RecordType(
+            name=NAME, kind="class", size_bits=128, vtable_fact=bad_fact
+        )
+        old = uncollected if bad_side == "old" else populated
+        new = populated if bad_side == "old" else uncollected
+        assert _vtable_transition_is_evidenced(NAME, old, new, {}, {})
+
+    def test_the_both_sides_populated_branch_is_already_unreachable_when_uncollected(
+        self,
+    ) -> None:
+        """The one branch a direct status check *could* have replaced is
+        already unreachable via ``resolved_fact_value``'s existing collapse
+        -- confirming the status read really would be redundant there, not
+        just declined for style. A populated old side plus an uncollected
+        new side falls through to the fallback streams exactly as a
+        confirmed-empty new side would, and (with no other evidence
+        differing) is correctly suppressed either way."""
+        old = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=64,
+            vtable=["A::f()"],
+        )
+        new = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=64,
+            vtable_fact=Fact.not_collected(),
+        )
+        assert not _vtable_transition_is_evidenced(NAME, old, new, {}, {})
+
+
+class TestOmittedVtableStillDetectsARealAddition:
+    """ADR-063 Track 4, 5B final closure, round 3's own regression pin.
+
+    An omitted ``vtable=`` at construction (not just a confirmed-empty
+    ``vtable=[]``) is how a large fraction of this codebase's own test
+    fixtures -- and any external typed-API caller of the public
+    ``RecordType`` constructor -- spell "this class has no vtable" for an
+    ordinary non-polymorphic class. It resolves to
+    ``Fact.not_collected()`` via ``bridge_legacy_and_fact``'s omission
+    branch, identically to PDB's own real, structural non-evidence -- the
+    round-2 "either side not is_present" decline could not tell the two
+    apart, and silently swallowed this exact scenario
+    (``tests/test_abicc_scenario_parity.py::
+    TestLeafClassVirtualMethodAdditions::test_virtual_added_to_leaf_class``,
+    caught only by running the full suite, not by review). Pinned directly
+    here too, at the guard level, so a future attempt at this same
+    narrowing trips over it immediately rather than rediscovering it via a
+    full-suite run.
+    """
+
+    def test_first_virtual_added_to_a_class_with_omitted_old_vtable(self) -> None:
+        old = RecordType(name=NAME, kind="class", size_bits=32)
+        assert old.vtable_fact is not None
+        assert old.vtable_fact.status is FactStatus.NOT_COLLECTED
+        new = RecordType(name=NAME, kind="class", size_bits=96, vtable=[f"{NAME}::f()"])
+        assert _vtable_transition_is_evidenced(NAME, old, new, {}, _virtual()), (
+            "the class's own retained virtual function must still evidence this"
+        )
+
+    def test_does_not_affect_a_fully_present_pair(self) -> None:
+        """Sanity check: an ordinary, fully-``PRESENT`` pair with a real
+        size-delta signal is unaffected by any of the above, matching
+        ``TestPreExistingSignalsStillHold.test_a_size_change_is_evidence``."""
+        old = RecordType(name=NAME, kind="class", size_bits=64, vtable=[])
+        new = RecordType(
+            name=NAME, kind="class", size_bits=128, vtable=[f"{NAME}::f()"]
+        )
+        assert old.vtable_fact is not None
+        assert new.vtable_fact is not None
+        assert old.vtable_fact.status is new.vtable_fact.status is FactStatus.PRESENT
+        assert _vtable_transition_is_evidenced(NAME, old, new, {}, {})
 
 
 class TestOwnedVirtualSignaturesBackCompatWrapper:

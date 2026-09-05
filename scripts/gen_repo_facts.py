@@ -63,6 +63,15 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 _MODULE_RUNNER = Path(__file__).resolve().with_name("run_isolated_module.py")
 
+# Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
+# This script's own directory is already on sys.path when run directly, but
+# not when imported as `scripts.gen_repo_facts` -- guard mirrors
+# gen_catalog_taxonomy.py's identical sibling-import guard for the identical
+# reason.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import example_catalog  # noqa: E402
+
 
 def _isolated_module_command(*mod_args: str) -> tuple[str, ...]:
     return (sys.executable, "-I", str(_MODULE_RUNNER), *mod_args)
@@ -122,9 +131,7 @@ def _project_version() -> str:
 
 
 def _example_cases() -> int:
-    gt = json.loads(
-        (ROOT / "examples" / "ground_truth.json").read_text(encoding="utf-8")
-    )
+    gt = json.loads(example_catalog.GROUND_TRUTH_PATH.read_text(encoding="utf-8"))
     return len(gt["verdicts"])
 
 

@@ -488,8 +488,16 @@ class ResolvedCompareConfig:
     public_symbols: tuple[str, ...]
     strict_suppressions: bool
     require_justification: bool
-    #: Resolved to a concrete scheme: ``"legacy"`` or ``"severity"`` (``auto``
-    #: has already been decided from ``severity_active``).
+    #: The one automatic gate algorithm (ADR-064/CLI cleanup phase two PR
+    #: G2): ``"severity"`` when a severity setting is in effect anywhere
+    #: (``severity_active``), else ``"legacy"``. Purely derived -- there is
+    #: no user-facing selector for this any more (the removed
+    #: ``--exit-code-scheme``/``.abicheck.yml``'s ``exit_code_scheme:`` key
+    #: used to let a caller force either value regardless of
+    #: ``severity_active``); kept as a named field because a large amount
+    #: of downstream reporting/dry-run code reads it as "which algorithm
+    #: did this run use", which is still a fact worth stating even though
+    #: it is no longer configurable.
     exit_code_scheme: str
     source_method: str | None
     #: ADR-040 Lever 2: debug-resolution knobs demoted to the ``debug:`` config
@@ -508,6 +516,13 @@ class ResolvedCompareConfig:
     merged_severity_potential_breaking: str | None = None
     merged_severity_quality_issues: str | None = None
     merged_severity_addition: str | None = None
+    #: CLI cleanup phase two, PR J: ``bundle.system_providers``/
+    #: ``bundle.cohorts`` demoted off the CLI entirely (no
+    #: ``--bundle-system-providers``/``--bundle-cohort`` flags any more) —
+    #: ``.abicheck.yml`` is these two fields' only source, same shape as
+    #: ``show_redundant`` above.
+    bundle_system_providers: tuple[str, ...] = ()
+    bundle_cohorts: tuple[str, ...] = ()
 
 
 def resolve_compare_config(
@@ -515,7 +530,6 @@ def resolve_compare_config(
     *,
     cli_severity_preset: str | None,
     cli_scope_public: bool | None,
-    cli_exit_code_scheme: str | None = None,
     cli_debug_format: str | None = None,
     cli_dwarf_only: bool | None = None,
     cli_debuginfod: bool | None = None,
@@ -573,13 +587,11 @@ def resolve_compare_config(
     strict = bool(cfg.suppression_strict) if cfg else False
     require_just = bool(cfg.suppression_require_justification) if cfg else False
 
-    raw_scheme = str(
-        _pick(cli_exit_code_scheme, cfg.exit_code_scheme if cfg else None, "auto")
-    )
-    if raw_scheme == "auto":
-        scheme = "severity" if severity_active else "legacy"
-    else:
-        scheme = raw_scheme
+    # ADR-064/CLI cleanup phase two PR G2: no manual override any more --
+    # the algorithm is fully determined by whether a severity policy is in
+    # effect. `severity_active` is exactly that predicate (see its own
+    # comment above).
+    scheme = "severity" if severity_active else "legacy"
 
     source_method = cfg.source_method if cfg else None
 
@@ -595,6 +607,8 @@ def resolve_compare_config(
         cli_debuginfod_url, cfg.debug_debuginfod_url if cfg else None, None
     )
     show_redundant = bool(cfg.scope_show_redundant) if cfg else False
+    bundle_system_providers = tuple(cfg.bundle_system_providers) if cfg else ()
+    bundle_cohorts = tuple(cfg.bundle_cohorts) if cfg else ()
 
     return ResolvedCompareConfig(
         severity=severity,
@@ -616,6 +630,8 @@ def resolve_compare_config(
         merged_severity_potential_breaking=eff_pot,
         merged_severity_quality_issues=eff_qual,
         merged_severity_addition=eff_add,
+        bundle_system_providers=bundle_system_providers,
+        bundle_cohorts=bundle_cohorts,
     )
 
 

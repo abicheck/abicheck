@@ -62,11 +62,19 @@ def release_options(func: F) -> F:
     The release-only options the removed ``compare-release`` command exposed:
     package extraction (``--debug-info*``/``--devel-pkg*``), DSO selection
     (``--include-private-dso``/``--keep-extracted``), the removed-library gate, and
-    the ADR-023 bundle/manifest analysis. They bite only when ``compare``'s
+    the ADR-023 instantiation-manifest analysis. They bite only when ``compare``'s
     operands are directories or packages (the per-library fan-out); on single-file
     inputs they are inert. Declared once here so ``compare`` and the internal
     release engine share one surface (ADR-037 D7). Applied bottom-up, so listed in
     reverse of displayed order.
+
+    CLI cleanup phase two, PR J: ``--bundle-system-providers``/
+    ``--bundle-cohort`` are gone from this group -- topology, not a per-run
+    input, per this plan's "belongs somewhere else" test. Sourced only from
+    ``.abicheck.yml``'s ``bundle:`` block now
+    (:data:`abicheck.buildsource.build_config.BuildConfig.bundle_system_providers`/
+    ``bundle_cohorts``, resolved onto
+    :class:`abicheck.cli_helpers_compare.ResolvedCompareConfig`).
     """
     func = click.option(
         "--no-bundle-analysis",
@@ -79,29 +87,16 @@ def release_options(func: F) -> F:
         "and manifest mismatches. (directory/package inputs only)",
     )(func)
     func = click.option(
-        "--bundle-cohort",
-        "bundle_cohorts",
-        multiple=True,
-        metavar="PREFIX",
-        help="Declare a co-versioned library cohort by name prefix (e.g. "
-        "'libfoo_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check. "
-        "(directory/package inputs only)",
-    )(func)
-    func = click.option(
-        "--bundle-system-providers",
-        "bundle_system_providers",
-        default="",
-        help="Comma-separated extra sonames to treat as system-provided "
-        "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list). "
-        "(directory/package inputs only)",
-    )(func)
-    func = click.option(
-        "--manifest",
+        "--instantiation-manifest",
         "manifest_path",
         type=click.Path(exists=True, path_type=Path),
         default=None,
         help="ABI instantiation manifest (YAML/JSON) listing symbols the release "
-        "publicly promises (ADR-023). (directory/package inputs only)",
+        "publicly promises (ADR-023). Renamed from --manifest (CLI cleanup "
+        "phase two, PR J): the bare spelling collided with aggregate's own "
+        "--manifest and the product's several other manifest-shaped concepts "
+        "(dump manifest, run plan, bundle facts, project config). "
+        "(directory/package inputs only)",
     )(func)
     func = click.option(
         "--bundle-facts-out",
@@ -524,3 +519,73 @@ def evidence_options(func: F) -> F:
 #: Back-compat alias for the pre-ADR-037-D3 name. ``evidence_options`` is the
 #: canonical spelling (the D3 table); this keeps existing imports working.
 build_source_compare_options = evidence_options
+
+
+def _stash_variant_in_context(
+    ctx: click.Context, param: click.Parameter, value: str | None
+) -> None:
+    """``--old-variant``/``--new-variant``'s click ``callback=``: stashes
+    *value* on ``ctx.meta`` under *param*'s own name instead of exposing it
+    to the decorated command's own ``**kwargs`` (``expose_value=False``).
+
+    Neither flag means anything to a single-pair `compare`/`run_compare`
+    call -- only the directory/package release fan-out
+    (`frontends.cli.commands.compare._dispatch_release_compare`) reads them
+    back via `variant_kwargs_from_context`, off the identical `ctx` -- so
+    routing them through `ctx.meta` instead of `**kwargs` means `run_compare`
+    (whose own typed signature has no matching parameters) never has to see
+    or strip them.
+    """
+    ctx.meta[f"abicheck.variant.{param.name}"] = value
+
+
+def variant_options(func: F) -> F:
+    """``--old-variant``/``--new-variant`` (ADR-062 A1.7): which `VariantRef`
+    to compare when a stored `ProjectSnapshot` package operand declares more
+    than one -- release-fanout-specific, same as this module's other option
+    groups (a plain directory/package release comparison, ADR-054's own
+    admission bar for what belongs here). Not applied via ``@variant_options``
+    on ``compare_cmd`` itself -- ``cli.py`` calls it directly on the already-
+    registered ``compare`` command instead, once `frontends/cli/commands/
+    compare.py` is fully loaded, so that already-at-cap module owes this
+    flag family neither an import nor a decorator line. See
+    `variant_kwargs_from_context`/`frontends/cli/commands/compare.py`'s own
+    use for the full read-back contract.
+    """
+    func = click.option(
+        "--old-variant",
+        "old_variant",
+        default=None,
+        metavar="VARIANT_ID",
+        expose_value=False,
+        callback=_stash_variant_in_context,
+        help="Which build variant to compare when OLD is a stored "
+        "ProjectSnapshot package directory declaring more than one. "
+        "Defaults to the package's only variant when it declares exactly "
+        "one; a usage error otherwise. No-op for a live directory/archive/"
+        "single-file operand.",
+    )(func)
+    func = click.option(
+        "--new-variant",
+        "new_variant",
+        default=None,
+        metavar="VARIANT_ID",
+        expose_value=False,
+        callback=_stash_variant_in_context,
+        help="The --old-variant counterpart for NEW.",
+    )(func)
+    return func
+
+
+def variant_kwargs_from_context(ctx: click.Context) -> dict[str, str | None]:
+    """``--old-variant``/``--new-variant``'s current values, stashed on
+    *ctx* by `_stash_variant_in_context` -- what
+    `frontends.cli.commands.compare._dispatch_release_compare` merges into
+    its own kwargs before calling `compare_release_cmd.callback` (ADR-062
+    A1.7), since `variant_options`' `expose_value=False` means neither flag
+    ever reaches a decorated command's own `**kwargs`.
+    """
+    return {
+        "old_variant": ctx.meta.get("abicheck.variant.old_variant"),
+        "new_variant": ctx.meta.get("abicheck.variant.new_variant"),
+    }

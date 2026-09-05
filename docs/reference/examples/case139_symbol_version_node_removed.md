@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `symbol_version_node_removed` |
 | **Source files** | `examples/case139_symbol_version_node_removed/` |
+| **Rule family** | [`symbol-version-node-removed`](by-rule/symbol-version-node-removed.md) — Variant (symbol-versioning) of [case65_symbol_version_removed](case65_symbol_version_removed.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -152,4 +154,4 @@ is what actually explains the load-time failure above.
 - `v2.c`
 - `v2.map`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Symbol version node removed](by-rule/symbol-version-node-removed.md)._

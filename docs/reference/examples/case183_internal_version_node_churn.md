@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `symbol_version_node_removed` |
 | **Source files** | `examples/case183_internal_version_node_churn/` |
+| **Rule family** | [`internal-version-node-churn`](by-rule/internal-version-node-churn.md) |
 
 **Category:** Risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -128,4 +130,4 @@ old-side binding for the symbol is confined to an internal/private node.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Internal version node churn](by-rule/internal-version-node-churn.md)._

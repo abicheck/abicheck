@@ -390,9 +390,10 @@ def _announce_exit_scheme(
 ) -> None:
     """Announce (on stderr) which exit-code scheme the compare command uses.
 
-    The scheme is now explicit (ADR-037 D12 / D4: ``--exit-code-scheme`` or the
-    config's ``exit_code_scheme``, with ``auto`` already resolved to ``legacy`` or
-    ``severity`` by the time we get here). Kept on stderr so it never pollutes the
+    The scheme is fully automatic (ADR-064 / CLI cleanup phase two PR G2 --
+    there is no manual override any more): ``severity`` whenever a severity
+    setting is in effect from any source, ``legacy`` otherwise, resolved
+    once by the time we get here. Kept on stderr so it never pollutes the
     report on stdout, and only for the human-readable formats — machine formats
     (json/sarif/junit) and the internal one-line format (``service_render.
     ONELINE_FORMAT``, the built-in ``quick`` --profile's sole surviving use of
@@ -414,8 +415,9 @@ def _announce_exit_scheme(
             "with --contract, 1=incomplete contract coverage; with "
             "--require-complete-analysis, 1=incomplete analysis assurance -- both "
             "orthogonal axes that never lower a 2/4). "
-            "Pass --exit-code-scheme severity (or a severity setting) for the "
-            "severity-aware scheme.",
+            "Set a severity setting (--severity-preset, a --pack, or "
+            ".abicheck.yml's severity: block) for the severity-aware scheme -- "
+            "there is no manual scheme selector any more.",
             err=True,
         )
 

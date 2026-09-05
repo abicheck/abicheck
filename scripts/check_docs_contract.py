@@ -1315,6 +1315,12 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 # Names the retired spellings once, to point a reader at the
                 # --compiler* replacements -- the page documenting the family.
                 "use/dump-compare-flags.md",
+                # A point-in-time "shipped in PR #422" use-case record: names
+                # the flag as it was called then, in its own historical-
+                # record capacity. Line-scoped (not the whole multi-entry
+                # registry), so a live `--gcc-option` added to a different
+                # entry later still gets flagged (CodeRabbit review).
+                "docs/contribute/usecase-registry.yaml#L416",
             }
         ),
     ),
@@ -1544,6 +1550,73 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "compare --bundle-cohort/--bundle-system-providers (CLI cleanup"
+        " phase two, PR J: bundle topology moved to .abicheck.yml's"
+        " bundle.cohorts:/bundle.system_providers:, since it's a stable,"
+        " reviewed-in-a-PR release property, not a per-run analysis input;"
+        " scan --artifact-set's --bundle-system-providers was retired the"
+        " same way)",
+        ("--bundle-cohort", "--bundle-system-providers"),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/plans/cli-cleanup-phase-two.md",
+                # Names the retired spelling once, in its own "formerly ..."
+                # historical-framing sentence, to point a reader coming from
+                # an old invocation at the `.abicheck.yml` replacement.
+                "use/multi-binary.md",
+                # Same "formerly ..." historical framing, in the use-case
+                # registry's bundle_soname_skew entry. Line-scoped, not the
+                # whole multi-entry registry (CodeRabbit review) -- see the
+                # --gcc-* entry above for why.
+                "docs/contribute/usecase-registry.yaml#L383",
+                # Same "replacing the removed ..." historical framing, in
+                # the canonical config-file reference's own bundle: section.
+                "reference/config-file.md",
+            }
+        ),
+    ),
+    (
+        "--exit-code-scheme and .abicheck.yml's top-level exit_code_scheme:"
+        " key (ADR-064 / CLI cleanup phase two PR G2 -- there is no manual"
+        " gate-algorithm override any more; the algorithm is fully"
+        " determined by whether a severity setting is in effect. Note this"
+        " is distinct from the still-live, purely-derived report field"
+        " `gate.exit_code_scheme`/`scoped_exit_code_scheme`, which is not"
+        " a settable surface and is not matched by these patterns)",
+        ("--exit-code-scheme", "exit_code_scheme:"),
+        frozenset(
+            {
+                # Historical "what changed" migration note explaining the
+                # old scoped-severity fix, including that its manual pin
+                # was later removed.
+                "start/upgrading-to-0.6.md",
+                # Explains why `gate.exit_code_scheme` carries no
+                # `field_provenance` entry any more -- names the retired
+                # flag/key as the thing that used to populate it.
+                "reference/compatibility-evaluation-config.md",
+                # The "no config key any more" explanation itself names
+                # the retired key and flag.
+                "reference/config-file.md",
+                # The release-path exit-code section explains there is no
+                # manual override any more, by naming what was removed.
+                "reference/exit-codes.md",
+                # "there is no separate `exit_code_scheme:` key" sentence
+                # explaining the config file's own severity block.
+                "learn/rollout-and-governance.md",
+                # Same "no such key any more" explanation as config-file.md.
+                "use/build-evidence-setup.md",
+                # The rewritten "the two exit-code schemes" section states
+                # there is no manual override any more, by naming it.
+                "use/ci-gating.md",
+                # Historical G22 changelog-style row: names the CLI as it
+                # was designed at the time (an explicit --exit-code-scheme),
+                # accurate to that point in history.
+                "contribute/usecase-coverage-evaluation.md",
+            }
+        ),
+    ),
 )
 
 
@@ -1570,9 +1643,26 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     --compile-db` while both this sweep and those tests stayed green (Codex
     review). YAML rather than Markdown, but the same failure and the same fix.
 
+    `docs/contribute/usecase-registry.yaml` is here for the identical reason:
+    it is the machine-checked use-case source of truth, and its free-text
+    `note:` fields document real invocations a reader can copy -- CLI cleanup
+    phase two's PR J retired `--bundle-cohort` while this registry's
+    UC-WF-bundle-related entry kept advertising it, invisible to this sweep
+    because it scanned Markdown/case-README/scenario YAML only (Codex
+    review, fresh evidence).
+
+    `examples/ground_truth.json` is here for the same reason one further
+    step out: it is the *other* machine-checked example-catalog source of
+    truth (alongside the case READMEs above), and its per-case
+    `description` fields document real invocations too -- PR J's
+    `--manifest` rename left case93's description advertising the retired
+    spelling, invisible to this sweep the same way (Codex review, fresh
+    evidence).
+
     Keyed repo-relative (`examples/caseNN.../README.md`,
-    `tests/scenarios/x.yaml`), which cannot collide with a docs-relative key,
-    so an allowlist entry stays unambiguous about which tree it exempts.
+    `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`,
+    `examples/ground_truth.json`), which cannot collide with a docs-relative
+    key, so an allowlist entry stays unambiguous about which tree it exempts.
     """
     targets = [(p, p.relative_to(DOCS).as_posix()) for p in sorted(DOCS.rglob("*.md"))]
     targets += [
@@ -1582,6 +1672,14 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     targets += [
         (p, f"tests/scenarios/{p.name}") for p in sorted(SCENARIOS.glob("*.yaml"))
     ]
+    usecase_registry = DOCS / "contribute" / "usecase-registry.yaml"
+    if usecase_registry.is_file():
+        targets.append(
+            (usecase_registry, "docs/contribute/usecase-registry.yaml")
+        )
+    ground_truth = EXAMPLES / "ground_truth.json"
+    if ground_truth.is_file():
+        targets.append((ground_truth, "examples/ground_truth.json"))
     return targets
 
 
@@ -1621,6 +1719,16 @@ def _check_retired_surfaces(f: Findings) -> None:
                 continue
             if text is None:
                 text = path.read_text(encoding="utf-8")
+            # An entry can also allow one specific line (`"<rel>#L<n>"`)
+            # instead of the whole file -- for a multi-entry catalogue like
+            # `docs/contribute/usecase-registry.yaml`, exempting the whole
+            # file for one historical mention would silently blind this
+            # sweep to a genuinely live occurrence of the same retired flag
+            # added to a different entry later (CodeRabbit review, fresh
+            # evidence). Line-pinned the same way `CLI_CONTRACT_ALLOWLIST`
+            # in check_ai_readiness.py is: a later edit shifting the line
+            # makes the allowlist entry stop matching, which re-surfaces the
+            # warning for a human to re-pin rather than silently drifting.
             # Longest-first, and skip a shorter pattern's match when it falls
             # entirely inside a longer pattern's already-reported span (e.g.
             # a bare "--source-abi" match sitting inside an already-flagged
@@ -1651,6 +1759,8 @@ def _check_retired_surfaces(f: Findings) -> None:
                         continue
                     reported_spans.append((idx, end))
                     line_no = text.count("\n", 0, idx) + 1
+                    if f"{rel}#L{line_no}" in allowed_paths:
+                        continue
                     f.warn(
                         "retired-surfaces",
                         f"{_rel(path)}:{line_no}: {pattern!r} names a retired "

@@ -114,6 +114,100 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > is already tracked here and is re-confirmed still open. Two of its items
 > were already fixed in `94be22ad..2598d0d` and are corrected rather than
 > re-opened. Full account: **"Review checkpoint (2026-09-01)"** below.
+>
+> **Update (2026-09-04, fresh re-review, `main` at `23c7808`, merge of
+> [#1042](https://github.com/abicheck/abicheck/pull/1042)).** A broader
+> architecture review (not scoped to this plan) was cross-checked against
+> this file; the parts of it that bear on this plan are recorded here so
+> a future pass does not re-derive them.
+>
+> **PR I's classification + flag deletion is confirmed actually landed on
+> `main`**, not merely landed on its own branch as the 2026-09-03 update
+> above states — #1042 (`feat(compare): classify a stored BundleFacts
+> OLD_INPUT automatically, delete --old-bundle-facts`) merged into `main`
+> at `23c7808`, base `48152645` (#1052). `--old-bundle-facts` is gone,
+> `workflows/bundle_compare_operand.py`/`bundle_compare_operand_marker.py`
+> do the classification (hardened across many adversarial review rounds,
+> each with its own fix and regression test — the module's own docstring
+> keeps accumulating new rounds after #1042 merged, so this note
+> deliberately names no count at all; see that module's docstring for the
+> current total), `compare_bundle_operand_dispatch.py` wires it
+> into `compare_cmd`. **The full `BundleCompareRequest` unification is
+> still explicitly out of scope of #1042 and remains this row's open
+> item** — live/stored still has no execution engine (stored/stored's own
+> landed 2026-09-04, see the Ordering block's PR I row below, Codex
+> review), and the evaluation/gate/report/dry-run surface is still
+> answered per operand-shape branch rather than once.
+>
+> **Corrected the "Ordering" block's PR C row**, which had gone stale in
+> the other direction from #1042/#1053 landing: it still read "ELF done,
+> PE/Mach-O open" and named `handle_non_elf_dump` as unmigrated, but the
+> 2026-08-27 checkpoint above already recorded PE/Mach-O's migration via
+> #980. Re-verified directly against `service_dump_pipeline.py`'s own
+> docstring on current `main`: both binary formats now route through
+> `execute_dump_request` via `frontends.cli.dump_execute.
+> execute_dump_cli_run`, and `handle_non_elf_dump` is kept only for its own
+> direct unit tests — that part of the row is DONE. (PR C's
+> config-discovery half is a separate, narrower story — see the "Net
+> effect" paragraph below and the row itself, not restated here.) This is
+> exactly the "generated status, not hand-kept prose" gap the 2026-09-01
+> checkpoint's "Generated plan status" bullet already named as a durable
+> problem, caught here as a live instance of it.
+>
+> **New context for PR I/PR J from #1053** (merged the same day, just
+> before #1042, base also `48152645`): ADR-062/ADR-063 Track C 8B folded
+> persisted `BundleFacts` documents and `actions/baseline`-produced
+> baseline sets into `ProjectSnapshot`'s sectioned representation
+> (`storage/import_bundle_facts.py`, `storage/import_baseline_set.py`,
+> `VariantRef.sections`). This does not change anything this plan commits
+> to, but it is a live candidate for what `BundleCompareRequest`'s
+> `StoredBundleFactsInput` side eventually reads once storage v2's own
+> "standard CLI input" gap (`abicheck compare old.project.zst
+> new.project.zst`, tracked in `docs/contribute/plans/storage-format-v2.md`,
+> not here) closes — worth a cross-reference when PR I's full unification
+> is actually scoped, not a reason to change PR I's own target shape today.
+> Likewise relevant background for PR J's "topology out of CLI flags": a
+> `ProjectSnapshot`-shaped bundle artifact is now a real storage primitive,
+> which is one more reason `BundleSpec`/`.abicheck.yml` topology (not a
+> flag) should be what a bundle comparison resolves against, rather than
+> designing PR J's topology model in ignorance of where the stored side is
+> headed.
+>
+> **Everything else the broader review raised — `ResolvedExecutionContext`
+> authority, `RunOutcome`/gate unification beyond PR G2's own scope,
+> SemanticIR consumer authority, the producer/consumer compiler split
+> (G34), storage v2 scale work — is real but is not this plan's scope**;
+> it belongs to `docs/contribute/plans/one-semantic-pipeline.md`,
+> `duplication-and-convergence-assessment.md`,
+> `g34-producer-consumer-compiler-profile-separation.md` (per
+> `plans/index.md`'s own G34 row — not one of the other three plans named
+> here, corrected 2026-09-04), and `storage-format-v2.md` respectively, and
+> is not duplicated here.
+> One item from that review *is* already tracked here and re-confirmed
+> unchanged: `contract=public`'s remaining unresolved-loss count (see the
+> 2026-09-01 checkpoint's own bullet) — still blocked on the same
+> `EntityId`-based public-closure work, still not a string-heuristic fix.
+>
+> **Net effect on "what remains" in this plan, unchanged in shape from the
+> 2026-09-01 checkpoint, narrower in substance:** PR G2 (delete
+> `--exit-code-scheme`, most of the prerequisite work landed, see PR 4's
+> own section for the exact remaining `--format text`/`--artifact-set`
+> signal gap), PR H (artifact-set provider-ownership semantics — not
+> started), PR I's full `BundleCompareRequest` unification (classification
+> + flag deletion done; the unification itself not started), and PR J
+> (bundle topology out of CLI flags — the `--manifest` rename and the
+> `--bundle-system-providers`/`--bundle-cohort` → `.abicheck.yml` move both
+> landed 2026-09-04, see PR J's own row for the account; per-library
+> header/compile-context topology and `--max-json-object-nodes` remain
+> open). PR C is done for binary-format migration and for `scan`'s
+> config-discovery dry-run parity, with one real, narrower open residual
+> (`dump`/`compare`'s explicit-`--config` case) — see the "Configuration
+> discovery (PR C's tail)" bullet under "Re-verified, unchanged, still
+> open" below for the single full account; reaching that precise a
+> statement took repeated review on this PR (recorded so a future pass
+> doesn't re-litigate it, and this paragraph deliberately doesn't restate
+> the account itself, per the same review's DRY finding). PR A/B/D/E/F and
+> PR 1/1b/2 are done.
 
 ## Problem
 
@@ -3953,6 +4047,138 @@ second top-level spelling of the same fact.
 > specifically — a separate, not-yet-scoped piece of work, unchanged by
 > this round.
 
+> **Update (2026-09-04): the `--format text` gap closed too, via the exit-
+> code approach after all.** Round 6's "does NOT generalize" conclusion
+> rested on "the set's own process exit is floored at a generic 1 with no
+> room for a distinct value" — re-reading `_aggregate_scan_set_verdict`
+> (`abicheck/service_scan.py`) against the actual current code found that
+> premise wrong, not the conclusion drawn from it: `run_scan_set` rejects
+> `severity_preset`/`exit_code_scheme` outright for every `--artifact-set`
+> request (`_reject_comparison_only_fields`), so the severity scheme's own
+> "1 = addition/quality error" meaning documented for `scan --against`
+> never actually applied to a set, and the *only* two producers of exit `1`
+> were this function's own evidence-contract-error floor and the sibling
+> `BUNDLE_INCOMPLETE` floor in `run_scan_set` — there was no other claimant
+> on exit `1`, so nothing stopped reassigning the evidence-contract-error
+> case to the identical dedicated `7` the single-binary path already uses.
+> This also fixes a latent inconsistency the old floor carried: each
+> member's own `ScanResult.exit_code` already recorded `7` for this abort
+> (`workflows/scan_abort_result.py`'s `_SCAN_ABORT_VERDICTS`) while the
+> *set's* aggregate exit read `1` for the identical cause — the set-level
+> code now agrees with what its own members already reported. `action/
+> run.sh`'s exit-`7` dispatch (previously single-binary-only) now fires
+> unconditionally for `--artifact-set` too, with an artifact-set-specific
+> `::error::` message pointing at the report's `per_artifact` entries (no
+> single command-level stderr line exists for a set the way it does for one
+> binary); the exit-`1` dispatch's own JSON-`compat_verdict` check for this
+> case (added in Round 6, restored after the marker-file rewrite regressed
+> it) is removed as dead code, not hardened further — the class of forgery
+> it was exposed to (trusting an attacker-influenced member's own JSON
+> report at a *shared* exit code) is closed by removing the shared exit
+> code entirely, the same resolution the single-binary axis reached after
+> three earlier rounds of hardening the same mechanism instead of replacing
+> it. Real, executing regression tests (`tests/test_scan_artifact_set_
+> coverage.py::TestArtifactSetDryRunPreview::test_real_run_exits_7_on_
+> evidence_contract_error`, and `tests/test_action_run_sh_scan_evidence_
+> contract_error.py`'s new artifact-set cases, including two that run the
+> real CLI end-to-end and feed its real exit code into the real bash
+> dispatch — the same discipline the single-binary fix used). This closes
+> the `--artifact-set`/PR G2 gap completely; see `docs/reference/exit-
+> codes.md`'s `scan --artifact-set` note and `docs/use/github-action.md`'s
+> `exit-code` output row for the user-facing statement.
+
+> **Update (2026-09-04): PR G2/PR 4 fully DONE — `--exit-code-scheme`
+> itself deleted.** With the `--format text` gap above closed, nothing was
+> left blocking the atomic removal this ADR's "Decision to encode" section
+> below describes. Deleted outright, with no replacement selector anywhere:
+> the `--exit-code-scheme` Click option on `compare` and `scan --against`
+> (`abicheck/frontends/cli/commands/compare.py`, `abicheck/cli_scan.py`);
+> `.abicheck.yml`'s top-level `exit_code_scheme:`/`exit_code_scheme_explicit`
+> keys (`abicheck/buildsource/build_config.py` — an unknown top-level key is
+> a hard `ValueError` at parse time, not a warning, so a stale config now
+> fails fast); the `kind: gate` pack schema's `gate.exit_code_scheme`
+> assignable field (`abicheck/compatibility_evaluation_wiring.py`'s
+> `GATE_PACK_FIELD_ROUTES` — a pack still asserting it now hits the generic
+> "not a route this kind may assign" `PackManifestError`); and
+> `CompareRequest`/`ScanRequest`'s typed-API `exit_code_scheme` fields
+> (`abicheck/api_types.py`, `abicheck/service_scan.py`). The D7 resolver's
+> whole scheme-candidate-building machinery in
+> `compatibility_evaluation_frontend.py` (`EXIT_CODE_SCHEME_FIELD`,
+> `_stated_exit_code_scheme()`, the explicit/profile/project candidate
+> list, the D8 pinned-gate conflict exemption) is replaced by pure
+> derivation from `_severity_active()` — no candidates, no provenance entry,
+> no precedence resolution, because there is nothing left to resolve
+> between. The `--profile ci-gate` bundle, which used to state
+> `exit_code_scheme: "severity"`, now states `severity_preset: "default"`
+> instead (`abicheck/frontends/cli/options/profiles.py`) — behavior-
+> preserving, since `PRESET_DEFAULT` is exactly `SeverityConfig()`'s
+> defaults, and stating a severity preset is what makes the scheme resolve
+> to `severity` under the new, fully-automatic rule anyway.
+>
+> What was deliberately **kept**, unrenamed: every place `exit_code_scheme`
+> already existed as a purely-*derived*, already-resolved value rather than
+> a settable input — `ResolvedCompareConfig.exit_code_scheme`,
+> `GateOptions.exit_code_scheme` (now typed `str`, never `str | None`, since
+> it is unconditionally resolved), `GateConfig.exit_code_scheme`, the JSON
+> report's `gate.exit_code_scheme` and
+> `effective_config_fields["gate.exit_code_scheme"]` (confirmed via
+> `effective_config_digest.py`: this one is a direct resolved-value string,
+> not a `field_provenance` lookup, so no JSON-schema change was needed —
+> `python scripts/publish_schemas.py --check` passes unchanged), and the
+> unrelated `scoped_exit_code_scheme` result field
+> (`abicheck/cli_compare_fold.py`, `abicheck/junit_report.py`) — none of
+> these needed to move or disappear, only their *settability* did. This
+> distinction — raw-override sites deleted, already-resolved-value sites
+> left alone — is what kept the actual edit surface tractable against an
+> initial ~100-file grep hit list.
+>
+> Every test asserting the old manual-override behavior was rewritten, not
+> just deleted, to assert the surviving auto-only behavior instead (e.g.
+> `tests/test_pack_application.py`'s
+> `test_a_gate_pack_severity_level_selects_the_algorithm_it_earns`,
+> `tests/test_typed_api_gate_options.py`'s
+> `test_compare_request_no_longer_has_an_exit_code_scheme_field`/
+> `test_scan_request_no_longer_has_an_exit_code_scheme_field`, and
+> `tests/test_config_rebalance.py`'s
+> `test_top_level_exit_code_scheme_key_no_longer_exists`, which asserts the
+> real `ValueError` an unknown top-level config key now raises). Docs
+> updated repo-wide (`docs/reference/exit-codes.md`,
+> `docs/reference/config-file.md`,
+> `docs/reference/compatibility-evaluation-config.md`, `docs/use/ci-gating.md`,
+> `docs/use/policies.md`, `docs/use/build-evidence-setup.md`,
+> `docs/learn/rollout-and-governance.md`, `docs/start/upgrading-to-0.6.md`,
+> `action.yml`, plus the generated CLI/Action/Python-API/config references);
+> `scripts/check_docs_contract.py`'s `_RETIRED_SURFACES` registry gained an
+> entry for `--exit-code-scheme`/`exit_code_scheme:` naming the pages that
+> legitimately still mention it in historical/explanatory capacity. ADR-064's
+> own Status line and `docs/contribute/adr/index.md`'s row were updated the
+> same day.
+
+> **Update (2026-09-04, post-merge review): two Codex-review findings on the
+> landing PR (#1062), both real, both fixed.** (1) An `--artifact-set`
+> member's own `_EvidenceContractError` message was discarded at the
+> exception boundary (`service_scan.py`'s two catch sites), so despite the
+> exit-`7`/text-renderer work above, neither the JSON `per_artifact` entries
+> nor the text report actually said *why* a member aborted — only the bare
+> verdict. Fixed by threading the message through
+> `workflows/scan_abort_result.scan_abort_result_fields` into
+> `report["evidence_contract_error_message"]`, rendered per member in
+> `cli_scan.py`'s `--artifact-set` text output. (2) Root `AGENTS.md`'s Exit
+> codes section and `pack_application.py` module-map narrative, plus
+> `abicheck/buildsource/CLAUDE.md`'s config-key list, still named
+> `--exit-code-scheme`/`exit_code_scheme:` as live surface after the flag
+> was deleted — invisible to `check_docs_contract.py`'s retired-surfaces
+> sweep, which scans only `docs/`, not agent-instruction files. Content
+> fixed in this pass; **genuinely still open**: generalizing the
+> retired-surfaces sweep itself to cover `AGENTS.md`/`CLAUDE.md` files
+> repo-wide, so this class of drift (an agent's own canonical instructions
+> going stale after a surface removal) is caught mechanically next time
+> instead of only by review. Not attempted here — the existing sweep's
+> `docs/`-only scope was deliberate (a manual page inside the historical
+> ADR/plans/archive trees is exempted from several of its checks, a
+> distinction agent-instruction files don't cleanly map onto), so extending
+> it needs its own design pass rather than a same-PR patch.
+
 **This is the item the original draft got wrong, and it gets its own ADR.**
 
 `--exit-code-scheme auto|legacy|severity` is not a spelling choice; it selects
@@ -4786,6 +5012,12 @@ at all.
 
 ### Bundle topology keeps arriving as CLI flags
 
+**Status (2026-09-04): the `--bundle-system-providers`/`--bundle-cohort` →
+config row and the `--manifest` rename row below are both done — see the
+Ordering block's PR J row for the live account, not restated here.** The
+per-library bundle configuration gap this section's own "open half"
+paragraph describes remains open.
+
 The release/bundle option group has grown `--bundle-system-providers`,
 `--bundle-cohort`, `--manifest`, `--include-private-dso`,
 `--bundle-facts-out`, `--old-bundle-facts`, `--max-json-object-nodes`. Not
@@ -4856,13 +5088,21 @@ the agreement so a future pass does not re-derive them as new:
   migration — every persisted identity carrier (flat entities, source-graph
   nodes, surface-graph nodes, consumer-graph nodes, proof-path references,
   impact ids), not one regex per graph format.
-- **Configuration discovery still happens too late (PR C's tail).** A
-  `.abicheck.yml`-only `build: targets:` can be discovered only during real
-  execution, so `dump --dry-run` / `compare --dry-run` / `scan --dry-run` can
-  answer "valid" for a request the real run then rejects. The convergence
-  target: configuration discovery, build-target resolution, toolchain
-  selection and evidence requirements belong to ADR-063 Phase 4's
-  `AnalysisPlan`, *before* extraction — not inside an extraction adapter.
+- **Configuration discovery (PR C's tail) — corrected precisely 2026-09-04,
+  third pass, after this bullet was wrong in both directions across two
+  earlier corrections.** The full mechanism (`12492deb`'s auto-discovery
+  fix, the precedence rule, the per-call-site rollout across `dump`/
+  `compare`/`scan`) is maintained once, in
+  `docs/contribute/known-gaps.md` and `docs/contribute/plans/
+  one-semantic-pipeline.md`'s Phase 4 section — not restated here, so this
+  plan can't drift from that account the way it just did. **This plan's
+  own status, precisely:** closed for `scan` (both the auto-discovery and
+  explicit-`--config` cases — `ScanRequest` carries `build_config` as a
+  real field); closed for `dump`/`compare`'s auto-discovery case only —
+  their explicit-`--config` case is a real, narrower, still-open residual
+  of PR C's own tail, since `dump`/`compare` have no `build_config` field
+  on `InputSpec` at the request level at all. PR C's row above reflects
+  this precisely rather than either "fully open" or "fully done".
 - **The ADR-061 move is directionally right and carries one visible debt.**
   #972 put the new command in `frontends/cli/commands/` instead of a new flat
   `cli_compare_bundle_facts.py`, which is exactly ADR-061's direction — but
@@ -5002,17 +5242,41 @@ PR B  effective configuration parity  — packs resolved once into one
                                        deliberately reassigned to PR G2,
                                        see PR B's own section for why
 PR C  typed dump+scan convergence     = PR 3A — DumpRequest →
-      (ELF done, PE/Mach-O open)       ResolvedDumpRequest → DumpResult, one
-                                       resolver for dump CLI/Python/Action
-                                       *and* scan_engine's candidate
-                                       resolution, JSON dry-run rendered
-                                       from that object. The real ELF `dump`
-                                       run now executes through
-                                       execute_dump_request (scan's
-                                       candidate resolution already did);
-                                       handle_non_elf_dump (PE/Mach-O) is
-                                       unmigrated -- no PE/Mach-O toolchain
-                                       was available to verify against
+      (binary-format migration DONE;   ResolvedDumpRequest → DumpResult, one
+       config-discovery dry-run parity resolver for dump CLI/Python/Action
+       DONE for scan, DONE for         *and* scan_engine's candidate
+       dump/compare's auto-discovery   resolution, JSON dry-run rendered
+       case only — explicit --config   from that object. The real ELF `dump`
+       still a real, narrower open     run now executes through
+       residual for dump/compare)      execute_dump_request (scan's
+                                       candidate resolution already did),
+                                       and PE/Mach-O followed via #980 (see
+                                       the 2026-09-04 checkpoint above):
+                                       `frontends.cli.dump_execute.
+                                       execute_dump_cli_run` routes both
+                                       binary formats through the same
+                                       function, so `cli_dump_non_elf.
+                                       handle_non_elf_dump` is no longer
+                                       called from `dump_cmd` for either
+                                       format (kept only for its own direct
+                                       unit tests) — verified only via
+                                       mock-based CLI/unit tests, no real
+                                       PE/Mach-O toolchain was available to
+                                       verify against a real binary.
+                                       Config-discovery dry-run/execution
+                                       parity is closed for `scan` (both
+                                       cases) and for `dump`/`compare`'s
+                                       auto-discovery case, with one real,
+                                       narrower residual for their explicit
+                                       `--config` case — see the
+                                       "Configuration discovery (PR C's
+                                       tail)" bullet under "Re-verified,
+                                       unchanged, still open" below for the
+                                       single full account (this row no
+                                       longer restates it, to stop the two
+                                       copies drifting apart the way they
+                                       did across three corrections on
+                                       #1059)
 PR D  build-context completeness      = PR 3B — matched compile-unit
       (DONE)                           selection, forced includes, provenance
                                        tests
@@ -5036,9 +5300,9 @@ PR F  trusted build config            = PR 3C — build.query executes only
       └─ DELETE dump --build-query, dump --build-compile-db — DONE, both are
          now `No such option` / exit 64
 PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
-      (ADR-064 accepted; stage 1a done,   schema / report / Action parity.
-       stage 1b: GateOptions landed       GateOptions (the release fan-out's
-       2026-09-02, rest partially wired)  own typed severity/exit-code-scheme
+      (DONE, 2026-09-04)                   schema / report / Action parity.
+                                       GateOptions (the release fan-out's
+                                       own typed severity/exit-code-scheme
                                        object) landed 2026-09-02
                                        (abicheck/policy/release_gate_options.py,
                                        reached from the frontends-classified
@@ -5066,11 +5330,22 @@ PR G2 canonical exit decision, part 2 = PR 4 — one automatic gate algorithm,
                                        (2026-09-03, Round 6 -- the JSON-
                                        verdict check a marker-file/exit-code
                                        rewrite had silently regressed is
-                                       restored); still open: the same
-                                       signal for --format text, since the
-                                       Action never requests a JSON
-                                       secondary for --artifact-set runs
-      └─ then DELETE --exit-code-scheme
+                                       restored), then closed for --format
+                                       text too (2026-09-04): the same
+                                       dedicated exit 7 generalizes to
+                                       --artifact-set with no new signal
+                                       needed (see this plan's own
+                                       2026-09-04 update above PR 4's
+                                       section). --exit-code-scheme itself
+                                       -- the CLI flag, .abicheck.yml's
+                                       exit_code_scheme: key, the kind: gate
+                                       pack field, and both typed requests'
+                                       exit_code_scheme fields -- deleted
+                                       2026-09-04 (ADR-064's Status line and
+                                       docs/contribute/adr/index.md's row
+                                       both updated the same day)
+      └─ DELETE --exit-code-scheme — DONE, 2026-09-04: `No such option` /
+         exit 64 on both compare and scan
 PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
       (syntax + cost/dry-run + audit-    duplicated symbols, cost and dry-run;
        mode ownership DONE; member-      syntax refinement (DONE) was the one
@@ -5089,10 +5364,11 @@ PR H  artifact-set semantics          = PR 5 — provider ownership, moved and
 PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
       (prerequisite DONE; operand        explicit artifact_type discriminator
        classification + flag deletion    on BundleFacts, operand classification
-       DONE 2026-09-03; full             instead of a mode flag, and one
-       BundleCompareRequest unification  BundleCompareRequest over live/live +
-       not started)                      stored/live + live/stored +
-                                       stored/stored, with the full
+       DONE 2026-09-03; stored/stored    instead of a mode flag, and one
+       execution engine DONE            BundleCompareRequest over live/live +
+       2026-09-04; live/stored and       stored/live + live/stored +
+       full evaluation/gate/report/      stored/stored, with the full
+       dry-run unification not started)
                                        evaluation/gate/report/dry-run surface
                                        answered once. Shares PR G2's own
                                        GateOptions prerequisite.
@@ -5136,34 +5412,138 @@ PR I  one bundle compare, not two     — NEW (2026-09-01 checkpoint): an
                                        marker-less legacy v1 document);
                                        `compare_bundle_operand_dispatch.py`
                                        is the frontends-boundary translation
-                                       (a stored NEW_INPUT is a
-                                       click.UsageError, live/stored and
-                                       stored/stored still having no
-                                       execution engine). `--old-bundle-facts`
+                                       (a stored NEW_INPUT paired with a
+                                       *live* OLD_INPUT is a
+                                       click.UsageError -- live/stored is
+                                       the one shape still with no execution
+                                       engine). `--old-bundle-facts`
                                        and its former help text are gone, no
                                        deprecation alias, per this plan's
-                                       standing stance. **Still not
-                                       started, and still this row's own
-                                       open design question:** the actual
-                                       BundleCompareRequest unification --
+                                       standing stance. **Stored/stored
+                                       execution engine landed
+                                       2026-09-04:**
+                                       workflows.bundle_stored_pair_compare.
+                                       compare_stored_bundle_facts_pair()
+                                       diffs two already-persisted
+                                       BundleFacts documents directly --
+                                       matched-key intersection, an
+                                       enforce_requested_depth() floor check
+                                       plus a project_snapshot_to_depth()
+                                       ceiling per matched library for an
+                                       explicit --depth, then one
+                                       workflows.compare_policy.
+                                       compare_snapshots() call per matched
+                                       library (no binaries read, no header
+                                       AST parsed on either side),
+                                       delegating the bundle-level call to
+                                       the same bundle_facts.
+                                       compare_bundle_from_facts() every
+                                       other operand shape already shares
+                                       (now also passed both sides'
+                                       depth-projected signature-evidence
+                                       maps, via a new old_signature_
+                                       evidence parameter on that function).
+                                       compare_bundle_facts.py's dispatch()
+                                       selects between the two stored-
+                                       OLD_INPUT drivers on the new
+                                       new_is_stored flag, and
+                                       compare_bundle_facts_rejections.py
+                                       gained the NEW-side-scoped mirror of
+                                       every OLD-side extraction-only
+                                       rejection (--header new=,
+                                       --ast-frontend, --devel-pkg new=,
+                                       --bundle-facts-library-manifest,
+                                       --include-private-dso,
+                                       --keep-extracted, an explicit
+                                       --version new=,
+                                       --include-system-declarations) for
+                                       when NEW_INPUT is stored too, since
+                                       neither side has anything left to
+                                       re-extract. **Still not started, and
+                                       still this row's own open design
+                                       question:** live/stored (a live
+                                       OLD_INPUT compared against a stored
+                                       NEW_INPUT) -- the mirror image of the
+                                       stored/live driver, with every
+                                       OLD-side extraction option newly
+                                       meaningful and every NEW-side one of
+                                       those newly rejected -- and, across
+                                       all four operand shapes, the actual
                                        one evaluation/gate/report/dry-run
-                                       path across all four operand
-                                       combinations, live/stored and
-                                       stored/stored gaining a real engine
-                                       instead of a clean rejection, and
+                                       path unification (today each stored
+                                       shape still renders its own narrower
+                                       `mode: "bundle_facts"` envelope
+                                       through compare_bundle_facts.py
+                                       rather than the shared ExitDecision/
+                                       report pipeline live/live uses), and
                                        whether that unification reuses
                                        GateOptions as-is or needs a broader
                                        one.
       └─ DELETE compare --old-bundle-facts — DONE 2026-09-03
 PR J  bundle topology out of the CLI  — NEW (2026-09-01 checkpoint):
-      (NEW, not started)                --bundle-system-providers/--bundle-
-                                       cohort and per-library header/compile
-                                       context move into BundleSpec /
-                                       .abicheck.yml referencing existing
-                                       targets; release --manifest renamed;
-                                       --max-json-object-nodes re-expressed as
+      (--manifest rename DONE;          --bundle-system-providers/--bundle-
+       --bundle-system-providers/       cohort and per-library header/compile
+       --bundle-cohort → config DONE;   context move into BundleSpec /
+       per-library header/compile       .abicheck.yml referencing existing
+       context and --max-json-object-   targets; release --manifest renamed;
+       nodes still open) 2026-09-04:    --max-json-object-nodes re-expressed as
                                        a resource limit. Depends on G42 for
-                                       provider resolution
+                                       provider resolution. **Two of four
+                                       sub-items landed**: `--manifest`
+                                       renamed to `--instantiation-manifest`
+                                       (no alias, matches the collision this
+                                       row already named); `--bundle-system-
+                                       providers`/`--bundle-cohort` deleted
+                                       from `compare`'s release fan-out and
+                                       `scan --artifact-set` alike, replaced
+                                       by a new `.abicheck.yml` `bundle:`
+                                       block (`system_providers:`/
+                                       `cohorts:`) -- `compare`'s directory/
+                                       package fan-out reads it through the
+                                       same `ResolvedCompareConfig` merge
+                                       point `severity:`/`scope:`/
+                                       `suppression:` already use, but `scan
+                                       --artifact-set` resolves it through
+                                       its own, separate
+                                       `_discover_scan_project_config` +
+                                       raw `BuildConfig` read (Codex review,
+                                       fresh evidence -- correcting an
+                                       earlier overstatement here that both
+                                       paths share one merge point; unifying
+                                       them behind one workflow-owned
+                                       resolved-bundle-topology object is a
+                                       real, separate cleanup this pass did
+                                       not attempt). A new, independent
+                                       top-level key, deliberately *not*
+                                       folded into the existing plural
+                                       `bundles:`/`BundleSpec` block
+                                       (`project_targets.py`, ADR-047 §3),
+                                       since that schema serves the `project`
+                                       command family's target-declaration
+                                       model and would have forced every
+                                       `compare`/`scan --artifact-set` caller
+                                       to first declare `targets:`/`bundles:`
+                                       just to extend a system-provider
+                                       allow-list — a materially bigger
+                                       config-shape change than this slice
+                                       set out to make. Per-library header/
+                                       compile-context topology (the
+                                       `BundleSpec`-referencing-targets end
+                                       state this row's own body still
+                                       describes) and `--max-json-object-
+                                       nodes` → `--resource-limit` remain
+                                       genuinely open — the former needs the
+                                       G42 environment-aware provider work
+                                       this row already named as a
+                                       dependency, the latter needs a real,
+                                       calibrated bytes-per-JSON-container-
+                                       node conversion this pass did not
+                                       attempt (inventing one uncalibrated
+                                       would be exactly the kind of
+                                       false-precision heuristic this
+                                       codebase's own conventions warn
+                                       against — see AGENTS.md's "Decision-
+                                       making principles").
 ```
 
 Independent of the chain, unblocked at any time: PR 1 (**done**), PR 2

@@ -174,16 +174,12 @@ For `abicheck compare` pipelines, a bare `compare` never fails on
 on them, set any severity value — `--severity-preset`, or a per-category key
 in `.abicheck.yml`'s `severity:` block (e.g. `addition: error`) — which
 switches `compare` to the severity-aware exit scheme and makes an
-error-level addition finding exit `1` — **but only when nothing already
-pins the scheme explicitly.** If a project's `.abicheck.yml` sets
-`exit_code_scheme: legacy` (auto-discovered or via `--config`), that
-explicit project-config value outranks the implicit severity-flag
-inference and the legacy scheme stays in effect; a `--severity-*` flag
-alone won't switch it. In that case also pass `--exit-code-scheme severity`
-explicitly (the CLI flag outranks project config), or remove the config's
-`legacy` pin. See [Exit Codes](../reference/exit-codes.md) for the full
-contract — exit `2` under the severity-aware scheme means an error-level
-`potential_breaking` finding, not a `COMPATIBLE` addition.
+error-level addition finding exit `1`. The switch is unconditional: there is
+no manual scheme selector to pin the legacy mapping instead (the CLI flag
+and config key that used to do that were removed), so a severity setting
+always takes effect. See [Exit Codes](../reference/exit-codes.md) for the
+full contract — exit `2` under the severity-aware scheme means an
+error-level `potential_breaking` finding, not a `COMPATIBLE` addition.
 
 ---
 

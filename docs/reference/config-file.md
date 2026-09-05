@@ -124,7 +124,7 @@ an unknown-key error.
 ## Top-level keys
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
-`compile:`, `debug:`, `exit_code_scheme:`, `version:`, `risk_rules:`,
+`compile:`, `debug:`, `bundle:`, `version:`, `risk_rules:`,
 `crosschecks:`, `targets:`, `bundles:`, `profiles:`, and `baseline:` are the
 recognized top-level keys. See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
@@ -249,12 +249,33 @@ overrides `DEBUGINFOD_URLS` (was `--debuginfod-url`).
 
 ---
 
-### `exit_code_scheme:`
+### `bundle:`
 
-Top-level string, one of `auto`, `legacy`, `severity`. Default `auto`.
+Cross-library bundle-analysis topology (CLI cleanup phase two, PR J) — the
+sole source for both settings now, replacing the removed
+`--bundle-system-providers`/`--bundle-cohort` CLI flags: `system_providers:`
+(a list of extra sonames to treat as system-provided, extending the built-in
+libc/libstdc++/libgcc/libtbb allow-list) and `cohorts:` (a list of
+co-versioned library name prefixes enabling the `BUNDLE_SONAME_SKEW` check).
+Entries are stripped of surrounding whitespace and empty entries dropped at
+parse time. `system_providers:` applies to `compare`'s directory/package
+fan-out and `scan --artifact-set` alike; `cohorts:` (the SONAME-skew check)
+applies to compare only — an `--artifact-set` audit has no old/new release
+pair to detect a skew between, so it has no effect there. Distinct from the
+plural `bundles:` block below, which serves a different, unrelated purpose
+(the `project` command family's target declarations). See
+[Multi-binary § The bundle-analysis flags](../use/multi-binary.md#the-bundle-analysis-flags).
 
-- `auto` → `severity` when a severity map is in effect, otherwise `legacy`.
-- `legacy` / `severity` force that scheme.
+---
+
+### Exit-code scheme (no config key — fully automatic)
+
+There is no `exit_code_scheme:` key (CLI cleanup phase two PR G2 removed
+it, along with the `--exit-code-scheme` CLI flag): the exit-code scheme is
+`severity` when a severity map is in effect (this file's `severity:` block,
+a `--severity-preset`, or a `kind: gate` pack's `gate.severity.<category>`),
+otherwise `legacy`. There is no way to force one scheme regardless of
+whether a severity setting is present.
 
 See [Exit codes](exit-codes.md).
 
@@ -372,7 +393,4 @@ suppression:
 # Precise evidence method (optional; a concrete s0..s6, never `auto`)
 source:
   method: s6
-
-# Exit-code scheme for CI
-exit_code_scheme: auto
 ```

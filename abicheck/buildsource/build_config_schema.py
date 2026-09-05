@@ -55,9 +55,16 @@ LIST_SUBKEYS: dict[str, frozenset[str]] = {
     "sources": frozenset({"public_headers", "exclude"}),
     "scope": frozenset({"public_symbols"}),
     "compile": frozenset({"include_dirs", "defines"}),
+    # CLI cleanup phase two, PR J: release/scan bundle topology, demoted off
+    # the CLI from --bundle-system-providers/--bundle-cohort.
+    "bundle": frozenset({"system_providers", "cohorts"}),
 }
 # Recognized top-level keys that are scalars, not blocks (i.e. absent from
 # BuildConfig._KNOWN_BLOCK_KEYS) — the same wrong-type gap as the block
-# subkeys above, one level up.
-TOP_LEVEL_STR_KEYS: frozenset[str] = frozenset({"exit_code_scheme"})
+# subkeys above, one level up. Empty since CLI cleanup phase two PR G2
+# removed the only entry (`exit_code_scheme`) -- kept as a named, typed
+# frozenset rather than deleted outright so a future scalar top-level key
+# has an obvious home, and so every existing `TOP_LEVEL_STR_KEYS` reader
+# keeps working unchanged against an empty set.
+TOP_LEVEL_STR_KEYS: frozenset[str] = frozenset()
 TOP_LEVEL_INT_KEYS: frozenset[str] = frozenset({"version"})

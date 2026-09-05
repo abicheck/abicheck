@@ -131,7 +131,7 @@ PINNED_74_CASE_RE = re.compile(r"^case(?:0[1-9]|[1-6][0-9]|7[0-3])_|^case26b_")
 
 # Expected verdicts loaded from ground_truth.json — single source of truth.
 # To add/change a verdict, edit examples/ground_truth.json only.
-_GT_PATH = Path(__file__).parent.parent / "examples" / "ground_truth.json"
+_GT_PATH = example_catalog.GROUND_TRUTH_PATH
 try:
     _gt_data = json.loads(_GT_PATH.read_text())
     if "verdicts" not in _gt_data:
@@ -2668,14 +2668,21 @@ def _run_bundle_case(
     ]
     manifest_file = entry.get("manifest_file")
     if manifest_file:
-        cmd += ["--manifest", str(case_dir / str(manifest_file))]
+        cmd += ["--instantiation-manifest", str(case_dir / str(manifest_file))]
     bundle_cohort = entry.get("bundle_cohort")
     if not bundle_cohort and "bundle_soname_skew" in (
         entry.get("expected_kinds") or []
     ):
         bundle_cohort = "libonedal_"
     if bundle_cohort:
-        cmd += ["--bundle-cohort", str(bundle_cohort)]
+        # CLI cleanup phase two, PR J: --bundle-cohort removed as a CLI
+        # flag -- cohorts are sourced from .abicheck.yml's `bundle.cohorts:`
+        # now.
+        cfg_path = old_dir.parent / ".abicheck.yml"
+        cfg_path.write_text(
+            f"bundle:\n  cohorts: [{bundle_cohort!r}]\n", encoding="utf-8"
+        )
+        cmd += ["--config", str(cfg_path)]
     try:
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV

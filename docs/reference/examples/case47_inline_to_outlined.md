@@ -5,18 +5,22 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Addition (Compatible) |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case47_inline_to_outlined/` |
+| **Rule family** | [`inline-function-outlined`](by-rule/inline-function-outlined.md) — Variant (callable-kind) of [case16_inline_to_non_inline](case16_inline_to_non_inline.md) |
 
 **Category:** Compatible | **Verdict:** 🟢 COMPATIBLE
 
 **Related rule:** same `inline-function-outlined` rule as
 `case16_inline_to_non_inline` (the
-canonical case for this rule) — an inline method moved out-of-line gains a
-real exported symbol, same mechanism, different demo names. See
-`examples/CLAUDE.md`'s "Taxonomy" section.
+canonical case for this rule) — an inline function/method moved out-of-line
+gains a real exported symbol, same mechanism. Recorded as a *variant*
+(axis: callable-kind), not a duplicate: case16 is a free function on Linux
+only, this case a C++ *member* function (name-mangled export) exercised on
+Linux, macOS, and Windows. See `examples/CLAUDE.md`'s "Taxonomy" section.
 
 ## Verdict and consumer impact
 
@@ -133,4 +137,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Inline function outlined](by-rule/inline-function-outlined.md)._

@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `atomic_qualifier_changed` |
 | **Source files** | `examples/case116_atomic_qualifier_changed/` |
+| **Rule family** | [`atomic-qualifier-changed`](by-rule/atomic-qualifier-changed.md) |
 
 **Category:** Modern C/C++ Contract | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +142,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Atomic qualifier changed](by-rule/atomic-qualifier-changed.md)._

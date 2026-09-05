@@ -52,6 +52,7 @@ from .storage.bundle_facts_validation import (
     validate_bundle_archive_artifact_type,
     validated_alias_map,
     validated_filename_map,
+    validated_variant_fingerprint,
 )
 
 if TYPE_CHECKING:
@@ -166,34 +167,34 @@ def capture_bundle_facts(
     """Build a :class:`BundleFacts` from already-dumped per-library snapshots.
 
     No new *ABI* extraction happens here -- *per_library_snapshots* is
-    expected to be exactly what a real ``dump``/``compare`` run already
-    produced for each bundle member (each carrying its own
-    ``AbiSnapshot.elf``).
+    exactly what a real ``dump``/``compare`` run already produced for each
+    member (each carrying its own ``AbiSnapshot.elf``).
 
-    *library_paths*, when given, is a ``{library_name: Path}`` map of the
-    real on-disk file each snapshot was dumped from -- used both to probe
-    filesystem aliases (:func:`abicheck.bundle_soname.filesystem_alias_basenames`)
-    while those files still exist, at the one point in this flow (capture
-    time) they are guaranteed to, and to record each library's real
-    on-disk *filename* (``BundleFacts.library_filenames``) for the
-    SONAME-skew fallback. A name absent from *library_paths* simply gets
-    no recorded aliases/filename, same as when it's omitted entirely.
+    *library_paths*, when given, is a ``{library_name: Path}`` map of each
+    snapshot's real on-disk file (or a stored member's materialized
+    sub-package directory, via `bundle.stored_capture_identity`) -- probed
+    for filesystem aliases and the real *filename* (SONAME-skew fallback).
     """
+    from .bundle import stored_capture_identity
     from .bundle_soname import filesystem_alias_basenames, resolved_basename
 
     filesystem_aliases: dict[str, tuple[str, ...]] = {}
     library_filenames: dict[str, str] = {}
+    alias_nodes_so_far = 0
     if library_paths:
         for name, path in library_paths.items():
             if name not in per_library_snapshots:
                 continue
-            # The resolved target's basename, not path.name -- library_paths
-            # commonly names a dev symlink, and path.name would capture the
-            # unversioned name, not the real one SONAME-skew needs (Codex).
-            library_filenames[name] = resolved_basename(path)
-            aliases = filesystem_alias_basenames(path)
-            if aliases:
-                filesystem_aliases[name] = aliases
+            if path.is_dir():
+                stored = stored_capture_identity(path, alias_nodes_so_far)
+                stored_name, stored_aliases, alias_nodes_so_far = stored
+            else:
+                stored_name = resolved_basename(path)  # not path.name
+                stored_aliases = filesystem_alias_basenames(path)
+            if stored_name:
+                library_filenames[name] = stored_name
+            if stored_aliases:
+                filesystem_aliases[name] = stored_aliases
     return BundleFacts(
         schema_version=BUNDLE_FACTS_SCHEMA_VERSION,
         variant_fingerprint=variant_fingerprint,
@@ -259,6 +260,7 @@ def compare_bundle_from_facts(
     policy: str = "strict_abi",
     policy_file: Any = None,
     new_signature_evidence: dict[str, Any] | None = None,
+    old_signature_evidence: dict[str, Any] | None = None,
 ) -> BundleDiffResult:
     """Bundle-level comparison with the *old* side loaded from a stored
     :class:`BundleFacts` instead of live ``.so`` files (G38 Phase 2).
@@ -275,18 +277,17 @@ def compare_bundle_from_facts(
     ``compare_bundle()``'s own ``manifest=`` parameter); otherwise the
     manifest captured in *old_facts* is reused.
 
-    *new_signature_evidence* (G38 stabilization Phase 12), when given and
-    non-empty, is the NEW side's bundle-canonical-key -> ``AbiSnapshot``
-    map for ``find_unverified_signature_findings`` -- the OLD side's own
-    map is always *old_facts.per_library_snapshots* itself. Omitted (the
-    default): the Phase 4 gate does not run, matching every pre-Phase-12
-    caller -- there is not yet a CLI producer for a live NEW-side evidence
-    map here (G38 Phase 13 is separate, not-yet-implemented).
+    *new_signature_evidence* (G38 Phase 12) is the NEW side's bundle-
+    canonical-key -> ``AbiSnapshot`` map for ``find_unverified_signature_
+    findings``. *old_signature_evidence* (Codex review, PR #1060, round 6)
+    overrides the OLD side's map, falling back to *old_facts.per_library_
+    snapshots* -- needed by a depth-projecting caller. Omitted: no gate.
     """
     from .bundle_analysis import analyze_bundle
 
     old_snapshot = bundle_snapshot_from_facts(old_facts)
     effective_manifest = manifest if manifest is not None else old_facts.manifest
+    effective_old_evidence = old_facts.per_library_snapshots if old_signature_evidence is None else old_signature_evidence
     return analyze_bundle(
         old_snapshot,
         new_snapshot,
@@ -296,7 +297,7 @@ def compare_bundle_from_facts(
         cohorts=cohorts,
         policy=policy,
         policy_file=policy_file,
-        old_signature_evidence=old_facts.per_library_snapshots,
+        old_signature_evidence=effective_old_evidence,
         new_signature_evidence=new_signature_evidence,
     )
 
@@ -786,9 +787,7 @@ def read_bundle_facts_archive(
             instantiation_manifest = manifest_from_dict(_load_blob_json(raw_manifest, "manifest_blob"))
         return BundleFacts(
             schema_version=bundle_facts_schema_version,
-            variant_fingerprint=str(
-                manifest.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
-            ),
+            variant_fingerprint=validated_variant_fingerprint(manifest.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)),
             per_library_snapshots=per_library_snapshots,
             manifest=instantiation_manifest,
             filesystem_aliases=validated_alias_map(

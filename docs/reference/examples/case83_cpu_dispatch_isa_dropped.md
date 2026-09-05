@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
 | **Category** | Risk |
+| **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `cpu_dispatch_isa_dropped` |
 | **Source files** | `examples/case83_cpu_dispatch_isa_dropped/` |
+| **Rule family** | [`cpu-dispatch-isa-dropped`](by-rule/cpu-dispatch-isa-dropped.md) |
 
 **Category:** Dispatch ABI | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -136,4 +138,4 @@ exit-code comparison on the same kind of raw symbol removal.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Cpu dispatch isa dropped](by-rule/cpu-dispatch-isa-dropped.md)._

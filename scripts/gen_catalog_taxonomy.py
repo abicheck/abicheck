@@ -24,7 +24,10 @@ are orthogonal to implementation language and independent of the physical
 
     entity          "rule" | "scenario"
     scenario_kind   set only for entity == "scenario":
-                     "case-study" | "project-topology" | "capability" | "audit"
+                     "case-study" | "project-topology" | "capability" --
+                     never "audit": audit-ness is orthogonal to entity (see
+                     `operation` below), not a scenario_kind value the
+                     generator emits
     ecosystem       "generic" | "onetbb" | "sycl" | "onemkl" | "linux-kernel"
     topics          derived from expected_kinds via the change-catalog's own
                      symbols/types/platform/build/source split (AGENTS.md
@@ -44,8 +47,33 @@ are orthogonal to implementation language and independent of the physical
     rule_slug       canonical slug for a rule family -- set on every
                      "rule"-entity case (mechanically derived by default,
                      see _default_rule_slug; a hand-reviewed shared slug for
-                     a confirmed duplicate, see RULE_FAMILIES)
+                     a confirmed duplicate or variant, see RULE_FAMILIES)
     variant_of      the canonical case this one is a variant of, or null
+    relation_type   set only when variant_of is not null: "duplicate" (no
+                     meaningful distinguishing condition -- the same
+                     demonstration restated) or "variant" (a genuine
+                     robustness demonstration of the same rule under a
+                     different condition). See RULE_FAMILIES below --
+                     collapsing this distinction is exactly what let the
+                     coverage report count a duplicate restatement as a
+                     robustness variant.
+    relation_axis   set only when relation_type == "variant": which
+                     condition the variant demonstrates the rule under
+                     ("language", "evidence", "public-surface",
+                     "symbol-versioning", "specialization",
+                     "callable-kind", ...). Null for a
+                     "duplicate" (there is no distinguishing axis) and for
+                     any case with no variant_of.
+    operation       "compare" (an old/new comparison -- the default) or
+                     "audit" (a single-release scan, ground_truth.json's own
+                     `mode: "audit"`). Orthogonal to `entity`/`scenario_kind`:
+                     an audit case may be either entity -- the G20 rule
+                     cases (143-146, 181) stay entity="rule", but the G20
+                     capability scenarios (147-151) are entity=
+                     "scenario" and also carry mode="audit" -- so "which
+                     release-evaluation operation does this case exercise"
+                     doesn't have to be inferred from either the entity or
+                     the "audit" topics entry.
 
 Run `python scripts/gen_catalog_taxonomy.py` to regenerate; `--check` fails
 (exit 1) if regeneration would change the file, without writing anything.
@@ -208,89 +236,133 @@ RELATED_RULES: dict[str, list[str]] = {
     ],
 }
 
-# Rule/variant consolidation (Phase 2). Every `rule`-entity case gets a
-# `rule_slug` -- for a case with no known duplicate, `_default_rule_slug()`
-# below derives one mechanically from the case's own name, so the family
-# name always exists even for a rule nobody has found a sibling for yet.
-# This table exists only for a case whose canonical family differs from
-# that mechanical default: a genuine duplicate/near-duplicate pair, found by
-# clustering every `rule`-entity case on its exact `expected_kinds` set and
-# reading each candidate cluster's README to separate a true duplicate
-# (same underlying mechanism, restated) from cases that merely share a
-# `ChangeKind` while demonstrating a different one (which stay independent
-# rules with their own default slug, not listed here). `rule_slug` is the
-# canonical family name both sides of a pair share; `variant_of` names the
-# canonical case within it (null on the canonical case itself, including a
-# canonical case listed here only to pin a shared slug for its variant(s)).
+# Rule/variant/duplicate consolidation (Phase 2). Every `rule`-entity case
+# gets a `rule_slug` -- for a case with no known duplicate,
+# `_default_rule_slug()` below derives one mechanically from the case's own
+# name, so the family name always exists even for a rule nobody has found a
+# sibling for yet. This table exists only for a case whose canonical family
+# differs from that mechanical default: a genuine duplicate/near-duplicate
+# pair, found by clustering every `rule`-entity case on its exact
+# `expected_kinds` set and reading each candidate cluster's README to
+# separate a true duplicate/variant (same underlying mechanism) from cases
+# that merely share a `ChangeKind` while demonstrating a different one
+# (which stay independent rules with their own default slug, not listed
+# here). `rule_slug` is the canonical family name both sides of a pair
+# share; `variant_of` names the canonical case within it (null on the
+# canonical case itself, including a canonical case listed here only to pin
+# a shared slug for its variant(s)).
 #
-# Pairs confirmed as genuine duplicates this pass, with the read that ruled
-# each one in:
-#   case01/case12  -- both a plain exported-function removal, same evidence.
-#   case08/case20  -- same enum-member-value-changed rule; case20 adds
+# A second read (prompted by an external review of this plan) separated
+# these seven pairs further: two are exact duplicates with no meaningful
+# distinguishing condition (`relation_axis=None` below) -- restating them as
+# "variants" inflated the catalog's demonstrated-robustness count by
+# counting the same demonstration twice. The other five are genuine
+# variants, each with a named axis: the condition that makes the second case
+# worth keeping distinct from the first.
+#
+#   case01/case12  -- DUPLICATE. Both a plain exported-function removal,
+#                      same evidence, no distinguishing condition.
+#   case08/case20  -- VARIANT (axis: public-surface). Same
+#                      enum-member-value-changed rule; case20 adds
 #                      public-surface scoping as a variant condition.
-#   case16/case47  -- byte-for-byte the same mechanism (an inline method
-#                      moved out-of-line gains a real exported symbol) under
-#                      different demo names -- confirmed by diffing the two
-#                      READMEs, not just matching expected_kinds.
-#   case49/case136 -- case136's own README calls itself "the fix
+#   case07/case14  -- VARIANT (axis: language). Same
+#                      embedded-type-size-increased rule; case14 is the C++
+#                      class-size restatement of case07's plain C struct.
+#   case16/case47  -- VARIANT (axis: callable-kind). The same underlying
+#                      mechanism (an inline function/method moved
+#                      out-of-line gains a real exported symbol) -- but not
+#                      a duplicate: case16 is a free function on Linux only
+#                      (platforms: [linux]); case47 is a C++ *member*
+#                      function (`Calculator::add()`, name-mangled export)
+#                      exercised on Linux, macOS, and Windows (platforms:
+#                      [linux, macos, windows]). A second review pass
+#                      (prompted by a Codex finding on the PR that first
+#                      classified this pair) corrected the original
+#                      byte-for-byte-README read: the *demonstration* text
+#                      is similarly worded, but the callable kind and
+#                      platform breadth are real, distinguishing robustness
+#                      conditions, not just a restatement under a different
+#                      demo name.
+#   case49/case136 -- DUPLICATE. case136's own README calls itself "the fix
 #                      counterpart to case49", but the technical
 #                      demonstration (GNU_STACK RWE -> RW) and even the
 #                      library source are identical, not just complementary.
-#   case65/case139 -- both a hard BREAKING symbol-version-node removal
-#                      (consumer records a version dependency the loader can
-#                      no longer satisfy); case139 adds the "old symbol name
-#                      persists, folded into a different node" nuance as a
-#                      variant, kept distinct from case183 (same ChangeKind
-#                      but COMPATIBLE_WITH_RISK -- a private/internal-node
+#   case65/case139 -- VARIANT (axis: symbol-versioning). Both a hard
+#                      BREAKING symbol-version-node removal (consumer
+#                      records a version dependency the loader can no longer
+#                      satisfy); case139 adds the "old symbol name persists,
+#                      folded into a different node" nuance, kept distinct
+#                      from case183 (same ChangeKind but
+#                      COMPATIBLE_WITH_RISK -- a private/internal-node
 #                      naming convention changes the verdict, not just the
 #                      demo, so it stays its own rule).
-#   case160/case190 -- same L5 "public API gains an internal dependency"
-#                      rule; case190 narrows it to the inline-function case
-#                      (the dependency is invisible to every artifact-level
-#                      diff, not just source-graph-level).
+#   case160/case190 -- VARIANT (axis: specialization). Same L5 "public API
+#                      gains an internal dependency" rule; case190 narrows
+#                      it to the inline-function case (the dependency is
+#                      invisible to every artifact-level diff, not just
+#                      source-graph-level).
 #
 # Clusters reviewed and NOT merged (same ChangeKind, different mechanism or
 # verdict, so each keeps its own default slug): case03/16/47/62/185 (func_added
 # from four unrelated causes); case07/14/17/18/36/40/44/48 (type_size_changed
-# from eight unrelated causes -- case07/case14 *are* a duplicate pair, C vs
-# C++, see below); case09/case38; case46/case102; case74/75/76/77 (the
+# from eight unrelated causes -- case07/case14 *are* a variant pair, C vs
+# C++, see above); case09/case38; case46/case102; case74/75/76/77 (the
 # "leaked internal types" pattern family -- four distinct embedding
 # mechanisms, deliberately not collapsed, per AGENTS.md's own worked
 # case01/case12 vs case08/case20 caution against over-consolidating); case97/182;
 # case137/52 (RUNPATH changed vs. RUNPATH build-path leak -- different
 # transition, different lesson); case43/77.
-RULE_FAMILIES: dict[str, tuple[str, str | None]] = {
-    "case01_symbol_removal": ("exported-function-removed", None),
-    "case12_function_removed": ("exported-function-removed", "case01_symbol_removal"),
-    "case08_enum_value_change": ("enum-member-value-changed", None),
+#
+# Value shape: (rule_slug, variant_of, relation_axis). relation_axis is
+# always None on a canonical entry (variant_of is None too, so relation_type
+# is None per build_taxonomy's derivation below); on a variant-side entry it
+# is None for a duplicate and a short axis name for a genuine variant.
+RULE_FAMILIES: dict[str, tuple[str, str | None, str | None]] = {
+    "case01_symbol_removal": ("exported-function-removed", None, None),
+    "case12_function_removed": (
+        "exported-function-removed",
+        "case01_symbol_removal",
+        None,
+    ),
+    "case08_enum_value_change": ("enum-member-value-changed", None, None),
     "case20_enum_member_value_changed": (
         "enum-member-value-changed",
         "case08_enum_value_change",
+        "public-surface",
     ),
-    "case07_struct_layout": ("embedded-type-size-increased", None),
-    "case14_cpp_class_size": ("embedded-type-size-increased", "case07_struct_layout"),
-    "case16_inline_to_non_inline": ("inline-function-outlined", None),
+    "case07_struct_layout": ("embedded-type-size-increased", None, None),
+    "case14_cpp_class_size": (
+        "embedded-type-size-increased",
+        "case07_struct_layout",
+        "language",
+    ),
+    "case16_inline_to_non_inline": ("inline-function-outlined", None, None),
     "case47_inline_to_outlined": (
         "inline-function-outlined",
         "case16_inline_to_non_inline",
+        "callable-kind",
     ),
-    "case49_executable_stack": ("executable-stack-flag-changed", None),
+    "case49_executable_stack": ("executable-stack-flag-changed", None, None),
     "case136_executable_stack_removed": (
         "executable-stack-flag-changed",
         "case49_executable_stack",
+        None,
     ),
-    "case65_symbol_version_removed": ("symbol-version-node-removed", None),
+    "case65_symbol_version_removed": ("symbol-version-node-removed", None, None),
     "case139_symbol_version_node_removed": (
         "symbol-version-node-removed",
         "case65_symbol_version_removed",
+        "symbol-versioning",
     ),
     "case160_public_api_internal_dep_added": (
         "public-api-gains-internal-dependency",
+        None,
         None,
     ),
     "case190_public_inline_function_references_internal_constant": (
         "public-api-gains-internal-dependency",
         "case160_public_api_internal_dep_added",
+        "specialization",
     ),
 }
 
@@ -482,6 +554,13 @@ def _scope(case_num: int) -> str:
     return "multi-library" if case_num in BUNDLE_SCENARIOS else "single-library"
 
 
+def _operation(mode: str | None) -> str:
+    """ "compare" (an old/new comparison) or "audit" (a single-release scan)
+    -- orthogonal to entity/scenario_kind, see build_taxonomy's own
+    docstring reference to this field."""
+    return "audit" if mode == "audit" else "compare"
+
+
 def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
     verdicts: dict[str, dict[str, object]] = gt["verdicts"]  # type: ignore[assignment]
     kind_to_topic = _kind_to_topic()
@@ -510,13 +589,30 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
 
         artifact_shape = _artifact_shape(case_dir, case_num, fixtures, mode)
         if case_name in RULE_FAMILIES:
-            rule_slug, variant_of = RULE_FAMILIES[case_name]
+            rule_slug, variant_of, relation_axis = RULE_FAMILIES[case_name]
         elif entity == "rule":
-            rule_slug, variant_of = _default_rule_slug(case_name), None
+            rule_slug, variant_of, relation_axis = (
+                _default_rule_slug(case_name),
+                None,
+                None,
+            )
         else:
             # A scenario composes rules via `related_rules` instead of
             # having one rule_slug of its own.
-            rule_slug, variant_of = None, None
+            rule_slug, variant_of, relation_axis = None, None, None
+
+        # relation_type is derived, not stored in RULE_FAMILIES, so it can
+        # never disagree with variant_of/relation_axis: null on a canonical
+        # or independent case (variant_of is None), else "variant" when a
+        # distinguishing axis was recorded or "duplicate" when none was --
+        # a duplicate has no axis by definition (see RULE_FAMILIES's own
+        # docstring).
+        if variant_of is None:
+            relation_type = None
+        elif relation_axis is not None:
+            relation_type = "variant"
+        else:
+            relation_type = "duplicate"
 
         assert scenario_kind is None or entity == "scenario", (
             f"{case_name}: scenario_kind is set ({scenario_kind!r}) but "
@@ -526,6 +622,7 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
         taxonomy[case_name] = {
             "entity": entity,
             "scenario_kind": scenario_kind,
+            "operation": _operation(mode),
             "ecosystem": _ecosystem(case_num),
             "topics": topics,
             "languages": _languages(case_dir, bool(fixtures))
@@ -537,6 +634,8 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             "related_rules": RELATED_RULES.get(case_name, []),
             "rule_slug": rule_slug,
             "variant_of": variant_of,
+            "relation_type": relation_type,
+            "relation_axis": relation_axis,
         }
     # Preserve the existing verdicts iteration order (already caseNN-ordered
     # in the committed file) rather than re-sorting -- keeps a regeneration

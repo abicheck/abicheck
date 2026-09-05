@@ -324,7 +324,8 @@ def test_compare_dump_manifest_and_release_manifest_coexist(
     tmp_path, runner, monkeypatch
 ):
     """--dump-manifest (this ADR's extraction manifest) and the pre-existing
-    --manifest (ADR-023 release instantiation manifest) are distinct,
+    --instantiation-manifest (ADR-023 release instantiation manifest,
+    renamed from --manifest by CLI cleanup phase two, PR J) are distinct,
     independently-settable options on the same compare invocation -- the
     specific Click-level collision this ADR's flag naming exists to avoid."""
     from abicheck.checker import DiffResult, Verdict
@@ -364,7 +365,7 @@ def test_compare_dump_manifest_and_release_manifest_coexist(
         main,
         [
             "compare", str(old_so), str(new_so),
-            "--manifest", str(release_manifest),
+            "--instantiation-manifest", str(release_manifest),
             "--dump-manifest", "old=" + str(dump_manifest),
         ],
     )

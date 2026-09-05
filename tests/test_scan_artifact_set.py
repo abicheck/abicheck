@@ -219,15 +219,21 @@ class TestArtifactSetCliValidation:
         assert result.exit_code != 0
         assert "--against is not supported with --artifact-set" in result.output
 
-    def test_rejects_bundle_system_providers_without_artifact_set(
+    def test_bundle_system_providers_flag_was_removed(
         self, runner: CliRunner, snap_a: Path
     ) -> None:
+        """CLI cleanup phase two, PR J: --bundle-system-providers is gone,
+        no deprecation alias -- the system-provider allow-list extension is
+        sourced only from .abicheck.yml's `bundle:` block now, so there is
+        no longer a "supplied without --artifact-set" combination to reject
+        (the flag itself is what Click rejects)."""
         result = runner.invoke(
             main,
             ["scan", str(snap_a), "--bundle-system-providers", "libfoo.so.1"],
         )
-        assert result.exit_code != 0
-        assert "--bundle-system-providers requires --artifact-set" in result.output
+        assert result.exit_code == 64
+        assert "No such option" in result.output
+        assert "--bundle-system-providers" in result.output
 
     def test_rejects_fewer_than_two_resolved_libraries(
         self, runner: CliRunner, tmp_path: Path
@@ -298,6 +304,61 @@ class TestArtifactSetCompileContextForwarding:
         assert req.compile.gcc_path == "/usr/bin/my-cross-gcc"
         assert req.compile.sysroot == sysroot_dir
         assert req.compile.nostdinc is True
+
+    def test_cwd_abicheck_yml_bundle_block_reaches_scan_request(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review, fresh evidence: --bundle-system-providers has no CLI
+        # flag any more (PR J), and its .abicheck.yml replacement was only
+        # ever discovered from an explicit --build-config or --sources --
+        # never cwd-upward, unlike compare's own directory/package fan-out --
+        # so a cwd .abicheck.yml with neither given was silently never read.
+        import abicheck.service_scan as service_scan_mod
+        from abicheck.service_scan import ScanSetResult
+
+        p1 = tmp_path / "liba.so"
+        p2 = tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        (tmp_path / ".abicheck.yml").write_text(
+            'bundle:\n  system_providers: ["libvendor.so.1"]\n', encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        captured: dict[str, object] = {}
+
+        def _fake_run_scan_set(req):
+            captured["req"] = req
+            return ScanSetResult(verdict="COMPATIBLE", exit_code=0)
+
+        monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
+
+        result = runner.invoke(
+            main, ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2)]
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["req"].bundle_system_providers == ("libvendor.so.1",)
+
+    def test_malformed_cwd_bundle_block_is_rejected_not_silently_dropped(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review: bundle: has no CLI-flag fallback any more (PR J
+        # removed --bundle-system-providers), so a malformed ambient config
+        # must fail loud, not silently read as "no providers declared".
+        p1 = tmp_path / "liba.so"
+        p2 = tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        (tmp_path / ".abicheck.yml").write_text(
+            "bundle:\n  system_providers: 123\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(
+            main, ["scan", "--artifact-set", str(p1), "--artifact-set", str(p2)]
+        )
+        assert result.exit_code == 64, result.output
+        assert "cannot parse build config" in result.output
 
 
 class TestArtifactSetSourceMethodSelection:

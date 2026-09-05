@@ -5,10 +5,12 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
+| **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `var_type_changed` |
 | **Source files** | `examples/case11_global_var_type/` |
+| **Rule family** | [`global-var-type`](by-rule/global-var-type.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -125,4 +127,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Global var type](by-rule/global-var-type.md)._

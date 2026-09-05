@@ -1,7 +1,7 @@
 # Case 93: Bundle — Instantiation Manifest Drift
 
 **Category:** Bundle / manifest | **Verdict:** 🔴 BREAKING (both with and
-without `--manifest`; the manifest upgrades *why* it's breaking)
+without `--instantiation-manifest`; the manifest upgrades *why* it's breaking)
 
 ## Verdict and consumer impact
 
@@ -14,7 +14,7 @@ Downstream code that instantiated the dropped triple fails to link or
 resolve the symbol at runtime — recompilation cannot fix a binary that
 already calls it. Per-library `func_removed` already flags the missing
 symbol as BREAKING with no extra input. What only the bundle layer's
-`--manifest` can add is *why* it matters: distinguishing "a documented
+`--instantiation-manifest` can add is *why* it matters: distinguishing "a documented
 public promise was broken" from "an internal helper happened to be
 visible and got cleaned up," which a bare removed-symbol diff can't tell
 apart on its own.
@@ -36,12 +36,12 @@ apart on its own.
 ```bash
 g++ -shared -fPIC -g old/libcore.cpp -o old/libcore.so
 g++ -shared -fPIC -g new/libcore.cpp -o new/libcore.so
-abicheck compare old/ new/ --manifest manifest.yaml --format markdown
+abicheck compare old/ new/ --instantiation-manifest manifest.yaml --format markdown
 ```
 
 ## Expected abicheck finding
 
-Without `--manifest` — the per-library break is still caught, just not
+Without `--instantiation-manifest` — the per-library break is still caught, just not
 attributed to a broken promise:
 
 ```text
@@ -52,7 +52,7 @@ libcore.so -> BREAKING
 - func_removed: Public function removed: train_double_sparse
 ```
 
-With `--manifest manifest.yaml`:
+With `--instantiation-manifest manifest.yaml`:
 
 ```text
 Verdict: BREAKING (exit 4)
@@ -78,7 +78,7 @@ demonstration* below can build a matching app.
 ## Why abicheck catches it
 
 Per-library `func_removed` detection already flags the missing symbol from
-plain `.dynsym` diffing. The `--manifest` input externalizes the contract:
+plain `.dynsym` diffing. The `--instantiation-manifest` input externalizes the contract:
 it lists exactly the symbols the release promises to keep. The bundle
 layer then enforces "every manifest entry must be exported by some library
 in the new bundle" and emits `bundle_manifest_instantiation_removed` for
@@ -116,7 +116,7 @@ is killed immediately on startup.
 Never drop a documented instantiation from a template-explosion library
 without a deprecation cycle — apply the same discipline as removing any
 other public symbol. Keep a `manifest.yaml`-style promised-symbol list in
-CI (`abicheck compare --manifest`) so a build-system regression that
+CI (`abicheck compare --instantiation-manifest`) so a build-system regression that
 silently drops an instantiation fails the release gate instead of shipping
 quietly.
 
@@ -133,5 +133,5 @@ concept — run against `libcore.so` old vs. new, either would report the
 same `train_double_sparse` removal as a plain symbol change, with no way
 to distinguish "a documented public promise was broken" from "an internal
 helper was cleaned up." That distinction is exactly what
-`--manifest`-driven `bundle_manifest_instantiation_removed` adds on top of
+`--instantiation-manifest`-driven `bundle_manifest_instantiation_removed` adds on top of
 the per-library removal both tools already see.
