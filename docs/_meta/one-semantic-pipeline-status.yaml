@@ -4,8 +4,11 @@
 # per docs/AGENTS.md's "Layout" section). Structurally validated by
 # scripts/pipeline_status_ledger.py's `check_pipeline_status_ledger`
 # (imported and called by scripts/check_docs_contract.py, which does not
-# define it itself) — parses, required fields present, status/authority
-# values from the declared enums, no unknown fields — a real, non-generated
+# define it itself) — parses, required fields present, status/authority/
+# lifecycle values from the declared enums, `lifecycle` consistent with
+# `authority` and with the status fields, every `investigated_declined`
+# entry well-formed and none of them sitting at `retired`, no unknown
+# fields — a real, non-generated
 # `docs/_meta/` registry has to
 # be at least checked, not merely formatted as YAML (a review finding on
 # PR #1019 caught the first version of this file claiming otherwise). It
@@ -29,19 +32,58 @@
 #                 pre-existing representation still decides, this concept
 #                 is additive), or `mixed` (some call sites migrated, most
 #                 have not).
+#   lifecycle   — where the concept sits on the consolidation ladder:
+#                 `introduced` (the primitive exists, nothing reads it),
+#                 `wired` (real consumers read it, but it does not decide
+#                 alone), `authoritative` (it decides), `retired` (the
+#                 implementation it replaced is deleted or reduced to
+#                 delegation). A refinement of `authority`, not a second
+#                 opinion about it: `authority` cannot express either end
+#                 of the ladder, because two of its three values are
+#                 ambiguous across two rungs each -- `authority: legacy`
+#                 covers both `introduced` and `wired`, and `authority:
+#                 self` covers both `authoritative` and `retired`. Only
+#                 `mixed` picks out exactly one rung (`wired`); the
+#                 converse does not hold, since a `legacy` concept can be
+#                 wired too. The validator enforces that correspondence,
+#                 so the two fields cannot contradict each other.
 #   removal_gate — the condition (an AI-readiness/architecture check, a
 #                 named future phase, or a specific still-open blocker)
 #                 that has to hold before the legacy representation this
 #                 concept replaces can be deleted.
+#   investigated_declined — optional list. Each entry records a
+#                 *behavioral* change that was investigated and declined
+#                 for lack of a demonstrated benefit, with `item`,
+#                 `decided` (YYYY-MM-DD), `leaves_open` (what the decline
+#                 does NOT close), and `tracked_as` (the narrative owner
+#                 holding the full reasoning). Declining a behavioral
+#                 change on that basis is correct and stays correct; it
+#                 does not delete a second *implementation*, so it never
+#                 closes a consolidation item -- the validator refuses
+#                 `lifecycle: retired` for any concept carrying one. An
+#                 entry describes something still open: once the
+#                 consolidation it left open lands, the entry belongs
+#                 wholly with its `tracked_as` narrative owner, not here.
+#                 The list is the structured, validator-enforced INDEX of
+#                 a concept's open declines, not their full account --
+#                 that stays with the concept's own removal_gate prose and
+#                 the `tracked_as` narrative owner, per docs/AGENTS.md's
+#                 fact-owner/narrative-owner split. What the index adds is
+#                 that a decline can no longer be recorded only as prose
+#                 inside a gate that reads as closed.
+#                 (duplication-and-convergence-assessment.md, "The
+#                 completion rule this plan was missing".)
 #
 # Status values: not_started | partial | complete.
+# Lifecycle values: introduced | wired | authoritative | retired.
 #
 # Sourced from ADR-063 (docs/contribute/adr/063-one-semantic-pipeline.md)
 # and its implementation plan (docs/contribute/plans/one-semantic-pipeline.md)
-# as of base commit bbce489e (the base this 2026-09-05 re-assessment update
-# built on -- PR #1062, the --exit-code-scheme removal, is an ancestor of it,
-# so this receipt covers the implementation the re-assessment inspected).
-# bbce489e carries forward bfb40222 (Track 4's 7B ledger/plan-table drift fix --
+# as of base commit 2f5ef696 (the base this schema-2 ladder/re-audit update
+# built on; PR #1062, the --exit-code-scheme removal, is an ancestor of it,
+# so this receipt covers the implementation the 2026-09-05 re-assessment
+# inspected). 2f5ef696 carries forward bbce489e (the re-assessment's own
+# authority corrections), which carries forward bfb40222 (Track 4's 7B ledger/plan-table drift fix --
 # updating the run_outcome concept's removal_gate to describe the landed
 # release-fan-out investigation and its parity test -- was built on and
 # merges this content forward), which itself carries forward 2a88a5bd (the
@@ -57,14 +99,22 @@
 # duplication-and-convergence-assessment.md's "2026-09-05 re-assessment"
 # section and its Phase 6): a concept's `authority` value must reflect
 # which representation *decides*, not which one is populated. Two
-# corrections this file now carries: `semantic_ir`'s landed cohorts are
+# corrections this file carries: `semantic_ir`'s landed cohorts are
 # fidelity gates (both indexes built every comparison, legacy adjudicates),
 # not authority transfers; and an "investigated and declined" disposition
 # for a *behavioral* change never closes an *implementation* consolidation's
-# removal gate. A future schema bump should make that ladder explicit
-# (introduced -> wired -> authoritative -> retired, with
-# investigated_declined as a separate disposition); until then it is stated
-# in each affected removal_gate's prose.
+# removal gate.
+#
+# Schema 2 (track T2, 2026-09-05) makes both of those structural rather
+# than prose: the `lifecycle` ladder and the `investigated_declined`
+# disposition described above, with the validator enforcing that a declined
+# investigation cannot sit at `retired` and that `lifecycle` agrees with
+# `authority`. Every concept row was re-audited against the ladder in the
+# same change; the audit's outcome is that NO concept is `retired` today
+# and only the three `authority: self` concepts are `authoritative` --
+# which is the re-assessment's own headline finding ("the primitives are
+# largely built; what is not done is making them the sole authority and
+# deleting what they replaced") recorded as data instead of prose.
 #
 # as_of_commit names a commit on the default branch, the same convention
 # adr/index.md's `**Verified:**` receipt uses and for the identical reason:
@@ -74,8 +124,8 @@
 # base commit this change built on (or a later reachable main commit, once
 # merged) — never at a same-PR branch commit.
 
-schema_version: 1
-as_of_commit: bbce489e
+schema_version: 2
+as_of_commit: 2f5ef696
 as_of_date: "2026-09-05"
 
 concepts:
@@ -85,6 +135,7 @@ concepts:
     persistence: complete
     consumers: partial
     authority: legacy
+    lifecycle: wired
     removal_gate: >-
       Phase 5B (fact-semantic-consumption): every detector reading an
       availability-bearing fact must branch on FactStatus instead of
@@ -146,32 +197,42 @@ concepts:
       method" from "I established the complete set of virtual methods."
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 4 /
       track T9.
-      **T9 first slice (2026-09-05): the PDB fabrication itself is now
-      closed.** `Fact[T]` gained a `producer` field (`model/fact.py`,
-      additive, round-tripped through `storage/fact_codec.py`).
-      `pdb_model.py` now stamps every PDB record's `vtable_fact`/
-      `vptr_offset_bits_fact` as an explicit `Fact.unsupported(...,
-      producer="pdb")` rather than omitting the fields, which previously
-      resolved to the same `NOT_COLLECTED` status a typed-API omission
-      also produces. `compare/vtable_evidence.
-      vtable_transition_is_evidenced` declines outright on either side's
-      `vtable_fact.status is FactStatus.UNSUPPORTED` -- a status only an
-      explicit producer-incapability claim produces, never a typed-API
-      omission -- closing the reachable fabrication without reopening the
-      leaf-class regression (`NOT_COLLECTED`/`FAILED` are untouched). This
-      closes the implementation-consolidation gap for the one concrete
-      case named above; it does *not* close the wider item: the DWARF
-      per-TU completeness gap (a producer-capability signal cannot express
-      a per-TU scope gap), the seven `fact_provenance`-gated case-(a)
-      fields' legacy-hybrid backfill blocker, and the shared declined-
-      comparison analysis accounting all remain open. See
-      duplication-and-convergence-assessment.md's own T9 row note for the
-      full account.
+    investigated_declined:
+      - item: >-
+          FactStatus gating for the vtable/TYPE_VTABLE_CHANGED cluster
+          (compare/vtable_evidence.vtable_transition_is_evidenced), closed
+          as Phase 5B's "final closure" after three rounds -- declined,
+          then a landed fix that regressed real detection coverage, then
+          reverted.
+        decided: "2026-09-04"
+        leaves_open: >-
+          The implementation consolidation -- narrowed by T9's first slice
+          (2026-09-05): the PDB-driven fabricated-finding path this decline
+          documented is now closed (Fact[T] gained a producer field;
+          pdb_model.py stamps every PDB record's vtable_fact/
+          vptr_offset_bits_fact as an explicit Fact.unsupported(...,
+          producer="pdb") instead of omitting them; vtable_transition_is_
+          evidenced declines outright on either side's vtable_fact.status
+          is FactStatus.UNSUPPORTED, never on NOT_COLLECTED/FAILED, so the
+          leaf-class regression this decline also protects is unaffected).
+          What remains open: the DWARF per-translation-unit completeness
+          gap (a producer-capability signal cannot express a per-TU scope
+          gap -- DWARF genuinely can capture this family, unlike PDB), and
+          the seven case-(a) fields still on the fact_provenance mechanism
+          (a separate, blocked item -- no safe conversion without a
+          legacy-hybrid load-path fix, not a decline).
+        tracked_as: >-
+          duplication-and-convergence-assessment.md Phase 6 item 4 / track
+          T9; the full three-round reasoning lives once, canonically, in
+          diff_types_vtable.py's own module docstring, and the T9 first
+          slice's own reasoning lives in compare/vtable_evidence.py's "T9
+          closure" docstring note.
   identity:
     primitive: complete
     producers: partial
     consumers: partial
     authority: mixed
+    lifecycle: wired
     removal_gate: >-
       Phase 2B (identity-consumer-migration), partial as of 2026-09-03:
       the StableEntityId/SnapshotLocalIdentity split landed
@@ -267,6 +328,27 @@ concepts:
       extract/pdb_scope.py's 4th limitation, not expected to close
       without new evidence of a CodeView record this module does not
       parse today.
+    investigated_declined:
+      - item: >-
+          Promoting the `entity:` alias into a real match tier in
+          resolve_change_identity. Investigated in depth rather than left
+          unexamined: the stability precondition is already built and
+          tested (StableEntityId/entity_id_is_cross_snapshot_stable), but
+          no currently-identifiable finding would be closed by promotion,
+          while it would change what report_canonical_finding_id hashes for
+          already-stored suppression rules.
+        decided: "2026-09-03"
+        leaves_open: >-
+          Phase 2B's consumer migration, which this decline does not touch:
+          producers remain partial (PDB and BTF/CTF populate entity_id for
+          struct/enum types only; function/variable/typedef identity is
+          unimplemented for both), and a change carrying no resolvable
+          entity_id at all still falls through to the spelling tier
+          unconditionally.
+        tracked_as: >-
+          This concept's own removal_gate (ADR-063 Phase 2B) holds the full
+          reasoning, including why type_reachability.py's spelling-matching
+          machinery is deliberately not migrated.
 
   semantic_ir:
     primitive: complete
@@ -280,6 +362,7 @@ concepts:
     # authoritative IR consumer that is not so adjudicated; there is none
     # today. See this concept's removal_gate for the full account.
     authority: legacy
+    lifecycle: wired
     removal_gate: >-
       Phase 6B (semantic-ir-checker-cutover), two cohorts landed so far.
       First cohort (2026-09-03): the TYPEDEF family now reads SemanticIR
@@ -376,11 +459,49 @@ concepts:
       and a disagreement is an explicit consistency failure rather than a
       silent fallback. Tracked as duplication-and-convergence-assessment.md
       Phase 6 item 2 / track T3.
+    investigated_declined:
+      - item: >-
+          Changing how the record and function detector families MATCH --
+          the behavioral half of migrating them onto SemanticIRIndex as
+          Phase 6B's third cohort. Both candidates were checked rather than
+          assumed and neither is blocked the way the original cohort-1
+          framing described, but neither has the concrete matching or
+          spelling defect typedefs and constants had (records already match
+          through ADR-045's qualified-name-keyed TypeMap; functions already
+          match on the mangled name via resolve_function_identity's
+          CANONICAL tier). Changing their matching precedence or published
+          finding IDs with no defect to close is the kind of behavioral
+          change this repository declines, so it was declined.
+        decided: "2026-09-03"
+        leaves_open: >-
+          The record/function implementation consolidation itself, which
+          this decline does NOT dispose of and which no track owns today.
+          SemanticIR already populates record and function occurrences on
+          every header-AST and DWARF producer while every record and
+          function detector still reads AbiSnapshot.types/.functions -- two
+          independently writable current representations of the same
+          semantic fact, which is the governing prohibition, and a
+          populated sidecar, which Phase 6 item 5 says means a cohort has
+          not landed. Consolidating them needs no new bug to justify it;
+          only the matching change above was declined. Explicitly NOT
+          covered by track T3, whose scope is typedefs and constants only
+          (Codex review, PR #1066 -- the first version of this entry cited
+          T3 here, which left the item this decline actually concerns with
+          no owner at all, recreating the loophole this field exists to
+          close).
+        tracked_as: >-
+          duplication-and-convergence-assessment.md Phase 6 item 5
+          ("Expand the proven pattern"), which names the remaining detector
+          families and the populated-sidecar rule. The typedef/constant
+          cutover (Phase 6 item 2 / track T3) is a separate open item, not
+          what this decline leaves open -- this concept's own removal_gate
+          covers it.
   public_surface:
     primitive: complete
     producers: complete
     consumers: complete
     authority: self
+    lifecycle: authoritative
     removal_gate: >-
       None outstanding for the shipped design (a deterministic closure
       walk over snapshot declarations). D5's own literal "traversal over
@@ -393,6 +514,7 @@ concepts:
     producers: complete
     consumers: partial
     authority: mixed
+    lifecycle: wired
     removal_gate: >-
       Phase 4B (resolved-execution-context): a ResolvedExecutionContext
       built for real (non-dry-run) execution, carrying resolved
@@ -426,6 +548,7 @@ concepts:
     producers: complete
     consumers: partial
     authority: mixed
+    lifecycle: wired
     removal_gate: >-
       Phase 7B (boundary-consumer-migration): action/run.sh reads
       run_outcome/exit from the machine report instead of decoding the raw
@@ -528,6 +651,7 @@ concepts:
     producers: complete
     consumers: partial
     authority: mixed
+    lifecycle: wired
     removal_gate: >-
       Phase 8B (multi-artifact-canonical-storage). Every typed-DTO item is
       now closed: storage.types_section_codec.TypesSection (2026-09-03,
@@ -586,6 +710,7 @@ concepts:
     producers: complete
     consumers: complete
     authority: self
+    lifecycle: authoritative
     removal_gate: >-
       None outstanding. Markdown's leaf/root-cause render modes have
       since converged onto ReportDocument too
@@ -601,6 +726,7 @@ concepts:
     producers: complete
     consumers: complete
     authority: self
+    lifecycle: authoritative
     removal_gate: >-
       Out of ADR-063's stated scope by design (Phase 2's own named
       boundary) — buildsource/entity_identity.py's CanonicalIdentity
