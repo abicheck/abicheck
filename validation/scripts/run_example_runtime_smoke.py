@@ -76,7 +76,7 @@ def _configure(build_dir: Path, build_type: str) -> str | None:
         [
             cmake,
             "-S",
-            str(EXAMPLES_DIR),
+            str(example_catalog.CATALOG_DIR),
             "-B",
             str(build_dir),
             f"-DCMAKE_BUILD_TYPE={build_type}",

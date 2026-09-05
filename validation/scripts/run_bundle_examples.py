@@ -83,7 +83,7 @@ def _configure(build_dir: Path) -> str | None:
         [
             cmake,
             "-S",
-            str(EXAMPLES_DIR),
+            str(example_catalog.CATALOG_DIR),
             "-B",
             str(build_dir),
             "-DCMAKE_BUILD_TYPE=Debug",

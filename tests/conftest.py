@@ -512,7 +512,9 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 def _cmake_configure_once(build_dir: Path) -> bool:
     """Run cmake configure into *build_dir*.  Returns True on success."""
-    examples_dir = Path(__file__).parent.parent / "examples"
+    # The CMake project root is catalog/ (catalog/CMakeLists.txt globs
+    # cases/case*), not examples/ -- Phase 4 of the examples/catalog split.
+    catalog_dir = Path(__file__).parent.parent / "catalog"
     cmake = shutil.which("cmake")
     if not cmake:
         return False
@@ -521,7 +523,7 @@ def _cmake_configure_once(build_dir: Path) -> bool:
             [
                 cmake,
                 "-S",
-                str(examples_dir),
+                str(catalog_dir),
                 "-B",
                 str(build_dir),
                 "-DCMAKE_BUILD_TYPE=Debug",
@@ -539,7 +541,7 @@ def _cmake_configure_once(build_dir: Path) -> bool:
 def shared_cmake_build_dir(tmp_path_factory: pytest.TempPathFactory) -> Path | None:
     """Session-scoped CMake build directory for integration tests.
 
-    Configures the examples/ CMakeLists.txt **once** per session so that
+    Configures the catalog/ CMakeLists.txt **once** per session so that
     individual tests only need to run ``cmake --build`` for their specific
     targets.  On Windows this avoids ~30 redundant cmake-configure passes
     (each one re-parses all 63 example CMakeLists).
@@ -548,8 +550,8 @@ def shared_cmake_build_dir(tmp_path_factory: pytest.TempPathFactory) -> Path | N
     worker runs the expensive cmake configure; other workers wait and
     reuse the same build directory.
     """
-    examples_dir = Path(__file__).parent.parent / "examples"
-    cmake_lists = examples_dir / "CMakeLists.txt"
+    catalog_dir = Path(__file__).parent.parent / "catalog"
+    cmake_lists = catalog_dir / "CMakeLists.txt"
     cmake = shutil.which("cmake")
 
     if not cmake or not cmake_lists.exists():

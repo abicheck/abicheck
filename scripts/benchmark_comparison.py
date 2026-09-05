@@ -705,7 +705,7 @@ def _build_plugin_side(
             [
                 "cmake",
                 "-S",
-                str(case_dir.parent),
+                str(example_catalog.CATALOG_DIR),
                 "-B",
                 str(side_build),
                 "-DCMAKE_BUILD_TYPE=Debug",
@@ -2077,7 +2077,7 @@ def _run_cmake_configure_and_build(
             [
                 "cmake",
                 "-S",
-                str(case_dir.parent),
+                str(example_catalog.CATALOG_DIR),
                 "-B",
                 str(cmake_build),
                 "-DCMAKE_BUILD_TYPE=Debug",
@@ -2599,7 +2599,7 @@ def _build_cmake_bundle(
         [
             "cmake",
             "-S",
-            str(EXAMPLES_DIR),
+            str(example_catalog.CATALOG_DIR),
             "-B",
             str(cmake_build),
             "-DCMAKE_BUILD_TYPE=Debug",
