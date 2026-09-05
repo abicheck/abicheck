@@ -266,11 +266,19 @@ class DispositionLedger:
         *,
         application_point: str,
         rule: RuleProvenance | None = None,
+        scope_excluded: bool = False,
     ) -> None:
         """Record *change*'s single terminal *disposition*.
 
         A no-op when *change* was already recorded — the disposition it
         received first is the one that actually applied to it.
+
+        *scope_excluded* marks a finding a consumer-scoping pass judged
+        irrelevant, so :meth:`with_gate` cannot later promote it into a gate
+        the run never evaluated it for. It is set here, rather than only by
+        :meth:`apply_scope`, because a late-appended finding is recorded for
+        the first time *during* the close and so has no earlier record to
+        rewrite.
         """
         key = id(change)
         if key in self._seen_ids:
@@ -287,6 +295,7 @@ class DispositionLedger:
                 verdict_class=_verdict_class_of(change),
                 rule=rule,
                 reclassified_by=getattr(change, "reclassified_by", None),
+                scope_excluded=scope_excluded,
             )
         )
 
@@ -465,7 +474,17 @@ class DispositionLedger:
         """
         scoped = {id(c) for c in in_scope}
         for index, (record, change) in enumerate(zip(self._records, self._anchors)):
-            if record.disposition is not Disposition.GATING:
+            # Both evaluated dispositions, not just ``gating``: a finding that
+            # is *already* non-gating (a compatible addition, say) still has
+            # to be marked excluded, or a later severity setting that promotes
+            # its category (``severity.addition: error``) would pull it into a
+            # gate the consumer-scoped run never evaluated it for. The mark is
+            # what ``with_gate`` reads; the demotion below is a no-op for one
+            # that was not gating to begin with.
+            if record.disposition not in (
+                Disposition.GATING,
+                Disposition.NON_GATING,
+            ):
                 continue
             if id(change) not in scoped:
                 self._records[index] = replace(

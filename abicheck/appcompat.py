@@ -1697,17 +1697,16 @@ def check_appcompat(
         # already attached is only reachable through the snapshot itself.
         old_snapshot=old_snap,
     )
-    # ADR-067: `scope_diff_to_app` deliberately leaves the ledger open, since
-    # the `compare --used-by` path calls it once per consumer and only the
-    # orchestrator knows the union. This standalone entry point *is* that
-    # orchestrator for its own single consumer, so it makes the one closing
-    # call here -- otherwise a caller that reads `result.full_diff` (the
-    # release recommendation, say) would see this scoping's own overlay
-    # findings with no verdict class and the whole-library gating labels.
-    # Found by sweeping every consumer-scoping entry point rather than by a
-    # report of it.
+    # ADR-067: `scope_diff_to_app` leaves the ledger open (the `--used-by`
+    # path calls it once per consumer and only the orchestrator knows the
+    # union); this entry point *is* that orchestrator for its single consumer,
+    # so the one closing call is here. `also_detected` is the whole relevant
+    # set rather than a finding-id-filtered one: it holds the very
+    # `diff.changes` objects, so `record`'s identity keying no-ops on those,
+    # newly recording only the scoped-only findings.
+    relevant = scoped.breaking_for_app
     close_consumer_scope(
-        ledger_for(diff), diff, gating=scoped.breaking_for_app
+        ledger_for(diff), diff, gating=relevant, also_detected=relevant
     )
     return scoped
 

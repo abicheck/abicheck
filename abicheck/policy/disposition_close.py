@@ -190,11 +190,32 @@ def close_consumer_scope(
     if ledger is None:
         return
     gating_ids = {id(c) for c in gating}
+    gate = _GateContext.of(result)
     for change in also_detected:
+        # Through the same per-finding gate resolution every other kept
+        # finding goes through -- membership in the scoped set says the
+        # finding is *relevant*, not that it gates. A scoped set legitimately
+        # contains findings whose own gate contribution is zero (the
+        # ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` advisory `scope_diff_to_app`
+        # appends is a RISK diagnostic, not a break), and counting those as
+        # effective would overstate the audit against the exit code beside it.
+        # Out-of-scope late findings are marked excluded for the same reason
+        # ``apply_scope`` marks the rest: severity must not pull them in
+        # later. The scope demotion applies under the same condition
+        # ``apply_scope`` applies it -- only to an *evaluated* disposition. A
+        # late finding that is proven out of contract (or whose relevance
+        # evidence ran out) is not made ``non_gating`` by being out of scope:
+        # that would replace one terminal disposition with another, which D2
+        # forbids, and would report a contract exclusion as an ordinary
+        # evaluated-and-harmless finding.
+        disposition = _kept_disposition(change, result, None, gate)
+        evaluated = disposition in (Disposition.GATING, Disposition.NON_GATING)
+        excluded = evaluated and id(change) not in gating_ids
         ledger.record(
             change,
-            Disposition.GATING if id(change) in gating_ids else Disposition.NON_GATING,
+            Disposition.NON_GATING if excluded else disposition,
             application_point="consumer_scope",
+            scope_excluded=excluded,
         )
     ledger.apply_scope(result, gating)
     ledger.resolve_verdict_classes(result)

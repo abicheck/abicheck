@@ -991,6 +991,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_disposition_audit.py",
             "tests/test_disposition_audit_states.py",
+            "tests/test_disposition_scope_matrix.py",
         ),
         axes={
             "application_point": (
@@ -1014,6 +1015,21 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                 "markdown-root-cause",
             ),
             "gate": ("legacy-verdict", "severity-preset"),
+            # Enumerated exhaustively rather than sampled:
+            # `tests/test_disposition_scope_matrix.py` runs the full
+            # cross-product of these three against a hand-written oracle,
+            # because the consumer-scoping half of this mechanism was fixed
+            # once per reported corner across six review rounds.
+            "scope_membership": ("in-scope", "scope-excluded"),
+            "record_timing": ("recorded-before-close", "recorded-during-close"),
+            "initial_disposition": (
+                "gating",
+                "non_gating",
+                "suppressed",
+                "out_of_contract",
+                "unresolved_relevance",
+                "deduplicated",
+            ),
         },
         known_gaps=(
             KnownGap(

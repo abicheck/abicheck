@@ -862,3 +862,100 @@ class TestNoteIfSameBinaryCompared:
             show_filtered=False,
         )
         assert result.coverage_warnings == []
+
+
+class TestNotEvaluatedDoesNotChangeConfidence:
+    """ADR-067 D3's reporting distinction must stay a reporting distinction.
+
+    `not_evaluated` separates "this detector never ran, for lack of the
+    evidence it needs" from "it ran and found nothing". Confidence is a
+    statement about the *evidence* a comparison had, and every evidence
+    input it reads (headers, ELF, DWARF, PE, Mach-O) is already computed
+    from the snapshots directly — so a detector moving onto the registry's
+    `requires_support` gate must not move the confidence level.
+
+    This is stated over *every* registered detector rather than as a
+    reproducer for the one that caught it: `abicheck/confidence.py` keys one
+    of its rules on `DetectorResult.enabled`, which every future support
+    gate also sets, so the next detector to gain one would otherwise
+    silently degrade confidence the same way the `dwarf` detector's did (a
+    Windows-lane stripped-vs-debug failure, where headers plus ELF plus no
+    usable DWARF baseline dropped from HIGH to MEDIUM).
+    """
+
+    @staticmethod
+    def _levels(name, *, has_dwarf):
+        from abicheck.checker_types import DetectorResult
+        from abicheck.confidence import _determine_confidence_level
+
+        levels = []
+        for not_evaluated in (False, True):
+            results = [
+                DetectorResult(
+                    name=name,
+                    changes_count=0,
+                    enabled=not not_evaluated,
+                    coverage_gap="no supporting evidence" if not_evaluated else None,
+                    not_evaluated=not_evaluated,
+                )
+            ]
+            levels.append(
+                _determine_confidence_level(
+                    has_elf=True,
+                    has_dwarf=has_dwarf,
+                    has_pe=False,
+                    has_macho=False,
+                    has_headers=True,
+                    detector_results=results,
+                    warnings=[],
+                )
+            )
+        return levels
+
+    def test_no_registered_detector_changes_confidence_by_not_running(self):
+        from abicheck.detector_registry import registry
+
+        assert registry.detector_names, "the registry must not be empty here"
+        for name in registry.detector_names:
+            for has_dwarf in (False, True):
+                ran, skipped = self._levels(name, has_dwarf=has_dwarf)
+                assert ran == skipped, (
+                    f"detector {name!r} changes the confidence level purely by "
+                    f"being recorded as not_evaluated ({ran} -> {skipped})"
+                )
+
+    def test_headers_plus_binary_stay_high_without_any_dwarf(self):
+        """The documented rule the regression violated, stated directly:
+        headers plus at least one binary metadata source is HIGH, and no
+        detector's support gate may lower it."""
+        for name in ("dwarf", "elf", "symbols"):
+            for level in self._levels(name, has_dwarf=False):
+                assert level == Confidence.HIGH
+
+    def test_a_detector_disabled_for_another_reason_still_degrades(self):
+        """The branch is narrowed, not deleted: a `dwarf` detector that was
+        supported and disabled anyway means evidence that really was
+        expected and really is missing."""
+        from abicheck.checker_types import DetectorResult
+        from abicheck.confidence import _determine_confidence_level
+
+        assert (
+            _determine_confidence_level(
+                has_elf=True,
+                has_dwarf=True,
+                has_pe=False,
+                has_macho=False,
+                has_headers=True,
+                detector_results=[
+                    DetectorResult(
+                        name="dwarf",
+                        changes_count=0,
+                        enabled=False,
+                        coverage_gap="disabled",
+                        not_evaluated=False,
+                    )
+                ],
+                warnings=[],
+            )
+            == Confidence.MEDIUM
+        )
