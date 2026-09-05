@@ -555,6 +555,35 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # not already raise -- it raises the same ones from one place.
     _resolved = resolve_dump_request_for_cli(_dump_request)
 
+    # ADR-063 Track T4 ("Dump request contract"): attach a dry-run-safe
+    # *preview* of the nine execution-option values onto the resolved
+    # request, so `dump --dry-run` can render what the real run below would
+    # pass to `execute_dump_request`. `dry_run_build_context_preview` is the
+    # silent, non-raising sibling of `_resolve_build_context_flags` used
+    # below for the real run -- same inputs, so the preview agrees with the
+    # real run except for one accepted imprecision (a malformed compile
+    # database folds to `([], False)` here rather than raising -- see that
+    # function's own docstring). Every other field mirrors a CLI-invariant
+    # value the real run always attaches too (see `execute_dump_cli_run`'s
+    # own docstring), or a value already resolved above.
+    from ....cli_dump_helpers import dry_run_build_context_preview
+    from ....service_dump_pipeline import DumpExecutionOptions
+
+    _preview_flags, _preview_matched = dry_run_build_context_preview(
+        compile_db_path, headers, compile_db_filter
+    ) or ([], False)
+    _resolved = dataclasses.replace(
+        _resolved,
+        execution_options=DumpExecutionOptions(
+            build_config=build_config,
+            allow_build_query=True,
+            legacy_compile_db_tokens=tuple(_preview_flags),
+            legacy_compile_db_matched=_preview_matched,
+            seed_collect_mode=_resolved.collect_mode,
+            source_frontend_from_folded_context=True,
+        ),
+    )
+
     if dry_run:
         from ....cli_buildsource_helpers import _is_inputs_pack_dir
         from ....cli_dump_dry_run_build_query import add_build_query_dry_run_section
@@ -704,8 +733,32 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         _dump_request,
         input=dataclasses.replace(_dump_request.input, path=so_path),
     )
+    # ADR-063 Track T4: the real (raise/echo-capable) `DumpExecutionOptions`
+    # -- unlike `_resolved`'s own dry-run-safe preview above -- attached
+    # directly onto the request this run actually executes, so
+    # `execute_dump_cli_run` picks it up as `execute_dump_request`'s default
+    # `options` rather than this call site threading the nine values through
+    # as separate keyword parameters.
     _exec_resolved = dataclasses.replace(
-        resolve_dump_request_for_cli(_exec_request), requested_depth=None,
+        resolve_dump_request_for_cli(_exec_request),
+        requested_depth=None,
+        execution_options=DumpExecutionOptions(
+            build_config=build_config,
+            allow_build_query=True,
+            legacy_compile_db_tokens=tuple(build_context_flags),
+            legacy_compile_db_matched=compile_db_matched,
+            # Codex review, two real regressions on the original ELF
+            # migration: `perform_elf_dump` always forwarded its own
+            # resolved collect mode to the L2 seed (running a zero-config
+            # inferred build query for a `--sources` tree with no compile
+            # database) and always replayed L4 source through the L3
+            # fold's own compiler once it applied -- both must be
+            # preserved here, exactly as `scan`'s own candidate resolution
+            # already does. Applies identically to PE/Mach-O, which shares
+            # this same tail.
+            seed_collect_mode=_resolved.collect_mode,
+            source_frontend_from_folded_context=True,
+        ),
     )
     from ....workflows.extraction import (
         dump_manifest_header_roots,
@@ -717,17 +770,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         _exec_resolved,
         notify=_click_notify,
         build_config=build_config,
-        legacy_compile_db_tokens=tuple(build_context_flags),
-        legacy_compile_db_matched=compile_db_matched,
-        # Codex review, two real regressions on the original ELF migration:
-        # `perform_elf_dump` always forwarded its own resolved collect mode
-        # to the L2 seed (running a zero-config inferred build query for a
-        # `--sources` tree with no compile database) and always replayed L4
-        # source through the L3 fold's own compiler once it applied -- both
-        # must be preserved here, exactly as `scan`'s own candidate
-        # resolution already does. Applies identically to PE/Mach-O, which
-        # shares this same tail.
-        seed_collect_mode=_resolved.collect_mode,
         stamp_provenance=_stamp_provenance,
         write_snapshot_output=_write_snapshot_output_fn,
         git_tag=git_tag, build_id=build_id, no_git=no_git,

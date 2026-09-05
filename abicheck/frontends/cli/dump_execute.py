@@ -82,12 +82,6 @@ def execute_dump_cli_run(
     exec_resolved: ResolvedDumpRequest,
     *,
     notify: Callable[[str], None],
-    build_config: Path | None,
-    allow_build_query: bool,
-    legacy_compile_db_tokens: tuple[str, ...],
-    legacy_compile_db_matched: bool,
-    seed_collect_mode: str | None,
-    source_frontend_from_folded_context: bool,
 ) -> AbiSnapshot:
     """Run the real ``dump`` extraction (ELF, PE, or Mach-O) and return its
     snapshot.
@@ -100,8 +94,20 @@ def execute_dump_cli_run(
     linker script / dev symlink: ``resolve_dump_request``'s own
     ``detect_binary_format(side.path)`` call runs before any such
     following, so feeding it the pre-follow path risks a wrong ``fmt`` for
-    a symlink-to-linker-script input) and with ``requested_depth`` nulled
-    out.
+    a symlink-to-linker-script input), with ``requested_depth`` nulled
+    out, and its own :attr:`~abicheck.service_dump_pipeline.
+    ResolvedDumpRequest.execution_options` already attached -- the nine
+    out-of-band execution kwargs this function used to accept as its own
+    separate parameters (ADR-063 Track T4, "Dump request contract";
+    :class:`~abicheck.service_dump_pipeline.DumpExecutionOptions` documents
+    each field). Folded onto *exec_resolved* itself, not threaded through
+    here, so the object the caller resolved is the one thing describing the
+    run -- the same reasoning that already governs every other value this
+    function reads off *exec_resolved* rather than taking as its own
+    parameter. :func:`~abicheck.service_dump_pipeline.execute_dump_request`
+    reads ``exec_resolved.execution_options`` itself whenever its own
+    ``options`` keyword is left unset, which is what this function relies on
+    below.
 
     That null-out matters here too, not just at the call site that does
     it: the shared pipeline's own depth gate
@@ -118,13 +124,14 @@ def execute_dump_cli_run(
     own ``_write_snapshot_output`` call stays the sole enforcement point,
     exactly as it already is today.
 
-    *legacy_compile_db_tokens*/*legacy_compile_db_matched* (ADR-063 Phase
-    1): the legacy ``-p``/``--compile-db`` auto-match's own derived
-    signal, which has no equivalent inside the shared pipeline's typed
-    ``InputSpec`` -- threaded through as an explicit pass-through
-    (``execute_dump_request``'s own docstring states the precedence rule:
-    the P0.3 fold's own result wins whenever it applies) rather than a new
-    typed field, so the migrated real run keeps seeing it exactly like
+    *exec_resolved.execution_options*'s own ``legacy_compile_db_tokens``/
+    ``legacy_compile_db_matched`` fields (ADR-063 Phase 1): the legacy
+    ``-p``/``--compile-db`` auto-match's own derived signal, which has no
+    equivalent inside the shared pipeline's typed ``InputSpec`` -- threaded
+    through as an explicit pass-through (``execute_dump_request``'s own
+    docstring states the precedence rule: the P0.3 fold's own result wins
+    whenever it applies) rather than a new typed field on ``InputSpec``
+    itself, so the migrated real run keeps seeing it exactly like
     ``perform_elf_dump`` did via its own ``legacy_build_context_flags``
     parameter.
 
@@ -138,26 +145,27 @@ def execute_dump_cli_run(
     ``cli_resolve._click_notify``, ``compare``'s own CLI convention for the
     identical pipeline, reused verbatim rather than invented a second time.
 
-    *seed_collect_mode*/*source_frontend_from_folded_context* (Codex review,
-    two real regressions the initial migration introduced): forwarded
-    verbatim to :func:`~abicheck.service_dump_pipeline.execute_dump_request`,
-    whose own docstring documents each and states the precedence/behavior
-    ``perform_elf_dump`` had that these preserve. The caller passes
+    *exec_resolved.execution_options*'s own ``seed_collect_mode``/
+    ``source_frontend_from_folded_context`` fields (Codex review, two real
+    regressions the initial migration introduced): forwarded verbatim to
+    :func:`~abicheck.service_dump_pipeline.execute_dump_request`, whose own
+    docstring documents each and states the precedence/behavior
+    ``perform_elf_dump`` had that these preserve. The caller attaches
     ``seed_collect_mode=resolved.collect_mode`` (the same collect mode
     ``--dry-run`` already projects and ``_write_snapshot_output`` already
     consumes) and ``source_frontend_from_folded_context=True`` unconditionally
     -- matching ``scan``'s own candidate resolution, which passes the
     identical value for the identical reason.
 
-    *allow_build_query* -- the caller passes ``True`` unconditionally here.
-    ``dump``'s CLI is itself the trust boundary an explicit ``--config``
-    already crossed by being typed here at all -- unlike ``scan``'s
-    config-file-sourced ``build.query``, which needs its own
-    ``resolve_effective_allow_query`` "level-implies-query" decision
-    (ADR-037 D4) precisely because it is not operator-typed. (The CLI used
-    to also carry its own always-``False`` ``--allow-build-query``/
-    ``--build-query`` no-op flags; both are gone now -- an explicit
-    ``--config`` is the only authorizer left.)
+    *exec_resolved.execution_options.allow_build_query* -- the caller
+    attaches ``True`` unconditionally here. ``dump``'s CLI is itself the
+    trust boundary an explicit ``--config`` already crossed by being typed
+    here at all -- unlike ``scan``'s config-file-sourced ``build.query``,
+    which needs its own ``resolve_effective_allow_query``
+    "level-implies-query" decision (ADR-037 D4) precisely because it is not
+    operator-typed. (The CLI used to also carry its own always-``False``
+    ``--allow-build-query``/``--build-query`` no-op flags; both are gone now
+    -- an explicit ``--config`` is the only authorizer left.)
 
     Raises:
         click.UsageError: If *exec_resolved* (or the input it resolves) is
@@ -173,21 +181,18 @@ def execute_dump_cli_run(
         click.ClickException: For any other extraction failure (exit 1).
     """
     from ...errors import ValidationError
-    from ...service_dump_pipeline import DumpExecutionOptions, execute_dump_request
+    from ...service_dump_pipeline import execute_dump_request
 
     try:
-        result = execute_dump_request(
-            exec_resolved,
-            notify=notify,
-            options=DumpExecutionOptions(
-                build_config=build_config,
-                allow_build_query=allow_build_query,
-                legacy_compile_db_tokens=legacy_compile_db_tokens,
-                legacy_compile_db_matched=legacy_compile_db_matched,
-                seed_collect_mode=seed_collect_mode,
-                source_frontend_from_folded_context=source_frontend_from_folded_context,
-            ),
-        )
+        # `options` is left unset: `execute_dump_request` itself falls back
+        # to `exec_resolved.execution_options` (or `DumpExecutionOptions()`
+        # if that is also unset) whenever its own `options` keyword is
+        # `None` -- see that function's own docstring. The caller
+        # (`dump_cmd`) is responsible for attaching the real
+        # `DumpExecutionOptions` onto `exec_resolved` before calling this
+        # function; this module deliberately does not assemble a second one
+        # of its own (ADR-063 Track T4).
+        result = execute_dump_request(exec_resolved, notify=notify)
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
@@ -203,9 +208,6 @@ def execute_and_write_dump_cli_run(
     *,
     notify: Callable[[str], None],
     build_config: Path | None,
-    legacy_compile_db_tokens: tuple[str, ...],
-    legacy_compile_db_matched: bool,
-    seed_collect_mode: str | None,
     stamp_provenance: Callable[..., None],
     write_snapshot_output: Callable[..., None],
     git_tag: str | None,
@@ -244,17 +246,17 @@ def execute_and_write_dump_cli_run(
     family (``cli_resolve``/``cli_buildsource``, ...) that supplies both --
     see this module's own docstring for why a *new* member of that already-
     accepted import cycle needs a maintainer decision, not a routine split.
+
+    *build_config* is still its own parameter here (unlike
+    :func:`execute_dump_cli_run`'s nine execution-option kwargs, which moved
+    onto ``exec_resolved.execution_options`` -- ADR-063 Track T4): it is also
+    needed below by ``write_snapshot_output``, a genuinely separate
+    provenance/write-step concern from execution, so it stays a parameter of
+    this function rather than being read a second time off
+    ``exec_resolved.execution_options.build_config`` (the caller already
+    attached the identical value there for execution's own use).
     """
-    snap = execute_dump_cli_run(
-        exec_resolved,
-        notify=notify,
-        build_config=build_config,
-        allow_build_query=True,
-        legacy_compile_db_tokens=legacy_compile_db_tokens,
-        legacy_compile_db_matched=legacy_compile_db_matched,
-        seed_collect_mode=seed_collect_mode,
-        source_frontend_from_folded_context=True,
-    )
+    snap = execute_dump_cli_run(exec_resolved, notify=notify)
 
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     write_snapshot_output(
