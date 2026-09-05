@@ -58,7 +58,7 @@ from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
     legacy_typedef_ir,
     producer_entity_id,
-    render_display_name,
+    render_display_name_or_leaf,
 )
 
 if TYPE_CHECKING:
@@ -158,21 +158,24 @@ def _underlying(index: SemanticIRIndex, entity_id: EntityId) -> str:
 def _aliases(index: SemanticIRIndex) -> dict[str, EntityId]:
     """This index's typedef occurrences, keyed by their rendered alias.
 
-    An identity with no faithful flat rendering is skipped -- it has no
-    alias a ``Change.symbol`` could name. Since ADR-063 Track T3 made
-    ``SemanticIR`` the sole comparison-time source for this cohort (see
-    ``typedef_index_pair``), this is the real, load-bearing mechanism for a
-    typedef nested in an anonymous/local-to-function scope, not a
-    defensive floor behind a gate that used to fall back before a detector
-    ever iterated a smaller set: such a typedef genuinely has no alias a
-    ``Change.symbol`` could name, on either the IR-backed or the
-    legacy-adapted path alike, and is simply absent from comparison.
+    Uses :func:`~abicheck.model.semantic_ir_legacy_adapter.
+    render_display_name_or_leaf`, not the strict ``render_display_name``
+    (Codex review, PR #1078, fourth round): a typedef nested in an
+    anonymous/local-to-function scope has no *faithful* alias, but it does
+    have a bare leaf name, and the legacy adapter's own synthetic-identity
+    construction already surfaces exactly that name for it (a flat map's
+    key is a plain string, never a real ``ScopePath``). Using the strict
+    renderer here would make an anonymous-namespace typedef silently
+    disappear from comparison the moment a real ``SemanticIR`` is used
+    directly -- visible on the legacy-adapted path only by the accident of
+    its synthetic identity's empty scope, not by design. Two distinct
+    anonymous-scoped typedefs sharing a leaf name still collide onto one
+    dict entry here, identical to (not worse than) the pre-existing legacy
+    accepted risk.
     """
     by_alias: dict[str, EntityId] = {}
     for entity_id in index.entities_of_kind(EntityKind.TYPEDEF):
-        alias = render_display_name(entity_id)
-        if alias is not None:
-            by_alias.setdefault(alias, entity_id)
+        by_alias.setdefault(render_display_name_or_leaf(entity_id), entity_id)
     return by_alias
 
 

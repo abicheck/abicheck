@@ -164,6 +164,27 @@ class TestBackendEquivalence:
 
 
 class TestDetectorBehavior:
+    def test_a_removed_anonymous_namespace_typedef_is_still_detected(self) -> None:
+        """The exact scenario Codex review (PR #1078, fourth round) named:
+        a typedef declared in an anonymous namespace, real on the old side
+        and genuinely removed on the new side. Before the leaf-name
+        fallback, this would have been silently invisible to comparison
+        (``_aliases`` skipped it outright); the strict renderer's ``None``
+        is not proof the typedef doesn't exist."""
+        gone = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
+        old_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(gone): CanonicalEntity(
+                        canonical_spelling=Fact.present("int")
+                    )
+                }
+            )
+        )
+        (change,) = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert change.kind is ChangeKind.TYPEDEF_REMOVED
+        assert change.symbol == "Alias"
+
     def test_removal_change_and_no_op(self) -> None:
         changes = _run(
             _ir_backed({"gone": "int", "moved": "int", "same": "int"}),
@@ -396,10 +417,16 @@ class TestPrivateHelpers:
             "_version_1_0_0", frozenset({"_version_2_0_0"})
         )
 
-    def test_aliases_skips_an_unrenderable_identity(self) -> None:
-        """An ``Anonymous``-scoped typedef identity contributes no entry --
-        directly against ``SemanticIRIndex``, the same shape a real,
-        IR-authoritative comparison would see since Track T3."""
+    def test_aliases_falls_back_to_the_bare_leaf_name_for_an_unrenderable_identity(
+        self,
+    ) -> None:
+        """An ``Anonymous``-scoped typedef identity still contributes an
+        entry, keyed by its bare leaf name -- Codex review, PR #1078,
+        fourth round: the legacy adapter's own synthetic identity for the
+        identical declaration always renders (an empty scope), so skipping
+        it here would make an anonymous-namespace typedef disappear the
+        moment a real ``SemanticIR`` is used directly, visible on the
+        legacy-adapted path only by accident."""
         from abicheck.compare.typedefs import _aliases
 
         anon = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
@@ -410,4 +437,4 @@ class TestPrivateHelpers:
                 )
             }
         )
-        assert _aliases(SemanticIRIndex(ir)) == {}
+        assert _aliases(SemanticIRIndex(ir)) == {"Alias": anon}

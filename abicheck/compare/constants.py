@@ -55,7 +55,7 @@ from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
     legacy_constant_ir,
     producer_entity_id,
-    render_display_name,
+    render_display_name_or_leaf,
 )
 
 if TYPE_CHECKING:
@@ -80,17 +80,14 @@ class _ReliabilityPredicate(Protocol):
 
 def _values(index: SemanticIRIndex) -> dict[str, EntityId]:
     """This index's constant occurrences, keyed by their rendered qualified
-    name. Mirrors ``compare.typedefs._aliases``: an identity with no
-    faithful flat rendering is skipped -- since ADR-063 Track T3 made
-    ``SemanticIR`` the sole comparison-time source for this cohort (see
-    ``constant_index_pair``), this is the real mechanism for an
-    anonymous/local-to-function-scoped constant, not a defensive floor
-    behind a gate that used to fall back first."""
+    name. Mirrors ``compare.typedefs._aliases`` exactly, including using
+    ``render_display_name_or_leaf`` rather than the strict
+    ``render_display_name`` (Codex review, PR #1078, fourth round) -- see
+    that function's own docstring for why an anonymous/local-to-function-
+    scoped constant still needs a name to compare under."""
     by_name: dict[str, EntityId] = {}
     for entity_id in index.entities_of_kind(EntityKind.CONSTANT):
-        name = render_display_name(entity_id)
-        if name is not None:
-            by_name.setdefault(name, entity_id)
+        by_name.setdefault(render_display_name_or_leaf(entity_id), entity_id)
     return by_name
 
 

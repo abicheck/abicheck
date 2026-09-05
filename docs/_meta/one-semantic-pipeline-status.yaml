@@ -385,7 +385,16 @@ concepts:
       was Fact.unsupported() on both sides (real for a same-backend
       compound-initializer/bool-literal edit) -- fixed by falling back to
       each snapshot's own flat `AbiSnapshot.constants` raw text, gated
-      through the existing fingerprint-unreliability predicate. A current-format
+      through the existing fingerprint-unreliability predicate. A fourth
+      Codex round found the strict `render_display_name` made an
+      anonymous-namespace typedef/constant disappear from comparison
+      entirely once a real SemanticIR is used directly (the legacy
+      adapter's own synthetic identity for the identical declaration always
+      renders, since it is built from the flat map's own string key with an
+      empty scope) -- fixed by a new `render_display_name_or_leaf` that
+      falls back to the identity's bare leaf name, the same name the legacy
+      path already surfaces, used by both cohorts' own name-keying
+      projections. A current-format
       snapshot's IR disagreeing, by identity, with its own
       `typedef_entity_ids`/`constant_entity_ids` sidecar is no longer a
       case this selector can even reach: it is caught earlier, at snapshot

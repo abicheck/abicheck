@@ -6,6 +6,16 @@ Uncomment the section that is right (remove the HTML comment wrapper).
 
 ### Changed
 
+- **An anonymous-namespace typedef or constant no longer disappears from
+  comparison.** `_aliases`/`_values` now key an entity by its bare leaf name
+  (`model.semantic_ir_legacy_adapter.render_display_name_or_leaf`) when its
+  identity's scope contains an unrenderable segment (`Anonymous`/
+  `LocalToFunction`), instead of skipping it outright (Codex review: the
+  legacy adapter's own synthetic identity for the identical declaration
+  always renders — an empty scope built purely from the flat map's own
+  string key — so using the real `SemanticIR` directly was silently
+  dropping an anonymous-namespace declaration the legacy path always
+  surfaced).
 - **The typedef and constant detector cohorts' `SemanticIR` is now a real
   authority, not a fidelity-gated echo of the legacy projection** (ADR-063
   Track T3, "typedef/constant authority cutover"). `compare.typedefs.

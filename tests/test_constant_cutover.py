@@ -305,42 +305,54 @@ class TestDetectorBehavior:
         assert change.symbol == "X"
         assert change.old_value is None
 
-    def test_an_unrenderable_scope_segment_is_skipped_by_every_projection(
+    def test_an_unrenderable_scope_segment_falls_back_to_its_bare_leaf_name(
         self,
     ) -> None:
         """An entity whose scope contains an ``Anonymous`` segment has no
-        faithful flat spelling (``render_display_name`` returns ``None``,
-        see ``semantic_ir_legacy_adapter.py``'s own docstring) -- exercised
-        directly against ``_values`` (via ``diff_constants``) and against
-        ``constant_index_pair`` itself, since Track T3 made ``SemanticIR``
-        the sole comparison-time source: an anonymous-scoped entity is still
-        present in the raw index either way, it simply renders no name."""
-        unrenderable_id = entity_id_for_constant((Anonymous("namespace", 0),), "X")
-        unrenderable = SemanticIRIndex(
+        *faithful* flat spelling (``render_display_name`` returns ``None``,
+        see ``semantic_ir_legacy_adapter.py``'s own docstring), but
+        ``_values`` still keys it under its bare leaf name via
+        ``render_display_name_or_leaf`` (Codex review, PR #1078, fourth
+        round) -- the same name the legacy adapter's own synthetic identity
+        already surfaces for it. A same-leaf value change across two
+        *different* anonymous scopes is still detected, which the strict
+        renderer would have made invisible entirely."""
+        old_id = entity_id_for_constant((Anonymous("namespace", 0),), "X")
+        new_id = entity_id_for_constant((Anonymous("namespace", 1),), "X")
+        old_index = SemanticIRIndex(
             SemanticIR(
                 occurrences={
-                    OccurrenceId(unrenderable_id): CanonicalEntity(
+                    OccurrenceId(old_id): CanonicalEntity(
                         canonical_spelling=Fact.present("1")
                     )
                 }
             )
         )
-        assert _run(unrenderable, unrenderable) == []
-        (change,) = _run(unrenderable, _ir_backed({"X": "1"}))
-        assert change.kind is ChangeKind.CONSTANT_ADDED
+        new_index = SemanticIRIndex(
+            SemanticIR(
+                occurrences={
+                    OccurrenceId(new_id): CanonicalEntity(
+                        canonical_spelling=Fact.present("2")
+                    )
+                }
+            )
+        )
+        assert _run(old_index, old_index) == []
+        (change,) = _run(old_index, new_index)
+        assert change.kind is ChangeKind.CONSTANT_CHANGED
+        assert change.symbol == "X"
+        assert change.old_value == "1"
+        assert change.new_value == "2"
 
-        old = _snap(constants={}, semantic_ir=unrenderable.ir)
-        new = _snap(constants={}, semantic_ir=unrenderable.ir)
-        old_index, new_index = constant_index_pair(
+        old = _snap(constants={}, semantic_ir=old_index.ir)
+        new = _snap(constants={}, semantic_ir=new_index.ir)
+        pair_old_index, pair_new_index = constant_index_pair(
             old, new, old_constants={}, new_constants={}
         )
-        # Both sides carry a real SemanticIR, so it is used directly --
-        # the anonymous entity is still present in the raw index (it is
-        # not projected away here), it simply has no rendered name for a
-        # detector's own `_values` projection to key it under.
-        assert isinstance(old_index, SemanticIRIndex)
-        assert isinstance(new_index, SemanticIRIndex)
-        assert unrenderable_id in old_index.entities_of_kind(EntityKind.CONSTANT)
+        # Both sides carry a real SemanticIR, so it is used directly.
+        assert isinstance(pair_old_index, SemanticIRIndex)
+        assert isinstance(pair_new_index, SemanticIRIndex)
+        assert old_id in pair_old_index.entities_of_kind(EntityKind.CONSTANT)
 
 
 # -- end to end, through the real detector entry point ---------------------

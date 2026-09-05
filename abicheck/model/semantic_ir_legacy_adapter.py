@@ -116,6 +116,7 @@ __all__ = [
     "legacy_typedef_ir",
     "producer_entity_id",
     "render_display_name",
+    "render_display_name_or_leaf",
 ]
 
 #: ``EntityId.extra`` marker for an identity this adapter derived from a
@@ -146,6 +147,31 @@ def render_display_name(entity_id: EntityId) -> str | None:
         parts.append(rendered)
     parts.append(entity_id.leaf_name)
     return "::".join(parts)
+
+
+def render_display_name_or_leaf(entity_id: EntityId) -> str:
+    """:func:`render_display_name`, falling back to *entity_id*'s bare
+    ``leaf_name`` when its scope contains an unrenderable segment (Codex
+    review, PR #1078, fourth round).
+
+    A migrated cohort's own display-name projection (``compare.typedefs.
+    _aliases``/``compare.constants._values``) used to skip such an entity
+    outright once ``SemanticIR`` became the sole comparison-time source --
+    but :func:`legacy_typedef_ir`/:func:`legacy_constant_ir` never had that
+    problem in the first place: a legacy flat map's key is a plain string,
+    so an anonymous-namespace declaration's synthetic identity (built from
+    that same string, with an empty scope) always renders. Skipping the
+    identical declaration on the real-IR path silently dropped an
+    anonymous-namespace typedef/constant from comparison entirely --
+    exactly the kind of case the pre-T3 fidelity gate's "any divergence
+    falls back to the adapter" rule used to catch by accident, not by
+    design. The bare-leaf fallback here is deliberately the *same* answer
+    the legacy path already gives, not a new one: it carries the identical,
+    already-accepted collision risk (two distinct anonymous-scoped
+    declarations sharing a leaf name), never a new one.
+    """
+    rendered = render_display_name(entity_id)
+    return rendered if rendered is not None else entity_id.leaf_name
 
 
 def _render_segment(segment: ScopeSegment) -> str | None:
