@@ -181,12 +181,35 @@ def _determine_confidence_level(
         confidence = Confidence.LOW
         warnings.append("Very limited data available; results may be incomplete")
 
-    # DWARF-specific warning: if DWARF is expected but stripped.
+    # DWARF-specific degradation: DWARF was *expected* here but could not be
+    # used. Deliberately keyed on `enabled and not not_evaluated`, not on
+    # `enabled` alone (ADR-067 D3).
+    #
+    # `not_evaluated` says a detector's *supporting evidence was absent*, and
+    # that is already accounted for above: the has_headers/has_elf/has_dwarf
+    # rules are what decide the level, and "headers plus a binary, no DWARF
+    # anywhere" is documented HIGH. Reading it here would degrade the
+    # confidence of every ordinary headers-plus-ELF comparison of two
+    # stripped binaries -- a broad, user-visible verdict change that D3's
+    # reporting distinction is explicitly not allowed to make. (Before the
+    # `dwarf` detector had a support gate at all it was unconditionally
+    # `enabled=True`, so this branch was unreachable for it; moving its two
+    # in-body "nothing to compare" returns onto the registry's own
+    # `requires_support` mechanism is what first made it reachable, and the
+    # Windows lane's stripped-vs-debug scenario is what caught it.)
+    #
+    # The branch stays for the case it was written for: a detector that was
+    # supported, ran, and was disabled for some other reason -- there, the
+    # evidence really was expected and really is missing.
     dwarf_detector = next(
         (dr for dr in detector_results if dr.name == "dwarf"),
         None,
     )
-    if dwarf_detector and not dwarf_detector.enabled:
+    if (
+        dwarf_detector
+        and not dwarf_detector.enabled
+        and not getattr(dwarf_detector, "not_evaluated", False)
+    ):
         if confidence == Confidence.HIGH:
             confidence = Confidence.MEDIUM
 

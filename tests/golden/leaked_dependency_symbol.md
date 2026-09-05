@@ -19,9 +19,9 @@
 | Evidence tiers | `elf`, `header` |
 | Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
 | Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
-| Coverage gap | Detector 'dwarf_layout_coherence' disabled: neither snapshot has a DWARF-vs-header-AST layout coherence mismatch |
 | Coverage gap | Detector 'pe' disabled: missing PE metadata |
 | Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
+| Coverage gap | Detector 'dwarf' disabled: no DWARF debug info on either side |
 | Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
 | Coverage gap | Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered) |
 | Coverage gap | Detector 'sycl' disabled: missing SYCL metadata |
@@ -37,6 +37,21 @@
 > your target environment before deploying.
 
 - **symbol_leaked_from_dependency_changed**: Symbol '_ZNSt6thread8_M_startEv' was removed but appears to originate from 'libstdc++.so.6' (a dependency of this library). This is a real ABI change — the library is leaking dependency symbols into its public ABI surface. Consider applying -fvisibility=hidden.
+
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 1 |
+| Effective (gating) | 0 |
+| … non gating | 1 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |
+
+**Not evaluated:** 10 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `dwarf`, `python_ext`, … and 4 more
 
 ---
 ## Legend

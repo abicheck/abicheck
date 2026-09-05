@@ -301,6 +301,9 @@ topics:
     allowed_summaries:
       - skills-src/shared/policies-and-suppressions.md
       - learn/rollout-and-governance.md
+      # ADR-067 C-S1: the disposition-audit page states what a suppressed
+      # finding still costs, and links back here for the rule syntax.
+      - use/disposition-audit.md
 
   # ADR-049's effective compatibility configuration: the resolved object, its
   # field-level precedence, and the pack-manifest format. Distinct from
@@ -398,6 +401,31 @@ topics:
     allowed_summaries:
       - skills-src/shared/policies-and-suppressions.md
       - learn/rollout-and-governance.md
+      # ADR-067 C-S1: the disposition-audit page states what a suppressed
+      # finding still costs, and links back here for the rule syntax.
+      - use/disposition-audit.md
+
+  # ADR-067 C-S1: the detected-vs-effective reconciliation and the six
+  # terminal dispositions. Its own topic rather than a section of
+  # `suppressions` or `output-formats`: suppression is one of five things
+  # that can dispose of a finding (contract exclusion, deduplication,
+  # unresolved relevance and a severity-scored non-gating verdict are the
+  # others), and the audit is a model a reader needs before any one
+  # projection's rendering of it makes sense -- which is what makes it a
+  # narrative owner rather than a `output-formats` field row.
+  disposition-audit:
+    canonical_page: use/disposition-audit.md
+    fact_sources:
+      - abicheck/policy/disposition_ledger.py
+      - abicheck/policy/disposition_close.py
+      - abicheck/report/disposition_audit.py
+      - abicheck/workflows/disposition.py
+      - abicheck/schemas/compare_report.schema.json
+    task_pages:
+      - use/suppressions.md
+    allowed_summaries:
+      - use/output-formats.md
+      - use/contract-evaluation.md
 
   # GitHub Actions workflow-command annotations (stderr rendering) and,
   # since report schema 2.43, the same classification persisted as a
@@ -450,6 +478,9 @@ topics:
       - start/first-report.md
       - start/choose-your-workflow.md
       - skills-src/shared/report-interpretation.md
+      # ADR-067 C-S1: names which projections carry the audit block, and
+      # links here rather than re-describing the report envelope.
+      - use/disposition-audit.md
 
   github-actions-surface:
     canonical_page: use/github-action.md

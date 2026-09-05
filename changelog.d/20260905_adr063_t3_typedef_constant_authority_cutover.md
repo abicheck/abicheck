@@ -563,15 +563,18 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   six-field algorithm -- a consumer following the documented algorithm
   could not reproduce the id for a disambiguated typedef/constant
   occurrence finding. Updated the schema description and bumped
-  `REPORT_SCHEMA_VERSION` to 2.51 (Codex review; renumbered from a
-  conflicting 2.50 when the `origin/main` merge claimed that version
-  first for ADR-065 S2's `comparison_scope`/`run_outcome` additions).
+  `REPORT_SCHEMA_VERSION` to 2.53 (Codex review; renumbered twice by
+  successive `origin/main` merges -- first from a conflicting 2.50 when
+  ADR-065 S2's `comparison_scope`/`run_outcome` additions claimed that
+  version, then from the resulting conflicting 2.51 when ADR-067 C-S1's
+  `disposition_audit` block claimed that one too).
 - **`scan --against`'s JSON also gains a version signal for the changed
   `finding_id` algorithm.** `cli_scan_baseline._finding_summary()`
-  serializes the same `report_finding_id()` `compare`'s 2.51 bump covers,
+  serializes the same `report_finding_id()` `compare`'s 2.53 bump covers,
   but `SCAN_SCHEMA_VERSION` wasn't bumped in lockstep -- a scan consumer
-  had no way to feature-detect the widened hash. Bumped to 1.29 (Codex
-  review; renumbered from a conflicting 1.28 for the same reason).
+  had no way to feature-detect the widened hash. Bumped to 1.30 (Codex
+  review; renumbered twice for the same reason, via a conflicting 1.28
+  then a conflicting 1.29).
 - **The user guide's `finding_id` description now documents the seventh
   hash input too.** `docs/use/output-formats.md` still described
   `finding_id` as the hash of exactly the original six fields after the

@@ -46,6 +46,7 @@ from typing import Any
 
 from ..checker_policy import impact_for
 from ..checker_types import Change
+from .disposition_audit import DispositionAudit, render_disposition_audit_lines
 
 
 def _contract_decision_text(
@@ -722,6 +723,11 @@ class ReviewDigest:
     bump_value: str
     soname_value: str
     impacted: tuple[ImpactedSymbol, ...]
+    #: ADR-067 D3 / workstream G's report invariant: the raw-versus-effective
+    #: counts every view must carry. Optional only so a caller constructing a
+    #: digest by hand (several tests do) is not forced to build one; a real
+    #: ``compute_review_digest`` always supplies it.
+    disposition_audit: DispositionAudit | None = None
 
 
 def render_review_digest(digest: ReviewDigest) -> str:
@@ -763,6 +769,14 @@ def render_review_digest(digest: ReviewDigest) -> str:
         f"SONAME `{digest.soname_value}`",
         "",
     ]
+
+    # ADR-067 D3: the digest is the summary a reviewer approves a merge from,
+    # so the counts table above must not be the whole story -- what was
+    # detected, what actually gated, and which rule accounts for the
+    # difference belong in the same view.
+    if digest.disposition_audit is not None:
+        lines += ["**Disposition audit:**", ""]
+        lines += render_disposition_audit_lines(digest.disposition_audit)
 
     if digest.impacted:
         lines += ["**Top impacted symbols:**", ""]

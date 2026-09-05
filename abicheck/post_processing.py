@@ -23,7 +23,10 @@ Architecture review: Problem C — explicit pipeline replaces imperative chain.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Protocol
+
+from .policy.disposition_ledger import Disposition, record_suppressed_change
 
 # Split out when this module reached the 2000-line hard cap (see each new
 # module's own docstring). `PipelineContext` is re-exported rather than
@@ -38,11 +41,30 @@ from .post_processing_reachability import MarkReachability as MarkReachability
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import AbiSnapshot
+    from .policy.disposition_ledger import DispositionLedger
     from .suppression import Suppression, SuppressionList
 
 
 class PipelineStep(Protocol):
     """Protocol for a single post-processing step."""
+
+    #: ADR-067: what it *means* when this step's output no longer contains a
+    #: finding its input did, for a finding that did not land in one of the
+    #: context's own buckets. Three answers, and the step is the only thing
+    #: that knows which applies:
+    #:
+    #: * ``Disposition.DEDUPLICATED`` (the default, declared by
+    #:   :data:`_DEFAULT_DROPPED_DISPOSITION`) -- the finding was folded into
+    #:   another one that survived;
+    #: * ``Disposition.NON_GATING`` -- it was excluded on its own merits as
+    #:   compatible noise, not collapsed into anything;
+    #: * ``None`` -- the step *substituted* a replacement object for it (a
+    #:   reclassification of the same observation), so recording the original
+    #:   as a drop would count one observed change twice: once as a
+    #:   disappearance and once as the replacement.
+    #:
+    #: Declared as a class attribute rather than inferred, because none of
+    #: the three is derivable from the before/after lists alone.
 
     name: str
 
@@ -111,6 +133,10 @@ class FilterReservedFieldRenames:
     """Suppress TYPE_FIELD_REMOVED false positives from reserved-field renames."""
 
     name = "filter_reserved_field_renames"
+    # Same reasoning as `DowngradeOpaqueTypeChanges`: a rename into a reserved
+    # field is recognized as compatible and excluded, not folded into a
+    # surviving finding.
+    dropped_finding_disposition = Disposition.NON_GATING
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _filter_reserved_field_renames
@@ -135,6 +161,12 @@ class DowngradeOpaqueStructChanges:
     """Downgrade changes for types opaque in both snapshots."""
 
     name = "downgrade_opaque_struct_changes"
+    # Substitution, not a drop: `_downgrade_opaque_struct_changes` replaces a
+    # breaking layout finding with a compatible `TYPE_FIELD_ADDED_COMPATIBLE`
+    # one describing the *same* observation. Recording the original as
+    # dropped would count that one observed change twice -- once as a
+    # disappearance, once as the replacement.
+    dropped_finding_disposition = None
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _downgrade_opaque_struct_changes
@@ -171,6 +203,10 @@ class DowngradeOpaqueTypeChanges:
     """Suppress structural changes for opaque types."""
 
     name = "downgrade_opaque_type_changes"
+    # A real drop, but not a collapse into another finding: a layout change on
+    # a type consumers only ever hold a pointer to is excluded on its own
+    # merits, which is what `non_gating` says.
+    dropped_finding_disposition = Disposition.NON_GATING
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _downgrade_opaque_type_changes
@@ -576,6 +612,13 @@ class ApplySuppression:
             outcome = ctx.suppression.evaluate(c)
             if outcome.suppressed:
                 c.suppression_rule = outcome.rule_label()
+                record_suppressed_change(
+                    ctx.disposition_ledger,
+                    c,
+                    rule=outcome.matched_rule,
+                    application_point=self.name,
+                    suppression=ctx.suppression,
+                )
                 ctx.suppressed.append(c)
                 continue
             filtered.append(c)
@@ -681,6 +724,121 @@ def _build_suppression_unknown_reachability_change(
     )
 
 
+#: The answer for a step that does not declare one: most steps that drop a
+#: finding drop it because another finding now covers it.
+_DEFAULT_DROPPED_DISPOSITION = Disposition.DEDUPLICATED
+
+
+def _record_collapsed_findings(
+    changes: Iterable[Change],
+    ctx: PipelineContext,
+    *,
+    application_point: str,
+) -> None:
+    """Record findings this pipeline folded away as ``deduplicated``.
+
+    **The rule this exists to enforce:** several steps park a change in
+    ``ctx.suppressed`` with no user rule involved, because that is the only
+    bucket ``compare()`` excludes from the verdict (see
+    ``DetectCppPatterns._suppress_grouped_children``'s own (a)/(b) note for
+    the mechanics). The bucket therefore does *not* identify the mechanism,
+    and the ledger cannot infer it: labelling these ``suppressed`` makes
+    ``semver.recommend_release`` read an ordinary grouping or version-rename
+    collapse as a user-waived major break. So every such step names itself
+    here instead, and ``DispositionLedger.record`` being first-write-wins is
+    what makes that stick against the ledger's own closing fallback.
+
+    Every current caller collapses a finding into another one (a grouped
+    parent, a surviving duplicate, a version-rename pair), which is why they
+    share one disposition and differ only in *application_point*. A future
+    step that parks a change in ``ctx.suppressed`` for some other
+    rule-less reason needs its own recording call, not this one.
+    """
+    if ctx.disposition_ledger is None:
+        return
+    for change in changes:
+        ctx.disposition_ledger.record(
+            change, Disposition.DEDUPLICATED, application_point=application_point
+        )
+
+
+def _bucket_total(ctx: PipelineContext) -> int:
+    """How many findings the context's own side-output buckets hold."""
+    return (
+        len(ctx.suppressed)
+        + len(ctx.redundant)
+        + len(ctx.opaque_filtered)
+        + len(ctx.out_of_surface)
+    )
+
+
+def _record_dropped_duplicates(
+    before: Sequence[Change],
+    after: list[Change],
+    bucket_total_before: int,
+    ctx: PipelineContext,
+    step_name: str,
+    disposition: Disposition | None = _DEFAULT_DROPPED_DISPOSITION,
+) -> None:
+    """Record findings a step discarded outright as ``deduplicated``.
+
+    ADR-067 D1/D3: the raw total must count every atomically detected change,
+    including the ones an early collapse removed. ``DeduplicateAstDwarf`` and
+    ``DeduplicateCrossDetector`` run *before* ``FilterRedundant`` and simply
+    return a shorter list, so without this the detected total silently
+    undercounted by exactly the duplicates they folded away.
+
+    Deliberately generic rather than a patch to those two steps: any future
+    step that drops a finding is covered the same way, which is the failure
+    class -- a collapse with no audit record -- not the two instances of it.
+
+    A finding a step *moved* into one of the context's own side-output lists
+    is not a discard and is skipped here: it keeps the disposition its own
+    owner assigns (suppression records at the point it fires; the surface,
+    redundancy and opaque buckets are labelled when the ledger is closed over
+    the result). Since :meth:`DispositionLedger.record` is identity-keyed and
+    first-write-wins, mislabelling one here would be permanent.
+
+    *disposition* is what the step declares its drops mean
+    (:class:`PipelineStep`'s own ``dropped_finding_disposition``); ``None``
+    means the step substitutes rather than drops, and nothing is recorded.
+    """
+    ledger = ctx.disposition_ledger
+    if ledger is None or disposition is None:
+        return
+    # Counting first, identity second. This runs once per step on every
+    # comparison, and a wide diff runs two dozen steps over thousands of
+    # findings, so the overwhelmingly common "this step changed nothing"
+    # case must cost O(1) rather than two identity sets per step.
+    #
+    # The count is a sound trigger because a step that removes a finding
+    # either drops it (shortening `changes`) or moves it into one of the
+    # buckets (growing them by the same amount). The one shape it cannot see
+    # is a step that adds and drops in the same call, so such a step records
+    # its own drops -- `_merge_findings_respecting_suppression` is the only
+    # one today and does exactly that. That is not an honour-system rule:
+    # `tests/test_disposition_audit.py::
+    # test_a_pipeline_step_can_never_drop_a_finding_unrecorded` runs the real
+    # pipeline and asserts every input finding is accounted for by the kept
+    # list, a bucket, or the ledger.
+    if len(after) + (_bucket_total(ctx) - bucket_total_before) >= len(before):
+        return
+    survived = set(map(id, after))
+    for bucket in (
+        ctx.suppressed,
+        ctx.redundant,
+        ctx.opaque_filtered,
+        ctx.out_of_surface,
+    ):
+        survived.update(map(id, bucket))
+    missing = set(map(id, before)) - survived
+    if not missing:
+        return
+    for change in before:
+        if id(change) in missing:
+            ledger.record(change, disposition, application_point=step_name)
+
+
 def _merge_findings_respecting_suppression(
     changes: list[Change],
     new_findings: list[Change],
@@ -710,6 +868,13 @@ def _merge_findings_respecting_suppression(
             outcome = ctx.suppression.evaluate(c)
             if outcome.suppressed:
                 c.suppression_rule = outcome.rule_label()
+                record_suppressed_change(
+                    ctx.disposition_ledger,
+                    c,
+                    rule=outcome.matched_rule,
+                    application_point="merge_late_findings",
+                    suppression=ctx.suppression,
+                )
                 ctx.suppressed.append(c)
                 continue
             if outcome.withheld_rule is not None:
@@ -724,6 +889,18 @@ def _merge_findings_respecting_suppression(
                 )
         key = (c.kind, c.symbol)
         if key in seen_keys:
+            # ADR-067 D1: a late finding a *second* detector produced for an
+            # entity already reported is still an observed change, and it is
+            # dropped here rather than moved to any bucket -- so it is
+            # recorded, in both the suppressed and unsuppressed paths, or
+            # adding a suppression rule would change the detected total
+            # instead of moving the finding between dispositions. It never
+            # reaches ``Pipeline.run``'s own dropped-finding sweep either:
+            # these objects are created *by* the step, so they are not in the
+            # snapshot that sweep diffs against.
+            _record_collapsed_findings(
+                [c], ctx, application_point="merge_late_findings"
+            )
             continue
         changes.append(c)
         seen_keys.add(key)
@@ -1005,6 +1182,15 @@ class DetectCppPatterns:
         Mutates ``changes`` in place (via slice assignment) and appends the
         removed entries to ``ctx.suppressed``.
 
+        ADR-067 D2: they are recorded as ``deduplicated`` -- *grouped into a
+        parent finding* -- not as ``suppressed``. No user rule hid them; the
+        list they land in is an implementation detail of (a) and (b) below,
+        and labelling them ``suppressed`` would make an ordinary ISA-tier
+        grouping look to ``semver.recommend_release`` like a waived major
+        break and turn a PATCH recommendation into MAJOR/REVIEW. Recorded
+        here rather than left to the ledger's own closing pass, which cannot
+        tell the two apart from the bucket alone.
+
         Two reasons to use ``ctx.suppressed`` (not ``ctx.redundant``):
         (a) ``compare()`` computes verdict on ``kept + redundant`` —
             redundant items still drive the verdict. Putting the
@@ -1028,6 +1214,9 @@ class DetectCppPatterns:
             if ch.kind == ChangeKind.FUNC_REMOVED and any(
                 _matches_suppression_key(ch.symbol, key) for key in suppressed_keys
             ):
+                _record_collapsed_findings(
+                    [ch], ctx, application_point="grouped_into_parent_finding"
+                )
                 ctx.suppressed.append(ch)
                 continue
             to_keep.append(ch)
@@ -1313,6 +1502,14 @@ class DetectVersionedSymbolScheme:
                 f" [{advisory.caused_count} version-renames collapsed as compatible]"
             )
             matched_ids = {id(c) for c in matched}
+            # G15's collapse is a reclassification of a version-rename pair as
+            # compatible, not a user waiver -- see
+            # ``_record_collapsed_findings`` for why the bucket alone cannot
+            # say which, and what reading it as a waiver would do to the
+            # release recommendation.
+            _record_collapsed_findings(
+                matched, ctx, application_point="versioned_symbol_collapse"
+            )
             ctx.suppressed.extend(matched)
             kept = [c for c in changes if id(c) not in matched_ids]
             ctx.kept = kept  # keep verdict source in sync (set mid-pipeline by FilterRedundant)
@@ -1488,6 +1685,9 @@ class PostProcessingPipeline:
         # for scope_to_public_surface would instead bind `True` here and
         # leave scoping disabled, with no error).
         internal_namespaces: tuple[str, ...] | None = None,
+        # ADR-067 C-S1: appended last for the same positional-safety reason
+        # the note above records.
+        disposition_ledger: DispositionLedger | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -1500,6 +1700,7 @@ class PostProcessingPipeline:
             force_public_symbols=set(force_public_symbols or set()),
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=public_surface_allowlist,
+            disposition_ledger=disposition_ledger,
         )
         # ``FilterRedundant`` sets ``ctx.kept = kept`` — an *aliasing* contract,
         # not a snapshot: every step from that point on is required to either
@@ -1514,8 +1715,24 @@ class PostProcessingPipeline:
         # comments). Enforce the invariant here instead of trusting every future
         # step author to remember it.
         kept_tracking_active = False
+        # One identity snapshot per step is the cost of the dropped-finding
+        # sweep below; skipped entirely when no ledger was supplied, so a
+        # caller that did not opt into the audit pays nothing for it.
+        auditing = ctx.disposition_ledger is not None
         for step in self.steps:
+            before = list(changes) if auditing else ()
+            bucket_total = _bucket_total(ctx) if auditing else 0
             changes = step.run(changes, ctx)
+            _record_dropped_duplicates(
+                before,
+                changes,
+                bucket_total,
+                ctx,
+                step.name,
+                getattr(
+                    step, "dropped_finding_disposition", _DEFAULT_DROPPED_DISPOSITION
+                ),
+            )
             if step.name == FilterRedundant.name:
                 kept_tracking_active = True
             elif kept_tracking_active and ctx.kept is not changes:

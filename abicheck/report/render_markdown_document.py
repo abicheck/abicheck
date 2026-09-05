@@ -88,6 +88,11 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
 
+from .disposition_audit import (
+    DispositionAudit,
+    compute_disposition_audit,
+    render_disposition_audit_section,
+)
 from .document import ReportDocument
 from .render_markdown import (
     ConfidenceSection,
@@ -169,6 +174,11 @@ def build_review_digest_document(
         "bump_value": digest.bump_value,
         "soname_value": digest.soname_value,
         "impacted": [{"symbol": s.symbol, "kind": s.kind} for s in digest.impacted],
+        "disposition_audit": (
+            None
+            if digest.disposition_audit is None
+            else digest.disposition_audit.to_dict()
+        ),
     }
     return ReportDocument.from_mapping(d)
 
@@ -194,6 +204,11 @@ def _review_digest_from_mapping(d: Mapping[str, Any]) -> ReviewDigest:
         bump_value=d["bump_value"],
         soname_value=d["soname_value"],
         impacted=impacted,
+        disposition_audit=(
+            None
+            if d.get("disposition_audit") is None
+            else DispositionAudit.from_dict(d["disposition_audit"])
+        ),
     )
 
 
@@ -443,6 +458,12 @@ def build_markdown_document(
                 else "_No ABI changes detected._"
             )
         ),
+        # ADR-067 D3: the counts belong in every projection, and the three
+        # Markdown modes reach their renderer through this document, so the
+        # block is a document field rather than something a renderer derives.
+        "disposition_audit": compute_disposition_audit(
+            result, severity_config
+        ).to_dict(),
         "redundancy_note": _opt_asdict(rm.compute_redundancy_note(result)),
         "suppression_note": _opt_asdict(rm.compute_suppression_note(result)),
         "out_of_surface_note": _opt_asdict(rm.compute_out_of_surface_note(result)),
@@ -454,6 +475,17 @@ def build_markdown_document(
         ),
     }
     return ReportDocument.from_mapping(d)
+
+
+def _render_disposition_audit_from_mapping(d: Any) -> list[str]:
+    """Rebuild and render the audit section from a document mapping.
+
+    Shared by all three Markdown modes; ``None``/absent renders nothing, so a
+    document built before this field existed still projects cleanly.
+    """
+    if not isinstance(d, Mapping):
+        return []
+    return render_disposition_audit_section(DispositionAudit.from_dict(d))
 
 
 def _suppression_note_from_mapping(
@@ -530,6 +562,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
     )
     if d["empty_message"] is not None:
         lines.append(d["empty_message"])
+    lines += _render_disposition_audit_from_mapping(d.get("disposition_audit"))
     lines += render_redundancy_note(
         None if d["redundancy_note"] is None else RedundancyNote(**d["redundancy_note"])
     )

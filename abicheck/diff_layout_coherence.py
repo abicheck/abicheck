@@ -67,6 +67,10 @@ def _mismatch_change(snapshot: AbiSnapshot, *, side: str) -> Change:
         or n.dwarf_layout_coherence == "mismatch",
         "neither snapshot has a DWARF-vs-header-AST layout coherence mismatch",
     ),
+    # A trigger, not an evidence gate: both snapshots *state* their coherence,
+    # and `matched` on both sides is a conclusive answer -- there is genuinely
+    # nothing here to report, which is not a coverage limitation.
+    support_is_trigger=True,
 )
 def _diff_dwarf_layout_coherence(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []

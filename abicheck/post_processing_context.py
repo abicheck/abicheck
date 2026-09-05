@@ -38,6 +38,7 @@ from .checker_policy import ChangeKind
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import AbiSnapshot
+    from .policy.disposition_ledger import DispositionLedger
     from .suppression import SuppressionList
     from .surface import PublicSurface
 
@@ -103,6 +104,14 @@ class PipelineContext:
     # SONAME change. The late SONAME policy should not call that bump
     # unnecessary after this step has moved the matched removals out of kept.
     versioned_scheme_soname_relink_required: bool = False
+    # ADR-067 C-S1: the run's conserved policy-disposition ledger. Every
+    # suppression application point in this pipeline records into it (with the
+    # matched rule's provenance) as it moves a change into ``suppressed``, so
+    # the raw-versus-effective totals reconcile by construction rather than
+    # being recovered after the fact. ``None`` only for a caller that built a
+    # context of its own without one -- recording is then skipped, never
+    # faked.
+    disposition_ledger: DispositionLedger | None = None
 
 
 # diff_types.py builds ENUM_MEMBER_*/ENUM_LAST_MEMBER_VALUE_CHANGED's symbol

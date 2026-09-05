@@ -359,6 +359,17 @@ plan adds, because it is a behavior change and needs its own migration note:
 post-suppression list, so a suppressed break currently becomes "no bump
 needed" — it must read the conserved delta instead.
 
+> **Landed.** All five suppression application points (the four C-S1
+> enumerates plus `post_processing._merge_findings_respecting_suppression`,
+> found during the inventory) now record through one primitive,
+> `policy/disposition_ledger.py`'s `record_suppressed_change`; the audit's
+> report half is `report/disposition_audit.py` (`compute_*`/`render_*` pair),
+> carried by the JSON, `--stat` JSON, one-line, review-digest and PR-comment
+> projections under report schema 2.50; `DetectorRegistry` records
+> `not_evaluated`; and `semver.recommend_release` reads the conserved delta,
+> with the migration note in the changelog fragment. Bundle/aggregate/consumer
+> parity is S2 and is deliberately untouched.
+
 **Block 3 — release-path scope and completeness.** A-S1 and A-S2 as they
 apply to the release fan-out, *in that order*: the completeness model comes
 first, the pairing rewrite follows it. Concretely, this block adds the

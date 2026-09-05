@@ -1815,7 +1815,13 @@ class TestUsedByScoping:
         # findings and no missing-contract labels, and the one-liner
         # correctly shows "no changes" instead of an unexplained "1
         # breaking" next to a COMPATIBLE verdict.
-        assert result.stdout.strip() == "COMPATIBLE: no changes (0 total)"
+        # The trailing ADR-067 audit note is the raw-versus-effective half of
+        # the same statement: the library change really was detected, and the
+        # scoped gate really does not count it. Asserted rather than stripped,
+        # since "0 total, 1 detected, 0 gating" is what makes the COMPATIBLE
+        # verdict above trustworthy instead of merely quiet.
+        assert result.stdout.strip().startswith("COMPATIBLE: no changes (0 total)")
+        assert "1 detected, 0 gating, 1 non_gating" in result.stdout
 
     def test_quick_profile_one_liner_counts_the_scoped_only_finding(
         self, tmp_path, monkeypatch
@@ -1840,7 +1846,8 @@ class TestUsedByScoping:
             "--profile", "quick",
         )
         assert result.exit_code == 4
-        assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
+        assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
+        assert "1 detected, 1 gating" in result.stdout
 
     def test_quick_profile_one_liner_counts_scoped_only_finding_under_show_only(
         self, tmp_path, monkeypatch
@@ -1868,7 +1875,8 @@ class TestUsedByScoping:
             "--profile", "quick", "--show-only", "compatible",
         )
         assert result.exit_code == 4
-        assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
+        assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
+        assert "1 detected, 1 gating" in result.stdout
 
     def test_quick_profile_one_liner_counts_an_ordinary_in_scope_removal(
         self, tmp_path, monkeypatch
@@ -1928,7 +1936,8 @@ class TestUsedByScoping:
             "--depth", "headers",  # else ADR-063's ceiling fix demotes to FUNC_REMOVED_ELF_ONLY
         )
         assert result.exit_code == 4
-        assert result.stdout.strip() == "BREAKING: 1 breaking (1 total)"
+        assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
+        assert "1 detected, 1 gating" in result.stdout
 
     def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(
         self, tmp_path, monkeypatch

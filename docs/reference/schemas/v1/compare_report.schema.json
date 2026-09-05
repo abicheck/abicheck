@@ -427,6 +427,69 @@
       "minimum": 0,
       "description": "G29 Phase 3 (ADR-052 slice 3, schema 2.16): present only under `--report-mode root-cause`. Length of `root_causes`."
     },
+    "disposition_audit": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "ADR-067 D3 (schema 2.51; `policy_overlays` added in 2.52): the raw-versus-effective audit -- every atomically detected change with the single terminal disposition it received. `counts` sums to `detected_total` by construction, and the block is structurally unsuppressible: it is derived from the run's conserved disposition ledger, not from the post-disposition `changes` list.",
+      "required": [
+        "detected_total",
+        "effective_total",
+        "counts"
+      ],
+      "properties": {
+        "detected_total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Every atomically detected change, before any disposition applied."
+        },
+        "effective_total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The gating subset."
+        },
+        "counts": {
+          "type": "object",
+          "description": "Per-disposition counts -- one key per disposition (gating, non_gating, suppressed, out_of_contract, unresolved_relevance, deduplicated), always all present so `absent` and `none` are never confused.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "rules": {
+          "type": "array",
+          "description": "Distinct rule provenances that produced a disposition, each with its `matched_count`.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "policy_overlays": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Findings policy generated *about* another finding (a withheld-suppression advisory), which appear in `effective_total` but in neither `detected_total` nor `counts` -- they are findings the gate can score, not observations. Stated so a consumer reconciling the three can account for the difference.",
+          "default": 0
+        },
+        "not_evaluated_detectors": {
+          "type": "array",
+          "description": "Detectors that did not run at all, each with the support gate's own reason (the same text as the matching `detectors[]` entry's `coverage_gap`).",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "suppression": {
       "type": "object",
       "required": [
@@ -462,6 +525,53 @@
               },
               "description": {
                 "type": "string"
+              },
+              "rule": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "ADR-067 D3 (schema 2.51): provenance of the suppression rule that actually hid this finding, captured at the application point that fired rather than re-evaluated at report time.",
+                "properties": {
+                  "rule_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Canonical selector identity of the matched rule."
+                  },
+                  "source_file": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Path of the --suppress document the rule was loaded from; null for a programmatically built rule set."
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "expires": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "ISO-8601 expiry date, when the rule declares one."
+                  },
+                  "intent": {
+                    "type": "string",
+                    "description": "ADR-067 D5's waiver/false_positive distinction. Always \"unspecified\" until the explicit `intent:` rule field lands (S3), which is also its migration default for every pre-existing rule."
+                  },
+                  "allow_public_break": {
+                    "type": "boolean"
+                  }
+                }
               },
               "reachability_state": {
                 "type": "string",
@@ -886,6 +996,10 @@
               "string",
               "null"
             ]
+          },
+          "not_evaluated": {
+            "type": "boolean",
+            "description": "ADR-067 D3 (schema 2.51): true when this detector did not run at all -- its requires_support gate refused it -- as opposed to running and producing no findings. `changes_count` is 0 in both cases, which is the ambiguity this flag removes; `coverage_gap` carries the gate's reason."
           }
         }
       }
@@ -1924,7 +2038,7 @@
         },
         "finding_id": {
           "type": "string",
-          "description": "Stable, deterministic fingerprint (sha256 of kind/symbol/old_value/new_value/source_location/description, truncated to 16 hex chars; report_schema_version 2.51 adds a seventh, conditional component -- see below) \u2014 lets a consumer correlate the same finding across two report runs without relying on array order. description disambiguates otherwise-identical findings on the same symbol (e.g. the same pointer-depth change on two different parameters). Excludes policy-derived fields (severity, evidence_status) so the same underlying finding hashes identically under any --policy. As of report_schema_version 2.51, a finding whose internal occurrence-identity discriminator is set (only ever true for a typedef/constant occurrence-level finding needing collision disambiguation -- not itself a reported field) has that discriminator appended as the seventh hash input; every other finding's id is computed exactly as before."
+          "description": "Stable, deterministic fingerprint (sha256 of kind/symbol/old_value/new_value/source_location/description, truncated to 16 hex chars; report_schema_version 2.53 adds a seventh, conditional component -- see below) \u2014 lets a consumer correlate the same finding across two report runs without relying on array order. description disambiguates otherwise-identical findings on the same symbol (e.g. the same pointer-depth change on two different parameters). Excludes policy-derived fields (severity, evidence_status) so the same underlying finding hashes identically under any --policy. As of report_schema_version 2.53, a finding whose internal occurrence-identity discriminator is set (only ever true for a typedef/constant occurrence-level finding needing collision disambiguation -- not itself a reported field) has that discriminator appended as the seventh hash input; every other finding's id is computed exactly as before."
         },
         "canonical_finding_id": {
           "type": "string",

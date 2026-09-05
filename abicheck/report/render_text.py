@@ -48,8 +48,16 @@ def format_stat_line(
     total_changes: int,
     redundant_count: int = 0,
     gate_note: str = "",
+    audit_note: str = "",
 ) -> str:
-    """Render already-resolved counts/label as the one-line summary."""
+    """Render already-resolved counts/label as the one-line summary.
+
+    *audit_note* is ADR-067 D3's raw-versus-effective suffix, already
+    formatted by ``report.disposition_audit.render_disposition_audit_note``.
+    Defaulted to the empty string so the one caller with no whole-library
+    result to compute one from (``cli_compare_fold._ScopedFold.into_oneline``,
+    which renders a *scoped* consumer gate) is unchanged.
+    """
     parts = []
     if breaking:
         parts.append(f"{breaking} breaking")
@@ -63,7 +71,10 @@ def format_stat_line(
     redundant_note = (
         f" [{redundant_count} redundant hidden]" if redundant_count > 0 else ""
     )
-    return f"{label}: {detail} ({total_changes} total){redundant_note}{gate_note}"
+    return (
+        f"{label}: {detail} ({total_changes} total)"
+        f"{redundant_note}{audit_note}{gate_note}"
+    )
 
 
 def render_stat_document(document: ReportDocument) -> str:
@@ -92,6 +103,8 @@ def render_stat_document(document: ReportDocument) -> str:
         gate_note = (
             f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
         )
+    audit_note = d.get("disposition_audit_note", "")
+    assert isinstance(audit_note, str)
     return format_stat_line(
         str(d["verdict_label"]),
         breaking=summary["breaking"],
@@ -101,4 +114,5 @@ def render_stat_document(document: ReportDocument) -> str:
         total_changes=summary["total_changes"],
         redundant_count=redundant_count,
         gate_note=gate_note,
+        audit_note=audit_note,
     )

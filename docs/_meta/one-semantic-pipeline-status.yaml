@@ -1049,6 +1049,30 @@ concepts:
       ADR-065-owned 2.50/1.28 reference (including its own tests) alone,
       since those numbers are genuinely, correctly ADR-065's.
 
+      **Merging `origin/main` a second time produced the identical
+      collision again, one version number later.** Between the previous
+      merge landing and this branch's next push, `origin/main` advanced
+      twice more (PR #1076, then PR #1082/ADR-067 C-S1). ADR-067 C-S1
+      independently claimed `REPORT_SCHEMA_VERSION` 2.51 (the
+      `disposition_audit` block, per-suppression `rule` provenance, and
+      `detectors[].not_evaluated`) and `SCAN_SCHEMA_VERSION` 1.29 (the
+      scan-side `not_evaluated` mirror) for its own unrelated additive
+      bumps -- the exact numbers this track had just renumbered its own
+      bump to. Resolved the same way again: kept ADR-067's 2.51/1.29 as
+      landed first, and renumbered this track's own bump a second time,
+      to 2.53/1.30, updating every place that named the old 2.51/1.29
+      numbers for this track's own change (the same file set as the
+      previous renumbering, plus `architecture/debt.yaml`'s baseline
+      rationale for `abicheck/schemas/__init__.py`) while leaving every
+      ADR-067-owned 2.51/1.29 reference alone. A third, unrelated
+      `duplication-and-convergence-assessment.md` table-row conflict (this
+      track's Track T3 "done" row versus a concurrently-merged Track T4
+      status update) and a `checker_types.py`/`abicheck/schemas/__init__.py`
+      debt-baseline line-count conflict (both files grew independently on
+      each side) were resolved the same additive way -- keep both sides'
+      real content, recompute the baseline from the merged file's actual
+      line count.
+
       Tracked as duplication-and-convergence-assessment.md Phase 6 item 2 /
       track T3 -- landed, per the Track T3 account above.
     investigated_declined:

@@ -34,6 +34,11 @@ from .checker_policy import ChangeKind, ReachabilityState, Verdict, compute_verd
 from .diff_helpers import make_change
 from .impact.engine import assess_change
 from .model import AbiSnapshot, Visibility
+from .policy.disposition_close import (
+    close_consumer_scope,
+    ledger_for,
+    record_consumer_overlay,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -1443,6 +1448,17 @@ def scope_diff_to_app(
     required_count = len(app_reqs.undefined_symbols)
     coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
 
+    # ADR-067 C-S1: the consumer overlay is the one recording call site that
+    # runs *after* `compare()` closed the ledger, so it resolves the diff's own
+    # ledger once here and attaches it when the diff carries none (a caller
+    # that built the DiffResult itself). `ledger_for` deliberately never
+    # attaches on its own -- a report projection must not mutate what it
+    # renders -- so this engine-side assignment is what makes the overlay's
+    # records reach the same object every projection reads.
+    overlay_ledger = ledger_for(diff)
+    if getattr(diff, "disposition_ledger", None) is None:
+        diff.disposition_ledger = overlay_ledger
+
     suppressed_missing: set[str] = set()
     uncovered = list(uncovered_missing_symbols(missing_symbols, breaking_for_app))
     # G29 Phase 4 (ADR-057): one joined consumer/source-graph walk for every
@@ -1492,6 +1508,7 @@ def scope_diff_to_app(
         # fields just set above.
         overlay_change.impact_assessment = assess_change(overlay_change)
         if suppression is None:
+            record_consumer_overlay(overlay_ledger, overlay_change, diff)
             breaking_for_app.append(overlay_change)
             continue
         # evaluate() (not the cheaper is_suppressed) so a broad rule whose
@@ -1512,8 +1529,28 @@ def scope_diff_to_app(
             # (that was the point of promoting it out of a bespoke string),
             # so a suppressed overlay must also remove its raw string from
             # every one of those consumers.
+            # ADR-067 C-S1's fourth application point. This overlay's *input*
+            # shape is a raw ``missing_symbols`` string rather than a detected
+            # change, but what suppression acts on here is a real ``Change``,
+            # so it records through the identical primitive the library-diff
+            # points use -- one record type, one query surface (D2), with the
+            # consumer overlay named as its own application point.
+            record_consumer_overlay(
+                overlay_ledger,
+                overlay_change,
+                diff,
+                rule=outcome.matched_rule,
+                suppression=suppression,
+            )
             suppressed_missing.add(sym)
             continue
+        # Recorded on *both* branches, not only when a rule fires (ADR-067
+        # D1): the overlay is an atomically detected consumer finding either
+        # way, so recording it only when suppressed would make adding a
+        # matching rule change the *detected* total rather than move the
+        # finding between dispositions -- exactly the conservation the audit
+        # exists to make checkable.
+        record_consumer_overlay(overlay_ledger, overlay_change, diff)
         breaking_for_app.append(overlay_change)
         # outcome.withheld_unknown_rule is never set here: overlay_change is
         # always constructed with reachability_state=PROVEN_REACHABLE above
@@ -1541,6 +1578,15 @@ def scope_diff_to_app(
     _promote_scoped_contract(
         breaking_for_app, policy=policy, policy_file=policy_file, diff=diff
     )
+
+    # ADR-067: the ledger is *not* closed here, deliberately. This function
+    # runs once per `--used-by` consumer, and `apply_scope` only ever
+    # demotes -- so closing per consumer would intersect the consumers'
+    # relevant sets instead of unioning them, and a finding only the second
+    # consumer uses would be excluded by the first one's call. The whole
+    # scoped gate is resolved by `cli_helpers_compare._apply_used_by_scoping`
+    # (and its `--required-symbol` sibling), which owns the union and makes
+    # the single `close_consumer_scope` call.
 
     return AppCompatResult(
         app_path=str(app_path),
@@ -1633,13 +1679,25 @@ def check_appcompat(
     from .service import compare_snapshots
     diff = compare_snapshots(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file, scope_to_public_surface=scope_to_public_surface)
 
-    return scope_diff_to_app(
+    scoped = scope_diff_to_app(
         diff, app_path, old_lib_path, new_lib_path,
         policy=policy, policy_file=policy_file, suppression=suppression,
         # ADR-057: old_lib_path is a real binary, so the graph the dump above
         # already attached is only reachable through the snapshot itself.
         old_snapshot=old_snap,
     )
+    # ADR-067: `scope_diff_to_app` leaves the ledger open (the `--used-by`
+    # path calls it once per consumer and only the orchestrator knows the
+    # union); this entry point *is* that orchestrator for its single consumer,
+    # so the one closing call is here. `also_detected` is the whole relevant
+    # set rather than a finding-id-filtered one: it holds the very
+    # `diff.changes` objects, so `record`'s identity keying no-ops on those,
+    # newly recording only the scoped-only findings.
+    relevant = scoped.breaking_for_app
+    close_consumer_scope(
+        ledger_for(diff), diff, gating=relevant, also_detected=relevant
+    )
+    return scoped
 
 
 # ---------------------------------------------------------------------------
@@ -1812,7 +1870,19 @@ def check_plugin_host_contract(
         suppression=suppression, policy=policy, policy_file=policy_file,
     )
 
-    return scope_diff_to_required_symbols(
+    scoped = scope_diff_to_required_symbols(
         diff, old_plugin, new_plugin, required_entrypoints,
         policy=policy, policy_file=policy_file,
     )
+    # ADR-067: the standalone plugin-host entry point is the orchestrator for
+    # its own single host contract, exactly as `check_appcompat` is for its
+    # consumer -- so it makes the one closing call too. Without it a plugin
+    # that drops an unrelated export while keeping every required entrypoint
+    # correctly returns COMPATIBLE while the audit still calls that removal
+    # `gating` (Codex review; the repo-wide sweep for `close_consumer_scope`
+    # call sites is what this closes).
+    relevant = scoped.breaking_for_host
+    close_consumer_scope(
+        ledger_for(diff), diff, gating=relevant, also_detected=relevant
+    )
+    return scoped

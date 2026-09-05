@@ -45,7 +45,11 @@ from typing import Any
 
 from .checker_policy import Verdict
 from .contract_evaluation import _NOT_APPLICABLE_KIND_SLUGS
-from .contract_relevance_types import ContractAssurance, ContractRelevance
+from .contract_relevance_types import (
+    EXPLICIT_SCOPE_REASON_CODE,
+    ContractAssurance,
+    ContractRelevance,
+)
 
 # ADR-049 section 4.3 item 1's strongest public-evidence tier: "explicit
 # required symbol, exact contract/ABI manifest, package symbols metadata,
@@ -64,8 +68,11 @@ from .contract_relevance_types import ContractAssurance, ContractRelevance
 # --used-by/--required-symbol combination permanently unstamped).
 #: The reason code stamp_explicit_scope_contract_evaluation always uses --
 #: hoisted so the two assignment branches below can't drift apart (CodeRabbit
-#: review), and already a registered key in CONTRACT_REASON_CODES.
-_EXPLICIT_SCOPE_REASON_CODE = "explicit_consumer_or_required_symbol_evidence"
+#: review). Defined in CONTRACT_REASON_CODES' own module rather than here,
+#: since `policy.disposition_ledger` keys its promotion refresh off the same
+#: code and may not import this module (ADR-061); re-exported under the
+#: original private name so every existing reference is unaffected.
+_EXPLICIT_SCOPE_REASON_CODE = EXPLICIT_SCOPE_REASON_CODE
 
 
 def stamp_explicit_scope_contract_evaluation(c: Any) -> None:

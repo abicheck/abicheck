@@ -40,7 +40,13 @@ from .checker_policy import (
 )
 from .checker_types import validate_check_id, validate_evidence_depth
 from .impact import assess_change
+from .policy.disposition_close import ledger_for
+from .policy.disposition_ledger import RuleProvenance
 from .policy.gate_decision import gate_decision_for_result
+from .report.contract_fields import (
+    add_contract_evaluation_fields as _add_contract_evaluation_fields,
+)
+from .report.disposition_audit import add_disposition_audit as _add_disposition_audit
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
 from .reporter_contract_blocks import add_contract_context as _add_contract_context
@@ -191,6 +197,9 @@ def to_stat_json(
             "affected_pct": round(summary.affected_pct, 1),
         },
     }
+    # ADR-067 D3: a compact view may collapse detail; it may not omit the
+    # raw-versus-effective counts.
+    _add_disposition_audit(d, result, severity_config)
     _add_check_identity(d, result)
     gate = gate_decision_for_result(result, severity_config)
     if gate is not None:
@@ -527,6 +536,9 @@ def _to_json_leaf(
         # FIX-H: populate changes with union for backward-compat consumers
         "changes": leaf_changes_list + non_type_list,
     }
+    # ADR-067 D3: a compact view may collapse detail; it may not omit the
+    # raw-versus-effective counts.
+    _add_disposition_audit(d, result, severity_config)
     _add_check_identity(d, result)
     gate = gate_decision_for_result(result, severity_config)
     if gate is not None:
@@ -756,6 +768,7 @@ def _to_json_root_cause(
     if result.pattern_modulations:
         d["pattern_modulations"] = result.pattern_modulations
     _add_suppression(d, result)
+    _add_disposition_audit(d, result, severity_config)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(
@@ -953,6 +966,7 @@ def _suppressed_change_entry(
     *,
     root_cause: tuple[str, str] | None = None,
     root_cause_evidence: dict[str, object] | None = None,
+    rule: RuleProvenance | None = None,
 ) -> dict[str, object]:
     """Minimal audit-trail entry for one suppressed change, plus the
     impact-assessment decision it was actually suppressed with (G29 Phase 3
@@ -966,12 +980,20 @@ def _suppressed_change_entry(
     itself -- a suppressed finding's root cause is computed relative to other
     *suppressed* findings, not folded together with the kept ``changes[]``
     list's own grouping.
+
+    ``rule`` (ADR-067 D3) is the provenance of the suppression that actually
+    fired, looked up by object identity from the run's own ledger — not
+    re-evaluated here, since the rule set is matched against fields that may
+    have been enriched after the match, and a second evaluation could
+    therefore name a different rule than the one that hid the finding.
     """
     entry: dict[str, object] = {
         "kind": c.kind.value,
         "symbol": c.symbol,
         "description": c.description,
     }
+    if rule is not None:
+        entry["rule"] = rule.to_dict()
     assessment = assess_change(
         c,
         suppressed=True,
@@ -993,7 +1015,17 @@ def _suppressed_change_entry(
 
 
 def _add_suppression(d: dict[str, object], result: DiffResult) -> None:
-    """Add suppression block (file flag, count, suppressed change list)."""
+    """Add suppression block (file flag, count, suppressed change list).
+
+    Each entry carries the rule that hid it (ADR-067 D3) plus the
+    ``--suppress`` document's own path, so "which rule hid this and why"
+    survives into the report instead of being computed and dropped. The
+    per-entry projection itself is
+    ``report.disposition_audit.suppressed_change_entry``; this function stays
+    here because the root-cause lookups it feeds that projection live in
+    ``reporter_markdown``, which this package may not import back.
+    """
+    ledger = ledger_for(result)
     _rc_lookup = root_cause_lookup_for_changes(result.suppressed_changes)
     _rc_evidence = root_cause_evidence_lookup_for_changes(result.suppressed_changes)
     d["suppression"] = {
@@ -1004,6 +1036,7 @@ def _add_suppression(d: dict[str, object], result: DiffResult) -> None:
                 c,
                 root_cause=_rc_lookup.get(_finding_id(c)),
                 root_cause_evidence=_rc_evidence.get(_finding_id(c)),
+                rule=ledger.rule_for(c),
             )
             for c in result.suppressed_changes
         ],
@@ -1018,6 +1051,10 @@ def _add_detectors(d: dict[str, object], result: DiffResult) -> None:
             "changes_count": det.changes_count,
             "enabled": det.enabled,
             "coverage_gap": det.coverage_gap,
+            # ADR-067 D3: "did not run" is a different statement from "ran
+            # and found nothing", and `changes_count: 0` cannot tell them
+            # apart on its own.
+            "not_evaluated": getattr(det, "not_evaluated", False),
         }
         for det in result.detector_results
         if det.changes_count > 0 or det.coverage_gap is not None
@@ -1206,6 +1243,7 @@ def to_json(
         severity_config=severity_config,
     )
     _add_suppression(d, result)
+    _add_disposition_audit(d, result, severity_config)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(
@@ -1323,75 +1361,6 @@ def _reviewer_action_for_change(
     kind = getattr(c, "kind", None)
     kind_val = kind.value if kind else ""
     return _ADDITION_REVIEWER_ACTION.get(kind_val, _DEFAULT_ADDITION_REVIEWER_ACTION)
-
-
-def _add_contract_evaluation_fields(
-    d: dict[str, object],
-    c: object,
-    *,
-    gate_contribution: int = 0,
-) -> None:
-    """Attach ADR-049's per-finding contract decision fields to *d*, if *c*
-    carries one; always stamps ``finding_id``/``canonical_finding_id`` first.
-
-    Shared by :func:`_change_to_dict` and :func:`_add_surface_scope` so a
-    demoted finding's decision is exposed the same way a kept finding's
-    already is. ``contract_relevance is None`` (the default) skips only
-    the contract-specific fields below.
-
-    *gate_contribution* completes ADR-049 D1's canonical per-finding shape.
-    It defaults to ``0`` -- the true answer for every audit ledger this
-    helper serializes, since none of those findings reach a gate. Only the
-    ``changes`` path passes a computed value, from
-    :func:`~abicheck.severity.gate_contribution_for_change`.
-    """
-    # The audit-ledger serializers (`_out_of_surface_entry`,
-    # `_suppressed_change_entry`, `_add_reconciled`, `_filtered_internal_entry`)
-    # build compact dicts that never emit `finding_id` themselves, so a
-    # consumer can't join a demoted/suppressed/reconciled finding to its
-    # decision. Stamped here, only when absent -- and unconditionally,
-    # ahead of the contract_relevance early return below: an ordinary run
-    # without `--contract` still calls this on every one of those entries and
-    # still needs a joinable id (Codex review: an earlier revision stamped
-    # this after the early return instead, silently skipping it on every
-    # default-run audit-ledger entry).
-    if "finding_id" not in d:
-        from .finding_identity import report_finding_id
-
-        d["finding_id"] = report_finding_id(c)
-    # Same reasoning, for finding_id's backend-independent sibling (2.36).
-    if "canonical_finding_id" not in d:
-        from .finding_identity import report_canonical_finding_id
-
-        d["canonical_finding_id"] = report_canonical_finding_id(c)
-
-    contract_relevance = getattr(c, "contract_relevance", None)
-    if contract_relevance is None:
-        return
-    d["contract_relevance"] = contract_relevance.value
-    d["contract_reason_code"] = getattr(c, "contract_reason_code", None)
-    contract_assurance = getattr(c, "contract_assurance", None)
-    if contract_assurance is not None:
-        d["contract_assurance"] = contract_assurance.value
-    # ADR-049 D1's canonical trio. `compatibility_decision` is JSON `null`
-    # for a NOT_EVALUATED finding and must stay that way: `null` records that
-    # compatibility policy never ran, which is a different statement from any
-    # verdict -- including COMPATIBLE -- that a renderer might be tempted to
-    # fill in.
-    from .contract_gating import evaluation_status_of
-
-    status = evaluation_status_of(c)
-    if status is not None:
-        d["compatibility_evaluation_status"] = status.value
-    decision = getattr(c, "compatibility_decision", None)
-    d["compatibility_decision"] = getattr(decision, "value", None)
-    d["gate_contribution"] = gate_contribution
-    # ADR-049 Phase 3's provider-evidence ledger. Emitted even when empty --
-    # `[]` is the real answer for a non-entity finding, and omitting the key
-    # would be indistinguishable from an unstamped finding.
-    contract_evidence_refs = getattr(c, "contract_evidence_refs", None)
-    if contract_evidence_refs is not None:
-        d["contract_evidence_refs"] = list(contract_evidence_refs)
 
 
 def _change_annotation_fields(c: Any) -> dict[str, Any]:

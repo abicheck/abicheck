@@ -453,7 +453,7 @@ Each finding in `changes[]` also carries:
   `_added`/`_removed` kind-name suffixes.
 - **`finding_id`** — a stable, deterministic fingerprint (a truncated SHA-256
   hash of `kind`/`symbol`/`old_value`/`new_value`/`source_location`/
-  `description`, plus a seventh, conditional input as of schema 2.51 — see
+  `description`, plus a seventh, conditional input as of schema 2.53 — see
   below) that identifies *this finding* independent of its position
   in the `changes[]` array. Two `compare` runs over the same underlying
   change produce the same `finding_id`, so a consumer can correlate a
@@ -465,7 +465,7 @@ Each finding in `changes[]` also carries:
   pointer-depth change reported on two different parameters of one
   function). `finding_id` deliberately excludes policy-derived fields
   (`severity`, `evidence_status`) — the same underlying finding hashes
-  identically regardless of the active `--policy`. As of schema 2.51, a
+  identically regardless of the active `--policy`. As of schema 2.53, a
   typedef/constant occurrence-level finding whose identity needs collision
   disambiguation (not itself a reported field) has that internal
   discriminator appended as a seventh hash input; every other finding's id
@@ -700,7 +700,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "2.51",
+  "report_schema_version": "2.53",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
