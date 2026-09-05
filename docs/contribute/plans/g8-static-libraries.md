@@ -21,10 +21,11 @@ investigating option (B). A bounded investigation into what a static
 archive's symbol/type union could honestly answer remains permitted and, per
 the vision, is exactly the kind of lower-priority work that could reopen
 this decision — it carries no implied delivery commitment, and nothing here
-schedules it. The registry's `by_design_excluded` classification (a
-`docs/contribute/usecase-registry.yaml` entry, not edited by this
-documentation pass) should be revisited for the same wording gap in a future
-change to that file.
+schedules it. The registry's `by_design_excluded` classification
+(`docs/contribute/usecase-registry.yaml`'s `UC-ARCH-static-lib` entry) and
+this plan's own index row (`docs/contribute/plans/index.md`) now carry the
+same amended wording — `by_design_excluded` still records today's shipped
+option-A stance, not a claim that option B is permanently foreclosed.
 
 ## Goal & acceptance criteria
 

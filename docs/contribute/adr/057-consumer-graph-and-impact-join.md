@@ -18,9 +18,13 @@ discipline exactly. See "Slice 2: declared use cases" below.
 **Update (2026-09-02):** `abicheck/impact/use_case_impact.py`'s
 `build_use_case_impact` (engine for `compare --use-cases MANIFEST`) is a
 further, real step past graph-building alone — a genuine report-level
-surface (`DiffResult.use_case_impact`, emitted by every JSON path and
-folded into text/markdown output) attributing a real comparison's changed
-symbols to the declared use cases whose entrypoints reach them. This is
+surface (`DiffResult.use_case_impact`, emitted by the full JSON path and
+folded into text/markdown/review output — `cli_compare_fold.
+_USE_CASE_IMPACT_BEARING_FORMATS`; the summary/`stat` JSON path and
+sarif/junit/html deliberately carry none of it, and `compare` rejects
+`--use-cases` outright when no selected output format is in that set)
+attributing a real comparison's changed symbols to the declared use cases
+whose entrypoints reach them. This is
 **not** the same thing as the two items still **not implemented**: runtime-
 trace ingestion (the `TRACE_OBSERVED_ENTRY`/`TRACE_OBSERVED_EDGE` reserved
 edge kinds stay unimplemented), and a per-finding, report-*schema*

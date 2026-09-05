@@ -215,15 +215,22 @@ use_cases:
     name: Static libraries (.a / .lib)
     status: by_design_excluded
     note: >
-      G8 decision (option A): static/import library archives are a non-goal.
-      abicheck compares single linkable images (shared libraries + objects); an
-      `ar` archive (.a / .lib, magic `!<arch>\n`) has no runtime ABI surface
-      (no SONAME, no dynamic symbol table, no symbol versioning). The CLI now
-      detects archives and fails with actionable guidance (extract members or
-      compare the shared library) instead of a misleading "unknown format"
-      error. See docs/contribute/goals.md (Non-goals),
-      docs/learn/limitations.md, and the plan
-      docs/contribute/plans/g8-static-libraries.md.
+      G8 decision (option A, shipped): static/import library archives are
+      unsupported input today. abicheck compares single linkable images
+      (shared libraries + objects); an `ar` archive (.a / .lib, magic
+      `!<arch>\n`) has no runtime ABI surface (no SONAME, no dynamic symbol
+      table, no symbol versioning). The CLI detects archives and fails with
+      actionable guidance (extract members or compare the shared library)
+      instead of a misleading "unknown format" error.
+      Amendment (2026-09, clarification): `vision.md`'s current, authoritative
+      scope statement is narrower than "non-goal" — static archives "merit a
+      bounded, lower-priority investigation into which questions can honestly
+      be answered; today they remain unsupported input, and that is a current
+      limitation rather than a permanent exclusion." `by_design_excluded`
+      records today's shipped stance (option A, decided and implemented), not
+      a permanent decision against ever investigating option B. See
+      docs/contribute/goals.md (Non-goals), docs/learn/limitations.md, and
+      the plan docs/contribute/plans/g8-static-libraries.md.
     evidence:
       modules: [abicheck/binary_utils.py, abicheck/service.py]
       tests: [tests/test_compare_input_modes.py, tests/test_service_unit.py]

@@ -2406,16 +2406,35 @@ already accepted:
 2. **Dimension comparability** — given an intentional cross-profile pair,
    *which questions can still be answered*, and which cannot, split by
    dimension rather than treated as one pass/fail gate: symbol-table
-   availability (an exported name is either present or absent regardless of
-   arch/compiler), source-level declaration facts (a header-derived
-   signature/field is comparable across compilers that parse the same
-   language dialect), compiled layout facts (`sizeof`/offsets are only
-   comparable within one ABI-compatible profile family — an x86-64 vs.
-   AArch64 struct layout comparison is not a layout question with a real
-   answer), and deployment requirements (a `SONAME`/runtime-floor
-   requirement is a property of the target platform, not comparable
-   cross-arch at all). A single `ProfileMismatchError` conflates all four
-   into one refusal.
+   availability, source-level declaration facts, compiled layout facts
+   (`sizeof`/offsets are only comparable within one ABI-compatible profile
+   family — an x86-64 vs. AArch64 struct layout comparison is not a layout
+   question with a real answer), and deployment requirements (a
+   `SONAME`/runtime-floor requirement is a property of the target platform,
+   not comparable cross-arch at all). A single `ProfileMismatchError`
+   conflates all four into one refusal.
+
+   **Each of the first two dimensions needs its own identity/build-context
+   comparability predicate before a raw diff is trusted, not name/spelling
+   equality alone** (a documentation review found the original wording of
+   this item understated that): a name present in one side's export table
+   and absent from the other's is only the same *question* across an
+   intentional cross-profile pair when both sides' name mangling and
+   decoration scheme agree (Itanium vs. MSVC mangling, or a
+   target-conditioned export present under one arch's calling convention and
+   not another's, is not a removal — it is two different name-encoding
+   spaces that happen to share this ADR's symbol-table dimension but are not
+   directly diffable by string equality). The same caveat applies to
+   source-level declaration facts: "compiles under the same language
+   dialect" does not by itself make two sides' header facts comparable when
+   target macros, preprocessor conditionals, or the platform data model
+   (e.g. LP64 vs. LLP64) can change a declared signature or field layout
+   between the two profiles being compared. Until a real per-dimension
+   identity/build-context predicate is implemented and used to gate the
+   diff, a cross-profile symbol-table or source-declaration comparison
+   stays `unverified` (item 3 below) rather than `established` — this
+   amendment names the requirement; it does not itself supply the
+   predicate.
 3. **Result aggregation** — an intentional cross-profile comparison's report
    must distinguish, per dimension: *established* (a real comparable
    answer), *unverified* (the dimension exists on both sides but this pair's
