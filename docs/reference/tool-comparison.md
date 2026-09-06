@@ -629,9 +629,10 @@ for that count.
 > this pass's environment has no working `contrib/abicheck-clang-plugin`
 > build, so every compiled case in that lane reported `ERROR` rather than a
 > real verdict — publishing that pass's number would record an environment
-> gap as a product regression against the 99.5%/152-family figure a working
-> L3-L5 lane would be expected to reach. Re-running all four lanes together
-> (the same live-plus-freshly-frozen pass the full-catalog benchmark above
+> gap as a product regression against the 99.5% per-case accuracy the
+> full-catalog benchmark above already measured for that lane, rather than
+> a genuine family-level result. Re-running all four lanes together (the
+> same live-plus-freshly-frozen pass the full-catalog benchmark above
 > describes) to populate this table's remaining rows is a tracked follow-up,
 > not fabricated here.
 
@@ -659,11 +660,11 @@ documents — no GCC 14+ available to build its C23 `_BitInt` fixture, a
 toolchain gap rather than a detector gap. The two totals track each other
 closely for this particular tool and run purely because none of its misses
 happen to share a family or fall outside the rule-entity scope more than
-once. The two
-numbers diverge more sharply for a tool with uneven family coverage — e.g.
-one that gets a rule's canonical case right but a documented variant
-(language, public-surface, symbol-versioning) wrong scores that whole
-family as a miss even though its per-case tally looks almost identical.
+once. The two numbers diverge more sharply for a tool with uneven family
+coverage — e.g. one that gets a rule's canonical case right but a
+documented variant (language, public-surface, symbol-versioning) wrong
+scores that whole family as a miss even though its per-case tally looks
+almost identical.
 
 ---
 
