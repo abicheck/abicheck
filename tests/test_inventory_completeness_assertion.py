@@ -96,7 +96,9 @@ class TestAssertionRoundTrips:
         from abicheck.storage.variant_composition import (
             read_variant_composition_inventory_complete,
         )
-        from abicheck.workflows.release_scope import stored_side_inventory_complete
+        from abicheck.workflows.release_stored_inventory import (
+            stored_side_inventory_complete,
+        )
 
         store = DirectoryObjectStore(tmp_path)
         manifest = write_bundle_facts_package(
@@ -124,7 +126,9 @@ class TestAssertionRoundTrips:
         )
         from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
         from abicheck.storage.package import variant_ref_relpath
-        from abicheck.workflows.release_scope import stored_side_inventory_complete
+        from abicheck.workflows.release_stored_inventory import (
+            stored_side_inventory_complete,
+        )
 
         pkg = tmp_path / "pkg"
         _write_stored_package(pkg, _LIBS)

@@ -1495,7 +1495,7 @@ class TestParseWheelNumpyRequirement:
         # decompresses far beyond a real METADATA file's size (a zip bomb).
         # Lower the cap to a few bytes so the test doesn't need to actually
         # write megabytes of data (CodeRabbit review).
-        import abicheck.package as package_mod
+        import abicheck.extract.wheel_tags as package_mod
 
         monkeypatch.setattr(package_mod, "_MAX_METADATA_SIZE", 8)
         whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
@@ -1528,7 +1528,7 @@ class TestParseWheelNumpyRequirement:
         # a reader that ignores the declared size entirely.
         import io
 
-        import abicheck.package as package_mod
+        import abicheck.extract.wheel_tags as package_mod
 
         monkeypatch.setattr(package_mod, "_MAX_METADATA_SIZE", 8)
         whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"

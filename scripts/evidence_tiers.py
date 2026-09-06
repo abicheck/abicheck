@@ -262,6 +262,13 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # (DWARF) evidence was unavailable, which is a fact about the finding,
     # not about the minimum tier needed to produce it.
     "bundle_intra_dep_signature_unverified": "L0",
+    # ADR-065 S3: both rest on the container's own declared component
+    # inventory plus each side's member set -- the same L0 (binary-presence)
+    # evidence every other release-level kind above rests on. No debug info,
+    # header or build data can add anything: the question is which components
+    # the package ships, not what any of them contains.
+    "support_promise_component_retired": "L0",
+    "support_promise_component_introduced": "L0",
     # ── L1: needs debug info (layout, offsets, sizes, enum values, calling conv) ──
     "suppression_would_hide_public_break": "L1",  # ADR-044: needs struct/field layout (internal_leak.compute_leak_paths) to judge public reachability
     "suppression_reachability_unknown": "L1",  # impact-analysis-layer P0: same reachability walk as suppression_would_hide_public_break, refined by the optional L5 call/type graph's coverage flags

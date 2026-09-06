@@ -164,6 +164,14 @@ def release_options(func: F) -> F:
         "contract-coverage axis. A run that completed no comparison at all "
         "contributes 1 under either setting. (directory/package inputs only)",
     )(func)
+    func = click.option(
+        "--support-promise",
+        "support_promise",
+        type=click.Choice(["off", "declared"]),
+        default="off",
+        show_default=True,
+        help="Report a proven change to the release's declared component set as a finding (ADR-065 D1/D6, a contract-policy field): 'off' (the default) emits nothing; 'declared' emits support_promise_component_retired/_introduced for every member whose absence the *other* side's proven-complete inventory establishes -- a package archive unpacked in full, or a stored snapshot whose capture asserted inventory_complete. Never fires on an unmatched member under an unproven inventory, whatever the setting. (directory/package inputs only)",
+    )(func)
     return func
 
 

@@ -383,6 +383,13 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_ADDED,
     ChangeKind.BUNDLE_LIBRARY_REMOVED,
     ChangeKind.BUNDLE_LIBRARY_ADDED,
+    # ADR-065 S3 -- tests/test_package_component_inventory.py (the policy's
+    # own derivation, over the whole policy x acquisition-state domain) and
+    # tests/test_release_package_inventory_cli.py (through the real `compare`
+    # CLI on a package-archive pair, which is the only operand shape that can
+    # produce them).
+    ChangeKind.SUPPORT_PROMISE_COMPONENT_RETIRED,
+    ChangeKind.SUPPORT_PROMISE_COMPONENT_INTRODUCED,
     ChangeKind.BUNDLE_INTRA_DEP_VERSION_DRIFT,
     # ADR-056 audit-mode bundle finding (scan --artifact-set, no old side).
     # Exercised in tests/test_bundle.py.

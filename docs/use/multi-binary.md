@@ -602,13 +602,41 @@ this release means a stored baseline whose capture **asserted** it — a
 one, carrying `inventory_complete: true` (the fan-out asserts it when its
 capture covered every library the OLD release enumerated and `--dso-only`
 left none unclassified). Being stored proves nothing by itself: a package
-or document without the assertion is as unproven as a live directory or an
-extracted archive (`package.py` returns directories, not a declared
-component inventory), and the same document decides identically whether
-compared directly or after import into a package.
-The JSON key `unmatched_old` keeps listing the raw old-minus-new set, as its
-name says. See the migration note in
+or document without the assertion is as unproven as a live directory, and
+the same document decides identically whether compared directly or after
+import into a package.
+
+A **package archive** operand proves it too, since ADR-065 S3: an archive
+extractor unpacks its whole container or raises, so `package.py` now returns
+a declared component inventory beside the extracted directory
+(`package_component_inventory`) and its `complete` flag is that statement.
+A component the archive plainly ships but whose content the extracted tree
+cannot reach — a dangling link, an unreadable file — is *expected but not
+produced*, an acquisition failure on the completeness axis, never an absence
+the other side's proof may read as a removal.
+
+The JSON key `unmatched_old` lists the members with no counterpart, as its
+name says — read off the acquisition record since ADR-065 S4, which deleted
+the old-minus-new set difference it used to be computed from. The fan-out's
+stderr notices come from that same record, so `library removed: X` (naming
+the inventory that proved it) and `library unmatched (no counterpart on
+NEW): X` are now two different lines rather than one wording for both. See
+the migration notes in
 [Exit codes](../reference/exit-codes.md#the-completeness-axis-adr-065-d6d7-directorypackage-compare-only).
+
+**Support-promise findings (`--support-promise`).** A proven inventory
+change is a change to what the project *promises to ship*, and ADR-065 D1
+requires it to be emitted under a policy rather than inferred. `off` (the
+default) emits nothing. `--support-promise declared` reports each proven
+removal as `support_promise_component_retired` (BREAKING) and each proven
+addition as `support_promise_component_introduced` (a compatible addition),
+as ordinary entries in the release report's `libraries` list carrying a
+`support_promise` field, so the release verdict, the severity policy and
+every renderer see them like any other finding. Unlike
+`bundle_library_removed`, which fires only when a surviving sibling in the
+same release imports the missing library, a retired promise holds for a
+component with no intra-bundle consumer at all. An unmatched member under an
+unproven inventory never produces one, whatever the setting.
 
 **Stored baselines.** A `--bundle-facts-out` capture whose stranded library
 failed to dump records that member under `degraded_members` (with the
