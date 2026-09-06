@@ -20,3 +20,17 @@
   `scope_diff_to_app`'s own loop was rewritten to call it too, so the two
   overlay mechanisms share one recording implementation rather than each
   hand-rolling it.
+
+### Fixed
+
+- `scope_diff_to_required_symbols`'s `--required-symbol(s)` coverage
+  computation now uses the raw, pre-suppression missing-entrypoint count
+  (mirroring `scope_diff_to_app`'s own coverage call): a suppressed missing
+  entrypoint no longer inflates the reported coverage percentage.
+- `scope_diff_to_required_symbols` now shares `scope_diff_to_app`'s
+  `_finalize_consumer_scope_diff` boundary, publishing its overlay ledger
+  onto `diff.disposition_ledger` when one is not already attached -- without
+  it, a later independent `ledger_for(diff)` resolve (e.g.
+  `check_plugin_host_contract`'s own closing `close_consumer_scope` call
+  against a `diff` with no pre-attached ledger) could rebuild a second,
+  disconnected ledger missing the overlay's recorded finding.

@@ -948,36 +948,45 @@ def _finalize_consumer_scope_diff(
     policy: str | None,
     policy_file: PolicyFile | None,
 ) -> None:
-    """The one finalization boundary for :func:`scope_diff_to_app`'s
-    mutation of the already-returned, already-finalized *diff* it was
-    handed (ADR-063 T10).
+    """The one finalization boundary for :func:`scope_diff_to_app`'s and
+    :func:`scope_diff_to_required_symbols`'s mutation of the already-returned,
+    already-finalized *diff* each was handed (ADR-063 T10; shared between
+    both call sites since ADR-067 C-S2, the same rationale that moved their
+    overlay-loop body into :func:`~abicheck.policy.disposition_close.
+    record_and_maybe_suppress_overlay`).
 
-    ``scope_diff_to_app`` runs after ``checker.compare()`` already finalized
-    ``diff`` and handed it back to its caller. Attaching this run's
-    disposition ledger, promoting consumer-proven findings onto the
-    compatibility axis, and recomputing the verdict that promotion leaves
-    stale are all instances of the same thing: a second producer joining
-    ``diff`` after ``compare()``'s own close -- exactly what
+    Both functions run after ``checker.compare()`` already finalized ``diff``
+    and handed it back to their caller. Attaching this run's disposition
+    ledger, promoting consumer-proven findings onto the compatibility axis,
+    and recomputing the verdict that promotion leaves stale are all instances
+    of the same thing: a second producer joining ``diff`` after
+    ``compare()``'s own close -- exactly what
     :func:`~abicheck.policy.disposition_close.close_consumer_scope`'s own
-    docstring names for the *aggregate* union this function's caller later
-    assembles from every consumer's ``breaking_for_app``. This function
-    collects the *per-consumer* half of that same concern into one named,
-    called-once boundary, rather than a ``diff.disposition_ledger = ...``
-    assignment before the overlay loop and a bare ``_promote_scoped_
-    contract(...)`` call after it, as two free-standing statements with the
-    dependency between them left implicit.
+    docstring names for the *aggregate* union each function's caller later
+    assembles from every consumer's/host's own relevant-changes list. This
+    function collects the *per-consumer* (or *per-host*) half of that same
+    concern into one named, called-once boundary, rather than a
+    ``diff.disposition_ledger = ...`` assignment before the overlay loop and
+    a bare ``_promote_scoped_contract(...)`` call after it, as two
+    free-standing statements with the dependency between them left implicit.
 
     Order is fixed here rather than left to the call site: the ledger must
     be attached before promotion runs (a later reader of
-    ``diff.disposition_ledger`` must see the same object this consumer
+    ``diff.disposition_ledger`` must see the same object this consumer/host
     recorded into), and promotion must run before the verdict recompute
     (the recompute reads the very ``contract_relevance``/verdict-bucket
     fields promotion just stamped). *overlay_ledger* is the exact object
-    every ``record_consumer_overlay`` call above already recorded into --
-    passed in rather than re-resolved via ``ledger_for(diff)`` here, since
-    ``diff.disposition_ledger`` may still be unset at this point and a
-    fresh resolve would build a second, disconnected ledger instead of
-    publishing the one this run actually populated.
+    every ``record_consumer_overlay``/``record_and_maybe_suppress_overlay``
+    call above already recorded into -- passed in rather than re-resolved via
+    ``ledger_for(diff)`` here, since ``diff.disposition_ledger`` may still be
+    unset at this point and a fresh resolve would build a second,
+    disconnected ledger instead of publishing the one this run actually
+    populated. Without this attachment, a later ``ledger_for(diff)`` call
+    (e.g. ``check_plugin_host_contract``'s own closing ``close_consumer_
+    scope`` call) would rebuild yet another fresh, disconnected ledger from
+    *diff*'s own change buckets and silently lose every overlay finding this
+    run recorded (review finding on the PR that added the required-symbol
+    call site).
     """
     if getattr(diff, "disposition_ledger", None) is None:
         diff.disposition_ledger = overlay_ledger
@@ -1460,6 +1469,12 @@ def scope_diff_to_required_symbols(
     required = set(required_entrypoints)
     new_exports = _snapshot_export_names(new_plugin)
     missing = sorted(e for e in required if e not in new_exports)
+    # Coverage is an objective fact about the export table, computed from the
+    # raw (pre-suppression) missing count -- mirrors scope_diff_to_app's own
+    # `coverage = _compute_symbol_coverage(...)` call above its overlay loop
+    # (see that call's comment). A suppressed missing entrypoint must not
+    # make the reported coverage number lie by shrinking the denominator.
+    raw_missing_count = len(missing)
 
     # Reuse the app-scoping machinery: the contract is a set of required
     # ("undefined") symbols, identical in shape to an app's symbol needs.
@@ -1513,9 +1528,9 @@ def scope_diff_to_required_symbols(
     verdict = _compute_appcompat_verdict(
         missing, [], breaking_for_host, len(required), policy, policy_file,
     )
-    coverage = _compute_symbol_coverage(new_exports, len(required), len(missing))
-    _promote_scoped_contract(
-        breaking_for_host, policy=policy, policy_file=policy_file, diff=diff
+    coverage = _compute_symbol_coverage(new_exports, len(required), raw_missing_count)
+    _finalize_consumer_scope_diff(
+        diff, overlay_ledger, breaking_for_host, policy=policy, policy_file=policy_file
     )
 
     return PluginHostContractResult(

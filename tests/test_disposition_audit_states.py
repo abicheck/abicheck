@@ -491,6 +491,83 @@ def test_a_suppressed_required_entrypoint_stays_conserved() -> None:
     assert record.rule.reason == "known optional entrypoint"
 
 
+def test_suppressed_required_entrypoint_does_not_inflate_coverage() -> None:
+    """A review finding on the PR that added the overlay above: coverage must
+    stay an objective fact about the export table, computed from the *raw*
+    (pre-suppression) missing count -- mirrors ``scope_diff_to_app``'s own
+    ``coverage = _compute_symbol_coverage(...)`` call, made *before* its
+    suppression loop runs, for the identical reason.
+
+    Before the fix, ``scope_diff_to_required_symbols`` filtered suppressed
+    symbols out of ``missing`` *before* computing coverage, so the one
+    required entrypoint here -- suppressed, still genuinely absent from the
+    new plugin -- reported 100% coverage instead of 0%. ``kept=1`` gives the
+    new plugin a real, non-empty export table (``_compute_symbol_coverage``
+    short-circuits to 0.0 whenever the export table is empty regardless of
+    the missing count, which would mask the bug this test targets).
+    """
+    from abicheck.appcompat import check_plugin_host_contract
+
+    old, new = _snapshots(kept=1, prefix="plug")
+    required = "dlsym_only_entrypoint"
+    suppression = SuppressionList(
+        [Suppression(symbol=required, reason="known optional entrypoint")]
+    )
+
+    scoped = check_plugin_host_contract(
+        old, new, [required], suppression=suppression
+    )
+    assert scoped.missing_entrypoints == [], "suppression still withdraws the gate"
+    assert scoped.coverage == 0.0, (
+        "the one required entrypoint is genuinely absent -- suppressing it "
+        "from the gate must not also lie about the export table"
+    )
+
+
+def test_required_symbol_overlay_ledger_persists_without_a_pre_attached_one() -> None:
+    """The ledger ``scope_diff_to_required_symbols`` records the overlay into
+    must survive a later, independent ``ledger_for(diff)`` call -- mirroring
+    ``scope_diff_to_app``'s own ``_finalize_consumer_scope_diff`` guard.
+
+    ``check_plugin_host_contract``'s normal path never hits this: ``compare()``
+    already attaches a ledger to ``diff`` before ``scope_diff_to_required_
+    symbols`` ever runs, so ``ledger_for(diff)`` always resolves to that same
+    object regardless of the fix. This test exercises the function directly
+    against a *detached* diff (``disposition_ledger`` cleared, as a bare
+    ``DiffResult`` from any other producer would start) -- the exact case
+    ``ledger_for``'s own docstring names ("otherwise finalizes a fresh ledger
+    over the result's own buckets"), which is what previously made the
+    overlay's recorded finding invisible to a second, independent resolve.
+    """
+    from abicheck.appcompat import scope_diff_to_required_symbols
+    from abicheck.policy.disposition_close import ledger_for
+    from abicheck.service import compare_snapshots
+
+    old, new = _snapshots(prefix="plug")
+    required = "dlsym_only_entrypoint"
+
+    diff = compare_snapshots(old, new)
+    diff.disposition_ledger = None  # simulate a diff with no ledger attached yet
+
+    scoped = scope_diff_to_required_symbols(diff, old, new, [required])
+    assert scoped.missing_entrypoints == [required]
+    assert diff.disposition_ledger is not None, (
+        "the overlay's ledger must publish itself onto diff, or a later "
+        "independent ledger_for(diff) call rebuilds a disconnected one"
+    )
+
+    # A second, independent resolve must see the same object -- and thus the
+    # same recorded overlay finding -- not a fresh one rebuilt from diff's
+    # own (overlay-free) change buckets.
+    later_ledger = ledger_for(diff)
+    assert later_ledger is diff.disposition_ledger
+    assert later_ledger.detected_total == 1
+    [record] = [
+        r for r in later_ledger.records if r.application_point == "required_symbol_overlay"
+    ]
+    assert record.symbol == required
+
+
 class TestSupportPredicateSemantics:
     """ADR-067 D3: `not_evaluated` means *the evidence was absent*.
 
