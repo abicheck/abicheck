@@ -2,7 +2,9 @@
 
 **Date:** 2026-09-05
 **Status:** Accepted — **slice S1 implemented** for the scalar single-pair
-`compare` path; S2–S4 not implemented. Design record for the vision's
+`compare` path; **S2 partially implemented** (release/aggregate audit
+folding, reclassification recording, and scope-reason accounting have
+landed — see below); S3–S4 not implemented. Design record for the vision's
 "intent and configuration accountability" decisions (`vision.md`). The
 audit half (D1–D4) extends ADR-013/024/044/049/063/064 and the report
 owners and is sequenced *first*, without waiting for history (ADR-066);
@@ -23,11 +25,32 @@ review digest, PR comment, SARIF, JUnit and HTML
 `abicheck/detectors.py`); and `abicheck/semver.py`'s release
 recommendation reading the conserved delta instead of the
 post-suppression change list — the one behavior change, carried with a
-migration note. Implementation is sequenced in
+migration note. What S2 has landed so far (2026-09-06): the release/bundle
+fan-out's primary JSON/Markdown report and `--output-dir` `summary.json`
+sidecar gain a top-level `disposition_audit` block folding every library's
+own per-comparison audit (`report/disposition_audit.py`'s
+`fold_disposition_audits`, report schema 3.1); `abicheck aggregate --format
+json` gains the same folded block across every analyzed/unexpected target
+that reports one, plus a `disposition_audit_missing_targets` list (aggregate
+schema 1.9); reclassification is now actually recorded through the ledger
+(`DispositionLedger.resolve_reclassifications`); and a contract/scope
+exclusion gains a `scope_reasons` breakdown by contract-relevance reason
+code. **Remaining S2 gaps, explicitly not closed by the above:**
+`appcompat.py`'s own `scope_diff_to_required_symbols` ledger accounting is
+excluded (that file is at its `no_growth` line-count baseline with no
+headroom for the audit hookup); and `scan` reports carry no
+`disposition_audit` block at all, so `aggregate`'s own fold can only
+distinguish "no block present" (a `scan`-sourced or pre-schema-2.51 target,
+listed in `disposition_audit_missing_targets`) from "an audit exists" —
+`aggregate` does not itself supply the missing block for `scan`.
+Implementation is sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
 (workstream "Policy-disposition audit and change acknowledgment").
 **Decision maker:** maintainer (product decision recorded in `vision.md`);
-technical sign-off pending review of this document.
+accepted as recorded above — the "technical sign-off pending" note in an
+earlier draft of this line referred to review of this ADR document itself,
+which review and merge have since completed (S1/S2 landing implies sign-off
+occurred).
 
 ## Context
 
