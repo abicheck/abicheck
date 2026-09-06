@@ -327,10 +327,24 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
         new_p.write_text(snapshot_to_json(new), encoding="utf-8")
         return old_p, new_p
 
-    def test_a_scoped_out_finding_contributes_zero(self, tmp_path: Path) -> None:
-        """Under `--required-symbol` the scoped gate is what the process
-        exits on, so a finding outside that contract contributes nothing —
-        publishing `4` beside an exit of `0` was the bug."""
+    def test_a_finding_outside_the_required_symbol_still_contributes_in_full(
+        self, tmp_path: Path
+    ) -> None:
+        """Originally: under `--required-symbol` the scoped gate was what
+        the process exited on, so a finding outside that contract had to
+        contribute nothing to `gate_contribution` -- publishing `4` beside
+        an exit of `0` was the bug this test targeted.
+
+        Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+        prebuilt-consumer lifecycle") makes the premise itself obsolete:
+        `--required-symbol`/`--used-by` no longer narrow the gate at all, so
+        `gate_contribution` is always the full-library number, exactly as it
+        would be for an unscoped run (`contract_gating.
+        zero_scoped_out_gate_contributions` -- the function that used to
+        zero it out -- was deleted). The consumer's own COMPATIBLE
+        assessment (it never calls the removed `_Z5otherv`) is reported
+        separately, informationally, under `consumer_scope`.
+        """
         old_p, new_p = self._uncovered_break_pair(tmp_path)
         out = tmp_path / "report.json"
         result = CliRunner().invoke(
@@ -349,14 +363,14 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
                 str(out),
             ],
         )
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 4, result.output
         report = json.loads(out.read_text(encoding="utf-8"))
         removal = next(c for c in report["changes"] if c["kind"] == "func_removed")
-        assert removal["gate_contribution"] == 0
-        # The compatibility axis is untouched: the removal is still breaking,
-        # and `full_verdict` still says so. Only the gate claim changed.
+        assert removal["gate_contribution"] == 4
         assert removal["compatibility_decision"] == "BREAKING"
-        assert report["full_verdict"] == "BREAKING"
+        assert "full_verdict" not in report
+        assert report["verdict"] == "BREAKING"
+        assert report["consumer_scope"]["verdict"] == "COMPATIBLE"
 
     def test_an_unscoped_run_keeps_the_full_contribution(self, tmp_path: Path) -> None:
         """The control: without scoping there is no second gate, so the
@@ -387,7 +401,13 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
         `changes[]` and into `root_causes[].findings` — and after the JSON
         round trip those are independent dicts, so zeroing one left the same
         finding reading `0` in one place and `4` in another within a single
-        document (Codex review, reproduced)."""
+        document (Codex review, reproduced).
+
+        Workstream D-S1: there is no more zeroing to disagree about --
+        `gate_contribution` is always the full-library number (4 here) in
+        both representations, exactly as it would be for an unscoped run.
+        The invariant this test states (every representation of the same
+        finding must agree) still holds and is still worth pinning."""
         old_p, new_p = self._uncovered_break_pair(tmp_path)
         out = tmp_path / "report.json"
         result = CliRunner().invoke(
@@ -408,7 +428,7 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
                 str(out),
             ],
         )
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 4, result.output
         report = json.loads(out.read_text(encoding="utf-8"))
 
         def _contributions(node: object) -> list[int]:
@@ -430,7 +450,7 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
         # Both representations must be present, or the test would pass
         # vacuously on a report that simply stopped carrying one of them.
         assert len(seen) >= 2, report
-        assert set(seen) == {0}, seen
+        assert set(seen) == {4}, seen
 
 
 class TestPromotionNeverLowersAVerdict:
@@ -631,18 +651,22 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         on its own."""
         assert self._run(tmp_path, *extra) == 4
 
-    def test_the_promotion_does_not_leave_the_full_verdict_stale(
+    def test_the_promotion_does_not_leave_the_verdict_stale(
         self, tmp_path: Path
     ) -> None:
         """The promotion mutates the same `Change` objects the full result
         holds, and `DiffResult`'s buckets are computed lazily from the
         current field state — so a `verdict` frozen before the promotion
-        disagreed with a summary derived after it: `full_verdict: NO_CHANGE`
-        beside `full_summary.breaking: 1` (Codex review).
+        could disagree with a summary derived after it, originally reported
+        as `full_verdict: NO_CHANGE` beside `full_summary.breaking: 1`
+        (Codex review).
 
-        Recomputed rather than reverted: ADR-049 §4.3 ranks explicit
-        consumer evidence above the export-derived conclusion, so a finding
-        it proves in-contract belongs in the full verdict too.
+        Workstream D-S1 removed the `full_verdict`/`full_summary` swap
+        entirely -- `verdict`/`summary` are the only representations left,
+        and they must themselves stay internally consistent post-promotion:
+        ADR-049 §4.3 ranks explicit consumer evidence above the
+        export-derived conclusion, so a finding it proves in-contract
+        belongs in the (one, now-authoritative) verdict and summary too.
         """
         old_p, new_p = self._changed_signature_pair(tmp_path)
         out = tmp_path / "report.json"
@@ -666,10 +690,12 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         # anything else is a real traceback the parse below would hide.
         assert isinstance(result.exception, SystemExit | None), result.output
         report = json.loads(out.read_text(encoding="utf-8"))
-        assert report["full_verdict"] == "BREAKING"
-        assert report["full_summary"]["breaking"] == 1
-        # The scoped view agrees with it rather than contradicting it.
+        assert "full_verdict" not in report
+        assert "full_summary" not in report
         assert report["verdict"] == "BREAKING"
+        assert report["summary"]["breaking"] == 1
+        # The consumer's own scope agrees with it too.
+        assert report["consumer_scope"]["verdict"] == "BREAKING"
 
     @pytest.mark.parametrize(
         "extra_flags",
@@ -679,10 +705,21 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         self, tmp_path: Path, extra_flags: tuple[str, ...]
     ) -> None:
         """A missing required symbol has no backing `Change`, so its
-        synthesized entry got neither decision nor contribution — on what is
-        frequently the response's only blocking finding (Codex review). Runs
-        under both the derived-legacy (no severity setting) and severity
-        (`--severity-preset`) schemes -- PR G2 removed the manual pin."""
+        synthesized entry got neither decision nor contribution — on what
+        was, under the pre-D-S1 design, frequently the response's only
+        blocking finding (Codex review). Runs under both the derived-legacy
+        (no severity setting) and severity (`--severity-preset`) schemes --
+        PR G2 removed the manual pin.
+
+        Workstream D-S1 changes what "blocking" means here: this label's
+        `gate_contribution` describes the *consumer's own* scope, which no
+        longer determines the real exit code -- the real library-wide
+        `pub_b` removal is itself `UNKNOWN_UNRESOLVED` under `--contract
+        exports` (no export-table evidence for a JSON-only snapshot pair),
+        so the actual exit code (1) comes from the orthogonal contract-
+        coverage floor, not from this label or from `pub_b`'s own
+        (zeroed, NOT_EVALUATED) gate_contribution.
+        """
         old, new = _removal_pair()
         old_p = tmp_path / "old.json"
         new_p = tmp_path / "new.json"
@@ -708,8 +745,9 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
                 str(out),
             ],
         )
-        assert result.exit_code == 4, result.output
+        assert result.exit_code == 1, result.output
         report = json.loads(out.read_text(encoding="utf-8"))
+        assert report["contract_coverage_exit_contribution"] == 1
         missing = [
             c
             for c in report["changes"]
@@ -720,9 +758,11 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
             assert entry["contract_relevance"] == "IN_CONTRACT"
             assert entry["compatibility_evaluation_status"] == "EVALUATED"
             assert entry["compatibility_decision"] == "BREAKING"
-            # The number that actually gated: this label is why the run
-            # exited 4.
-            assert entry["gate_contribution"] == result.exit_code
+            # This is the consumer's own scoped contribution (4, legacy
+            # BREAKING mapping) -- informational under workstream D-S1, and
+            # no longer what the process actually exits with (1, the
+            # orthogonal contract-coverage floor).
+            assert entry["gate_contribution"] == 4
             # Regression (Codex review, PR #753, fresh evidence): this
             # synthetic entry bypasses _change_to_dict entirely, so it
             # never picked up canonical_finding_id (schema 2.35) the way

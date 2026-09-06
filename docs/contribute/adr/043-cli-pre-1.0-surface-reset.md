@@ -134,13 +134,20 @@ only the *relevance filter* over an already-computed diff differs.
   user passed `--policy` explicitly — matching the deleted `plugin-check`
   command's default, now expressed as a policy default rather than a
   parallel command.
-- The scoped verdict's exit code (`BREAKING` → 4, `API_BREAK` → 2, else 0)
+- ~~The scoped verdict's exit code (`BREAKING` → 4, `API_BREAK` → 2, else 0)
   **overrides** the unscoped diff's exit code when scoping is requested — the
   point of scoping is that the narrower relevance set is what the caller
-  actually wants gated on.
-- Both the CLI and the MCP `abi_compare` tool (`used_by`/`required_symbols`
-  params) route through the same `appcompat.py` functions — one
-  implementation, two front-ends, per the ADR-037 D1 tier discipline.
+  actually wants gated on.~~ **Reverted (workstream D-S1,
+  `docs/contribute/plans/vision-api-abi-evolution.md` "D. Optional
+  prebuilt-consumer lifecycle").** A supplied consumer's own result now
+  enriches the full-library verdict/exit code (`used_by`/
+  `required_symbol_contract`/`consumer_scope` in the JSON report) and never
+  overrides it — the override this bullet described let a supplied consumer
+  narrow what a library-wide compatibility check reports, which the vision's
+  "Global versus consumer results" report invariant rules out.
+- Both the CLI (the now-removed MCP `abi_compare` tool historically did too;
+  see ADR-021, retired) routes through the same `appcompat.py` functions —
+  one implementation, per the ADR-037 D1 tier discipline.
 
 ### D3. `pr-comment` moves off the public command tree
 

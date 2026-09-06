@@ -700,7 +700,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "2.53",
+  "report_schema_version": "3.0",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
@@ -819,21 +819,37 @@ omitted when no policy file (or no active rule) applies.
 }
 ```
 
-### Scoped vs. full-library results (`full_verdict`/`full_severity`/`full_summary`)
+### Consumer scope (`used_by`/`required_symbol_contract`/`consumer_scope`)
 
-A `--used-by`/`--required-symbol(s)` scoped compare gates its exit code and
-`verdict`/`severity`/`summary` on the *scoped* subset of changes (plus any
-scoped-only synthetic findings, e.g. `consumer_required_symbol_removed`) —
-that scoped result is what a CI gate should act on. When the scoped result
-differs from the unscoped, full-library comparison, the original full-library
-values are preserved alongside it: `full_verdict` (schema 2.1+, same enum as
-`verdict`), `full_severity` (schema 2.1+, same shape as `severity`), and
-`full_summary` (schema 2.9+, same shape as `summary`). All three are absent
-for an unscoped compare, where `verdict`/`severity`/`summary` already
-describe the whole library. `summary` itself is always recomputed from the
-complete (post-scoping) `changes` array, so it never contradicts the changes
-a consumer actually sees — `full_summary` exists only to preserve the
-pre-scoping counts a consumer might also want.
+A `--used-by`/`--required-symbol(s)` compare gates its exit code and
+`verdict`/`severity`/`run_outcome`/`summary` on the full library, exactly as
+an unscoped compare would (workstream D-S1, since schema 3.0) — a supplied
+consumer's own confirmed/potential/unresolved impact is reported *beside*
+that result, never in place of it:
+
+- `used_by` — a list of per-app summaries (`app`, `verdict`, `missing_symbols`,
+  `missing_versions`, `relevant_change_count`, `symbol_coverage`), one per
+  `--used-by` app.
+- `required_symbol_contract` — the equivalent single object for
+  `--required-symbol(s)`.
+- `consumer_scope` — one object stating what a consumer-only assessment would
+  have concluded on its own: `verdict`, `scope` (`"used_by"` or
+  `"required_symbol"`), and, when the run resolved to the severity exit-code
+  scheme, `exit_code`/`exit_code_scheme`. Its own `note` field says plainly
+  that it is informational.
+
+`changes`/`summary` still gain any scoped-only synthetic findings a supplied
+consumer's own imports surface (e.g. `consumer_required_symbol_removed`,
+`pe_ordinal_retargeted`) — those are real, additional facts about the
+library from that consumer's point of view, so they are folded in
+additively; they never change `verdict` or this run's exit code.
+
+Prior to schema 3.0, a scoped compare's `verdict`/`severity`/`summary`/
+`run_outcome` were instead *replaced* by the scoped result, with the
+original full-library values preserved as `full_verdict`/`full_severity`/
+`full_summary`/`full_run_outcome`. Those four keys are gone as of schema
+3.0 — see this schema version's own changelog entry
+(`abicheck/schemas/__init__.py`) for the full migration note.
 
 **Stability policy:**
 

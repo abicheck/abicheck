@@ -15,12 +15,28 @@
 
 """Native scoped-gate (``--used-by``/``--required-symbol(s)``) JSON construction.
 
-ADR-061 Phase 2 item 5's last open piece: the fold that makes a JSON report
-describe the *scoped* gate (the one the process actually exits on under
-``--used-by``/``--required-symbol``) instead of the full-library one now
-runs as a plain ``dict`` mutation, applied by :func:`apply_scoped_gate` from
-inside :func:`abicheck.reporter_contract_blocks.render_json_with_side_facts`
--- before the payload is rendered, never as a render -> ``json.loads`` ->
+**Workstream D-S1 (vision-api-abi-evolution.md "D. Optional prebuilt-consumer
+lifecycle") reverted this module's original design.** It used to make the
+JSON report describe the *scoped* gate (the one the process used to exit on
+under ``--used-by``/``--required-symbol``) *instead of* the full-library one
+-- swapping ``verdict``/``severity``/``run_outcome``/``summary`` aside to
+``full_*`` siblings and putting the scoped values in their place, and zeroing
+every out-of-scope finding's ``gate_contribution``. A supplied consumer's own
+result is a confirmed/potential/unresolved per-consumer impact assessment
+reported **beside** the full-library compatibility result; it never
+substitutes for it or narrows what the run's own gate/exit code reports. So
+:func:`apply_scoped_gate` no longer swaps any of ``verdict``/``severity``/
+``run_outcome``/``summary`` -- those stay exactly what an unscoped comparison
+would have produced. It still folds ``used_by``/``required_symbol_contract``
+(the per-app/per-host breakdown) and any scoped-only findings
+(``scope_diff_to_app``/``scope_diff_to_required_symbols`` synthesize these
+fresh, e.g. ``PE_ORDINAL_RETARGETED``, ``CONSUMER_REQUIRED_SYMBOL_REMOVED``)
+into the payload, since those are real, additional facts worth surfacing --
+just never in place of the global result.
+
+Applied by :func:`apply_scoped_gate` from inside
+:func:`abicheck.reporter_contract_blocks.render_json_with_side_facts` --
+before the payload is rendered, never as a render -> ``json.loads`` ->
 patch -> ``json.dumps`` pass over already-serialized text.
 
 ``cli_compare_fold.py``'s ``_ScopedFold`` used to own this logic (as
@@ -66,8 +82,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
-
-from ..contract_gating import zero_scoped_out_gate_contributions
 
 
 @dataclass(frozen=True)
@@ -130,58 +144,60 @@ def apply_scoped_gate(
     show_only: str | None = None,
     contract_evaluation: bool = False,
 ) -> None:
-    """Fold ``--used-by``/``--required-symbol(s)`` scoping into *payload*.
+    """Fold ``--used-by``/``--required-symbol(s)`` *enrichment* into *payload*.
 
     No-op unless *result* carries a stamped ``used_by``/``required_symbols``
     (set by ``cli_helpers_compare.py`` before rendering ever starts) --
-    every other caller of ``to_json``/``to_stat_json`` is unaffected. The
-    full-library verdict/severity/run_outcome/summary move to their
-    ``full_*`` siblings and the scoped ones take their place, so the body
-    agrees with the exit code the process is about to use. See this
-    module's docstring for why this now runs pre-render.
+    every other caller of ``to_json``/``to_stat_json`` is unaffected.
+
+    Workstream D-S1: ``verdict``/``severity``/``run_outcome``/``summary`` are
+    never touched here -- they already describe the full-library
+    compatibility result the process's own exit code comes from, exactly as
+    they would for a run with no consumer supplied at all. This function only
+    *adds* to the payload: the per-app/per-host ``used_by``/
+    ``required_symbol_contract`` breakdown, a purely informational
+    ``consumer_scope`` block naming what the consumer-scoped assessment would
+    have concluded on its own, and any scoped-only findings folded into
+    ``changes``/``summary`` as additional, non-gating facts (see
+    :func:`_fold_findings_into_changes` and its ``--stat`` sibling).
     """
     used_by = getattr(result, "used_by", None)
     required_symbols = getattr(result, "required_symbols", None)
     if used_by is None and required_symbols is None:
         return
-    payload["full_verdict"] = payload.get("verdict")
-    scoped_verdict_value = _scoped_verdict_value(result)
-    if scoped_verdict_value is not None:
-        payload["verdict"] = scoped_verdict_value
     if used_by is not None:
         payload["used_by"] = used_by
     if required_symbols is not None:
         payload["required_symbol_contract"] = required_symbols
-    _swap_in_scoped_severity(payload, result)
-    _swap_in_scoped_run_outcome(payload, result, scoped_verdict_value)
+    consumer_scope = _consumer_scope_block(result)
+    if consumer_scope is not None:
+        payload["consumer_scope"] = consumer_scope
     # Scoped-only changes (e.g. PE_ORDINAL_RETARGETED, synthesized fresh
     # per app/host by scope_diff_to_app/scope_diff_to_required_symbols)
-    # and uncovered missing-contract labels are relevant to the scoped
-    # gate but never land in `result.changes` -- without folding them
-    # into `changes` here too, a --used-by/--required-symbol run whose
-    # only gated issue is one of these reports an empty `changes` array
-    # despite a nonzero scoped exit code/verdict, so a JSON consumer
-    # (e.g. the GitHub Action's `--on changes` PR-comment gate, which
-    # buckets purely off this array) sees nothing to explain the failure
-    # and silently skips posting (Codex review, mirrors
-    # sarif.to_sarif/junit_report._build_testsuite's identical fold-in).
+    # and uncovered missing-contract labels are real, additional facts about
+    # the supplied consumer(s) that never land in `result.changes` -- folded
+    # into `changes` here too, purely additively, so a JSON consumer sees
+    # them (mirrors sarif.to_sarif/junit_report._build_testsuite's identical
+    # fold-in). They enrich the report; they never move the already-rendered
+    # `verdict`/`severity`/`run_outcome`/`summary` off the full-library
+    # result (workstream D-S1).
     changes_list = payload.get("changes")
-    full_summary = payload.get("summary")
+    summary = payload.get("summary")
     if isinstance(changes_list, list):
         _fold_findings_into_changes(
             payload,
             changes_list,
-            full_summary,
+            summary,
             result,
             helpers=helpers,
             severity_config=severity_config,
             show_only=show_only,
             contract_evaluation=contract_evaluation,
         )
-    elif isinstance(full_summary, dict):
+    elif isinstance(summary, dict):
         _fold_findings_into_stat_summary(
             payload,
-            full_summary,
+            summary,
             result,
             helpers=helpers,
             severity_config=severity_config,
@@ -189,97 +205,33 @@ def apply_scoped_gate(
         )
 
 
-def _swap_in_scoped_severity(payload: dict[str, Any], result: Any) -> None:
-    """Move the full-library severity block aside for the scoped one.
+def _consumer_scope_block(result: Any) -> dict[str, Any] | None:
+    """The purely informational ``consumer_scope`` block for *payload*.
 
-    Under a severity scheme, `severity.exit_code`/`blocking` describe
-    the *full-library* gate decision -- but the process actually exits
-    with the scoped exit code computed above (Codex review): without
-    this, a scoped-compatible run that exits 0 could still carry
-    `severity.exit_code: 4`/`blocking: true` in its own JSON body, the
-    opposite of what the command that produced it just did. Mirrors the
-    verdict/full_verdict swap above -- the full-library breakdown moves
-    to `full_severity`, `severity` becomes the scoped gate.
+    States what a consumer-only assessment would have concluded (the verdict/
+    exit code ``--used-by``/``--required-symbol`` used to substitute for the
+    process's own gate, pre workstream D-S1) without ever feeding it back
+    into ``verdict``/``severity``/``run_outcome``/the process exit code. A
+    reader that wants "what does this consumer see" reads this block instead
+    of a swapped-in top-level field.
     """
-    scoped_exit_code = getattr(result, "scoped_exit_code", None)
-    scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
-    severity_block = payload.get("severity")
-    if (
-        scoped_exit_code is None
-        or scoped_exit_code_scheme != "severity"
-        or not isinstance(severity_block, dict)
-    ):
-        return
-    payload["full_severity"] = severity_block
-    # `categories.*.count` must also move to the scoped tally --
-    # otherwise a scoped-compatible `exit_code: 0` could still show
-    # an error-level `categories.abi_breaking.count > 0` left over
-    # from the full-library breakdown, contradicting the now-scoped
-    # `blocking`/`blocking_categories` fields above (Codex review).
-    scoped_counts = getattr(result, "scoped_severity_counts", None) or {}
-    full_categories = severity_block.get("categories")
-    scoped_categories = (
-        {
-            cat: (
-                {**info, "count": scoped_counts.get(cat, 0)}
-                if isinstance(info, dict)
-                else info
-            )
-            for cat, info in full_categories.items()
-        }
-        if isinstance(full_categories, dict)
-        else full_categories
-    )
-    payload["severity"] = {
-        **severity_block,
-        "categories": scoped_categories,
-        "exit_code": scoped_exit_code,
-        "blocking": scoped_exit_code != 0,
-        "blocking_categories": list(
-            getattr(result, "scoped_blocking_categories", ()) or ()
+    scoped_verdict_value = _scoped_verdict_value(result)
+    if scoped_verdict_value is None:
+        return None
+    block: dict[str, Any] = {
+        "verdict": scoped_verdict_value,
+        "scope": getattr(result, "gate_scope", None),
+        "note": (
+            "Informational: this consumer's own assessment. It does not "
+            "affect this run's compatibility verdict, severity, run_outcome, "
+            "or exit code -- those always describe the full-library result."
         ),
     }
-
-
-def _swap_in_scoped_run_outcome(
-    payload: dict[str, Any], result: Any, scoped_verdict_value: Any
-) -> None:
-    """Move the full-library ``run_outcome`` block aside for the scoped one.
-
-    ``run_outcome`` (ADR-063 Phase 7) is built by ``report.run_outcome.
-    run_outcome_dict_for_diff_result`` before any ``--used-by``/
-    ``--required-symbol`` scoping is applied, so it describes the
-    full-library compatibility gate by construction -- the identical
-    problem `_swap_in_scoped_severity` above already exists to fix for
-    the legacy ``severity`` block, on the newer structured axis (Codex
-    review): without this, a scoped-compatible run that exits 0 could
-    still carry a blocking ``run_outcome.gate`` describing an unrelated
-    full-library break, and since `GateInfo.from_report_data` prefers
-    the structured `run_outcome` over `severity`/`exit_code`, an
-    aggregate reading this report would fail on a target whose actual,
-    scoped process exit passed. Uses
-    ``result.scoped_compatibility_contribution`` -- the *pre*-coverage/
-    analysis-assurance-floor scoped exit code
-    ``cli_compare_helpers.run_compare`` stamps before folding those
-    orthogonal axes into ``result.scoped_exit_code`` -- so this stays
-    the pure compatibility-gate value ``run_outcome.gate`` represents,
-    under both the legacy and severity exit-code schemes alike (unlike
-    `_swap_in_scoped_severity` above, which only fires under the
-    severity scheme, since only that scheme has a `severity` block to
-    swap in the first place).
-    """
-    run_outcome = payload.get("run_outcome")
-    scoped_compat = getattr(result, "scoped_compatibility_contribution", None)
-    if not isinstance(run_outcome, dict) or scoped_compat is None:
-        return
-    from .not_comparable import policy_gate_decision_for_exit_code
-
-    payload["full_run_outcome"] = run_outcome
-    payload["run_outcome"] = {
-        **run_outcome,
-        "compatibility": scoped_verdict_value,
-        "gate": policy_gate_decision_for_exit_code(scoped_compat).value,
-    }
+    scoped_exit_code = getattr(result, "scoped_exit_code", None)
+    if scoped_exit_code is not None:
+        block["exit_code"] = scoped_exit_code
+        block["exit_code_scheme"] = getattr(result, "scoped_exit_code_scheme", None)
+    return block
 
 
 def _fold_findings_into_changes(
@@ -334,20 +286,15 @@ def _fold_findings_into_changes(
             policy_file=result.policy_file,
         )
     rc_evidence = root_cause_evidence_lookup_for_changes(primary_changes + scoped_only)
-    # ADR-049 D1: `gate_contribution` is defined as the number that
-    # *actually* gated, and under --used-by/--required-symbol the
-    # scoped gate is what the run exits on -- this fold is where it
-    # replaces the primary verdict and severity block. A full-diff
-    # finding the selected consumer does not use contributes nothing
-    # to that gate, so leaving its full-library number in place
-    # published `gate_contribution: 4` on a run that exited 0 (Codex
-    # review, reproduced with a removal outside the required-symbol
-    # contract). Only entries that already carry the field are
-    # touched, so a run without --contract is unaffected.
-    # Called here, *before* the scoped-only/missing-contract fold-in
-    # below: those are the scoped gate's own findings and only the
-    # ones tracked in `scoped_relevant_finding_ids` would survive it.
-    zero_scoped_out_gate_contributions(payload, result)
+    # Workstream D-S1: every full-diff finding's own `gate_contribution`
+    # (ADR-049 D1 -- the number that actually gates the *global*
+    # compatibility axis under `--contract`) is left exactly as computed for
+    # the full-library result. A finding a supplied consumer does not happen
+    # to use still gated the process the same way it would have without
+    # `--used-by`/`--required-symbol` -- consumer scoping is enrichment, not
+    # a second, narrower gate, so it no longer zeroes any full-diff finding's
+    # contribution here (reverting the earlier "the scoped gate is what the
+    # run exits on" design this fold used to implement).
     # G29 Phase 3 slice 3 (ADR-052, Codex review): these synthetic
     # entries are appended to `changes` after `_to_json_root_cause`
     # already grouped `result.changes` into `root_causes` -- without
@@ -478,21 +425,17 @@ def _fold_findings_into_changes(
         )
         root_cause_entries.append((key, root_display, entry))
     _add_entries_to_root_causes(payload, root_cause_entries)
-    # `summary` above was computed from result.changes *before*
-    # scoped_only/missing_labels were appended to `changes` here --
-    # so a scoped run whose only gating issue is one of these
-    # synthetic entries could report e.g. verdict "BREAKING" next to
-    # summary.total_changes: 0, an internally contradictory JSON
-    # body (audit finding: scoped CLI JSON summary can be stale).
-    # Move the pre-scoped summary to `full_summary` (mirrors the
-    # verdict/full_verdict and severity/full_severity swap above)
-    # and recompute the count buckets `summary` reports from the
-    # now-complete `changes` array. `binary_compatibility_pct`/
-    # `affected_pct` describe the full library surface and are left
-    # as-is -- recomputing them for the scoped subset would need
-    # old_symbol_count context this fold-in doesn't have.
+    # `summary` was computed from `result.changes` *before* scoped_only/
+    # missing_labels were appended to `changes` above -- purely additive: the
+    # scoped-only/missing-contract entries are real, additional consumer
+    # findings, so their own bucket counts and `total_changes` are folded in
+    # on top of the already-correct full-library counts (workstream D-S1: no
+    # `full_summary`/`summary` swap -- `summary` always described, and
+    # continues to describe, the full-library result plus this addition).
+    # `binary_compatibility_pct`/`affected_pct` describe the full library
+    # surface and are left as-is -- recomputing them for the consumer-scoped
+    # subset would need old_symbol_count context this fold-in doesn't have.
     if isinstance(full_summary, dict):
-        payload["full_summary"] = full_summary
         bucket_counts = {
             "breaking": 0,
             "source_breaks": 0,
@@ -524,21 +467,15 @@ def _fold_findings_into_stat_summary(
     severity_config: Any,
     show_only: str | None,
 ) -> None:
-    """Adjust a ``--stat`` payload's summary-only counts for the scoped gate.
+    """Add a supplied consumer's own scoped-only findings to a ``--stat`` summary.
 
     Codex review: `--format json --stat` (to_stat_json) emits a
-    summary-only payload with no `changes` array at all, so the
-    branch above -- gated on `isinstance(changes_list, list)` --
-    never runs for it. Without this, a `--stat --used-by`/
-    `--required-symbol` run still swaps `verdict` to the scoped
-    gate result (above) but leaves `summary` as the stale
-    full-library counts and never adds `full_summary`: a scoped
-    BREAKING verdict sitting next to unrelated full-library
-    summary numbers, the exact contradiction this fold-in exists
-    to remove. There's no per-change list to recompute bucket
-    counts from here, so instead add each scoped-only/missing-
-    contract synthetic finding's own contribution on top of the
-    already-correct full-library counts.
+    summary-only payload with no `changes` array at all, so the branch
+    above -- gated on `isinstance(changes_list, list)` -- never runs for it.
+    There's no per-change list to recompute bucket counts from here, so
+    instead each scoped-only/missing-contract synthetic finding's own
+    contribution is added on top of the already-correct full-library counts
+    (workstream D-S1: purely additive, no `full_summary`/`summary` swap).
     """
     from ..checker_policy import EvidenceStatus
 
@@ -548,7 +485,6 @@ def _fold_findings_into_stat_summary(
         result, severity_config, show_only, helpers
     )
     if scoped_only or missing_labels:
-        payload["full_summary"] = full_summary
         eff_sets = result._effective_kind_sets()
         added_counts = {
             "breaking": 0,

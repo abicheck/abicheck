@@ -4,9 +4,9 @@
   ],
   "architectures": [],
   "category": "B",
-  "digest": "sha256:5bf36287df0f37aa9a41f146064399f394820d261a1ddcace2c840d2acd728fb",
+  "digest": "sha256:4838330dd14de022b167b3629e668eb7790678535281941e299ca3cdd2757182",
   "expected": {
-    "full_verdict": "BREAKING",
+    "consumer_verdict": "BREAKING",
     "verdict": "BREAKING"
   },
   "inputs": "agent-evals/skills/fixtures/consumer-actually-affected",

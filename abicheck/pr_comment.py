@@ -408,17 +408,25 @@ def _from_compare(
     contract_coverage_blocking = isinstance(contract_exit, int) and contract_exit >= 1
     if contract_coverage_blocking:
         incomplete_blocking = True
-    # ADR-043 `compare --used-by`/`--required-symbol(s)`: the JSON report
-    # overwrites `verdict` with the scoped result and adds `full_verdict` plus
-    # `used_by`/`required_symbol_contract` (see cli_compare_helpers's
-    # _fold_scoped_compat_into_text) — carry those through so the comment's
-    # headline can follow the scoped verdict instead of the raw bucket counts.
+    # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+    # prebuilt-consumer lifecycle"): `compare --used-by`/`--required-symbol(s)`
+    # no longer overwrites `verdict` -- it always carries the full-library
+    # result, and a supplied consumer's own informational assessment is
+    # reported under the `consumer_scope` block instead
+    # (`report.scoped_gate._consumer_scope_block`). `full_verdict` is no
+    # longer a separate JSON field (there is nothing for it to be "full"
+    # beside any more) -- `verdict` itself is that value, so the comment
+    # model's own `full_verdict` is read from there for backward-compatible
+    # rendering (see `_scoped_lines`, which only shows the note when the two
+    # differ).
     used_by = report.get("used_by")
     required_symbol_contract = report.get("required_symbol_contract")
+    consumer_scope = report.get("consumer_scope")
     scoped_verdict: str | None = None
-    if isinstance(used_by, list) or isinstance(required_symbol_contract, dict):
-        verdict = report.get("verdict")
+    if isinstance(consumer_scope, dict):
+        verdict = consumer_scope.get("verdict")
         scoped_verdict = str(verdict) if verdict is not None else None
+    verdict_value = report.get("verdict")
     return CommentModel(
         mode="compare",
         subject=str(report.get("library", "library")),
@@ -434,9 +442,7 @@ def _from_compare(
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
         scoped_verdict=scoped_verdict,
-        full_verdict=(
-            str(report["full_verdict"]) if "full_verdict" in report else None
-        ),
+        full_verdict=(str(verdict_value) if verdict_value is not None else None),
         used_by_summaries=[a for a in used_by if isinstance(a, dict)]
         if isinstance(used_by, list)
         else [],

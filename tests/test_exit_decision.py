@@ -808,18 +808,25 @@ class TestCompareExitDecisionIntegration:
             == report["analysis_assurance_exit_contribution"]
         )
 
-    def test_scoped_gate_reports_the_scoped_exit_not_the_full_library_gate(
+    def test_scoped_gate_never_narrows_the_full_library_exit(
         self, tmp_path: Path,
     ) -> None:
-        """Codex review: a `--required-symbol` compare's real process exit is
-        the *scoped* gate (`result.scoped_exit_code`), floored/persisted by
-        `cli_compare_helpers._apply_scoped_gating` before any report renders
-        -- not the full-library verdict/severity gate this module would
-        otherwise compute from `result.verdict`. Scoping the requirement to
-        the surviving symbol alone must report a clean scoped exit even
-        though the full library is BREAKING (a real removed symbol outside
-        the required set), and the persisted ``exit`` block must agree with
-        the real process exit code, not the informational full-library one.
+        """Codex review, originally: a `--required-symbol` compare's real
+        process exit used to be the *scoped* gate (`result.scoped_exit_code`),
+        floored/persisted by `cli_compare_helpers._apply_scoped_gating`
+        before any report renders -- not the full-library verdict/severity
+        gate this module would otherwise compute from `result.verdict`.
+        Scoping the requirement to the surviving symbol alone reported a
+        clean scoped exit even though the full library was BREAKING.
+
+        Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+        prebuilt-consumer lifecycle") reverts this: the persisted ``exit``
+        block, like the process's own exit code, always names
+        ``compatibility_gate`` and reflects the full-library verdict --
+        never ``scoped_gate`` -- regardless of what a supplied
+        `--required-symbol` consumer's own scope concludes. The consumer's
+        own COMPATIBLE assessment (this run's required symbol survived) is
+        reported informationally under ``consumer_scope`` instead.
         """
         old_p, new_p = _write(tmp_path, *_breaking_pair())
         res = CliRunner().invoke(
@@ -830,23 +837,26 @@ class TestCompareExitDecisionIntegration:
                 "--format", "json",
             ],
         )
-        assert res.exit_code == 0, res.output
+        assert res.exit_code == 4, res.output
         report = json.loads(res.stdout[res.stdout.index("{") :])
-        # full_verdict is the informational, unscoped full-library gate;
-        # verdict itself is already the scoped one under --required-symbol.
-        assert report["full_verdict"] == "BREAKING"
-        assert report["exit"]["code"] == 0
-        assert report["exit"]["reasons"] == ["clean"]
-        assert report["exit"]["compatibility_contribution"] == 0
+        assert "full_verdict" not in report
+        assert report["verdict"] == "BREAKING"
+        assert report["consumer_scope"]["verdict"] == "COMPATIBLE"
+        assert report["exit"]["code"] == 4
+        assert report["exit"]["reasons"] == ["compatibility_gate"]
+        assert report["exit"]["compatibility_contribution"] == 4
         assert report["exit"]["code"] == res.exit_code
 
-    def test_scoped_gate_failure_names_the_scoped_reason(
+    def test_scoped_gate_failure_still_names_the_compatibility_reason(
         self, tmp_path: Path,
     ) -> None:
-        """The inverse: requiring the *removed* symbol must fail the scoped
-        gate, and the ``exit`` block must name ``scoped_gate`` -- not
-        ``compatibility_gate`` -- since the full-library verdict alone never
-        determined this exit.
+        """The inverse of the test above: requiring the *removed* symbol
+        also fails, but for the same reason (the full-library
+        ``compatibility_gate``) -- there is no separate ``scoped_gate``
+        reason any more (workstream D-S1). Before this revert, this case and
+        the one above reported two different ``reasons`` for what is, from
+        the process's own exit code's perspective, the identical
+        full-library BREAKING gate.
         """
         old_p, new_p = _write(tmp_path, *_breaking_pair())
         res = CliRunner().invoke(
@@ -860,8 +870,9 @@ class TestCompareExitDecisionIntegration:
         assert res.exit_code != 0, res.output
         report = json.loads(res.stdout[res.stdout.index("{") :])
         assert report["exit"]["code"] == res.exit_code
-        assert report["exit"]["reasons"] == ["scoped_gate"]
+        assert report["exit"]["reasons"] == ["compatibility_gate"]
         assert report["exit"]["compatibility_contribution"] == res.exit_code
+        assert report["consumer_scope"]["verdict"] == "BREAKING"
 
     def test_scoped_clean_gate_does_not_mask_the_real_assurance_reason(
         self, tmp_path: Path,

@@ -178,8 +178,8 @@ def recompute_verdict_after_promotion(
     mutation also moves the finding back onto the compatibility axis, and
     ``DiffResult``'s verdict buckets are computed *lazily* from the current
     field state while ``verdict`` was frozen before the promotion. Left
-    alone, one report said ``full_verdict: NO_CHANGE`` beside
-    ``full_summary.breaking: 1`` (Codex review, confirmed via
+    alone, one report said ``verdict: NO_CHANGE`` beside
+    ``summary.breaking: 1`` (Codex review, confirmed via
     ``--required-symbol`` under ``--contract exports``).
 
     Recomputing is the right direction rather than reverting the mutation:
@@ -220,7 +220,7 @@ def recompute_verdict_after_promotion(
     #    `opaque_filtered` is deliberately excluded from the verdict while
     #    rename halves are excluded as well. Recomputing from `changes` alone
     #    therefore dropped a redundant child's stronger verdict and *lowered*
-    #    `full_verdict` from BREAKING to COMPATIBLE on any unrelated scoped
+    #    `verdict` from BREAKING to COMPATIBLE on any unrelated scoped
     #    promotion (Codex review, reproduced). Keeping the stronger of the
     #    two preserves whatever those findings contributed, without this
     #    function having to reconstruct a set the result no longer

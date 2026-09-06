@@ -710,26 +710,24 @@ def contract_mode(call: dict) -> str | None:
     return None
 
 
-def strongest_reported_verdict(
-    run_dir: Path, calls: list[dict], *, only_scoped: bool = False
-) -> str | None:
+def strongest_reported_verdict(run_dir: Path, calls: list[dict]) -> str | None:
     """The most severe verdict any real comparison in this run produced.
 
-    `only_scoped` restricts the reckoning to consumer-scoped calls
-    (`is_consumer_scoped`) — for a claim that answers a scoped question, an
-    earlier *unscoped* comparison of the same pair is not a milder report of
-    the same fact to be held against it, it is the answer to a different
-    question (`shared/consumer-scoping.md`: "Neither direction is a filtered
-    view of the other"). Suppression-style gaming *within* the scoped calls
-    themselves — running two differently-scoped calls and citing the milder
-    one — is unaffected: this only drops unscoped calls from consideration,
-    never a scoped one.
+    Workstream D-S1 reverted `--used-by`/`--required-symbol(s)` to pure
+    enrichment: a scoped call's own `verdict` field describes the same
+    full-library quantity an unscoped call's does (the CLI never swaps a
+    consumer's own result into it), so every call that reached a verdict
+    is comparable on equal footing here regardless of whether it was
+    scoped. This used to take an `only_scoped` flag that restricted the
+    reckoning to consumer-scoped calls, back when a scoped call's top-level
+    `verdict` *was* the narrower, consumer-specific answer
+    (`shared/consumer-scoping.md`'s old reading) — that distinction no
+    longer exists, so the flag was removed rather than kept as dead
+    plumbing (see `dimensions.py::dimension_6`'s own note on the change).
     """
     severest: int | None = None
     for call in calls:
         if not ran_to_a_verdict(call):
-            continue
-        if only_scoped and not is_consumer_scoped(call):
             continue
         verdict = reported_verdict(run_dir, call)
         if verdict is None:
@@ -739,42 +737,57 @@ def strongest_reported_verdict(
     return None if severest is None else VERDICT_ORDER[severest]
 
 
-def reported_full_verdict(run_dir: Path, call: dict) -> str | None:
-    """The library-wide `full_verdict` this call's own JSON report stated.
+def reported_consumer_verdict(run_dir: Path, call: dict) -> str | None:
+    """The informational consumer-scoped verdict this call's own JSON report stated.
 
-    JSON only, unlike `reported_verdict` — `full_verdict` has no established
-    Markdown "field" text this module already scans for, and inventing a
-    regex for one on the strength of a single report shape risks a false
-    match on unrelated prose. A JSON-only cited call that carries the field
-    is still checked; a Markdown-only one degrades to "nothing to check
-    against" rather than guessing — the same false-negative-over-false-
-    positive default this module uses throughout.
+    Workstream D-S1: the old top-level `verdict`-is-scoped /
+    `full_verdict`-is-global report pair was reverted. A scoped call's
+    top-level `verdict` is now always the library-wide result (read by
+    `reported_verdict` above, same as any other call), and the consumer's
+    own additional, purely informational result lives in a nested
+    `consumer_scope.verdict` field (`abicheck.report.scoped_gate.
+    _consumer_scope_block`) instead of a sibling top-level key.
+
+    JSON only, unlike `reported_verdict` — `consumer_scope` has no
+    established Markdown "field" text this module already scans for, and
+    inventing a regex for one on the strength of a single report shape
+    risks a false match on unrelated prose. A JSON-only cited call that
+    carries the field is still checked; a Markdown-only one degrades to
+    "nothing to check against" rather than guessing — the same
+    false-negative-over-false-positive default this module uses
+    throughout.
     """
     for text in _artifact_texts(run_dir, call):
         try:
             parsed: Any = json.loads(text)
         except json.JSONDecodeError:
             continue
-        if isinstance(parsed, dict) and parsed.get("full_verdict") in VERDICT_ORDER:
-            value: str = parsed["full_verdict"]
+        if not isinstance(parsed, dict):
+            continue
+        consumer_scope = parsed.get("consumer_scope")
+        if isinstance(consumer_scope, dict) and consumer_scope.get("verdict") in (
+            VERDICT_ORDER
+        ):
+            value: str = consumer_scope["verdict"]
             return value
     return None
 
 
-def reported_full_verdicts(run_dir: Path, calls: Iterable[dict]) -> frozenset[str]:
-    """Every distinct `full_verdict` these calls' own reports stated.
+def reported_consumer_verdicts(run_dir: Path, calls: Iterable[dict]) -> frozenset[str]:
+    """Every distinct consumer-scoped verdict these calls' own reports stated.
 
     Deliberately takes whatever iterable of calls the caller already
     resolved as *cited* (`_cited(calls, claim)`'s `resolved.values()`) —
-    `full_verdict` is being checked against the specific report(s) a claim
-    rested its own `full_verdict` on, not against every report the run
-    happened to produce. A caller wanting an *unambiguous* grounding check
-    treats more than one distinct value as "can't tell which one the claim
-    should match" rather than picking one — the same false-negative-over-
-    false-positive default this module uses throughout.
+    the consumer verdict is being checked against the specific report(s) a
+    claim rested its own `consumer_verdict` on, not against every report
+    the run happened to produce. A caller wanting an *unambiguous*
+    grounding check treats more than one distinct value as "can't tell
+    which one the claim should match" rather than picking one — the same
+    false-negative-over-false-positive default this module uses
+    throughout.
     """
     return frozenset(
-        v for c in calls if (v := reported_full_verdict(run_dir, c)) is not None
+        v for c in calls if (v := reported_consumer_verdict(run_dir, c)) is not None
     )
 
 

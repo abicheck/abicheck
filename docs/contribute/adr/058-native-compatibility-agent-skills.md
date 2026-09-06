@@ -7,7 +7,17 @@ reduced to one (`check-abi-compatibility`) by the 2026-08-20 portfolio
 reset amendment below — and Layer-B
 fragments, `scripts/gen_agent_skills.py` generating the three publication
 trees (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/` — no longer
-committed as of the 2026-08-21 amendment below; generated on demand), AI-readiness
+committed as of the 2026-08-21 amendment below; generated on demand). **The
+`verdict`-is-scoped/`full_verdict`-is-global reading rule the amendments
+below describe is superseded**: workstream D-S1
+(`docs/contribute/plans/vision-api-abi-evolution.md` "D. Optional
+prebuilt-consumer lifecycle") reverted that design — `verdict` is now
+always the library-wide answer, and a supplied consumer's own result is
+reported under `consumer_scope`/`used_by`/`required_symbol_contract`
+instead; `skills-src/shared/consumer-scoping.md`, `SKILL.md`, and the
+graders below have been updated to match, and this ADR's own quoted
+history below is left as the historical record of the (now superseded)
+design at the time. AI-readiness
 and docs-contract gate coverage, structural/tool-API-drift/trigger tests, and
 the `docs/use/agent-skills.md` catalog page. Still open: P0.4 (`abicheck
 info`, blocked on an explicit maintainer decision between the two design

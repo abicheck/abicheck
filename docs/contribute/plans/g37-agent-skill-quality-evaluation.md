@@ -963,13 +963,22 @@ writing the checks made the gap visible:
   bundle still records the digest it ran against, and a CLI change still makes
   every bundle stale. What disappears is only a committed copy that nothing
   needed and that other people's PRs could silently invalidate.
-- **A consumer-scoped scenario states both verdicts.** In a scoped run the
-  top-level `verdict` is the *scoped* answer and `full_verdict` is the
-  library-wide one — `native-consumer-compatibility/SKILL.md` uses exactly the
-  divergent pair as its worked example and warns against reading it the other
-  way round. A scenario stating only the global value would have made the
-  grader reject the correct consumer answer and reward the inversion, so
-  `expected.full_verdict` exists to give the grader the distractor.
+- **A consumer-scoped scenario states both verdicts.** *(Historical: this
+  bullet describes the pre-D-S1 field names — see below.)* In a scoped run
+  the top-level `verdict` was the *scoped* answer and `full_verdict` was the
+  library-wide one — `native-consumer-compatibility/SKILL.md` used exactly
+  the divergent pair as its worked example and warned against reading it the
+  other way round. A scenario stating only the global value would have made
+  the grader reject the correct consumer answer and reward the inversion, so
+  `expected.full_verdict` existed to give the grader the distractor.
+  **Superseded (workstream D-S1):** `verdict` is now always the library-wide
+  answer; the consumer's own answer is `consumer_verdict`/
+  `consumer_scope.verdict`. The grading invariant this bullet states is
+  unchanged in spirit — a scenario still states both the global and the
+  consumer's own expected answer, and the grader still rejects a claim that
+  drops or inverts either — only the field names moved; see
+  `agent-evals/skills/graders/dimensions.py` and
+  `tests/test_skill_eval_graders_consumer_scoping.py` for the current shape.
 
 **Done when:** `pr` fails on a hand-edited pack, an unresolvable fixture
 reference, and a stale results artifact. All three are covered:

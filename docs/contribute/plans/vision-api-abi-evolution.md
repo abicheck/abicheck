@@ -199,9 +199,10 @@ manifests are implemented** (`abicheck/impact/use_cases.py`,
 `use_case_impact.py`, `compare --use-cases`); Action inputs `used-by`/
 `required-symbol(s)` and `actions/check-target`'s `app-consumer` kind;
 no consumer code is ever executed (ADR-060 deferred; the only subprocess
-adjacency is a demangler prewarm). `--used-by` currently *replaces* the
-gate (`scoped_verdict`, `gate_scope="used_by"`, worst-app-wins) while the
-full verdict survives as context.
+adjacency is a demangler prewarm). **`--used-by`/`--required-symbol(s)`
+no longer replace the gate (S1's gate-enrichment slice, landed)** — see
+below; S1's consumer-*specification* half (identity/digest/platform/
+profile/provider-baseline) remains open, tracked under "Missing".
 
 **Missing.** A consumer input is a single binary path only — no manifest,
 no digest, no platform/profile, no provider-baseline provenance; an
@@ -209,14 +210,31 @@ unreadable consumer is a hard error, not an advisory/required distinction;
 no "N of M consumers affected" statement; no staging/caching of consumer
 artifacts in the Action; runtime-trace ingestion unimplemented.
 
-**Slices.** S1 consumer specification (identity, exact artifact/digest,
-platform/profile, provider baseline known/unknown, source channel,
-optional use-case manifest, `required`/`advisory`), resolved by the
-existing loaders; local/prebuilt artifacts only; per-consumer
-`confirmed/potential/unresolved` impact reported **beside** the global
-contract status (the consumer result enriches, never overwrites — a
-change from today's gate replacement, sequenced with a migration note);
-real compiled consumer/provider fixture. S2 existing Actions
+**Slices.** **S1's gate-enrichment slice (landed).** A supplied consumer's per-`confirmed/
+potential/unresolved` impact (`scoped_verdict`/`scoped_exit_code`/
+`used_by`/`required_symbol_contract`, still computed by
+`abicheck/appcompat.py`'s `scope_diff_to_app`/
+`scope_diff_to_required_symbols`) is now reported **beside** the global
+contract status, never in place of it: the compare command's exit code
+and JSON `verdict`/`severity`/`run_outcome`/`summary` always describe the
+full-library result, exactly as an unscoped run would, and a supplied
+consumer's own result is additionally exposed under the JSON `used_by`/
+`required_symbol_contract`/`consumer_scope` keys (`abicheck/report/
+scoped_gate.py`), SARIF's informational `scopedGate` block, JUnit's
+`abicheck.gate_*` properties, the HTML report's "Consumer-scoped verdict"
+box, and the PR comment's own consumer summary note — none of which drive
+that surface's own pass/fail decision any more (`abicheck/sarif.py`,
+`abicheck/junit_report.py`, `abicheck/html_report.py`,
+`abicheck/pr_comment_render.py`). This is a **behavior change** from the
+prior "scoped gate wins" design (worst-app-wins `sys.exit(scoped_exit_
+code)`, JSON `verdict`/`full_verdict` swap): a `--used-by`/
+`--required-symbol` run's exit code can differ from before when the
+consumer's own result and the full-library result disagree — see the
+changelog fragment landing this slice. Identity/digest/platform/profile/
+provider-baseline provenance (the rest of the consumer-specification
+scope this slice's own name describes) remains unaddressed — a consumer
+input is still a single binary path only, tracked under "Missing" above,
+not S1. Real compiled consumer/provider fixture: still open. S2 existing Actions
 acquisition/publishing channels; exact-version selection; missing
 advisory/required handling. S3 declared source/use-case enrichment with
 coverage-qualified reports. S4 separately designed, opt-in compile/link/

@@ -611,11 +611,16 @@ def render_gate_card(data: GateCardData | None) -> str:
         return ""
     h = html.escape
     if data.scoped:
-        gate_title = "CI Gate (scoped)"
+        # No longer produced by `compute_gate_card` (workstream D-S1: a
+        # supplied consumer's own gate is informational, never authoritative)
+        # -- kept only so a `GateCardData` built directly (e.g. by a test)
+        # still renders something honest.
+        gate_title = "CI Gate (consumer-scoped, informational)"
         gate_note = (
-            f"Reflects the scoped --used-by/--required-symbol severity gate "
-            f"the CLI process actually exits on (full-library gate: "
-            f"{h(data.full_gate_label)})."
+            "Reflects a supplied --used-by/--required-symbol consumer's own "
+            f"assessment only (full-library gate: {h(data.full_gate_label)}); "
+            "the CLI process's own exit code always comes from the "
+            "full-library gate."
         )
     else:
         gate_title = "CI Gate"
@@ -676,21 +681,20 @@ def render_scoped_verdict(data: ScopedVerdictData | None) -> str:
         data.verdict_value, ("#212121", "#f5f5f5")
     )
     exit_note = (
-        f"The CLI process exits {data.exit_code} under the "
-        f"{data.exit_code_scheme} exit-code scheme for this "
-        f"--used-by/--required-symbol run"
+        f"a consumer-only assessment would compute exit code {data.exit_code} "
+        f"under the {data.exit_code_scheme} exit-code scheme"
         if data.exit_code is not None
-        else "This is what the CLI process exit code reflects for this "
-        "--used-by/--required-symbol run"
+        else "this is what a consumer-only assessment would conclude"
     )
     return (
         f"<div class='verdict-box' "
         f"style='background:{scoped_bg}; color:{scoped_fg}; "
         f"border-left:6px solid {scoped_fg};'>"
-        f"<h2>{verdict_icon(data.verdict_value)} Scoped verdict: {h(data.verdict_value)}</h2>"
+        f"<h2>{verdict_icon(data.verdict_value)} Consumer-scoped verdict: {h(data.verdict_value)}</h2>"
         f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
-        f"{h(exit_note)} — it may differ from the "
-        f"full-library Compatibility verdict above."
+        f"Informational only ({h(exit_note)}) — the CLI process's own exit "
+        f"code and Compatibility verdict above always come from the "
+        f"full-library result."
         f"</div></div>"
     )
 

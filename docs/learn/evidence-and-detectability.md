@@ -592,9 +592,8 @@ part of the ABI — see [Template Instantiation](limitations.md#template-instant
 `appcompat` command) answers a deliberately narrow question: *will **this**
 application still work with the new library?* It parses the app's required
 symbols, runs the full library comparison once, checks new-symbol
-availability, and lets the worst app-scoped result **become the primary
-verdict**, keeping the full-library verdict and unrelated changes as
-informational context.
+availability, and reports the app's own result **beside** the primary
+(full-library) verdict — informational context, never a substitute for it.
 
 That scope cuts both ways:
 

@@ -285,9 +285,11 @@ def app_usage_scope_options(func: F) -> F:
         "required_symbols_opt",
         multiple=True,
         help="An exported linker symbol a plugin host resolves via dlopen/dlsym "
-        "and requires (repeatable; folds `plugin-check`). Scopes the "
-        "comparison to this explicit entrypoint contract instead of the "
-        "full diff. Mutually exclusive with --used-by.",
+        "and requires (repeatable; folds `plugin-check`). The full library "
+        "comparison always determines this run's own verdict/exit code; "
+        "this contract's own confirmed/potential/unresolved impact is "
+        "reported alongside it (informational), never in place of it. "
+        "Mutually exclusive with --used-by.",
     )(func)
     func = click.option(
         "--used-by",
@@ -296,12 +298,13 @@ def app_usage_scope_options(func: F) -> F:
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         help="Application binary whose actual imports/required symbol versions "
         "scope the comparison (repeatable; folds `appcompat`). The full "
-        "library comparison still runs once; the worst app-scoped result "
-        "becomes the primary verdict/exit code, with the full verdict and "
-        "unrelated changes kept as informational context. OLD/NEW may be "
-        "real library binaries or JSON snapshots carrying binary evidence "
-        "(a `dump` of a real library, not headers-only). Mutually "
-        "exclusive with --required-symbol/--required-symbols.",
+        "library comparison always determines this run's own verdict/exit "
+        "code, exactly as it would without --used-by; the supplied "
+        "application's own confirmed/potential/unresolved impact is "
+        "reported alongside it (informational), never in place of it. "
+        "OLD/NEW may be real library binaries or JSON snapshots carrying "
+        "binary evidence (a `dump` of a real library, not headers-only). "
+        "Mutually exclusive with --required-symbol/--required-symbols.",
     )(func)
     return func
 

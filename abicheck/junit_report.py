@@ -155,11 +155,12 @@ def _is_failure(
     ``"warning"``, so they pass).
 
     *relevant_ids*, when not ``None``, means a ``--used-by``/``--required-symbol``
-    gate is active: a change whose :func:`abicheck.reporter._finding_id` is
-    absent from the set can never fail here regardless of its own severity --
-    it is out of scope for the gate this testsuite now reports (CLI-audit P1:
-    JUnit failures must follow the scoped gate, not just the full-library
-    verdict).
+    consumer was supplied. Workstream D-S1 reverted the earlier design where
+    a change outside that consumer's relevant set could never fail here
+    regardless of its own severity -- a supplied consumer enriches this
+    report (see ``_add_scoped_properties`` below), it never narrows which
+    findings count as failures. *relevant_ids* stays a parameter only so
+    existing callers keep working; it no longer affects the answer.
 
     A finding compatibility policy never scored (ADR-049 D1's
     ``NOT_EVALUATED``, only reachable under ``--contract``) can
@@ -171,8 +172,6 @@ def _is_failure(
     fact to stay visible, it just is not a failure.
     """
     if not is_evaluated(change):
-        return False
-    if relevant_ids is not None and _finding_id(change) not in relevant_ids:
         return False
     finding = findings_by_id.get(id(change)) if findings_by_id is not None else None
     if severity_config is not None:
@@ -538,10 +537,10 @@ def _build_testsuite(
         )
     )
 
-    # When --used-by/--required-symbol scoping is active, relevant_ids makes
-    # failures follow the scoped gate rather than the full library verdict
-    # (CLI-audit P1 fix); None means no scoping is active, so behavior below
-    # is unchanged from before.
+    # Workstream D-S1: relevant_ids is passed through for stamping only --
+    # _count_failures/_is_failure no longer use it to narrow which changes can
+    # fail. Every genuine severity-based failure counts, whether or not this
+    # run also supplied a --used-by/--required-symbol consumer.
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
     failure_count = _count_failures(
         changes, result, kind_sets, severity_config,
@@ -722,11 +721,11 @@ def _add_scoped_properties(props: ET.Element, result: DiffResult) -> None:
     audit above; this function adds nothing at all when no scoping was
     requested, which is the pre-existing behaviour of its own rows.
 
-    The scoped gate is authoritative for this testsuite's own ``failures``
-    count and each ``<testcase>``'s pass/fail status -- ``result.verdict``
-    (the full, unscoped library verdict) is still reported here as
-    ``abicheck.full_library_verdict`` for context, but no longer drives what
-    a JUnit-consuming CI dashboard treats as failing.
+    **Purely informational (workstream D-S1).** ``failures``/pass-fail
+    status always follow ``result.verdict``, reported here unswapped as
+    ``abicheck.full_library_verdict`` -- never this block's own
+    ``abicheck.gate_verdict``/``abicheck.gate_exit_code``, a supplied
+    consumer's own impact, reported *beside* the full-library result.
     """
     scoped_verdict = getattr(result, "scoped_verdict", None)
     if scoped_verdict is None:

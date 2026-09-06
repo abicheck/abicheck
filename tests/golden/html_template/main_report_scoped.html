@@ -109,8 +109,8 @@ footer { margin: 20px 32px 32px; padding: 12px 16px; font-size: 0.8em;
   </div>
 </div>
 
-<div class='verdict-box' style='background:#ffebee; color:#b71c1c; border-left:6px solid #b71c1c;'><h2>🛑 CI Gate (scoped): FAIL (exit 2)</h2><div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>Reflects the scoped --used-by/--required-symbol severity gate the CLI process actually exits on (full-library gate: FAIL (exit 4)).</div></div>
-<div class='verdict-box' style='background:#ffe0b2; color:#e65100; border-left:6px solid #e65100;'><h2>🟠 Scoped verdict: API_BREAK</h2><div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>The CLI process exits 2 under the severity exit-code scheme for this --used-by/--required-symbol run — it may differ from the full-library Compatibility verdict above.</div></div>
+<div class='verdict-box' style='background:#ffebee; color:#b71c1c; border-left:6px solid #b71c1c;'><h2>🛑 CI Gate: FAIL (exit 4)</h2><div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>Reflects the configured severity gate — may differ from the Compatibility verdict above (e.g. an addition promoted to <code>error</code> still fails CI).</div><div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>Blocked by: <code>abi_breaking</code></div></div>
+<div class='verdict-box' style='background:#ffe0b2; color:#e65100; border-left:6px solid #e65100;'><h2>🟠 Consumer-scoped verdict: API_BREAK</h2><div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>Informational only (a consumer-only assessment would compute exit code 2 under the severity exit-code scheme) — the CLI process's own exit code and Compatibility verdict above always come from the full-library result.</div></div>
 <div class='summary-section'><h3>🔍 Analysis Confidence</h3><table class='summary-table'><tbody><tr><th>Confidence</th><td><strong style='color:#e65100'>MEDIUM</strong></td></tr>
 <tr><th>Evidence tiers</th><td><span class='kind-badge'>elf</span> <span class='kind-badge'>dwarf</span> <span class='kind-badge'>header</span></td></tr>
 <tr><th>Policy</th><td><code>strict_abi</code></td></tr>

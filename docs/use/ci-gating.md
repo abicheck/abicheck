@@ -93,8 +93,11 @@ unscoped path:
    step has nothing to do.
 6. **Exit.** The exit code comes from one of the two schemes below, folded
    with the orthogonal contract-coverage contribution (next section) —
-   computed over the promoted, scoped result for a `--used-by`/
-   `--required-symbol` run.
+   always computed over the full library's own result, promotion from step 5
+   included where it applies. A `--used-by`/`--required-symbol` run's own
+   confirmed/potential/unresolved impact assessment is reported beside this
+   result (`used_by`/`required_symbol_contract`/`consumer_scope` in the JSON
+   report); it never substitutes for it or changes this exit code.
 
 **Contract coverage runs alongside, not inside, this chain.** Under
 `--contract`, if the selected domain's required evidence is

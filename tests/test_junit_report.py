@@ -1599,10 +1599,19 @@ class TestScopedProperties:
         assert props["abicheck.gate_exit_code"] == "0"
         assert props["abicheck.gate_exit_code_scheme"] == "severity"
 
-    def test_irrelevant_change_does_not_fail_but_relevant_one_does(self) -> None:
-        # A change outside the --used-by/--required-symbol gate's relevance
-        # must not count as a JUnit failure -- it's out of scope for the
-        # gate this testsuite now reports (CLI-audit P1).
+    def test_consumer_irrelevance_no_longer_affects_pass_fail(self) -> None:
+        # Originally: a change outside the --used-by/--required-symbol
+        # gate's relevance did not count as a JUnit failure -- it was out of
+        # scope for the (then-authoritative) scoped gate this testsuite
+        # reported.
+        #
+        # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+        # prebuilt-consumer lifecycle"): `_is_failure` no longer takes
+        # `relevant_ids` into account at all -- every genuine severity-based
+        # failure counts regardless of consumer relevance, since the
+        # testsuite's own pass/fail always reflects the full-library result.
+        # Both real FUNC_REMOVED changes here fail, whether or not the
+        # supplied consumer happens to use the symbol.
         from abicheck.reporter import _finding_id
 
         relevant = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
@@ -1614,10 +1623,10 @@ class TestScopedProperties:
         xml_str = to_junit_xml(r)
         root = _parse(xml_str)
         ts = root.find("testsuite")
-        assert ts.get("failures") == "1"
+        assert ts.get("failures") == "2"
         tcs = {tc.get("name"): tc for tc in ts.findall("testcase")}
         assert tcs["_Z3foov"].find("failure") is not None
-        assert tcs["_Z3barv"].find("failure") is None
+        assert tcs["_Z3barv"].find("failure") is not None
 
     def test_missing_contract_emits_a_failing_testcase(self) -> None:
         # A required symbol absent from the new library has no backing diff

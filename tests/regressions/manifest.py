@@ -1106,6 +1106,43 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="gating.consumer_scope_enrichment",
+        invariant=(
+            "A supplied --used-by/--required-symbol(s) consumer's own "
+            "confirmed/potential/unresolved result must never substitute "
+            "for, narrow, or override the full-library compatibility "
+            "result: the process's exit code and the JSON verdict/"
+            "severity/run_outcome/summary always describe the full-library "
+            "comparison, exactly as an unscoped run would, whatever that "
+            "consumer's own scoped verdict/exit code says."
+        ),
+        fixed_by=(1094,),
+        seed_tests=("tests/test_used_by_gate_enrichment.py",),
+        axes={
+            "exit_code_scheme": ("legacy", "severity"),
+            "consumer_verdict": ("COMPATIBLE", "API_BREAK", "BREAKING"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Covers the compare CLI's own compatibility-contribution "
+                    "resolution and the real compare --used-by process exit "
+                    "code. Does not independently property-test SARIF's "
+                    "invocations[0].exitCode/results[].level, JUnit's "
+                    "failure count, or the HTML/PR-comment renderers -- "
+                    "those are covered by fixed-example tests only "
+                    "(tests/test_sarif.py, tests/test_junit_report.py, "
+                    "tests/test_sprint9_html.py, tests/unit/report/"
+                    "test_render_html.py, tests/test_pr_comment.py)."
+                ),
+                reference=(
+                    "docs/contribute/plans/vision-api-abi-evolution.md -- "
+                    "D. Optional prebuilt-consumer lifecycle, S1"
+                ),
+            ),
+        ),
+    ),
 )
 
 

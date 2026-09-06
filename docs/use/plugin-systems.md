@@ -20,9 +20,11 @@ doesn't fully capture on its own:
 > **History note:** this used to be a standalone `abicheck plugin-check`
 > command. The pre-1.0 CLI reset folded it into
 > `compare --required-symbol`/`--required-symbols` (ADR-043) — the full
-> library comparison runs once, and the entrypoint-scoped result becomes the
-> primary verdict/exit code, with the full-library verdict kept as
-> informational context. Mutually exclusive with `--used-by`.
+> library comparison runs once, and its own result is always the primary
+> verdict/exit code (workstream D-S1); the entrypoint contract's own
+> confirmed/potential/unresolved impact is reported alongside it,
+> informational only, never in place of it. Mutually exclusive with
+> `--used-by`.
 
 ---
 

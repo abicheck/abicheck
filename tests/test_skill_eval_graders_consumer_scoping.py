@@ -19,8 +19,28 @@ Split out of `test_skill_eval_graders.py` (tests/CLAUDE.md's "_lib/ pattern")
 when that file crossed the AI-readiness 2000-line hard cap: this is its
 largest class, and the one most of this session's Codex-review findings on
 consumer-scoping (`--used-by`/`--required-symbol(s)`), contract-coverage
-(`--contract`), and `full_verdict` grounding landed in. Shares fixtures with
-its sibling via `_skill_eval_graders_fixtures.py` rather than a second copy.
+(`--contract`), and `consumer_verdict` grounding landed in. Shares fixtures
+with its sibling via `_skill_eval_graders_fixtures.py` rather than a second
+copy.
+
+Workstream D-S1 (vision-api-abi-evolution.md "D. Optional prebuilt-consumer
+lifecycle") reverted `--used-by`/`--required-symbol(s)` from *replacing* the
+compatibility gate to merely *enriching* it: a scoped run's own top-level
+`verdict` field is now always the library-wide result (never swapped for a
+supplied consumer's own scoped result), and a supplied consumer's own
+confirmed/potential/unresolved impact is reported separately, under the
+purely informational `consumer_scope` object (`consumer_scope.verdict`).
+This file's tests were updated in place for that: every `full_verdict` claim
+field/scenario-expectation is now `consumer_verdict`, every scoped call's
+mock JSON report states its `verdict` as the library-wide truth and (when
+relevant) a nested `consumer_scope.verdict` for the consumer's own result,
+and the tests that used to hold a claim to only the "scoped" subset of calls
+(the `only_scoped` reckoning) were removed or rewritten, since there is no
+longer a separate scoped-vs-global top-level `verdict` split for
+`strongest_reported_verdict` to need to keep apart -- see
+`graders/evidence.py::strongest_reported_verdict`'s own docstring. The test
+*intent* -- what property of the grader each one pins -- is preserved
+throughout; only the report shape and field names changed.
 """
 
 from __future__ import annotations
@@ -71,35 +91,11 @@ class TestDimensionSix:
         assert result.status == "fail"
         assert any("own report" in r for r in result.reasons)
 
-    def test_a_scoped_claim_is_not_held_to_an_earlier_unscoped_report(self, tmp_path):
-        """The skill's own worked example: run the global comparison, then
-        narrow via `--used-by`, and report the *scoped* answer. An earlier,
-        more severe unscoped report of the same pair must not fail a claim
-        that correctly cites the scoped call — that is a different question,
-        not a milder report of the same one (Codex review, PR #808)."""
-        calls = [
-            a_breaking_call(0, argv=["compare", "old.so", "new.so"]),
-            a_breaking_call(
-                1, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
-            ),
-        ]
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="COMPATIBLE", evidence=[1], confident=True),
-            SCENARIO_COMPATIBLE,
-            calls=calls,
-            artifacts={
-                "captured/0.out": json.dumps({"verdict": "BREAKING"}),
-                "captured/1.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
-                ),
-            },
-        )
-        assert result.status == "pass", result.reasons
-
     def test_a_scoped_claim_is_still_held_to_its_own_scoped_report(self, tmp_path):
-        """Restricting the reckoning to scoped calls must not exempt a claim
-        from the severity of the scoped call it actually cites."""
+        """A scoped call's own top-level `verdict` field is always the
+        library-wide result (workstream D-S1) -- a claim citing it is held
+        to that report's severity exactly like an unscoped call's, with no
+        exemption for having named `--used-by`."""
         calls = [
             a_breaking_call(
                 0, argv=["compare", "old.so", "new.so", "--used-by", "renderer"]
@@ -115,74 +111,6 @@ class TestDimensionSix:
         assert result.status == "fail"
         assert any("own report" in r for r in result.reasons)
 
-    def test_a_failed_scoped_call_does_not_exempt_a_cited_unscoped_report(
-        self, tmp_path
-    ):
-        """A claim citing both a successful unscoped BREAKING report and a
-        scoped call that FAILED before producing a verdict (e.g. an invalid
-        consumer path, exit 64) must not get the only_scoped exemption --
-        the scoped call never backed anything, so the real unscoped report
-        must still count (Codex review, PR #808)."""
-        calls = [
-            a_breaking_call(0, argv=["compare", "old.so", "new.so"]),
-            {
-                "seq": 1,
-                "call_id": "c1",
-                "argv": [
-                    "compare",
-                    "old.so",
-                    "new.so",
-                    "--used-by",
-                    "no-such-consumer",
-                ],
-                "exit_code": 64,
-                "stdout_path": "captured/1.out",
-                "outputs": [],
-            },
-        ]
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="COMPATIBLE", evidence=[0, 1], confident=True),
-            SCENARIO_COMPATIBLE,
-            calls=calls,
-            artifacts={"captured/0.out": json.dumps({"verdict": "BREAKING"})},
-        )
-        assert result.status == "fail"
-        assert any("own report" in r for r in result.reasons)
-
-    def test_a_scoped_self_comparison_does_not_exempt_a_cited_unscoped_report(
-        self, tmp_path
-    ):
-        """`compare old.so old.so --used-by renderer` exits with a real
-        verdict (trivially NO_CHANGE) while comparing nothing -- it must not
-        satisfy the only_scoped exemption any more than a failed scoped call
-        does, or a real unscoped BREAKING report gets dropped in favor of a
-        scoped call that never actually compared the two sides (Codex
-        review, PR #808)."""
-        calls = [
-            a_breaking_call(0, argv=["compare", "old.so", "new.so"]),
-            {
-                "seq": 1,
-                "call_id": "c1",
-                "argv": ["compare", "old.so", "old.so", "--used-by", "renderer"],
-                "exit_code": 0,
-                "stdout_path": "captured/1.out",
-                "outputs": [],
-            },
-        ]
-        result = self._grade(
-            tmp_path,
-            envelope(verdict="COMPATIBLE", evidence=[0, 1], confident=True),
-            SCENARIO_COMPATIBLE,
-            calls=calls,
-            artifacts={
-                "captured/0.out": json.dumps({"verdict": "BREAKING"}),
-                "captured/1.out": json.dumps({"verdict": "NO_CHANGE"}),
-            },
-        )
-        assert result.status == "fail"
-        assert any("own report" in r for r in result.reasons)
-
     def test_a_scoped_self_comparison_does_not_satisfy_the_declared_target_check(
         self, tmp_path
     ):
@@ -193,7 +121,7 @@ class TestDimensionSix:
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
-            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "COMPATIBLE"},
         }
         calls = [
             {
@@ -208,8 +136,8 @@ class TestDimensionSix:
         result = self._grade(
             tmp_path,
             envelope(
-                verdict="COMPATIBLE",
-                full_verdict="BREAKING",
+                verdict="BREAKING",
+                consumer_verdict="COMPATIBLE",
                 evidence=[0],
                 confident=True,
             ),
@@ -228,7 +156,7 @@ class TestDimensionSix:
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
-            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "COMPATIBLE"},
         }
         calls = [
             a_breaking_call(
@@ -238,8 +166,8 @@ class TestDimensionSix:
         result = self._grade(
             tmp_path,
             envelope(
-                verdict="COMPATIBLE",
-                full_verdict="BREAKING",
+                verdict="BREAKING",
+                consumer_verdict="COMPATIBLE",
                 evidence=[0],
                 confident=True,
             ),
@@ -247,7 +175,7 @@ class TestDimensionSix:
             calls=calls,
             artifacts={
                 "captured/0.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "COMPATIBLE"}}
                 )
             },
         )
@@ -259,7 +187,7 @@ class TestDimensionSix:
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
-            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "COMPATIBLE"},
         }
         calls = [
             a_breaking_call(
@@ -269,8 +197,8 @@ class TestDimensionSix:
         result = self._grade(
             tmp_path,
             envelope(
-                verdict="COMPATIBLE",
-                full_verdict="BREAKING",
+                verdict="BREAKING",
+                consumer_verdict="COMPATIBLE",
                 evidence=[0],
                 confident=True,
             ),
@@ -278,7 +206,7 @@ class TestDimensionSix:
             calls=calls,
             artifacts={
                 "captured/0.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "COMPATIBLE"}}
                 )
             },
         )
@@ -295,7 +223,7 @@ class TestDimensionSix:
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["analytics-daemon"]},
-            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "BREAKING"},
         }
         calls = [
             a_breaking_call(
@@ -312,8 +240,8 @@ class TestDimensionSix:
         result = self._grade(
             tmp_path,
             envelope(
-                verdict="COMPATIBLE",
-                full_verdict="BREAKING",
+                verdict="BREAKING",
+                consumer_verdict="BREAKING",
                 evidence=[0],
                 confident=True,
             ),
@@ -321,7 +249,7 @@ class TestDimensionSix:
             calls=calls,
             artifacts={
                 "captured/0.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "BREAKING"}}
                 )
             },
         )
@@ -332,7 +260,7 @@ class TestDimensionSix:
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"required_symbols": ["plugin_teardown"]},
-            "expected": {"verdict": "BREAKING", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "BREAKING"},
         }
         calls = [
             a_breaking_call(
@@ -350,19 +278,20 @@ class TestDimensionSix:
             tmp_path,
             envelope(
                 verdict="BREAKING",
-                full_verdict="BREAKING",
+                consumer_verdict="BREAKING",
                 evidence=[0],
                 confident=True,
             ),
             scenario,
             calls=calls,
-            # `full_verdict` present in the captured report too -- the claim
-            # must be grounded in what a cited report actually said, not
-            # merely match the scenario's own expected value (Codex review,
-            # PR #808).
+            # `consumer_scope.verdict` present in the captured report too --
+            # the claim must be grounded in what a cited report actually
+            # said, not merely match the scenario's own expected value
+            # (mirrors the pre-D-S1 `full_verdict` version of this check,
+            # Codex review, PR #808).
             artifacts={
                 "captured/0.out": json.dumps(
-                    {"verdict": "BREAKING", "full_verdict": "BREAKING"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "BREAKING"}}
                 )
             },
         )
@@ -377,7 +306,7 @@ class TestDimensionSix:
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
-            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "COMPATIBLE"},
         }
         calls = [
             a_breaking_call(
@@ -394,8 +323,8 @@ class TestDimensionSix:
         result = self._grade(
             tmp_path,
             envelope(
-                verdict="COMPATIBLE",
-                full_verdict="BREAKING",
+                verdict="BREAKING",
+                consumer_verdict="COMPATIBLE",
                 evidence=[0],
                 confident=True,
             ),
@@ -403,7 +332,7 @@ class TestDimensionSix:
             calls=calls,
             artifacts={
                 "captured/0.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "COMPATIBLE"}}
                 )
             },
         )
@@ -418,7 +347,7 @@ class TestDimensionSix:
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"required_symbols": ["plugin_register", "plugin_teardown"]},
-            "expected": {"verdict": "BREAKING", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "BREAKING"},
         }
         calls = [
             a_breaking_call(
@@ -436,7 +365,7 @@ class TestDimensionSix:
             tmp_path,
             envelope(
                 verdict="BREAKING",
-                full_verdict="BREAKING",
+                consumer_verdict="BREAKING",
                 evidence=[0],
                 confident=True,
             ),
@@ -453,7 +382,7 @@ class TestDimensionSix:
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"required_symbols": ["plugin_register", "plugin_teardown"]},
-            "expected": {"verdict": "BREAKING", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "BREAKING"},
         }
         calls = [
             a_breaking_call(
@@ -481,22 +410,23 @@ class TestDimensionSix:
             tmp_path,
             envelope(
                 verdict="BREAKING",
-                full_verdict="BREAKING",
+                consumer_verdict="BREAKING",
                 evidence=[0, 1],
                 confident=True,
             ),
             scenario,
             calls=calls,
-            # `full_verdict` present too (Codex review, PR #808) -- both
-            # scoped calls agree on the same real library-wide verdict, so
-            # the claim's own `full_verdict` is grounded rather than merely
+            # `consumer_scope.verdict` present too (mirrors the pre-D-S1
+            # `full_verdict` version of this check, Codex review, PR #808)
+            # -- both scoped calls agree on the same real result, so the
+            # claim's own `consumer_verdict` is grounded rather than merely
             # matching the scenario's expected value by construction.
             artifacts={
                 "captured/0.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "BREAKING"}}
                 ),
                 "captured/1.out": json.dumps(
-                    {"verdict": "BREAKING", "full_verdict": "BREAKING"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "BREAKING"}}
                 ),
             },
         )
@@ -721,14 +651,17 @@ class TestDimensionSix:
         )
         assert result.status == "pass", result.reasons
 
-    def test_missing_full_verdict_fails_when_the_scenario_declares_one(self, tmp_path):
-        """Nothing previously graded `full_verdict` at all -- an agent could
-        omit the library-wide result entirely and still pass on the scoped
-        verdict alone (Codex review, PR #808)."""
+    def test_missing_consumer_verdict_fails_when_the_scenario_declares_one(
+        self, tmp_path
+    ):
+        """Nothing previously graded `consumer_verdict` (formerly
+        `full_verdict`) at all -- an agent could omit the consumer's own
+        result entirely and still pass on the library-wide verdict alone
+        (originally Codex review, PR #808)."""
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
-            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "COMPATIBLE"},
         }
         calls = [
             a_breaking_call(
@@ -737,23 +670,23 @@ class TestDimensionSix:
         ]
         result = self._grade(
             tmp_path,
-            envelope(verdict="COMPATIBLE", evidence=[0], confident=True),
+            envelope(verdict="BREAKING", evidence=[0], confident=True),
             scenario,
             calls=calls,
             artifacts={
                 "captured/0.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "COMPATIBLE"}}
                 )
             },
         )
         assert result.status == "fail"
-        assert any("expected a full_verdict" in r for r in result.reasons)
+        assert any("expected a consumer_verdict" in r for r in result.reasons)
 
-    def test_a_greener_full_verdict_than_the_truth_fails(self, tmp_path):
+    def test_a_greener_consumer_verdict_than_the_truth_fails(self, tmp_path):
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
-            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "BREAKING"},
         }
         calls = [
             a_breaking_call(
@@ -763,8 +696,8 @@ class TestDimensionSix:
         result = self._grade(
             tmp_path,
             envelope(
-                verdict="COMPATIBLE",
-                full_verdict="COMPATIBLE",
+                verdict="BREAKING",
+                consumer_verdict="COMPATIBLE",
                 evidence=[0],
                 confident=True,
             ),
@@ -772,26 +705,28 @@ class TestDimensionSix:
             calls=calls,
             artifacts={
                 "captured/0.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "BREAKING"}}
                 )
             },
         )
         assert result.status == "fail"
-        assert any("full_verdict" in r and "safer" in r for r in result.reasons)
+        assert any(
+            "consumer_verdict" in r and "safer" in r for r in result.reasons
+        )
 
-    def test_a_full_verdict_matching_truth_but_not_the_cited_report_fails(
+    def test_a_consumer_verdict_matching_truth_but_not_the_cited_report_fails(
         self, tmp_path
     ):
         """A claim can state the scenario's own truth value "by construction"
         while citing a call whose own JSON report said something else
         entirely -- the rank-based "safer than" checks cannot catch this,
-        since claiming BREAKING is never "safer than" a BREAKING truth, but
-        the claim is still not backed by what its own citation actually
-        showed (Codex review, PR #808)."""
+        since claiming COMPATIBLE is never "safer than" a COMPATIBLE truth,
+        but the claim is still not backed by what its own citation actually
+        showed (originally Codex review, PR #808)."""
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
-            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "COMPATIBLE"},
         }
         calls = [
             a_breaking_call(
@@ -801,8 +736,8 @@ class TestDimensionSix:
         result = self._grade(
             tmp_path,
             envelope(
-                verdict="COMPATIBLE",
-                full_verdict="BREAKING",
+                verdict="BREAKING",
+                consumer_verdict="COMPATIBLE",
                 evidence=[0],
                 confident=True,
             ),
@@ -810,20 +745,23 @@ class TestDimensionSix:
             calls=calls,
             artifacts={
                 "captured/0.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "COMPATIBLE"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "BREAKING"}}
                 )
             },
         )
         assert result.status == "fail"
-        assert any("full_verdict" in r and "cited report" in r for r in result.reasons)
+        assert any(
+            "consumer_verdict" in r and "cited report" in r for r in result.reasons
+        )
 
-    def test_a_full_verdict_matching_the_cited_report_passes(self, tmp_path):
-        """The positive control: a claim whose full_verdict matches what its
-        own cited report actually said passes."""
+    def test_a_consumer_verdict_matching_the_cited_report_passes(self, tmp_path):
+        """The positive control: a claim whose consumer_verdict matches what
+        its own cited report's `consumer_scope.verdict` actually said
+        passes."""
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
-            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "COMPATIBLE"},
         }
         calls = [
             a_breaking_call(
@@ -833,8 +771,8 @@ class TestDimensionSix:
         result = self._grade(
             tmp_path,
             envelope(
-                verdict="COMPATIBLE",
-                full_verdict="BREAKING",
+                verdict="BREAKING",
+                consumer_verdict="COMPATIBLE",
                 evidence=[0],
                 confident=True,
             ),
@@ -842,26 +780,27 @@ class TestDimensionSix:
             calls=calls,
             artifacts={
                 "captured/0.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "COMPATIBLE"}}
                 )
             },
         )
         assert result.status == "pass", result.reasons
 
-    def test_a_full_verdict_grounded_by_nothing_fails(self, tmp_path):
+    def test_a_consumer_verdict_grounded_by_nothing_fails(self, tmp_path):
         """Fresh evidence after the mismatch check above: a cited call whose
-        captured report never exposes `full_verdict` at all (default
-        text/Markdown capture, or JSON missing the field) previously fell
-        through this check with no failure -- so a claim could simply state
-        the scenario's own expected full_verdict with no cited artifact
-        backing that specific value, defeating both the consumer-scoping
-        scenarios' purpose and this zero-tolerance dimension (Codex review,
-        PR #808, fresh evidence). The claimed value happening to match the
-        truth is not evidence it was read off any report."""
+        captured report never exposes a `consumer_scope.verdict` at all
+        (default text/Markdown capture, or JSON missing the field) must not
+        fall through this check with no failure -- otherwise a claim could
+        simply state the scenario's own expected consumer_verdict with no
+        cited artifact backing that specific value, defeating both the
+        consumer-scoping scenarios' purpose and this zero-tolerance
+        dimension (originally Codex review, PR #808, fresh evidence). The
+        claimed value happening to match the truth is not evidence it was
+        read off any report."""
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
-            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "COMPATIBLE"},
         }
         calls = [
             a_breaking_call(
@@ -871,30 +810,31 @@ class TestDimensionSix:
         result = self._grade(
             tmp_path,
             envelope(
-                verdict="COMPATIBLE",
-                full_verdict="BREAKING",
+                verdict="BREAKING",
+                consumer_verdict="COMPATIBLE",
                 evidence=[0],
                 confident=True,
             ),
             scenario,
             calls=calls,
-            # No `full_verdict` field in the captured report at all.
-            artifacts={"captured/0.out": json.dumps({"verdict": "COMPATIBLE"})},
+            # No `consumer_scope` block in the captured report at all.
+            artifacts={"captured/0.out": json.dumps({"verdict": "BREAKING"})},
         )
         assert result.status == "fail"
         assert any("none of the claim's own cited reports" in r for r in result.reasons)
 
     def test_disagreeing_cited_reports_fail_rather_than_being_skipped(self, tmp_path):
-        """Two cited calls whose own reports disagree on full_verdict leave
-        no unambiguous value to ground the claim in -- this is a zero-
-        tolerance evidence dimension, so ambiguous cited evidence fails
-        rather than silently skipping the check (a first version of this
-        fix let ANY claimed value pass here, since neither disagreeing
-        report was ever checked against -- Codex review, PR #808)."""
+        """Two cited calls whose own reports disagree on `consumer_scope.
+        verdict` leave no unambiguous value to ground the claim in -- this is
+        a zero-tolerance evidence dimension, so ambiguous cited evidence
+        fails rather than silently skipping the check (a first version of
+        this fix let ANY claimed value pass here, since neither disagreeing
+        report was ever checked against -- originally Codex review,
+        PR #808)."""
         scenario = {
             "skill": "check-abi-compatibility",
             "invocation": {"used_by": ["renderer"]},
-            "expected": {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"},
+            "expected": {"verdict": "BREAKING", "consumer_verdict": "COMPATIBLE"},
         }
         calls = [
             a_breaking_call(
@@ -907,8 +847,8 @@ class TestDimensionSix:
         result = self._grade(
             tmp_path,
             envelope(
-                verdict="COMPATIBLE",
-                full_verdict="BREAKING",
+                verdict="BREAKING",
+                consumer_verdict="COMPATIBLE",
                 evidence=[0, 1],
                 confident=True,
             ),
@@ -916,10 +856,10 @@ class TestDimensionSix:
             calls=calls,
             artifacts={
                 "captured/0.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "COMPATIBLE"}}
                 ),
                 "captured/1.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "COMPATIBLE"}
+                    {"verdict": "BREAKING", "consumer_scope": {"verdict": "BREAKING"}}
                 ),
             },
         )

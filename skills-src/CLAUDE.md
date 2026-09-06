@@ -113,8 +113,10 @@ place:**
   narrowing to one consumer), not just the single linking citation to
   `shared/consumer-scoping.md` the reset amendment left behind. States
   inline when to reach for `--used-by` versus `--required-symbol`/
-  `--required-symbols`, and the `verdict`-is-scoped /
-  `full_verdict`-is-global reading rule.
+  `--required-symbols`, and the `verdict`-is-always-global /
+  `consumer_scope`-is-the-supplied-consumer's-own-informational-answer
+  reading rule (workstream D-S1 reverted the earlier `verdict`-is-scoped /
+  `full_verdict`-is-global design this bullet used to describe).
 - A new `references/remediation-patterns.md` (pImpl, reserved slots,
   versioned interfaces, capability negotiation, deprecation lifecycle,
   anti-patterns), cited from the recommendation step — harvested from

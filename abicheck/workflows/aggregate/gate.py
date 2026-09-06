@@ -27,7 +27,7 @@ COVERAGE_INCOMPLETE_EXIT = 1
 _VALID_GATE_EXIT = frozenset({0, 1, 2, 4})
 #: The keys `$defs.run_outcome` (`compare_report.schema.json`) declares
 #: required -- `RunOutcome.from_dict` deliberately does not enforce all of
-#: these itself (see `_has_valid_full_run_outcome`'s own docstring, point 3).
+#: these itself (see `_is_schema_valid_run_outcome`'s own docstring).
 _RUN_OUTCOME_REQUIRED_KEYS = frozenset(
     {"schema_version", "compatibility", "assurance", "gate", "operational", "lifecycle"}
 )
@@ -49,10 +49,9 @@ def _is_schema_valid_run_outcome(data: object) -> bool:
     lenient for its OTHER callers (reading an already-genuine block back):
     ``compatibility``/``lifecycle`` degrade silently, and it never reads
     ``schema_version``/``assurance``. So ``schema_version: null``,
-    ``compatibility: {}``, and ``lifecycle: "bogus"`` survived, at both the top-level ``run_outcome`` read
-    (:func:`_run_outcome_gate_and_operational`) and the scoped exemption's
-    ``full_run_outcome`` read (:func:`_has_valid_full_run_outcome`) --
-    shared here so neither can independently drift from the schema.
+    ``compatibility: {}``, and ``lifecycle: "bogus"`` survived the top-level
+    ``run_outcome`` read (:func:`_run_outcome_gate_and_operational`) -- this
+    is the one strict validator that call site relies on.
     """
     if not isinstance(data, Mapping):
         return False
@@ -173,74 +172,6 @@ def _run_outcome_gate_and_operational(
     return outcome.gate, outcome.operational
 
 
-def _has_valid_full_run_outcome(data: Mapping[str, Any]) -> bool:
-    """Whether *data* has the complete shape a genuine scoped
-    (``--used-by``/``--required-symbol``) report always carries, earning the
-    ``run_outcome``/``severity`` contradiction exemption in
-    :func:`_fold_top_level_run_outcome`.
-
-    Two rounds of Codex review, both fresh evidence, on the same exemption:
-
-    1. The original check was bare key presence (``"full_run_outcome" in
-       data``), so a corrupted or partially rewritten *unscoped* report
-       could pair a genuinely contradictory ``severity``/``run_outcome``
-       pair with an arbitrary ``full_run_outcome: null`` (or any other
-       garbage value) and have the cross-check silently disabled. Fixed by
-       requiring ``full_run_outcome`` to itself parse via
-       :meth:`~abicheck.policy.outcome.RunOutcome.from_dict`.
-    2. That alone was still not enough: a *well-formed but unrelated*
-       ``full_run_outcome`` value, added to an otherwise-unscoped corrupt
-       report, still earned the exemption -- the real writer
-       (``report.scoped_gate.apply_scoped_gate``) never emits
-       ``full_run_outcome`` without *also* unconditionally emitting
-       ``full_verdict`` (set on every scoped fold, regardless of which flag
-       triggered it) and at least one of ``used_by``/
-       ``required_symbol_contract`` (one of the two is always set --
-       ``_fold_scoped_compat_into_text`` returns unmodified text unless at
-       least one of ``result.used_by``/``result.required_symbols`` is
-       non-``None``). Requiring the same three markers together is what a
-       corrupt report cannot forge without also being a genuine scoped one.
-    3. Still not enough (Codex review, fresh evidence): ``RunOutcome.
-       from_dict`` is a lenient, best-effort reader (it only requires
-       ``gate``/``operational`` to parse; ``compatibility`` degrades
-       silently to ``None`` and ``lifecycle`` defaults to ``EXISTING``
-       rather than failing on a malformed/absent value -- deliberately so,
-       per its own docstring, for its OTHER callers that read an
-       already-genuine block back). A partially rewritten unscoped report
-       could therefore forge a minimal two-key ``full_run_outcome: {"gate":
-       ..., "operational": ...}`` alongside the other two markers and still
-       earn the exemption.
-    4. Requiring the six keys to be *present* (previous fix) still let
-       schema-invalid *values* through (Codex review, fresh evidence):
-       ``schema_version: null``, ``compatibility: {}``, ``lifecycle:
-       "bogus"`` all satisfy "key present" while being rejected by
-       ``$defs.run_outcome``'s own type/enum constraints. This function now
-       delegates to :func:`_is_schema_valid_run_outcome`, the same strict
-       validator :func:`_run_outcome_gate_and_operational` uses for the
-       ordinary top-level ``run_outcome`` read, so neither can
-       independently drift from the schema.
-    5. Presence alone was still not enough for the *other* two markers
-       either (Codex review, fresh evidence): ``full_verdict: null`` plus
-       ``used_by: null`` satisfied both membership checks, though
-       ``report.scoped_gate.apply_scoped_gate`` never emits either key
-       with a ``null`` value -- it only ever sets ``full_verdict`` to the
-       real pre-swap ``verdict`` string, and only ever adds ``used_by``/
-       ``required_symbol_contract`` when that attribute is not ``None``.
-       ``full_verdict`` must now parse as a real :class:`Verdict`, and at
-       least one of ``used_by``/``required_symbol_contract`` must be
-       genuinely non-``None``.
-    """
-    if "full_run_outcome" not in data or "full_verdict" not in data:
-        return False
-    try:
-        Verdict(data.get("full_verdict"))
-    except ValueError:
-        return False
-    if data.get("used_by") is None and data.get("required_symbol_contract") is None:
-        return False
-    return _is_schema_valid_run_outcome(data.get("full_run_outcome"))
-
-
 def _run_outcome_blocking_categories(
     gate: PolicyGateDecision, operational: OperationalStatus
 ) -> tuple[str, ...]:
@@ -297,8 +228,6 @@ class _MalformedGate(ValueError):
 def _fold_top_level_run_outcome(
     result: GateInfo,
     run_outcome: tuple[PolicyGateDecision, OperationalStatus] | None,
-    *,
-    scoped_exempt: bool,
 ) -> GateInfo:
     """Fold a report's top-level ``RunOutcome`` axes into *result*, a
     ``GateInfo`` already derived from its ``severity`` block alone.
@@ -318,62 +247,34 @@ def _fold_top_level_run_outcome(
     operational failure may only ever *raise* what ``severity`` alone
     already stated, never lower it.
 
-    ``gate`` is cross-checked against *result*'s own ``exit_code``, unless
-    *scoped_exempt*: ``RunOutcome.gate`` is derived from the identical
-    computation ``severity`` itself is (see ``reporter._run_outcome_for_
-    result``), so the two can never disagree on a *fresh, unscoped* report
-    -- a disagreement is corruption and fails closed
-    (:class:`_MalformedGate`), the same principle the surrounding
-    ``severity``-block validation already applies. A **scoped**
-    (``--used-by``/``--required-symbol``) ``compare`` report is
-    deliberately exempt: ``report.scoped_gate._swap_in_scoped_severity``
-    rewrites ``severity.exit_code`` to ``result.scoped_exit_code`` --
-    already folded with the orthogonal contract-coverage/analysis-
-    assurance floors -- while ``report.scoped_gate._swap_in_scoped_run_outcome`` rewrites
-    ``run_outcome.gate`` from ``result.scoped_compatibility_contribution``,
-    the deliberately *pre*-fold, compatibility-only value D6's own axis
-    separation requires; the two legitimately differ by exactly that fold
-    on a scoped report. ``scan`` reports have no scoped-gate concept, so
-    their own caller always passes ``scoped_exempt=False``.
+    ``gate`` is cross-checked against *result*'s own ``exit_code``:
+    ``RunOutcome.gate`` is derived from the identical computation
+    ``severity`` itself is (see ``reporter._run_outcome_for_result``), so
+    the two can never legitimately disagree -- a disagreement is corruption
+    and fails closed (:class:`_MalformedGate`), the same principle the
+    surrounding ``severity``-block validation already applies.
+
+    **No scoped-report exemption any more (workstream D-S1).** A
+    ``--used-by``/``--required-symbol`` ``compare`` report used to be
+    deliberately exempt from this cross-check, because
+    ``report.scoped_gate`` used to rewrite ``severity.exit_code``/
+    ``run_outcome.gate`` to the *scoped* result while ``result.exit_code``
+    (this function's caller) stayed the full-library one -- a legitimate
+    disagreement by construction. Since that swap was reverted,
+    ``severity``/``run_outcome`` always describe the full-library result on
+    every report, scoped or not, so the exemption's premise no longer
+    holds; a disagreement on a `--used-by`/`--required-symbol` report is
+    corruption exactly like any other, and this function no longer accepts
+    a *scoped_exempt* parameter to request one.
     """
     if run_outcome is None:
         return result
     gate, operational = run_outcome
-    if not scoped_exempt:
-        gate_exit = policy_gate_decision_exit_code(gate)
-        if gate_exit != result.exit_code:
-            raise _MalformedGate(
-                f"'run_outcome.gate' ({gate.value}, exit {gate_exit}) "
-                f"contradicts the severity-derived exit_code ({result.exit_code})"
-            )
-    else:
-        # A scoped report's `severity.exit_code` is `scoped_exit_code`
-        # (`report.scoped_gate._swap_in_scoped_severity`) -- already folded
-        # with the orthogonal contract-coverage/analysis-assurance floors,
-        # unlike an unscoped report's `severity.exit_code`, which every
-        # other caller of this `GateInfo` treats as the pure compatibility-
-        # gate axis alone. Retaining that composite value here (Codex
-        # review, fresh evidence) meant a scoped report whose only
-        # contribution was coverage/assurance (compatibility clean,
-        # `run_outcome.gate: none`) still built a `GateInfo` with
-        # `exit_code=1`/`blocking=True`, so aggregation counted the target
-        # as a *compatibility* blocker even though that same coverage/
-        # assurance contribution is folded onto the aggregate's own
-        # orthogonal axis independently -- double-counting one contribution
-        # as two different kinds of blocker. Rebuilding from the pure
-        # `run_outcome.gate` here (then folding only `operational` below,
-        # same as the unscoped path) restores the invariant every other
-        # `GateInfo` already satisfies: this object's own `exit_code`/
-        # `blocking_categories` reflect the compatibility+operational axes
-        # only, never contract-coverage/analysis-assurance.
-        gate_exit = policy_gate_decision_exit_code(gate)
-        result = replace(
-            result,
-            exit_code=gate_exit,
-            blocking=gate_exit != 0,
-            blocking_categories=(gate.value,)
-            if gate is not PolicyGateDecision.NONE
-            else (),
+    gate_exit = policy_gate_decision_exit_code(gate)
+    if gate_exit != result.exit_code:
+        raise _MalformedGate(
+            f"'run_outcome.gate' ({gate.value}, exit {gate_exit}) "
+            f"contradicts the severity-derived exit_code ({result.exit_code})"
         )
     op_exit = operational_status_exit_code(operational)
     # A real operational failure's own category is unioned in independently
@@ -473,15 +374,11 @@ class GateInfo:
         )
         # ADR-063 Phase 7: fold `RunOutcome`'s top-level axes into the
         # severity-derived result -- see `_fold_top_level_run_outcome`'s own
-        # docstring for the full design (including the scoped-report
-        # exemption, earned only by a well-formed `full_run_outcome` block --
-        # see `_has_valid_full_run_outcome`). `data` (not `sev`) is
-        # deliberately what's checked for `full_run_outcome`/re-read for
-        # `run_outcome`: both live at the report's top level, siblings of
-        # `severity`, never nested inside it.
-        return _fold_top_level_run_outcome(
-            result, run_outcome, scoped_exempt=_has_valid_full_run_outcome(data)
-        )
+        # docstring for the full design. No scoped-report exemption any more
+        # (workstream D-S1): `severity`/`run_outcome` always describe the
+        # full-library result now, `--used-by`/`--required-symbol` supplied
+        # or not.
+        return _fold_top_level_run_outcome(result, run_outcome)
 
     @classmethod
     def from_scan_report(cls, data: Mapping[str, Any]) -> GateInfo | None:
@@ -526,7 +423,7 @@ class GateInfo:
             # a severity-scheme scan's top-level run_outcome was never
             # consulted at all).
             return _fold_top_level_run_outcome(
-                nested, _run_outcome_gate_and_operational(data), scoped_exempt=False
+                nested, _run_outcome_gate_and_operational(data)
             )
         # ADR-063 Phase 7: a fresh scan report's own top-level `run_outcome`
         # (`ScanOutcome.to_dict()`/`ScanResult.to_dict()`/

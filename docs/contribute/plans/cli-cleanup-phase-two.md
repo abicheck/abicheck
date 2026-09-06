@@ -348,7 +348,7 @@ checklist: where the two ever disagree, `vision-api-abi-evolution.md` wins.
 | 3 | Release-path scope & completeness | **A-S2 DONE (#1079)**; A-S1 selection is the live slice | A-S1 (deletion gate A-S4) | `cli_compare_release*`, `workflows/`, `policy/outcome.py` | **Yes — integration owner** |
 | 5 | Per-dimension comparability + failed evidence | **Tier 1 — now** (untouched) | E-S1/S2 | `comparability.py`, `analysis_assurance.py`, `workflows/plan.py` | **Yes — integration owner** |
 | 2 | Scalar disposition audit | **DONE (#1082)**; C-S2's multi-member parity is the next slice | C-S1 + G-S1 | `policy/`, `report/`, `checker.py`, `semver.py` | No |
-| 8 | `--used-by` enriches instead of replacing the gate | **Newly unblocked** by #1082 | D-S1 | `appcompat.py`, `impact/`, `report/` | No |
+| 8 | `--used-by` enriches instead of replacing the gate | **DONE** | D-S1 | `appcompat.py`, `impact/`, `report/` | No |
 | 4 | Header-only capture and comparison | Tier 3 — after E-S1 (untouched) | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `service_dump_pipeline.py`, `workflows/artifact/` | No |
 | 6 | `scan --artifact-set` member-identity manifest | Tier 3 — needs A-S3's component inventory (untouched) | this plan (PR H, last piece) | `cli_scan*`, a member-identity schema that does not exist yet | Indirectly (A's inventory) |
 

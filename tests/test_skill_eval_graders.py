@@ -512,10 +512,18 @@ class TestEvidenceReading:
         )
         assert ev.strongest_reported_verdict(run, calls) == "BREAKING"
 
-    def test_only_scoped_drops_unscoped_calls_from_the_reckoning(self, tmp_path):
-        """An unscoped compare answers a different question than a `--used-by`
-        one — `only_scoped` must not let its report dominate the scoped
-        answer, even though it is the more severe of the two."""
+    def test_a_scoped_calls_verdict_field_counts_the_same_as_an_unscoped_ones(
+        self, tmp_path
+    ):
+        """Workstream D-S1: a `--used-by`/`--required-symbol(s)` call's own
+        top-level `verdict` field is always the library-wide result, exactly
+        like an unscoped call's — there is no separate "scoped answer" for a
+        `strongest_reported_verdict` reckoning to exempt or favor. (This used
+        to test the opposite: an `only_scoped` flag that restricted the
+        reckoning to consumer-scoped calls, back when a scoped call's
+        top-level `verdict` *was* the narrower, consumer-specific answer.
+        That flag was removed along with the pre-D-S1 report shape it
+        existed for.)"""
         calls = [
             a_breaking_call(0, argv=["compare", "old.so", "new.so"]),
             a_breaking_call(
@@ -527,16 +535,47 @@ class TestEvidenceReading:
             final="",
             calls=calls,
             artifacts={
-                "captured/0.out": json.dumps({"verdict": "BREAKING"}),
+                "captured/0.out": json.dumps({"verdict": "COMPATIBLE"}),
                 "captured/1.out": json.dumps(
-                    {"verdict": "COMPATIBLE", "full_verdict": "BREAKING"}
+                    {
+                        "verdict": "BREAKING",
+                        "consumer_scope": {"verdict": "COMPATIBLE"},
+                    }
                 ),
             },
         )
         assert ev.strongest_reported_verdict(run, calls) == "BREAKING"
-        assert (
-            ev.strongest_reported_verdict(run, calls, only_scoped=True) == "COMPATIBLE"
+
+    def test_the_consumer_verdict_is_read_out_of_the_consumer_scope_block(
+        self, tmp_path
+    ):
+        call = a_breaking_call(
+            0, argv=["compare", "old.so", "new.so", "--used-by", "app"]
         )
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[call],
+            artifacts={
+                "captured/0.out": json.dumps(
+                    {
+                        "verdict": "BREAKING",
+                        "consumer_scope": {"verdict": "COMPATIBLE"},
+                    }
+                )
+            },
+        )
+        assert ev.reported_consumer_verdict(run, call) == "COMPATIBLE"
+
+    def test_a_report_with_no_consumer_scope_block_answers_none(self, tmp_path):
+        call = a_breaking_call(0, argv=["compare", "old.so", "new.so"])
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[call],
+            artifacts={"captured/0.out": json.dumps({"verdict": "BREAKING"})},
+        )
+        assert ev.reported_consumer_verdict(run, call) is None
 
     @pytest.mark.parametrize(
         "argv",

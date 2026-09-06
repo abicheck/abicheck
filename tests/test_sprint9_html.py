@@ -625,11 +625,19 @@ def test_gate_card_omits_blocking_categories_when_passing() -> None:
     assert "Blocked by:" not in out
 
 
-def test_gate_card_scoped_gate_omits_full_library_blocking_categories() -> None:
-    """Regression guard: the scoped gate's exit code can fail for a reason
-    unrelated to full_gate's categories (e.g. a missing --required-symbol
-    entrypoint), so the card must not name full-library categories next to
-    the scoped FAIL -- that would misattribute the cause."""
+def test_gate_card_always_names_the_full_library_blocking_categories() -> None:
+    """Regression guard, originally: the scoped gate's exit code could fail
+    for a reason unrelated to full_gate's categories (e.g. a missing
+    --required-symbol entrypoint), so the card had to avoid naming
+    full-library categories next to a scoped FAIL that would misattribute
+    the cause.
+
+    Workstream D-S1: `compute_gate_card` is now always the full-library gate
+    -- a supplied consumer's own scoped result never produces a "CI Gate
+    (scoped)" card at all (`GateCardData.scoped` is never set to True by it
+    any more). Here the full-library gate genuinely fails on the
+    error-promoted addition, so "Blocked by: addition" is correct and
+    expected."""
     from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
     from abicheck.severity import resolve_severity_config
 
@@ -646,8 +654,12 @@ def test_gate_card_scoped_gate_omits_full_library_blocking_categories() -> None:
     result.scoped_exit_code_scheme = "severity"  # type: ignore[attr-defined]
     cfg = resolve_severity_config("default", addition="error")
     out = generate_html_report(result, severity_config=cfg)
-    assert "CI Gate (scoped)" in out
-    assert "Blocked by:" not in out
+    assert "CI Gate (scoped)" not in out
+    assert "CI Gate: FAIL (exit 1)" in out
+    assert "Blocked by:" in out
+    assert "<code>addition</code>" in out
+    # The consumer's own BREAKING assessment is still reported, separately.
+    assert "Consumer-scoped verdict: BREAKING" in out
 
 
 def test_gate_card_passes_when_no_error_level_findings() -> None:
@@ -668,14 +680,19 @@ def test_gate_card_passes_when_no_error_level_findings() -> None:
     assert "PASS" in out
 
 
-def test_gate_card_reflects_scoped_gate_not_full_library() -> None:
-    """Regression (CodeRabbit review): the CI Gate card used to always be
-    computed from the full-library diff, even under --used-by/--required
-    -symbol scoping. Here the full library has an error-level BREAKING
-    removal, but the scoped result (set on `result` the way
-    `_apply_used_by_scoping` does) is compatible -- the CLI process exits 0,
-    so the card must say PASS, not FAIL, and must not just silently ignore
-    the scoping."""
+def test_gate_card_always_reflects_the_full_library_gate() -> None:
+    """Regression (CodeRabbit review), originally: the CI Gate card used to
+    be replaced by the scoped gate under --used-by/--required-symbol
+    scoping -- here the full library has an error-level BREAKING removal,
+    but the scoped result (set on `result` the way `_apply_used_by_scoping`
+    does) is compatible, and the card used to say PASS (the scoped result)
+    instead of FAIL (the real, full-library gate).
+
+    Workstream D-S1 reverts that: the CI Gate card always reflects the
+    full-library gate (FAIL here, since the real exit code is 4) -- a
+    supplied consumer's own COMPATIBLE assessment is reported separately, in
+    the informational Consumer-scoped verdict box, and never produces a
+    "CI Gate (scoped)" card."""
     from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
     from abicheck.severity import resolve_severity_config
 
@@ -692,8 +709,9 @@ def test_gate_card_reflects_scoped_gate_not_full_library() -> None:
     result.scoped_exit_code_scheme = "severity"  # type: ignore[attr-defined]
     cfg = resolve_severity_config("default")
     out = generate_html_report(result, severity_config=cfg)
-    assert "CI Gate (scoped): PASS" in out
-    assert "full-library gate: FAIL (exit 4)" in out
+    assert "CI Gate (scoped)" not in out
+    assert "CI Gate: FAIL (exit 4)" in out
+    assert "Consumer-scoped verdict: COMPATIBLE" in out
 
 
 def test_gate_card_absent_from_abicc_compatible_layout() -> None:
@@ -747,32 +765,43 @@ def test_scoped_verdict_box_absent_when_no_scoping() -> None:
 
 
 def test_scoped_verdict_box_present_and_can_disagree_with_full_verdict() -> None:
-    # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI process
-    # exits on the scoped verdict floor, which can disagree with the full
-    # library's Compatibility verdict box above -- the report must surface
-    # that instead of only showing the (possibly misleading) full verdict
-    # (post-merge PR #566 review).
+    # `--used-by`/`--required-symbol(s)` scoping (ADR-043), originally: the
+    # CLI process exited on the scoped verdict floor, which could disagree
+    # with the full library's Compatibility verdict box above.
+    #
+    # Workstream D-S1: the CLI process always exits on the full-library
+    # verdict now -- this box is purely informational
+    # (`report/render_html.render_scoped_verdict`), stating what the
+    # supplied consumer's own assessment would conclude on its own, beside
+    # (never instead of) the full-library Compatibility box above.
     r = _result(verdict="BREAKING")
     r.scoped_verdict = SimpleNamespace(value="COMPATIBLE")
     r.used_by = [{"app": "/bin/myapp", "verdict": "COMPATIBLE"}]
     out = generate_html_report(r)
-    assert "Scoped verdict: COMPATIBLE" in out
+    assert "Consumer-scoped verdict: COMPATIBLE" in out
+    assert "always come from the full-library result" in out
     # The main verdict box stays the full-library one (unchanged).
     assert "Compatibility: BREAKING" in out
 
 
 def test_scoped_verdict_box_states_actual_exit_code_under_severity_scheme() -> None:
-    # Regression: the banner used to claim "this is what the CLI process
-    # exit code reflects" unconditionally, wrong under a severity scheme --
-    # e.g. --severity-preset info-only can floor the scoped exit code at 0
-    # even for a BREAKING scoped verdict (Codex review).
+    # Regression, originally: the banner used to claim "this is what the CLI
+    # process exit code reflects" unconditionally, wrong under a severity
+    # scheme -- e.g. --severity-preset info-only can floor the scoped exit
+    # code at 0 even for a BREAKING scoped verdict.
+    #
+    # Workstream D-S1 supersedes the underlying claim entirely: the box
+    # never claims to describe the process's own exit code any more, under
+    # any severity scheme -- it states what a *consumer-only* assessment
+    # would compute, explicitly informational.
     r = _result(verdict="BREAKING")
     r.scoped_verdict = SimpleNamespace(value="BREAKING")
     r.scoped_exit_code = 0
     r.scoped_exit_code_scheme = "severity"
     out = generate_html_report(r)
-    assert "exits 0" in out
+    assert "a consumer-only assessment would compute exit code 0" in out
     assert "severity exit-code scheme" in out
+    assert "always come from the full-library result" in out
 
 
 def test_correlated_change_kind_rendered_in_changes_table() -> None:

@@ -76,16 +76,6 @@ def _md_url(url: str) -> str:
     return url.replace("(", "%28").replace(")", "%29").replace(" ", "%20")
 
 
-#: Scoped-verdict (--used-by/--required-symbol) headline per verdict string —
-#: this is what the actual exit code reflects, so it takes priority over the
-#: raw (unscoped) bucket counts, which stay informational context below.
-_SCOPED_HEADER: dict[str, tuple[str, str]] = {
-    "BREAKING": ("❌", "ABI BREAKING (scoped)"),
-    "API_BREAK": ("⚠️", "API break (scoped)"),
-    "COMPATIBLE": ("✅", "Compatible (scoped)"),
-}
-
-
 #: Reviewer-facing headline for a Breaking bucket whose members are *only*
 #: policy-gated COMPATIBLE findings (a severity-config category promoted to
 #: ``error``) — not a genuine ABI/API incompatibility. Keyed by the exact
@@ -116,27 +106,14 @@ def _header(model: CommentModel) -> tuple[str, str]:
         # as "we compared and found nothing" rather than "there was nothing
         # to compare".
         return "✅", "Scan audit — no baseline to compare"
-    if model.scoped_verdict is not None:
-        # `contract_coverage_blocking` is checked FIRST, ahead of the scoped
-        # header itself (Codex review, two rounds): the contract-coverage
-        # axis folds into the real exit code unconditionally, on top of
-        # *any* other verdict including a scoped one — a
-        # --used-by/--required-symbol run reporting a scoped COMPATIBLE
-        # verdict does not silence an orthogonal coverage failure that
-        # already turned the real exit code non-zero. This must return
-        # directly here, not merely skip the scoped-header return and fall
-        # through to the rest of the function: under scoping, the *raw*
-        # `b`/`r`/`s` bucket counts below are the full, unscoped library
-        # diff (kept only as informational context, per this module's own
-        # design) and are not part of the actual gate — falling through
-        # would let an unrelated full-library break the scoped consumer
-        # never even sees win the headline instead of correctly naming the
-        # orthogonal coverage axis that is what's actually failing.
-        if model.contract_coverage_blocking:
-            return "🛑", "Source analysis incomplete"
-        header = _SCOPED_HEADER.get(model.scoped_verdict)
-        if header is not None:
-            return header
+    # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+    # prebuilt-consumer lifecycle"): a supplied --used-by/--required-symbol
+    # consumer's own scoped verdict (`model.scoped_verdict`) no longer
+    # overrides this headline -- it is reported separately, see
+    # `_scoped_notes` below. The headline always follows the full-library
+    # `b`/`r`/`s` bucket counts (and the orthogonal `incomplete_blocking`
+    # check further down, which already folds in a contract-coverage
+    # failure), exactly as it would for a run with no consumer supplied.
     b, r, s = model.counts
     if model.removed_libraries:
         return "❌", "LIBRARY REMOVED"
@@ -508,21 +485,25 @@ def _suppression_note(model: CommentModel) -> list[str]:
 
 
 def _scoped_notes(model: CommentModel) -> list[str]:
-    """`compare --used-by`/`--required-symbol(s)` scoping banner + summary.
+    """`compare --used-by`/`--required-symbol(s)` consumer summary (workstream
+    D-S1, vision-api-abi-evolution.md "D. Optional prebuilt-consumer
+    lifecycle").
 
-    States which verdict the exit code actually reflects whenever it disagrees
-    with the full-library breaking/review/safe buckets rendered below, then
-    lists each app's/contract's own scoped result (Codex review) — otherwise a
-    reviewer sees only the alarming full-library findings with no indication
-    the gate is scoped and currently passing (or vice versa).
+    States a supplied consumer's own confirmed/potential/unresolved
+    assessment *beside* the full-library breaking/review/safe buckets
+    rendered below/above, then lists each app's/contract's own scoped result
+    — purely informational: the exit code and headline verdict this comment
+    reports always come from the full-library result, never this consumer's
+    own.
     """
     if model.scoped_verdict is None:
         return []
     out: list[str] = []
     if model.full_verdict is not None and model.full_verdict != model.scoped_verdict:
         out += [
-            f"> ℹ️ **Scoped verdict: {model.scoped_verdict}** — this is what the "
-            f"exit code reflects. The full library (all changes below) is "
+            f"> ℹ️ **Consumer-scoped verdict: {model.scoped_verdict}** "
+            f"(informational only). The full library verdict (all changes "
+            f"below, and what this run's exit code/headline are based on) is "
             f"`{model.full_verdict}`.",
             "",
         ]

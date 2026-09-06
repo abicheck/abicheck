@@ -40,9 +40,10 @@ that's noted — none of these are documented as a public CLI path anymore.
 ## Folded into `compare` flags
 
 Two of the old standalone commands became scoping flags on `compare` instead
-of separate commands — the full library comparison still runs once, and the
-worst app/plugin-scoped result becomes the primary verdict/exit code, with
-the full verdict kept as informational context.
+of separate commands — the full library comparison still runs once, and its
+own result is always this run's primary verdict/exit code; the supplied
+consumer's/host's own confirmed/potential/unresolved impact is reported
+alongside it, informational only, never in place of it.
 
 | Old command | New flag | What it scopes to |
 |---|---|---|

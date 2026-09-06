@@ -227,10 +227,10 @@ def validate(claim: dict) -> str | None:
     verdict = claim.get("verdict")
     if verdict is not None and verdict not in VERDICT_ORDER:
         return f"verdict {verdict!r} is outside the vocabulary"
-    if "full_verdict" in claim:
-        full_verdict = claim["full_verdict"]
-        if full_verdict is not None and full_verdict not in VERDICT_ORDER:
-            return f"full_verdict {full_verdict!r} is outside the vocabulary"
+    if "consumer_verdict" in claim:
+        consumer_verdict = claim["consumer_verdict"]
+        if consumer_verdict is not None and consumer_verdict not in VERDICT_ORDER:
+            return f"consumer_verdict {consumer_verdict!r} is outside the vocabulary"
     if "decision" in claim and _outside(claim["decision"], DECISION_STATES):
         return f"decision {claim['decision']!r} is outside the vocabulary"
     if "confident" not in claim or not isinstance(claim["confident"], bool):

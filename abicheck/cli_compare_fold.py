@@ -71,11 +71,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .report.scoped_gate import (
-    _SEVERITY_TO_SUMMARY_BUCKET as _SEVERITY_TO_SUMMARY_BUCKET,
-)
-from .service_render import ONELINE_FORMAT
-
 
 def _fold_scoped_compat_into_text(
     text: str,
@@ -161,21 +156,13 @@ def _fold_scoped_compat_into_text(
     )
     if fmt in ("markdown", "text", "review"):
         return fold.into_text(text, fmt)
-    if fmt == ONELINE_FORMAT:
-        # The built-in `quick` --profile's output. Unlike markdown/text/
-        # review's into_text (which appends a scoped section after the
-        # existing report), the incoming `text` here is the *unscoped*
-        # one-liner and must be replaced outright, not appended to --
-        # appending would break the one-line contract --profile quick
-        # exists to guarantee, and leaving it as the leading line would
-        # print the wrong (full-library) verdict/counts next to a process
-        # exit code computed from the scoped result (Codex review, fresh
-        # evidence). Imported rather than duplicated as a literal --
-        # cli_compare_helpers.py already imports the same constant, so the
-        # leaf-module-independence argument contract_coverage_exit.py's own
-        # `_ONELINE_FORMAT` duplicate makes doesn't hold here (CodeRabbit
-        # review).
-        return fold.into_oneline()
+    # ONELINE_FORMAT (the built-in `quick` --profile's output) falls through
+    # unchanged (workstream D-S1): the incoming `text` already states the
+    # full-library verdict/counts the process actually exits on, and a
+    # supplied consumer's own result no longer needs to replace it -- the
+    # one-line contract --profile quick guarantees has no room for an
+    # appended consumer breakdown either, so it is left to the fuller
+    # markdown/text/review/JSON reports.
     return text
 
 
@@ -214,197 +201,30 @@ class _ScopedFold:
             self.result, self.severity_config, self.show_only
         )
 
-    # ── One-line (service_render.ONELINE_FORMAT, the built-in `quick`
-    #    --profile's output) ──────────────────────────────────────────────
-    #
-    # JSON's own fold used to live here too, as `into_json` +
-    # `_swap_in_scoped_severity`/`_swap_in_scoped_run_outcome`/
-    # `_fold_findings_into_changes`/`_fold_findings_into_stat_summary` --
-    # see :mod:`abicheck.report.scoped_gate` (ADR-061 Phase 2 item 5),
-    # which now applies the identical fold natively, before rendering,
-    # inside `reporter.to_json`/`to_stat_json`.
-
-    def into_oneline(self) -> str:
-        """The one-line summary, but for the *scoped* gate.
-
-        CLI cleanup phase two, PR 1 (Codex review, fresh evidence): before
-        this method existed, `--profile quick` combined with `--used-by`/
-        `--required-symbol` fell through `_fold_scoped_compat_into_text`'s
-        dispatch untouched (only json/markdown/text/review were handled),
-        so the printed one-liner showed the full-library verdict/counts even
-        though the process actually exits on the *scoped* result -- e.g.
-        removing an irrelevant symbol while breaking a required one could
-        print "BREAKING: 1 breaking" while exiting 0, or the reverse.
-
-        The verdict/exit-code halves reuse `to_stat_json` itself, called with
-        this fold's own `show_only`/`contract_evaluation` -- the exact same
-        scoped-verdict-swap and severity-recompute logic the JSON path
-        already uses (`report.scoped_gate.apply_scoped_gate`, folded in
-        natively before `to_stat_json` ever returns) and this module's own
-        tests already cover. The *counts* are deliberately NOT read from
-        that payload's `summary`, though (Codex review, fresh evidence,
-        second round): `apply_scoped_gate`'s own
-        `_fold_findings_into_stat_summary` ADDS scoped-only contributions on
-        top of the full-library counts rather than replacing them -- correct
-        for JSON, which also carries `changes`/`full_summary` so a reader
-        can see *why* an unrelated full-library finding is still counted
-        despite a COMPATIBLE scoped verdict. The one-line format has no such
-        context: a bare "COMPATIBLE: 1 breaking" with nothing explaining the
-        1 reads as a genuine contradiction, not a nuance. So the counts here
-        are recomputed from scratch out of *only* the findings that actually
-        decide the scoped verdict/exit code: `_scoped_gate_findings()`'s
-        `scoped_only` changes and `missing_labels`, mirroring
-        `_fold_findings_into_stat_summary`'s own per-finding severity-bucket
-        tally -- PLUS (Codex review, fresh evidence, third round) every
-        entry of `result.changes` itself that the scoped gate also counts.
-        `scoped_only`/`missing_labels` cover only the *synthesized*
-        scoped-relevant findings (e.g. a missing required symbol, or a
-        `PE_ORDINAL_RETARGETED` with no backing full-library `Change`) --
-        the ordinary case, a real full-library finding that is ALSO
-        scoped-relevant (e.g. removing a function `--required-symbol`
-        itself names), lives in `result.changes` and is marked relevant via
-        `result.scoped_relevant_finding_ids` (the same set
-        `sarif.py`/`junit_report.py`'s own scoped-gate folds already read).
-        Omitting it reproduced exactly the bug the earlier revision of this
-        fix was written to close, just for the far more common shape of
-        input: an ordinary in-scope removal exiting 4 while printing
-        "no changes (0 total)".
-        """
-        import json
-
-        from .checker_policy import EvidenceStatus
-        from .report.disposition_audit import (
-            compute_disposition_audit,
-            render_disposition_audit_note,
-        )
-        from .report.render_text import format_stat_line
-        from .reporter import _change_to_dict, _finding_id, to_stat_json
-        from .reporter_markdown import _VERDICT_LABEL
-
-        folded = json.loads(
-            to_stat_json(
-                self.result,
-                severity_config=self.severity_config,
-                show_only=self.show_only,
-                contract_evaluation=self.contract_evaluation,
-            )
-        )
-        verdict_value = folded.get("verdict") or _VERDICT_LABEL[self.result.verdict]
-        gate_note = ""
-        severity_block = folded.get("severity")
-        if isinstance(severity_block, dict):
-            # Read back the already-scoped-swapped block
-            # `report.scoped_gate._swap_in_scoped_severity` produced (when
-            # the run's exit-code scheme is severity-aware) instead of
-            # recomputing from `self.result.changes` (full-library) here --
-            # recomputing would reproduce, for this one-line path, exactly
-            # the full-vs-scoped severity mismatch that function exists to
-            # fix for the JSON path.
-            exit_code = severity_block.get("exit_code", 0)
-            gate_note = (
-                f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
-            )
-
-        # Deliberately unfiltered by self.show_only (Codex review, fresh
-        # evidence): self._scoped_gate_findings() applies --show-only to
-        # scoped_only/missing_labels for *display* purposes (so markdown/
-        # json don't re-surface an excluded finding), but this method's own
-        # counts must track what actually decided the scoped verdict/exit
-        # code, which --show-only never changes -- `blocks` above (and the
-        # exit code read from `severity_block`) are already computed from
-        # the unfiltered set. Filtering scoped_only/missing_labels here but
-        # not relevant_in_changes below let a --show-only run print "no
-        # changes (0 total)" while still exiting non-zero on a synthesized
-        # scoped-only break (e.g. PE_ORDINAL_RETARGETED) that show_only
-        # happened to exclude from the display list.
-        from .reporter import _resolve_scoped_gate_findings
-
-        scoped_only, missing_labels, blocks, _missing_kind = (
-            _resolve_scoped_gate_findings(self.result, self.severity_config, None)
-        )
-        relevant_ids = (
-            getattr(self.result, "scoped_relevant_finding_ids", None) or frozenset()
-        )
-        relevant_in_changes = [
-            c for c in self.result.changes if _finding_id(c) in relevant_ids
-        ]
-        counts = {
-            "breaking": 0,
-            "source_breaks": 0,
-            "risk_changes": 0,
-            "compatible_additions": 0,
-        }
-        eff_sets = self.result._effective_kind_sets()
-
-        def _tally(c: Any, *, consumer_proven: bool) -> None:
-            entry = _change_to_dict(
-                c,
-                policy=self.result.policy or "strict_abi",
-                kind_sets=eff_sets,
-                policy_file=self.result.policy_file,
-                severity_config=self.severity_config,
-                evidence_status_override=(
-                    EvidenceStatus.CONSUMER_PROVEN if consumer_proven else None
-                ),
-            )
-            severity = entry.get("severity")
-            bucket = (
-                _SEVERITY_TO_SUMMARY_BUCKET.get(severity)
-                if isinstance(severity, str)
-                else None
-            )
-            if bucket:
-                counts[bucket] += 1
-
-        for c in relevant_in_changes:
-            # A real full-library finding, not synthesized -- its own
-            # already-computed severity applies, same as every other
-            # `result.changes` entry.
-            _tally(c, consumer_proven=False)
-        for c in scoped_only:
-            _tally(c, consumer_proven=True)
-        for _label in missing_labels:
-            bucket = _SEVERITY_TO_SUMMARY_BUCKET["breaking" if blocks else "compatible"]
-            counts[bucket] += 1
-        return format_stat_line(
-            str(verdict_value),
-            breaking=counts["breaking"],
-            source_breaks=counts["source_breaks"],
-            risk_count=counts["risk_changes"],
-            compatible_additions=counts["compatible_additions"],
-            total_changes=sum(counts.values()),
-            redundant_count=0,
-            gate_note=gate_note,
-            # ADR-067 D3: this is the only thing a `--profile quick
-            # --used-by`/`--required-symbol` run prints, so it carries the
-            # counts like every other projection. They are the *scoped*
-            # counts by construction: the scoped-gate orchestrator closed the
-            # ledger over the union of relevant findings and recorded the
-            # synthesized scoped-only ones into it
-            # (`policy.disposition_ledger.close_consumer_scope`), so the
-            # audit's population is the same one the counts to its left come
-            # from -- which is what makes stating it here honest rather than
-            # a second, disagreeing tally.
-            audit_note=render_disposition_audit_note(
-                compute_disposition_audit(self.result, self.severity_config)
-            ),
-        )
+    # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+    # prebuilt-consumer lifecycle"): `service_render.ONELINE_FORMAT` (the
+    # built-in `quick` --profile's output) is no longer replaced outright by
+    # a scoped one-liner -- the process's own exit code and verdict always
+    # come from the full-library result, so the plain one-liner
+    # `_fold_scoped_compat_into_text` was handed already states it correctly.
+    # `into_oneline` (the scoped-replacement renderer this used to dispatch
+    # to) was removed with it; see this module's git history for the prior
+    # design.
 
     # ── markdown / text / review ───────────────────────────
 
     def _scoped_verdict_header(self) -> list[str]:
-        """The "scoped verdict disagrees with the headline" note, or ``[]``.
+        """The "consumer's own scoped verdict differs from the headline" note, or ``[]``.
 
-        The exit code is computed from the *scoped* result (ADR-043
-        worst-wins), which can disagree with the full-library verdict this
-        report's own headline already rendered above -- state which one is
-        authoritative for CI instead of leaving the two to silently disagree
-        (Codex review). Under a severity scheme the exit code is NOT a fixed
-        BREAKING->4/API_BREAK->2 mapping of scoped_verdict -- e.g.
-        ``--severity-preset info-only`` can floor it at 0 even for a BREAKING
-        scoped verdict -- so state the actual computed value/scheme instead of
-        asserting the exit code "reflects" the scoped verdict, which would be
-        false in that case (Codex review follow-up).
+        Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+        prebuilt-consumer lifecycle"): a supplied consumer's own result is
+        *informational* -- it enriches the full-library verdict this report's
+        headline already rendered above, and never substitutes for it. The
+        CLI process's own exit code always comes from that full-library
+        verdict (or the resolved severity config), regardless of whether this
+        consumer's own scoped assessment agrees. This note exists purely so a
+        reader can see the two differ; it must never claim the scoped number
+        is what the process exits with.
         """
         scoped_verdict_value = self.scoped_verdict_value
         full_verdict_value = getattr(
@@ -416,17 +236,10 @@ class _ScopedFold:
             or scoped_verdict_value == full_verdict_value
         ):
             return []
-        scoped_exit_code = getattr(self.result, "scoped_exit_code", None)
-        scoped_exit_code_scheme = getattr(self.result, "scoped_exit_code_scheme", None)
-        exit_note = (
-            f"the CLI process exits {scoped_exit_code} under the "
-            f"{scoped_exit_code_scheme} exit-code scheme for this run"
-            if scoped_exit_code is not None
-            else "this is what the exit code reflects"
-        )
         return [
-            f"**Scoped verdict: {scoped_verdict_value}** "
-            f"({exit_note}; the full library verdict above is "
+            f"**Consumer-scoped verdict: {scoped_verdict_value}** "
+            "(informational only -- this run's compatibility verdict and "
+            f"exit code are always based on the full library verdict, "
             f"{full_verdict_value}).",
             "",
         ]

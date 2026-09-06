@@ -1584,16 +1584,14 @@ class TestAnalysisAssurancePartialManifestLayer:
 
 
 class TestScopedExitFloorAppliedBeforeRendering:
-    """New review finding (P2): the ``--used-by``/``--required-symbol`` scoped-
-    exit path used to render both the primary and secondary reports from the
-    *pre-floor* ``result.scoped_exit_code`` and only fold the coverage/
-    analysis-assurance floors into a local variable afterward, right before
-    ``sys.exit`` -- so a rendered SARIF/JUnit/JSON artifact could show a
-    passing ``gateExitCode``/``scoped_exit_code`` of 0 while the CLI process
-    itself exited 1 under ``--require-complete-analysis``. The fix folds both
-    floors into ``result.scoped_exit_code`` itself, before any report is
-    rendered, so every renderer -- present or future -- reads the one
-    authoritative, already-floored value.
+    """Historical (P2): the scoped-exit path used to render reports from the
+    *pre-floor* ``result.scoped_exit_code``, folding the coverage/analysis-
+    assurance floors into it only right before ``sys.exit``.
+
+    Workstream D-S1 supersedes that: those floors score the *global* exit
+    code, not a per-consumer scope, so ``scoped_exit_code`` now stays raw
+    and purely informational -- it and the real (also floored) process exit
+    code are no longer expected to agree.
     """
 
     @staticmethod
@@ -1601,9 +1599,12 @@ class TestScopedExitFloorAppliedBeforeRendering:
         old, new = _elf_only_pair()
         return _write(tmp_path, old, new)
 
-    def test_sarif_gate_exit_code_matches_process_exit_code(
+    def test_sarif_gate_exit_code_is_the_consumer_scope_alone(
         self, tmp_path: Path
     ) -> None:
+        """Consumer scope (0) and process exit (1, assurance floor) now
+        disagree -- see class docstring. ``res.stdout``, not ``.output``:
+        Click 8.2+ mixes the assurance diagnostic into ``.output``."""
         old_p, new_p = self._pair(tmp_path)
         res = CliRunner().invoke(
             main,
@@ -1623,19 +1624,17 @@ class TestScopedExitFloorAppliedBeforeRendering:
         # ELF-only fixture's incompleteness is what --require-complete-analysis
         # is catching, not a real ABI break).
         assert res.exit_code == 1, res.output
-        out = res.output
+        out = res.stdout
         doc = json.loads(out[out.index("{") :])
         props = doc["runs"][0]["properties"]
         scoped_gate = props["scopedGate"]
-        # The rendered artifact's own exit-code fields must agree with the
-        # real process exit code -- not the pre-floor value.
-        assert scoped_gate["gateExitCode"] == res.exit_code
-        assert scoped_gate["scopedExitCode"] == res.exit_code
-        assert doc["runs"][0]["invocations"][0]["exitCode"] == res.exit_code
+        # Raw consumer scope; exitCode follows the full-library gate (0).
+        assert scoped_gate["gateExitCode"] == 0
+        assert scoped_gate["scopedExitCode"] == 0
+        assert doc["runs"][0]["invocations"][0]["exitCode"] == 0
 
-    def test_junit_gate_exit_code_matches_process_exit_code(
-        self, tmp_path: Path
-    ) -> None:
+    def test_junit_gate_exit_code_is_the_consumer_scope_alone(self, tmp_path: Path) -> None:
+        """JUnit sibling of the SARIF test above (workstream D-S1)."""
         old_p, new_p = self._pair(tmp_path)
         res = CliRunner().invoke(
             main,
@@ -1651,8 +1650,8 @@ class TestScopedExitFloorAppliedBeforeRendering:
             ],
         )
         assert res.exit_code == 1, res.output
-        assert f'name="abicheck.gate_exit_code" value="{res.exit_code}"' in res.output
-        assert f'name="abicheck.scoped_exit_code" value="{res.exit_code}"' in res.output
+        assert 'name="abicheck.gate_exit_code" value="0"' in res.stdout
+        assert 'name="abicheck.scoped_exit_code" value="0"' in res.stdout
 
     def test_assurance_floor_diagnostic_is_emitted_on_the_scoped_path(
         self, tmp_path: Path

@@ -441,7 +441,7 @@ def fold_dump_provenance_into_json(
     versioned snapshot schema, so it needs no ``SCHEMA_VERSION`` bump and
     is silently dropped by ``snapshot_from_dict``'s defensive ``.get()``
     parsing on any later object round-trip (load → re-save), same as
-    ``compare``'s own JSON-only ``full_verdict``/``old_evidence_depth``
+    ``compare``'s own JSON-only ``consumer_scope``/``old_evidence_depth``
     folds. ``degraded`` is always ``False`` when *depth* is non-``None``, by
     construction: ``check_requested_depth_satisfied`` (called before this,
     in ``_write_snapshot_output``) already raised if the rank had come up

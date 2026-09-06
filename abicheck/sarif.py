@@ -367,13 +367,14 @@ def _result_for(
     *report_mode*), mirroring *impact_root_cause* above.
 
     *relevant_ids*, when not ``None``, means a ``--used-by``/``--required-symbol``
-    gate is active: a change whose :func:`_finding_id` is absent from the set is
-    not relevant to that gate, so its ``level`` is downgraded to ``"note"``
-    (informational, never blocks the scoped gate) regardless of its own
-    computed severity, and its ``properties.relevantToGate`` is set to
-    ``false`` so a consumer can distinguish "not severe" from "out of scope"
-    (CLI-audit P1: SARIF result levels must follow the scoped gate, not just
-    the full-library verdict).
+    consumer was supplied: ``properties.relevantToConsumerScope`` records
+    whether *change* is relevant to that consumer (:func:`_finding_id` present
+    in the set), purely informational. Workstream D-S1 (vision-api-abi-
+    evolution.md "D. Optional prebuilt-consumer lifecycle") reverted the
+    earlier design where an out-of-scope change's ``level`` was downgraded to
+    ``"note"`` regardless of its own severity -- a supplied consumer enriches
+    the report, it never narrows which findings this document treats as
+    severe.
 
     *evidence_status_override*, when given, wins over the kind-derived
     :func:`evidence_status_for_result` — mirrors ``reporter._change_to_dict``'s
@@ -462,10 +463,7 @@ def _result_for(
     if not is_evaluated(change):
         level = "note"
     if relevant_ids is not None:
-        is_relevant = _finding_id(change) in relevant_ids
-        properties["relevantToGate"] = is_relevant
-        if not is_relevant:
-            level = "note"
+        properties["relevantToConsumerScope"] = _finding_id(change) in relevant_ids
 
     return {
         "ruleId": change.kind.value,
@@ -531,19 +529,16 @@ def _missing_contract_result(
     ``missing_symbols``/``missing_versions``, or --required-symbol's
     ``missing_entrypoints``) has no backing diff ``Change`` -- it was never in
     ``result.changes`` to begin with, so :func:`_result_for` never emits it.
-    Without a synthetic result the gate's own ``exitCode`` could be a nonzero
-    (BREAKING) value while ``results`` shows nothing to explain it (CLI-audit
-    P1).
+    Without a synthetic result this real, consumer-specific fact would be
+    invisible to a SARIF/code-scanning consumer even though it is a genuine
+    finding (CLI-audit P1).
 
-    The level must follow the same severity decision as the gate's own exit
-    code (:func:`abicheck.severity.missing_contract_exit_code`, the function
-    ``_scoped_exit_code`` floors on): under the legacy scheme (no
-    *severity_config*) a missing contract member is unconditionally BREAKING,
-    but under a severity scheme that demotes ``abi_breaking`` (e.g.
-    ``--severity-preset info-only``), the scoped exit code can be 0 for the
-    same missing member -- emitting ``level: "error"`` regardless would let a
-    SARIF/code-scanning consumer flag/block a finding the gate itself passed
-    (Codex review).
+    ``blocksGate``/``relevantToGate`` describe this consumer's *own* scoped
+    assessment (:func:`abicheck.severity.missing_contract_exit_code`) -- they
+    are informational, same as the whole ``scopedGate`` block this result's
+    caller attaches (workstream D-S1): this document's own top-level
+    ``exitCode`` no longer follows them, only the full-library
+    compatibility/severity result does.
     """
     rule_id = missing_contract_kind(gate_scope)
     blocks = severity_config is None or missing_contract_exit_code(severity_config) != 0
@@ -582,13 +577,13 @@ def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
     """Build a ``scopedGate`` block when ``--used-by``/``--required-symbol(s)``
     scoping was requested (ADR-043).
 
-    The scoped gate (``result.scoped_verdict``/``scoped_exit_code``) is
-    authoritative for this document's own ``invocations[0].exitCode`` and each
-    result's ``level`` (CLI-audit P1 fix) -- ``result.verdict`` (the full,
-    unscoped library verdict) is still reported here as ``fullLibraryVerdict``
-    for context, but no longer drives what SARIF consumers treat as
-    blocking. This block also carries the relevant/unrelated finding counts so
-    a consumer can see how many of ``results`` actually gated this run.
+    **Purely informational (workstream D-S1).** ``invocations[0].exitCode``
+    and every result's ``level`` always follow ``result.verdict``/the
+    resolved severity config -- never this block's ``gateVerdict``/
+    ``gateExitCode``. A supplied consumer's own impact is reported *beside*
+    that full-library result (also carried, unswapped, as
+    ``fullLibraryVerdict``), never in place of it. Also carries the
+    relevant/unrelated finding counts for the supplied consumer(s).
     """
     scoped_verdict = getattr(result, "scoped_verdict", None)
     if scoped_verdict is None:
@@ -947,7 +942,6 @@ def to_sarif(
         else None
     )
     scoped_gate = _scoped_gate_properties(result)
-    scoped_exit_code = getattr(result, "scoped_exit_code", None)
 
     # ADR-049 Phase 7: the orthogonal contract-coverage floor, folded into the
     # invocation's exit code exactly as the process folds it. This block is
@@ -965,11 +959,12 @@ def to_sarif(
     # comparison, not a failed execution.
     from .contract_coverage_exit import coverage_exit_floor
 
+    # Workstream D-S1: `scoped_gate` never contributes to this invocation's
+    # exit code any more (see `_scoped_gate_properties`'s docstring) -- the
+    # base exit code always comes from the full-library severity/verdict.
     _coverage_floor = coverage_exit_floor(result)
     _base_exit_code = (
-        scoped_exit_code
-        if scoped_exit_code is not None
-        else severity_gate["exitCode"]
+        severity_gate["exitCode"]
         if severity_gate is not None
         else (
             4
@@ -981,12 +976,16 @@ def to_sarif(
     )
     _exit_code = max(_base_exit_code, _coverage_floor)
     _exit_description = (
-        f"{scoped_gate['gateVerdict']} (scoped: {scoped_gate['gateScope']})"
-        if scoped_gate is not None
-        else f"{result.verdict.value} (severity-gated)"
+        f"{result.verdict.value} (severity-gated)"
         if severity_gate is not None
         else result.verdict.value
     )
+    if scoped_gate is not None:
+        # Informational only -- appended, never substituted (workstream D-S1).
+        _exit_description += (
+            f" [consumer-scoped assessment: {scoped_gate['gateVerdict']} "
+            f"(scope: {scoped_gate['gateScope']}), informational only]"
+        )
     if _coverage_floor:
         # Names the axis rather than only moving the number, so a reader of
         # the artifact alone can tell a coverage floor from a gate decision.
@@ -1029,12 +1028,11 @@ def to_sarif(
                         # exits 0 — binary-compatible, deployment risk is surfaced
                         # via exitCodeDescription only. When severity_config *is*
                         # given, the exit code instead follows the severity-aware
-                        # gate (severityGate.exitCode below). When --used-by/
-                        # --required-symbol scoping is active, the scoped gate
-                        # wins over both — it's what the CLI process actually
-                        # exits with (CLI-audit P1 fix; matches
-                        # cli_compare_helpers.run_compare's unconditional
-                        # sys.exit(scoped_exit_code) when scoping was requested).
+                        # gate (severityGate.exitCode below). A supplied
+                        # --used-by/--required-symbol consumer's own result
+                        # (scopedGate, above) never changes this number (workstream
+                        # D-S1) — it always matches what the CLI process itself
+                        # exits with, consumer or no consumer supplied.
                         "exitCode": _exit_code,
                         "exitCodeDescription": _exit_description,
                     }

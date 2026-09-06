@@ -807,7 +807,7 @@ class TestUsedByScopingStampsExplicitEvidence:
                 "json",
             ],
         )
-        assert result.exit_code == 4, result.output
+        assert result.exit_code == 1, result.output
         payload = json.loads(result.stdout)
         missing_entries = [
             c for c in payload["changes"] if c["kind"] == "used_by_missing_symbol"
@@ -848,7 +848,7 @@ class TestUsedByScopingStampsExplicitEvidence:
                 "json",
             ],
         )
-        assert result.exit_code == 4, result.output
+        assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)
         missing_entries = [
             c for c in payload["changes"] if c["kind"] == "used_by_missing_symbol"
@@ -899,7 +899,7 @@ class TestUsedByScopingStampsExplicitEvidence:
                 "json",
             ],
         )
-        assert result.exit_code == 4, result.output
+        assert result.exit_code == 1, result.output
         payload = json.loads(result.stdout)
         matches = [
             c
@@ -969,7 +969,7 @@ class TestUsedByScopingStampsExplicitEvidence:
                 "json",
             ],
         )
-        assert result.exit_code == 4, result.output
+        assert result.exit_code == 1, result.output
         payload = json.loads(result.stdout)
         by_finding = payload["contract_context"]["decision_receipt"][
             "relevance_by_finding"
@@ -1019,7 +1019,7 @@ class TestUsedByScopingStampsExplicitEvidence:
                 "public",
             ],
         )
-        assert result.exit_code == 4, result.output
+        assert result.exit_code == 1, result.output
         assert "Additional scoped-gate findings" in result.output
         assert "[contract: IN_CONTRACT" in result.output
 
@@ -1044,7 +1044,7 @@ class TestUsedByScopingStampsExplicitEvidence:
             main,
             ["compare", str(old), str(new), "--used-by", str(app)],
         )
-        assert result.exit_code == 4, result.output
+        assert result.exit_code == 0, result.output
         assert "Additional scoped-gate findings" in result.output
         assert "[contract:" not in result.output
 
@@ -1085,7 +1085,7 @@ class TestUsedByScopingStampsExplicitEvidence:
                 "root-cause",
             ],
         )
-        assert result.exit_code == 4, result.output
+        assert result.exit_code == 1, result.output
         assert "Root Causes" in result.output
         assert "[contract: IN_CONTRACT" in result.output
         assert "assurance:" in result.output
@@ -1119,7 +1119,7 @@ class TestUsedByScopingStampsExplicitEvidence:
                 "root-cause",
             ],
         )
-        assert result.exit_code == 4, result.output
+        assert result.exit_code == 0, result.output
         assert "Root Causes" in result.output
         assert "[contract:" not in result.output
 

@@ -21,8 +21,8 @@
         "NOT_VERIFIED"
       ]
     },
-    "full_verdict": {
-      "description": "Set only when verdict is the scoped answer to a --used-by/--required-symbol(s) run: the same run's library-wide verdict, mirroring the report's own verdict/full_verdict pair (shared/consumer-scoping.md). Omitted entirely for an unscoped comparison — there is no second, wider answer to report.",
+    "consumer_verdict": {
+      "description": "Set only when the run was scoped to a named consumer or plugin host (--used-by/--required-symbol(s)): that consumer's own scoped result, mirroring the report's informational `consumer_scope.verdict` block (workstream D-S1, shared/consumer-scoping.md). `verdict` above is always the library-wide answer -- exactly what an unscoped comparison of the same pair would report -- never swapped for the consumer's own result. Omitted entirely for an unscoped comparison, where there is no second, narrower answer to report.",
       "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
     },
     "evidence": {
