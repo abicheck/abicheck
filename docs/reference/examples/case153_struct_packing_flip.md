@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `struct_packing_mode_changed` |
 | **Source files** | `catalog/cases/case153_struct_packing_flip/` |
 | **Rule family** | [`struct-packing-flip`](by-rule/struct-packing-flip.md) |
+| **Subject** | [Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md) |
 
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -129,4 +130,4 @@ directly localizes the cause to the packing flag flip.
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Default struct packing flipped](by-rule/struct-packing-flip.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Default struct packing flipped](by-rule/struct-packing-flip.md) · [Subject: Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md)._

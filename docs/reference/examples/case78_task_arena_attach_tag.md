@@ -12,6 +12,7 @@
 | **Source files** | `catalog/cases/case78_task_arena_attach_tag/` |
 | **Ecosystem** | [oneTBB](by-ecosystem/onetbb.md) |
 | **Related rules** | [`compat-addition`](by-rule/compat-addition.md), [`compatible-type-added`](by-rule/compatible-type-added.md), [`exported-function-removed`](by-rule/exported-function-removed.md), [`exported-type-removed`](by-rule/exported-type-removed.md) |
+| **Subject** | [Tag-dispatch and empty-class ABI](by-subject/tag-dispatch-and-empty-class-abi.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -127,4 +128,4 @@ using the enum-value form.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md) · [Subject: Tag-dispatch and empty-class ABI](by-subject/tag-dispatch-and-empty-class-abi.md)._

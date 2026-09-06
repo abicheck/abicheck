@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
 | **Source files** | `catalog/cases/case76_detail_pimpl_vtable_changed/` |
 | **Rule family** | [`detail-pimpl-vtable-changed`](by-rule/detail-pimpl-vtable-changed.md) |
+| **Subject** | [Leaked internal types](by-subject/leaked-internal-types.md) |
 
 **Category:** Internal Leak | **Verdict:** 🔴 BREAKING
 
@@ -159,4 +160,4 @@ document the slot order as part of the binary contract.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal pimpl vtable leaks](by-rule/detail-pimpl-vtable-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal pimpl vtable leaks](by-rule/detail-pimpl-vtable-changed.md) · [Subject: Leaked internal types](by-subject/leaked-internal-types.md)._

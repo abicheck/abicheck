@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `value_abi_trait_changed` |
 | **Source files** | `catalog/cases/case69_trivial_to_nontrivial/` |
 | **Rule family** | [`trivial-to-nontrivial`](by-rule/trivial-to-nontrivial.md) |
+| **Subject** | [Calling convention and integer-model changes](by-subject/calling-convention-and-integer-model-changes.md) |
 
 **Category:** Calling Convention | **Verdict:** 🔴 BREAKING
 
@@ -133,4 +134,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Value ABI traits changed](by-rule/trivial-to-nontrivial.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Value ABI traits changed](by-rule/trivial-to-nontrivial.md) · [Subject: Calling convention and integer-model changes](by-subject/calling-convention-and-integer-model-changes.md)._

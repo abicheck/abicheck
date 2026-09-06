@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `enum_member_added` |
 | **Source files** | `catalog/cases/case25_enum_member_added/` |
 | **Rule family** | [`enum-member-added`](by-rule/enum-member-added.md) |
+| **Subject** | [Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🟢 COMPATIBLE
 
@@ -118,4 +119,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Enumerator added](by-rule/enum-member-added.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Enumerator added](by-rule/enum-member-added.md) · [Subject: Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md)._

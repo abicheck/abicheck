@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_visibility_changed` |
 | **Source files** | `catalog/cases/case06_visibility/` |
 | **Rule family** | [`visibility`](by-rule/visibility.md) |
+| **Subject** | [Symbol visibility scoping](by-subject/symbol-visibility-scoping.md) |
 
 **Category:** Visibility | **Verdict:** 🔴 BREAKING (bad practice)
 
@@ -149,4 +150,4 @@ though it doesn't carry abicheck's `VISIBILITY_LEAK`-style framing of the
 - `bad.c`
 - `good.c`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Symbol visibility changed](by-rule/visibility.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Symbol visibility changed](by-rule/visibility.md) · [Subject: Symbol visibility scoping](by-subject/symbol-visibility-scoping.md)._

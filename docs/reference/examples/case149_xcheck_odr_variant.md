@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `odr_type_variant` |
 | **Source files** | `catalog/cases/case149_xcheck_odr_variant/` |
 | **Related rules** | [`odr-type-variant`](by-rule/odr-type-variant.md) |
+| **Subject** | [Export/declaration mismatches](by-subject/export-declaration-mismatches.md) |
 
 **Category:** API Break (Audit) | **Verdict:** 🟠 API_BREAK
 
@@ -107,4 +108,4 @@ source-replayed definitions within one build).
 
 - `snapshot.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Subject: Export/declaration mismatches](by-subject/export-declaration-mismatches.md)._

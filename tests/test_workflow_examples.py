@@ -466,6 +466,117 @@ def test_non_json_output_is_reported_and_stops_payload_checks():
 
 
 # --------------------------------------------------------------------------
+# `expect_json` keys can be dotted/`[]`-projected paths, not just top-level
+# keys -- a workflow's field of interest (a suppression record, a per-change
+# detail) often lives nested inside the report, and flattening the whole
+# report first would hide exactly the shape mismatch a real regression
+# would produce.
+# --------------------------------------------------------------------------
+
+
+SUPPRESSION_PAYLOAD = {
+    "verdict": "COMPATIBLE",
+    "suppression": {
+        "suppressed_count": 1,
+        "suppressed_changes": [
+            {
+                "kind": "func_removed",
+                "symbol": "to_rgb",
+                "rule": {"rule_id": "symbol='to_rgb'"},
+            }
+        ],
+    },
+}
+
+
+def test_a_dotted_key_reaches_a_nested_scalar():
+    runner = _load_runner()
+    assert (
+        runner._check_json(SUPPRESSION_PAYLOAD, {"suppression.suppressed_count": 1})
+        == []
+    )
+
+
+def test_a_dotted_key_reports_a_mismatched_nested_scalar():
+    runner = _load_runner()
+    failures = runner._check_json(
+        SUPPRESSION_PAYLOAD, {"suppression.suppressed_count": 2}
+    )
+    assert any("suppression.suppressed_count" in f for f in failures)
+
+
+def test_a_list_projection_reaches_a_field_inside_every_item():
+    """`suppression.suppressed_changes[].symbol` resolves the list, then
+    projects `symbol` out of each item -- containment, like a plain list
+    expectation, so pinning it doesn't require the complete change set."""
+    runner = _load_runner()
+    assert (
+        runner._check_json(
+            SUPPRESSION_PAYLOAD,
+            {"suppression.suppressed_changes[].symbol": ["to_rgb"]},
+        )
+        == []
+    )
+
+
+def test_a_list_projection_reaches_a_doubly_nested_field():
+    runner = _load_runner()
+    assert (
+        runner._check_json(
+            SUPPRESSION_PAYLOAD,
+            {"suppression.suppressed_changes[].rule.rule_id": ["symbol='to_rgb'"]},
+        )
+        == []
+    )
+
+
+def test_a_list_projection_flattens_a_second_nested_projection():
+    """`groups[].changes[].symbol` -- two `[]` segments -- must flatten to a
+    single list of symbols, not a list of one-item lists. Appending each
+    outer item's own projection whole (`[["to_rgb"]]`) would make every
+    containment check against it silently fail, since `"to_rgb" in
+    [["to_rgb"]]` is False."""
+    runner = _load_runner()
+    payload = {
+        "groups": [
+            {"changes": [{"symbol": "to_rgb"}, {"symbol": "from_rgb"}]},
+            {"changes": [{"symbol": "convert"}]},
+        ]
+    }
+    assert (
+        runner._check_json(
+            payload, {"groups[].changes[].symbol": ["to_rgb", "convert"]}
+        )
+        == []
+    )
+
+
+def test_a_list_projection_reports_a_missing_value():
+    runner = _load_runner()
+    failures = runner._check_json(
+        SUPPRESSION_PAYLOAD,
+        {"suppression.suppressed_changes[].symbol": ["convert_to_rgb"]},
+    )
+    assert any("suppression.suppressed_changes[].symbol" in f for f in failures)
+
+
+def test_a_missing_intermediate_segment_is_reported_not_silently_none():
+    """A path through a container that isn't there must fail loudly -- a
+    typo'd key silently resolving to `None` would make the assertion pass
+    whenever the report is merely missing the field entirely."""
+    runner = _load_runner()
+    failures = runner._check_json(SUPPRESSION_PAYLOAD, {"suppression.nope.deeper": "x"})
+    assert any("suppression.nope.deeper" in f for f in failures)
+
+
+def test_a_plain_top_level_key_still_works_unchanged():
+    """Negative control: dotted-path support must not regress the ordinary
+    single-key case every other workflow's `expect_json` already uses."""
+    runner = _load_runner()
+    assert runner._check_json(SUPPRESSION_PAYLOAD, {"verdict": "COMPATIBLE"}) == []
+
+
+# --------------------------------------------------------------------------
 # Sequence fields must be sequences. `tuple("BREAKING")` is eight
 # one-character assertions, and `"BRAKEING"` satisfies every one of them --
 # so the common YAML slip `stdout_contains: BREAKING` (no `- `) would turn a

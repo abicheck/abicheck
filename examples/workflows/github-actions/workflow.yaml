@@ -1,0 +1,55 @@
+# Executable contract for this workflow example (Phase 5 of the
+# examples/catalog split). `validation/scripts/run_workflow_examples.py`
+# copies the directory to a scratch tree, runs each `run:` line below as a
+# single program invocation -- no shell, `shlex.split` + `shell=False` --
+# and checks what it claims.
+#
+# Every `run:` line must appear verbatim in this directory's README.md
+# (whitespace-normalized) -- that is the whole point: without it this file
+# is a second copy of the walkthrough, free to keep passing while the
+# documented commands rot. `tests/test_workflow_examples.py` enforces it in
+# the fast lane, with no compiler needed.
+#
+# The README's `.github/workflows/*.yml` snippet is illustrative only --
+# it's fenced ```yaml, not ```bash/sh/shell/console, so
+# workflow_examples.documented_commands() never scans it for a step to run
+# (a real GitHub Actions run only proves out by actually running in CI, the
+# same reasoning the plan doc's own Phase 4 "Known gaps" entry gives for
+# not templating the composite Action's own end-to-end test workflows
+# through this runner). What this manifest verifies is the local
+# reproduction above it -- the exact comparison the Action step runs.
+id: github-actions
+task: How do I run this check automatically on every pull request, without anyone remembering to run it (or writing a CI script myself)?
+platforms:
+  - linux
+  - macos
+requires:
+  - gcc
+  # build_shared_lib.py needs python3 to pick the right link-mode flag
+  # for the host platform (gcc -shared on Linux, -dynamiclib on macOS).
+  - python3
+  # The compare step passes --header, which goes through the default
+  # CastXML AST backend. Declaring it here is what makes a host without
+  # CastXML report an honest skip instead of a failure that looks like a
+  # real ABI regression -- and what lets a CI lane that just installed
+  # CastXML turn that skip back into a failure with `--require
+  # github-actions`.
+  - castxml
+  # The tool under test. Declaring it is not ceremony: without it a host
+  # without abicheck on PATH reports a launch failure per step instead of
+  # an honest skip.
+  - abicheck
+steps:
+  - name: build-v1
+    run: python3 build_shared_lib.py -fPIC -g v1/counter.c -o libcounter_v1.so
+  - name: build-v2
+    run: python3 build_shared_lib.py -fPIC -g v2/counter.c -o libcounter_v2.so
+  - name: compare
+    run: >-
+      abicheck compare libcounter_v1.so libcounter_v2.so
+      --header old=v1/counter.h --header new=v2/counter.h
+    expect:
+      exit_code: 4
+      stdout_contains:
+        - BREAKING
+        - func_removed

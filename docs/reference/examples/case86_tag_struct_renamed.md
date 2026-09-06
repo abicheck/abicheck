@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `tag_type_renamed` |
 | **Source files** | `catalog/cases/case86_tag_struct_renamed/` |
 | **Rule family** | [`tag-struct-renamed`](by-rule/tag-struct-renamed.md) |
+| **Subject** | [Tag-dispatch and empty-class ABI](by-subject/tag-dispatch-and-empty-class-abi.md) |
 
 **Category:** Mangling ABI | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +141,4 @@ exit-code comparison.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Tag type renamed](by-rule/tag-struct-renamed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Tag type renamed](by-rule/tag-struct-renamed.md) · [Subject: Tag-dispatch and empty-class ABI](by-subject/tag-dispatch-and-empty-class-abi.md)._

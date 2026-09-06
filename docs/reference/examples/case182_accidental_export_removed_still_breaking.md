@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_removed_elf_only` |
 | **Source files** | `catalog/cases/case182_accidental_export_removed_still_breaking/` |
 | **Rule family** | [`accidental-export-removed-still-breaking`](by-rule/accidental-export-removed-still-breaking.md) |
+| **Subject** | [Symbol visibility scoping](by-subject/symbol-visibility-scoping.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -163,4 +164,4 @@ to answer.
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Accidental export removed](by-rule/accidental-export-removed-still-breaking.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Accidental export removed](by-rule/accidental-export-removed-still-breaking.md) · [Subject: Symbol visibility scoping](by-subject/symbol-visibility-scoping.md)._

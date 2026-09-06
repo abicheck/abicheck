@@ -55,8 +55,7 @@ def test_rule_count_matches_taxonomy_directly():
     generator's own rendering, so a bug in `render()`'s prose can't hide a
     wrong count from the sync check above."""
     gen = _load_gen()
-    gt = gen.example_catalog.load_ground_truth()
-    taxonomy = gt["taxonomy"]
+    taxonomy = gen.example_catalog.load_taxonomy()
 
     rules = {k: v for k, v in taxonomy.items() if v["entity"] == "rule"}
     scenarios = {k: v for k, v in taxonomy.items() if v["entity"] == "scenario"}
@@ -85,8 +84,8 @@ def test_rule_count_matches_taxonomy_directly():
 
 def test_every_taxonomy_entity_is_rule_or_scenario():
     gen = _load_gen()
-    gt = gen.example_catalog.load_ground_truth()
-    for case_id, entry in gt["taxonomy"].items():
+    taxonomy = gen.example_catalog.load_taxonomy()
+    for case_id, entry in taxonomy.items():
         assert entry["entity"] in ("rule", "scenario"), (
             f"{case_id}: unexpected entity {entry['entity']!r} -- "
             "gen_catalog_coverage_report.py's dimension split assumes only "

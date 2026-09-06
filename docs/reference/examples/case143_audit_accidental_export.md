@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `exported_not_public` |
 | **Source files** | `catalog/cases/case143_audit_accidental_export/` |
 | **Rule family** | [`audit-accidental-export`](by-rule/audit-accidental-export.md) |
+| **Subject** | [Export/declaration mismatches](by-subject/export-declaration-mismatches.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -105,4 +106,4 @@ each other, not a binary against its own headers).
 
 - `snapshot.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Exported symbol is not public API](by-rule/audit-accidental-export.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Exported symbol is not public API](by-rule/audit-accidental-export.md) · [Subject: Export/declaration mismatches](by-subject/export-declaration-mismatches.md)._

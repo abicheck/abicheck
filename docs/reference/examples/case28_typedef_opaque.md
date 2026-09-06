@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_became_opaque` |
 | **Source files** | `catalog/cases/case28_typedef_opaque/` |
 | **Rule family** | [`typedef-opaque`](by-rule/typedef-opaque.md) |
+| **Subject** | [Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md) |
 
 **Category:** Type System | **Verdict:** 🔴 BREAKING
 
@@ -166,4 +167,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Type became opaque](by-rule/typedef-opaque.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Type became opaque](by-rule/typedef-opaque.md) · [Subject: Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `bundle_manifest_instantiation_removed` |
 | **Source files** | `catalog/cases/case93_bundle_manifest_drift/` |
 | **Related rules** | [`exported-function-removed`](by-rule/exported-function-removed.md), [`missing-template-instantiation`](by-rule/missing-template-instantiation.md) |
+| **Subject** | [Multi-library bundle topology](by-subject/multi-library-bundle-topology.md) |
 
 **Category:** Bundle / manifest | **Verdict:** 🔴 BREAKING (both with and
 without `--instantiation-manifest`; the manifest upgrades *why* it's breaking)
@@ -165,4 +166,4 @@ The bundle-level verdict above is the cohort's. Each library in the cohort is se
 - `CMakeLists.txt`
 - `manifest.yaml`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md) · [Subject: Multi-library bundle topology](by-subject/multi-library-bundle-topology.md)._

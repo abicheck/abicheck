@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `catalog/cases/case14_cpp_class_size/` |
 | **Rule family** | [`embedded-type-size-increased`](by-rule/embedded-type-size-increased.md) — Variant (language) of [case07_struct_layout](case07_struct_layout.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** C++ ABI | **Verdict:** 🔴 BREAKING
 
@@ -139,4 +140,4 @@ echo "exit: $?"   # → 4
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Embedded type size increased](by-rule/embedded-type-size-increased.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Embedded type size increased](by-rule/embedded-type-size-increased.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

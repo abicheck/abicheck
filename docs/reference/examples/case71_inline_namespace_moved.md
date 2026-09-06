@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `inline_namespace_moved` |
 | **Source files** | `catalog/cases/case71_inline_namespace_moved/` |
 | **Rule family** | [`inline-namespace-moved`](by-rule/inline-namespace-moved.md) |
+| **Subject** | [Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md) |
 
 **Category:** Symbol ABI | **Verdict:** 🔴 BREAKING
 
@@ -163,4 +164,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline namespace membership changed](by-rule/inline-namespace-moved.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline namespace membership changed](by-rule/inline-namespace-moved.md) · [Subject: Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md)._

@@ -12,6 +12,7 @@
 | **Source files** | `catalog/cases/case112_lp64_ilp64/` |
 | **Ecosystem** | [oneMKL](by-ecosystem/onemkl.md) |
 | **Related rules** | [`public-integer-model-width-changed`](by-rule/public-integer-model-width-changed.md), [`typedef-underlying-changed`](by-rule/typedef-underlying-changed.md) |
+| **Subject** | [Calling convention and integer-model changes](by-subject/calling-convention-and-integer-model-changes.md) |
 
 **Category:** Numerical-Library ABI Hazard | **Verdict:** 🔴 BREAKING
 
@@ -151,4 +152,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneMKL](by-ecosystem/onemkl.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneMKL](by-ecosystem/onemkl.md) · [Subject: Calling convention and integer-model changes](by-subject/calling-convention-and-integer-model-changes.md)._

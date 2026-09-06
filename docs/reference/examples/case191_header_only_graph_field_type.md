@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `struct_size_changed`, `public_api_internal_dependency_added` |
 | **Source files** | `catalog/cases/case191_header_only_graph_field_type/` |
 | **Related rules** | [`compatible-type-added`](by-rule/compatible-type-added.md), [`embedded-type-size-increased`](by-rule/embedded-type-size-increased.md), [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md), [`type-field-added-compatible`](by-rule/type-field-added-compatible.md) |
+| **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 | **Known kind gap** | `public_api_internal_dependency_added` — verdict is correct; see note below |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
@@ -148,4 +149,4 @@ instead of embedding the internal type directly.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._

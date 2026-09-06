@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `union_field_added` |
 | **Source files** | `catalog/cases/case26b_union_field_added_compatible/` |
 | **Rule family** | [`union-field-added-compatible`](by-rule/union-field-added-compatible.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🟢 COMPATIBLE
 
@@ -115,4 +116,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Union gained a member within its size](by-rule/union-field-added-compatible.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Union gained a member within its size](by-rule/union-field-added-compatible.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

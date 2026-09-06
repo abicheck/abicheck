@@ -143,14 +143,25 @@ def test_diff_against_doc_partial_run_skips_numeric_rows() -> None:
         "date": "2099-01-01",
         "case_count": _GT_CASE_COUNT,
         "rows": _all_lanes_rows(
-            abicheck={"correct": 999, "pct": 12.3, "false_positives": 9, "false_negatives": 9}
+            abicheck={
+                "correct": 999,
+                "pct": 12.3,
+                "false_positives": 9,
+                "false_negatives": 9,
+            }
         ),
     }
     report = {
         "full_catalog_run": False,
         "coverage_accuracy": {
-            "abicheck": {"label": "abicheck", "correct": 1, "total": 1, "pct": 100.0,
-                         "false_positives": 0, "false_negatives": 0},
+            "abicheck": {
+                "label": "abicheck",
+                "correct": 1,
+                "total": 1,
+                "pct": 100.0,
+                "false_positives": 0,
+                "false_negatives": 0,
+            },
         },
     }
     assert gbr.diff_against_doc(report, doc_table) == []
@@ -160,8 +171,14 @@ def _full_run_report(**coverage_overrides: dict[str, Any]) -> dict[str, Any]:
     """A full-catalog report with matching data for every documented lane and
     every ground-truth case — the "nothing missing" baseline for drift tests."""
     coverage_accuracy = {
-        name: {"label": name, "correct": 0, "total": _GT_CASE_COUNT, "pct": 0.0,
-                "false_positives": 0, "false_negatives": 0}
+        name: {
+            "label": name,
+            "correct": 0,
+            "total": _GT_CASE_COUNT,
+            "pct": 0.0,
+            "false_positives": 0,
+            "false_negatives": 0,
+        }
         for name in gbr.LANE_DOC_LABELS
     }
     coverage_accuracy.update(coverage_overrides)
@@ -177,12 +194,23 @@ def test_diff_against_doc_matches_when_numbers_agree() -> None:
         "date": "2099-01-01",
         "case_count": _GT_CASE_COUNT,
         "rows": _all_lanes_rows(
-            abicheck={"correct": 3, "pct": 100.0, "false_positives": 0, "false_negatives": 0}
+            abicheck={
+                "correct": 3,
+                "pct": 100.0,
+                "false_positives": 0,
+                "false_negatives": 0,
+            }
         ),
     }
     report = _full_run_report(
-        abicheck={"label": "abicheck", "correct": 3, "total": 3, "pct": 100.0,
-                  "false_positives": 0, "false_negatives": 0},
+        abicheck={
+            "label": "abicheck",
+            "correct": 3,
+            "total": 3,
+            "pct": 100.0,
+            "false_positives": 0,
+            "false_negatives": 0,
+        },
     )
     assert gbr.diff_against_doc(report, doc_table) == []
 
@@ -199,7 +227,9 @@ def test_diff_against_doc_flags_lane_with_no_data_on_full_run() -> None:
     report = _full_run_report()
     del report["coverage_accuracy"]["abidiff"]
     drift = gbr.diff_against_doc(report, doc_table)
-    assert any("abidiff" in line and "no fresh or frozen data" in line for line in drift)
+    assert any(
+        "abidiff" in line and "no fresh or frozen data" in line for line in drift
+    )
 
 
 def test_diff_against_doc_flags_incomplete_case_coverage_on_full_run() -> None:
@@ -223,14 +253,25 @@ def test_diff_against_doc_flags_numeric_mismatch() -> None:
         "date": "2099-01-01",
         "case_count": _GT_CASE_COUNT,
         "rows": _all_lanes_rows(
-            abicheck={"correct": 3, "pct": 100.0, "false_positives": 0, "false_negatives": 0}
+            abicheck={
+                "correct": 3,
+                "pct": 100.0,
+                "false_positives": 0,
+                "false_negatives": 0,
+            }
         ),
     }
     report = {
         "full_catalog_run": True,
         "coverage_accuracy": {
-            "abicheck": {"label": "abicheck", "correct": 2, "total": 3, "pct": 66.7,
-                         "false_positives": 0, "false_negatives": 1},
+            "abicheck": {
+                "label": "abicheck",
+                "correct": 2,
+                "total": 3,
+                "pct": 66.7,
+                "false_positives": 0,
+                "false_negatives": 1,
+            },
         },
     }
     drift = gbr.diff_against_doc(report, doc_table)
@@ -271,7 +312,8 @@ def test_cache_state_for_stale_frozen_digest_is_n_a(monkeypatch) -> None:
     bc_args = gbr.bc.parse_args([])
     bc_args.tools = ["abicheck"]
     monkeypatch.setattr(
-        gbr.bc, "_load_frozen",
+        gbr.bc,
+        "_load_frozen",
         lambda _path: {
             "ground_truth_sha256": "stale-digest",
             "frozen_at": "2020-01-01T00:00:00Z",
@@ -288,7 +330,8 @@ def test_cache_state_for_matching_frozen_digest_is_frozen(monkeypatch) -> None:
     bc_args = gbr.bc.parse_args([])
     bc_args.tools = ["abicheck"]
     monkeypatch.setattr(
-        gbr.bc, "_load_frozen",
+        gbr.bc,
+        "_load_frozen",
         lambda _path: {
             "ground_truth_sha256": "current-digest",
             "frozen_at": "2020-01-01T00:00:00Z",
@@ -324,8 +367,14 @@ def test_render_markdown_includes_key_fields() -> None:
         "tool_versions": {"gcc": "gcc 13"},
         "accuracy": {"abicheck": {"total_ms": 500}},
         "coverage_accuracy": {
-            "abicheck": {"label": "abicheck", "correct": 1, "total": 1, "pct": 100.0,
-                         "false_positives": 0, "false_negatives": 0},
+            "abicheck": {
+                "label": "abicheck",
+                "correct": 1,
+                "total": 1,
+                "pct": 100.0,
+                "false_positives": 0,
+                "false_negatives": 0,
+            },
         },
         "status_counts": {"abicheck": {}},
     }
@@ -343,8 +392,14 @@ def test_render_markdown_round_trips_through_parse_and_diff() -> None:
     same column layout) and diff_against_doc() must find no drift against the
     report that produced it."""
     coverage_accuracy = {
-        name: {"label": name, "correct": 5, "total": _GT_CASE_COUNT, "pct": 83.3,
-                "false_positives": 1, "false_negatives": 0}
+        name: {
+            "label": name,
+            "correct": 5,
+            "total": _GT_CASE_COUNT,
+            "pct": 83.3,
+            "false_positives": 1,
+            "false_negatives": 0,
+        }
         for name in gbr.LANE_DOC_LABELS
     }
     report = {
@@ -365,8 +420,275 @@ def test_render_markdown_round_trips_through_parse_and_diff() -> None:
     cache_state = {name: "live" for name in gbr.LANE_DOC_LABELS}
     md = gbr.render_markdown(report, cache_state)
 
-    pasted_doc = f"## Full-catalog benchmark (2099-01-01, all {_GT_CASE_COUNT} cases)\n\n{md}"
+    pasted_doc = (
+        f"## Full-catalog benchmark (2099-01-01, all {_GT_CASE_COUNT} cases)\n\n{md}"
+    )
     table = gbr.parse_doc_table(pasted_doc)
-    assert table is not None, "parse_doc_table() could not read render_markdown()'s own output back"
+    assert table is not None, (
+        "parse_doc_table() could not read render_markdown()'s own output back"
+    )
     assert set(table["rows"]) == set(gbr.LANE_DOC_LABELS)
     assert gbr.diff_against_doc(report, table) == []
+
+
+# ── Rule-family accuracy (docs/contribute/plans/examples-catalog-split.md
+# "What is left" item 3): a second, independent accuracy dimension aggregated
+# by rule family (a rule's canonical case plus its confirmed duplicate/variant
+# siblings, per scripts/catalog_rule_registry.py) rather than by raw case. ──
+
+
+def test_rule_family_accuracy_scores_whole_family_as_one_unit(monkeypatch) -> None:
+    """A family with its canonical case correct but a variant sibling wrong
+    must score the *whole family* as incorrect -- a flat per-case accuracy
+    would otherwise credit 50% for a rule the tool doesn't actually get right
+    end to end, which is exactly the inflation this dimension exists to
+    remove (see the "Problem" section of examples-catalog-split.md)."""
+    taxonomy = {
+        "case_a": {"rule_slug": "widget-removed", "relation_type": None},
+        "case_b": {
+            "rule_slug": "widget-removed",
+            "relation_type": "variant",
+            "relation_axis": "language",
+        },
+    }
+    results = [
+        {"case": "case_a", "expected": "BREAKING", "toolX": "BREAKING"},
+        {"case": "case_b", "expected": "BREAKING", "toolX": "COMPATIBLE"},
+    ]
+    monkeypatch.setattr(gbr.bc, "_gt_data", {"taxonomy": taxonomy, "verdicts": {}})
+    out = gbr.bc._rule_family_accuracy(results, ["toolX"])
+    assert out["toolX"] == {"correct": 0, "total": 1, "pct": 0.0}
+
+
+def test_rule_family_accuracy_credits_family_when_every_member_correct(
+    monkeypatch,
+) -> None:
+    taxonomy = {
+        "case_a": {"rule_slug": "widget-removed", "relation_type": None},
+        "case_b": {"rule_slug": "widget-removed", "relation_type": "duplicate"},
+    }
+    results = [
+        {"case": "case_a", "expected": "BREAKING", "toolX": "BREAKING"},
+        {"case": "case_b", "expected": "BREAKING", "toolX": "BREAKING"},
+    ]
+    monkeypatch.setattr(gbr.bc, "_gt_data", {"taxonomy": taxonomy, "verdicts": {}})
+    out = gbr.bc._rule_family_accuracy(results, ["toolX"])
+    assert out["toolX"] == {"correct": 1, "total": 1, "pct": 100.0}
+
+
+def test_rule_family_accuracy_excludes_referenced_only_families(monkeypatch) -> None:
+    """A family named only by a scenario's related_rules (no rule-entity case
+    of its own -- catalog_rule_registry.STATUS_REFERENCED_ONLY) has no
+    case-level verdict to attribute to it and must not appear in the
+    denominator."""
+    taxonomy = {
+        "case_scn": {
+            "rule_slug": None,
+            "relation_type": None,
+            "related_rules": ["referenced-only-rule"],
+        },
+    }
+    results = [
+        {"case": "case_scn", "expected": "BREAKING", "toolX": "BREAKING"},
+    ]
+    monkeypatch.setattr(gbr.bc, "_gt_data", {"taxonomy": taxonomy, "verdicts": {}})
+    out = gbr.bc._rule_family_accuracy(results, ["toolX"])
+    assert out["toolX"] == {"correct": 0, "total": 0, "pct": None}
+
+
+def test_rule_family_accuracy_excludes_families_absent_from_a_partial_run(
+    monkeypatch,
+) -> None:
+    """A --cases/pinned74 partial run that never touched any of a family's
+    member cases must exclude that family from the denominator entirely --
+    the same "can't verify what wasn't run" rule diff_against_doc's own
+    full_catalog_run guard applies to the flat per-case table."""
+    taxonomy = {
+        "case_a": {"rule_slug": "widget-removed", "relation_type": None},
+        "case_untouched": {"rule_slug": "other-rule", "relation_type": None},
+    }
+    results = [
+        {"case": "case_a", "expected": "BREAKING", "toolX": "BREAKING"},
+    ]
+    monkeypatch.setattr(gbr.bc, "_gt_data", {"taxonomy": taxonomy, "verdicts": {}})
+    out = gbr.bc._rule_family_accuracy(results, ["toolX"])
+    assert out["toolX"] == {"correct": 1, "total": 1, "pct": 100.0}
+
+
+def test_rule_family_accuracy_denominator_shared_across_tools(monkeypatch) -> None:
+    """The family denominator depends only on which cases *results* covers,
+    not on any one tool's verdicts -- a fair like-for-like comparison across
+    lanes, same as _coverage_accuracy's shared per-case denominator."""
+    taxonomy = {
+        "case_a": {"rule_slug": "widget-removed", "relation_type": None},
+    }
+    results = [
+        {
+            "case": "case_a",
+            "expected": "BREAKING",
+            "toolX": "BREAKING",
+            "toolY": "COMPATIBLE",
+        },
+    ]
+    monkeypatch.setattr(gbr.bc, "_gt_data", {"taxonomy": taxonomy, "verdicts": {}})
+    out = gbr.bc._rule_family_accuracy(results, ["toolX", "toolY"])
+    assert out["toolX"]["total"] == out["toolY"]["total"] == 1
+    assert out["toolX"]["correct"] == 1
+    assert out["toolY"]["correct"] == 0
+
+
+def test_render_markdown_includes_rule_family_section() -> None:
+    report = {
+        "generated_at": "2099-01-01T00:00:00Z",
+        "abicheck_version": "0.0.0-test",
+        "git_commit": "deadbeefcafe",
+        "ground_truth_sha256": "abc",
+        "case_count": 1,
+        "full_catalog_run": False,
+        "wall_time_s": 1.0,
+        "peak_rss_mb": 1.0,
+        "tool_versions": {},
+        "accuracy": {"abicheck": {"total_ms": 1}},
+        "coverage_accuracy": {
+            "abicheck": {
+                "label": "abicheck",
+                "correct": 1,
+                "total": 1,
+                "pct": 100.0,
+                "false_positives": 0,
+                "false_negatives": 0,
+            },
+        },
+        "rule_family_accuracy": {
+            "abicheck": {"correct": 3, "total": 4, "pct": 75.0},
+        },
+        "status_counts": {"abicheck": {}},
+    }
+    md = gbr.render_markdown(report, {"abicheck": "live"})
+    assert "## Rule-family accuracy (4 demonstrated rule families)" in md
+    assert "| abicheck (L2, headers) | 3 | 75.0% |" in md
+
+
+def test_parse_rule_family_table_finds_heading_in_committed_doc() -> None:
+    text = gbr.DOC_PATH.read_text(encoding="utf-8")
+    table = gbr.parse_rule_family_table(text)
+    assert table is not None, (
+        "RULE_FAMILY_HEADING_RE no longer matches "
+        "docs/reference/tool-comparison.md's 'Rule-family accuracy' heading "
+        "-- update the regex in generate_benchmark_report.py"
+    )
+    assert table["family_total"] > 0
+    for row in table["rows"].values():
+        assert row["correct"] >= 0
+
+
+def test_parse_rule_family_table_missing_heading_returns_none() -> None:
+    assert gbr.parse_rule_family_table("no such section in this text") is None
+
+
+def test_diff_rule_family_against_doc_reports_missing_heading() -> None:
+    report = {"rule_family_accuracy": {"x": {"total": 1, "correct": 1, "pct": 100.0}}}
+    drift = gbr.diff_rule_family_against_doc(report, None)
+    assert len(drift) == 1
+    assert "could not find" in drift[0]
+
+
+def test_diff_rule_family_against_doc_flags_no_generated_data() -> None:
+    doc_table = {"family_total": 5, "rows": {}}
+    drift = gbr.diff_rule_family_against_doc({}, doc_table)
+    assert any("no rule_family_accuracy data" in line for line in drift)
+
+
+def test_diff_rule_family_against_doc_flags_total_mismatch() -> None:
+    doc_table = {"family_total": 5, "rows": {}}
+    report = {
+        "rule_family_accuracy": {
+            "abicheck": {"correct": 1, "total": 4, "pct": 25.0},
+        }
+    }
+    drift = gbr.diff_rule_family_against_doc(report, doc_table)
+    assert any("5 demonstrated" in line and "covers 4" in line for line in drift)
+
+
+def test_diff_rule_family_against_doc_flags_missing_row() -> None:
+    doc_table = {"family_total": 1, "rows": {}}
+    report = {
+        "rule_family_accuracy": {
+            "abidiff": {"correct": 1, "total": 1, "pct": 100.0},
+        }
+    }
+    drift = gbr.diff_rule_family_against_doc(report, doc_table)
+    assert any("abidiff" in line and "missing" in line for line in drift)
+
+
+def test_diff_rule_family_against_doc_flags_numeric_mismatch() -> None:
+    doc_table = {
+        "family_total": 1,
+        "rows": {"abicheck": {"correct": 1, "pct": 100.0}},
+    }
+    report = {
+        "rule_family_accuracy": {
+            "abicheck": {"correct": 0, "total": 1, "pct": 0.0},
+        }
+    }
+    drift = gbr.diff_rule_family_against_doc(report, doc_table)
+    assert any("correct" in line for line in drift)
+    assert any("family accuracy" in line for line in drift)
+
+
+def test_diff_rule_family_against_doc_matches_when_numbers_agree() -> None:
+    doc_table = {
+        "family_total": 1,
+        "rows": {"abicheck": {"correct": 1, "pct": 100.0}},
+    }
+    report = {
+        "rule_family_accuracy": {
+            "abicheck": {"correct": 1, "total": 1, "pct": 100.0},
+        }
+    }
+    assert gbr.diff_rule_family_against_doc(report, doc_table) == []
+
+
+def test_render_markdown_rule_family_section_round_trips_through_parse_and_diff() -> (
+    None
+):
+    """Sibling of test_render_markdown_round_trips_through_parse_and_diff for
+    the rule-family dimension: paste render_markdown()'s new table over the
+    doc's, then --check it later -- parse_rule_family_table() must recognize
+    it and diff_rule_family_against_doc() must find no drift."""
+    report = {
+        "generated_at": "2099-01-01T00:00:00Z",
+        "abicheck_version": "0.0.0-test",
+        "git_commit": "cafefeedface",
+        "ground_truth_sha256": "abc123",
+        "case_count": 1,
+        "full_catalog_run": False,
+        "wall_time_s": 3.0,
+        "peak_rss_mb": 10.0,
+        "tool_versions": {},
+        "accuracy": {name: {"total_ms": 100} for name in gbr.LANE_DOC_LABELS},
+        "coverage_accuracy": {
+            name: {
+                "label": name,
+                "correct": 5,
+                "total": 6,
+                "pct": 83.3,
+                "false_positives": 1,
+                "false_negatives": 0,
+            }
+            for name in gbr.LANE_DOC_LABELS
+        },
+        "rule_family_accuracy": {
+            name: {"correct": 4, "total": 5, "pct": 80.0}
+            for name in gbr.LANE_DOC_LABELS
+        },
+        "status_counts": {name: {} for name in gbr.LANE_DOC_LABELS},
+    }
+    cache_state = {name: "live" for name in gbr.LANE_DOC_LABELS}
+    md = gbr.render_markdown(report, cache_state)
+    table = gbr.parse_rule_family_table(md)
+    assert table is not None, (
+        "parse_rule_family_table() could not read render_markdown()'s own output back"
+    )
+    assert set(table["rows"]) == set(gbr.LANE_DOC_LABELS)
+    assert gbr.diff_rule_family_against_doc(report, table) == []

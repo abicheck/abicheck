@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_alignment_changed` |
 | **Source files** | `catalog/cases/case42_type_alignment_changed/` |
 | **Rule family** | [`type-alignment-changed`](by-rule/type-alignment-changed.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -144,4 +145,4 @@ abidiff v1.xml v2.xml
 - `good.c`
 - `good.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Type alignment changed](by-rule/type-alignment-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Type alignment changed](by-rule/type-alignment-changed.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

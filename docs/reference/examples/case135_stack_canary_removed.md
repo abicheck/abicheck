@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `stack_canary_removed` |
 | **Source files** | `catalog/cases/case135_stack_canary_removed/` |
 | **Rule family** | [`stack-canary-removed`](by-rule/stack-canary-removed.md) |
+| **Subject** | [ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md) |
 
 **Category:** ELF / Security | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -116,4 +117,4 @@ them. abicheck reports both from one pass over the binary.
 - `v1.c`
 - `v2.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Stack protector removed](by-rule/stack-canary-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Stack protector removed](by-rule/stack-canary-removed.md) · [Subject: ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md)._

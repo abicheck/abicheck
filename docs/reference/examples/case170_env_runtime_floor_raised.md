@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `runtime_floor_raised`, `symbol_version_required_added` |
 | **Source files** | `catalog/cases/case170_env_runtime_floor_raised/` |
 | **Rule family** | [`env-runtime-floor-raised`](by-rule/env-runtime-floor-raised.md) |
+| **Subject** | [ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md) |
 
 **Category:** Environment / Toolchain Drift | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -115,4 +116,4 @@ equivalent reproduction of this finding with either tool.
 - `new.abi.json`
 - `old.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Runtime floor raised](by-rule/env-runtime-floor-raised.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Runtime floor raised](by-rule/env-runtime-floor-raised.md) · [Subject: ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md)._

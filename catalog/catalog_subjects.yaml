@@ -1,0 +1,359 @@
+# catalog/catalog_subjects.yaml
+#
+# Hand-authored, reader-facing "subject" classification -- a NEW semantic
+# grouping distinct from `topics`/`rule_slug`/`ecosystem` (see
+# docs/contribute/plans/examples-catalog-split.md, "What is left" item 2,
+# and the end of that plan's "Taxonomy visibility on the public docs site"
+# section for why `topics` is too coarse to serve this role). Mirrors
+# catalog_classification.yaml's own declarative-manifest pattern, but
+# keyed by subject rather than by case: a subject is a coherent, nameable
+# pattern a maintainer would recognize and search for ("leaked internal
+# types", "vtable and virtual dispatch changes", ...), and its `cases` list
+# names every case demonstrating it. A case may appear under more than one
+# subject when genuinely applicable (see case181 below); most appear under
+# exactly one.
+#
+# `scripts/catalog_subjects.py` loads and validates this file: every case in
+# catalog/ground_truth.json['verdicts'] must appear in at least one subject's
+# `cases` list (a case with no subject is a hard error, not a silent
+# default -- the same anti-silent-default convention
+# catalog_classification.py's own docstring establishes), every subject must
+# have at least one member, and every case named in a `cases` list must be a
+# real, current case (a stale entry naming a removed/renamed case is dead
+# configuration, same as catalog_rule_registry.validate_registry's own
+# 'defined but unused' / 'used but undefined' checks).
+#
+# `pattern_summary` is optional, hand-authored narrative prose rendered
+# verbatim onto that subject's generated docs/reference/examples/by-subject/
+# page (scripts/gen_examples_docs.py) -- the "pattern page" plan item 2's own
+# case74-77 worked example calls for, extended to the one other subject with
+# an equally rich, explicit shared mechanism (`internal-dependency-
+# reachability`, the L5 source-graph evidence-tier family). Every other
+# subject renders from its `blurb` and case list alone, the same way
+# by-rule/by-ecosystem pages do when a rule/ecosystem carries no extra prose.
+
+subjects:
+  api-design-and-hygiene-anti-patterns:
+    title: "API design and hygiene anti-patterns"
+    blurb: "The change is technically compatible (or a correctly-labelled risk) but represents a design smell -- namespace pollution, an unnamed type in the public ABI, a polymorphic type with no virtual destructor, or the experimental-API graduation/removal lifecycle."
+    cases:
+      - case53_namespace_pollution
+      - case99_experimental_graduated
+      - case100_experimental_removed_without_replacement
+      - case165_polymorphic_nonvirtual_dtor
+      - case178_unnamed_type_in_public_abi
+
+  build-flag-and-toolchain-mode-drift:
+    title: "Build-flag and toolchain-mode drift"
+    blurb: "The same source compiles differently because a build flag, language-mode switch, or standard-library ABI mode flipped between releases -- nothing in the source changed, but the generated code's ABI contract did."
+    cases:
+      - case15_noexcept_change
+      - case98_cxx_standard_floor_raised
+      - case103_toolchain_flag_drift
+      - case104_glibcxx_dual_abi_flip
+      - case130_exceptions_mode_flip
+      - case131_rtti_mode_flip
+      - case132_threadsafe_statics_flip
+      - case133_tls_model_flip
+      - case152_enum_size_flag_flip
+      - case153_struct_packing_flip
+      - case154_lto_mode_flip
+      - case155_char_signedness_flip
+
+  calling-convention-and-integer-model-changes:
+    title: "Calling convention and integer-model changes"
+    blurb: "The generated calling convention, parameter-passing model, or a platform's integer/floating-point width for a type changes -- callers and callees stop agreeing on the machine-level contract even though no symbol name changed."
+    cases:
+      - case64_calling_convention_changed
+      - case66_language_linkage_changed
+      - case69_trivial_to_nontrivial
+      - case112_lp64_ilp64
+      - case129_struct_return_convention
+      - case177_long_double_abi_changed
+
+  elf-export-and-linker-metadata:
+    title: "ELF export and linker metadata"
+    blurb: "SONAME, RPATH/RUNPATH, DT_NEEDED, symbol binding, or protected/default visibility metadata changes in the ELF dynamic section -- the loader's view of the library, not its symbol contract."
+    cases:
+      - case05_soname
+      - case27_symbol_binding_weakened
+      - case29_ifunc_transition
+      - case50_soname_inconsistent
+      - case51_protected_visibility
+      - case52_rpath_leak
+      - case128_symbol_binding_strengthened
+      - case137_runpath_changed
+      - case138_needed_added
+      - case180_symbol_binding_lost_unique
+
+  elf-security-hardening-and-deployment-risk:
+    title: "ELF security hardening and deployment risk"
+    blurb: "A binary-hardening flag, CPU-dispatch capability, or deployment/runtime-environment assumption weakens or shifts between releases -- usually still symbol-compatible, but a real operational risk."
+    cases:
+      - case49_executable_stack
+      - case83_cpu_dispatch_isa_dropped
+      - case134_relro_weakened
+      - case135_stack_canary_removed
+      - case136_executable_stack_removed
+      - case170_env_runtime_floor_raised
+      - case171_static_tls_introduced
+      - case179_cet_protection_weakened
+
+  enum-abi-and-api-changes:
+    title: "Enum ABI and API changes"
+    blurb: "An enum's member set, value, name, or underlying-type width changes -- some breaks are ABI (value/size), some are source-only (rename)."
+    cases:
+      - case08_enum_value_change
+      - case19_enum_member_removed
+      - case20_enum_member_value_changed
+      - case25_enum_member_added
+      - case31_enum_rename
+      - case57_enum_underlying_size_changed
+
+  export-declaration-mismatches:
+    title: "Export/declaration mismatches"
+    blurb: "A single-release audit (no old/new comparison) finds the binary's export table and its own public headers disagreeing -- an accidental export, a private header leak, an unversioned export, or a declaration with no matching export and vice versa."
+    cases:
+      - case143_audit_accidental_export
+      - case144_audit_private_header_leak
+      - case146_audit_rtti_for_internal
+      - case147_scan_depth_ladder
+      - case148_xcheck_header_build_mismatch
+      - case149_xcheck_odr_variant
+      - case150_xcheck_export_public_pair
+      - case151_xcheck_provider_matrix
+      - case181_xcheck_public_to_internal_dependency
+
+  exported-variable-and-data-object-changes:
+    title: "Exported variable and data-object changes"
+    blurb: "A global/exported variable's type, qualifiers, size, or TLS model changes -- the same class of change as a function signature break, but for data symbols rather than callable ones."
+    cases:
+      - case11_global_var_type
+      - case39_var_const
+      - case58_var_removed
+      - case61_var_added
+      - case67_tls_var_size_changed
+      - case127_data_object_size_changed
+
+  function-signature-and-source-api-changes:
+    title: "Function-signature and source-API changes"
+    blurb: "A function or method's parameter types, return type, qualifiers, access level, or overload set changes in a way that is a source-level (recompile-required) break more often than a binary one."
+    cases:
+      - case02_param_type_change
+      - case10_return_type
+      - case21_method_became_static
+      - case22_method_const_changed
+      - case32_param_defaults
+      - case33_pointer_level
+      - case34_access_level
+      - case35_field_rename
+      - case46_pointer_chain_type_change
+      - case82_sycl_overload_set_removed
+      - case96_hidden_friend_removed
+      - case102_frozen_runtime_signature_changed
+      - case106_ctor_became_explicit
+      - case123_default_argument_removed
+      - case125_class_became_final
+      - case163_python_kwarg_renamed
+      - case166_ref_qualifier_added
+      - case169_overload_added
+
+  inheritance-layout-and-base-subobjects:
+    title: "Inheritance layout and base subobjects"
+    blurb: "A base class gains a member, changes position among multiple bases, or loses the empty-base optimization -- the derived class's own subobject layout moves even though the derived class's own members are untouched."
+    cases:
+      - case37_base_class
+      - case43_base_class_member_added
+      - case60_base_class_position_changed
+      - case140_empty_base_optimization_lost
+
+  inline-function-and-odr-boundary-changes:
+    title: "Inline-function and ODR-boundary changes"
+    blurb: "A function moves across the inline/out-of-line boundary, or an inline accessor's body changes what it references -- symbols appear, disappear, or silently reference something else, all without an explicit ABI-breaking declaration."
+    cases:
+      - case16_inline_to_non_inline
+      - case47_inline_to_outlined
+      - case89_inline_accessor_renamed_pimpl_member
+      - case157_inline_function_removed
+
+  internal-dependency-reachability:
+    title: "Public API depends on an internal declaration"
+    blurb: "A public declaration's own contract secretly depends on a private/internal declaration -- reachable only through the L5 source-graph evidence tier, including how the detector reconciles a dependency that was merely renamed or moved rather than truly removed."
+    pattern_summary: "This is the L5 source-graph evidence tier's own subject: a public declaration's contract can depend on a private one through a channel no artifact-level diff (binary, debug info, or even headers alone) can see -- a private base class, a private field's type, an inline function's body referencing an internal constant, or an ordinary function's internal call graph. case160/187/188/189/190/191 each demonstrate one such channel; case192/193 show the same reachability question applied to suppression (a call-graph-reachable break can survive a suppression rule aimed at the wrong symbol) and to a negative case (an internal call that genuinely is *not* publicly reachable, so nothing should fire). case194-197 then test the detector's own precision under a compound edit: when the internal target is renamed, moved, or merely re-identified across a header change, does the reconciliation logic correctly recognize \"same dependency, moved\" rather than reporting a false removal-and-addition pair? case161/162/181 round out the family with the build-topology and audit-mode variants of the same underlying question -- did a dependency's *source*, not just its presence, change. The throughline for a maintainer: a public API's real dependency surface is not what its own header declares, it is everything reachable from that header -- and demonstrating that reachability, correctly and without false positives on an unrelated rename, is what this entire evidence tier exists to prove."
+    cases:
+      - case160_public_api_internal_dep_added
+      - case161_target_dependency_added
+      - case162_symbol_source_owner_changed
+      - case181_xcheck_public_to_internal_dependency
+      - case187_public_struct_private_field_type
+      - case188_public_class_private_base_class
+      - case189_public_function_private_parameter_type
+      - case190_public_inline_function_references_internal_constant
+      - case191_header_only_graph_field_type
+      - case192_call_graph_break_survives_suppression
+      - case193_ordinary_exported_fn_call_not_reachable
+      - case194_header_graph_rename_reconciled
+      - case195_header_graph_ambiguous_rename_not_reconciled
+      - case196_header_graph_move_reconciled
+      - case197_header_graph_identity_reconciled
+
+  leaked-internal-types:
+    title: "Leaked internal types"
+    blurb: "An internal/`detail::`-namespace type reaches the public ABI by inheritance, by-value embedding, or a shared vtable -- a layout change the author thought was private moves the public class's own size, offsets, or dispatch table."
+    pattern_summary: "These four cases are the same lesson told through four different C++ embedding mechanisms: a plain base class (case74), a by-value member (case75), a polymorphic base's vtable (case76), and a class template's base (case77). In every case the library author changed something living under a `detail::`/internal namespace -- exactly the convention real projects like oneDAL, oneTBB, and Boost use to signal \"do not depend on this\" -- and assumed that convention was load-bearing. It is not: C++ has no language mechanism that makes a `detail::` type's layout private once something public inherits from it, embeds it by value, or shares its vtable. The size, field offsets, and vtable slots of the *public* class are a direct, computable function of the *internal* class's own definition, so any change to the internal type changes the public one's binary contract, with no change to the public type's own source at all. What a maintainer should watch for: grep for `detail::`/`internal::`/`impl::` base classes and by-value members reachable from any public class, and treat every one of them as public ABI surface unless it is hidden behind a pointer (the pimpl idiom's actual job -- see each case's own \"Safe redesign\" section). A namespace name is a documentation convention, not an ABI boundary."
+    cases:
+      - case74_detail_base_class_changed
+      - case75_detail_embedded_by_value
+      - case76_detail_pimpl_vtable_changed
+      - case77_detail_templated_base_changed
+
+  modern-cpp-standard-feature-hazards:
+    title: "Modern C/C++ standard-feature hazards"
+    blurb: "A newer C/C++ standard feature (`_BitInt`, `_Atomic`, `char8_t`, `[[no_unique_address]]`, ABI tags, customization-point objects) has its own, less-familiar ABI implications when it changes."
+    cases:
+      - case88_cpo_kind_changed
+      - case113_abi_tag_changed
+      - case114_char8t_migration
+      - case115_bit_int_width_changed
+      - case116_atomic_qualifier_changed
+      - case117_no_unique_address
+
+  multi-library-bundle-topology:
+    title: "Multi-library bundle topology"
+    blurb: "The break is between libraries in one multi-library release cohort (ADR-023) -- a SONAME skew, an intra-bundle dependency removed, a provider migrated, or a manifest instantiation drift -- not inside any single library's own diff."
+    cases:
+      - case84_bundle_soname_skew
+      - case90_bundle_intra_dep_removed
+      - case91_bundle_intra_signature_drift
+      - case92_bundle_provider_changed
+      - case93_bundle_manifest_drift
+
+  opaque-types-typedefs-and-contract-identifiers:
+    title: "Opaque types, typedefs, and contract identifiers"
+    blurb: "A typedef's underlying type, an opaque type's hidden field, a pimpl alias, or a stable numeric/macro identifier (a serialization tag, a public macro or header constant) changes -- the contract was the *name* staying stable, not any particular layout."
+    cases:
+      - case28_typedef_opaque
+      - case62_type_field_added_compatible
+      - case73_typedef_underlying_changed
+      - case80_pimpl_shared_to_unique
+      - case81_serialization_tag_reassigned
+      - case95_allocator_nested_typedef_removed
+      - case124_header_constant_value_changed
+      - case156_public_macro_removed
+      - case158_public_typedef_removed
+
+  removed-types-and-classes:
+    title: "Removed types and classes"
+    blurb: "A whole type, class, or a renamed policy/typedef family is withdrawn from a public API -- coarser-grained than a single function or field removal, usually the retirement of a historical API surface."
+    cases:
+      - case41_type_changes
+      - case107_task_scheduler_init_removed
+      - case108_task_class_removed
+      - case109_flow_graph_policy_renames
+      - case110_concurrent_unordered_map_api_drift
+
+  safe-changes-correctly-not-flagged:
+    title: "Safe changes correctly not flagged"
+    blurb: "A change that looks superficially risky is correctly left un-flagged: an internal/private-header type changed under public-surface scoping, a preprocessor-conditional false positive reconciled, or a genuinely ABI-neutral qualifier change."
+    cases:
+      - case04_no_change
+      - case118_internal_struct_field_added_scoped
+      - case119_internal_struct_field_removed_scoped
+      - case120_internal_struct_reordered_scoped
+      - case164_preproc_conditional_field
+      - case184_internal_enum_churn_scoped
+      - case186_c_api_pointee_const_abi_neutral
+
+  struct-and-type-layout-changes:
+    title: "Struct and type layout changes"
+    blurb: "A struct, union, or opaque record's own size, field order, offsets, packing, alignment, or bitfield widths change -- the core \"does the compiled layout still match\" family."
+    cases:
+      - case07_struct_layout
+      - case14_cpp_class_size
+      - case18_dependency_leak
+      - case24_union_field_removed
+      - case26_union_field_added
+      - case26b_union_field_added_compatible
+      - case30_field_qualifiers
+      - case36_anon_struct
+      - case40_field_layout
+      - case42_type_alignment_changed
+      - case44_cyclic_type_member_added
+      - case45_multi_dim_array_change
+      - case48_leaf_struct_through_pointer
+      - case54_used_reserved_field
+      - case55_type_kind_changed
+      - case56_struct_packing_changed
+      - case63_bitfield_changed
+      - case70_flexible_array_member_changed
+      - case121_kernel_btf_struct_field_added
+      - case126_sycl_device_impl_ptr
+
+  symbol-versioning-and-kabi:
+    title: "Symbol versioning and kABI"
+    blurb: "A GNU symbol-version node, an inline namespace used for ABI versioning, or a Linux kernel module's kABI CRC/namespace changes -- the mechanisms libraries use to version their own ABI, and what breaks when those mechanisms themselves move."
+    cases:
+      - case13_symbol_versioning
+      - case65_symbol_version_removed
+      - case71_inline_namespace_moved
+      - case101_inline_namespace_version_bumped
+      - case139_symbol_version_node_removed
+      - case141_versioned_symbol_scheme
+      - case145_audit_unversioned_export
+      - case175_kabi_crc_changed
+      - case176_kabi_symbol_namespace_changed
+      - case183_internal_version_node_churn
+
+  symbol-visibility-scoping:
+    title: "Symbol visibility scoping"
+    blurb: "A symbol is visible in the binary's export table but was never part of the declared public/header contract -- an ELF-only export whose removal is still a break for whoever found and used it anyway."
+    cases:
+      - case06_visibility
+      - case59_func_became_inline
+      - case97_api_depends_on_consumer_env
+      - case182_accidental_export_removed_still_breaking
+
+  tag-dispatch-and-empty-class-abi:
+    title: "Tag-dispatch and empty-class ABI"
+    blurb: "A tag or empty-class type used for compile-time dispatch or as a symbol-mangling landmark gains state, gets renamed, or gets replaced -- its whole ABI role was to be small/stable, so any change to it is disproportionate."
+    cases:
+      - case78_task_arena_attach_tag
+      - case86_tag_struct_renamed
+      - case94_empty_tag_gained_state
+
+  template-and-generic-programming-issues:
+    title: "Template and generic-programming issues"
+    blurb: "A class or function template's instantiation set, default arguments, or constraints change in a way visible (or invisible) at the binary or header level -- including a shipped binary missing an instantiation the header still declares."
+    cases:
+      - case17_template_abi
+      - case79_missing_template_instantiation
+      - case85_internal_template_signature_changed
+      - case87_default_template_arg_changed
+      - case105_concept_tightening
+      - case111_enumerable_thread_specific_lambda_ambiguity
+      - case122_template_signature_uninstantiated
+
+  textbook-symbol-add-remove:
+    title: "Textbook symbol add/remove"
+    blurb: "The minimal, no-frills case of an exported function appearing or disappearing -- the baseline every more specific removal/addition pattern in this catalog is a variation on."
+    cases:
+      - case01_symbol_removal
+      - case03_compat_addition
+      - case12_function_removed
+
+  vtable-and-virtual-dispatch:
+    title: "Vtable and virtual dispatch changes"
+    blurb: "A change to a class's virtual-method set, order, or inheritance reshapes its vtable, VTT, or dispatch thunks -- silent misdispatch or a crash, not a link error."
+    cases:
+      - case09_cpp_vtable
+      - case23_pure_virtual_added
+      - case38_virtual_methods
+      - case68_virtual_method_added
+      - case72_covariant_return_changed
+      - case142_vtable_slot_count_binary_only
+      - case167_base_became_virtual
+      - case168_virtual_method_devirtualized
+      - case172_vtable_thunk_offset_changed
+      - case173_vtt_slot_count_changed
+      - case174_secondary_vtable_group_changed
+      - case185_inherited_override_reuses_slot

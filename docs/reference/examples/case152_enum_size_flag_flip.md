@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `enum_size_flag_changed` |
 | **Source files** | `catalog/cases/case152_enum_size_flag_flip/` |
 | **Rule family** | [`enum-size-flag-flip`](by-rule/enum-size-flag-flip.md) |
+| **Subject** | [Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md) |
 
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -129,4 +130,4 @@ localizes the cause to the flag flip.
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Short-enums build flag flipped](by-rule/enum-size-flag-flip.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Short-enums build flag flipped](by-rule/enum-size-flag-flip.md) · [Subject: Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md)._

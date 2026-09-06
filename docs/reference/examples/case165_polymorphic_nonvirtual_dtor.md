@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `polymorphic_type_non_virtual_dtor` |
 | **Source files** | `catalog/cases/case165_polymorphic_nonvirtual_dtor/` |
 | **Rule family** | [`polymorphic-nonvirtual-dtor`](by-rule/polymorphic-nonvirtual-dtor.md) |
+| **Subject** | [API design and hygiene anti-patterns](by-subject/api-design-and-hygiene-anti-patterns.md) |
 
 **Category:** API Design / Latent UB | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -142,4 +143,4 @@ header.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Polymorphic type has a non-virtual destructor](by-rule/polymorphic-nonvirtual-dtor.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Polymorphic type has a non-virtual destructor](by-rule/polymorphic-nonvirtual-dtor.md) · [Subject: API design and hygiene anti-patterns](by-subject/api-design-and-hygiene-anti-patterns.md)._

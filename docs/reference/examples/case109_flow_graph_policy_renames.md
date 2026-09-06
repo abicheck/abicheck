@@ -12,6 +12,7 @@
 | **Source files** | `catalog/cases/case109_flow_graph_policy_renames/` |
 | **Ecosystem** | [oneTBB](by-ecosystem/onetbb.md) |
 | **Related rules** | [`compatible-type-added`](by-rule/compatible-type-added.md), [`public-typedef-removed`](by-rule/public-typedef-removed.md), [`tag-struct-renamed`](by-rule/tag-struct-renamed.md) |
+| **Subject** | [Removed types and classes](by-subject/removed-types-and-classes.md) |
 | **Underlying fact** | API_BREAK (policy-escalated to BREAKING) |
 
 **Category:** Source API / regression suite | **Verdict:** 🔴 BREAKING (policy-escalated source break)
@@ -149,4 +150,4 @@ maintainers.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md) · [Subject: Removed types and classes](by-subject/removed-types-and-classes.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `typedef_removed` |
 | **Source files** | `catalog/cases/case95_allocator_nested_typedef_removed/` |
 | **Rule family** | [`allocator-nested-typedef-removed`](by-rule/allocator-nested-typedef-removed.md) |
+| **Subject** | [Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md) |
 | **Underlying fact** | API_BREAK (policy-escalated to BREAKING) |
 
 **Category:** Source API contract | **Verdict:** 🔴 BREAKING (policy-escalated source break)
@@ -146,4 +147,4 @@ where a binary-only diff tool is not.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Allocator nested typedef removed](by-rule/allocator-nested-typedef-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Allocator nested typedef removed](by-rule/allocator-nested-typedef-removed.md) · [Subject: Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md)._

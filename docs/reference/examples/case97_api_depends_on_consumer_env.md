@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_removed_elf_only` |
 | **Source files** | `catalog/cases/case97_api_depends_on_consumer_env/` |
 | **Rule family** | [`api-depends-on-consumer-env`](by-rule/api-depends-on-consumer-env.md) |
+| **Subject** | [Symbol visibility scoping](by-subject/symbol-visibility-scoping.md) |
 
 **Category:** Symbol API | **Verdict:** ❌ BREAKING
 
@@ -143,4 +144,4 @@ exit code is reproduced here.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported surface depends on consumer environment](by-rule/api-depends-on-consumer-env.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported surface depends on consumer environment](by-rule/api-depends-on-consumer-env.md) · [Subject: Symbol visibility scoping](by-subject/symbol-visibility-scoping.md)._

@@ -1,7 +1,8 @@
 # Executable contract for this workflow example (Phase 5 of the
 # examples/catalog split). `validation/scripts/run_workflow_examples.py`
 # copies the directory to a scratch tree, runs each `run:` line below as a
-# real shell command, and checks what it claims.
+# single program invocation -- no shell, `shlex.split` + `shell=False` --
+# and checks what it claims.
 #
 # Every `run:` line must appear verbatim in this directory's README.md
 # (whitespace-normalized) -- that is the whole point: without it this file
@@ -15,6 +16,9 @@ platforms:
   - macos
 requires:
   - gcc
+  # build_shared_lib.py needs python3 to pick the right link-mode flag
+  # for the host platform (gcc -shared on Linux, -dynamiclib on macOS).
+  - python3
   # The compare step passes --header, which goes through the default CastXML
   # AST backend. Declaring it here is what makes a host without CastXML report
   # an honest skip instead of a failure that looks like an ABI regression --
@@ -27,9 +31,9 @@ requires:
   - abicheck
 steps:
   - name: build-v1
-    run: gcc -shared -fPIC -g v1/mathutils.c -o libmathutils_v1.so
+    run: python3 build_shared_lib.py -fPIC -g v1/mathutils.c -o libmathutils_v1.so
   - name: build-v2
-    run: gcc -shared -fPIC -g v2/mathutils.c -o libmathutils_v2.so
+    run: python3 build_shared_lib.py -fPIC -g v2/mathutils.c -o libmathutils_v2.so
   - name: compare
     run: >-
       abicheck compare libmathutils_v1.so libmathutils_v2.so

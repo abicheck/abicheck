@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_removed`, `func_added`, `versioned_symbol_scheme_detected` |
 | **Source files** | `catalog/cases/case141_versioned_symbol_scheme/` |
 | **Rule family** | [`versioned-symbol-scheme`](by-rule/versioned-symbol-scheme.md) |
+| **Subject** | [Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -147,4 +148,4 @@ symbol-table evidence.
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Symbol versioning scheme changed](by-rule/versioned-symbol-scheme.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Symbol versioning scheme changed](by-rule/versioned-symbol-scheme.md) · [Subject: Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `secondary_vtable_group_changed` |
 | **Source files** | `catalog/cases/case174_secondary_vtable_group_changed/` |
 | **Rule family** | [`secondary-vtable-group-changed`](by-rule/secondary-vtable-group-changed.md) |
+| **Subject** | [Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md) |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
@@ -158,4 +159,4 @@ reproduced here.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Secondary vtable group changed](by-rule/secondary-vtable-group-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Secondary vtable group changed](by-rule/secondary-vtable-group-changed.md) · [Subject: Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md)._

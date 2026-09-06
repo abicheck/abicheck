@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `private_header_leak` |
 | **Source files** | `catalog/cases/case151_xcheck_provider_matrix/` |
 | **Related rules** | [`audit-private-header-leak`](by-rule/audit-private-header-leak.md) |
+| **Subject** | [Export/declaration mismatches](by-subject/export-declaration-mismatches.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -124,4 +125,4 @@ either tool.
 - `snapshot.abi.json`
 - `thin.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Subject: Export/declaration mismatches](by-subject/export-declaration-mismatches.md)._

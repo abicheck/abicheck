@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `symbol_size_changed` |
 | **Source files** | `catalog/cases/case127_data_object_size_changed/` |
 | **Rule family** | [`data-object-size-changed`](by-rule/data-object-size-changed.md) |
+| **Subject** | [Exported variable and data-object changes](by-subject/exported-variable-and-data-object-changes.md) |
 
 **Category:** Symbol / Data Layout | **Verdict:** 🔴 BREAKING
 
@@ -130,4 +131,4 @@ distinguishes them.
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported data object size changed](by-rule/data-object-size-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported data object size changed](by-rule/data-object-size-changed.md) · [Subject: Exported variable and data-object changes](by-subject/exported-variable-and-data-object-changes.md)._

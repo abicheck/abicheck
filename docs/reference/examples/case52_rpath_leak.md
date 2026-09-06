@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `runpath_changed` |
 | **Source files** | `catalog/cases/case52_rpath_leak/` |
 | **Rule family** | [`rpath-leak`](by-rule/rpath-leak.md) |
+| **Subject** | [ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md) |
 
 **Category:** Quality | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -118,4 +119,4 @@ non-standard paths in `DT_RPATH`/`DT_RUNPATH`. Debian's lintian reports
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Build-machine search path leaked](by-rule/rpath-leak.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Build-machine search path leaked](by-rule/rpath-leak.md) · [Subject: ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md)._

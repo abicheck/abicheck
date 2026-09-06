@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `catalog/cases/case120_internal_struct_reordered_scoped/` |
 | **Rule family** | [`internal-struct-reordered-scoped`](by-rule/internal-struct-reordered-scoped.md) |
+| **Subject** | [Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md) |
 
 **Category:** Public-Surface Scoping (ADR-024) | **Verdict:** ✅ NO_CHANGE
 
@@ -127,4 +128,4 @@ environment, so no cross-tool output is reproduced here.
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal struct reordered, out of contract](by-rule/internal-struct-reordered-scoped.md)._
+_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal struct reordered, out of contract](by-rule/internal-struct-reordered-scoped.md) · [Subject: Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md)._

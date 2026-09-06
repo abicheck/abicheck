@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `serialization_tag_changed` |
 | **Source files** | `catalog/cases/case81_serialization_tag_reassigned/` |
 | **Rule family** | [`serialization-tag-reassigned`](by-rule/serialization-tag-reassigned.md) |
+| **Subject** | [Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md) |
 
 **Category:** Payload ABI | **Verdict:** 🔴 BREAKING
 
@@ -135,4 +136,4 @@ is on par with changing a wire-protocol field.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Serialization tag reassigned](by-rule/serialization-tag-reassigned.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Serialization tag reassigned](by-rule/serialization-tag-reassigned.md) · [Subject: Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md)._

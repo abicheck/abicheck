@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `unnamed_type_in_public_abi` |
 | **Source files** | `catalog/cases/case178_unnamed_type_in_public_abi/` |
 | **Rule family** | [`unnamed-type-in-public-abi`](by-rule/unnamed-type-in-public-abi.md) |
+| **Subject** | [API design and hygiene anti-patterns](by-subject/api-design-and-hygiene-anti-patterns.md) |
 
 **Category:** C++ Hygiene / Deployment Risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -148,4 +149,4 @@ reproduced here.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Unnamed type in the public ABI](by-rule/unnamed-type-in-public-abi.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Unnamed type in the public ABI](by-rule/unnamed-type-in-public-abi.md) · [Subject: API design and hygiene anti-patterns](by-subject/api-design-and-hygiene-anti-patterns.md)._

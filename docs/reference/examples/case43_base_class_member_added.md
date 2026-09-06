@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_field_added`, `type_size_changed`, `type_field_offset_changed` |
 | **Source files** | `catalog/cases/case43_base_class_member_added/` |
 | **Rule family** | [`base-class-member-added`](by-rule/base-class-member-added.md) |
+| **Subject** | [Inheritance layout and base subobjects](by-subject/inheritance-layout-and-base-subobjects.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -150,4 +151,4 @@ echo "exit: $?"   # → 4 (ABI change: base class data member added)
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Base class gained a member](by-rule/base-class-member-added.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Base class gained a member](by-rule/base-class-member-added.md) · [Subject: Inheritance layout and base subobjects](by-subject/inheritance-layout-and-base-subobjects.md)._

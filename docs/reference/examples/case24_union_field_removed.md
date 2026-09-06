@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `union_field_removed` |
 | **Source files** | `catalog/cases/case24_union_field_removed/` |
 | **Rule family** | [`union-field-removed`](by-rule/union-field-removed.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -126,4 +127,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Union member removed](by-rule/union-field-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Union member removed](by-rule/union-field-removed.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

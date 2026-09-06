@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_removed`, `public_api_internal_dependency_added` |
 | **Source files** | `catalog/cases/case189_public_function_private_parameter_type/` |
 | **Rule family** | [`public-function-private-parameter-type`](by-rule/public-function-private-parameter-type.md) |
+| **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 | **Known kind gap** | `public_api_internal_dependency_added` — verdict is correct; see note below |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
@@ -132,4 +133,4 @@ public handle that wraps the internal type.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public function takes a private parameter type](by-rule/public-function-private-parameter-type.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public function takes a private parameter type](by-rule/public-function-private-parameter-type.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `ctor_explicit_added` |
 | **Source files** | `catalog/cases/case106_ctor_became_explicit/` |
 | **Rule family** | [`ctor-became-explicit`](by-rule/ctor-became-explicit.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Source API contract | **Verdict:** 🟠 API_BREAK
 
@@ -110,4 +111,4 @@ g++ -std=c++17 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Constructor became explicit](by-rule/ctor-became-explicit.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Constructor became explicit](by-rule/ctor-became-explicit.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

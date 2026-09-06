@@ -76,6 +76,12 @@ BUILD_DIR = REPORT_DIR / "_build"
 # Evidence-tier model (five sources / L0–L4) lives in a sibling module so it is
 # importable without a compiler. See scripts/evidence_tiers.py.
 sys.path.insert(0, str(Path(__file__).parent))
+# The canonical rule registry (docs/contribute/plans/examples-catalog-split.md
+# "What is left" item 3) -- joins ground_truth.json["taxonomy"]'s rule_slug/
+# variant_of/related_rules fields into per-family membership. Used below by
+# _rule_family_accuracy() to aggregate accuracy by rule family instead of by
+# raw case.
+import catalog_rule_registry  # noqa: E402
 import evidence_tiers  # noqa: E402
 
 # Ensure we use abicheck from THIS repo, not any globally-installed version
@@ -1733,6 +1739,85 @@ def _coverage_accuracy(results: list[dict], key: str) -> tuple[int, int]:
     return correct, len(results)
 
 
+def _rule_family_accuracy(
+    results: list[dict], tool_names: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Per-tool accuracy aggregated by *rule family* instead of by raw case.
+
+    docs/contribute/plans/examples-catalog-split.md's "What is left" item 3:
+    a flat per-case denominator (:func:`_coverage_accuracy`) counts three
+    demonstrations of the same rule (a canonical case plus its confirmed
+    duplicate/variant siblings — see ``catalog_rule_registry.py``) as three
+    distinct ABI concepts, so a rule with more sibling fixtures than another
+    contributes more to (or costs more from) a tool's apparent accuracy for
+    no reason connected to how many *rules* it actually understands. This
+    changes what is measured, not just how the existing number is labelled
+    (the reason this dimension was deferred as its own change rather than
+    folded into Phase 6's report-only case-count split).
+
+    A rule family counts as *correct* for a tool only when the tool scores
+    every one of its member cases correctly (the canonical case plus every
+    confirmed duplicate/variant) — one miss anywhere in the family makes the
+    whole family a miss. This mirrors how a maintainer actually judges "does
+    this tool understand this rule", rather than "how many of these
+    near-identical fixtures did it happen to get right" — a tool that gets
+    the canonical case right but a variant wrong does not, in fact,
+    understand the rule well enough to trust across its own documented
+    robustness conditions (language, public-surface reachability, symbol
+    versioning, ...).
+
+    Only *demonstrated* rule families are scored
+    (``catalog_rule_registry.STATUS_DEMONSTRATED``) — a "referenced-only"
+    family (named only by a scenario's ``related_rules``, e.g. a mechanism no
+    single-library case demonstrates alone yet) has no rule-entity case of
+    its own, so there is no case-level verdict to attribute to it. A family
+    with none of its member cases present in *results* (a ``--cases``/
+    ``pinned74`` partial run) is excluded from the denominator entirely — the
+    same "can't verify what wasn't run" rule
+    ``generate_benchmark_report.py``'s own ``diff_against_doc`` already
+    applies to per-lane doc rows.
+
+    Denominator (family count) is identical across every tool in
+    *tool_names*, since it depends only on which cases *results* covers, not
+    on any one tool's verdicts — a fair like-for-like comparison across
+    lanes, same as :func:`_coverage_accuracy`'s shared per-case denominator.
+    """
+    by_case = {r["case"]: r for r in results}
+    taxonomy = _gt_data.get("taxonomy") or {}
+    families = catalog_rule_registry.build_families(taxonomy)
+
+    scored_families: dict[str, list[dict]] = {}
+    for slug, fam in families.items():
+        if fam.status != catalog_rule_registry.STATUS_DEMONSTRATED:
+            continue
+        member_rows = [by_case[c] for c in fam.rule_cases if c in by_case]
+        if member_rows:
+            scored_families[slug] = member_rows
+
+    total = len(scored_families)
+    out: dict[str, dict[str, Any]] = {}
+    for name in tool_names:
+        correct = 0
+        for member_rows in scored_families.values():
+            if all(
+                r.get("expected", "?") != "?"
+                and (
+                    r[name] == r["expected"]
+                    or _is_source_enrichment_match(
+                        r["case"], name, r["expected"], r[name]
+                    )
+                )
+                for r in member_rows
+            ):
+                correct += 1
+        out[name] = {
+            "correct": correct,
+            "total": total,
+            "pct": round(100 * correct / total, 1) if total else None,
+        }
+    return out
+
+
 def _total_ms(results: list[dict], ms_key: str) -> float:
     return sum(r.get(ms_key, 0) for r in results)
 
@@ -2028,6 +2113,9 @@ def _collect_metadata(
         },
         "accuracy": accuracy,
         "coverage_accuracy": coverage_accuracy,
+        "rule_family_accuracy": _rule_family_accuracy(
+            results, [t.name for t in active_tools]
+        ),
         "results": results,
     }
 

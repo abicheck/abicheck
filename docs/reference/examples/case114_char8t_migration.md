@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `char8t_migration` |
 | **Source files** | `catalog/cases/case114_char8t_migration/` |
 | **Rule family** | [`char8t-migration`](by-rule/char8t-migration.md) |
+| **Subject** | [Modern C/C++ standard-feature hazards](by-subject/modern-cpp-standard-feature-hazards.md) |
 
 **Category:** Binary ABI break / C++20 | **Verdict:** 🔴 BREAKING
 
@@ -138,4 +139,4 @@ abidiff v1.xml v2.xml
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: char8_t migration](by-rule/char8t-migration.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: char8_t migration](by-rule/char8t-migration.md) · [Subject: Modern C/C++ standard-feature hazards](by-subject/modern-cpp-standard-feature-hazards.md)._

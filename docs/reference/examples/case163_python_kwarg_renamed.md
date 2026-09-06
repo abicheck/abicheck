@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `python_api_parameter_renamed` |
 | **Source files** | `catalog/cases/case163_python_kwarg_renamed/` |
 | **Rule family** | [`python-kwarg-renamed`](by-rule/python-kwarg-renamed.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Python API | **Verdict:** 🟠 API_BREAK
 
@@ -120,4 +121,4 @@ exactly the blind spot this case demonstrates.
 - `v1.pyi`
 - `v2.pyi`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Python keyword argument renamed](by-rule/python-kwarg-renamed.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Python keyword argument renamed](by-rule/python-kwarg-renamed.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

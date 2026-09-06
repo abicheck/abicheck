@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `symbol_binding_changed` |
 | **Source files** | `catalog/cases/case27_symbol_binding_weakened/` |
 | **Rule family** | [`symbol-binding-weakened`](by-rule/symbol-binding-weakened.md) |
+| **Subject** | [ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md) |
 
 **Category:** ELF / Symbol Quality | **Verdict:** 🟢 COMPATIBLE
 
@@ -124,4 +125,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Symbol binding weakened](by-rule/symbol-binding-weakened.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Symbol binding weakened](by-rule/symbol-binding-weakened.md) · [Subject: ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md)._

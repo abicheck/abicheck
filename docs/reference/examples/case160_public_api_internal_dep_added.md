@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `public_api_internal_dependency_added` |
 | **Source files** | `catalog/cases/case160_public_api_internal_dep_added/` |
 | **Rule family** | [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md) |
+| **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 
 **Category:** Build/Source Evidence (L5) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -143,4 +144,4 @@ is no `.so`/`abidw` XML pair to hand either tool for this case.
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Public API gained an internal dependency](by-rule/public-api-gains-internal-dependency.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Public API gained an internal dependency](by-rule/public-api-gains-internal-dependency.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._

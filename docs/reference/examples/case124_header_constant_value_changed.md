@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `constant_changed` |
 | **Source files** | `catalog/cases/case124_header_constant_value_changed/` |
 | **Rule family** | [`header-constant-value-changed`](by-rule/header-constant-value-changed.md) |
+| **Subject** | [Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md) |
 
 **Category:** API Break | **Verdict:** 🟠 API_BREAK
 
@@ -129,4 +130,4 @@ change at all.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public constant value changed](by-rule/header-constant-value-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public constant value changed](by-rule/header-constant-value-changed.md) · [Subject: Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md)._

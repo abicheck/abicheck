@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `public_typedef_removed` |
 | **Source files** | `catalog/cases/case158_public_typedef_removed/` |
 | **Rule family** | [`public-typedef-removed`](by-rule/public-typedef-removed.md) |
+| **Subject** | [Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md) |
 
 **Category:** Build/Source Evidence (L4) | **Verdict:** 🟠 API_BREAK
 
@@ -135,4 +136,4 @@ either tool for this case.
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public typedef removed](by-rule/public-typedef-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public typedef removed](by-rule/public-typedef-removed.md) · [Subject: Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md)._

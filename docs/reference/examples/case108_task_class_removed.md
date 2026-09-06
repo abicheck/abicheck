@@ -12,6 +12,7 @@
 | **Source files** | `catalog/cases/case108_task_class_removed/` |
 | **Ecosystem** | [oneTBB](by-ecosystem/onetbb.md) |
 | **Related rules** | [`compat-addition`](by-rule/compat-addition.md), [`compatible-type-added`](by-rule/compatible-type-added.md), [`exported-function-removed`](by-rule/exported-function-removed.md), [`exported-type-removed`](by-rule/exported-type-removed.md), [`var-removed`](by-rule/var-removed.md), [`virtual-dispatch-contract-removed`](by-rule/virtual-dispatch-contract-removed.md) |
+| **Subject** | [Removed types and classes](by-subject/removed-types-and-classes.md) |
 
 **Category:** Polymorphic Class Removal | **Verdict:** 🔴 BREAKING
 
@@ -142,4 +143,4 @@ recommended way to write parallel algorithms before `parallel_invoke` /
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md) · [Subject: Removed types and classes](by-subject/removed-types-and-classes.md)._

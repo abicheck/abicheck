@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `declaration_identity_reconciled`, `public_api_internal_dependency_added` |
 | **Source files** | `catalog/cases/case197_header_graph_identity_reconciled/` |
 | **Related rules** | [`internal-declaration-identity-reconciled`](by-rule/internal-declaration-identity-reconciled.md), [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md) |
+| **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 
 **Category:** Risk (Source Graph / Reconciliation) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -221,4 +222,4 @@ structural-context tier or deliberately left unreconciled).
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._

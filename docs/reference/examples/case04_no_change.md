@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `catalog/cases/case04_no_change/` |
 | **Rule family** | [`no-change`](by-rule/no-change.md) |
+| **Subject** | [Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md) |
 
 **Category:** Symbol API | **Verdict:** ✅ NO_CHANGE
 
@@ -108,4 +109,4 @@ echo "exit: $?"   # → 0
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: No change](by-rule/no-change.md)._
+_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: No change](by-rule/no-change.md) · [Subject: Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md)._

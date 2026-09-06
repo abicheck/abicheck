@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `ifunc_introduced` |
 | **Source files** | `catalog/cases/case29_ifunc_transition/` |
 | **Rule family** | [`ifunc-transition`](by-rule/ifunc-transition.md) |
+| **Subject** | [ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md) |
 
 **Category:** ELF / Symbol Quality | **Verdict:** 🟢 COMPATIBLE
 
@@ -117,4 +118,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Symbol became an IFUNC](by-rule/ifunc-transition.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Symbol became an IFUNC](by-rule/ifunc-transition.md) · [Subject: ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md)._

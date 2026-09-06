@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `symbol_binding_lost_unique` |
 | **Source files** | `catalog/cases/case180_symbol_binding_lost_unique/` |
 | **Rule family** | [`symbol-binding-lost-unique`](by-rule/symbol-binding-lost-unique.md) |
+| **Subject** | [ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md) |
 
 **Category:** Deployment Risk (ELF/Loader) | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -139,4 +140,4 @@ difference abicheck's `symbol_binding_lost_unique` detector reads.
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Unique binding lost](by-rule/symbol-binding-lost-unique.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Unique binding lost](by-rule/symbol-binding-lost-unique.md) · [Subject: ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md)._

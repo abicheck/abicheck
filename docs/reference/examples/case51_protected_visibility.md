@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `symbol_elf_visibility_changed` |
 | **Source files** | `catalog/cases/case51_protected_visibility/` |
 | **Rule family** | [`protected-visibility`](by-rule/protected-visibility.md) |
+| **Subject** | [ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md) |
 
 **Category:** Quality | **Verdict:** 🟢 COMPATIBLE
 
@@ -111,4 +112,4 @@ interposability for codegen freedom.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: ELF symbol visibility changed](by-rule/protected-visibility.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: ELF symbol visibility changed](by-rule/protected-visibility.md) · [Subject: ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md)._

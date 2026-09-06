@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_static_changed` |
 | **Source files** | `catalog/cases/case21_method_became_static/` |
 | **Rule family** | [`method-became-static`](by-rule/method-became-static.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -144,4 +145,4 @@ shape here.
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Member function became static](by-rule/method-became-static.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Member function became static](by-rule/method-became-static.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

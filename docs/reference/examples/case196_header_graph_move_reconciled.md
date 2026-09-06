@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `declaration_moved`, `public_api_internal_dependency_added` |
 | **Source files** | `catalog/cases/case196_header_graph_move_reconciled/` |
 | **Related rules** | [`internal-declaration-moved-reconciled`](by-rule/internal-declaration-moved-reconciled.md), [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md) |
+| **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 
 **Category:** Risk (Source Graph / Reconciliation) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -244,4 +245,4 @@ guess).
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._
