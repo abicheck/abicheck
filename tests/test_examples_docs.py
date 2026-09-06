@@ -31,6 +31,7 @@ import example_catalog  # noqa: E402
 
 EXAMPLES_DIR = example_catalog.CASES_DIR
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
+TAXONOMY_PATH = example_catalog.TAXONOMY_PATH
 GEN_SCRIPT = ROOT / "scripts" / "gen_examples_docs.py"
 
 
@@ -45,6 +46,10 @@ def _load_generator_module():
 
 def _ground_truth() -> dict:
     return json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
+
+
+def _taxonomy() -> dict:
+    return json.loads(TAXONOMY_PATH.read_text(encoding="utf-8"))
 
 
 def _ground_truth_cases() -> list[str]:
@@ -270,10 +275,9 @@ def test_bundle_cases_render_their_per_library_expectations() -> None:
 def test_ecosystem_view_counts_every_case_in_that_ecosystem() -> None:
     """The by-ecosystem pages must agree with the taxonomy's own counts --
     the property that failed when bundle cases were excluded from
-    `_load_cases()` but present in `ground_truth.json["taxonomy"]`."""
+    `_load_cases()` but present in `catalog/taxonomy.json`."""
     mod = _load_generator_module()
-    gt = _ground_truth()
-    taxonomy = gt["taxonomy"]
+    taxonomy = _taxonomy()
     cases = mod._load_cases()
     for eco in mod.ECOSYSTEM_ORDER:
         from_taxonomy = {

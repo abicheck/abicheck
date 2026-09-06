@@ -322,7 +322,7 @@ class Case:
     # surfaced on the case page so a reader can see "is this an atomic rule
     # or a composed scenario" and "is this a duplicate/variant of another
     # case" without leaving the docs site -- previously only visible in the
-    # raw ground_truth.json taxonomy block (an external review's core
+    # raw taxonomy.json manifest (an external review's core
     # finding: "internally the repository understands the cases are
     # different... externally users still see a flat catalog").
     entity: str = "rule"
@@ -1088,7 +1088,11 @@ def _render_catalog_readme(text: str, entries: list[ReadmeEntry]) -> str:
 
 def _load_cases() -> list[Case]:
     data = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
-    taxonomy_block: dict[str, dict] = data.get("taxonomy") or {}
+    taxonomy_block: dict[str, dict] = (
+        json.loads(example_catalog.TAXONOMY_PATH.read_text(encoding="utf-8"))
+        if example_catalog.TAXONOMY_PATH.exists()
+        else {}
+    )
     cases = []
     for name, meta in data["verdicts"].items():
         # Multi-library bundle cases (ADR-023) used to be excluded here, on

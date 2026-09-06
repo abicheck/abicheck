@@ -57,6 +57,13 @@ EXAMPLES_DIR = ROOT / "examples"
 CATALOG_DIR = ROOT / "catalog"
 CASES_DIR = CATALOG_DIR / "cases"
 GROUND_TRUTH_PATH = CATALOG_DIR / "ground_truth.json"
+#: `gen_catalog_taxonomy.py`'s generated output -- a sibling manifest of
+#: ``ground_truth.json``, not a key inside it (examples-catalog-split.md's
+#: "What is left" item 5): a taxonomy-only edit no longer changes
+#: ``ground_truth.json``'s own bytes, so it can't perturb
+#: ``benchmark_comparison._ground_truth_digest()`` or the frozen
+#: abidiff/ABICC competitor-result stamp that digest guards.
+TAXONOMY_PATH = CATALOG_DIR / "taxonomy.json"
 
 
 def case_dir(case_id: str) -> Path:
@@ -72,6 +79,17 @@ def case_dir(case_id: str) -> Path:
 def load_ground_truth() -> dict[str, object]:
     """The parsed contents of ``catalog/ground_truth.json``."""
     return json.loads(GROUND_TRUTH_PATH.read_text(encoding="utf-8"))
+
+
+def load_taxonomy() -> dict[str, dict[str, object]]:
+    """The parsed contents of ``catalog/taxonomy.json`` -- the generated,
+    per-case classification `gen_catalog_taxonomy.py` writes as its own
+    manifest, a sibling of ``ground_truth.json`` rather than a key inside it
+    (examples-catalog-split.md's "What is left" item 5). Every caller that
+    used to read ``load_ground_truth()["taxonomy"]`` should call this
+    instead.
+    """
+    return json.loads(TAXONOMY_PATH.read_text(encoding="utf-8"))
 
 
 def all_case_ids(ground_truth: dict[str, object] | None = None) -> list[str]:

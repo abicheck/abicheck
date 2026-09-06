@@ -783,8 +783,15 @@ def check_doc_count_sync(f: Findings) -> None:
     # contract (it is the first CI step, before `pip install`) and the
     # registry loader needs PyYAML. The two derivations are checked against
     # each other by tests/test_catalog_rule_registry.py, which has no such
-    # constraint.
-    taxonomy = ground_truth.get("taxonomy") or {}
+    # constraint. `taxonomy.json` is a sibling manifest of ground_truth.json,
+    # not a key inside it (examples-catalog-split.md's "What is left" item 5)
+    # -- read separately, and tolerated missing the same way ground_truth.json
+    # itself is above.
+    taxonomy_path = CATALOG / "taxonomy.json"
+    try:
+        taxonomy = json.loads(_read(taxonomy_path)) or {}
+    except Exception:
+        taxonomy = {}
     n_demonstrated_rules = len(
         {
             entry["rule_slug"]

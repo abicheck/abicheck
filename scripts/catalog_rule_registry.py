@@ -6,7 +6,7 @@ Phase 2/6 of the examples/catalog split
 (docs/contribute/plans/examples-catalog-split.md). `catalog/catalog_rules.yaml`
 is the hand-authored half: one `title` + `definition` per rule slug. This
 module is the derived half -- it joins that registry against
-`ground_truth.json["taxonomy"]` to answer, per rule, which case is the
+`catalog/taxonomy.json` to answer, per rule, which case is the
 canonical demonstration, which cases are variants or duplicates of it, which
 scenarios compose it, and therefore whether the rule is *demonstrated* by a
 real rule-entity case or merely *referenced* by a scenario.

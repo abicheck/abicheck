@@ -51,7 +51,7 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 @pytest.fixture(scope="module")
 def taxonomy() -> dict[str, dict]:
-    return example_catalog.load_ground_truth()["taxonomy"]  # type: ignore[index]
+    return example_catalog.load_taxonomy()
 
 
 @pytest.fixture(scope="module")

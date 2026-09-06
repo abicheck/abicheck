@@ -2,7 +2,7 @@
 """Generate docs/contribute/catalog-coverage.md -- Phase 6 of the
 examples/catalog split (docs/contribute/plans/examples-catalog-split.md).
 
-Phases 1-2 gave every case in `catalog/ground_truth.json["taxonomy"]` an
+Phases 1-2 gave every case in `catalog/taxonomy.json` an
 `entity` (rule/scenario), a `rule_slug`/`variant_of`/`relation_type`/
 `relation_axis` set, a `scenario_kind`, and an `ecosystem`. Before this
 generator, every consumer that reported on catalog size
@@ -289,8 +289,7 @@ def _workflow_coverage() -> str:
 
 
 def render() -> str:
-    gt = example_catalog.load_ground_truth()
-    taxonomy: dict[str, dict[str, object]] = gt["taxonomy"]  # type: ignore[assignment]
+    taxonomy = example_catalog.load_taxonomy()
 
     parts = [
         GENERATED_NOTE,
