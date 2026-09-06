@@ -264,14 +264,15 @@ fi
 # gap: check-target's kind: app-consumer/plugin-contract route through
 # these two flags).
 _USED_BY="${INPUT_USED_BY:-}"
+_USED_BY_MANIFEST="${INPUT_USED_BY_MANIFEST:-}"
 _REQUIRED_SYMBOL="${INPUT_REQUIRED_SYMBOL:-}"
 _REQUIRED_SYMBOLS="${INPUT_REQUIRED_SYMBOLS:-}"
-if [[ -n "$_USED_BY" && ( -n "$_REQUIRED_SYMBOL" || -n "$_REQUIRED_SYMBOLS" ) ]]; then
-  _fail "used-by is mutually exclusive with required-symbol/required-symbols -- set only one contract per check."
+if [[ ( -n "$_USED_BY" || -n "$_USED_BY_MANIFEST" ) && ( -n "$_REQUIRED_SYMBOL" || -n "$_REQUIRED_SYMBOLS" ) ]]; then
+  _fail "used-by/used-by-manifest is mutually exclusive with required-symbol/required-symbols -- set only one contract per check."
 fi
-_scoped_input_names=(used-by required-symbol required-symbols)
-_scoped_input_values=("$_USED_BY" "$_REQUIRED_SYMBOL" "$_REQUIRED_SYMBOLS")
-_scoped_input_unset_values=("" "" "")
+_scoped_input_names=(used-by used-by-manifest required-symbol required-symbols)
+_scoped_input_values=("$_USED_BY" "$_USED_BY_MANIFEST" "$_REQUIRED_SYMBOL" "$_REQUIRED_SYMBOLS")
+_scoped_input_unset_values=("" "" "" "")
 for _i in "${!_scoped_input_names[@]}"; do
   if [[ "${_scoped_input_values[$_i]}" != "${_scoped_input_unset_values[$_i]}" && "$MODE" != "compare" ]]; then
     _warn "${_scoped_input_names[$_i]} is set but has no effect: it only applies to mode: compare (mode is '$MODE')."

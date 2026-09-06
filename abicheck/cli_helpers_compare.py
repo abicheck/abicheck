@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from .checker_types import Change, DiffResult
     from .compatibility_evaluation_frontend import PublicSymbolsList
     from .model import AbiSnapshot
+    from .model.consumer_spec import ConsumerAppInput
     from .service_scan import CompileContext
     from .workflows.extraction import BuildConfig
     from .workflows.gate import SeverityConfig
@@ -820,8 +821,16 @@ def fold_l0_hard_removals(
 
 
 def _app_compat_summary(result: object) -> dict[str, Any]:
-    """Project an :class:`appcompat.AppCompatResult` into a small JSON-safe dict."""
-    return {
+    """Project an :class:`appcompat.AppCompatResult` into a small JSON-safe dict.
+
+    Workstream D-S1: ``platform``/``profile``/``provider_baseline``/
+    ``digest``/``requirement``/``unreadable`` are only present when the
+    supplied consumer actually carried that provenance (a
+    :class:`~abicheck.model.consumer_spec.ConsumerSpec`, e.g. via
+    ``--used-by-manifest``) -- a bare ``--used-by <path>`` consumer's summary
+    is byte-for-byte the same shape it has always been.
+    """
+    summary: dict[str, Any] = {
         "app": result.app_path,  # type: ignore[attr-defined]
         "verdict": result.verdict.value,  # type: ignore[attr-defined]
         "required_symbol_count": result.required_symbol_count,  # type: ignore[attr-defined]
@@ -830,6 +839,45 @@ def _app_compat_summary(result: object) -> dict[str, Any]:
         "relevant_change_count": len(result.breaking_for_app),  # type: ignore[attr-defined]
         "symbol_coverage": round(result.symbol_coverage, 1),  # type: ignore[attr-defined]
     }
+    for field in ("platform", "profile", "provider_baseline", "digest"):
+        value = getattr(result, field, None)
+        if value is not None:
+            summary[field] = value
+    requirement = getattr(result, "requirement", "required")
+    if requirement != "required":
+        summary["requirement"] = requirement
+    if getattr(result, "unreadable", False):
+        summary["unreadable"] = True
+        summary["unreadable_reason"] = getattr(result, "unreadable_reason", None)
+    return summary
+
+
+def _is_consumer_affected(summary: dict[str, Any]) -> bool:
+    """Whether one ``_app_compat_summary`` entry counts as "affected" in the
+    "N of M consumers affected" statistic (Workstream D-S1).
+
+    An unreadable (necessarily advisory -- a REQUIRED one would have raised
+    before a summary was ever built) consumer is excluded from both N and M's
+    "evaluated" denominator: there is no verdict to call affected or not.
+    """
+    return summary.get("verdict") not in ("COMPATIBLE", "NO_CHANGE")
+
+
+def _consumer_impact_summary(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    """"N of M consumers affected" statistics across every supplied
+    ``--used-by`` consumer (Workstream D-S1's "Missing" item)."""
+    from .model.consumer_spec import ConsumerImpactSummary
+
+    unreadable = [s for s in summaries if s.get("unreadable")]
+    evaluated = [s for s in summaries if not s.get("unreadable")]
+    affected = [s for s in evaluated if _is_consumer_affected(s)]
+    return ConsumerImpactSummary(
+        total=len(summaries),
+        evaluated=len(evaluated),
+        affected=len(affected),
+        unreadable_advisory=len(unreadable),
+        unreadable_paths=tuple(s["app"] for s in unreadable),
+    ).to_json()
 
 
 def _plugin_contract_summary(result: object) -> dict[str, Any]:
@@ -1013,7 +1061,7 @@ def _require_used_by_binary_evidence(
 
 def _apply_used_by_scoping(
     result: Any,
-    used_by_apps: tuple[Path, ...],
+    used_by_apps: tuple[ConsumerAppInput, ...],
     old_input: Path,
     new_input: Path,
     old_snapshot: Any,
@@ -1154,6 +1202,11 @@ def _apply_used_by_scoping(
             worst_verdict_rank = rank
             worst_verdict = scoped.verdict
     result.used_by = summaries  # type: ignore[attr-defined]
+    # Workstream D-S1: "N of M consumers affected" -- computed over every
+    # supplied consumer's own summary, unreadable-advisory ones included (as
+    # non-evaluated), so it stays in step with `summaries` regardless of
+    # which apps ended up worst-wins.
+    result.consumer_impact_summary = _consumer_impact_summary(summaries)  # type: ignore[attr-defined]
     result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
     result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]

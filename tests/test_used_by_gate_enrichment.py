@@ -231,3 +231,76 @@ class TestCliExitCodeInvariantToConsumerScope:
         assert scoped.exit_code == unscoped.exit_code, (
             unscoped.output, scoped.output,
         )
+
+
+class TestConsumerImpactSummary:
+    """Workstream D-S1: "N of M consumers affected" over every supplied
+    ``--used-by``/``--used-by-manifest`` consumer, and ``--used-by-manifest``
+    parity with a bare ``--used-by`` path."""
+
+    def _write_binaries(self, tmp_path):
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        app1 = tmp_path / "app1"
+        app1.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        return old, new, app1, app2
+
+    def test_n_of_m_affected_across_used_by_and_manifest(self, tmp_path, monkeypatch):
+        import json as json_mod
+
+        from abicheck.appcompat import AppCompatResult
+
+        old, new, app1, app2 = self._write_binaries(tmp_path)
+        manifest = tmp_path / "consumers.json"
+        manifest.write_text(
+            json_mod.dumps({"consumers": [{"path": str(app2)}]}), encoding="utf-8"
+        )
+
+        results_by_app = {
+            str(app1): AppCompatResult(
+                app_path=str(app1), old_lib_path=str(old), new_lib_path=str(new),
+                verdict=Verdict.BREAKING, symbol_coverage=0.0,
+            ),
+            str(app2): AppCompatResult(
+                app_path=str(app2), old_lib_path=str(old), new_lib_path=str(new),
+                verdict=Verdict.COMPATIBLE, symbol_coverage=100.0,
+            ),
+        }
+
+        def _fake_scope(diff, app, old_lib, new_lib, **kwargs):
+            from abicheck.model.consumer_spec import as_consumer_spec
+
+            return results_by_app[str(as_consumer_spec(app).path)]
+
+        monkeypatch.setattr("abicheck.appcompat.scope_diff_to_app", _fake_scope)
+        monkeypatch.setattr(
+            "abicheck.dumper.dump",
+            MagicMock(side_effect=[_snap("1.0"), _snap("2.0")]),
+        )
+        result = _invoke(
+            "compare", str(old), str(new),
+            "--used-by", str(app1),
+            "--used-by-manifest", str(manifest),
+            "--format", "json",
+        )
+        assert result.exit_code in (0, 2, 4), result.output
+        # A missing-header warning may precede the JSON payload on stdout;
+        # the payload itself is always the trailing `{...}` document.
+        payload = json_mod.loads(result.output[result.output.index("{"):])
+        summary = payload["consumer_impact_summary"]
+        assert summary["total"] == 2
+        assert summary["evaluated"] == 2
+        assert summary["affected"] == 1
+        assert summary["unreadable_advisory"] == 0
+        used_by_apps = {entry["app"]: entry for entry in payload["used_by"]}
+        assert used_by_apps[str(app1)]["verdict"] == "BREAKING"
+        assert used_by_apps[str(app2)]["verdict"] == "COMPATIBLE"
+        # A bare --used-by/--used-by-manifest consumer with no provenance
+        # carries none of the new optional fields (byte-identical shape to
+        # before Workstream D-S1).
+        assert "platform" not in used_by_apps[str(app2)]
+        assert "requirement" not in used_by_apps[str(app2)]
