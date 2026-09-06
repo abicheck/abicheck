@@ -182,16 +182,37 @@ releases — S1/S2 consume `deprecated_fact` as-is and introduce no second
 deprecation representation); a version window on suppressions
 (`version_range` does not exist in `abicheck/`).
 
-**Slices.** S0 model trade-offs on real fixtures (three-release sequences
-built from `examples/` cases); retention design. S1 offline history:
-`N` user-supplied snapshots in, machine-readable events + coverage out,
-through the typed API and one CLI surface chosen per ADR-054's admission
-bar (an option or `project` subcommand, not a new root command). S2 the
+**Slices.** **S0 done.** Model trade-offs validated against snapshots built
+from `examples/workflows/compare-release/{v1,v2}/mathutils.h`'s real
+`add`/`subtract`/`multiply` surface (extended with a synthetic third/fourth
+release for deprecate/remove/reintroduce coverage); recorded as a dated
+amendment on `docs/contribute/adr/066-longitudinal-history-and-versioning-
+policy.md` (2026-09-06) — correspondence-key narrowing (existing `EntityId`/
+`(kind, symbol)`, not D2's full overload-disambiguation-with-corroboration
+algorithm), a bounded `DiffResult.confidence`-based absence-uncertainty proxy
+in place of ADR-065's full evidence ledger, a bounded SemVer-shape gap
+heuristic in place of D4's real version scheme, and retention deferred to S4
+(nothing to prune from an offline one-shot run yet). **S1 landed.** `N`
+user-supplied stored-snapshot paths in (explicit release order — D4's
+scheme-derived ordering is not implemented), machine-readable
+`first_observed`/`introduced`/`deprecated`/`removed`/`reintroduced` events +
+coverage gaps out (D2's `changed` event is not emitted — see the amendment).
+Typed API: `abicheck.workflows.history.run_history_request`/
+`build_longitudinal_history` (new module, composing the existing pairwise
+`checker.compare` — no second N-way engine). CLI: `abicheck project history
+SNAPSHOTS... [--version LABEL]... [--policy NAME] --format {json,text}`
+(`abicheck/cli_project.py`), per ADR-054's admission bar (a `project`
+subcommand, not a new root command). Tests:
+`tests/test_workflows_history.py` (typed API, covering the ADR's mandatory
+three-release add/deprecate/remove sequence, missing-intermediate-release
+gap, removed-and-reintroduced, first-observed-vs-introduced, and non-SemVer
+labels) and `tests/test_cli_project_history.py` (CLI end to end). S2 the
 versioning policy model in `policy/`, resolved through ADR-049 D7's
 precedence; support/deprecation evaluation; integration with the existing
-advice. S3 CI publication/resolution via the existing baseline channels.
-S4 timeline projections through `ReportDocument`; bounded retention;
-cached-comparison reuse under complete keys.
+advice; the full D2 correspondence algorithm S1 deferred. S3 CI
+publication/resolution via the existing baseline channels. S4 timeline
+projections through `ReportDocument`; bounded retention; cached-comparison
+reuse under complete keys.
 
 ### C. Policy-disposition audit and change acknowledgment — ADR-067
 

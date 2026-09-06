@@ -319,6 +319,26 @@ Dump ABI snapshot of a shared library to JSON.
 
 Advanced multi-target project integration (ADR-047).
 
+### `project history`
+
+Derive per-API lifecycle events from an ordered chain of SNAPSHOTS (ADR-066 S1: offline longitudinal compatibility history).
+
+**Arguments**
+
+| Name | Required | Description |
+|---|:--:|---|
+| `snapshots` | yes |  |
+
+**Options**
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--version` | no | — | Explicit release label for one SNAPSHOT, in the same order as the SNAPSHOTS arguments (repeatable — pass one per snapshot, or omit entirely). Without this, each snapshot's own recorded AbiSnapshot.version is used as its release label. |
+| `--policy` | no | `strict_abi` | Policy profile passed to each pairwise comparison in the chain (same values as `compare --policy`). |
+| `--format` | no | `json` | Output format for the derived history. Choices: `json`, `text`. |
+| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
+
 ### `project plan`
 
 Generate run-plan.json from CONFIG's targets:/bundles:/profiles: block.

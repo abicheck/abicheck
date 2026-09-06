@@ -292,3 +292,76 @@ deprecation date; rebased source paths that must not reset identity;
 ambiguous renames that must not be asserted; re-evaluation under a new
 policy without overwriting the original result. Memory/time budgets are set
 from measured fixtures in S1, not promised here.
+
+> **Amendment (2026-09-06, S0 design validated on real fixtures; S1
+> landed).** S0's design pass was run against snapshots built from real
+> declarations (`examples/workflows/compare-release/{v1,v2}/mathutils.h`'s
+> `add`/`subtract`/`multiply` surface, extended with a synthetic third and
+> fourth release exercising deprecate/remove/reintroduce) rather than a
+> from-nothing sketch — see `tests/test_workflows_history.py` for the
+> resulting fixture shapes, which now double as this slice's regression
+> suite. Trade-offs recorded:
+>
+> - **History is an index over stored snapshots, resolved offline.**
+>   `abicheck.workflows.history.run_history_request` takes N stored
+>   `AbiSnapshot` paths (ADR-059 storage envelope, any compression), never a
+>   copy of their facts, matching D1's "index, not a second store."
+> - **Ordering is explicit, not inferred.** D1 describes an explicit
+>   predecessor relation *or* an order derived from a declared version
+>   scheme (D4). S1 implements only the former: the caller's own snapshot
+>   order (oldest first) IS the release order, full stop. D4's scheme-driven
+>   ordering is deferred to S2, once `versioning: scheme:` exists to derive
+>   one from.
+> - **Correspondence key is deliberately narrower than D2's full algorithm.**
+>   S1 tracks each entity by its existing, already-resolved `EntityId` (or a
+>   `(kind, symbol)` fallback when no header-AST identity was resolved for
+>   that pair) — never a bespoke identity scheme. D2's full correspondence
+>   step (overload signature-discriminator disambiguation with TU-relative
+>   provenance corroboration for a "possible correspondence") is **not**
+>   implemented. This is a conservative narrowing, not a violation: per D2's
+>   own fallback rule, anything short of a proven one-to-one correspondence
+>   must read as `removed`+`introduced`/`first_observed` rather than an
+>   asserted `changed` — which is exactly what omitting the corroboration
+>   step produces, just for a slightly larger set of cases (S1 never
+>   attempts the correspondence hint at all, so it never reaches the
+>   "corroborated" branch either). Consequence: a function whose signature
+>   changes reads as one entity removed and a different one introduced in
+>   S1's output, never a `changed` event — D2's sixth vocabulary word
+>   (`changed`) is not emitted by this slice at all. Implementing full
+>   correspondence (signature-discriminator disambiguation, TU-relative
+>   declaration-anchor corroboration, the D3 correspondence-algorithm
+>   version this ADR requires once that logic exists) is real, separate
+>   engineering work, tracked as an open S1+ follow-up rather than
+>   attempted in this pass.
+> - **Absence honesty is a bounded proxy, not ADR-065's full ledger.** A
+>   `removed` lifecycle event carries `evidence_uncertain: true` whenever the
+>   backing pairwise `DiffResult.confidence` is not `HIGH` — cheap to compute
+>   from data `compare()` already returns, and directionally correct (low
+>   confidence usually does mean thinner evidence), but it is a proxy, not
+>   ADR-065's real per-provider completeness ledger. Wiring that ledger
+>   through per-entity absence claims is deferred; until then, a
+>   `evidence_uncertain: false` removal is not a formal proof of absence,
+>   only "nothing about this comparison's own confidence flagged a gap."
+> - **Coverage-gap detection is a bounded SemVer heuristic, not D4's real
+>   scheme.** With no declared `versioning: scheme:` yet, "a release is
+>   missing" can only be guessed from label shape: two adjacent labels that
+>   both parse as `major.minor.patch` and are not one ordinary SemVer
+>   increment apart are flagged `unknown_interval`. A label pair that
+>   doesn't parse as SemVer (calendar versions, opaque codenames, git SHAs)
+>   reports no gap verdict at all — never a false "contiguous", per D2's
+>   terminology section. Retention/pruning: **not implemented in S1** —
+>   every supplied snapshot is loaded and held for the run's lifetime, with
+>   no bounded-retention summarization; that is explicitly S4 scope (D7:
+>   "optional bounded retention... is a storage setting, not a semantic
+>   one") and depends on S3's CI publication channel existing first, since
+>   there is nothing to prune from an offline, one-shot run over N
+>   explicitly-supplied files.
+>
+> **S1 landed**, offline only: `abicheck/workflows/history.py`
+> (`run_history_request`/`build_longitudinal_history`, plus
+> `LifecycleEvent`/`CoverageGap`/`LongitudinalHistoryResult`) and one CLI
+> surface, `abicheck project history SNAPSHOTS... [--version LABEL]...
+> [--policy NAME] --format {json,text}` (`abicheck/cli_project.py`), per
+> ADR-054's admission bar — a `project` subcommand, not a new root command.
+> No `versioning:` config key, no CI publication, and no report/timeline
+> projection exist yet; S2-S4 remain as scoped above.
