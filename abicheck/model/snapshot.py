@@ -610,13 +610,9 @@ class AbiSnapshot:
     # originally-reported danger (a filtered ``dump`` baseline compared
     # against an unfiltered ``compare`` live dump, e.g. one built by a
     # direct Python API caller) once both sides come from a current abicheck
-    # build, without touching the irrecoverable ambiguity of an old,
-    # untagged snapshot.
+    # build, without touching the irrecoverable ambiguity of an old, untagged snapshot.
     dependency_scope: str | None = field(default=None, kw_only=True)
-
-    # Schema v44 (workstream F S1): True only for a binary-less header-AST
-    # dump. See policy.header_only_capabilities.
-    header_only: bool = field(default=False, kw_only=True)
+    header_only: bool = field(default=False, kw_only=True)  # v44: header-AST, no binary
 
     # Fully-qualified typedef alias -> underlying type name (schema v25,
     # G31 Phase C). Additive twin of ``typedefs`` above, not a replacement:

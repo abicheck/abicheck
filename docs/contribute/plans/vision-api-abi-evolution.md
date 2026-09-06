@@ -372,17 +372,22 @@ real pre-existing silent gap this workstream's own testing surfaced —
 `elf`/`tls_checks`/`protected_visibility`/`symbol_version_alias`/
 `glibcxx_dual_abi`/`inline_namespace`/`vtable_identity`/`abi_surface`/
 `elf_deleted_fallback` each used to substitute an empty `ElfMetadata()`
-for a missing side and record a real, evaluated zero for *any*
-binary-less comparison (source-only included, not only the new
-headers-only tier) instead of the coverage gap it actually is. Now every
-one of the four capability classes the plan names — symbol presence/
-versioning, ELF/DWARF layout, vtable/RTTI linkage identity, and mangled-
-name linkage-level churn — surfaces as an explicit, reasoned
-`not_evaluated` row (`elf`/`dwarf`/`advanced_dwarf`/`vtable_identity`/
-`glibcxx_dual_abi`/`inline_namespace`, among others) in
-`disposition_audit.not_evaluated_detectors`, never silently absent. No
-behavior change for any comparison where both sides genuinely carry ELF
-metadata — every pre-existing binary-dump case.
+for a missing side and record a real, evaluated zero for a comparison
+against the new binary-less headers-only tier instead of the coverage gap
+it actually is. Now every one of the four capability classes the plan
+names — symbol presence/versioning, ELF/DWARF layout, vtable/RTTI linkage
+identity, and mangled-name linkage-level churn — surfaces as an explicit,
+reasoned `not_evaluated` row (`elf`/`dwarf`/`advanced_dwarf`/
+`vtable_identity`/`glibcxx_dual_abi`/`inline_namespace`, among others) in
+`disposition_audit.not_evaluated_detectors`, never silently absent. The
+gate is deliberately keyed on the explicit `AbiSnapshot.header_only`
+marker rather than a bare `elf is None`: an earlier revision keyed on the
+latter and was reverted after a real regression run found it silently
+disabled these same detectors for the many pre-existing synthetic test
+snapshots (and every pre-existing L3-L5 source-only dump) that never
+bother populating `.elf` while still conceptually representing an
+ordinary ELF library. No behavior change for any comparison not involving
+the new headers-only tier.
 
 **Explicitly still open, deferred to S2 or later**: the deeper macro/
 inline/template evidence beyond what L4 already gives; layering L3–L5

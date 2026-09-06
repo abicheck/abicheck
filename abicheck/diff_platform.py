@@ -91,36 +91,47 @@ def _pe_export_id(e: Any) -> str:
 _COPY_RELOC_TYPES = (SymbolType.OBJECT, SymbolType.COMMON)
 
 
-def _has_elf_on_both_sides(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str | None]:
+def _has_elf_on_both_sides(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[bool, str | None]:
     """Support gate (ADR-067 D3) for a detector whose evidence is real,
     observed ELF symbol-table facts (``.dynsym``/``.gnu.version``/RTTI
     mangled symbols) -- never header-declared/guessed ones.
 
-    Workstream F S1 ("Header-only comparison"): before this gate existed,
-    ``elf``/``tls_checks``/``protected_visibility``/``symbol_version_alias``/
-    ``vtable_identity``/``abi_surface``/``elf_deleted_fallback`` each
-    silently substituted an empty ``ElfMetadata()`` (via ``getattr(old,
-    "elf", None) or ElfMetadata()``) when a side had none, so a comparison
-    between two binary-less snapshots (source-only, or the new headers-only
-    tier) recorded these as ordinary evaluated zeros rather than the real
-    coverage gap they are -- exactly the "silently absent" failure mode
-    ADR-067 D3's own ``not_evaluated`` convention exists to close (see
-    ``_has_any_dwarf`` below, the sibling gate this mirrors). ``glibcxx_
-    dual_abi``/``inline_namespace`` never read ``.elf`` at all -- they
-    cluster mass churn in ``Function.mangled`` -- but a header-only
-    snapshot's mangled name is the header frontend's own *guessed* Itanium/
-    MSVC spelling (``AbiSnapshot.header_only``'s own docstring), never a
-    linker-confirmed export, so a "mass mangled-name churn" verdict from two
-    such guesses would misrepresent unconfirmed spellings as observed
-    linkage-level breakage -- the same gate applies to both for that
-    reason, not because they read ``.elf`` themselves.
+    Workstream F S1 ("Header-only comparison"): ``elf``/``tls_checks``/
+    ``protected_visibility``/``symbol_version_alias``/``vtable_identity``/
+    ``abi_surface``/``elf_deleted_fallback`` each silently substitute an
+    empty ``ElfMetadata()`` (via ``getattr(old, "elf", None) or
+    ElfMetadata()``) when a side has none, so a comparison against the new
+    binary-less headers-only tier (``AbiSnapshot.header_only``) recorded
+    these as ordinary evaluated zeros rather than the real coverage gap
+    they are -- exactly the "silently absent" failure mode ADR-067 D3's own
+    ``not_evaluated`` convention exists to close (see ``_has_any_dwarf``
+    below, the sibling gate this mirrors). ``glibcxx_dual_abi``/
+    ``inline_namespace`` never read ``.elf`` at all -- they cluster mass
+    churn in ``Function.mangled`` -- but a header-only snapshot's mangled
+    name is the header frontend's own *guessed* Itanium/MSVC spelling
+    (``AbiSnapshot.header_only``'s own docstring), never a linker-confirmed
+    export, so a "mass mangled-name churn" verdict from two such guesses
+    would misrepresent unconfirmed spellings as observed linkage-level
+    breakage -- the same gate applies to both for that reason, not because
+    they read ``.elf`` themselves.
 
-    Every one of these detectors keeps running exactly as before whenever
-    both sides genuinely carry ELF metadata (every existing binary-dump
-    comparison) -- this only changes the previously-silent binary-less case.
+    Deliberately keyed on the explicit ``header_only`` marker, **not** on
+    a bare ``elf is None`` -- a real ELF binary's own snapshot always sets
+    ``elf`` to a populated object, but a great many pre-existing synthetic
+    test snapshots (and every pre-existing L3-L5 source-only dump) never
+    bother setting it at all while still conceptually representing an
+    ordinary ELF library, and unconditionally gating on its mere absence
+    silently disabled these detectors for all of them too -- confirmed by a
+    real regression run during this workstream. ``header_only`` is the one
+    unambiguous signal that a side genuinely has no binary to have observed
+    anything from, so gating on it precisely targets the new tier this
+    workstream introduces without touching any pre-existing comparison's
+    behavior, binary or otherwise.
     """
-    if old.elf is None or new.elf is None:
-        return False, "missing ELF metadata on one side"
+    if old.header_only or new.header_only:
+        return False, "one side is a header-only snapshot (no binary evidence)"
     return True, None
 
 
