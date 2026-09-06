@@ -98,40 +98,51 @@ def _has_elf_on_both_sides(
     observed ELF symbol-table facts (``.dynsym``/``.gnu.version``/RTTI
     mangled symbols) -- never header-declared/guessed ones.
 
-    Workstream F S1 ("Header-only comparison"): ``elf``/``tls_checks``/
-    ``protected_visibility``/``symbol_version_alias``/``vtable_identity``/
-    ``abi_surface``/``elf_deleted_fallback`` each silently substitute an
-    empty ``ElfMetadata()`` (via ``getattr(old, "elf", None) or
-    ElfMetadata()``) when a side has none, so a comparison against the new
-    binary-less headers-only tier (``AbiSnapshot.header_only``) recorded
-    these as ordinary evaluated zeros rather than the real coverage gap
-    they are -- exactly the "silently absent" failure mode ADR-067 D3's own
-    ``not_evaluated`` convention exists to close (see ``_has_any_dwarf``
-    below, the sibling gate this mirrors). ``glibcxx_dual_abi``/
-    ``inline_namespace`` never read ``.elf`` at all -- they cluster mass
-    churn in ``Function.mangled`` -- but a header-only snapshot's mangled
-    name is the header frontend's own *guessed* Itanium/MSVC spelling
-    (``AbiSnapshot.header_only``'s own docstring), never a linker-confirmed
-    export, so a "mass mangled-name churn" verdict from two such guesses
-    would misrepresent unconfirmed spellings as observed linkage-level
-    breakage -- the same gate applies to both for that reason, not because
-    they read ``.elf`` themselves.
+    Mirrors the ``pe``/``macho`` gates immediately above/below exactly:
+    keyed on the real per-format metadata object being present on *both*
+    sides, with the matching "missing ... metadata" reason shape. Applies
+    to ``elf``/``tls_checks``/``protected_visibility``/
+    ``symbol_version_alias``/``vtable_identity``/``abi_surface``/
+    ``elf_deleted_fallback`` -- every detector that actually reads
+    ``AbiSnapshot.elf``.
 
-    Deliberately keyed on the explicit ``header_only`` marker, **not** on
-    a bare ``elf is None`` -- a real ELF binary's own snapshot always sets
-    ``elf`` to a populated object, but a great many pre-existing synthetic
-    test snapshots (and every pre-existing L3-L5 source-only dump) never
-    bother setting it at all while still conceptually representing an
-    ordinary ELF library, and unconditionally gating on its mere absence
-    silently disabled these detectors for all of them too -- confirmed by a
-    real regression run during this workstream. ``header_only`` is the one
-    unambiguous signal that a side genuinely has no binary to have observed
-    anything from, so gating on it precisely targets the new tier this
-    workstream introduces without touching any pre-existing comparison's
-    behavior, binary or otherwise.
+    Before this gate existed, each of these detectors instead silently
+    substituted an empty ``ElfMetadata()`` (via ``getattr(old, "elf", None)
+    or ElfMetadata()``) whenever a side had none, so a comparison with no
+    real ELF evidence at all -- not only the new binary-less headers-only
+    tier this workstream introduces (``AbiSnapshot.header_only``), but any
+    pre-existing snapshot that simply never populated ``.elf`` -- recorded
+    an ordinary evaluated zero (comparing two fabricated empty objects)
+    rather than the real coverage gap it is. That is exactly the "silently
+    absent" failure mode ADR-067 D3's own ``not_evaluated`` convention
+    exists to close (see ``_has_any_dwarf`` below, the sibling gate this
+    mirrors) -- and since two empty ``ElfMetadata()`` objects always compare
+    equal, gating this way changes no detector's emitted findings, only
+    whether the absence is recorded explicitly.
+
+    ``glibcxx_dual_abi``/``inline_namespace`` are deliberately NOT gated by
+    this predicate (or any other): they never read ``.elf`` at all -- they
+    cluster mass churn in ``Function.mangled``, evidence that is exactly as
+    present (and exactly as much a spelling rather than a linkage proof) in
+    an ordinary headers-augmented binary dump as in a header-only one, so
+    singling out ``header_only`` for a gate these two never carried even for
+    that pre-existing, unremarked case would be an inconsistent, ad hoc
+    carve-out rather than a real evidence gate.
+
+    A side counts as having ELF evidence when it carries a populated
+    ``.elf`` object *or* is flagged ``elf_only_mode`` -- a Sprint 2
+    ELF-symbols-but-no-debug-info dump that, by construction, has real
+    ``.dynsym``-derived evidence even on a snapshot whose own ``.elf``
+    object happens not to be populated (the ``elf`` detector's own
+    ``_diff_visibility_leak`` sub-check reads ``.elf_only_mode``/
+    ``.functions`` directly, never ``.elf``, precisely for this case).
     """
-    if old.header_only or new.header_only:
-        return False, "one side is a header-only snapshot (no binary evidence)"
+
+    def _has_evidence(s: AbiSnapshot) -> bool:
+        return s.elf is not None or s.elf_only_mode
+
+    if not (_has_evidence(old) and _has_evidence(new)):
+        return False, "missing ELF metadata"
     return True, None
 
 
@@ -1052,7 +1063,7 @@ def _diff_symbol_version_aliases(old: AbiSnapshot, new: AbiSnapshot) -> list[Cha
     return changes
 
 
-@registry.detector("glibcxx_dual_abi", requires_support=_has_elf_on_both_sides)
+@registry.detector("glibcxx_dual_abi")
 def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect mass symbol churn caused by libstdc++ dual ABI toggles.
 
@@ -1111,7 +1122,7 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-@registry.detector("inline_namespace", requires_support=_has_elf_on_both_sides)
+@registry.detector("inline_namespace")
 def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect symbols that moved between inline namespaces (e.g. v1:: → v2::).
 

@@ -370,24 +370,47 @@ rows are the existing `DetectorRegistry`/`not_evaluated` convention
 shared support gate, `diff_platform._has_elf_on_both_sides`, closes a
 real pre-existing silent gap this workstream's own testing surfaced —
 `elf`/`tls_checks`/`protected_visibility`/`symbol_version_alias`/
-`glibcxx_dual_abi`/`inline_namespace`/`vtable_identity`/`abi_surface`/
-`elf_deleted_fallback` each used to substitute an empty `ElfMetadata()`
-for a missing side and record a real, evaluated zero for a comparison
-against the new binary-less headers-only tier instead of the coverage gap
-it actually is. Now every one of the four capability classes the plan
-names — symbol presence/versioning, ELF/DWARF layout, vtable/RTTI linkage
-identity, and mangled-name linkage-level churn — surfaces as an explicit,
-reasoned `not_evaluated` row (`elf`/`dwarf`/`advanced_dwarf`/
-`vtable_identity`/`glibcxx_dual_abi`/`inline_namespace`, among others) in
-`disposition_audit.not_evaluated_detectors`, never silently absent. The
-gate is deliberately keyed on the explicit `AbiSnapshot.header_only`
-marker rather than a bare `elf is None`: an earlier revision keyed on the
-latter and was reverted after a real regression run found it silently
-disabled these same detectors for the many pre-existing synthetic test
-snapshots (and every pre-existing L3-L5 source-only dump) that never
-bother populating `.elf` while still conceptually representing an
-ordinary ELF library. No behavior change for any comparison not involving
-the new headers-only tier.
+`vtable_identity`/`abi_surface`/`elf_deleted_fallback` (the seven
+detectors that genuinely read `AbiSnapshot.elf`) each used to substitute
+an empty `ElfMetadata()` for a missing side and record a real, evaluated
+zero rather than the coverage gap it actually is. The gate is keyed on
+real ELF-evidence presence — `.elf` populated on both sides, or
+`.elf_only_mode` for the one sub-check (`elf`'s own
+`_diff_visibility_leak`) that reads `.functions`/`.elf_only_mode`
+directly and never `.elf` — mirroring the `pe`/`macho` gates immediately
+alongside it, rather than a `header_only`-only proxy. Two review rounds
+each found and reverted a narrower version of this gate that broke
+pre-existing tests: first keying it on a bare `elf is None` (broke every
+synthetic test snapshot — and every pre-existing L3-L5 source-only dump —
+that never bothers populating `.elf` while still representing an ordinary
+ELF library or an `elf_only_mode` symbol-table-only dump); then keying it
+on `AbiSnapshot.header_only` alone and applying it to `glibcxx_dual_abi`/
+`inline_namespace` too (broke every test exercising mass mangled-name
+churn via bare `functions=` fixtures, since those two detectors never
+read `.elf` at all and were never gated before this workstream).
+`glibcxx_dual_abi`/`inline_namespace` are therefore deliberately left
+ungated, unchanged from their pre-workstream form — a header-only
+snapshot's guessed mangled names carry exactly the same
+spelling-not-linkage-proof status an ordinary headers-augmented binary
+dump's mangled names already carry, which this workstream did not
+newly introduce and is not the one to start gating. Because the real
+gate closes a genuine pre-existing bug (silently comparing two fabricated
+empty `ElfMetadata()` objects whenever `.elf` was missing on *either*
+side, binary or header-only), it surfaces new `not_evaluated` rows for
+several golden fixtures that never populate `.elf` — those fixtures were
+deliberately regenerated as part of this fix. Now three of the plan's four
+capability classes — symbol presence/versioning, ELF layout, and
+vtable/RTTI linkage identity — surface as an explicit, reasoned
+`not_evaluated` row (`elf`/`tls_checks`/`protected_visibility`/
+`symbol_version_alias`/`vtable_identity`/`abi_surface`/
+`elf_deleted_fallback`, alongside the pre-existing `dwarf`/
+`advanced_dwarf`) in `disposition_audit.not_evaluated_detectors`, never
+silently absent; the fourth class (mangled-name linkage-level churn) is
+covered by the same `elf` family's own not-evaluated status rather than a
+per-detector gate on `glibcxx_dual_abi`/`inline_namespace` themselves, per
+the paragraph above. No detector's emitted findings change anywhere (two
+empty `ElfMetadata()` objects always compare equal), only whether the
+absence is now recorded explicitly.
 
 **Explicitly still open, deferred to S2 or later**: the deeper macro/
 inline/template evidence beyond what L4 already gives; layering L3–L5

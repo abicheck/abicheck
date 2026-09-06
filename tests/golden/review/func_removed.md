@@ -6,9 +6,16 @@
 > ⚠️ Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode
 > ⚠️ Detector 'kabi' disabled: missing Module.symvers (kABI) metadata
 > ⚠️ Detector 'long_double' disabled: missing ELF metadata on one side
+> ⚠️ Detector 'elf' disabled: missing ELF metadata
 > ⚠️ Detector 'pe' disabled: missing PE metadata
 > ⚠️ Detector 'macho' disabled: missing Mach-O metadata
+> ⚠️ Detector 'tls_checks' disabled: missing ELF metadata
+> ⚠️ Detector 'protected_visibility' disabled: missing ELF metadata
+> ⚠️ Detector 'symbol_version_alias' disabled: missing ELF metadata
+> ⚠️ Detector 'vtable_identity' disabled: missing ELF metadata
+> ⚠️ Detector 'abi_surface' disabled: missing ELF metadata
 > ⚠️ Detector 'dwarf' disabled: no DWARF debug info on either side
+> ⚠️ Detector 'elf_deleted_fallback' disabled: missing ELF metadata
 > ⚠️ Detector 'python_ext' disabled: missing CPython extension metadata
 > ⚠️ Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered)
 > ⚠️ Detector 'sycl' disabled: missing SYCL metadata
@@ -39,7 +46,7 @@
 | … unresolved relevance | 0 |
 | … deduplicated | 0 |
 
-**Not evaluated:** 13 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `pe`, `macho`, … and 7 more
+**Not evaluated:** 20 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 14 more
 
 **Top impacted symbols:**
 
