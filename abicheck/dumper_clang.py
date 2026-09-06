@@ -1158,6 +1158,7 @@ class _ClangAstParser:
             virtual_mangled_names=self._virtual_mangled_names(),
             target_triple=self._target_triple,
             default_value=lambda p: _initializer_value(p, self._id_index),
+            no_binary_evidence=self._no_binary_evidence,
         )
 
     def parse_variables(self) -> list[Variable]:

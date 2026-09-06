@@ -85,6 +85,38 @@ class TestHeaderOnlyDumpBasics:
         assert [f.name for f in snap.functions] == ["add"]
         assert [t.name for t in snap.types] == ["Point"]
 
+    def test_header_only_snapshot_has_real_declarations_on_clang_backend(
+        self, tmp_path: Path
+    ):
+        """Regression (CodeRabbit review, this PR): the clang backend's own
+        ``extract.headers.clang.functions.parse_functions`` delegates to a
+        module-level function taking bare ``exported_dynamic``/
+        ``exported_static`` sets rather than a context object, so the
+        ``no_binary_evidence`` fix (which flips the ``visibility()``
+        fallback from HIDDEN to PUBLIC for a genuinely binary-less
+        comparison) only took effect on the castxml backend until it was
+        explicitly threaded through here too -- verified by pinning the
+        clang frontend directly rather than relying on ``auto`` (which
+        would silently pick castxml on a host where it's installed)."""
+        if shutil.which("clang") is None:
+            pytest.skip("no clang on PATH")
+        header = tmp_path / "api.h"
+        header.write_text(
+            "int add(int a, int b);\nstruct Point { int x; int y; };\n",
+            encoding="utf-8",
+        )
+        request = DumpRequest(
+            input=InputSpec.of(path=None, headers=[header], version="1.0"),
+            frontend="clang",
+        )
+        snap = run_dump_request(request)
+        assert snap.header_only is True
+        assert [f.name for f in snap.functions] == ["add"]
+        # The bug this regression guards: without no_binary_evidence forwarded,
+        # every function is misclassified HIDDEN (no export set to match
+        # against) and filtered out of the public surface entirely.
+        assert snap.functions[0].visibility.value == "public"
+
     def test_bare_headers_alone_are_valid_dump_request_evidence(self, tmp_path: Path):
         """A binary-less DumpRequest with only headers (no sources/
         build_info/dump_manifest) validates -- the api_types.py widening
@@ -100,6 +132,22 @@ class TestHeaderOnlyDumpBasics:
         what counts as evidence, it doesn't remove the "some evidence
         required" floor."""
         request = DumpRequest(input=InputSpec.of(path=None))
+        errors = request.validation_errors()
+        assert any("has no path" in e for e in errors)
+        with pytest.raises(ValidationError, match="has no path"):
+            request.validate()
+
+    def test_public_header_dirs_alone_is_not_valid_evidence(self, tmp_path: Path):
+        """Regression (CodeRabbit review, this PR): ``public_header_dirs``
+        is a pure declaration-provenance (public-vs-internal) classifier,
+        never a source of headers to parse -- a binary-less DumpRequest
+        naming only it (no actual header file, no dump_manifest) must be
+        rejected here, not silently reach ``execute_source_only_dump_request``
+        and fail later with a confusing "needs sources and/or build_info"
+        error that never mentions ``public_header_dirs`` at all."""
+        request = DumpRequest(
+            input=InputSpec.of(path=None, public_header_dirs=[tmp_path])
+        )
         errors = request.validation_errors()
         assert any("has no path" in e for e in errors)
         with pytest.raises(ValidationError, match="has no path"):

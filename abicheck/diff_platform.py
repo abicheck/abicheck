@@ -99,12 +99,11 @@ def _has_elf_on_both_sides(
     mangled symbols) -- never header-declared/guessed ones.
 
     Mirrors the ``pe``/``macho`` gates immediately above/below exactly:
-    keyed on the real per-format metadata object being present on *both*
-    sides, with the matching "missing ... metadata" reason shape. Applies
-    to ``elf``/``tls_checks``/``protected_visibility``/
-    ``symbol_version_alias``/``vtable_identity``/``abi_surface``/
-    ``elf_deleted_fallback`` -- every detector that actually reads
-    ``AbiSnapshot.elf``.
+    keyed on the real per-format metadata object (``.elf``) being present
+    on *both* sides, no alternate evidence path. Applies to ``elf``/
+    ``tls_checks``/``protected_visibility``/``symbol_version_alias``/
+    ``vtable_identity``/``abi_surface``/``elf_deleted_fallback`` -- every
+    detector that actually reads ``AbiSnapshot.elf``.
 
     Before this gate existed, each of these detectors instead silently
     substituted an empty ``ElfMetadata()`` (via ``getattr(old, "elf", None)
@@ -129,21 +128,42 @@ def _has_elf_on_both_sides(
     that pre-existing, unremarked case would be an inconsistent, ad hoc
     carve-out rather than a real evidence gate.
 
-    A side counts as having ELF evidence when it carries a populated
-    ``.elf`` object *or* is flagged ``elf_only_mode`` -- a Sprint 2
-    ELF-symbols-but-no-debug-info dump that, by construction, has real
-    ``.dynsym``-derived evidence even on a snapshot whose own ``.elf``
-    object happens not to be populated (the ``elf`` detector's own
-    ``_diff_visibility_leak`` sub-check reads ``.elf_only_mode``/
-    ``.functions`` directly, never ``.elf``, precisely for this case).
+    Deliberately **strict** -- an earlier revision of this gate also
+    accepted ``elf_only_mode=True`` (a Sprint 2 ELF-symbols-but-no-
+    debug-info dump) as sufficient evidence even with ``.elf is None``, to
+    cover ``elf``'s own ``_diff_visibility_leak`` sub-check, which reads
+    ``.elf_only_mode``/``.functions`` directly and never touches ``.elf``.
+    That carve-out defeated this gate's own purpose for the *other* eight
+    sub-checks bundled into the ``elf`` detector (``_diff_elf_dynamic_section``,
+    version-node/versioning diffs, import-set, allocator-replacement, leaked-
+    dependency-symbol, version-script-missing): under ``elf_only_mode=True,
+    elf=None`` they would still substitute a fabricated empty ``ElfMetadata()``
+    and get recorded as an ordinary evaluated zero, exactly the silent-gap bug
+    this whole gate exists to close (CodeRabbit review on this PR).
+    ``_diff_visibility_leak`` is therefore registered as its own, separate
+    ``visibility_leak`` detector below instead, with no evidence gate of its
+    own -- it already answers its one "not applicable" case (not
+    ``elf_only_mode``) correctly via its own in-body check, which is a
+    genuine "zero by construction" (headers/debug info means visibility is
+    already known, not "leaked"), never a missing-evidence question.
     """
-
-    def _has_evidence(s: AbiSnapshot) -> bool:
-        return s.elf is not None or s.elf_only_mode
-
-    if not (_has_evidence(old) and _has_evidence(new)):
+    if old.elf is None or new.elf is None:
         return False, "missing ELF metadata"
     return True, None
+
+
+@registry.detector("visibility_leak")
+def _diff_visibility_leak_detector(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Registered wrapper for :func:`_diff_visibility_leak` (Sprint 2).
+
+    Split out of the ``elf`` detector (see ``_has_elf_on_both_sides``'s own
+    docstring for why): this check needs only ``.elf_only_mode``/
+    ``.functions``, never ``.elf``, so it must not share ``elf``'s
+    strict ``.elf``-presence gate. Left ungated -- its own in-body
+    ``elf_only_mode`` check already distinguishes "not applicable" from
+    "missing evidence" correctly for its one input.
+    """
+    return _diff_visibility_leak(old, new)
 
 
 @registry.detector("elf", requires_support=_has_elf_on_both_sides)
@@ -167,7 +187,6 @@ def _diff_elf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes.extend(_diff_elf_symbol_metadata(old, new, o, n))
     changes.extend(_diff_elf_import_set(o, n))
     changes.extend(_diff_allocator_replacement(o, n))
-    changes.extend(_diff_visibility_leak(old, new))
     changes.extend(_diff_leaked_dependency_symbols(o, n))
     changes.extend(detect_version_script_missing(o, n))
     return changes
