@@ -312,15 +312,18 @@ def resolve_compare_exit_decision_with_abort_axes(
     )
     evidence_contract_error = getattr(result, "evidence_contract_error", False)
     budget_overflow = getattr(result, "budget_overflow", False)
-    if evidence_contract_error or budget_overflow:
-        dominant = resolve_scan_exit_decision(
-            evidence_contract_error=evidence_contract_error,
-            budget_overflow=budget_overflow,
-            prior_decision=ordinary,
-        )
-        if dominant is not None:
-            return dominant
-    return ordinary
+    if not (evidence_contract_error or budget_overflow):
+        return ordinary
+    # `resolve_scan_exit_decision` only returns `None` when none of its four
+    # axes apply -- unreachable here, since at least one of the two we pass
+    # is always `True` by the guard above.
+    dominant = resolve_scan_exit_decision(
+        evidence_contract_error=evidence_contract_error,
+        budget_overflow=budget_overflow,
+        prior_decision=ordinary,
+    )
+    assert dominant is not None
+    return dominant
 
 
 def resolve_release_exit_decision(
