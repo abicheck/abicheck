@@ -218,24 +218,25 @@ static scoping (`abicheck/appcompat.py`: `parse_app_requirements`,
 consumer graph and join (`abicheck/impact/consumer_graph.py`); **use-case
 manifests are implemented** (`abicheck/impact/use_cases.py`,
 `use_case_impact.py`, `compare --use-cases`); Action inputs `used-by`/
-`required-symbol(s)` and `actions/check-target`'s `app-consumer` kind;
-no consumer code is ever executed (ADR-060 deferred; the only subprocess
-adjacency is a demangler prewarm). **`--used-by`/`--required-symbol(s)`
-no longer replace the gate (S1's gate-enrichment slice, landed)** — see
-below; S1's consumer-*specification* half (identity/digest/platform/
-profile/provider-baseline) remains open, tracked under "Missing".
+`required-symbol(s)`/**`used-by-manifest`** and `actions/check-target`'s
+`app-consumer` kind; no consumer code is ever executed (ADR-060 deferred;
+the only subprocess adjacency is a demangler prewarm). **`--used-by`/
+`--required-symbol(s)` no longer replace the gate (S1's gate-enrichment
+slice, landed)**; **the consumer-*specification* half is now also landed
+(S1 complete)** — see below.
 
-**Missing.** A consumer input is a single binary path only — no manifest,
-no digest, no platform/profile, no provider-baseline provenance; an
-unreadable consumer is a hard error, not an advisory/required distinction;
-no "N of M consumers affected" statement; no staging/caching of consumer
-artifacts in the Action; runtime-trace ingestion unimplemented.
+**Missing.** No staging/caching of consumer artifacts in the Action (S2);
+no exact-version selection or existing-Actions-acquisition/publishing-
+channel parity beyond the CLI/manifest surface itself (S2); no declared
+source/use-case enrichment with coverage-qualified reports (S3);
+runtime-trace ingestion unimplemented; a real compiled consumer/provider
+fixture (rather than mocked/stubbed test binaries) is still open.
 
-**Slices.** **S1's gate-enrichment slice (landed).** A supplied consumer's per-`confirmed/
-potential/unresolved` impact (`scoped_verdict`/`scoped_exit_code`/
-`used_by`/`required_symbol_contract`, still computed by
-`abicheck/appcompat.py`'s `scope_diff_to_app`/
-`scope_diff_to_required_symbols`) is now reported **beside** the global
+**Slices.** **S1 (complete).** Gate-enrichment half (landed): a supplied
+consumer's per-`confirmed/potential/unresolved` impact
+(`scoped_verdict`/`scoped_exit_code`/`used_by`/`required_symbol_contract`,
+still computed by `abicheck/appcompat.py`'s `scope_diff_to_app`/
+`scope_diff_to_required_symbols`) is reported **beside** the global
 contract status, never in place of it: the compare command's exit code
 and JSON `verdict`/`severity`/`run_outcome`/`summary` always describe the
 full-library result, exactly as an unscoped run would, and a supplied
@@ -246,21 +247,54 @@ scoped_gate.py`), SARIF's informational `scopedGate` block, JUnit's
 box, and the PR comment's own consumer summary note — none of which drive
 that surface's own pass/fail decision any more (`abicheck/sarif.py`,
 `abicheck/junit_report.py`, `abicheck/html_report.py`,
-`abicheck/pr_comment_render.py`). This is a **behavior change** from the
+`abicheck/pr_comment_render.py`). This was a **behavior change** from the
 prior "scoped gate wins" design (worst-app-wins `sys.exit(scoped_exit_
-code)`, JSON `verdict`/`full_verdict` swap): a `--used-by`/
-`--required-symbol` run's exit code can differ from before when the
-consumer's own result and the full-library result disagree — see the
-changelog fragment landing this slice. Identity/digest/platform/profile/
-provider-baseline provenance (the rest of the consumer-specification
-scope this slice's own name describes) remains unaddressed — a consumer
-input is still a single binary path only, tracked under "Missing" above,
-not S1. Real compiled consumer/provider fixture: still open. S2 existing Actions
-acquisition/publishing channels; exact-version selection; missing
-advisory/required handling. S3 declared source/use-case enrichment with
-coverage-qualified reports. S4 separately designed, opt-in compile/link/
-runtime validation with its own execution design review — never implied
-by S1–S3, and not a reauthorization of ADR-060.
+code)`, JSON `verdict`/`full_verdict` swap) — see that slice's own
+changelog fragment.
+
+Consumer-*specification* half (landed): a consumer input is no longer only
+a bare binary path. `abicheck/model/consumer_spec.py`'s `ConsumerSpec`
+carries identity/provenance beyond `path` — `digest` (an expected content
+digest, verified against the real file at resolution time via
+`verify_digest`), `platform`, `profile`, `provider_baseline`, and
+`requirement` (`ConsumerRequirement.REQUIRED`, the default, or `ADVISORY`).
+`--used-by-manifest PATH` (repeatable; `parse_consumer_manifest`) names one
+or more consumers via a small JSON document and merges them into the same
+`--used-by` pipeline (`cli_compare_helpers.run_compare`), so a manifest
+consumer contributes to the same worst-wins scoped gate and the same
+`used_by[]` report block as a bare `--used-by <path>` consumer — the two
+are one population, not two. An unreadable **required** consumer (the
+default, matching every pre-S1 `--used-by <path>`) still raises
+(`ConsumerUnreadableError`/`ConsumerDigestMismatchError`, both
+`ValueError` subclasses) and aborts the run; an unreadable **advisory**
+consumer (`scope_diff_to_app`) instead returns a `NO_CHANGE`-verdict,
+`unreadable=True` result that is skipped, reported, and never contributes
+to the worst-wins computation. `--format json` gains a `consumer_impact_summary`
+object — "N of M consumers affected" (`total`/`evaluated`/`affected`/
+`unreadable_advisory`/`unreadable_paths`) across every supplied consumer
+(`cli_helpers_compare._consumer_impact_summary`) — and each `used_by[]`
+entry gains the new fields only when a manifest consumer actually supplied
+them, so a bare `--used-by <path>` consumer's entry is byte-for-byte
+unchanged (report schema 3.3, additive; SARIF/JUnit/HTML do not yet carry
+`consumer_impact_summary` — JSON only for now, tracked as a small
+remaining gap rather than folded into "Missing" above). The GitHub Action
+gained a matching `used-by-manifest` input (space-separated, repeated
+`--used-by-manifest`), validated the same way `used-by` is
+(`action/validate-inputs.sh`, `action/run.sh`).
+
+**S2 (started).** Action-input parity for the new consumer-manifest surface
+(landed, above: `used-by-manifest` mirrors `used-by`/`required-symbol(s)`
+exactly — same mutual-exclusivity check, same compare-mode-only scoping
+warning). Still open: staging/caching consumer artifacts *in* the Action
+(so a manifest-named consumer can be fetched/cached across workflow runs
+rather than assumed already checked out), exact-version selection against
+an existing acquisition/publishing channel, and parity for the advisory/
+required distinction in the Action's own `check-target`/`app-consumer`
+kind (today a Python-API/CLI-only distinction). **S3** declared source/
+use-case enrichment with coverage-qualified reports. **S4** separately
+designed, opt-in compile/link/runtime validation with its own execution
+design review — never implied by S1–S3, and not a reauthorization of
+ADR-060.
 
 ### E. Evidence adequacy, contract-source conflicts, cross-profile comparison — amend ADR-028/049/050/063/064
 

@@ -111,6 +111,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--sysroot",
         "--use-cases",
         "--used-by",
+        "--used-by-manifest",
         "--verbose",
         "--write",
         "--version",

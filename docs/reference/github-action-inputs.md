@@ -4,7 +4,7 @@
 
 Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../use/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
 
-## Inputs (82)
+## Inputs (83)
 
 | Input | Required | Default | Description |
 |---|:--:|---|---|
@@ -43,6 +43,7 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `search-path` | no | — | Additional directories to search for shared libraries (space-separated). Used by deps-tree, deps-compare, and follow-deps. |
 | `ld-library-path` | no | — | Simulated LD_LIBRARY_PATH (colon-separated). Used by deps-tree, deps-compare, and follow-deps. |
 | `used-by` | no | — | Application binary/binaries whose actual imports/required symbol versions scope the comparison (space-separated; maps to repeated compare --used-by). The full library comparison always determines this run's own verdict/exit code; the supplied application's own confirmed/potential/unresolved impact is reported alongside it (informational), never in place of it. Mutually exclusive with required-symbol/required-symbols (the CLI rejects both being set). compare mode only. |
+| `used-by-manifest` | no | — | Path(s) to a JSON document naming one or more consumer binaries (space-separated; maps to repeated compare --used-by-manifest), each with optional digest/platform/profile/provider_baseline provenance and a requirement ("required", the default -- an unreadable consumer aborts the run, same as used-by -- or "advisory" -- an unreadable consumer is skipped and reported instead). Merged into the same scoping pipeline as used-by; every listed consumer counts toward the reported "N of M consumers affected" summary (consumer_impact_summary in --format json). Mutually exclusive with required-symbol/required-symbols. compare mode only. |
 | `required-symbol` | no | — | An exported linker symbol a plugin host resolves via dlopen/dlsym and requires (space-separated; maps to repeated compare --required-symbol). The full library comparison always determines this run's own verdict/exit code; this contract's own confirmed/ potential/unresolved impact is reported alongside it (informational), never in place of it. Mutually exclusive with used-by. compare mode only. |
 | `required-symbols` | no | — | Path to a file of required symbols, one per line (blank lines and '#' comments ignored) -- combined with any required-symbol values. compare mode only. |
 | `against` | no | — | scan mode only. Baseline artifact (a library binary or JSON snapshot) to compare the scanned new-library against. Maps to scan --against; omit for a one-build audit (see the audit input below). Overridden by abi-baseline when set. |

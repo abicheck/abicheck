@@ -215,8 +215,27 @@
           "missing_symbols": {"type": "array", "items": {"type": "string"}},
           "missing_versions": {"type": "array", "items": {"type": "string"}},
           "relevant_change_count": {"type": "integer"},
-          "symbol_coverage": {"type": "number"}
+          "symbol_coverage": {"type": "number"},
+          "platform": {"type": "string"},
+          "profile": {"type": "string"},
+          "provider_baseline": {"type": "string"},
+          "digest": {"type": "string"},
+          "requirement": {"type": "string", "enum": ["required", "advisory"]},
+          "unreadable": {"type": "boolean"},
+          "unreadable_reason": {"type": "string"}
         }
+      }
+    },
+    "consumer_impact_summary": {
+      "type": "object",
+      "description": "Present only when --used-by/--used-by-manifest was given: \"N of M consumers affected\" statistics across every supplied consumer (Workstream D-S1). Purely informational.",
+      "additionalProperties": true,
+      "properties": {
+        "total": {"type": "integer"},
+        "evaluated": {"type": "integer"},
+        "affected": {"type": "integer"},
+        "unreadable_advisory": {"type": "integer"},
+        "unreadable_paths": {"type": "array", "items": {"type": "string"}}
       }
     },
     "required_symbol_contract": {

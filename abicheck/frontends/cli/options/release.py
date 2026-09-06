@@ -271,7 +271,33 @@ def app_usage_scope_options(func: F) -> F:
     the former standalone ``appcompat``/``plugin-check`` commands into
     ``compare``. Decorators apply bottom-up, so they are listed here in
     reverse of their displayed order.
+
+    ``--used-by-manifest`` (Workstream D-S1) is a third way to name a
+    consumer, additive to (never a replacement for) ``--used-by``: each
+    manifest is a small JSON document naming one or more consumer binaries
+    with optional digest/platform/profile/provider-baseline provenance and
+    an advisory/required distinction for an unreadable consumer (see
+    :mod:`abicheck.model.consumer_spec`). Manifest-named consumers are
+    merged into the same ``--used-by`` pipeline -- they show up in the same
+    ``used_by[]``/``consumer_scope`` report block, contribute to the same
+    worst-wins scoped gate, and are still mutually exclusive with
+    ``--required-symbol``/``--required-symbols``.
     """
+    func = click.option(
+        "--used-by-manifest",
+        "used_by_manifests",
+        multiple=True,
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="A JSON document naming one or more consumer binaries "
+        "(repeatable), each with optional 'digest'/'platform'/'profile'/"
+        "'provider_baseline' provenance and a 'requirement': "
+        "'required' (default, an unreadable consumer aborts the run, "
+        "same as --used-by) or 'advisory' (an unreadable consumer is "
+        "skipped and reported, never aborts the run). Merged into the "
+        "same scoping pipeline as --used-by; every listed consumer counts "
+        "toward the reported 'N of M consumers affected' summary. "
+        "Mutually exclusive with --required-symbol/--required-symbols.",
+    )(func)
     func = click.option(
         "--required-symbols",
         "required_symbols_file",
