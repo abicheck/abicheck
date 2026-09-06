@@ -448,6 +448,7 @@ def compute_extraction_contract(
     public_header_dirs: Sequence[Path] = (),
     manifest_tu_scope: str | None = None,
     frontend_context_kind: str | None = None,
+    compiler_identity_status: str | None = None,
 ) -> ExtractionContract | None:
     """Compute one side's :class:`ExtractionContract`, for either the legacy
     non-manifest CLI path or a ``--dump-manifest`` (ADR-050 D1/D3).
@@ -527,6 +528,17 @@ def compute_extraction_contract(
       external slot, a system-bucket file has no declared ``-I`` directory
       to make its path side-local against, so including its raw resolved
       path would make the fingerprint checkout/cache-root-dependent.
+
+    ``compiler_identity_status`` (E-S1, vision-api-abi-evolution.md section
+    E / cli-cleanup-phase-two.md Block 5): the caller's already-resolved
+    ``dumper_toolchain._compiler_identity_status(...).value`` for this
+    side, or ``None``. Recorded verbatim onto the returned
+    :class:`ExtractionContract` -- never hashed into ``profile_fingerprint``
+    itself (it isn't a member of :data:`PROFILE_FIELD_KEYS`) -- so
+    :func:`check_contracts_comparable` can refuse a compiler-probe failure
+    unconditionally, independent of whether the two sides' (necessarily
+    incomplete) ``profile_fields["compiler_family"]`` happen to still
+    collide.
     """
     scope_inputs_present = bool(
         declared_headers or public_header_paths or public_header_dirs
@@ -606,6 +618,7 @@ def compute_extraction_contract(
         scope_fingerprint=scope_fingerprint,
         profile_fields=profile_fields,
         scope_fields=scope_fields,
+        compiler_identity_status=compiler_identity_status,
     )
 
 

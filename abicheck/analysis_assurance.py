@@ -119,6 +119,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from .analysis_assurance_layout import (
+    layout_unverified_detectors as _layout_unverified_detectors,
+)
 from .buildsource.fact_set import check_fact_compatibility
 from .buildsource.model import CoverageStatus, DataLayer
 from .checker_policy import ChangeKind, EvidenceTier
@@ -393,6 +396,8 @@ class AnalysisAssurance:
     #: project the graph actually covers cannot be determined); or
     #: ``"not_collected"`` (neither side carries an L5 graph).
     graph_completeness: str = "not_collected"
+    #: E-S1: see ``analysis_assurance_layout.py``.
+    layout_unverified_detectors: tuple[str, ...] = field(default_factory=tuple)
     #: Human-readable notes explaining any non-``complete`` status, folded
     #: from the same underlying signals rather than duplicating their wording.
     notes: tuple[str, ...] = field(default_factory=tuple)
@@ -413,6 +418,7 @@ class AnalysisAssurance:
             "l3_context_status": self.l3_context_status,
             "fact_set_comparability": self.fact_set_comparability,
             "graph_completeness": self.graph_completeness,
+            "layout_unverified_detectors": list(self.layout_unverified_detectors),
             "notes": list(self.notes),
         }
 
@@ -1341,6 +1347,10 @@ def compute_analysis_assurance(
     dwarf_context_status, dw_notes = _dwarf_context_status(old, new)
     notes.extend(dw_notes)
 
+    layout_unverified_detectors = _layout_unverified_detectors(old, new)  # E-S1
+    if layout_unverified_detectors:
+        notes.append("layout unverified: " + ", ".join(layout_unverified_detectors))
+
     # -- L3 build-evidence context status ---------------------------------------
     l3_context_status, l3_notes = _l3_context_status(old_pack, new_pack)
     notes.extend(l3_notes)
@@ -1443,6 +1453,7 @@ def compute_analysis_assurance(
         l3_context_status=l3_context_status,
         fact_set_comparability=fact_set_comparability,
         graph_completeness=graph_completeness,
+        layout_unverified_detectors=layout_unverified_detectors,
         notes=tuple(notes),
     )
 

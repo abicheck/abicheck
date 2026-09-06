@@ -33,6 +33,16 @@ from .buildsource.redaction import DEFAULT_REDACTION
 from .dumper_ast_config import _detect_cpp_headers
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 
+# E-S1: relocated to extract/toolchain_identity.py (ADR-061's extract
+# package owns "read a binary/debug/header/build fact") alongside the new
+# compiler_identity_status this function's own FAILED-probe carve-out
+# feeds -- re-exported here (`X as X`) so `abicheck.dumper_toolchain.
+# _compiler_family_from_toolchain` stays a valid import path for existing
+# callers/tests.
+from .extract.toolchain_identity import (
+    _compiler_family_from_toolchain as _compiler_family_from_toolchain,
+)
+
 log = logging.getLogger(__name__)
 
 
@@ -330,33 +340,6 @@ def _stamp_ast_parser(
         setattr(parser, "_abicheck_ast_unsupported_reasons", check.reasons)
         metadata.update(check.provenance_fields())
     return parser
-
-
-def _compiler_family_from_toolchain(ast_toolchain: dict[str, str]) -> str | None:
-    """Best-effort ADR-050 ``compiler_family`` label from the resolved host
-    compiler binary (low-stakes: used for ``profile_fingerprint`` stability,
-    not semantic parsing, so a reasonable guess is fine — Codex review,
-    PR #624).
-
-    Reads ``compiler_selected`` first, not the bare ``selected`` key: for a
-    castxml-produced snapshot, ``selected`` names the castxml binary itself
-    (e.g. ``/usr/bin/castxml``), never the host compiler whose family/ABI
-    dialect actually matters here; ``compiler_selected`` is the resolved
-    host cc (see ``dumper._header_ast_parser``'s ``_stamp_parser``). For a
-    clang-produced snapshot the two keys already carry the same value
-    (clang is both frontend and compiler), so the fallback is harmless.
-    """
-    path = ast_toolchain.get("compiler_selected") or ast_toolchain.get("selected") or ""
-    name = Path(path).name.lower() if path else ""
-    if not name:
-        return None
-    if "clang" in name:
-        return "clang"
-    if name in ("cl", "cl.exe"):
-        return "msvc"
-    if "gcc" in name or "g++" in name:
-        return "gnu"
-    return name
 
 
 def _ast_fallback_enabled() -> bool:
