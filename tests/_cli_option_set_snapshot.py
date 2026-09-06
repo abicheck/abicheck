@@ -106,6 +106,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--show-filtered",
         "--show-only",
         "--sources",
+        "--support-promise",
         "--suppress",
         "--surface-metrics",
         "--sysroot",

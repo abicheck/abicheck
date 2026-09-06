@@ -41,7 +41,6 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
     _cleanup_temp_dirs,
     _collect_bundle_result,
-    _collect_release_warnings,
     _compute_release_severity_exit_code,
     _debian_symbols_warning,
     _discover_include_roots,
@@ -105,7 +104,10 @@ from .model import AbiSnapshot
 from .model.release_selection import ReleaseSelection
 from .model.scope_acquisition import AcquisitionState
 from .pack_application import resolve_bundle_policy_file
-from .report.comparison_scope import comparison_scope_terms
+from .report.comparison_scope import (
+    comparison_scope_terms,
+    release_scope_warnings,
+)
 from .workflows.gate import resolve_scope_decision
 from .workflows.release_scope import (
     DIRECT_PAIR_KEY,
@@ -114,10 +116,13 @@ from .workflows.release_scope import (
     out_of_scope_provider_names,
     release_inventory_evidence,
     scoped_bundle_maps,
+)
+from .workflows.release_stored_inventory import (
     stored_degraded_members,
     stored_side_degraded_members,
     stored_side_inventory_complete,
 )
+from .workflows.release_support_promise import support_promise_results
 from .workflows.storage import is_project_snapshot_package_dir
 
 if TYPE_CHECKING:
@@ -178,6 +183,14 @@ if TYPE_CHECKING:
     help="What an incompletely checked comparison scope does to the exit code "
     "(ADR-065 D6): 'warn' reports every unchecked member and contributes 0; "
     "'block' contributes 1, folded with max() like the contract-coverage axis.",
+)
+@click.option(
+    "--support-promise",
+    "support_promise",
+    type=click.Choice(["off", "declared"]),
+    default="off",
+    show_default=True,
+    help="Report a proven change to the release's declared component set as a finding (ADR-065 D1/D6, a contract-policy field): 'off' (the default) emits nothing; 'declared' emits support_promise_component_retired/_introduced for every member whose absence the *other* side's proven-complete inventory establishes -- a package archive unpacked in full, or a stored snapshot whose capture asserted inventory_complete. Never fires on an unmatched member under an unproven inventory, whatever the setting. (directory/package inputs only)",
 )
 @click.option(
     "--select",
@@ -373,6 +386,7 @@ def compare_release_cmd(
     probe_matrix_new: Path | None,
     severity_preset: str | None,
     on_incomplete_scope: str = "warn",
+    support_promise: str = "off",
     select: tuple[str, ...] = (),
     select_required: tuple[str, ...] = (),
     # Not Click options: `compare`'s directory/package fan-out `ctx.invoke`s
@@ -527,7 +541,7 @@ def compare_release_cmd(
 
     def _do_extract(
         input_path: Path, debug_pkg: Path | None, devel_pkg: Path | None
-    ) -> tuple[Path, Path | None, Path | None, Path | None]:
+    ) -> tuple[Path, Path | None, Path | None, Path | None, bool]:
         return _extract_if_package(
             input_path,
             debug_pkg,
@@ -570,10 +584,10 @@ def compare_release_cmd(
                 new_map,
                 warning_msgs,
                 matched_keys,
-                removed_keys,
-                added_keys,
                 old_unclassified,
                 new_unclassified,
+                old_inventory,
+                new_inventory,
             ) = _prepare_compare_release_inputs(
                 old_dir,
                 new_dir,
@@ -627,6 +641,12 @@ def compare_release_cmd(
                 # could not classify withholds that side's proof.
                 old_unclassified=old_unclassified,
                 new_unclassified=new_unclassified,
+                # ADR-065 S3: a package archive's own declared component
+                # inventory, complete because the container was unpacked in
+                # full -- the live-operand counterpart of a stored package's
+                # persisted `inventory_complete` assertion.
+                old_inventory=old_inventory,
+                new_inventory=new_inventory,
             )
 
             if fmt != "json":
@@ -769,6 +789,16 @@ def compare_release_cmd(
             _scope_failed = {
                 "old_failed": {**degraded.old_unmatched, **old_unclassified},
                 "new_failed": {**degraded.new_unmatched, **new_unclassified},
+                # ADR-065 S3: declared by the package inventory, absent after
+                # extraction -- `expected_not_produced`, never an absence a
+                # proven-complete inventory on the other side may read as a
+                # removal (the state D1 reserved and S2 left unproduced).
+                "old_unproduced": dict(old_inventory.unproduced)
+                if old_inventory is not None
+                else {},
+                "new_unproduced": dict(new_inventory.unproduced)
+                if new_inventory is not None
+                else {},
             }
             if release_selection is not None and not (
                 inventory_evidence.direct_pair
@@ -823,6 +853,33 @@ def compare_release_cmd(
             )
             removed_keys = [m.member for m in scope_record.proven_removed_members]
             added_keys = [m.member for m in scope_record.proven_added_members]
+            # ADR-065 S4: the fan-out's unmatched/removed/added stderr notices,
+            # now written from the acquisition record instead of the deleted
+            # `_match_release_keys` set difference -- so one line can say
+            # "removed" only when the lacking side's inventory proves it, and
+            # says "unmatched" (naming why the proof is missing) otherwise.
+            # Emitted here, not with the discovery-time warnings above, because
+            # the record does not exist until the fan-out has run.
+            scope_notices = release_scope_warnings(scope_record)
+            warning_msgs.extend(scope_notices)
+            if fmt != "json":
+                for msg in scope_notices:
+                    click.echo(msg, err=True)
+            # ADR-065 D1/S3: a *support-promise* change -- what the release
+            # promises to ship, not what this run happened to acquire. Emitted
+            # only under the contract policy that asks for it, and only for a
+            # member whose absence the other side's proven-complete inventory
+            # establishes (`support_promise_changes` reads nothing else). Each
+            # one becomes an ordinary per-component result so the existing
+            # verdict fold, severity aggregation, report renderers and
+            # disposition audit see it without a parallel pipeline.
+            for entry in support_promise_results(scope_record, support_promise):
+                library_results.append(entry)
+                entry_verdict = str(entry["verdict"])
+                if _RELEASE_VERDICT_ORDER.get(
+                    entry_verdict, 0
+                ) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
+                    worst_verdict = entry_verdict
 
             if bundle_facts_out is not None and not no_bundle_analysis:
                 # Resolved here, not in the leaf write_bundle_facts_out() (see its docstring).

@@ -159,6 +159,7 @@ from ..package import (
     detect_extractor,
     discover_shared_libraries,
     is_package,
+    package_component_inventory,
     resolve_debug_info as resolve_package_debug_info,
 )
 from ..provenance import apply_provenance
@@ -209,6 +210,7 @@ __all__ = [
     "detect_python_extension",
     "discover_build_config",
     "discover_shared_libraries",
+    "package_component_inventory",
     "drain_build_dir_cleanups",
     "dump_manifest_header_roots",
     "embed_build_source",

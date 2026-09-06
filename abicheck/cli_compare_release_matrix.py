@@ -60,7 +60,6 @@ from .cli import (
 )
 from .cli_compare_release_helpers import (
     _RELEASE_VERDICT_ORDER,
-    _collect_release_warnings,
     _debian_symbols_warning,
     _discover_include_roots,
     _exit_compare_release,
@@ -77,9 +76,11 @@ from .frontends.cli.release_summary import (  # moved (ADR-065 S2), re-exported
 )
 from .model import AbiSnapshot
 from .report.comparison_scope import ComparisonScopeTerms
+from .workflows.extraction import package_component_inventory
 from .workflows.gate import incomplete_scope_diagnostic
 
 if TYPE_CHECKING:
+    from .model.package_inventory import PackageInventory
     from .pack_application import PackApplication
     from .workflows.gate import SeverityConfig
 
@@ -615,7 +616,7 @@ def _prepare_compare_release_inputs(
     config_includes: tuple[Path, ...],
     extract_if_package: Callable[
         [Path, Path | None, Path | None],
-        tuple[Path, Path | None, Path | None, Path | None],
+        tuple[Path, Path | None, Path | None, Path | None, bool],
     ],
     discover_shared_libraries: Callable[..., list[Path]],
     is_package: Callable[[Path], bool],
@@ -635,16 +636,22 @@ def _prepare_compare_release_inputs(
     dict[str, Path],
     list[str],
     list[str],
-    list[str],
-    list[str],
     dict[str, str],
     dict[str, str],
+    PackageInventory | None,
+    PackageInventory | None,
 ]:
     """Prepare inputs/maps/keys for compare-release command.
 
-    The trailing two mappings (ADR-065 D1) name the stored members
-    `--dso-only` could not classify on OLD/NEW, keyed like the maps, with
-    the reason; empty whenever the flag is off or a side is live.
+    ADR-065 S4 removed the old-minus-new / new-minus-old key lists from this
+    return: pairing answers *which* members have a counterpart and nothing
+    else -- what an unpaired member means is decided once, by
+    `workflows.release_scope.build_release_scope_record`. The two mappings
+    before the inventories (D1) name the stored members `--dso-only` could
+    not classify; the trailing two (S3) are each side's declared **component
+    inventory** when that side was a package archive this run unpacked --
+    `None` for a directory operand, for a stored `ProjectSnapshot` package
+    (whose own `inventory_complete` assertion governs), and for a file pair.
 
     *old_variant*/*new_variant* and *make_temp_dir* (ADR-062 A1.7) are the
     stored-side plumbing for a `ProjectSnapshot` package operand -- ``None``
@@ -684,15 +691,11 @@ def _prepare_compare_release_inputs(
         if new_cls is not None:
             new_pkg_map, new_unclassified = new_cls.members, new_cls.unclassified
 
-    old_lib_dir, old_debug_dir, old_header_dir, old_symbols_file = extract_if_package(
-        old_dir,
-        debug_info1,
-        devel_pkg1,
+    (old_lib_dir, old_debug_dir, old_header_dir, old_symbols_file, old_whole) = (
+        extract_if_package(old_dir, debug_info1, devel_pkg1)
     )
-    new_lib_dir, new_debug_dir, new_header_dir, new_symbols_file = extract_if_package(
-        new_dir,
-        debug_info2,
-        devel_pkg2,
+    (new_lib_dir, new_debug_dir, new_header_dir, new_symbols_file, new_whole) = (
+        extract_if_package(new_dir, debug_info2, devel_pkg2)
     )
     old_files: list[Path] = []
     new_files: list[Path] = []
@@ -753,7 +756,7 @@ def _prepare_compare_release_inputs(
     )
     old_inc.extend(_discover_include_roots(old_header_dir))
     new_inc.extend(_discover_include_roots(new_header_dir))
-    matched_keys, removed_keys, added_keys, old_map, new_map = _match_release_keys(
+    matched_keys, old_map, new_map = _match_release_keys(
         old_dir,
         new_dir,
         old_map,
@@ -762,13 +765,21 @@ def _prepare_compare_release_inputs(
         new_files,
         is_package,
     )
-    _collect_release_warnings(
-        warning_msgs,
-        matched_keys,
-        removed_keys,
-        added_keys,
-        old_map,
-        new_map,
+    # ADR-065 S3: the declared component inventory, built from the members
+    # this run selected out of a container it unpacked *in full*. Only a
+    # live package operand has one -- a stored `ProjectSnapshot` side
+    # (`*_pkg_map is not None`) already carries its own `inventory_complete`
+    # assertion, which `release_inventory_evidence` reads instead, and a
+    # directory operand proves nothing about what the release ships.
+    old_inventory = (
+        package_component_inventory(old_lib_dir, old_files, container_complete=True)
+        if old_pkg_map is None and old_whole
+        else None
+    )
+    new_inventory = (
+        package_component_inventory(new_lib_dir, new_files, container_complete=True)
+        if new_pkg_map is None and new_whole
+        else None
     )
     return (
         old_debug_dir,
@@ -781,8 +792,8 @@ def _prepare_compare_release_inputs(
         new_map,
         warning_msgs,
         matched_keys,
-        removed_keys,
-        added_keys,
         old_unclassified,
         new_unclassified,
+        old_inventory,
+        new_inventory,
     )

@@ -83,6 +83,16 @@ package extraction without a component inventory (`abicheck/package.py`
 returns directories); the Action's typed outcomes ending at the composite
 boundary; the degraded stranded-library snapshot.
 
+**Still missing after S1-S4** (the list above is the 2026-09-05 assessment,
+kept verbatim; this is what it has *not* closed): `compare_product_
+directories`' canonical fallback still leaves an ambiguous group silently
+unpaired rather than emitting D3's `ambiguous` diagnostic
+(`abicheck/product_baseline.py`), and no `CompareRequest`/`BundleCompareRequest`
+carries a selection or expected inventory as a typed field -- the release
+fan-out's selection and inventory reach the engine as CLI parameters, which
+is why scalar-versus-bundle operand convergence stays with
+`cli-cleanup-phase-two.md`'s PR I rather than being solved twice here.
+
 **Slices.** S0 executable scenario table (`tests/scenarios/`, existing
 catalogue). S1 selection by identity/coordinates with a `--dry-run` plan
 view, on the typed API and the release/bundle CLI — **landed 2026-09-06**:
@@ -119,18 +129,73 @@ worst behaviors with no new request field): `model/scope_acquisition.py`,
 `report/comparison_scope.py`, `--on-incomplete-scope warn|block` on the
 release fan-out, `BundleFacts.degraded_members`. S3 package
 component inventories; support-promise findings under a contract-policy
-field. S4 Action/project/aggregate parity; scalar/bundle operand
+field — **landed 2026-09-06**: `model/package_inventory.py`'s
+`PackageInventory`/`PackageComponent` (declared components, an explicit
+`complete` flag, and a separate `unproduced` map — the three answers this
+slice exists to keep apart), built by `package.package_component_inventory`
+from `ExtractResult.container_complete`, which every archive extractor now
+sets and `DirExtractor` deliberately does not: an archive extractor unpacks
+its container in full or raises, so a successfully extracted package
+operand is a D2 completeness proof, while a directory a user may have
+populated partially is not. Threaded through
+`cli_compare_release_matrix._prepare_compare_release_inputs` into
+`release_scope.release_inventory_evidence` (a new `PROVEN` source beside
+S2's stored `inventory_complete` assertion) and into
+`build_release_scope_record`/`build_declared_selection_record` as
+`old_unproduced`/`new_unproduced`, which gives `EXPECTED_NOT_PRODUCED` —
+reserved by S2 with no producer — a real one: a declared component whose
+content the extracted tree cannot reach (a dangling link, an unreadable
+file) is an *acquisition failure*, never an absence the other side's proof
+may read as a removal. The support-promise half is
+`policy/support_promise.py` (D1's fifth concept: the `--support-promise
+off|declared` contract-policy field, `off` by default so every existing
+invocation is unchanged) plus the two new `ChangeKind`s
+`SUPPORT_PROMISE_COMPONENT_RETIRED`/`_INTRODUCED`, derived *only* from
+`proven_removed_members`/`proven_added_members` and carrying D2's
+completeness receipt in their `old_value`/`new_value`;
+`workflows/release_support_promise.py` places each one in the fan-out's own
+`library_results` so the existing verdict fold, severity aggregation,
+renderers and disposition audit see it without a parallel path.
+Deliberately not a duplicate of `BUNDLE_LIBRARY_REMOVED`, which fires only
+when a surviving sibling imports the missing library. **One consequence
+worth stating: `--fail-on-removed-library`'s exit `8` is reachable again
+for a package-archive pair** (S2 had left it reachable only for a stored
+`ProjectSnapshot`); a directory pair still cannot reach it. S4
+Action/project/aggregate parity; scalar/bundle operand
 convergence as a slice of `cli-cleanup-phase-two.md` PR I/J; delete the
-set-difference pairing and the silent canonical fallback -- now that S1's
-declared selection exists as the alternative, but `_match_release_keys`
-itself is untouched by S1 and still runs the discovery/matching a
-selection filters.
+set-difference pairing and the silent canonical fallback — **landed
+2026-09-06 except the two items named below**: `_match_release_keys` now
+returns only the matched keys and the two maps, and its last two consumers
+were migrated — the JSON `unmatched_old`/`unmatched_new` keys (which already
+read `unmatched_names(record)` when a record existed, and now report `[]`
+rather than re-deriving a difference when one does not) and the fan-out's
+stderr notices, which moved to `report/comparison_scope.release_scope_
+warnings` and are emitted after the record exists. That move is what lets
+one line distinguish a *proven* removal (naming the inventory that proved
+it) from an unmatched member, an `expected_not_produced` one, and an
+`out_of_scope` one the set difference reported identically. The
+Action/aggregate parity this slice names had already landed with S2
+(`action/run.sh`'s `SCOPE_INCOMPLETE` verdict tier, aggregate report schema
+1.8's `scope_completeness` axis), so S4 added no second copy.
 
-**Deletion gates.** `_match_release_keys`'s set-difference removal path is
-deleted in S4 once every removal finding flows from proven completeness
-(S2 already stopped exit `8`, the verdict bump, and the Markdown/PR-comment
-"removed" sections from reading it; only the JSON `unmatched_old` key and
-the stderr warnings still do, by name). `bundle_variants_config` — **deleted
+**Still open in S4, deliberately.** Two items keep their existing owners
+rather than being duplicated here: the **scalar/bundle operand
+convergence** is `cli-cleanup-phase-two.md`'s PR I (live/stored driver plus
+one evaluation/gate/report/dry-run path across all four operand shapes),
+still open there and explicitly cross-referenced by that plan's own row as
+overlapping this workstream; and **the silent canonical fallback** in
+`compare_product_directories` (`abicheck/product_baseline.py`) is not yet
+D3's `ambiguous` diagnostic — the deletion gate below covers
+`_match_release_keys`'s set difference, and turning an ambiguity into a
+refusal-to-compare in the whole-product path is a behaviour change of its
+own that needs its own slice and migration note.
+
+**Deletion gates.** `_match_release_keys`'s set-difference removal path was
+**deleted in S4** (2026-09-06), once every removal finding flowed from proven
+completeness: S2 had already stopped exit `8`, the verdict bump, and the
+Markdown/PR-comment "removed" sections from reading it, and S4 migrated the
+two remaining readers that still did so by name (the JSON `unmatched_old`
+key and the stderr warnings). `bundle_variants_config` — **deleted
 in S1** (see above) rather than given a consumer.
 
 ### B. Longitudinal history and versioning policy — ADR-066
