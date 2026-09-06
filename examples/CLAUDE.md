@@ -56,7 +56,7 @@ the output) — not calibration fixtures a gate scores. Consequently:
   `docs/AGENTS.md`'s ownership split).
 
 See the plan doc's Phase 5 row for the target set (compare one library
-[done], audit a release [done], multi-library project, evidence depth,
-build/source evidence, Python API [done], suppressions [done],
+[done], audit a release [done], multi-library project [done], evidence
+depth, build/source evidence, Python API [done], suppressions [done],
 GitHub Actions [done]) and which
 of them remain.

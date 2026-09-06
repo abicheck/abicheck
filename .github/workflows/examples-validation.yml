@@ -71,7 +71,10 @@ jobs:
       # manifest's `requires:` lists castxml, so the job would skip rather
       # than fail silently. Both halves are needed: the toolchain here,
       # and `--require` below turning a skip into a failure if this step
-      # ever stops providing it.
+      # ever stops providing it. compare-project's own `compare` step passes
+      # no headers (it demonstrates the symbols-only, directory-vs-directory
+      # bundle/cross-library path), so it needs gcc but not castxml -- its
+      # manifest's `requires:` reflects that.
       - name: Install system deps
         uses: ./.github/actions/install-system-deps
         with:
@@ -96,7 +99,7 @@ jobs:
           PYTHONPATH=. python validation/scripts/run_workflow_examples.py \
             --require compare-release --require audit-release \
             --require suppressions --require python-api \
-            --require github-actions \
+            --require github-actions --require compare-project \
             --json results/workflow-examples.json
 
       - name: Upload workflow-example receipt

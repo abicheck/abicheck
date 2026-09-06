@@ -1,0 +1,54 @@
+# Executable contract for this workflow example (Phase 5 of the
+# examples/catalog split). `validation/scripts/run_workflow_examples.py`
+# copies the directory to a scratch tree, runs each `run:` line below as a
+# real shell command, and checks what it claims.
+#
+# Every `run:` line must appear verbatim in this directory's README.md
+# (whitespace-normalized) -- that is the whole point: without it this file
+# is a second copy of the walkthrough, free to keep passing while the
+# documented commands rot. `tests/test_workflow_examples.py` enforces it in
+# the fast lane, with no compiler needed.
+#
+# Unlike the other workflows here, `compare` is given two *directories*
+# rather than two files -- that's what turns on bundle (cross-library)
+# analysis, no manifest or extra flag required. No headers are passed, so
+# this walkthrough deliberately stays on the symbols-only path.
+id: compare-project
+task: Did removing a function from one library in my project break a sibling library that depends on it?
+platforms:
+  - linux
+  - macos
+requires:
+  - gcc
+  # The tool under test. Declaring it is not ceremony: without it a host
+  # without abicheck on PATH reports a launch failure per step instead of an
+  # honest skip.
+  - abicheck
+steps:
+  - name: build-old-core
+    run: gcc -shared -fPIC -g core_v1.c -o old/libcore.so
+  - name: build-old-algo
+    run: gcc -shared -fPIC -g algo.c -o old/libalgo.so -L old -lcore
+  - name: build-new-core
+    run: gcc -shared -fPIC -g core_v2.c -o new/libcore.so
+  - name: build-new-algo
+    run: gcc -shared -fPIC -g algo.c -o new/libalgo.so -L new -lcore
+  - name: compare
+    run: abicheck compare old new
+    expect:
+      exit_code: 4
+      stdout_contains:
+        - "**Verdict** | ❌ `BREAKING`"
+        - "**Bundle** | ❌ `BREAKING` (2 cross-library findings)"
+        - "bundle_intra_dep_removed** — `core_mul` (consumer: `libalgo.so`)"
+    # Re-run the identical command with a machine-readable format so the
+    # project-level and bundle-level verdicts can be asserted structurally.
+    # This report is shaped around `libraries`/`bundle_findings`, not a flat
+    # `changes` list, so `change_kinds` isn't used here (see the other
+    # workflows' `expect_json` for that shape).
+    json_variant:
+      - --format
+      - json
+    expect_json:
+      verdict: BREAKING
+      bundle_verdict: BREAKING
