@@ -126,6 +126,7 @@ class _CastxmlParser:
         exported_static: set[str],
         public_header_paths: list[str] | None = None,
         public_dir_paths: list[str] | None = None,
+        no_binary_evidence: bool = False,
     ):
         # All parser state now lives on a shared context object (ADR-061 D9
         # "context.py") so entity-parsing modules under
@@ -141,6 +142,7 @@ class _CastxmlParser:
             exported_static,
             public_header_paths,
             public_dir_paths,
+            no_binary_evidence=no_binary_evidence,
         )
         self._ctx.build_id_map()
 

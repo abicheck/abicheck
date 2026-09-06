@@ -585,6 +585,7 @@ class _ClangAstParser:
         public_header_paths: list[str] | None = None,
         public_dir_paths: list[str] | None = None,
         target_triple: str | None = None,
+        no_binary_evidence: bool = False,
     ) -> None:
         self._root = root
         # May be unavailable for synthetic/unit ASTs or an unprobeable
@@ -593,6 +594,9 @@ class _ClangAstParser:
         self._target_triple = target_triple
         self._exported_dynamic = exported_dynamic
         self._exported_static = exported_static
+        # Workstream F S1 ("Header-only comparison"): see
+        # `extract.headers.clang.context.visibility`'s own docstring.
+        self._no_binary_evidence = no_binary_evidence
         # Per-*logical-scope* (not per-walk-frame, and not per-AST-node
         # either) anonymous-ordinal state, keyed by `child_scope_path` --
         # the typed `ScopePath` a `_walk` call's children actually enter --
@@ -1059,7 +1063,11 @@ class _ClangAstParser:
         implementation this delegates to) for the full contract.
         """
         return _clang_context.visibility(
-            self._exported_dynamic, self._exported_static, mangled, name
+            self._exported_dynamic,
+            self._exported_static,
+            mangled,
+            name,
+            no_binary_evidence=self._no_binary_evidence,
         )
 
     @staticmethod

@@ -75,7 +75,11 @@ if TYPE_CHECKING:
     from ...model import AbiSnapshot
     from ...service_dump_pipeline import ResolvedDumpRequest
 
-__all__ = ["execute_and_write_dump_cli_run", "execute_dump_cli_run"]
+__all__ = [
+    "execute_and_write_dump_cli_run",
+    "execute_and_write_header_only_dump_cli_run",
+    "execute_dump_cli_run",
+]
 
 
 def execute_dump_cli_run(
@@ -275,4 +279,85 @@ def execute_and_write_dump_cli_run(
         snapshot_compression=snapshot_compression,
         public_headers=public_headers,
         public_header_dirs=public_header_dirs,
+    )
+
+
+def execute_and_write_header_only_dump_cli_run(
+    resolved: ResolvedDumpRequest,
+    *,
+    notify: Callable[[str], None],
+    build_config: Path | None,
+    stamp_provenance: Callable[..., None],
+    write_snapshot_output: Callable[..., None],
+    git_tag: str | None,
+    build_id: str | None,
+    no_git: bool,
+    output: Path | None,
+    build_info: Path | None,
+    sources: Path | None,
+    build_targets: tuple[str, ...],
+    include_dependencies: bool,
+    headers: tuple[Path, ...],
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    snapshot_compression: str,
+) -> None:
+    """``dump_cmd``'s real-run tail for a binary-less, headers-only request
+    (workstream F S1, "Header-only comparison" --
+    ``vision-api-abi-evolution.md``): the ``-H api.h``/``--dump-manifest``
+    with no ``SO_PATH`` and no ``--sources``/``--build-info`` shape
+    :func:`~abicheck.workflows.artifact.execute_header_only.
+    is_header_only_evidence` identifies.
+
+    Mirrors :func:`execute_and_write_dump_cli_run`'s own shape (execute via
+    the shared ``execute_dump_request`` pipeline, stamp provenance, write
+    the snapshot) with the same reason for its own existence -- keeping
+    ``commands/dump.py`` under the architecture gate's file-size cap. Unlike
+    that sibling, *resolved* here is the caller's plain, not-yet-re-pointed
+    ``ResolvedDumpRequest`` (the dry-run-safe preview object,
+    ``_resolved``) -- this function does its own
+    ``requested_depth=None``/:class:`~abicheck.service_dump_pipeline.
+    DumpExecutionOptions` re-pointing internally (mirroring
+    ``dump_cmd``'s own ELF/PE/Mach-O real-run branch), since a headers-only
+    request has no per-format execution-option kwargs (no legacy
+    ``-p``/``--compile-db`` auto-match, no PE/Mach-O early return) worth
+    exposing as separate caller-supplied parameters the way that branch's
+    own richer plumbing needs.
+    """
+    from dataclasses import replace as _replace
+
+    from ...service_dump_pipeline import DumpExecutionOptions
+    from ...workflows.extraction import resolve_source_frontend_clang_bin
+
+    exec_resolved = _replace(
+        resolved,
+        requested_depth=None,
+        execution_options=DumpExecutionOptions(
+            build_config=build_config,
+            allow_build_query=True,
+            seed_collect_mode=resolved.collect_mode,
+            source_frontend_from_folded_context=True,
+        ),
+    )
+    snap = execute_dump_cli_run(exec_resolved, notify=notify)
+
+    stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
+    write_snapshot_output(
+        snap,
+        output,
+        build_info,
+        sources,
+        build_config,
+        resolved.collect_mode,
+        build_targets=build_targets,
+        extractor=resolved.header_backend,
+        depth=resolved.requested_depth,
+        include_dependencies=include_dependencies,
+        header_roots=headers,
+        clang_bin=resolve_source_frontend_clang_bin(
+            gcc_path, gcc_prefix, exclude_cl_style=False
+        ),
+        snapshot_compression=snapshot_compression,
+        public_headers=resolved.public_headers,
+        public_header_dirs=resolved.public_header_dirs,
     )

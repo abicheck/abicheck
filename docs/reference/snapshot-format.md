@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`43`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`44`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 43,
+  "schema_version": 44,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -184,12 +184,17 @@ document. Bumped specifically so a pre-Phase-8 reader (whose own
 silently reading every top-level field as absent/empty — a same-numbered
 envelope change would have given that reader no signal at all. This build
 itself reads the envelope transparently regardless of version, per
-`snapshot_from_dict`'s own `is_sectioned_document` check. Finally (v43)
+`snapshot_from_dict`'s own `is_sectioned_document` check. Then (v43)
 `Variable.is_static` persisted — closes the plain-C/`extern "C"` same-named
 static-vs-external variable identity collision `tu_merge._variable_key`'s own
 docstring long documented as a known, accepted limitation; missing on a pre-v43
 snapshot loads as `False`, matching every prior reader's implicit assumption
-since the field did not exist.
+since the field did not exist. Finally (v44) `AbiSnapshot.header_only`
+persisted — the explicit marker for a snapshot built by the binary-less
+header-AST dump path (workstream F S1, "Header-only comparison"; no
+`SO_PATH`, no `--sources`/`--build-info`); missing on a pre-v44 snapshot
+loads as `False`, matching every prior snapshot's implicit "this has a
+binary, or is a pre-existing source-only dump" status.
 
 ### Forward / backward compatibility
 
@@ -200,7 +205,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 43`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 44`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -279,7 +284,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `43`). |
+| `schema_version` | int | Snapshot format version (currently `44`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -291,6 +296,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 | `build_id` | string \| null | Opaque CI identifier (run ID, build number). |
 | `contract` | object \| null | ADR-050 D1 extraction-contract fingerprints (schema v14, *verdict-blocking* — see "Forward / backward compatibility" above): `profile_fingerprint`/`scope_fingerprint` plus their named resolved sub-inputs, proving two snapshots were extracted under a comparable profile/scope. `null` when no producer populated it yet. |
 | `dependency_scope` | string \| null | (schema v18) `"filtered"` when the toolchain/system-header exclusion (`dumper_scoping.py`) was applied, `"full"` when opted out via `--include-system-declarations`. `dump` and `compare`'s live-binary dumping (`service.run_dump`) both filter by default (`include_dependencies=False`) and tag `"filtered"`; a Python API caller of `service.run_dump`/`resolve_input` gets the opposite default (`include_dependencies=True`, tagging `"full"`), preserving every existing caller that doesn't opt in explicitly. `scan`'s own candidate is the one exception: it also filters by default, but derives its actual mode from a `--against`/`--baseline` JSON snapshot's own explicit tag (`scan_engine._scan_candidate_include_dependencies`) — unfiltered only when that baseline is itself explicitly tagged `"full"`, since `scan` has no `--include-system-declarations` flag of its own to request that directly. `null` on any pre-v18 snapshot or any snapshot with no header-derived declarations. `comparability.check_contracts_comparable` raises `ScopeMismatchError` only when BOTH sides carry an explicit, non-null value and they differ — `null` is deliberately NOT treated as `"full"` (an ordinary pre-v18 baseline is usually already-filtered content that simply predates this tag; assuming `"full"` for it would spuriously flag the routine "compare a cached baseline against a fresh dump" workflow), so a genuinely ambiguous untagged snapshot is left unchecked on this axis rather than guessed at. |
+| `header_only` | boolean | (schema v44) `true` only for a snapshot built by the binary-less header-AST dump path (`dump -H api.h`, no `SO_PATH`/`--sources`/`--build-info` — workstream F S1, "Header-only comparison"). Explicit, not inferred from `platform`/`from_headers`: a pre-existing `--sources`/`--build-info` source-only dump also has `platform: null`, but carries no header-AST declarations at all. `false` (the default) for every snapshot predating this field and every ordinary binary dump. |
 
 ### Compile-context provenance (schema v15, header-AST parses only)
 
@@ -413,7 +419,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `43`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `44`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

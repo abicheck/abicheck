@@ -614,6 +614,10 @@ class AbiSnapshot:
     # untagged snapshot.
     dependency_scope: str | None = field(default=None, kw_only=True)
 
+    # Schema v44 (workstream F S1): True only for a binary-less header-AST
+    # dump. See policy.header_only_capabilities.
+    header_only: bool = field(default=False, kw_only=True)
+
     # Fully-qualified typedef alias -> underlying type name (schema v25,
     # G31 Phase C). Additive twin of ``typedefs`` above, not a replacement:
     # ``typedefs`` is keyed by *bare* (unqualified) name on both header

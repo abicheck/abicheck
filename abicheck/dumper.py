@@ -536,6 +536,7 @@ def _header_ast_parser(
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
     pruning_header_roots: tuple[str, ...] | None = None,
+    no_binary_evidence: bool = False,
 ) -> _CastxmlParser | _ClangAstParser:
     """Run the resolved L2 backend and return its CastXML/Clang parser.
 
@@ -546,6 +547,11 @@ def _header_ast_parser(
     An explicit ``--ast-frontend castxml`` with a non-``"host"`` request
     fails immediately rather than silently returning an ordinary castxml
     dump; under ``"auto"`` a non-``"host"`` request skips castxml entirely.
+
+    ``no_binary_evidence`` (workstream F S1, "Header-only comparison"):
+    forwarded unchanged to whichever parser is constructed -- see
+    ``extract.headers.castxml.location.visibility``'s own docstring for what
+    it changes. ``False`` (the default) for every ordinary binary dump.
     """
     # `_resolve_effective_ast_backend` both validates (raising for a request
     # no single parser can satisfy) and predicts the dispatch below in one
@@ -606,6 +612,7 @@ def _header_ast_parser(
             target_triple=_configured_target_triple(
                 gcc_options, gcc_option_tokens, clang_bin
             ),
+            no_binary_evidence=no_binary_evidence,
         )
         stamped = cast(
             _ClangAstParser,
@@ -663,6 +670,7 @@ def _header_ast_parser(
         exported_static,
         public_header_paths=public_header_paths,
         public_dir_paths=public_dir_paths,
+        no_binary_evidence=no_binary_evidence,
     )
     meta = selected_meta[0] if selected_meta else (None, None)
     return cast(

@@ -91,7 +91,40 @@ def _pe_export_id(e: Any) -> str:
 _COPY_RELOC_TYPES = (SymbolType.OBJECT, SymbolType.COMMON)
 
 
-@registry.detector("elf")
+def _has_elf_on_both_sides(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str | None]:
+    """Support gate (ADR-067 D3) for a detector whose evidence is real,
+    observed ELF symbol-table facts (``.dynsym``/``.gnu.version``/RTTI
+    mangled symbols) -- never header-declared/guessed ones.
+
+    Workstream F S1 ("Header-only comparison"): before this gate existed,
+    ``elf``/``tls_checks``/``protected_visibility``/``symbol_version_alias``/
+    ``vtable_identity``/``abi_surface``/``elf_deleted_fallback`` each
+    silently substituted an empty ``ElfMetadata()`` (via ``getattr(old,
+    "elf", None) or ElfMetadata()``) when a side had none, so a comparison
+    between two binary-less snapshots (source-only, or the new headers-only
+    tier) recorded these as ordinary evaluated zeros rather than the real
+    coverage gap they are -- exactly the "silently absent" failure mode
+    ADR-067 D3's own ``not_evaluated`` convention exists to close (see
+    ``_has_any_dwarf`` below, the sibling gate this mirrors). ``glibcxx_
+    dual_abi``/``inline_namespace`` never read ``.elf`` at all -- they
+    cluster mass churn in ``Function.mangled`` -- but a header-only
+    snapshot's mangled name is the header frontend's own *guessed* Itanium/
+    MSVC spelling (``AbiSnapshot.header_only``'s own docstring), never a
+    linker-confirmed export, so a "mass mangled-name churn" verdict from two
+    such guesses would misrepresent unconfirmed spellings as observed
+    linkage-level breakage -- the same gate applies to both for that
+    reason, not because they read ``.elf`` themselves.
+
+    Every one of these detectors keeps running exactly as before whenever
+    both sides genuinely carry ELF metadata (every existing binary-dump
+    comparison) -- this only changes the previously-silent binary-less case.
+    """
+    if old.elf is None or new.elf is None:
+        return False, "missing ELF metadata on one side"
+    return True, None
+
+
+@registry.detector("elf", requires_support=_has_elf_on_both_sides)
 def _diff_elf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """ELF-only detectors (Sprint 2): no debug info required."""
     from .diff_versioning import (
@@ -881,7 +914,7 @@ def _diff_macho_weak_exports(o: Any, n: Any) -> list[Change]:
 # ── Gap analysis: new ELF-level detectors ─────────────────────────────────────
 
 
-@registry.detector("tls_checks")
+@registry.detector("tls_checks", requires_support=_has_elf_on_both_sides)
 def _diff_tls_symbols(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect size changes for exported TLS (thread-local) symbols."""
     from .model.elf_facts import ElfMetadata
@@ -913,7 +946,7 @@ def _diff_tls_symbols(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-@registry.detector("protected_visibility")
+@registry.detector("protected_visibility", requires_support=_has_elf_on_both_sides)
 def _diff_protected_visibility(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect DEFAULT ↔ PROTECTED visibility changes for non-function symbols.
 
@@ -958,7 +991,7 @@ def _diff_protected_visibility(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
     return changes
 
 
-@registry.detector("symbol_version_alias")
+@registry.detector("symbol_version_alias", requires_support=_has_elf_on_both_sides)
 def _diff_symbol_version_aliases(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect default symbol version alias changes.
 
@@ -1008,7 +1041,7 @@ def _diff_symbol_version_aliases(old: AbiSnapshot, new: AbiSnapshot) -> list[Cha
     return changes
 
 
-@registry.detector("glibcxx_dual_abi")
+@registry.detector("glibcxx_dual_abi", requires_support=_has_elf_on_both_sides)
 def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect mass symbol churn caused by libstdc++ dual ABI toggles.
 
@@ -1067,7 +1100,7 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-@registry.detector("inline_namespace")
+@registry.detector("inline_namespace", requires_support=_has_elf_on_both_sides)
 def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect symbols that moved between inline namespaces (e.g. v1:: → v2::).
 
@@ -1148,7 +1181,7 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-@registry.detector("vtable_identity")
+@registry.detector("vtable_identity", requires_support=_has_elf_on_both_sides)
 def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect vtable/typeinfo symbol identity changes while class layout is stable.
 
@@ -1278,7 +1311,7 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-@registry.detector("abi_surface")
+@registry.detector("abi_surface", requires_support=_has_elf_on_both_sides)
 def _diff_abi_surface(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect dramatic ABI surface growth or shrinkage.
 
@@ -1814,7 +1847,7 @@ def _diff_enum_layouts(o: object, n: object) -> list[Change]:
 # ── PR #89: ELF fallback for = delete (issue #100) ───────────────────────────
 
 
-@registry.detector("elf_deleted_fallback")
+@registry.detector("elf_deleted_fallback", requires_support=_has_elf_on_both_sides)
 def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """ELF fallback for detecting implicitly-deleted / disappeared symbols.
 

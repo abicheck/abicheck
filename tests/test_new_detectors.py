@@ -26,11 +26,20 @@ from abicheck.model import (
 
 def _snap(version="1.0", functions=None, variables=None, types=None,
           enums=None, typedefs=None, elf=None, from_headers=False):
+    # elf=None means "caller didn't care to build one" here, not "this
+    # snapshot has no binary" (workstream F S1's own new distinction) --
+    # every test in this file models a real ELF library ("libtest.so.1"),
+    # so an omitted elf= still needs a present (if empty) ElfMetadata for
+    # the ELF-evidence-gated detectors (elf/tls_checks/.../abi_surface,
+    # diff_platform._has_elf_on_both_sides) to run at all, matching the
+    # pre-gate behavior of every one of them substituting an empty
+    # ElfMetadata() for a missing side internally.
     return AbiSnapshot(
         library="libtest.so.1", version=version,
         functions=functions or [], variables=variables or [],
         types=types or [], enums=enums or [],
-        typedefs=typedefs or {}, elf=elf, from_headers=from_headers,
+        typedefs=typedefs or {}, elf=elf if elf is not None else ElfMetadata(),
+        from_headers=from_headers,
     )
 
 

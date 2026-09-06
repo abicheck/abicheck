@@ -135,6 +135,7 @@ _SECTION_FIELDS: Mapping[str, tuple[str, ...]] = {
         "conditional_fields",
         "contract",
         "dependency_scope",
+        "header_only",
     ),
     "debug": (
         "dwarf",
