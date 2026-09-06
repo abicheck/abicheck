@@ -520,6 +520,29 @@ class TestSupportPredicateSemantics:
         leak_entry = next(e for e in registry._detectors if e.name == "visibility_leak")
         assert leak_entry.support_fn is None
 
+    def test_asymmetric_elf_evidence_never_manufactures_a_soname_finding(self):
+        """Regression (CodeRabbit review, this PR): the gate's own docstring
+        used to claim gating changes no detector's emitted findings, citing
+        "two empty ElfMetadata() objects always compare equal" -- true only
+        for the *symmetric* no-evidence case. The *asymmetric* case (one
+        side has a real, populated ``.elf``, the other has none) is not
+        neutral: before this gate existed, the old code compared that real
+        object against a fabricated-empty one, so a populated
+        ``new.elf.soname`` against a substituted-empty old side would
+        manufacture a spurious ``SONAME_MISSING`` from a side that was
+        never actually observed. This states the gate now correctly
+        suppresses that finding instead."""
+        from abicheck.elf_metadata import ElfMetadata
+
+        old = AbiSnapshot(library="l", version="1")  # elf=None
+        new = AbiSnapshot(library="l", version="2", elf=ElfMetadata(soname="libl.so.1"))
+        result = compare(old, new)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.SONAME_MISSING not in kinds
+        elf_det = next(d for d in result.detector_results if d.name == "elf")
+        assert elf_det.not_evaluated is True
+        assert elf_det.coverage_gap == "missing ELF metadata"
+
     def test_a_conclusive_trigger_reports_an_evaluated_zero(self):
         """The reported case, through a real comparison: two snapshots that
         both record `matched` coherence leave the detector reporting zero,

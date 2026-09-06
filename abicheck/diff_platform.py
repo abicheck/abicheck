@@ -111,13 +111,22 @@ def _has_elf_on_both_sides(
     real ELF evidence at all -- not only the new binary-less headers-only
     tier this workstream introduces (``AbiSnapshot.header_only``), but any
     pre-existing snapshot that simply never populated ``.elf`` -- recorded
-    an ordinary evaluated zero (comparing two fabricated empty objects)
-    rather than the real coverage gap it is. That is exactly the "silently
-    absent" failure mode ADR-067 D3's own ``not_evaluated`` convention
-    exists to close (see ``_has_any_dwarf`` below, the sibling gate this
-    mirrors) -- and since two empty ``ElfMetadata()`` objects always compare
-    equal, gating this way changes no detector's emitted findings, only
-    whether the absence is recorded explicitly.
+    an ordinary evaluated zero rather than the real coverage gap it is.
+    That is exactly the "silently absent" failure mode ADR-067 D3's own
+    ``not_evaluated`` convention exists to close (see ``_has_any_dwarf``
+    below, the sibling gate this mirrors). The **symmetric** case (neither
+    side has ``.elf``) is a pure recording change: two empty ``ElfMetadata()``
+    objects always compare equal, so no detector's emitted findings differ,
+    only whether the absence is now recorded explicitly. The **asymmetric**
+    case (one side has a real, populated ``.elf``, the other has none) is
+    not neutral, and this gate deliberately changes its behavior too: the
+    old code compared that real object against a fabricated empty one --
+    e.g. a populated ``new.soname`` against a substituted-empty old side
+    could emit a spurious ``SONAME_MISSING``, or the reverse a spurious
+    ``SONAME_CHANGED`` -- a real ABI-layout claim manufactured from a side
+    that was never actually observed. Gating this case too (CodeRabbit
+    review, fresh evidence) suppresses exactly that manufactured finding,
+    correctly reporting the comparison as incomplete instead.
 
     ``glibcxx_dual_abi``/``inline_namespace`` are deliberately NOT gated by
     this predicate (or any other): they never read ``.elf`` at all -- they
