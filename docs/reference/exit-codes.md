@@ -225,10 +225,26 @@ JSON report — see the section below) and never feeds into this field.
 
 This field is additive and does not itself change any exit code — it is a
 persisted view of a resolution every axis above already performs. It does
-not yet cover `not_comparable`, `scan --against`'s own budget-overflow
-floor, or a release's removed-required-library policy, each raised through
-a different code path today; see `abicheck/exit_decision.py`'s own module
-docstring for that scope boundary.
+not yet cover `not_comparable` or a release's removed-required-library
+policy, each raised through a different code path today; see
+`abicheck/policy/exit_decision.py`'s own module docstring for that scope
+boundary.
+
+**`evidence_contract_error_contribution`/`budget_overflow_contribution`
+(schema 3.3, `docs/contribute/plans/one-comparison-product.md` P3).** Native
+`compare` shares `scan --against`'s own evidence-contract-error (`7`) and
+budget-overflow (`5`) `ExitDecision` axes — `resolve_compare_exit_decision`
+folds `DiffResult.evidence_contract_error`/`.budget_overflow` through the
+identical precedence rule `scan` uses
+(`exit_decision_precedence.resolve_scan_exit_decision`), reused rather than
+re-derived, so the two commands can never disagree on which axis wins when
+both apply. **No `compare` invocation sets either field yet** — `compare`
+has no `--budget` flag, and ADR-037 D5's auto-strict `--depth`/
+`--source-method` enforcement remains `scan`-only — so both contributions
+stay `0` and neither reason is ever named in a `compare` report today; this
+is prerequisite plumbing for the plan's own Phase 2/7, which will give a
+future `compare` flag a real trigger without a second precedence rule to
+keep in sync.
 
 ## Commands removed in the ADR-043 CLI reset
 
@@ -390,8 +406,11 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 | `7` | Evidence-contract error (ADR-037 D5) — a pinned `--depth`/`--source-method` whose required source evidence was never collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module. No comparison ever ran (`verdict: "EVIDENCE_CONTRACT_ERROR"` in `--format json`); this process's own dedicated exit code (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`), unambiguous regardless of format or whether a JSON report was written. |
 | `64` | Invalid invocation (bad arguments/options) |
 
-> Exit `5` is unique to `scan`: `--budget 15m` **fails** the run rather than
-> quietly dropping evidence. Use `--dry-run` to preview the audit checks and
+> Exit `5` is `scan`-only in practice: `--budget 15m` **fails** the run
+> rather than quietly dropping evidence, and native `compare` has no
+> `--budget` flag to raise it (see the `exit` report field section above for
+> the shared, currently-unreachable `ExitDecision` axis). Use `--dry-run` to
+> preview the audit checks and
 > (if `--against` is given) the comparison that would run, plus the projected
 > per-layer cost, without scanning — like every command's `--dry-run` it only
 > ever exits `0`/`1`/`64`, never a verdict code; see

@@ -1363,7 +1363,7 @@
     },
     "exit": {
       "type": "object",
-      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42; ADR-064 stage 1b added the five operational_error_contribution..removed_required_library_contribution keys at schema 2.47): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution, operational_error_contribution) for a native compare report (the four remaining ADR-064 dominant fields are early-return axes, not fold participants — see ExitDecision's own docstring), the identical value cli._exit_with_severity_or_verdict computes for the real process exit (every ADR-064 field is always 0 for a native compare report — none of them have meaning outside scan --against/the release fan-out). reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. compare's own code still never covers not_comparable/scan-budget/release-removed-library exits (raised through different code paths today) — the five new keys are always-0 placeholders here, shared shape with scan/release reports where they can be nonzero.",
+      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42; ADR-064 stage 1b added the five operational_error_contribution..removed_required_library_contribution keys at schema 2.47): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution, operational_error_contribution) for a native compare report whose DiffResult carries no evidence_contract_error/budget_overflow (every existing report), since those two are early-return dominant axes, not fold participants — see ExitDecision's own docstring. This is the identical value cli._exit_with_severity_or_verdict computes for the real process exit. reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. compare's own code still never covers not_comparable/release-removed-library exits (raised through different code paths today, always 0 here) — evidence_contract_error_contribution/budget_overflow_contribution (schema 3.3, one-comparison-product.md P3) are the two ADR-064 axes compare *can* now emit, reusing scan --against's own precedence rule, though no CLI-reachable compare invocation sets either yet; the remaining three (operational_error/not_comparable/removed_required_library) stay always-0 placeholders, meaningful only for scan/release reports.",
       "required": [
         "code",
         "reasons",
@@ -1397,10 +1397,12 @@
               "promoted_crosscheck",
               "clean",
               "incomplete_scope",
-              "no_comparison_completed"
+              "no_comparison_completed",
+              "evidence_contract_error",
+              "budget_overflow"
             ]
           },
-          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"incomplete_scope\"/\"no_comparison_completed\" (schema 2.50, ADR-065 S2) only ever appear on a directory/package release report. \"scoped_gate\" (schema < 3.0 only, kept in this enum for historical/persisted documents) used to replace \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping was in effect; as of schema 3.0 (workstream D-S1) this resolver never produces it -- \"compatibility_contribution\"/\"reasons\" always describe the full-library gate regardless of consumer scoping. \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code."
+          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"incomplete_scope\"/\"no_comparison_completed\" (schema 2.50, ADR-065 S2) only ever appear on a directory/package release report. \"scoped_gate\" (schema < 3.0 only, kept in this enum for historical/persisted documents) used to replace \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping was in effect; as of schema 3.0 (workstream D-S1) this resolver never produces it -- \"compatibility_contribution\"/\"reasons\" always describe the full-library gate regardless of consumer scoping. \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code. \"evidence_contract_error\"/\"budget_overflow\" (schema 3.3, one-comparison-product.md P3) are shared by scan --against and native compare; neither is ever produced by a native compare report today (no CLI-reachable trigger yet), but the resolver's shared precedence rule can now name either when a caller's DiffResult sets evidence_contract_error/budget_overflow."
         },
         "compatibility_contribution": {
           "type": "integer",
@@ -1429,13 +1431,13 @@
         },
         "evidence_contract_error_contribution": {
           "type": "integer",
-          "const": 0,
-          "description": "schema 2.47 (ADR-064): scan --against's evidence-contract-error dominant axis. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+          "minimum": 0,
+          "description": "schema 2.47 (ADR-064), no longer const as of schema 3.3 (one-comparison-product.md P3): the evidence-contract-error dominant axis, shared by scan --against and native compare. 0 for every existing compare report -- compare has no CLI-reachable trigger for DiffResult.evidence_contract_error yet (ADR-037 D5's auto-strict --depth/--source-method enforcement remains scan-only) -- but the schema no longer forbids a nonzero value, since resolve_compare_exit_decision now folds it through the shared exit_decision_precedence.resolve_scan_exit_decision precedence when a caller does set it."
         },
         "budget_overflow_contribution": {
           "type": "integer",
-          "const": 0,
-          "description": "schema 2.47 (ADR-064): scan --against's budget-overflow dominant axis. Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+          "minimum": 0,
+          "description": "schema 2.47 (ADR-064), no longer const as of schema 3.3 (one-comparison-product.md P3): the budget-overflow dominant axis, shared by scan --against and native compare. 0 for every existing compare report -- compare has no --budget flag yet -- but the schema no longer forbids a nonzero value, for the same reason as evidence_contract_error_contribution above."
         },
         "not_comparable_contribution": {
           "type": "integer",

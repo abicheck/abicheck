@@ -38,7 +38,13 @@ dead code the way it was when first split out.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .exit_decision import ExitDecision, ExitReason, resolve_exit_decision
+
+if TYPE_CHECKING:
+    from ..checker_types import DiffResult
+    from .severity import SeverityConfig
 
 #: Which of :class:`ExitDecision`'s four ADR-064 fields corresponds to each
 #: dominant :class:`ExitReason`. `_dominant_decision` uses this so exactly
@@ -177,6 +183,18 @@ def resolve_scan_exit_decision(
     """ADR-064's outer precedence layer for `scan`, ahead of
     :func:`resolve_compare_exit_decision`'s gate/coverage/assurance fold.
 
+    **Also called from `resolve_compare_exit_decision_with_abort_axes`
+    below** (`one-comparison-product.md` P3): when a `DiffResult` carries
+    `evidence_contract_error`/`budget_overflow` (currently never set by any
+    CLI-reachable `compare` path -- see those fields' own docstrings in
+    `checker_types.py`), native `compare` folds its own gate/coverage/
+    assurance decision through this exact function as `prior_decision`,
+    reusing the identical precedence rule rather than a second copy. The
+    `*_code` defaults (`7`/`5`) are `scan`'s own numbers, shared as-is --
+    ADR-064 assigns the same two codes to the same two conditions regardless
+    of which command raises them, unlike e.g. `not_comparable_code`, which
+    the release resolver below overrides to `16`.
+
     Reproduces `scan_engine.run_scan_core`'s exact raise/check order --
     which, contrary to an earlier revision's simpler "evidence always beats
     budget" rule, puts `_BudgetOverflow` on **both** sides of
@@ -246,6 +264,63 @@ def resolve_scan_exit_decision(
     if not_comparable:
         return _dominant_decision(not_comparable_code, ExitReason.NOT_COMPARABLE)
     return None
+
+
+def resolve_compare_exit_decision_with_abort_axes(
+    result: DiffResult,
+    sev_config: SeverityConfig | None,
+    scheme: str,
+    *,
+    require_complete_analysis: bool = False,
+) -> ExitDecision:
+    """`one-comparison-product.md` P3: `resolve_compare_exit_decision`,
+    extended with the two ADR-064 abort axes `scan` already has.
+
+    Same signature and same ordinary gate/coverage/assurance fold as
+    :func:`~abicheck.policy.exit_decision.resolve_compare_exit_decision` (in
+    fact calls it directly for that fold) -- this wrapper lives in this
+    sibling module, not that one, purely so it can call
+    :func:`resolve_scan_exit_decision` without `exit_decision.py` importing
+    *this* module back (this module already imports from `exit_decision.py`
+    at the top of the file; the reverse edge would be a fresh import cycle
+    the AI-readiness `import-cycle-growth` gate rejects -- "move shared
+    logic to a leaf module both sides can depend on" per `AGENTS.md`'s own
+    "Don't" list).
+
+    `result.evidence_contract_error`/`.budget_overflow` default `False` on
+    every `DiffResult` any existing caller builds (`compare` has no
+    CLI-reachable trigger for either yet -- no `--budget` flag, and
+    ADR-037 D5's auto-strict `--depth`/`--source-method` enforcement remains
+    `scan`-only), so for every pre-existing invocation this returns exactly
+    what the wrapped ordinary fold does. When a `DiffResult` does carry one,
+    the ordinary fold is still computed first and passed through as
+    `resolve_scan_exit_decision`'s own `prior_decision` -- see that
+    function's own docstring for which of the two axes preserves it and
+    which does not; this wrapper does not alter either rule, only calls it.
+
+    Both real production consumers of the *ordinary* resolver
+    (`reporter_contract_blocks.add_contract_context`'s real JSON `exit`
+    block, `cli._exit_with_severity_or_verdict`'s real process exit) call
+    this wrapper instead, so both are P3-aware without either duplicating
+    the precedence.
+    """
+    from .exit_decision import resolve_compare_exit_decision
+
+    ordinary = resolve_compare_exit_decision(
+        result, sev_config, scheme,
+        require_complete_analysis=require_complete_analysis,
+    )
+    evidence_contract_error = getattr(result, "evidence_contract_error", False)
+    budget_overflow = getattr(result, "budget_overflow", False)
+    if evidence_contract_error or budget_overflow:
+        dominant = resolve_scan_exit_decision(
+            evidence_contract_error=evidence_contract_error,
+            budget_overflow=budget_overflow,
+            prior_decision=ordinary,
+        )
+        if dominant is not None:
+            return dominant
+    return ordinary
 
 
 def resolve_release_exit_decision(

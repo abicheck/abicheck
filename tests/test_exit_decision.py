@@ -47,11 +47,14 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from abicheck.checker import compare
+from abicheck.checker import DiffResult, compare
+from abicheck.checker_policy import Verdict
 from abicheck.cli import main
 from abicheck.exit_decision import ExitDecision, ExitReason, resolve_exit_decision
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.exit_decision import resolve_compare_exit_decision
 from abicheck.policy.exit_decision_precedence import (
+    resolve_compare_exit_decision_with_abort_axes,
     resolve_release_exit_decision,
     resolve_scan_exit_decision,
 )
@@ -214,6 +217,89 @@ class TestResolveExitDecision:
             pass
         else:
             raise AssertionError("ExitDecision must be immutable")
+
+
+class TestResolveCompareExitDecisionAdr064Axes:
+    """`one-comparison-product.md` P3, pure-function level: the bare
+    `resolve_compare_exit_decision` stays blind to `evidence_contract_error`/
+    `budget_overflow` (it must not import `exit_decision_precedence`, a
+    fresh cycle); `resolve_compare_exit_decision_with_abort_axes`, its
+    sibling-module wrapper, folds both through `resolve_scan_exit_decision`.
+    """
+
+    @staticmethod
+    def _result(verdict: Verdict = Verdict.NO_CHANGE, **kwargs: object) -> DiffResult:
+        return DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so",
+            changes=[], verdict=verdict, **kwargs,
+        )
+
+    def test_ordinary_resolver_ignores_both_fields_even_when_set(self) -> None:
+        # Both real production consumers call the wrapper below instead, so
+        # the bare resolver stays the pre-P3 pure fold for every other
+        # caller (test_used_by_gate_enrichment.py's Hypothesis suite incl.).
+        result = self._result(Verdict.BREAKING, evidence_contract_error=True)
+        decision = resolve_compare_exit_decision(result, None, "legacy")
+        assert decision.code == 4
+        assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
+        assert decision.evidence_contract_error_contribution == 0
+        assert decision.budget_overflow_contribution == 0
+
+    def test_neither_field_set_is_the_ordinary_fold(self) -> None:
+        # Bit-for-bit unchanged for every pre-existing DiffResult.
+        result = self._result(Verdict.BREAKING)
+        decision = resolve_compare_exit_decision_with_abort_axes(
+            result, None, "legacy",
+        )
+        assert decision.code == 4
+        assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
+        assert decision.evidence_contract_error_contribution == 0
+        assert decision.budget_overflow_contribution == 0
+
+    def test_evidence_contract_error_dominates_a_clean_gate(self) -> None:
+        result = self._result(Verdict.NO_CHANGE, evidence_contract_error=True)
+        decision = resolve_compare_exit_decision_with_abort_axes(
+            result, None, "legacy",
+        )
+        assert decision.code == 7
+        assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
+        assert decision.evidence_contract_error_contribution == 7
+        assert decision.compatibility_contribution == 0
+
+    def test_budget_overflow_preserves_the_prior_decision(self) -> None:
+        # Unlike evidence_contract_error, budget_overflow fires after a real
+        # comparison ran, so the ordinary fold's contributions must survive.
+        result = self._result(Verdict.BREAKING, budget_overflow=True)
+        decision = resolve_compare_exit_decision_with_abort_axes(
+            result, None, "legacy",
+        )
+        assert decision.code == 5
+        assert decision.reasons == (ExitReason.BUDGET_OVERFLOW,)
+        assert decision.budget_overflow_contribution == 5
+        assert decision.compatibility_contribution == 4
+
+    def test_evidence_contract_error_dominates_budget_overflow(self) -> None:
+        result = self._result(
+            Verdict.BREAKING, evidence_contract_error=True, budget_overflow=True,
+        )
+        decision = resolve_compare_exit_decision_with_abort_axes(
+            result, None, "legacy",
+        )
+        assert decision.code == 7
+        assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
+
+    def test_matches_resolve_scan_exit_decision_directly(self) -> None:
+        # Delegation is exact, not merely code-equal.
+        result = self._result(Verdict.API_BREAK, budget_overflow=True)
+        decision = resolve_compare_exit_decision_with_abort_axes(
+            result, None, "legacy",
+        )
+        prior = resolve_exit_decision(compatibility_contribution=2)
+        expected = resolve_scan_exit_decision(
+            budget_overflow=True, prior_decision=prior,
+        )
+        assert expected is not None
+        assert decision == expected
 
 
 class TestResolveScanExitDecision:
@@ -910,6 +996,76 @@ class TestCompareExitDecisionIntegration:
         assert report["exit"]["reasons"] == ["analysis_assurance"]
         assert report["exit"]["compatibility_contribution"] == 0
         assert report["exit"]["analysis_assurance_contribution"] == 1
+
+
+class TestCompareEvidenceContractAndBudgetAxes:
+    """`one-comparison-product.md` P3, exercised end-to-end: native
+    `compare`'s real production consumers (`_exit_with_severity_or_verdict`'s
+    process exit, `add_contract_context`'s JSON `exit` block) already fold
+    `DiffResult.evidence_contract_error`/`.budget_overflow`. Neither has a
+    CLI-reachable trigger yet (Phase 2/7) -- these tests force the field via
+    `workflows.compare_policy.compare` (the Tier-1 chokepoint every native
+    `compare` DiffResult comes from, ADR-037 D10.1) the way a future trigger
+    will, so the assertions exercise the real, shipped pipeline.
+    """
+
+    @staticmethod
+    def _force_field(monkeypatch: pytest.MonkeyPatch, field: str) -> None:
+        import abicheck.workflows.compare_policy as compare_policy
+
+        real_compare = compare_policy.compare
+
+        def _fake_compare(*args: object, **kwargs: object) -> object:
+            result = real_compare(*args, **kwargs)
+            setattr(result, field, True)
+            return result
+
+        monkeypatch.setattr(compare_policy, "compare", _fake_compare)
+
+    def test_evidence_contract_error_wins_over_a_clean_compatibility_gate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._force_field(monkeypatch, "evidence_contract_error")
+        res = _compare(tmp_path, _compatible_pair(), "--format", "json")
+        assert res.exit_code == 7, res.output
+        report = json.loads(res.stdout[res.stdout.index("{") :])
+        assert report["exit"]["code"] == 7
+        assert report["exit"]["reasons"] == ["evidence_contract_error"]
+        assert report["exit"]["evidence_contract_error_contribution"] == 7
+        # The ordinary compatibility gate still ran (this pair is clean) --
+        # it just no longer decides `code`, matching `resolve_scan_exit_
+        # decision`'s own "nothing preserved" rule for this axis (no
+        # `prior_decision` reaches its `evidence_contract_error` branch).
+        assert report["exit"]["compatibility_contribution"] == 0
+
+    def test_budget_overflow_preserves_the_prior_breaking_gate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._force_field(monkeypatch, "budget_overflow")
+        res = _compare(tmp_path, _breaking_pair(), "--format", "json")
+        assert res.exit_code == 5, res.output
+        report = json.loads(res.stdout[res.stdout.index("{") :])
+        assert report["exit"]["code"] == 5
+        assert report["exit"]["reasons"] == ["budget_overflow"]
+        assert report["exit"]["budget_overflow_contribution"] == 5
+        # ADR-064: a late budget overflow preserves the prior gate/coverage/
+        # assurance contributions for explainability, even though they no
+        # longer decide `code` (the whole point of `prior_decision`).
+        assert report["exit"]["compatibility_contribution"] == 4
+
+    def test_default_compare_never_engages_either_axis(
+        self, tmp_path: Path,
+    ) -> None:
+        # The acceptance bar: every pre-existing invocation is bit-for-bit
+        # unchanged -- both contributions stay 0, neither reason is named.
+        for pair, expected_exit in ((_compatible_pair(), 0), (_breaking_pair(), 4)):
+            res = _compare(tmp_path, pair, "--format", "json")
+            assert res.exit_code == expected_exit, res.output
+            report = json.loads(res.stdout[res.stdout.index("{") :])
+            assert report["exit"]["evidence_contract_error_contribution"] == 0
+            assert report["exit"]["budget_overflow_contribution"] == 0
+            assert "evidence_contract_error" not in report["exit"]["reasons"]
+            assert "budget_overflow" not in report["exit"]["reasons"]
 
 
 class TestIncludeExitDecisionFlag:

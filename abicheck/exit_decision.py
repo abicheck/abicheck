@@ -40,6 +40,7 @@ from .policy.exit_decision import (
     resolve_exit_decision,
 )
 from .policy.exit_decision_precedence import (
+    resolve_compare_exit_decision_with_abort_axes,
     resolve_release_exit_decision,
     resolve_scan_exit_decision,
 )
@@ -48,6 +49,7 @@ __all__ = [
     "ExitDecision",
     "ExitReason",
     "resolve_compare_exit_decision",
+    "resolve_compare_exit_decision_with_abort_axes",
     "resolve_exit_decision",
     "resolve_release_exit_decision",
     "resolve_scan_exit_decision",
