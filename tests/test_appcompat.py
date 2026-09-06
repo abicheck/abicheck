@@ -2473,7 +2473,9 @@ class TestEnrichCoveredChangesRefreshesCache:
     ``proof_path=None`` and silently drop the newly attached explanation."""
 
     def test_stale_pathless_cache_is_refreshed_after_enrichment(self):
-        from abicheck.appcompat_consumer_impact import enrich_covered_changes as _enrich_covered_changes
+        from abicheck.appcompat_consumer_impact import (
+            enrich_covered_changes as _enrich_covered_changes,
+        )
         from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
         from abicheck.impact.consumer_graph import ConsumerImpactPath
         from abicheck.impact.engine import assess_change
@@ -2526,7 +2528,9 @@ class TestAttachConsumerImpactStampsReachability:
     status)."""
 
     def test_enrichment_marks_the_change_consumer_proven(self):
-        from abicheck.appcompat_consumer_impact import enrich_covered_changes as _enrich_covered_changes
+        from abicheck.appcompat_consumer_impact import (
+            enrich_covered_changes as _enrich_covered_changes,
+        )
         from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
@@ -2862,7 +2866,9 @@ class TestMergeConsumerImpactPaths:
         single shared Change whose affected_symbols names two missing
         exports must report both public roots, not just the first
         explanation found."""
-        from abicheck.appcompat_consumer_impact import enrich_covered_changes as _enrich_covered_changes
+        from abicheck.appcompat_consumer_impact import (
+            enrich_covered_changes as _enrich_covered_changes,
+        )
         from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
