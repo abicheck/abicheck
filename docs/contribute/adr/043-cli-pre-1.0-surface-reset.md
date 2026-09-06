@@ -1,5 +1,20 @@
 # ADR-043: Pre-1.0 CLI Surface Reset — Root Command Collapse, Depth Ladder Narrowing, and Dry-Run Unification
 
+> **Amendment (2026-09-06, [ADR-068](068-one-comparison-product-and-scan-retirement.md)).**
+> **D5 (`scan` reshape) is superseded by retirement.** The reshape this ADR
+> performed — positional artifact, `--against`, no separate mode/audit/estimate
+> flags — was the right narrowing of the wrong thing: `scan` is a second
+> analysis product, not a mode of the first, and it exclusively owns checks
+> `compare` cannot reach. D1's verb set therefore moves from the six this
+> ADR's own D13 amendment recorded (later seven, with `project`) to **six by
+> subtraction**: `compare`, `dump`, `deps`, `aggregate`, `project`, `compat`.
+> D9's shared `--dry-run` model and D10's typed-API vocabulary follow the same
+> subtraction; D11's `deps compare --old-root`/`--new-root` operands are
+> confirmed, not changed (ADR-068 D6); D12's surface-drift gate is what pins
+> the new set. `scan`'s audit-only mode becomes `compare --no-baseline NEW`,
+> declared by flag rather than inferred from argument count. Sequenced in
+> [`plans/one-comparison-product.md`](../plans/one-comparison-product.md).
+
 **Date:** 2026-07-16
 **Status:** Accepted — implemented.
 **Decision maker:** (pending)

@@ -28,6 +28,20 @@ lifecycle: active
 
 # G35 — Multi-Artifact / Library-Set `scan`
 
+> **Superseded (2026-09-06).** [ADR-056](../adr/056-multi-artifact-library-set-scan.md),
+> which this plan implements, is superseded by
+> [ADR-068](../adr/068-one-comparison-product-and-scan-retirement.md): the
+> `scan` command is being retired, so `--artifact-set` is deleted rather than
+> completed. The deferred items below (the example catalog, the `--dry-run`
+> estimator's remaining rows, the never-started member-identity manifest —
+> `cli-cleanup-phase-two.md`'s PR H) are **cancelled**, not carried forward.
+> The capability survives under a different spelling: an old-side-less
+> N-library audit is `abicheck compare --no-baseline DIR` over ADR-065's one
+> acquisition/selection model, and the declared provider manifest becomes
+> project configuration. See
+> [`one-comparison-product.md`](one-comparison-product.md) §B rows 16-17.
+> Retained as the historical implementation record.
+
 **Origin:** User request to properly scan cases where one logical
 "product" ships as several binary files (reference case: Intel oneDAL —
 `libonedal_core.so` + `libonedal_thread.so`/`libonedal_dpc.so` behind one

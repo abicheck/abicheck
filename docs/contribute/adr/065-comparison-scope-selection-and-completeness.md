@@ -1,5 +1,27 @@
 # ADR-065: Comparison Scope, Member Selection, and Input Completeness
 
+> **Amendment (2026-09-06, [ADR-068](068-one-comparison-product-and-scan-retirement.md)).**
+> This ADR's model is **depended on, not changed**: `unselected`, `expected
+> but not produced`, `failed` and `deliberately retired` stay four states, a
+> partial local build still never reads as a removal, and a run that
+> completed zero comparisons still never reads as a pass. Two additions
+> follow from retiring `scan`:
+>
+> 1. One new acquisition state, **`declared_absent`** — the OLD side of an
+>    `abicheck compare --no-baseline NEW` run, which replaces `scan`'s
+>    audit-only mode. It is explicitly *not* `not_supplied`: the user
+>    declared there is no prior surface, so the evolution axis is reported
+>    `not_evaluated` and contributes no compatibility verdict, rather than
+>    the scope being reported incomplete.
+> 2. `scan --artifact-set`'s multi-library members become **this ADR's**
+>    members. [ADR-056](056-multi-artifact-library-set-scan.md) is superseded,
+>    so its parallel set model does not survive alongside the acquisition and
+>    selection model here; S3's package component inventories are the
+>    prerequisite for that fold.
+>
+> Sequenced as Phase 1 of
+> [`plans/one-comparison-product.md`](../plans/one-comparison-product.md).
+
 **Date:** 2026-09-05
 **Status:** Proposed — S2 implemented (2026-09-05): the acquisition record
 (`abicheck/model/scope_acquisition.py`), the completeness axis on

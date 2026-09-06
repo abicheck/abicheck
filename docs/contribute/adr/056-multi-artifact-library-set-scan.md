@@ -1,11 +1,24 @@
 # ADR-056: Multi-Artifact / Library-Set `scan`
 
 **Date:** 2026-07-29
-**Status:** Proposed — partially implemented (see
-[G35](../plans/g35-multi-artifact-scan.md)'s "Implementation status" note
-for what shipped ahead of formal sign-off vs. what remains deferred). The
-shipped slice lives in `abicheck/service_scan.py`, `abicheck/bundle.py`, and
-`abicheck/cli_scan.py`.
+**Status:** Superseded by
+[ADR-068](068-one-comparison-product-and-scan-retirement.md) (2026-09-06),
+which retires the `scan` command this ADR extends. It never reached formal
+sign-off; the slice that shipped ahead of it (`abicheck/service_scan.py`,
+`abicheck/bundle.py`, `abicheck/cli_scan.py`, and
+[G35](../plans/g35-multi-artifact-scan.md)'s "Implementation status" note)
+is deleted with the command. **The capability is preserved, the mode is
+not:** an N-library audit with no old side becomes
+`abicheck compare --no-baseline DIR` over
+[ADR-065](065-comparison-scope-selection-and-completeness.md)'s one
+acquisition/selection model, and this ADR's own genuinely new idea — a
+declared member-identity/provider manifest checked against a single set —
+becomes a `.abicheck.yml` contract read by that same canonical path rather
+than an `--artifact-set` flag. See
+[`plans/one-comparison-product.md`](../plans/one-comparison-product.md) §B
+rows 16-17 for the migration, and ADR-068's Context for why four parallel
+answers to "several libraries at once" was the defect. Everything below is
+retained as the historical design record.
 **Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** (pending)
 
