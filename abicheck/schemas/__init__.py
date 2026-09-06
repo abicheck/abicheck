@@ -740,7 +740,8 @@ from typing import Any
 #:       version first for E-S2's ``comparability_assurance`` block (same
 #:       "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/
 #:       2.49/2.51/2.53 entries above).
-REPORT_SCHEMA_VERSION = "3.2"
+#: 3.3 -- ADR-068 D3 / plan P2: ``compare(..., cross_source_checks=True)`` stamps a ``change``'s ``finding_evolution`` (introduced/resolved/persistent/not_evaluated) and an additive top-level ``cross_source_evolution`` per-state count object; off by default, never changes the finding's default verdict.
+REPORT_SCHEMA_VERSION = "3.3"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

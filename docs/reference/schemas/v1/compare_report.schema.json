@@ -579,6 +579,35 @@
         }
       }
     },
+    "cross_source_evolution": {
+      "type": "object",
+      "description": "Schema 3.3 (ADR-068 D3 / plan P2): present only when at least one finding in this report carries a `finding_evolution` value (i.e. compare(..., cross_source_checks=True) was requested and flagged something on at least one side). Per-state counts over every such finding, mirroring each finding's own `finding_evolution` field one level up.",
+      "required": [
+        "introduced",
+        "resolved",
+        "persistent",
+        "not_evaluated"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "introduced": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resolved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "persistent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_evaluated": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
     "suppression": {
       "type": "object",
       "required": [
@@ -2161,6 +2190,11 @@
           "type": "string",
           "description": "The removed symbol's ELF linkage (schema 2.32), present only on func_removed/func_removed_elf_only/var_removed/func_deleted_elf_fallback findings whose binding was captured (non-ELF platforms, older snapshots, and an unmatched .dynsym entry all omit this key). A WEAK/COMDAT symbol usually \u2014 but not always \u2014 means every consumer already carries its own copy (see the binding: suppression selector's documentation for the extern-template counterexample); this is provider-side evidence about the library's own build, not proof a removal is safe.",
           "enum": ["global", "weak", "local", "unique", "other"]
+        },
+        "finding_evolution": {
+          "type": "string",
+          "description": "Schema 3.3 (ADR-068 D3): present only on a finding produced by compare(..., cross_source_checks=True) evaluating a cross-source hygiene check independently on OLD and NEW. 'introduced' \u2014 absent on OLD (OLD evidence sufficient to say so), present on NEW. 'resolved' \u2014 present on OLD, absent on NEW. 'persistent' \u2014 present on both. 'not_evaluated' \u2014 at least one side's evidence could not answer the question, so neither introduced/resolved/persistent can be asserted (mandatory, not a convenience \u2014 never infer 'introduced' from missing baseline evidence). Purely descriptive: never changes this finding's severity/verdict.",
+          "enum": ["introduced", "resolved", "persistent", "not_evaluated"]
         },
         "reviewer_action": {
           "type": "string",

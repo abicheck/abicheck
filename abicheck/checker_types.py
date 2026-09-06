@@ -29,6 +29,7 @@ from .checker_policy import (
     ChangeKind,
     Confidence,
     EvidenceTier,
+    FindingEvolution,
     ReachabilityState,
     Verdict,
     apply_policy_file_overrides as _apply_policy_file_overrides,
@@ -399,6 +400,9 @@ class Change:
     # Same field(kw_only=True)-appended-last convention as evidence_provenance.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
     disambiguator: str | None = field(default=None, kw_only=True, compare=False)
+    # ADR-068 D3 / plan P2 -- OLD->NEW evolution for a one-sided cross-source
+    # finding (see FindingEvolution). None for every ordinary finding.
+    finding_evolution: FindingEvolution | None = field(default=None, kw_only=True)
 
 
 @dataclass

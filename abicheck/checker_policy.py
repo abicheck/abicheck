@@ -136,6 +136,43 @@ class ReachabilityState(str, Enum):
     UNKNOWN = "unknown"
 
 
+class FindingEvolution(str, Enum):
+    """How a one-sided (candidate-side) finding behaves across OLD → NEW
+    (ADR-068 D3; ``docs/contribute/plans/one-comparison-product.md`` P2).
+
+    A cross-source hygiene check (``buildsource.crosscheck.run_crosschecks``
+    and siblings) evaluates one snapshot's evidence sources against each
+    other — it carries no baseline of its own. Migrating such a check onto
+    ``compare()`` means running it independently on OLD and NEW and stating
+    how the two runs relate, rather than reporting NEW's run alone (which
+    would silently lose "this was already broken" / "this got fixed"
+    information the two-sided comparison is uniquely positioned to state).
+
+    - ``INTRODUCED``: absent on OLD (with OLD evidence sufficient to say
+      so), present on NEW.
+    - ``RESOLVED``: present on OLD, absent on NEW.
+    - ``PERSISTENT``: present on both.
+    - ``NOT_EVALUATED``: the check could not be run against at least one
+      side's evidence (e.g. a stripped/ELF-only snapshot with no header
+      provenance) with the other side flagging the finding, so neither
+      "introduced" nor "resolved" nor "persistent" can be asserted. **This
+      state is mandatory, not a convenience**: reporting a pre-existing
+      hygiene problem as ``INTRODUCED`` merely because the baseline lacked
+      the evidence to evaluate it would be a manufactured finding, which
+      ``vision.md`` forbids outright.
+
+    Authority is unchanged (ADR-028 D3 / ADR-035 D1): a finding carrying
+    this field stays whatever ``RISK``/``API_BREAK`` severity its
+    ``ChangeKind`` already defaults to — this axis is purely descriptive
+    and never promotes a finding toward ``BREAKING`` on its own.
+    """
+
+    INTRODUCED = "introduced"
+    RESOLVED = "resolved"
+    PERSISTENT = "persistent"
+    NOT_EVALUATED = "not_evaluated"
+
+
 class EvidenceStatus(str, Enum):
     """The epistemic status of a single finding — *how* it was proven, not just
     *what* it is (its ``Verdict``/severity already say that).

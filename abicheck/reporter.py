@@ -1412,6 +1412,8 @@ def _change_annotation_fields(c: Any) -> dict[str, Any]:
         out["correlated_change_kind"] = correlated
     if getattr(c, "symbol_binding", None):
         out["symbol_binding"] = c.symbol_binding
+    if (fe := getattr(c, "finding_evolution", None)) is not None:  # ADR-068 D3 (3.3)
+        out["finding_evolution"] = fe.value
     return out
 
 

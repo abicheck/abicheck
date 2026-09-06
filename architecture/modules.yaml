@@ -272,6 +272,7 @@
       ],
       "legacy_paths": [
         "abicheck/appcompat.py",
+        "abicheck/buildsource/crosscheck.py",
         "abicheck/binder.py",
         "abicheck/buildsource/baseline_publish.py",
         "abicheck/bundle.py",

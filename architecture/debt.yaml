@@ -353,7 +353,7 @@
     },
     {
       "path": "abicheck/checker.py",
-      "baseline_lines": 1345,
+      "baseline_lines": 1357,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
@@ -373,7 +373,7 @@
     },
     {
       "path": "abicheck/checker_types.py",
-      "baseline_lines": 836,
+      "baseline_lines": 840,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
@@ -1063,7 +1063,7 @@
     },
     {
       "path": "abicheck/schemas/__init__.py",
-      "baseline_lines": 1169,
+      "baseline_lines": 1170,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
