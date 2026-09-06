@@ -24,11 +24,14 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.model import AbiSnapshot
 from abicheck.model.release_selection import ReleaseSelection
 from abicheck.model.scope_acquisition import AcquisitionState
+from abicheck.serialization import write_snapshot
 from abicheck.workflows.release_plan import (
     build_declared_selection_record,
     build_release_plan,
+    build_release_plan_from_directories,
 )
 from abicheck.workflows.release_scope import release_inventory_evidence
 
@@ -228,3 +231,50 @@ class TestBuildDeclaredSelectionRecord:
         assert not member.required
         assert member in record.unchecked_members
         assert record.is_incomplete
+
+
+class TestBuildReleasePlanFromDirectories:
+    """A previous version of this preview discovered a directory's members
+    via ``package.discover_shared_libraries``, which only recognizes real
+    ELF shared objects -- silently showing an empty/wrong plan for a
+    directory of non-ELF supported inputs (e.g. ``.json`` snapshots) that
+    the real live-directory fan-out (``cli_helpers_compare.
+    _collect_release_inputs``) accepts just fine. These tests pin the fix:
+    the preview must discover *exactly* what the real run would."""
+
+    def test_json_snapshot_pair_is_discovered_and_would_compare(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        snap = AbiSnapshot(library="libfoo.so", version="1.0")
+        write_snapshot(snap, old_dir / "libfoo.json")
+        write_snapshot(snap, new_dir / "libfoo.json")
+        plan = build_release_plan_from_directories(old_dir, new_dir)
+        assert len(plan.would_compare_members) == 1
+        (entry,) = plan.entries
+        assert entry.member == "libfoo.json"
+        assert entry.would_compare
+
+    def test_json_snapshot_with_declared_selection(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        snap = AbiSnapshot(library="libfoo.so", version="1.0")
+        write_snapshot(snap, old_dir / "libfoo.json")
+        write_snapshot(snap, new_dir / "libfoo.json")
+        sel = ReleaseSelection.from_lists(required=["libfoo.json"])
+        plan = build_release_plan_from_directories(old_dir, new_dir, selection=sel)
+        assert plan.would_compare_members
+        assert plan.missing_required == ()
+
+    def test_empty_directories_produce_no_candidates(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        plan = build_release_plan_from_directories(old_dir, new_dir)
+        assert plan.entries == ()

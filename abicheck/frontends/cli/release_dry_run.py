@@ -23,12 +23,12 @@ a new function (see this file's own PR for the measurement) -- exactly the
 "prefer extending a split-out module over growing the parent toward the cap"
 guidance in the root ``CLAUDE.md``, applied by creating a fresh, correctly
 classified (``frontends``) home instead of bumping either legacy baseline.
-The actual plan *computation* (including library discovery, a
-``workflows -> extract`` edge this module may not hold itself) lives in
-:func:`abicheck.workflows.release_plan.build_release_plan_from_directories`;
-this module only renders it into ``DryRunResult`` section lines, mirroring
-``frontends/cli/scan_dry_run.py``'s own split between a workflow's computed
-plan and its CLI rendering.
+The actual plan *computation*, including discovering what counts as a
+comparable input in a plain directory the same way the real fan-out does,
+lives in :func:`abicheck.workflows.release_plan.
+build_release_plan_from_directories`; this module only renders it into
+``DryRunResult`` section lines, mirroring ``frontends/cli/scan_dry_run.py``'s
+own split between a workflow's computed plan and its CLI rendering.
 """
 
 from __future__ import annotations
