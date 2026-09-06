@@ -21,14 +21,14 @@ command owns which analysis, and what a user has to type.
 
 **Supersedes the remaining scope of**
 [`cli-cleanup-phase-two.md`](cli-cleanup-phase-two.md). That file's three open
-items are re-homed here (§E): PR H (`scan --artifact-set` member identity)
+items are re-homed here (§6): PR H (`scan --artifact-set` member identity)
 is *cancelled* — the mode is being deleted; PR I (one operand driver) and
 PR J (bundle topology out of CLI flags) become Phase 7 slices. Its closed
 items stay closed and are not re-opened.
 
 ---
 
-## Why now — the measured problem
+## 1. Current state
 
 Three findings from the audit of `main`, each verified directly:
 
@@ -69,7 +69,7 @@ pre-existing leak as newly introduced.
 
 ---
 
-## A. Target CLI
+## 2. Target state
 
 ### Root surface — six verbs, three tiers
 
@@ -118,7 +118,7 @@ Nothing in that set requires the user to know `L0`–`L5`, `BundleFacts`,
 
 ---
 
-## B. `scan` retirement map
+## 3. Scan retirement
 
 Classification vocabulary (ADR-068 D3/D5):
 **COMPARE-STAGE** — becomes an ordinary analysis/enrichment stage of the
@@ -175,7 +175,7 @@ equivalents.
 
 ---
 
-## C. Flag inventory and target classification
+## 4. Flag retirement
 
 All modern CLI commands. `compat` excluded (ADR-068 D7). Hidden options are
 marked **H** and counted. Counts from Click introspection on `309c8a82`.
@@ -186,7 +186,7 @@ CLI spelling removed) · **AUTO** (tool determines/reports it, no flag) ·
 **MERGE** (duplicate concept, represented once) · **REMOVE** (internal,
 debug, or obsolete).
 
-### C.1 `compare` — 78 accepted today (4 hidden)
+### 4.1 `compare` — 78 accepted today (4 hidden)
 
 | Flag | Class | Target representation | Rationale | Prerequisite |
 |---|---|---|---|---|
@@ -269,7 +269,7 @@ debug, or obsolete).
 | **H** `--debug-format` | REMOVE | `debug.format` only | as above | — |
 | `--include-system-declarations` | ADV | unchanged | ADR-061 dependency-scope selector, per-run | — |
 
-### C.2 `dump` — 39 accepted today (0 hidden)
+### 4.2 `dump` — 39 accepted today (0 hidden)
 
 `dump` stays evidence capture. Its toolchain/debug block is the *same*
 concept as `compare`'s and moves the same way (ADR-037 D8.1: they share the
@@ -297,7 +297,7 @@ L2 compile context and must not drift).
 | `--dwarf-only`, `--debug-format`, `--debuginfod`, `--debuginfod-url`, `--pdb-path` | CONFIG | `debug.*` | Debug resolution is a host/project property (matches `compare`) |
 | `--ast-frontend`, `--allow-ast-frontend-fallback`, `--allow-unsupported-castxml`, `--compiler`, `--compiler-prefix`, `--compiler-option`, `--sysroot`, `--nostdinc`, `--frontend-context`, `--lang` | CONFIG / MERGE | `compile.*`, identically to `compare` | ADR-037 D8.1 — one shared compile context, no drift |
 
-### C.3 `deps` — 15 accepted today
+### 4.3 `deps` — 15 accepted today
 
 Reviewed for convergence (ADR-068 D6), not reduction.
 
@@ -312,7 +312,7 @@ No `deps` flag is removed. The `deps` work is internal: `StackVerdict` →
 `RunOutcome`/`ExitDecision` axes, and its report → a `ReportDocument`
 projection.
 
-### C.4 `aggregate` (6) and `project` (4 subcommands)
+### 4.4 `aggregate` (6) and `project` (4 subcommands)
 
 Advanced integration surface; left as-is by this plan except that
 `--format`/`-o`/`-v` follow the shared projection contract. `aggregate
@@ -321,7 +321,7 @@ Advanced integration surface; left as-is by this plan except that
 
 ---
 
-## D. Target counts
+### 4.5 Target counts
 
 The number is a consequence of the model, not the goal.
 
@@ -343,7 +343,25 @@ request/result pair, ~40 `action/run.sh` branches.
 
 ---
 
-## E. Migration sequence
+## 5. Prerequisites
+
+Six cross-cutting blockers. Each gates a whole phase, not one row — the
+per-row prerequisites in §3 and §4 are the detail beneath these.
+
+| # | Prerequisite | Gates | State today |
+|---|---|---|---|
+| P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2), and therefore the whole audit half of the retirement | Not started; ADR-065 S2's record exists to extend |
+| P2 | A `FindingEvolution` state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | Not started. **The correctness crux** — without it, a pre-existing problem reads as newly introduced |
+| P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion (they are `scan`-only today; `cli_stack.py`'s own `5` is unrelated) | ADR-064 already models the precedence; `compare` does not emit them |
+| P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public` | The leakage and public-vs-exported checks (§3 #4, #5, #22) | `scan --public-header-dir` has the rule; it must survive the move verbatim, file-vs-directory asymmetry included |
+| P5 | ADR-065 S3's package component inventories | Folding `--artifact-set`'s members into the one selection model (§3 #16, #17) | Not started — workstream A's next slice |
+| P6 | `EntityId`-based public closure (ADR-063 Phase 2) and `public-contract-default.md` Phase 6's two open relevance defects plus two uncovered measurement lanes | Phase 9 only — the `--scope-public-headers` → `--contract public` collapse | Open. **Not a string heuristic, and never traded for a shorter CLI** |
+
+Two of these (P1, P5) are ADR-065 work this plan consumes rather than owns;
+starting them here would fork the model workstream A is building. P2 and P3
+are this plan's own Phase 1.
+
+## 6. PR sequence
 
 Nine phases, each independently reviewable. The ordering is the mechanism
 that prevents capability loss (ADR-068 D9) — **no phase may be reordered
@@ -354,7 +372,7 @@ ahead of its predecessor**, and no `scan` code is deleted before Phase 6.
 Build `tests/parity/` running `scan` and `compare` over the same fixture
 corpus and diffing the *finding sets* (kind, identity, severity, evidence
 refs) while both commands still exist. It starts red on every check in
-§B #3–#8, #12, #15 — that red set *is* the migration's definition of done.
+§3 #3–#8, #12, #15 — that red set *is* the migration's definition of done.
 **Deliverable:** an executable capability-loss detector, not a document.
 
 ### Phase 1 — Canonical primitives where `scan` owns unique behavior
@@ -373,7 +391,7 @@ refs) while both commands still exist. It starts red on every check in
 
 One PR per capability group, each landing with parity tests going green:
 
-- **2a** cross-source checks (§B #3–#5), per side, evolution-stated;
+- **2a** cross-source checks (§3 #3–#5), per side, evolution-stated;
 - **2b** pattern + preprocessor scans (#6, #8);
 - **2c** changed-path localization `--since`/`--changed-path` (#12) and POI
   scoping parity for `--depth source` (#10, #11);
@@ -423,7 +441,7 @@ The command, `cli_scan*.py`, `scan_engine.py`, `service_scan.py`,
 `scan` test modules — deleted in that order, only after Phases 3 and 4 have
 proven no caller remains. `buildsource/crosscheck.py`,
 `pattern_scan.py`, `preprocessor_scan.py`, `poi.py`, `risk.py` and
-`scan_levels.py` **survive** as engine primitives (§B #34) and are renamed
+`scan_levels.py` **survive** as engine primitives (§3 #34) and are renamed
 off the `scan` identity in the same PR. `tests/test_cli_root_surface.py` is
 updated to the six-verb set in the same commit as the registration removal
 (ADR-043 D12 / ADR-054 #6).
@@ -431,15 +449,21 @@ updated to the six-verb set in the same commit as the registration removal
 No deprecated alias is kept. `abicheck scan` exits `64` with `No such
 command`, with an error message naming `compare --no-baseline`.
 
-### Phase 7 — CLI/config cleanup (the C-table)
+### Phase 7 — CLI/config cleanup
 
-Only now, with one analysis path: the CONFIG/AUTO/MERGE/REMOVE rows of §C,
+Only now, with one analysis path: the CONFIG/AUTO/MERGE/REMOVE rows of §4,
 in small PRs grouped by concept —
 7a hidden flags (4) · 7b `compile.*` demotion (shared `compare`+`dump`) ·
 7c `debug.*` demotion · 7d release/bundle topology (absorbs cli-cleanup
 PR J) · 7e `--profile` removal · 7f `dump` provenance merge ·
 7g resource limits (needs the calibration cli-cleanup PR J identified) ·
 7h `--required-symbols`, `-j`, `--keep-extracted`, `--no-bundle-analysis`.
+
+Every PR in this phase meets the merge criteria recorded in
+[`cli-cleanup-phase-two.md`](cli-cleanup-phase-two.md) — old spelling exits
+`64` with no hidden alias, front-end parity in the same PR, schema bump where
+a machine contract changes, and verdict/gate/exit/coverage/assurance asserted
+separately. That list is carried forward unchanged; it is not restated here.
 
 ### Phase 8 — `deps` convergence (ADR-068 D6)
 
@@ -460,13 +484,13 @@ false negative for a shorter CLI (ADR-068 context).
 
 | Item there | Disposition here |
 |---|---|
-| PR H — `scan --artifact-set` member-identity manifest | **Cancelled** — the mode is deleted (§B #16/#17); the declared-provider capability becomes config, read by the canonical path |
+| PR H — `scan --artifact-set` member-identity manifest | **Cancelled** — the mode is deleted (§3 #16/#17); the declared-provider capability becomes config, read by the canonical path |
 | PR I — one operand driver / one evaluation-gate-report-dry-run path | Phase 7d, narrowed: with `scan` gone there are fewer operand shapes to unify |
 | PR J — bundle topology out of CLI flags; `--max-json-object-nodes` | Phase 7d + 7g, unchanged in intent |
 
 ---
 
-## F. Acceptance tests
+## 7. Acceptance criteria
 
 Behavioral scenarios proving `scan`'s removal loses nothing. Each is an
 executable test, run through the **public** entry point (CLI and Action),
@@ -518,7 +542,7 @@ Restated so they are checkable in review:
 - Not preserving `scan` because ~10,000 lines exist for it.
 - Not introducing `check`, or any command whose semantics depend on argument
   count (§A, ADR-068 D2).
-- Not moving every removed flag into YAML one-for-one (§C, ADR-068 D5.1).
+- Not moving every removed flag into YAML one-for-one (§4, ADR-068 D5.1).
 - No `--set internal.path=value` escape hatch.
 - Not copying `scan`'s 45 options onto `compare`; five are added, and
   `compare` still shrinks from 78 to ≤40.
