@@ -203,7 +203,16 @@ class TestHeaderOnlyReportContract:
         """Binary-level detectors (symbol presence/versioning, ELF layout,
         vtable/RTTI, DWARF) must appear as explicit not_evaluated rows, not
         silently absent -- ADR-067 D3's convention, applied to the new
-        binary-less tier."""
+        binary-less tier.
+
+        ``glibcxx_dual_abi``/``inline_namespace`` are deliberately NOT
+        asserted here: they read only ``Function.mangled`` churn, never
+        ``AbiSnapshot.elf``, and are ungated in every comparison shape (see
+        ``diff_platform._has_elf_on_both_sides``'s own docstring) -- a
+        header-only comparison's mangled-name-linkage limitation is
+        signalled by the ``elf`` family's own not_evaluated rows below,
+        not by gating these two heuristic detectors specifically.
+        """
         old, new = _pair("int add(int a, int b);\n", "int add(int a, int b, int c);\n")
         result = checker.compare(old, new)
         not_evaluated = {
@@ -219,9 +228,6 @@ class TestHeaderOnlyReportContract:
         # DWARF-derived layout.
         assert "dwarf" in not_evaluated
         assert "advanced_dwarf" in not_evaluated
-        # Mangled-name linkage-level churn heuristics.
-        assert "glibcxx_dual_abi" in not_evaluated
-        assert "inline_namespace" in not_evaluated
         # Every gap must carry a real, non-empty reason -- never a bare flag.
         assert all(reason for reason in not_evaluated.values())
 
