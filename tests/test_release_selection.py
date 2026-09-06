@@ -20,20 +20,49 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
-from abicheck.model import AbiSnapshot
+from abicheck.cli import main
+from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.release_selection import ReleaseSelection
 from abicheck.model.scope_acquisition import AcquisitionState, MemberAcquisition
-from abicheck.serialization import write_snapshot
+from abicheck.serialization import snapshot_to_json, write_snapshot
 from abicheck.workflows.release_plan import (
     build_declared_selection_record,
     build_release_plan,
     build_release_plan_from_directories,
 )
 from abicheck.workflows.release_scope import release_inventory_evidence
+
+
+def _snap(library: str = "libfoo.so") -> AbiSnapshot:
+    return AbiSnapshot(
+        library=library,
+        version="1.0",
+        functions=[
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+        from_headers=True,
+    )
+
+
+def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
+    path.write_text(snapshot_to_json(snap), encoding="utf-8")
+    return path
+
+
+def _invoke(*args: str) -> tuple[int, str]:
+    result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.output
 
 
 class TestReleaseSelection:
@@ -318,3 +347,89 @@ class TestMemberAcquisitionFromDictRequired:
             }
         )
         assert member.required is True
+
+
+class TestReleaseSelectionCli:
+    """ADR-065 S1's --select/--select-required end to end, through the real
+    `compare` directory dispatch (fast, JSON-snapshot fixtures -- no gcc)."""
+
+    def test_select_filters_out_undeclared_member(self, tmp_path: Path) -> None:
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        # libbar loses its only public function -- always BREAKING.
+        _write_snap(old_dir / "libbar.json", _snap("libbar.so"))
+        _write_snap(
+            new_dir / "libbar.json",
+            AbiSnapshot(library="libbar.so", version="1.0", from_headers=True),
+        )
+        # Without --select, libbar's real break would fail the run.
+        code, _ = _invoke("compare", str(old_dir), str(new_dir))
+        assert code == 4
+        # --select libfoo.json alone excludes libbar.json entirely.
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--select",
+            "libfoo.json",
+            "--format",
+            "json",
+        )
+        assert code == 0
+        data = json.loads(out)
+        assert [lib["library"] for lib in data["libraries"]] == ["libfoo.json"]
+        scope = data["comparison_scope"]
+        assert scope["selection"] == "declared"
+        by_member = {m["member"]: m for m in scope["members"]}
+        assert by_member["libbar.json"]["state"] == "out_of_scope"
+
+    def test_select_required_missing_member_blocks(self, tmp_path: Path) -> None:
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--select-required",
+            "libmissing.json",
+            "--on-incomplete-scope",
+            "block",
+            "--format",
+            "json",
+        )
+        assert code == 1
+        data = json.loads(out)
+        by_member = {m["member"]: m for m in data["comparison_scope"]["members"]}
+        assert by_member["libmissing.json"]["state"] == "expected_not_produced"
+        assert by_member["libmissing.json"]["required"] is True
+
+    def test_select_warns_and_is_ignored_for_single_file_input(
+        self, tmp_path: Path
+    ) -> None:
+        old_f, new_f = tmp_path / "libfoo.json", tmp_path / "libfoo2.json"
+        _write_snap(old_f, _snap())
+        _write_snap(new_f, _snap())
+        code, out = _invoke(
+            "compare", str(old_f), str(new_f), "--select", "libfoo.json"
+        )
+        assert code == 0
+        assert "--select" in out and "only apply to directory/package" in out
+
+    def test_dry_run_shows_comparison_plan(self, tmp_path: Path) -> None:
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        _write_snap(old_dir / "libbar.json", _snap("libbar.so"))
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--dry-run")
+        assert code == 0
+        assert "Comparison plan" in out
+        assert "libfoo.json" in out
+        assert "libbar.json" in out
