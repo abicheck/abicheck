@@ -63,6 +63,23 @@ class TestJsonOutput:
         assert events_by_name["multiply"] == "introduced"
         assert doc["coverage"]["gaps"] == []
 
+    def test_coverage_gap_is_serialized_in_json_output(self, tmp_path: Path) -> None:
+        p1 = _snapshot(tmp_path, "1.0.0", ["add"])
+        p2 = _snapshot(tmp_path, "1.5.0", ["add"])  # skips intermediate releases
+
+        res = _run([p1, p2])
+        assert res.exit_code == 0, res.output
+        doc = json.loads(res.output)
+        assert doc["coverage"]["gaps"] == [
+            {
+                "from_version": "1.0.0",
+                "to_version": "1.5.0",
+                "kind": "unknown_interval",
+                "detail": doc["coverage"]["gaps"][0]["detail"],
+            }
+        ]
+        assert "1.0.0" in doc["coverage"]["gaps"][0]["detail"]
+
     def test_explicit_version_labels(self, tmp_path: Path) -> None:
         p1 = _snapshot(tmp_path, "snap-a", ["add"])
         p2 = _snapshot(tmp_path, "snap-b", ["add", "multiply"])

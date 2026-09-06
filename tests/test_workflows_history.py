@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.model import AbiSnapshot, Function, RecordType, Variable
+from abicheck.model.identity import entity_id_for_function
 from abicheck.serialization import save_snapshot
 from abicheck.workflows.history import (
     HistoryError,
@@ -125,6 +126,55 @@ class TestBasicLifecycle:
             ("1.2.0", "reintroduced"),
         ]
 
+    def test_entity_id_backed_correspondence(self, tmp_path: Path) -> None:
+        """When the pairwise compare engine attaches a resolved ``EntityId``
+        to a finding (ADR-063 Phase 2 header-AST identity), the
+        correspondence key uses it directly rather than falling back to
+        ``(entity_kind, symbol)`` -- see the module's own "Correspondence
+        key" bullet."""
+        eid = entity_id_for_function((), "widget_maker", mangled_name="widget_maker")
+        made = Function(
+            name="widget_maker",
+            mangled="widget_maker",
+            return_type="int",
+            entity_id=eid,
+        )
+
+        p1 = _save(tmp_path, "1.0.0", [_fn("add")])
+        p2 = _save(tmp_path, "2.0.0", [_fn("add"), made])
+
+        result = run_history_request([p1, p2])
+        event = next(e for e in result.events if e.display_name == "widget_maker")
+        assert event.event == "introduced"
+        assert event.entity_key == f"entity:function:{eid.key}"
+
+    def test_un_deprecation_clears_the_flag_for_a_later_re_deprecation(
+        self, tmp_path: Path
+    ) -> None:
+        """D2 has no "un-deprecated" event word -- clearing the running flag
+        is silent -- but the flag really must clear, or a later
+        re-deprecation of the same entity would be silently dropped."""
+        plain = _fn("scale")
+        deprecated = _fn("scale", deprecated="use resize() instead")
+
+        p1 = _save(tmp_path, "1.0.0", [plain])
+        p2 = _save(tmp_path, "1.1.0", [deprecated])
+        p3 = _save(tmp_path, "1.2.0", [plain])  # un-deprecated, still present
+        p4 = _save(tmp_path, "1.3.0", [deprecated])  # re-deprecated
+
+        result = run_history_request([p1, p2, p3, p4])
+        scale_events = [
+            (e.version, e.event) for e in result.events if e.display_name == "scale"
+        ]
+        # No "un-deprecated" event at 1.2.0 (not in D2's vocabulary), but the
+        # flag clearing is proven by 1.3.0 reporting "deprecated" again
+        # rather than being silently suppressed as already-deprecated.
+        assert scale_events == [
+            ("1.0.0", "first_observed"),
+            ("1.1.0", "deprecated"),
+            ("1.3.0", "deprecated"),
+        ]
+
     def test_variables_and_types_are_tracked_too(self, tmp_path: Path) -> None:
         # RecordType must be reachable from a public function/variable to be
         # considered part of the ABI surface at all (diff_types's own
@@ -193,6 +243,32 @@ class TestCoverageGaps:
 
         result = run_history_request([p1, p2])
         assert result.gaps == ()
+
+    def test_identical_semver_labels_report_no_gap(self, tmp_path: Path) -> None:
+        """Two entries sharing one SemVer label (a re-tagged/re-dumped
+        snapshot of the same release) is neither a "gap" nor an ordering
+        disagreement -- ``a == b`` is its own no-verdict case, distinct from
+        both the successor check and the descending-order check below."""
+        p1 = _save(tmp_path, "1.0.0", [_fn("add")])
+        p2 = _save(tmp_path, "1.0.0", [_fn("add"), _fn("multiply")])
+
+        result = run_history_request([p1, p2])
+        assert result.gaps == ()
+
+    def test_descending_semver_order_is_flagged_as_a_gap(self, tmp_path: Path) -> None:
+        """D1: history order is never inferred from labels -- if the
+        caller's supplied order and the labels' own SemVer order disagree,
+        that is reported as a gap (not silently accepted, and not an
+        error abicheck second-guesses the caller's stated order over)."""
+        p1 = _save(tmp_path, "2.0.0", [_fn("add")])
+        p2 = _save(tmp_path, "1.0.0", [_fn("add")])
+
+        result = run_history_request([p1, p2])
+        assert len(result.gaps) == 1
+        gap = result.gaps[0]
+        assert gap.from_version == "2.0.0"
+        assert gap.to_version == "1.0.0"
+        assert "does not sort after" in gap.detail
 
 
 class TestUsageErrors:
