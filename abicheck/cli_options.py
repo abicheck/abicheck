@@ -1300,7 +1300,7 @@ def set_input_options(func: F) -> F:
         "select",
         multiple=True,
         metavar="KEY",
-        help="Declare an optional expected release member -- see "
+        help="Declare an optional expected release member. Repeatable -- see "
         "--select-required (directory/package inputs only).",
     )(func)
     func = click.option(

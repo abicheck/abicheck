@@ -102,6 +102,21 @@ class ReleaseSelection:
                 "ReleaseSelection needs at least one declared member "
                 "(an empty selection would select nothing, not everything)"
             )
+        # Enforced here, not only in from_dict(), so from_lists() (the CLI's
+        # own --select/--select-required path) can't construct a selection
+        # from_dict() would reject -- e.g. an empty '--select ""' key that
+        # can never match a real canonical release key (Codex review on #1094).
+        for key, required in self.members.items():
+            if not isinstance(key, str) or not key:
+                raise ValueError(
+                    f"release selection: member key must be a non-empty "
+                    f"string, got {key!r}"
+                )
+            if not isinstance(required, bool):
+                raise ValueError(
+                    f"release selection.{key}: 'required' must be a boolean, "
+                    f"got {type(required).__name__}"
+                )
 
     def __bool__(self) -> bool:
         return bool(self.members)

@@ -26,7 +26,7 @@ import pytest
 
 from abicheck.model import AbiSnapshot
 from abicheck.model.release_selection import ReleaseSelection
-from abicheck.model.scope_acquisition import AcquisitionState
+from abicheck.model.scope_acquisition import AcquisitionState, MemberAcquisition
 from abicheck.serialization import write_snapshot
 from abicheck.workflows.release_plan import (
     build_declared_selection_record,
@@ -70,6 +70,17 @@ class TestReleaseSelection:
         sel = ReleaseSelection.from_lists(required=["libfoo.so"])
         assert "libfoo.so" in sel
         assert "libbar.so" not in sel
+
+    def test_construction_rejects_empty_key_even_via_from_lists(self) -> None:
+        """Codex review, #1094: from_dict() rejected an empty key but
+        from_lists() (the CLI's own --select "" path) did not -- validation
+        must live in __post_init__ so every constructor enforces it."""
+        with pytest.raises(ValueError, match="non-empty string"):
+            ReleaseSelection.from_lists(optional=[""])
+
+    def test_construction_rejects_non_bool_required_directly(self) -> None:
+        with pytest.raises(ValueError, match="must be a boolean"):
+            ReleaseSelection(members={"libfoo.so": 0})  # type: ignore[dict-item]
 
 
 class TestBuildReleasePlan:
@@ -278,3 +289,32 @@ class TestBuildReleasePlanFromDirectories:
         new_dir.mkdir()
         plan = build_release_plan_from_directories(old_dir, new_dir)
         assert plan.entries == ()
+
+
+class TestMemberAcquisitionFromDictRequired:
+    def test_rejects_non_bool_required(self) -> None:
+        """Codex review, #1094: a present but non-boolean 'required' (e.g.
+        the JSON integer 0) must not be silently coerced by bool(...) --
+        that would let a malformed document quietly excuse a member from
+        D6's completeness axis."""
+        with pytest.raises(ValueError, match="must be a boolean"):
+            MemberAcquisition.from_dict(
+                {
+                    "member": "libfoo.so",
+                    "state": "not_supplied",
+                    "old_present": True,
+                    "new_present": False,
+                    "required": 0,
+                }
+            )
+
+    def test_absent_required_defaults_true(self) -> None:
+        member = MemberAcquisition.from_dict(
+            {
+                "member": "libfoo.so",
+                "state": "not_supplied",
+                "old_present": True,
+                "new_present": False,
+            }
+        )
+        assert member.required is True

@@ -213,9 +213,18 @@ class MemberAcquisition:
         """Parse the JSON shape :meth:`to_dict` produces. ``required``
         defaults to ``True`` when absent (a schema-1.0 document, or any
         producer predating ADR-065 S1) -- the value every such member
-        implicitly had."""
+        implicitly had -- but a *present* value must be a real boolean:
+        silently coercing e.g. ``0``/``""`` to ``False`` would let a
+        malformed document quietly excuse a member from D6's completeness
+        axis (Codex review on #1094)."""
         member = str(data["member"])
         name = str(data.get("name", member))
+        required = data.get("required", True)
+        if not isinstance(required, bool):
+            raise ValueError(
+                f"scope acquisition member {member!r}: 'required' must be a "
+                f"boolean, got {type(required).__name__}"
+            )
         return cls(
             member=member,
             state=AcquisitionState(data["state"]),
@@ -223,7 +232,7 @@ class MemberAcquisition:
             new_present=bool(data.get("new_present", False)),
             reason=str(data.get("reason", "")),
             display_name=name if name != member else "",
-            required=bool(data.get("required", True)),
+            required=required,
         )
 
 

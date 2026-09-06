@@ -1754,9 +1754,10 @@
           "enum": [
             "direct_pair",
             "all_expected",
-            "current_artifact"
+            "current_artifact",
+            "declared"
           ],
-          "description": "How the scope was selected: direct_pair (two files, the one pair), all_expected (every library discovered on either side), current_artifact (ADR-065 D9: NEW was named as exactly one artifact with one OLD counterpart; the other OLD members are out of scope)."
+          "description": "How the scope was selected: direct_pair (two files, the one pair), all_expected (every library discovered on either side), current_artifact (ADR-065 D9: NEW was named as exactly one artifact with one OLD counterpart; the other OLD members are out of scope), declared (ADR-065 S1: an explicit --select/--select-required ReleaseSelection named the expected members)."
         },
         "selection_reason": {
           "type": "string"

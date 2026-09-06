@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 
+from abicheck.model.release_selection import ReleaseSelection
 from abicheck.model.scope_acquisition import (
     AcquisitionState,
     InventoryCompleteness,
@@ -37,6 +38,7 @@ from abicheck.model.scope_acquisition import (
 from abicheck.policy.scope_completeness import resolve_scope_decision
 from abicheck.report.comparison_scope import comparison_scope_terms
 from abicheck.schemas import load_compare_report_schema
+from abicheck.workflows.release_plan import build_declared_selection_record
 from abicheck.workflows.release_scope import (
     ReleaseInventoryEvidence,
     build_release_scope_record,
@@ -158,6 +160,23 @@ def _records() -> list[tuple[str, ScopeAcquisitionRecord]]:
                 new_provenance="live",
                 unsupported={"libc.so": "newer"},
                 failed={"libd.so": "damaged"},
+            ),
+        )
+    )
+    out.append(
+        (
+            "declared",
+            build_declared_selection_record(
+                {"liba.so": p("liba.so"), "libextra.so": p("libextra.so")},
+                {"liba.so": p("liba.so")},
+                ["liba.so"],
+                [{"library": "liba.so", "verdict": "NO_CHANGE"}],
+                _evidence(old_proven=False, new_proven=False),
+                ReleaseSelection.from_lists(
+                    required=["liba.so"], optional=["libmissing.so"]
+                ),
+                old_failed=None,
+                new_failed=None,
             ),
         )
     )
