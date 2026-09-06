@@ -24,7 +24,14 @@ detector, or default changes — this plan only produces a taxonomy, a
 coverage matrix, and the paired-control cases and page cross-links that
 matrix identifies as missing).
 
-**Status:** Proposed; not started.
+**Status:** Phase 1 landed; Phases 2-4 not started. The normative failure
+taxonomy now exists as `docs/_meta/abi-failure-taxonomy.json` (hand-authored
+source of truth), rendered as
+[the ABI/API failure taxonomy](../abi-api-failure-taxonomy.md) by
+`scripts/gen_abi_failure_taxonomy_doc.py`: **247 leaf mechanisms** across
+**13 top-level branches**, each with a stable id later phases key off. No
+mapping, coverage status, or case exists yet -- Phases 2, 3 and 4 remain
+exactly as described below.
 
 ## The three surfaces, restated
 
@@ -116,6 +123,23 @@ Three consequences follow from not having an answer to that:
 ## Design
 
 ### Phase 1 — a normative ABI/API failure taxonomy
+
+**Landed.** Source of truth: `docs/_meta/abi-failure-taxonomy.json`; rendered
+page: [`docs/contribute/abi-api-failure-taxonomy.md`](../abi-api-failure-taxonomy.md)
+(`python scripts/gen_abi_failure_taxonomy_doc.py`). The manifest carries one
+row per leaf mechanism with a stable `<branch>.<leaf>` id, a short
+description, its applicable platforms and languages, and whether it can reach
+an already-built consumer, a recompiling one, or both. Ids are the interface
+Phases 2-4 key off: the generator validates the scheme and refuses to render a
+manifest that violates it, and an id is never reused for a different
+mechanism. The thirteen branches below were kept as the plan named them; the
+leaf sets under each were written during the phase, as intended. Two
+refinements the phase made to the branch list as stated here: `Header-only
+compatibility` is its own branch (the original numbering listed it twice by
+accident), and the page records the boundary rules that decide which branch a
+mechanism belongs to when more than one could claim it.
+
+The original description follows, unchanged.
 
 Write a taxonomy of the ABI/API compatibility failure *domain*, independent
 of both `catalog/` and abicheck's own `ChangeKind` registry: a top-down

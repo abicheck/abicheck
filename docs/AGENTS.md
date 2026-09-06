@@ -403,6 +403,7 @@ python scripts/gen_learning_ladder.py     # docs/learn/abi-api-handling.md's num
 python scripts/gen_backend_capability_matrix.py  # docs/reference/header-backend-capabilities.md's fact matrix
 python scripts/gen_fact_capability_matrix.py      # docs/reference/fact-registry.md
 python scripts/gen_catalog_coverage_report.py     # docs/contribute/catalog-coverage.md (rule/variant/scenario/ecosystem/workflow coverage)
+python scripts/gen_abi_failure_taxonomy_doc.py     # docs/contribute/abi-api-failure-taxonomy.md (from docs/_meta/abi-failure-taxonomy.json)
 python scripts/gen_agent_skills.py        # .agents/skills/, .claude/skills/, .gemini/skills/ (from skills-src/)
 ```
 

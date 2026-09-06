@@ -216,6 +216,13 @@ evidence required to observe it, and abicheck's actual detection behavior.
 A mechanism abicheck cannot yet detect, or cannot detect at all, stays
 visible as a stated gap rather than disappearing from the count.
 
+Coverage of that kind needs a denominator, so the failure modes themselves
+are enumerated as a maintained taxonomy of the domain — written the way the
+field is organized rather than the way this tool models it, precisely so it
+can show a gap on either side. The knowledge, the corpus, and the detectors
+are then read against that enumeration, and completeness against it is the
+honest headline, not how many cases happen to exist.
+
 ## What exists today and what is direction
 
 Shipped today: two-sided comparison of binaries, snapshots, release

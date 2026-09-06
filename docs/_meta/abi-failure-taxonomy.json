@@ -1,0 +1,3605 @@
+{
+  "schema_version": 1,
+  "title": "ABI/API compatibility failure taxonomy",
+  "hand_authored": true,
+  "owner_plan": "docs/contribute/plans/abi-api-knowledge-and-corpus.md",
+  "rendered_page": "docs/contribute/abi-api-failure-taxonomy.md",
+  "generator": "scripts/gen_abi_failure_taxonomy_doc.py",
+  "description": "A domain-keyed enumeration of the known ways a compiled or source-level compatibility contract can break. Deliberately independent of abicheck's own ChangeKind registry, of its evidence tiers, and of the catalog/ corpus: Phase 2 of the owning plan maps those onto these ids, and that mapping can only find a gap on either side if the taxonomy was not defined in their image. Edit this file, then regenerate the rendered page.",
+  "id_scheme": "<branch-id>.<leaf-id>, both lowercase kebab-case; ids are stable and never reused",
+  "vocabularies": {
+    "platforms": [
+      "ELF",
+      "PE/COFF",
+      "Mach-O",
+      "any"
+    ],
+    "languages": [
+      "C",
+      "C++",
+      "CPython extension",
+      "SYCL",
+      "Linux kernel"
+    ],
+    "surface": [
+      "binary",
+      "source",
+      "both"
+    ]
+  },
+  "branches": [
+    {
+      "id": "symbol-identity",
+      "title": "Symbol identity",
+      "summary": "Whether the name a consumer already bound to still names the same entity, with the same linkage properties, in the new artifact. These mechanisms are observable from the export table alone and are the ones that make a prebuilt consumer fail to load or to resolve.",
+      "leaves": [
+        {
+          "id": "symbol-identity.export-removed",
+          "title": "Exported symbol removed",
+          "description": "A name a consumer could bind to is no longer present in the artifact's export table, so an already-linked consumer fails to resolve it.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.export-renamed",
+          "title": "Exported symbol renamed without an alias",
+          "description": "The same entity is exported under a different name and no alias or compatibility symbol keeps the old spelling resolvable.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "symbol-identity.signature-driven-mangling-change",
+          "title": "Mangled name changed by a signature or qualification edit",
+          "description": "A C++ declaration's own signature, cv/ref-qualification, or template arguments change, so the mangled name a consumer bound to disappears even though a same-named declaration still exists.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.scope-change",
+          "title": "Declaration moved between namespaces or classes",
+          "description": "A public entity is moved into or out of a namespace, class, or nested scope, changing its mangled name and its source spelling together.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "symbol-identity.mangling-scheme-change",
+          "title": "Name-mangling scheme or rule changed",
+          "description": "The mangling produced for an unchanged declaration differs because the mangler, its version, or a mangling-relevant language rule changed, silently re-keying every C++ export.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary",
+          "notes": "Distinct from a signature edit: the source declaration is untouched."
+        },
+        {
+          "id": "symbol-identity.abi-tag-change",
+          "title": "Compiler ABI tag added, removed, or changed",
+          "description": "A declaration gains, loses, or changes a compiler ABI tag (for example GCC's `abi_tag`), which is encoded into the mangled name and retires the previous symbol.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.inline-namespace-stamp-change",
+          "title": "Inline-namespace ABI stamp changed",
+          "description": "A versioning inline namespace around a public entity is introduced, bumped, or removed, so every enclosed symbol is re-mangled while the source spelling is unchanged.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.language-linkage-change",
+          "title": "Language linkage changed",
+          "description": "A declaration moves between C and C++ language linkage, replacing an unmangled name with a mangled one or the reverse.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "symbol-identity.visibility-reduced",
+          "title": "Symbol visibility or export status reduced",
+          "description": "A previously exported declaration becomes hidden or internal (visibility attribute, export map, `__declspec`, unexported symbol list), removing it from the linkable surface without deleting the code.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.visibility-widened",
+          "title": "Symbol visibility or export status widened",
+          "description": "A previously internal symbol becomes exported, enlarging the surface consumers can bind to and, once bound, must keep supported.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.interposition-semantics-changed",
+          "title": "Interposition or preemption semantics changed",
+          "description": "A symbol changes between default and protected visibility, or otherwise stops being preemptible, so an interposing definition or a copy relocation no longer behaves as it did.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.binding-strength-changed",
+          "title": "Symbol binding strength changed",
+          "description": "A symbol changes between weak and global binding, altering which definition wins at link and load time and whether a missing definition is tolerated.",
+          "platforms": [
+            "ELF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.unique-binding-changed",
+          "title": "Unique-object binding gained or lost",
+          "description": "A symbol gains or loses unique-object binding (`STB_GNU_UNIQUE`), which changes cross-`dlopen` object identity and whether the library can be unloaded.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.symbol-kind-changed",
+          "title": "Symbol type class changed",
+          "description": "An exported name changes between function, data object, thread-local object, or indirect-function kinds, invalidating how existing relocations reference it.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.exported-object-size-changed",
+          "title": "Exported data object size changed",
+          "description": "The recorded size of an exported data object changes, which breaks consumers that copy-relocated it at their own recorded size.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.ifunc-resolution-changed",
+          "title": "Indirect-function resolution introduced or removed",
+          "description": "A symbol becomes, or stops being, an indirect function resolved at load time, changing both its relocation kind and the loader support it requires.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.alias-set-changed",
+          "title": "Symbol alias or equivalence set changed",
+          "description": "An alias relationship between two exported names is added or dropped, so a name that used to resolve to the same definition now resolves elsewhere or not at all.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.version-node-membership-changed",
+          "title": "Symbol moved between version nodes",
+          "description": "A versioned symbol is emitted under a different version node, so a consumer's recorded `name@VERSION` reference no longer matches.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary",
+          "notes": "Library-wide versioning scheme and node lifecycle live under `dynamic-linker-contract`."
+        },
+        {
+          "id": "symbol-identity.default-version-alias-changed",
+          "title": "Default version binding of a symbol changed",
+          "description": "Which version of a multiply-versioned symbol is the default (`name@@VERSION`) changes, silently redirecting newly linked consumers to a different definition.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.export-ordinal-changed",
+          "title": "Export ordinal reassigned",
+          "description": "A DLL export's ordinal number is reassigned or reused, breaking consumers that bind by ordinal rather than by name.",
+          "platforms": [
+            "PE/COFF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "symbol-identity.thread-local-storage-class-changed",
+          "title": "Thread-local storage class changed",
+          "description": "A public variable becomes, or stops being, thread-local, changing its access protocol and the storage a consumer's generated code expects.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both",
+          "notes": "The declared storage class, not the access model \u2014 the latter is `toolchain-platform-abi.tls-model-changed`."
+        }
+      ]
+    },
+    {
+      "id": "function-calling-contract",
+      "title": "Function calling contract",
+      "summary": "How a caller and a callee agree to pass arguments, receive results, and propagate exceptions. A mismatch here corrupts the stack or registers at the call itself, whether or not the symbol still resolves.",
+      "leaves": [
+        {
+          "id": "function-calling-contract.parameter-added",
+          "title": "Parameter added",
+          "description": "A function gains a parameter, so existing callers pass too few arguments even when the symbol still resolves (C) or the mangled name changes (C++).",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.parameter-removed",
+          "title": "Parameter removed",
+          "description": "A function loses a parameter, leaving existing callers passing an extra argument the callee no longer consumes.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.parameter-type-changed",
+          "title": "Parameter type changed",
+          "description": "A parameter's type changes in a way that alters its size, class, or register assignment, so the callee reinterprets what the caller pushed.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.parameter-type-changed-abi-neutral",
+          "title": "Parameter type changed without an ABI effect",
+          "description": "A parameter's spelling changes (typedef substitution, added pointee constness in C, signedness-neutral alias) without changing how the argument is passed.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "source",
+          "notes": "The paired negative control for `parameter-type-changed`: a source-visible edit that must not be reported as an ABI break."
+        },
+        {
+          "id": "function-calling-contract.parameter-order-changed",
+          "title": "Parameter order changed",
+          "description": "Two same-typed parameters are swapped, which leaves the symbol and often the mangled name intact while silently transposing the caller's arguments.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.return-type-changed",
+          "title": "Return type changed",
+          "description": "The returned type's size, class, or register assignment changes, so the caller reads a result the callee never produced.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.return-convention-changed",
+          "title": "Return convention changed between register and memory",
+          "description": "A returned aggregate crosses the threshold between register return and hidden-pointer (`sret`) return, adding or removing an implicit argument at every call site.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "function-calling-contract.calling-convention-changed",
+          "title": "Calling convention changed",
+          "description": "A function's declared calling convention changes (cdecl, stdcall, fastcall, vectorcall, register-parameter conventions), redistributing arguments and stack-cleanup responsibility.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "function-calling-contract.variadic-status-changed",
+          "title": "Variadic status changed",
+          "description": "A function gains or loses its trailing ellipsis, changing argument-area layout and, on some targets, the register-save protocol.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.va-list-parameter-changed",
+          "title": "Explicit `va_list` parameter added or removed",
+          "description": "A function switches between taking a `va_list` and taking variadic arguments directly, which are different calling contracts even though the source-level call may look similar.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.argument-passing-class-changed",
+          "title": "Argument passing class changed by a type's own change",
+          "description": "A parameter's type stays named the same but stops being trivially copyable, gains a non-trivial special member, or changes size class, so it is passed indirectly instead of in registers.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "function-calling-contract.noexcept-contract-changed",
+          "title": "`noexcept` specification changed",
+          "description": "A function gains or loses `noexcept`, which is part of its type since C++17 (affecting function-pointer compatibility and mangling) and changes what a caller may assume about unwinding.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.exception-specification-changed",
+          "title": "Dynamic exception specification changed",
+          "description": "A declared throw specification changes, altering the set of exceptions that may cross the boundary and the terminate behavior consumers were compiled against.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.member-function-qualification-changed",
+          "title": "Member-function cv/ref qualification changed",
+          "description": "A member function's `const`/`volatile`/ref-qualifier set changes, re-mangling it and changing which objects may call it.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.implicit-object-parameter-changed",
+          "title": "Static/non-static member function status changed",
+          "description": "A member function becomes static or stops being static, adding or removing the implicit object parameter from every call.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.noreturn-contract-changed",
+          "title": "`noreturn` contract changed",
+          "description": "A function gains or loses a `noreturn` guarantee that callers were compiled to rely on, changing generated code after the call.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.pointer-aliasing-qualifier-changed",
+          "title": "Pointer aliasing qualifier changed",
+          "description": "A parameter gains or loses `restrict`, changing the aliasing promise callers were compiled against without changing argument layout.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "function-calling-contract.function-pointer-typedef-changed",
+          "title": "Public function-pointer type changed",
+          "description": "A publicly declared function-pointer type (callback signature, dispatch-table slot) changes, so consumer-supplied callbacks are invoked under the wrong contract.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        }
+      ]
+    },
+    {
+      "id": "data-layout",
+      "title": "Data layout",
+      "summary": "How the bytes of a publicly visible type are arranged. A consumer compiled against the old layout keeps using the old offsets, sizes, and alignments regardless of what the new library believes.",
+      "leaves": [
+        {
+          "id": "data-layout.type-size-changed",
+          "title": "Type size changed",
+          "description": "A public type's total size changes, so consumer-allocated storage, array strides, and by-value copies no longer match the library's expectation.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.type-alignment-changed",
+          "title": "Type alignment requirement changed",
+          "description": "A public type's alignment requirement changes, invalidating consumer allocations, embedded placements, and over-aligned access assumptions.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.field-offset-changed",
+          "title": "Field offset changed",
+          "description": "An existing field moves to a different offset, so consumer code compiled against the old layout reads or writes the wrong bytes.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.field-added-at-end",
+          "title": "Field appended at the end of a type",
+          "description": "A field is added after all existing members, preserving existing offsets but changing the type's size and any consumer-side allocation or embedding.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary",
+          "notes": "Whether this is acceptable depends on the declared contract (opaque-by-pointer, caller-allocated, versioned-size struct)."
+        },
+        {
+          "id": "data-layout.field-inserted",
+          "title": "Field inserted before existing members",
+          "description": "A field is added anywhere but the end, shifting every following member's offset.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.field-removed",
+          "title": "Field removed",
+          "description": "A publicly visible field disappears, breaking direct consumer access and shifting the members that followed it.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "data-layout.field-type-changed",
+          "title": "Field type changed",
+          "description": "A field's type changes, altering its size, alignment, or interpretation at an offset consumers already read.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "data-layout.field-reordered",
+          "title": "Fields reordered",
+          "description": "Two or more members are permuted, which can preserve the type's size while relocating every affected field.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.packing-changed",
+          "title": "Structure packing changed",
+          "description": "A packing pragma, packed attribute, or default member alignment changes, recomputing padding across the whole type.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.explicit-alignment-changed",
+          "title": "Explicit alignment specifier changed",
+          "description": "An `alignas`/`__attribute__((aligned))`/`__declspec(align)` specifier is added, removed, or changed on a public type or member.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.bitfield-width-changed",
+          "title": "Bit-field width changed",
+          "description": "A bit-field's declared width changes, moving the bit boundary of that member and every later member in its storage unit.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.bitfield-allocation-changed",
+          "title": "Bit-field allocation or straddling changed",
+          "description": "The order or storage unit in which bit-fields are allocated changes \u2014 through an added anonymous bit-field, a declared-type change, endianness, or a target's allocation rules \u2014 relocating bits without changing declared widths.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.bitfield-status-changed",
+          "title": "Member converted between bit-field and plain field",
+          "description": "A member gains or loses its bit-field form, changing both its addressability and the packing of its neighbours.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "data-layout.union-member-set-changed",
+          "title": "Union member set changed",
+          "description": "A union gains or loses a member, potentially changing the union's size or alignment to that of a different largest member.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "data-layout.union-member-type-changed",
+          "title": "Union member type changed",
+          "description": "An existing union alternative's type changes, so a consumer writing through one member and the library reading another disagree about the representation.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "data-layout.anonymous-aggregate-changed",
+          "title": "Anonymous struct or union member changed",
+          "description": "An anonymous aggregate member's own shape changes, altering the enclosing type's size or the offsets of the names it injects.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.enum-underlying-type-changed",
+          "title": "Enumeration underlying type changed",
+          "description": "An enumeration's underlying integer type changes \u2014 explicitly, by an enumerator that no longer fits, or by a compiler enum-size flag \u2014 changing the size and signedness of every value and field of that type.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.enum-value-changed",
+          "title": "Enumerator value changed",
+          "description": "An existing enumerator's numeric value changes, so a prebuilt consumer passes or compares the old constant against new semantics.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.enum-member-added",
+          "title": "Enumerator added",
+          "description": "A new enumerator appears, which is compatible for consumers that ignore unknown values and a break for those with exhaustive handling or a fixed sentinel.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "data-layout.enum-member-removed",
+          "title": "Enumerator removed",
+          "description": "An enumerator disappears from the public enumeration, breaking source that names it and any consumer relying on its acceptance.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "data-layout.flexible-array-member-changed",
+          "title": "Flexible or trailing array member changed",
+          "description": "A trailing flexible array member is added, removed, or given a fixed extent, changing the allocation arithmetic consumers perform.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "data-layout.array-extent-changed",
+          "title": "Public array extent changed",
+          "description": "A fixed-size array member or exported array object changes its element count, changing the type's size and every following offset.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.tail-padding-reuse-changed",
+          "title": "Tail-padding reuse changed",
+          "description": "Whether a base subobject's trailing padding is reused by a derived class changes, moving derived members without any declared member changing.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.atomic-qualification-changed",
+          "title": "Atomic qualification changed",
+          "description": "A type or member gains or loses `_Atomic`/atomic wrapping, changing its size, alignment, and the access protocol both sides must share.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "data-layout.member-storage-duration-changed",
+          "title": "Data member moved between instance and static storage",
+          "description": "A data member becomes static (or stops being static), removing storage from every object and changing the type's size and offsets.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "data-layout.opaque-status-changed",
+          "title": "Type changed between opaque and complete",
+          "description": "A type that consumers could only hold by pointer gains a public definition, or a previously complete type becomes opaque, moving the layout contract across the interface boundary.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "data-layout.public-typedef-target-changed",
+          "title": "Public typedef target changed",
+          "description": "A public type alias is retargeted (for example a fixed-width integer to a platform type, or a handle to a different representation), changing the layout of everything declared through it.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "data-layout.integer-width-declaration-changed",
+          "title": "Declared integer width changed",
+          "description": "A public integer member or parameter changes declared width or signedness \u2014 including `_BitInt` width changes \u2014 altering value range and layout.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        }
+      ]
+    },
+    {
+      "id": "cpp-object-model",
+      "title": "C++ object model",
+      "summary": "The parts of the C++ implementation contract beyond plain layout: base subobjects, dispatch tables, run-time type identity, and the adjustment code that connects them. Consumers bake all of it into their own compiled code.",
+      "leaves": [
+        {
+          "id": "cpp-object-model.base-class-added",
+          "title": "Base class added",
+          "description": "A class gains a base, inserting a base subobject that shifts members, changes conversions, and can introduce a vptr.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.base-class-removed",
+          "title": "Base class removed",
+          "description": "A class loses a base, invalidating consumer upcasts, inherited-member access, and the object's layout.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "cpp-object-model.base-class-order-changed",
+          "title": "Base class order changed",
+          "description": "Base classes are reordered, relocating base subobjects and their vtable groups within the complete object.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.base-class-access-changed",
+          "title": "Base class access changed",
+          "description": "A base changes between public, protected, and private, which removes the implicit conversion consumers relied on.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "cpp-object-model.base-class-virtuality-changed",
+          "title": "Base class became or stopped being virtual",
+          "description": "A base is made virtual or non-virtual, replacing direct base placement with indirection through virtual-base offsets.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.virtual-base-offset-changed",
+          "title": "Virtual base offset changed",
+          "description": "The offset at which a virtual base subobject is found changes, so consumer code performing the old adjustment lands on the wrong subobject.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.vtable-slot-inserted",
+          "title": "Virtual function inserted into an existing vtable",
+          "description": "A virtual function is added anywhere before the end of the primary vtable, renumbering every later slot for already-compiled callers and overriders.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.vtable-slot-appended",
+          "title": "Virtual function appended to a vtable",
+          "description": "A virtual function is added at the end of the vtable, which keeps existing slots but still breaks classes a consumer derived from the old vtable size.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.vtable-slot-removed",
+          "title": "Virtual function removed from a vtable",
+          "description": "A virtual function disappears, leaving consumers dispatching through a slot that is now absent or occupied by something else.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.vtable-slot-order-changed",
+          "title": "Virtual function order changed",
+          "description": "Declared virtual functions are permuted, so an unchanged slot index now dispatches to a different function.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.virtual-signature-changed",
+          "title": "Virtual function signature changed",
+          "description": "A virtual function's signature or return type changes, so the slot survives but the call through it is made under the wrong contract and existing overrides stop overriding.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "cpp-object-model.virtuality-introduced",
+          "title": "Class gained its first virtual member",
+          "description": "A class becomes polymorphic, introducing a vptr that changes the object's size and shifts every data member.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.purity-changed",
+          "title": "Virtual function became or stopped being pure",
+          "description": "A virtual function's purity changes, altering whether consumers may instantiate the class and whether they must supply an override.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "cpp-object-model.destructor-virtuality-changed",
+          "title": "Destructor virtuality changed",
+          "description": "A destructor becomes virtual or non-virtual, changing both the vtable layout and whether deletion through a base pointer is defined.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.secondary-vtable-group-changed",
+          "title": "Secondary vtable group changed",
+          "description": "Under multiple inheritance, the number, order, or contents of the secondary vtables change, so dispatch through a non-primary base lands in the wrong table.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.vtt-changed",
+          "title": "Virtual-table-table structure changed",
+          "description": "The construction vtable structure used while building objects with virtual bases changes, breaking constructors already compiled into consumers.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.thunk-set-changed",
+          "title": "Adjustor thunk set or offsets changed",
+          "description": "The this-pointer or covariant-return adjustment thunks change in membership or offset, corrupting the receiver of a virtual call made through a base pointer.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.key-function-changed",
+          "title": "Key function changed",
+          "description": "Which member function anchors a class's vtable emission changes, so the vtable or type information may be emitted in a different object \u2014 or in none at all.",
+          "platforms": [
+            "ELF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.rtti-availability-changed",
+          "title": "Run-time type information availability changed",
+          "description": "Type information stops being emitted, or starts being emitted differently, so `dynamic_cast` and exception matching that consumers compiled in no longer work.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.rtti-identity-changed",
+          "title": "Run-time type identity changed",
+          "description": "A type's run-time identity record changes name or ceases to be unique across the boundary, so `dynamic_cast` and `catch` matching silently fail for objects that cross it.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.rtti-hierarchy-changed",
+          "title": "Run-time inheritance description changed",
+          "description": "The recorded inheritance description backing dynamic casts changes shape (single, multiple, or virtual inheritance form), changing cast results without any declared member changing.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.triviality-changed",
+          "title": "Special-member triviality or standard-layout status changed",
+          "description": "A type gains or loses a non-trivial special member, or stops being standard-layout, changing how it is passed, returned, copied, and laid out.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.empty-base-optimization-changed",
+          "title": "Empty-base optimization applicability changed",
+          "description": "A base or member stops being empty (or starts being empty), so storage that was elided is now allocated, changing size and offsets.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.pointer-to-member-representation-changed",
+          "title": "Pointer-to-member representation changed",
+          "description": "The declared inheritance model or the class's own shape changes the size and encoding of pointers to its members, breaking stored member pointers.",
+          "platforms": [
+            "PE/COFF"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary",
+          "notes": "Chiefly an MSVC concern, where the pointer-to-member representation is chosen per inheritance model."
+        },
+        {
+          "id": "cpp-object-model.structor-variant-set-changed",
+          "title": "Constructor or destructor variant set changed",
+          "description": "The set of emitted constructor/destructor variants (complete, base, deleting) changes, so a consumer's reference to one variant no longer resolves.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "cpp-object-model.class-allocation-function-changed",
+          "title": "Class-scoped allocation function changed",
+          "description": "A class gains or loses its own `operator new`/`operator delete`, so allocations and deallocations of its objects can cross allocator boundaries.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "cpp-object-model.finality-changed",
+          "title": "Class or member finality changed",
+          "description": "A class or virtual member gains or loses `final`, forbidding derivation or override that consumers already perform and changing devirtualization assumptions.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "cpp-object-model.abstractness-changed",
+          "title": "Class became or stopped being abstract",
+          "description": "A class becomes abstract (or concrete), changing whether consumers may instantiate it directly.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "cpp-object-model.exception-hierarchy-changed",
+          "title": "Thrown exception type hierarchy changed",
+          "description": "The class hierarchy of a type thrown across the boundary changes, so consumer `catch` clauses written against a base no longer match.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        }
+      ]
+    },
+    {
+      "id": "inline-template-source-abi",
+      "title": "Inline, template, and header-baked implementation",
+      "summary": "Implementation that the consumer compiled into its own binary. Changing it in the library leaves two divergent copies in the running process, and the library's own export table shows nothing.",
+      "leaves": [
+        {
+          "id": "inline-template-source-abi.inline-body-changed",
+          "title": "Inline function body changed",
+          "description": "The definition of a function consumers inlined is changed, so old and new behaviour coexist in one process with no symbol-level evidence of the change.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.inline-body-invariant-broken",
+          "title": "Inline body's assumption about private state broken",
+          "description": "A header-inlined body reads or writes internal state (a field offset, an invariant, a renamed member) whose meaning changed in the library, so consumer-inlined copies now operate on the wrong data.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.function-became-inline",
+          "title": "Function became inline-only",
+          "description": "A function that had an out-of-line definition becomes header-only, so its exported symbol disappears for consumers that did not inline it.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.function-left-inline",
+          "title": "Function stopped being inline",
+          "description": "A previously header-defined function is moved out of line, requiring a link-time definition consumers previously did not need.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.header-constant-value-changed",
+          "title": "Header-defined constant value changed",
+          "description": "A constant defined in a public header \u2014 enumerator alias, `const`/`constexpr` object, macro-defined literal \u2014 changes value, so consumers keep the old value baked in.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.constexpr-status-changed",
+          "title": "`constexpr`/`consteval` status changed",
+          "description": "A function or variable gains or loses constant-evaluation status, changing where consumers may use it and whether its value is baked in.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "inline-template-source-abi.default-member-initializer-changed",
+          "title": "Default member initializer changed",
+          "description": "A class's default member initializer changes, so consumer-compiled implicit constructors keep producing the old initial state.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.template-definition-changed",
+          "title": "Template definition changed",
+          "description": "A template's body changes while consumers hold instantiations compiled from the previous definition, mixing two implementations of one entity.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.template-parameter-list-changed",
+          "title": "Template parameter list changed",
+          "description": "A template gains, loses, or reorders parameters, re-mangling every instantiation and breaking consumer uses of the old form.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "inline-template-source-abi.default-template-argument-changed",
+          "title": "Default template argument changed",
+          "description": "A default template argument changes, so the same written type spells a different instantiation than the one consumers already carry.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "inline-template-source-abi.explicit-instantiation-set-changed",
+          "title": "Explicit instantiation set changed",
+          "description": "The set of instantiations the library exports changes, so an `extern template` declaration consumers relied on no longer has a definition to link against.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.specialization-set-changed",
+          "title": "Specialization set changed",
+          "description": "A partial or explicit specialization is added, removed, or altered, so an already-compiled consumer selected a different implementation than a recompiled one would.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.odr-divergent-definition",
+          "title": "One-definition-rule violation across translation units or libraries",
+          "description": "The same entity is defined differently in two places that end up in one program, and the linker silently keeps one of them.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.odr-configuration-mismatch",
+          "title": "Configuration-dependent definitions mixed",
+          "description": "The library and its consumer compile the same headers under different configuration macros, standard levels, or ABI stamps, producing incompatible definitions of the same names.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.macro-driven-layout-changed",
+          "title": "Macro-driven layout or declaration set changed",
+          "description": "A public preprocessor condition now selects different members, declarations, or padding, so what a consumer sees depends on macros defined at their compile time.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "inline-template-source-abi.public-macro-removed",
+          "title": "Public macro removed",
+          "description": "A macro that is part of the published interface disappears, breaking source that uses it.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "inline-template-source-abi.public-macro-semantics-changed",
+          "title": "Public macro definition changed",
+          "description": "A public macro's expansion changes (value, arity, or the code it generates), silently changing what consumer source compiles to.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "inline-template-source-abi.hidden-friend-set-changed",
+          "title": "Hidden friend or ADL-visible operator set changed",
+          "description": "The set of functions found by argument-dependent lookup changes, so an expression consumers wrote resolves differently or stops resolving.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "inline-template-source-abi.constraint-tightened",
+          "title": "Concept or constraint tightened",
+          "description": "A constraint, `requires` clause, or SFINAE condition becomes stricter, rejecting instantiations consumers previously performed.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "inline-template-source-abi.inline-variable-identity-changed",
+          "title": "Inline variable or static-member identity changed",
+          "description": "A header-defined variable changes between one shared definition and per-translation-unit copies, so state consumers assumed was shared is duplicated (or the reverse).",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        }
+      ]
+    },
+    {
+      "id": "export-public-surface-contract",
+      "title": "Export and public-surface contract",
+      "summary": "Divergence between the three surfaces a library has: what its headers declare, what its artifact exports, and what consumers actually use. These mechanisms are about the boundary itself rather than about any one declaration's shape.",
+      "leaves": [
+        {
+          "id": "export-public-surface-contract.declared-not-exported",
+          "title": "Declared in a public header but not exported",
+          "description": "A declaration presented as supported has no corresponding export, so consumers can compile against it and fail to link.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "export-public-surface-contract.exported-not-declared",
+          "title": "Exported but not declared in any public header",
+          "description": "The artifact exports a symbol no public header declares, creating an unsupported surface that consumers can nonetheless bind to.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "export-public-surface-contract.private-header-leak",
+          "title": "Private header reachable from the public surface",
+          "description": "A public header includes an internal one, pulling declarations that were never meant to be supported into the surface consumers see.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "export-public-surface-contract.internal-type-in-public-signature",
+          "title": "Internal type exposed through a public signature",
+          "description": "A public function or object is declared in terms of an internal type, so that type's layout becomes part of the contract by accident.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "export-public-surface-contract.internal-symbol-required-by-public-code",
+          "title": "Public inline code requires an internal symbol",
+          "description": "Code consumers compile from public headers references a symbol the library does not export, producing an unresolvable reference.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "export-public-surface-contract.export-policy-changed",
+          "title": "Export policy changed",
+          "description": "The mechanism that decides what is exported (version script, module definition file, exported-symbols list, default visibility setting) changes, moving many symbols across the boundary at once.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "export-public-surface-contract.public-surface-grew",
+          "title": "Public surface grew",
+          "description": "The supported surface gains declarations or exports, which is a real, reviewable change to a maintained contract even though it breaks nothing.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "export-public-surface-contract.public-surface-shrank",
+          "title": "Public surface shrank",
+          "description": "The supported surface loses declarations or exports without an accompanying removal being individually attributable \u2014 the aggregate view of withdrawal.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "export-public-surface-contract.consumed-unsupported-symbol",
+          "title": "Known consumer depends on an unsupported symbol",
+          "description": "A known consumer binds to a symbol outside the declared contract, so withdrawing it is technically permitted and practically breaking.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "export-public-surface-contract.surface-varies-by-consumer-environment",
+          "title": "Exported surface depends on the consumer's build environment",
+          "description": "Which declarations or exports a consumer sees depends on their own macros, toolchain, or feature detection, so one release presents several contracts.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "export-public-surface-contract.reserved-capacity-consumed",
+          "title": "Reserved field, slot, or symbol consumed",
+          "description": "Space explicitly reserved for future growth (padding fields, reserved vtable slots, reserved enumerator ranges) is taken into use, which is compatible only if no consumer ever used it.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "export-public-surface-contract.deprecation-lifecycle-violated",
+          "title": "Removal without a completed deprecation window",
+          "description": "A supported entity is withdrawn without the deprecation marking and support window the project's own contract promised.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "export-public-surface-contract.unversioned-export-in-versioned-library",
+          "title": "Unversioned export in an otherwise versioned library",
+          "description": "A symbol escapes the library's versioning scheme, so it carries no version node and cannot participate in the compatibility guarantees the rest of the surface has.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        }
+      ]
+    },
+    {
+      "id": "dynamic-linker-contract",
+      "title": "Dynamic linker and loader contract",
+      "summary": "The library-level agreement the loader enforces: which artifact satisfies a dependency, where it is found, which version sets it offers, and what the loader itself must support. These break deployment rather than any single call.",
+      "leaves": [
+        {
+          "id": "dynamic-linker-contract.soname-changed",
+          "title": "SONAME or install name changed",
+          "description": "The library's own runtime identity changes, so existing consumers keep requesting an artifact that is no longer installed under that name.",
+          "platforms": [
+            "ELF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.soname-missing",
+          "title": "SONAME absent",
+          "description": "The library carries no runtime identity, so consumers record a build-time path and lose the indirection versioning depends on.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.soname-not-bumped-after-break",
+          "title": "Incompatible change without a SONAME bump",
+          "description": "The runtime identity is unchanged across an incompatible change, so the loader silently binds old consumers to an incompatible library.",
+          "platforms": [
+            "ELF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.dylib-version-metadata-changed",
+          "title": "Library compatibility/current version metadata changed",
+          "description": "A Mach-O library's compatibility or current version is lowered or bumped, changing which consumers the loader accepts.",
+          "platforms": [
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.needed-dependency-added",
+          "title": "Dependency added to the artifact",
+          "description": "The library records a new dependency, which every deployment must now be able to resolve.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.needed-dependency-removed",
+          "title": "Dependency removed from the artifact",
+          "description": "A recorded dependency disappears, so symbols consumers resolved transitively through it are no longer reachable.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.dependency-order-changed",
+          "title": "Dependency order changed",
+          "description": "The order in which dependencies are recorded changes, altering which definition wins when two of them export the same symbol.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.search-path-changed",
+          "title": "Runtime search path changed",
+          "description": "The embedded search path (`RPATH`, `RUNPATH`, `@rpath`, delay-load path) changes, so a deployment that resolved dependencies correctly may now pick a different artifact or none.",
+          "platforms": [
+            "ELF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.search-path-kind-changed",
+          "title": "Search path kind changed",
+          "description": "The library switches between path kinds with different transitivity and override rules (`RPATH` versus `RUNPATH`), changing resolution for dependencies it does not itself name.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.version-node-removed",
+          "title": "Symbol version node removed",
+          "description": "A version node disappears from the library, so every consumer reference recorded against it fails verification at load.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.version-node-added",
+          "title": "Symbol version node added",
+          "description": "A new version node appears, which is compatible for existing consumers but sets a new floor for anything linked against it.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.required-version-floor-raised",
+          "title": "Required version of a dependency raised",
+          "description": "The library now requires a newer version node from a dependency, raising the runtime floor for every deployment.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.versioning-scheme-changed",
+          "title": "Symbol versioning scheme introduced or withdrawn",
+          "description": "The library starts or stops versioning its symbols as a whole, changing the guarantees the loader can enforce for all of them.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.loader-feature-requirement-changed",
+          "title": "Loader feature requirement changed",
+          "description": "The artifact starts using a loader feature (compact relocations, a hash-table style, a new relocation type, a program-header form) that older loaders cannot process.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.binding-mode-changed",
+          "title": "Binding or interposition mode changed",
+          "description": "Lazy versus immediate binding, symbolic binding, or global/local scope on load changes, altering which definitions win and when failures surface.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.namespace-mode-changed",
+          "title": "Two-level namespace or flat namespace mode changed",
+          "description": "A Mach-O image changes how symbol references record their defining library, changing resolution and interposition behaviour.",
+          "platforms": [
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.reexport-set-changed",
+          "title": "Re-export or forwarder set changed",
+          "description": "The set of symbols re-exported from, or forwarded to, another library changes, so names that resolved through this artifact no longer do.",
+          "platforms": [
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.initialization-contract-changed",
+          "title": "Initialization or finalization contract changed",
+          "description": "The library's initializer/finalizer set, entry point, or ordering changes, altering the state consumers can assume at first use.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.static-tls-requirement-introduced",
+          "title": "Static TLS requirement introduced",
+          "description": "The library begins requiring static thread-local storage, so loading it with `dlopen` can fail once the process's surplus TLS is exhausted.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dynamic-linker-contract.interpreter-changed",
+          "title": "Program interpreter or loader requirement changed",
+          "description": "The recorded interpreter changes, so the artifact requires a different runtime loader than the deployment provides.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        }
+      ]
+    },
+    {
+      "id": "dependency-abi",
+      "title": "Dependency ABI",
+      "summary": "Breaks that originate in a library this one links against and reach consumers through it. The library's own surface may be untouched.",
+      "leaves": [
+        {
+          "id": "dependency-abi.transitive-break-reaches-consumers",
+          "title": "Dependency's own ABI break reaches consumers",
+          "description": "A linked library changes incompatibly in a way consumers of this library are exposed to, even though this library's own surface is unchanged.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dependency-abi.dependency-type-in-public-surface",
+          "title": "Dependency type appears in the public surface",
+          "description": "This library's public declarations are expressed in a dependency's types, so that dependency's layout becomes part of this library's contract.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "dependency-abi.dependency-soname-bump",
+          "title": "Dependency SONAME bumped",
+          "description": "A dependency's runtime identity changes, requiring this library \u2014 and possibly its consumers \u2014 to be relinked and redeployed together.",
+          "platforms": [
+            "ELF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dependency-abi.dependency-version-floor-raised",
+          "title": "Dependency version floor raised",
+          "description": "The minimum acceptable version of a dependency rises, so deployments that satisfied the old floor no longer work.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dependency-abi.dependency-provider-changed",
+          "title": "Symbol provider changed",
+          "description": "A symbol this library resolves is now provided by a different artifact, changing which implementation consumers get.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dependency-abi.dependency-linkage-model-changed",
+          "title": "Dependency linkage model changed",
+          "description": "A dependency moves between dynamic linking, static linking, and vendoring, changing whether its ABI is baked in, shared, or duplicated in the process.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dependency-abi.duplicate-provider-conflict",
+          "title": "Two loaded artifacts provide the same symbol",
+          "description": "More than one loaded library defines the same symbol, so which definition is used depends on load order and interposition rather than on any declared contract.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dependency-abi.dependency-symbol-version-floor-raised",
+          "title": "Dependency symbol-version floor raised",
+          "description": "References to a dependency now name newer version nodes (for example a newer `glibc` node), raising the runtime floor without any visible interface change.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dependency-abi.dependency-build-configuration-changed",
+          "title": "Dependency built with an ABI-relevant configuration change",
+          "description": "A dependency is rebuilt with different ABI-relevant options, so the interface this library was compiled against no longer matches the one deployed.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dependency-abi.dependency-header-runtime-skew",
+          "title": "Dependency headers and deployed dependency disagree",
+          "description": "This library was compiled against one version of a dependency's headers and is deployed against a different runtime, so layouts and signatures silently diverge.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "dependency-abi.unresolved-dependency-symbol",
+          "title": "Reference no deployed dependency satisfies",
+          "description": "The library references a symbol that nothing in the deployed dependency set defines, so resolution fails at load or first use.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        }
+      ]
+    },
+    {
+      "id": "toolchain-platform-abi",
+      "title": "Toolchain and platform ABI",
+      "summary": "The implementation-defined agreements a compiler, standard library, and target impose on everything built with them. Nothing in the library's source needs to change for these to break consumers.",
+      "leaves": [
+        {
+          "id": "toolchain-platform-abi.compiler-abi-epoch-changed",
+          "title": "Compiler ABI epoch changed",
+          "description": "The toolchain moves to a different C++ ABI generation, changing mangling, layout, or passing rules for unchanged declarations.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.standard-library-implementation-changed",
+          "title": "Standard library implementation changed",
+          "description": "The C++ standard library is switched (for example libstdc++ to libc++), replacing the layout and mangling of every standard type in the surface.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.standard-library-abi-mode-changed",
+          "title": "Standard library ABI mode changed",
+          "description": "A standard library ABI switch is flipped (dual-ABI string selection, ABI version macro, unstable-ABI namespace), re-mangling and re-laying-out standard types.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.standard-library-debug-mode-changed",
+          "title": "Standard library debug or hardening mode changed",
+          "description": "A checked/debug standard library mode is enabled or disabled, changing container layouts and internal symbols between the library and its consumers.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.language-standard-changed",
+          "title": "Language standard level changed",
+          "description": "The compiled language standard changes, altering layout, mangling, or implicit special members for declarations whose source text is unchanged.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.character-type-model-changed",
+          "title": "Character type model changed",
+          "description": "The representation or distinctness of character types changes (`char8_t` becoming a distinct type, plain `char` signedness, `wchar_t` width), changing mangling and layout.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.floating-point-model-changed",
+          "title": "Floating-point representation or ABI changed",
+          "description": "The representation of a floating-point type or the convention for passing one changes (extended-precision `long double`, IEEE-128 migration, hard versus soft float).",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.integer-data-model-changed",
+          "title": "Integer data model changed",
+          "description": "The target's data model changes (ILP32, LP64, LLP64), altering the width of pointer and `long`-typed members throughout the surface.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.time-or-file-offset-abi-changed",
+          "title": "Time or file-offset ABI changed",
+          "description": "A platform-wide widening of `time_t`, `off_t`, or similar system types changes the layout of every public structure containing one.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.target-triple-changed",
+          "title": "Target architecture, OS, or environment changed",
+          "description": "The artifact targets a different architecture, operating system, or environment, so it is not a substitute for the artifact it replaces.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.libc-implementation-changed",
+          "title": "C runtime implementation changed",
+          "description": "The C runtime the artifact was built against changes (glibc to musl, one MSVC runtime to another), changing both symbol requirements and type layouts.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.cpu-baseline-raised",
+          "title": "CPU instruction-set baseline raised",
+          "description": "The artifact requires newer instruction-set extensions, so it fails on hardware the previous release supported.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.vector-abi-changed",
+          "title": "Vector or extended-register ABI changed",
+          "description": "The convention for passing vector or extended-register types changes, so calls involving them are made under different register assignments.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.exception-model-changed",
+          "title": "Exception handling model changed",
+          "description": "The unwinding model changes, or exceptions are disabled, so exceptions can no longer propagate correctly across the boundary.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.unwind-information-availability-changed",
+          "title": "Unwind information availability changed",
+          "description": "Unwind tables or frame pointers stop being emitted, so unwinding, backtraces, and cleanup across the boundary stop working.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.threadsafe-statics-mode-changed",
+          "title": "Thread-safe static initialization mode changed",
+          "description": "Guarded initialization of function-local statics is enabled or disabled, changing both the guard symbols emitted and the concurrency contract.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.whole-program-optimization-mode-changed",
+          "title": "Link-time or whole-program optimization mode changed",
+          "description": "Link-time optimization or whole-program devirtualization is enabled or disabled, so assumptions about a closed class hierarchy no longer hold once other components are involved.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.sanitizer-instrumentation-changed",
+          "title": "Sanitizer or instrumentation mode changed",
+          "description": "Instrumentation is enabled or disabled, changing object layouts, runtime requirements, and the symbol set, and requiring every participating component to match.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.tls-model-changed",
+          "title": "Thread-local storage model changed",
+          "description": "The TLS access model changes, altering the relocations and loader support required for thread-local variables.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.deployment-target-raised",
+          "title": "Platform deployment target raised",
+          "description": "The minimum OS version the artifact declares support for rises, so it stops loading on platforms the previous release supported.",
+          "platforms": [
+            "Mach-O",
+            "PE/COFF"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.runtime-floor-raised",
+          "title": "Runtime library floor raised",
+          "description": "The minimum runtime library version required at load rises, narrowing the set of systems the artifact runs on.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.memory-protection-posture-changed",
+          "title": "Memory protection posture changed",
+          "description": "Position independence, relocation read-only status, executable stack, or writable-executable segments change, altering the deployment and hardening contract.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.control-flow-integrity-changed",
+          "title": "Control-flow integrity mitigation changed",
+          "description": "Branch-target or shadow-stack mitigations are added or removed, which changes indirect-call requirements across mixed components as well as the security posture.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.runtime-check-level-changed",
+          "title": "Runtime check or stack-protection level changed",
+          "description": "Fortification level, stack protector coverage, or similar runtime checks change, altering emitted symbol requirements and the guarantees a deployment relies on.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "toolchain-platform-abi.structure-layout-rule-flag-changed",
+          "title": "Layout-affecting compiler flag changed",
+          "description": "A compiler flag that changes layout rules for unchanged source (short enums, bit-field packing rules, default member alignment) is added or removed.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        }
+      ]
+    },
+    {
+      "id": "multi-library-product-abi",
+      "title": "Multi-library and product ABI",
+      "summary": "Contracts that exist between components of one release rather than between a library and the outside world. Each component can be individually compatible while the product is not.",
+      "leaves": [
+        {
+          "id": "multi-library-product-abi.symbol-moved-between-components",
+          "title": "Symbol moved between components of a release",
+          "description": "An export migrates from one library of the product to another, so it is still present in the release but absent from the artifact consumers link against.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "multi-library-product-abi.component-added",
+          "title": "Component added to the release",
+          "description": "The release ships an artifact it did not before, extending the product's surface and its deployment requirements.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "multi-library-product-abi.component-removed",
+          "title": "Component removed from the release",
+          "description": "An artifact the previous release shipped is gone, which is a removal only when the new release's inventory is known to be complete.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "multi-library-product-abi.intra-product-signature-skew",
+          "title": "Components disagree about a shared declaration",
+          "description": "One component was built against a different version of another's headers, so the two disagree about a signature or layout they both use.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "multi-library-product-abi.intra-product-soname-skew",
+          "title": "Components disagree about a dependency's identity",
+          "description": "Components of one release record different runtime identities or versions for the same dependency, so no single deployment satisfies all of them.",
+          "platforms": [
+            "ELF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "multi-library-product-abi.shared-type-diverged-across-components",
+          "title": "Shared type defined differently in two components",
+          "description": "A type passed between components has diverging definitions in each, so objects crossing the boundary are misinterpreted.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "multi-library-product-abi.intra-product-unresolved-reference",
+          "title": "Component references something the release does not provide",
+          "description": "A component references a symbol no artifact in the release defines, so the product is unusable regardless of each component's own compatibility.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "multi-library-product-abi.plugin-interface-changed",
+          "title": "Plugin or extension interface changed",
+          "description": "The interface between a host and its separately built plugins changes, breaking plugins built against the previous host without any exported library symbol changing.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "multi-library-product-abi.variant-coverage-regressed",
+          "title": "Build-variant coverage regressed",
+          "description": "A release stops shipping a variant (architecture, toolchain, configuration) the previous release shipped, so consumers of that variant have nothing to upgrade to.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "multi-library-product-abi.component-version-lockstep-violated",
+          "title": "Component version lockstep violated",
+          "description": "Components that must be upgraded together are versioned or released in a way that allows a mixed deployment their shared contract does not survive.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "binary"
+        }
+      ]
+    },
+    {
+      "id": "source-api-compatibility",
+      "title": "Source-level API compatibility",
+      "summary": "Changes that break recompilation of consumer source without necessarily breaking an already-built binary. They are a separate contract with a separate audience, and are frequently the reverse of an ABI-safe change.",
+      "leaves": [
+        {
+          "id": "source-api-compatibility.declaration-removed-from-header",
+          "title": "Declaration removed from the public header",
+          "description": "A declaration disappears from the headers while the symbol may still be exported, so existing binaries keep working and recompilation fails.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.parameter-added-with-default",
+          "title": "Parameter added with a default argument",
+          "description": "A new parameter with a default keeps consumer source compiling while changing the function's binary contract \u2014 the inverse of the usual case.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.default-argument-changed",
+          "title": "Default argument value changed",
+          "description": "A default argument's value changes, so recompiled callers pass a different argument than already-compiled ones.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.default-argument-removed",
+          "title": "Default argument removed",
+          "description": "A parameter loses its default, so calls that omitted the argument no longer compile.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.overload-set-changed",
+          "title": "Overload set changed",
+          "description": "An overload is added or removed, so an unchanged call expression resolves to a different function, becomes ambiguous, or stops resolving.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.implicit-conversion-removed",
+          "title": "Implicit conversion removed",
+          "description": "A converting constructor becomes `explicit`, or a conversion operator is removed or made explicit, so implicit conversions consumers relied on stop compiling.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.member-access-tightened",
+          "title": "Member access tightened",
+          "description": "A member moves to a more restrictive access level, so consumer code that named it no longer compiles.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.declaration-deleted",
+          "title": "Declaration explicitly deleted",
+          "description": "A function is `= delete`d, converting a previously valid call into a compile error while the symbol may simply vanish.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.type-alias-removed",
+          "title": "Public type alias removed",
+          "description": "A `typedef` or alias that is part of the published vocabulary disappears, breaking source that names it even when the underlying type is unchanged.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.member-or-enumerator-renamed",
+          "title": "Public member or enumerator renamed",
+          "description": "A field, member function, or enumerator is renamed, breaking source that names it, with an ABI effect that depends on whether the name is mangled in.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.aggregate-initialization-broken",
+          "title": "Aggregate initialization contract broken",
+          "description": "A public aggregate gains, loses, or reorders members, so positional or designated initializers in consumer source stop compiling or initialize different members.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.completeness-requirement-changed",
+          "title": "Type completeness requirement changed",
+          "description": "An interface starts requiring a complete type where a forward declaration used to be enough (or the reverse), forcing consumers to change their includes.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.deprecation-attribute-added",
+          "title": "Deprecation or diagnostic attribute added",
+          "description": "A declaration gains `[[deprecated]]`, `[[nodiscard]]`, or a similar attribute, which breaks consumers building with warnings as errors.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.header-layout-changed",
+          "title": "Header file set or include graph changed",
+          "description": "A public header is renamed, split, merged, or stops including another, so consumer include directives no longer find the declarations they used to.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.template-argument-requirement-changed",
+          "title": "Template argument requirement changed",
+          "description": "A template gains a mandatory parameter or loses a default, so existing spellings of the instantiation no longer compile.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.consumer-build-requirement-changed",
+          "title": "Consumer build requirement changed",
+          "description": "Consuming the headers now requires a newer language standard, an added compile definition, or a new dependency's headers, so unchanged consumer builds fail.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C",
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "source-api-compatibility.namespace-or-scope-spelling-changed",
+          "title": "Public spelling of a scope changed",
+          "description": "A namespace or enclosing scope is renamed, merged, or introduced, so qualified names in consumer source must change even when the entity is otherwise identical.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        }
+      ]
+    },
+    {
+      "id": "header-only-compatibility",
+      "title": "Header-only compatibility",
+      "summary": "Libraries with no compiled artifact of their own. Every consumer compiles the whole implementation, so the compatibility question is about the source contract and about what happens when two consumers in one process compiled different versions of it.",
+      "leaves": [
+        {
+          "id": "header-only-compatibility.header-only-definition-changed",
+          "title": "Header-only definition changed",
+          "description": "An entity's definition changes, so every consumer must recompile and any two components that did not recompile together carry divergent copies.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both",
+          "notes": "Distinct from `inline-template-source-abi.inline-body-changed`: there is no compiled artifact at all, so no side of the comparison holds an authoritative copy."
+        },
+        {
+          "id": "header-only-compatibility.header-only-layout-changed",
+          "title": "Header-only type layout changed",
+          "description": "A type defined entirely in headers changes layout, so components compiled against different versions silently disagree about objects they exchange.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "header-only-compatibility.header-only-emitted-symbol-identity-changed",
+          "title": "Emitted symbol identity of a header-only entity changed",
+          "description": "The weak or comdat symbols consumer translation units emit change name or signature, so the linker's pick-one behaviour selects between incompatible definitions.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "header-only-compatibility.header-only-configuration-macro-changed",
+          "title": "Header-only configuration macro changed",
+          "description": "A configuration macro is added, removed, or given new meaning, so two translation units configuring the library differently produce incompatible definitions of the same names.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "header-only-compatibility.header-only-inline-namespace-changed",
+          "title": "Header-only namespace versioning changed",
+          "description": "The library's inline-namespace versioning is introduced, bumped, or removed, changing whether mixed versions in one process are detected or silently merged.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary",
+          "notes": "The header-only reading of `symbol-identity.inline-namespace-stamp-change`: here the stamp's job is to make a mixed-version process fail to link rather than to retire an export."
+        },
+        {
+          "id": "header-only-compatibility.header-only-distribution-shape-changed",
+          "title": "Header distribution shape changed",
+          "description": "The library moves between single-header and multi-header form, or reorganizes its include root, so consumer include directives and build systems must change.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "header-only-compatibility.header-only-linkage-requirement-introduced",
+          "title": "Compiled component introduced into a header-only library",
+          "description": "Part of the library now requires linking against a compiled artifact, so consumers that only included headers fail to link.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "header-only-compatibility.compiled-component-became-header-only",
+          "title": "Compiled component became header-only",
+          "description": "Functionality that had an exported definition becomes header-only, so its symbol disappears from the artifact consumers link against.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "header-only-compatibility.header-only-dependency-requirement-changed",
+          "title": "Header-only dependency requirement changed",
+          "description": "The set or minimum version of third-party headers the library requires changes, so consumer builds that satisfied the old requirement fail.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "C++"
+          ],
+          "surface": "source"
+        }
+      ]
+    },
+    {
+      "id": "language-ecosystem-specific",
+      "title": "Language and ecosystem-specific mechanisms",
+      "summary": "Mechanisms that only exist inside one language, runtime, or ecosystem's own compatibility contract, and that its consumers judge a release against.",
+      "leaves": [
+        {
+          "id": "language-ecosystem-specific.c-opaque-handle-representation-changed",
+          "title": "C opaque handle representation changed",
+          "description": "A typedef'd handle changes between pointer, integer, and structure representation, changing both calling contract and consumer storage.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "language-ecosystem-specific.c-callback-registration-contract-changed",
+          "title": "C callback registration contract changed",
+          "description": "A registered callback's signature, calling convention, user-data slot, or lifetime contract changes, so consumer-supplied callbacks are invoked incorrectly.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "language-ecosystem-specific.c-sentinel-or-terminator-contract-changed",
+          "title": "C sentinel or terminator convention changed",
+          "description": "A variadic sentinel, array terminator, or out-of-band error value convention changes, so unchanged consumer calls are misinterpreted.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "language-ecosystem-specific.c-versioned-struct-size-protocol-changed",
+          "title": "Versioned-structure size protocol changed",
+          "description": "A struct carrying its own size or version field changes how that field is interpreted, defeating the mechanism that made growth safe.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "C"
+          ],
+          "surface": "both"
+        },
+        {
+          "id": "language-ecosystem-specific.cpython-stable-abi-violated",
+          "title": "CPython stable ABI contract violated",
+          "description": "An extension module built for the limited API uses something outside it, so the `abi3` promise it advertises does not hold.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.cpython-abi3-floor-raised",
+          "title": "CPython `abi3` floor raised",
+          "description": "The minimum limited-API version the module targets rises, so interpreters that could load the previous release no longer can.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.cpython-abi3-dropped",
+          "title": "CPython limited API abandoned",
+          "description": "A module that shipped a version-independent `abi3` artifact now ships per-version binaries, changing what every consumer environment must obtain.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.cpython-version-tag-changed",
+          "title": "CPython version-specific ABI tag changed",
+          "description": "The interpreter ABI tag the artifact is built for changes, so it is no longer loadable by the interpreters the previous release supported.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.cpython-build-configuration-abi-changed",
+          "title": "CPython build-configuration ABI changed",
+          "description": "The interpreter build variant the module requires changes (free-threaded versus GIL-enabled, debug build, unicode or pymalloc configuration), which the loader treats as a different ABI.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.cpython-internal-structure-dependency-changed",
+          "title": "Dependency on interpreter-internal structures changed",
+          "description": "The module's use of interpreter-internal object layouts or private APIs changes, tying it to interpreter internals that are not covered by any compatibility promise.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.cpython-module-init-contract-changed",
+          "title": "Extension module initialization contract changed",
+          "description": "The module's initialization entry point, multi-phase initialization support, or module name changes, so the interpreter cannot initialize it as before.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.cpython-level-api-changed",
+          "title": "Python-level API of an extension package changed",
+          "description": "The Python-visible callables, classes, parameters, or defaults an extension package exposes change, which breaks consumers even when the compiled surface is intact.",
+          "platforms": [
+            "any"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "source"
+        },
+        {
+          "id": "language-ecosystem-specific.numpy-c-api-floor-raised",
+          "title": "Array C-API floor raised",
+          "description": "The minimum NumPy C-API version the artifact requires rises, so environments that satisfied the previous floor no longer work.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.numpy-abi-generation-changed",
+          "title": "Array ABI generation changed",
+          "description": "The artifact is built against an incompatible major array ABI generation, so it cannot be mixed with modules built against the other.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.wheel-tag-mismatch",
+          "title": "Distribution platform tag misrepresents the artifact",
+          "description": "A built distribution's platform, interpreter, or ABI tag does not describe what the contained binary actually requires, so installation succeeds and loading fails.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.wheel-bundled-closure-violated",
+          "title": "Bundled dependency closure violated",
+          "description": "A self-contained distribution's bundled libraries stop being a closed, correctly named set, so the artifact resolves to whatever the host happens to provide.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "CPython extension"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.sycl-plugin-interface-version-changed",
+          "title": "Heterogeneous runtime plugin interface version changed",
+          "description": "The version of the interface between the runtime and its backend plugins changes, so plugins built against the previous version are rejected or misused.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "SYCL"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.sycl-plugin-entrypoint-set-changed",
+          "title": "Plugin entry-point set changed",
+          "description": "The set of entry points a backend plugin must provide or the runtime may call changes, breaking independently built plugins.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "SYCL"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.sycl-backend-requirement-changed",
+          "title": "Backend or driver requirement changed",
+          "description": "The required backend runtime, driver version, or device support changes, so deployments that ran the previous release no longer do.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "SYCL"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.sycl-device-image-format-changed",
+          "title": "Device image format or target set changed",
+          "description": "The device code format, intermediate representation version, or set of ahead-of-time targets embedded in the artifact changes, so previously supported devices stop working.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "SYCL"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.sycl-kernel-identity-changed",
+          "title": "Kernel identity changed",
+          "description": "The names or identities used to select device kernels change, so host code and device images built at different times no longer match.",
+          "platforms": [
+            "ELF",
+            "PE/COFF",
+            "Mach-O"
+          ],
+          "languages": [
+            "SYCL"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.kabi-exported-symbol-removed",
+          "title": "Kernel-exported symbol removed",
+          "description": "A symbol exported to kernel modules disappears, so out-of-tree modules that used it cannot load.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "Linux kernel"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.kabi-symbol-checksum-changed",
+          "title": "Kernel symbol version checksum changed",
+          "description": "A symbol's computed type checksum changes, so modules built against the previous kernel are rejected even though the name is unchanged.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "Linux kernel"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.kabi-symbol-namespace-changed",
+          "title": "Kernel symbol namespace or license class changed",
+          "description": "A symbol moves between export namespaces or license classes, so modules that previously resolved it are refused.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "Linux kernel"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.btf-type-layout-changed",
+          "title": "Kernel type layout described by BTF changed",
+          "description": "A type described by kernel type information changes shape, so relocatable programs and tools that read it against the previous description misread memory.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "Linux kernel"
+          ],
+          "surface": "binary"
+        },
+        {
+          "id": "language-ecosystem-specific.kernel-type-information-availability-changed",
+          "title": "Kernel type information availability changed",
+          "description": "The kernel type information a consumer relies on (BTF or CTF presence, completeness, or format version) changes, so consumers lose the evidence they resolve against.",
+          "platforms": [
+            "ELF"
+          ],
+          "languages": [
+            "Linux kernel"
+          ],
+          "surface": "binary"
+        }
+      ]
+    }
+  ]
+}
