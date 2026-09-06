@@ -1849,7 +1849,7 @@ track, the steps are ordered.
 | ~~**T1 — Dead-implementation retirement**~~ ✅ **done (2026-09-05)** | Rehomed `perform_elf_dump`/`handle_non_elf_dump`'s unique assertions onto the live path; deleted both functions, `cli_dump_non_elf.py` and `cli_dump_protocols.py` | `cli_dump_helpers.py` (-661 lines), `cli_dump_non_elf.py` + `cli_dump_protocols.py` (deleted), their tests, `architecture/{modules,debt}.yaml`, `CLI_CONTRACT_ALLOWLIST` | nothing |
 | ~~**T2 — Ledger/status-model change**~~ ✅ **done (2026-09-05)** | Added the `introduced → wired → authoritative → retired` ladder and a separate `investigated_declined` disposition to `docs/_meta/one-semantic-pipeline-status.yaml` + `scripts/pipeline_status_ledger.py`'s field/enum validation; re-audited every concept row against it. Shipped as ledger `schema_version: 2` with the cross-field rules and the re-audit described under "The four-state status model" above | `scripts/pipeline_status_ledger.py`, the ledger, `tests/` | nothing |
 | ~~**T3 — Typedef/constant authority cutover**~~ ✅ **done (2026-09-05)** | Deleted the runtime dual-index construction: `typedef_index_pair`/`constant_index_pair` now decide each side of a comparison independently, reading a side's real `SemanticIR` directly whenever it has one (never both-or-neither — a Codex review round found the first both-or-neither cut would starve an IR-carrying side of its own real evidence whenever the *other* side lacked one) and falling back to the legacy adapter's projection of that side's own flat collection only when it has none; the identity half of the old fidelity gate (a real IR disagreeing with its own `typedef_entity_ids`/`constant_entity_ids` sidecar) moved to the canonical model's load boundary (`AbiSnapshot.__post_init__`, and re-run explicitly after `serialization.snapshot_from_dict` decodes a stored IR — a second Codex finding, since that decode bypasses `__post_init__`), now a hard `SemanticIrAuthorityError` rather than a silent fallback. A related fix in the same PR: `diff_constants` was silently dropping a constant addition/removal whenever its value was `Fact.unsupported()`, since only now reachable with the dual-index gate gone (Codex finding). The old gate's name/value equality half against the legacy alias/value collections is deliberately *not* preserved anywhere — requiring it would make a populated legacy collection an accidental prerequisite of `SemanticIR`-only construction, the opposite of authority transfer | `compare/typedefs.py`, `compare/constants.py`, `model/semantic_ir_legacy_adapter.py`, `model/snapshot.py`, `errors.py`, `serialization.py`, `scripts/semantic_ir_cutover.py` | nothing (T2 records it) |
-| **T4 — Dump request contract** ◐ *(partial, 2026-09-05: see note below)* | Fold `execute_dump_request`'s nine semantic kwargs into the typed request; split backend selection from fallback policy; give source-only dump an execution variant | `service_dump_pipeline.py`, `cli_dump_request.py`, `cli_buildsource.py`, `frontends/cli/dump_execute.py` | ~~T1~~ — satisfied (T1 landed 2026-09-05) |
+| ~~**T4 — Dump request contract**~~ ✅ **done (2026-09-06)** | Fold `execute_dump_request`'s nine semantic kwargs into the typed request; split backend selection from fallback policy; give source-only dump an execution variant | `dumper.py`, `dumper_toolchain.py`, `extract/header_ast_backend.py`, `service_compare_evidence.py`, `service_dump_pipeline.py`, `workflows/artifact/dump_request.py`, `workflows/artifact/dump_execution_options.py`, `workflows/artifact/execute_source_only.py` | ~~T1~~ — satisfied (T1 landed 2026-09-05) |
 | ~~**T5 — Direct-bypass migration**~~ ✅ **done (2026-09-05)** | Routed `appcompat.check_appcompat()` and `stack_checker._run_abi_diff()` through `service.run_dump`/`service.compare_snapshots` instead of calling `dumper.dump()`/`checker.compare()` directly; removed `appcompat.check_appcompat()`'s two entries from `CLI_CONTRACT_ALLOWLIST` (`stack_checker.py` was never itself in that list -- it isn't one of the front-end modules the `cli-contract` gate scans). No `cli_stack.py` change was needed: `_run_abi_diff()`'s return type and failure semantics (`DiffResult \| None`, `ProfileMismatchError`/`ScopeMismatchError` still propagate) are unchanged | `appcompat.py`, `stack_checker.py`, `scripts/check_ai_readiness.py` | T4 for the dump half; the compare half is independent |
 | **T6 — Effective gate/policy convergence** ✅ *(landed 2026-09-05; the shared fold and the derived scheme are done, the two runtime shapes remain P0's own job)* | Collapse `apply_release_gate_pack`'s raw-string mirror of `pack_application.apply_to_compare_config` onto one shared fold **without inverting the dependency direction** — `policy/release_gate_options.py` deliberately consumes a `_GatePackApplication` `Protocol` rather than importing the flat-root `pack_application`, since `policy` may not import it (ADR-061; `policy/AGENTS.md`'s "Permitted imports"), so the shared fold belongs in an inward module both may import, or an outer layer invokes both halves — never a `policy → legacy root` call. Also make `GateOptions.exit_code_scheme` derived rather than independently constructible | `policy/release_gate_options.py`, `pack_application.py`, a new inward fold owner, `tests/test_release_gate_pack_fold_parity.py` | nothing |
 | **T7 — Canonical export index** | One raw export index plus named projections (versioned ELF / default versions / Mach-O normalization / named PE / ordinal imports / missing-vs-empty); delete the five sibling implementations | `policy/depth_projection.py`, `buildsource/crosscheck_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, `diff_unnamed_types.py` | nothing |
@@ -1884,17 +1884,109 @@ from the preview (`cli_dump_helpers.render_dump_dry_run`) — the gap this
 note used to describe ("a caller inspecting a `ResolvedDumpRequest` has no
 way to see what a real execution would pass") no longer holds.
 
-**Still open, unstarted:** item 1's other two clauses — splitting backend
-selection from fallback policy, and a source-only dump execution variant
-(`execute_dump_request` still raises `ValidationError` for a binary-less
-`InputSpec.path is None` request; producing that snapshot is still
-`cli_buildsource.dump_source_only`'s own separate pipeline, per that
-function's own docstring reference).
+**T4 closed (2026-09-06): both of item 1's remaining clauses landed.**
+
+*Backend selection split from fallback policy.* `dumper._resolve_single_
+ast_backend`/`_resolve_header_backend`/`HEADER_BACKENDS` moved to a new
+`extract/header_ast_backend.py` module (a real ADR-061 `extract`
+responsibility-package leaf, not a new flat `dumper_*.py`/`service_*.py`
+sibling — `architecture/modules.yaml`'s `frozen_root_families` closes both
+of those flat namespaces to new members, and `dumper.py`/
+`dumper_toolchain.py` were both already at their own no-growth debt-ledger
+line-count baseline with zero room to add a function). A new function
+there, `_resolve_effective_ast_backend(requested_frontend, frontend_context)`,
+is the one pure "selection" primitive: it validates via
+`_resolve_single_ast_backend` (raising for a request no single parser can
+satisfy — `"hybrid"`, or an explicit/env-pinned `castxml` under a non-host
+context) and then mirrors `_header_ast_parser`'s own post-resolution
+dispatch rule (`if resolved == "clang" or frontend_context != "host":
+return _run_clang()`) exactly. `dumper.py`/`dumper_toolchain.py` re-export
+every name from the new module unchanged, so no existing
+`from .dumper import _resolve_header_backend`-shaped call site moved.
+`dumper._header_ast_parser`'s own dispatch now calls this same function
+instead of re-deriving the rule inline, and
+`service_compare_evidence.effective_frontend_for_context` (a new function,
+alongside `requested_frontend_override` — the override-precedence half
+`effective_frontend` already had inline, now factored out so it isn't
+re-derived a second time either) calls it too for
+`service_dump_pipeline.resolve_dump_request`'s own `effective_header_
+backend` reporting field — replacing that function's previous ~25-line
+inline reimplementation of both rules with one shared-selector call.
+Runtime fallback *policy* (`dumper._castxml_fallback_reason` — only
+discoverable by actually attempting castxml and observing a specific
+failure signature) is untouched and stays in `dumper.py`, where the
+attempt itself happens; the two were never conflated by this change.
+`tests/test_ast_backend_selection.py` states the "identical prediction
+regardless of caller" contract directly, over a range of inputs, not just
+the one case each pre-existing test already covered.
+
+*Source-only dump execution variant.* `service_dump_pipeline.
+execute_dump_request` no longer raises unconditionally for a binary-less
+(`InputSpec.path is None`) `ResolvedDumpRequest` — it dispatches to a new
+`workflows/artifact/execute_source_only.execute_source_only_dump_request`,
+which builds an empty-library `AbiSnapshot` and embeds L3-L5 evidence via
+`workflows.extraction.embed_build_source` (the engine primitive, not
+`cli_buildsource.embed_build_source`'s Click-error-translating wrapper),
+then enforces the requested-depth floor exactly like the binary path does
+— the same pipeline `cli_buildsource.dump_source_only` already ran,
+reduced to its engine primitives so a non-CLI (typed API) caller can reach
+it too. No idempotence guard was needed (unlike `_write_snapshot_output`'s
+own `build_source_already_satisfies` check): the new function's snapshot
+is freshly constructed and embedded into exactly once, so there is no
+earlier embed to be idempotent against — that guard remains relevant only
+where a CLI write step might re-embed onto an already-populated snapshot
+(the binary path's resolve-time embed), which this addition doesn't touch.
+Lives in its own `workflows/artifact/` module (a same-layer sibling of
+`service_dump_pipeline.py`, which is itself `layers.workflows`-classified)
+rather than growing `service_dump_pipeline.py` past its own 800-line
+new-file architecture cap, and returns a plain `SourceOnlyDumpOutcome`
+rather than a real `DumpResult`: `service_dump_pipeline.py` imports this
+module to call the function, so returning `DumpResult` itself would need a
+module-level import back into `service_dump_pipeline.py`, which the
+AI-readiness `import-cycle-growth` gate's whole-file AST walk (it does not
+special-case `TYPE_CHECKING` blocks or function-local imports) flags as a
+new two-module cycle regardless of how that import were spelled; the
+caller (already holding `DumpResult` in scope) builds the real object from
+the three fields `SourceOnlyDumpOutcome` carries. `ResolvedDumpRequest`
+itself also moved to a new `workflows/artifact/dump_request.py` leaf for
+the identical reason — the new module's own function signature needs the
+type, and importing it only from `service_dump_pipeline.py` would create
+the same cycle; `service_dump_pipeline.py` re-exports it unchanged.
+`tests/test_dump_source_only_execution.py` pins the general contract
+(parity with `dump_source_only` for both the `--sources` and
+`--build-info`-only shapes, the "no evidence" `ValidationError`, and the
+unreached-requested-depth-floor `ValidationError`) rather than one
+hand-picked example.
+
+**`cli_buildsource.dump_source_only`/the `dump` CLI's own source-only
+dispatch (`frontends/cli/commands/dump.py`, `so_path is None` branch) are
+deliberately left as they are — not a silent two-implementations gap, but
+a scoped decision recorded here per this file's own "Record before
+disposing" norm.** A full migration of that CLI call site to build a
+`DumpRequest` and call the new shared `execute_dump_request` path (the way
+ADR-063 Phase 1 / CLI cleanup phase two PR C did for the ELF/PE/Mach-O
+binary paths) would additionally need to preserve, byte-for-byte: provenance
+stamping via `_stamp_provenance`; `_write_snapshot_output`'s full
+sectioned-document/compression/depth-check/`--include-system-declarations`
+machinery; the G21.7 "missing requested evidence layer" warning; and the
+CLI's own `-H`/`--header`-has-no-effect warning — all of which
+`service_dump_pipeline.py`'s own module docstring explicitly excludes from
+this pipeline's scope ("the CLI's presentation and provenance layer").
+Attempting that migration in the same pass that introduces the new
+execution path itself risks exactly the kind of scope creep this plan's
+own T4 status notes have twice already had to walk back an overclaiming
+draft on (see the two notes above); it is better scoped as its own
+follow-up slice once the new path has had a release cycle to prove itself,
+mirroring how the ELF/PE/Mach-O migration itself was its own dedicated,
+multi-PR effort (ADR-063 Phase 1). Nothing about leaving it as-is
+regresses any existing behavior or test: `dump_source_only`'s own pipeline
+is unchanged, and the new `execute_dump_request` path is purely additive,
+reachable only through the typed API today.
 
 **Recommended first wave (fully parallel, no shared files):** ~~T1~~ (done),
 ~~T2~~ (done), T6 (landed with caveats — see its own row), T7, T8. **Second
-wave:** ~~T3~~ (done), T4, T9 (each large enough to be its own multi-PR
-effort). **Third wave:** ~~T5~~ (done), ~~T10~~ (done).
+wave:** ~~T3~~ (done), ~~T4~~ (done), T9 (each large enough to be its own
+multi-PR effort). **Third wave:** ~~T5~~ (done), ~~T10~~ (done).
 
 **T9's first slice (2026-09-05): the PDB `vtable` fabrication is closed;
 the rest of the item's scope is not.** `Fact[T]` gained a `producer: str |

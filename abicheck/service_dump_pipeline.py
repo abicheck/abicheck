@@ -45,16 +45,22 @@ import cycle.
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .errors import AstContextMissingError, ValidationError
+from .errors import ValidationError
 from .workflows.artifact import ResolvedArtifactPlan
 from .workflows.artifact.compile_context_gate import side_effective_compile_context
+from .workflows.artifact.dump_execution_options import (
+    DumpExecutionOptions as DumpExecutionOptions,
+    _DumpAssuranceView as _DumpAssuranceView,
+)
+from .workflows.artifact.dump_request import ResolvedDumpRequest as ResolvedDumpRequest
 from .workflows.artifact.execute import (
     _resolve_side_snapshot_impl,
     enforce_requested_depth,
 )
+from .workflows.artifact.execute_source_only import execute_source_only_dump_request
 from .workflows.artifact.resolve import (
     is_raw_source_tree,
     reject_hybrid_source_frontend,
@@ -78,152 +84,6 @@ __all__ = [
     "resolve_dump_request",
     "run_dump_request",
 ]
-
-
-@dataclass(frozen=True)
-class ResolvedDumpRequest:
-    """A :class:`DumpRequest` after resolution, before execution.
-
-    CLI cleanup phase two, PR C / PR 3A (see
-    ``docs/contribute/plans/cli-cleanup-phase-two.md``): the object
-    ``dump --dry-run`` is meant to render, once its rendering path
-    (``cli_dump_helpers.render_dump_dry_run``, currently a hand-written
-    second implementation) is migrated to build from this instead of
-    re-deriving the same facts independently.
-
-    Carries only what :func:`resolve_dump_request` can determine without
-    invoking castxml/clang or writing anything: the normalized language, the
-    requested header-AST backend, the detected binary format, the requested
-    ``depth`` (an input, known up front) and the effective *collect mode*
-    (the build/source evidence level ``depth`` resolves to). Deliberately
-    does **not** carry an *achieved* depth — that can only be read off the
-    completed snapshot (``cli_dump_helpers.fold_dump_provenance_into_dict``
-    derives it via ``_gated_source_label(snap.build_source, snap)``), so a
-    resolve-only object reporting it would have to guess, and a guess that
-    disagrees with the real run defeats the point of rendering ``--dry-run``
-    from a real resolved object (Codex review, fresh evidence). See
-    :class:`DumpResult` for the achieved depth.
-
-    Also deliberately excludes the P0.3 L3→L2 compile-context fold's result:
-    that fold (``buildsource.l2_seed.seed_includes_and_fold_compile_context``)
-    can raise ``HeaderCompileContextAmbiguousError`` on genuinely ambiguous
-    build evidence, and ``--dry-run``'s existing contract
-    (``render_dump_dry_run``'s own docstring) is to never raise on anything
-    but a usage error. Folding it in here would be a real behavior change to
-    that contract, not merely an additive one — it stays inside
-    :func:`execute_dump_request`, unchanged from where :func:`run_dump_request`
-    already runs it today (via :func:`~abicheck.service_input_resolution.resolve_side_snapshot`).
-
-    ``artifact_plan`` (dedup-and-convergence plan, Phase 1 item 1
-    "Milestone B"): the same facts this object already carries, also
-    attached to a :class:`~abicheck.workflows.artifact.ResolvedArtifactPlan`
-    -- the general, cross-consumer shape the plan's target architecture
-    names. Built with an empty ``pending_cleanups`` (this function allocates
-    no resource -- see :mod:`abicheck.workflows.artifact.contracts`'s own
-    module docstring for why the two fields that *would* require one,
-    effective include search and effective compile context, stay excluded
-    here too), so it is
-    additive, inert data today: nothing yet reads it. It exists so a future
-    consumer of the general shape (e.g. a migrated ``render_dump_dry_run``)
-    has one object to build from instead of this dump-specific one, without
-    this dataclass's own field surface changing again when that lands.
-
-    Excluded from this dataclass's generated ``__eq__``/``__hash__``
-    (``compare=False``, Codex review): ``ResolvedArtifactPlan`` is a plain
-    class, not a dataclass, so it compares by identity. Two structurally
-    identical ``DumpRequest``s resolved independently would otherwise
-    produce two ``ResolvedDumpRequest``s that compare unequal purely
-    because each carries its own, distinct ``ResolvedArtifactPlan``
-    instance -- silently breaking equality-based comparison or caching for
-    every existing and future caller of this frozen dataclass, over a field
-    that is itself inert today.
-
-    ``resolved_execution_context`` (One Semantic Pipeline plan, sub-phase 4B
-    -- ``dump``'s own slice of the gap
-    :class:`~abicheck.service_compare_pipeline.ResolvedComparePair`'s
-    identically-named field already closed for ``compare``): the
-    :class:`~abicheck.workflows.resolved_execution_context.
-    ResolvedExecutionContext` built from this same call's own, otherwise-
-    discarded :class:`~abicheck.workflows.plan.AnalysisPlan`
-    (:func:`resolve_dump_request` already calls ``AnalysisPlanner.resolve``
-    for its ADR-063 Phase 4 pre-flight check -- this is not a second
-    resolution). ``operation`` reads ``"dump"`` off the plan; ``evidence``
-    carries only ``requested_depth``/``available_depths`` at this point --
-    the pre-execution view, via :meth:`~abicheck.workflows.
-    resolved_execution_context.ResolvedExecutionContext.from_plan` with no
-    *assurance*. Optional and additive: excluded from ``compare=False`` for
-    the same reason ``artifact_plan`` is -- a fresh, distinct
-    ``ResolvedExecutionContext`` instance must not make two structurally
-    identical resolutions compare unequal. Carries no ``evaluation_config``/
-    ``compile_contexts`` yet, for the identical reason
-    ``ResolvedComparePair.resolved_execution_context`` does not: neither
-    resolves at this seam. See :func:`execute_dump_request` for the
-    post-execution counterpart, attached via
-    :meth:`~abicheck.workflows.resolved_execution_context.
-    ResolvedExecutionContext.with_assurance`.
-    """
-
-    request: DumpRequest
-    lang: str
-    lang_explicit: bool
-    header_backend: str
-    # A *reporting-only* projection of the concrete header-AST backend
-    # resolution currently favors -- what a future `--dry-run` render would
-    # show. `header_backend` alone under-reports this: service.py's own
-    # eff_backend computation gives an explicit `evidence.compile.frontend`
-    # precedence over the bare `header_backend` arg, and resolves "auto" to
-    # a concrete backend either way, so a naive render of `header_backend`
-    # can name a different frontend than what would currently be chosen.
-    #
-    # Deliberately NOT what execute_dump_request passes to execution
-    # (Codex review, two rounds -- the first attempt did pass this value
-    # through, which is a real regression, not a pin: `dumper.
-    # _header_ast_parser`'s own `_auto_ast_fallback_eligible(backend)`
-    # checks whether `backend` is *literally* the string "auto" to decide
-    # whether a CastXML failure may gracefully fall back to Clang, and a
-    # non-"host" `frontend_context` has its own "auto"-specific routing --
-    # pre-resolving "auto" to a concrete choice before it reaches that
-    # function silently strips those behaviors). Execution therefore keeps
-    # passing the bare `header_backend` through unchanged, and this field
-    # is accepted as a best-effort preview that can, in principle, disagree
-    # with what execution ends up doing if the environment changes between
-    # resolve and execute, or if the genuinely-unpinned-"auto" fallback
-    # path fires -- the same class of accepted imprecision every other
-    # resolve-time preview in this object already carries.
-    effective_header_backend: str
-    fmt: str | None
-    debug_format: str | None
-    requested_depth: str | None
-    evidence: SideEvidence
-    public_headers: tuple[Path, ...]
-    public_header_dirs: tuple[Path, ...]
-    artifact_plan: ResolvedArtifactPlan | None = field(default=None, compare=False)
-    resolved_execution_context: ResolvedExecutionContext | None = field(
-        default=None, compare=False
-    )
-    # ADR-063 Track T4 ("Dump request contract"): the `DumpExecutionOptions`
-    # a real execution would pass to `execute_dump_request`, when a caller
-    # has resolved one -- so `dump --dry-run`
-    # (`cli_dump_helpers.render_dump_dry_run`) can show these nine values.
-    # `resolve_dump_request` never populates this itself (`build_config`/
-    # `legacy_compile_db_tokens`/`legacy_compile_db_matched` are CLI-only
-    # values with no `DumpRequest` equivalent); the `dump` CLI attaches its
-    # own via `dataclasses.replace(resolved, execution_options=...)`.
-    # `execute_dump_request` reads this as its default when its own
-    # `options` is `None` -- an explicit `options=` argument still wins.
-    # Comparable like any plain value (unlike `artifact_plan`/
-    # `resolved_execution_context` above, which compare by identity).
-    execution_options: DumpExecutionOptions | None = None
-
-    @property
-    def collect_mode(self) -> str:
-        """The effective build/source evidence level ``depth`` resolved to."""
-        return self.evidence.collect_mode
-
-    @property
-    def headers(self) -> tuple[Path, ...]:
-        """The resolved public-header set (files only; see ``public_header_dirs``)."""
-        return tuple(self.evidence.headers)
 
 
 @dataclass(frozen=True)
@@ -444,38 +304,31 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     # ResolvedDumpRequest.effective_header_backend's own comment).
     effective_header_backend = _sce.effective_frontend(evidence.compile, header_backend)
     # dumper._header_ast_parser routes ANY non-"host" frontend_context to
-    # clang unconditionally (`if resolved == "clang" or frontend_context !=
-    # "host": return _run_clang()`), regardless of what the backend itself
-    # resolved to -- mirror that here so this reporting field doesn't claim
-    # castxml for a request that will always run clang. But an *explicit*
+    # clang unconditionally, regardless of what the backend itself resolved
+    # to -- so the host-only `effective_frontend` above can under-report a
+    # request that will always run clang. But an *explicit*
     # `--ast-frontend castxml` (or an env-pinned one) combined with a
     # non-host context doesn't route to clang at all -- it raises
     # AstContextMissingError at execution, so claiming "clang" there would
     # be equally wrong in the other direction (Codex review, two rounds:
     # the first fix applied the clang override unconditionally, missing
-    # this pinned-castxml case entirely). Reuse dumper's own resolver to
-    # tell the two apart without duplicating its pin/env logic; on the
-    # raising path, leave whatever `_resolve_header_backend` already
-    # produced above -- this best-effort preview never raises.
-    if (
-        evidence.compile is not None
-        and evidence.compile.frontend_context.lower() != "host"
-    ):
-        from .dumper import _resolve_single_ast_backend
-
-        requested = (
-            evidence.compile.frontend
-            if evidence.compile.frontend.lower() != "auto"
-            else header_backend
-        )
-        try:
-            _resolve_single_ast_backend(
-                requested, evidence.compile.frontend_context.lower()
-            )
-        except (AstContextMissingError, ValidationError):
-            pass
-        else:
-            effective_header_backend = "clang"
+    # this pinned-castxml case entirely).
+    #
+    # `effective_frontend_for_context` is the one shared "selection"
+    # function this and `dumper._header_ast_parser` both call for that
+    # prediction (`dumper._resolve_effective_ast_backend`, ADR-063 T4) --
+    # this used to inline the same override-precedence and
+    # context-forces-clang rules a second time, which is exactly the
+    # duplicated reimplementation that made those two Codex-review rounds
+    # necessary in the first place. `None` means "leave `effective_frontend`
+    # above unchanged" -- either the context is "host" (nothing to predict),
+    # or the request is one no single parser could satisfy, and this is a
+    # best-effort preview that must never raise.
+    context_backend = _sce.effective_frontend_for_context(
+        evidence.compile, header_backend
+    )
+    if context_backend is not None:
+        effective_header_backend = context_backend
 
     # `headers` doubles as the public-header set for provenance tagging and
     # must be split into files and directories before tagging (an unsplit
@@ -517,117 +370,6 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     )
 
 
-@dataclass(frozen=True)
-class _DumpAssuranceView:
-    """The minimal shape :meth:`~abicheck.workflows.resolved_execution_context.
-    EvidenceView.from_assurance` reads via ``getattr`` -- ``requested_depth``/
-    ``effective_depth``/``depth_satisfied`` -- built from a completed
-    :class:`DumpResult`'s own facts rather than a real
-    :class:`~abicheck.analysis_assurance.AnalysisAssurance`.
-
-    ``AnalysisAssurance`` is comparison-shaped: pair symmetry (L0/header/DWARF
-    context drift between two sides), target/TU/export accounting, fact-set
-    comparability -- none of it meaningful for a single ``dump`` with no other
-    side to compare against. But the one axis ``AnalysisAssurance`` and a
-    single dump genuinely share -- "did the requested ``--depth`` get
-    reached" -- *is* knowable here, from :func:`execute_dump_request`'s own
-    already-computed ``effective_depth`` (a real post-execution fact, the
-    identical value :class:`DumpResult` itself carries), so this class states
-    exactly that axis rather than leaving :meth:`~abicheck.workflows.
-    resolved_execution_context.ResolvedExecutionContext.with_assurance`
-    fully unwired for ``dump``.
-    """
-
-    requested_depth: str | None
-    effective_depth: str | None
-    depth_satisfied: bool | None
-
-
-@dataclass(frozen=True)
-class DumpExecutionOptions:
-    """The out-of-band execution semantics :func:`execute_dump_request`
-    needs beyond *resolved* itself and *notify*, folded into one typed value
-    -- ADR-063 ``duplication-and-convergence-assessment.md`` Track T4 ("Dump
-    request contract"). Before this, the nine fields below were nine
-    separate keyword parameters on :func:`execute_dump_request`: reaching
-    the same function did not mean a caller stated a coherent, nameable
-    execution plan, only that it happened to pass the same nine positional
-    names. Grouping them is additive, not a new decision point -- every
-    field keeps the exact default :func:`execute_dump_request` already gave
-    it, so ``DumpExecutionOptions()`` (the parameter's own default) is
-    bit-for-bit equivalent to omitting all nine kwargs before this change.
-
-    Since this track's follow-up, an instance is also attachable to the
-    *resolved* request (see :attr:`ResolvedDumpRequest.execution_options`)
-    rather than only assembled fresh at :func:`execute_dump_request`'s own
-    call boundary -- so ``dump --dry-run`` can render what a real run would
-    pass, instead of the ``dump`` CLI threading the nine values through
-    :func:`~abicheck.frontends.cli.dump_execute.execute_dump_cli_run` as
-    separate parameters.
-
-    *build_config*/*build_query*/*build_compile_db*/*changed_paths*/
-    *allow_build_query* (PR 3A, dump/scan resolver convergence): optional
-    pass-throughs to
-    :func:`~abicheck.workflows.artifact.execute._resolve_side_snapshot_impl`.
-    These exist only for the ELF ``dump`` CLI path's ``--config`` flag --
-    and, for a programmatic caller, its own ``build_query``/
-    ``build_compile_db`` arguments (PR 3C removed the CLI flags of those
-    names; these fields stay because a Python API caller is the operator,
-    exactly as an explicit ``--config`` is) -- to route through this one
-    shared primitive instead of a second, independent call to the same
-    underlying fold.
-
-    *legacy_compile_db_tokens* (ADR-063 Phase 1): the castxml flags the CLI's
-    own legacy ``-p``/``--compile-db`` auto-match
-    (``cli_helpers_compare._resolve_build_context_flags``) already derived,
-    forwarded verbatim to :func:`~abicheck.workflows.artifact.execute._resolve_side_snapshot_impl`
-    -- see that function's own docstring for the precedence rule (the P0.3
-    fold's own result wins whenever it applies) and
-    ``docs/contribute/known-gaps.md``'s "ADR-063 Phase 1" entry for exactly
-    what this closes and what still doesn't. *legacy_compile_db_matched*
-    (Codex review, fresh evidence) is a separate signal from whether any
-    tokens were actually derived -- see the resolve-layer function's own
-    docstring for why a real match with zero derived flags still must set
-    it. Both are passed by the migrated ``dump`` CLI's real run for either
-    binary format (``frontends.cli.dump_execute.execute_dump_cli_run``) --
-    ADR-063 Phase 1 migrated PE/Mach-O onto this same function after ELF, so
-    ``cli_dump_non_elf.handle_non_elf_dump`` stopped being called from
-    ``dump_cmd`` for either format; ADR-063 Track 1 then deleted it, and
-    ``cli_dump_helpers.perform_elf_dump`` with it, once the only thing left
-    holding either alive was its own unit tests.
-
-    *seed_collect_mode*/*source_frontend_from_folded_context* (Codex review
-    on the initial ELF migration -- two real regressions it introduced):
-    forwarded verbatim to
-    :func:`~abicheck.workflows.artifact.execute._resolve_side_snapshot_impl`,
-    whose own docstring documents each. Both default to the pre-typed-object
-    behavior (``seed_collect_mode=None`` pins the L2 seed's collect mode to
-    ``"off"``; ``source_frontend_from_folded_context=False`` keeps L4 replay
-    pointed at the pre-fold compiler). The retired ``perform_elf_dump``
-    always forwarded its own resolved ``collect_mode`` to the identical L2
-    seed call (unconditionally running a zero-config inferred build query
-    for a ``--sources`` tree with no compile database) and always
-    reassigned ``gcc_path``/``gcc_prefix``/``effective_gcc_options`` from
-    the L3 fold's context once it applied (so an L4 source replay used the
-    compiler the L3 fold actually matched, not the caller's pre-fold
-    default) -- the migrated ELF run builds
-    ``DumpExecutionOptions(seed_collect_mode=resolved.collect_mode,
-    source_frontend_from_folded_context=True, ...)`` to preserve both,
-    exactly as ``scan``'s own candidate resolution already does for the
-    identical reasons (see that call site's comments).
-    """
-
-    build_config: Path | None = None
-    build_query: str | None = None
-    build_compile_db: str | None = None
-    changed_paths: tuple[str, ...] = ()
-    allow_build_query: bool | None = None
-    legacy_compile_db_tokens: tuple[str, ...] = ()
-    legacy_compile_db_matched: bool = False
-    seed_collect_mode: str | None = None
-    source_frontend_from_folded_context: bool = False
-
-
 def execute_dump_request(
     resolved: ResolvedDumpRequest,
     *,
@@ -654,11 +396,14 @@ def execute_dump_request(
     one, or ``DumpExecutionOptions()`` when neither is set -- every
     pre-existing caller is unaffected.
 
+    A binary-less (``InputSpec.path is None``) *resolved* is dispatched to
+    :func:`~abicheck.workflows.artifact.execute_source_only.
+    execute_source_only_dump_request` instead (ADR-063 Track T4) -- see
+    that function's own docstring.
+
     Raises:
         ValidationError: If *resolved* requests a ``depth`` the resolved
-            snapshot did not reach, or if its input carries no ``path`` (a
-            source-only request — see
-            :func:`~abicheck.cli_buildsource.dump_source_only`).
+            snapshot did not reach.
         SnapshotError: If the input cannot be loaded.
     """
     from .dependency_info import populate_side_dependency_info
@@ -669,22 +414,21 @@ def execute_dump_request(
     request = resolved.request
     side = request.input
     if side.path is None:
-        # PR 3A blocker 5: `InputSpec.path` was widened to `Path | None` so a
-        # source-only dump is *expressible* as a typed request (which is what
-        # lets `dump_cmd` build one `DumpRequest` covering both of its
-        # branches, and lets `--dry-run` resolve one). Executing that shape is
-        # a genuinely different pipeline -- `cli_buildsource.dump_source_only`
-        # collects L3-L5 into an otherwise empty snapshot with no
-        # `resolve_input` call at all -- and routing it through here is its own
-        # slice, not part of making the model able to say it. Fail loudly and
-        # specifically rather than with an `AttributeError` from deep inside
-        # extraction.
-        raise ValidationError(
-            "executing a binary-less (source-only) DumpRequest is not wired "
-            "into execute_dump_request yet -- resolve_dump_request() supports "
-            "it (that is what `dump --dry-run` needs), but producing the "
-            "snapshot is still cli_buildsource.dump_source_only's own "
-            "pipeline. Supply InputSpec.path, or use the `dump` CLI."
+        # A source-only dump (ADR-063 Track T4's own tracked gap, now
+        # closed): a sibling module's function rather than a branch
+        # continuing below, since nearly every remaining line here reads
+        # `side.path` or a value `_resolve_side_snapshot_impl` only
+        # produces from a real artifact -- see that function's own
+        # docstring for why it lives in its own module. It returns a plain
+        # `SourceOnlyDumpOutcome`, not a `DumpResult`, so this is the one
+        # place that constructs the latter for this shape (see that
+        # module's own docstring for why -- avoiding a real import cycle).
+        outcome = execute_source_only_dump_request(resolved, options)
+        return DumpResult(
+            resolved=resolved,
+            snapshot=outcome.snapshot,
+            effective_depth=outcome.effective_depth,
+            resolved_execution_context=outcome.resolved_execution_context,
         )
 
     resolution = _resolve_side_snapshot_impl(
@@ -778,7 +522,7 @@ def execute_dump_request(
         # answers whether `resolution.effective_compile_context` is safe to
         # record, including its own format detection (following a GNU ld
         # linker script to its real target). `side.path` is guaranteed
-        # non-None here -- the `is None` branch above already raised.
+        # non-None here -- the `is None` branch above already returned.
         side_ctx = side_effective_compile_context(
             resolution.effective_compile_context,
             snap,
