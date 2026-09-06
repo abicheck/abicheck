@@ -1563,12 +1563,12 @@
     },
     {
       "path": "tests/test_contract_authoritative_pipeline.py",
-      "baseline_lines": 1506,
+      "baseline_lines": 1526,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1472 -> 1506 (workstream D-S1, vision-api-abi-evolution.md \"D. Optional prebuilt-consumer lifecycle\"): new/rewritten regression tests asserting a --used-by/--required-symbol(s) consumer's own result enriches rather than replaces the full-library verdict/exit code (the gate-replacement design this reverts).",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1472 -> 1506 (workstream D-S1, vision-api-abi-evolution.md \"D. Optional prebuilt-consumer lifecycle\"): new/rewritten regression tests asserting a --used-by/--required-symbol(s) consumer's own result enriches rather than replaces the full-library verdict/exit code (the gate-replacement design this reverts). Raised 1506 -> 1526 (ADR-067 C-S2): `test_a_missing_label_carries_the_whole_canonical_shape`'s docstring and body updated for the deliberate behavior change the same PR makes -- a `--required-symbol` label with no backing diff `Change` is no longer the bespoke `required_symbol_missing` synthetic entry (`scope_diff_to_required_symbols` now synthesizes the same ledger-recorded `CONSUMER_REQUIRED_SYMBOL_REMOVED` overlay `--used-by` already had), so the test asserts the new kind and records why in its own docstring rather than silently starting to fail. No responsibility to move: this is the one test module that already owns the D-S1 consumer-scoped-gate contract this assertion is part of.",
       "review_by": "2026-11-30"
     },
     {
