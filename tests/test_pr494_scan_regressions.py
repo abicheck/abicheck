@@ -19,7 +19,7 @@ def test_scan_baseline_compare_preserves_hard_l0_elf_removal(monkeypatch) -> Non
     remains authoritative and must be folded into the final scan verdict.
     """
 
-    old_snap = SimpleNamespace(build_source=None)
+    old_snap = SimpleNamespace(build_source=None, elf=None)
     new_snap = SimpleNamespace(build_source=None)
     hard_l0 = SimpleNamespace(kind=SimpleNamespace(value="func_removed_elf_only"))
     calls: list[dict[str, object]] = []
@@ -126,7 +126,7 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(
 ) -> None:
     """Only explicit hard L0 removals are preserved; crosschecks stay advisory."""
 
-    old_snap = SimpleNamespace(build_source=None)
+    old_snap = SimpleNamespace(build_source=None, elf=None)
     new_snap = SimpleNamespace(build_source=None)
     advisory = SimpleNamespace(
         kind=SimpleNamespace(value="header_build_context_mismatch")
@@ -242,7 +242,7 @@ def test_scan_baseline_compare_truncates_large_finding_lists(monkeypatch) -> Non
     """A large baseline diff caps embedded findings and flags the truncation."""
     from abicheck.cli_scan_baseline import _MAX_BASELINE_FINDINGS
 
-    old_snap = SimpleNamespace(build_source=None)
+    old_snap = SimpleNamespace(build_source=None, elf=None)
     new_snap = SimpleNamespace(build_source=None)
     many_breaks = [
         SimpleNamespace(
@@ -320,7 +320,7 @@ def test_scan_baseline_compare_truncates_large_suppressed_lists(monkeypatch) -> 
     """A large *suppressed* list caps independently and flags its own truncation."""
     from abicheck.cli_scan_baseline import _MAX_BASELINE_FINDINGS
 
-    old_snap = SimpleNamespace(build_source=None)
+    old_snap = SimpleNamespace(build_source=None, elf=None)
     new_snap = SimpleNamespace(build_source=None)
     many_suppressed = [
         SimpleNamespace(
@@ -409,7 +409,7 @@ def test_scan_baseline_compare_filters_dependency_scope_by_default(monkeypatch) 
     dump'd baseline" workflow with ScopeMismatchError. Assert the baseline
     resolve_input() call now matches the candidate's own default."""
 
-    old_snap = SimpleNamespace(build_source=None)
+    old_snap = SimpleNamespace(build_source=None, elf=None)
     new_snap = SimpleNamespace(build_source=None)
     calls: list[dict[str, object]] = []
 

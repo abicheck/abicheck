@@ -1,0 +1,3 @@
+### Changed
+
+- **`scan --baseline`'s old-side resolution now routes through the shared `service_input_resolution.resolve_side_snapshot` primitive** instead of calling `service.resolve_input()` directly — the same convergence `compare`'s implicit-dump operand, `dump`'s typed pipeline, and `scan`'s candidate resolution already went through. Closes the last `CLI_CONTRACT_ALLOWLIST` entry for `cli_scan_baseline.py`. No observable behavior change: no build/source evidence is embedded through this path (it's still diffed separately via `prepare_embedded_build_source`) and no compile database is resolvable here, so the shared primitive's L2 include/compile-context fold and ADR-039 build-context collector are both no-ops.
