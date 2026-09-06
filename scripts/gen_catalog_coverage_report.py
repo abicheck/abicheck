@@ -306,7 +306,8 @@ def render() -> str:
         '"three demonstrations of one rule" reads as "1 rule, 3 cases (1 '
         'canonical + 2 variants)" rather than "3 ABI concepts". Regenerate with '
         "`python scripts/gen_catalog_coverage_report.py` after any "
-        "`ground_truth.json` change.",
+        "`ground_truth.json`, `catalog/taxonomy.json`, or "
+        "`catalog/catalog_classification.yaml` change.",
         "",
         _rule_coverage(taxonomy),
         _scenario_coverage(taxonomy),

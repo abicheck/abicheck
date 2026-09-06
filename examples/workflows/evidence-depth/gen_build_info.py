@@ -8,6 +8,7 @@ itself, so this one-line generator fills that in with a real absolute
 path at run time instead of shipping a JSON file with a path baked in
 that would only be correct on one machine.
 """
+
 import json
 import os
 import sys
@@ -17,7 +18,11 @@ abs_dir = os.path.abspath(side_dir)
 db = [
     {
         "directory": abs_dir,
-        "command": f"gcc -I{abs_dir} -c widget.c -o widget.o",
+        # `arguments` (not `command`) so an `abs_dir` containing spaces
+        # doesn't need platform-specific quoting -- CompileEntry.from_dict()
+        # only re-splits a `command` string per-host, which a literal path
+        # with a space would survive incorrectly.
+        "arguments": ["gcc", f"-I{abs_dir}", "-c", "widget.c", "-o", "widget.o"],
         "file": os.path.join(abs_dir, "widget.c"),
     }
 ]

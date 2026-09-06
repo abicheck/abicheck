@@ -1088,11 +1088,7 @@ def _render_catalog_readme(text: str, entries: list[ReadmeEntry]) -> str:
 
 def _load_cases() -> list[Case]:
     data = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
-    taxonomy_block: dict[str, dict] = (
-        json.loads(example_catalog.TAXONOMY_PATH.read_text(encoding="utf-8"))
-        if example_catalog.TAXONOMY_PATH.exists()
-        else {}
-    )
+    taxonomy_block = example_catalog.load_taxonomy()
     cases = []
     for name, meta in data["verdicts"].items():
         # Multi-library bundle cases (ADR-023) used to be excluded here, on
@@ -1108,7 +1104,7 @@ def _load_cases() -> list[Case]:
             raise ValueError(f"{name}: unknown verdict {meta['expected']!r}")
         if meta["category"] not in CATEGORY_META:
             raise ValueError(f"{name}: unknown category {meta['category']!r}")
-        cases.append(_read_case(name, meta, taxonomy_block.get(name, {})))
+        cases.append(_read_case(name, meta, taxonomy_block[name]))
     return cases
 
 

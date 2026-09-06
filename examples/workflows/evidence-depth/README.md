@@ -64,7 +64,7 @@ python3 build_shared_lib.py -fPIC -Iv2 v2/widget.c -o v2/libwidget.so
 abicheck compare v1/libwidget.so v2/libwidget.so
 ```
 
-```
+```text
 | **Verdict** | ✅ `NO_CHANGE` |
 ```
 
@@ -83,7 +83,7 @@ you not to trust this result as complete.
 abicheck compare v1/libwidget.so v2/libwidget.so --header old=v1/widget.h --header new=v2/widget.h
 ```
 
-```
+```text
 | **Verdict** | ❌ `BREAKING` |
 
 ## ❌ Breaking Changes
@@ -115,7 +115,7 @@ argument directory with an absolute path baked in (a compile database has
 to name real, resolvable paths, which can't be written down ahead of time
 in a walkthrough anyone can copy to any machine) — see the script itself.
 
-```
+```text
 | **Verdict** | ❌ `BREAKING` |
 
 ## ❌ Breaking Changes

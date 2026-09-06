@@ -163,9 +163,13 @@ def _resolve_json_path(payload: object, path: str) -> tuple[object, bool]:
     that list -- so a nested field inside a report's own list-of-findings
     shape (suppressions, changes, ...) is reachable without a bespoke
     special case per field, the way `_change_kinds` below needed one before
-    this existed. Returns `(value, resolved)`; `resolved` is `False` when a
-    segment's container is missing or the wrong shape, distinct from a
-    present-but-`None` value.
+    this existed. A remainder that itself contains another `[]` segment
+    (`"groups[].changes[].symbol"`) is flattened one level rather than
+    nested -- each outer item's own projection is already a list, and
+    appending it whole would produce `[["to_rgb"]]` instead of `["to_rgb"]`,
+    silently failing every containment check downstream. Returns
+    `(value, resolved)`; `resolved` is `False` when a segment's container is
+    missing or the wrong shape, distinct from a present-but-`None` value.
     """
     segments = path.split(".")
     current: object = payload
@@ -178,12 +182,17 @@ def _resolve_json_path(payload: object, path: str) -> tuple[object, bool]:
             if not isinstance(items, list):
                 return None, False
             remainder = ".".join(segments[i + 1 :])
+            nested = "[]" in remainder
             projected = []
             for item in items:
                 value, ok = (
                     _resolve_json_path(item, remainder) if remainder else (item, True)
                 )
-                if ok:
+                if not ok:
+                    continue
+                if nested and isinstance(value, list):
+                    projected.extend(value)
+                else:
                     projected.append(value)
             return projected, True
         if not isinstance(current, dict) or segment not in current:

@@ -59,19 +59,19 @@ dynamic symbol table. That graph is what catches this break: `libalgo.so`'s
 own diff is clean, but the bundle-level view sees that it still imports a
 symbol nothing in the new release exports any more.
 
-```
+```text
 | **Verdict** | ❌ `BREAKING` |
 | **Bundle** | ❌ `BREAKING` (2 cross-library findings) |
 ```
 
-```
+```text
 | Library | Verdict | Breaking | Source | Risk | Additions |
 |---|---|---|---|---|---|
 | `libalgo.so` | ✅ `NO_CHANGE` | 0 | 0 | 0 | 0 |
 | `libcore.so` | ❌ `BREAKING` | 1 | 0 | 0 | 0 |
 ```
 
-```
+```text
 ## 🔗 Bundle (Cross-Library) Findings
 
 - **bundle_intra_dep_removed** — `core_mul` (consumer: `libalgo.so`)

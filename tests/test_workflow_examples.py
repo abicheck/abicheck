@@ -530,6 +530,27 @@ def test_a_list_projection_reaches_a_doubly_nested_field():
     )
 
 
+def test_a_list_projection_flattens_a_second_nested_projection():
+    """`groups[].changes[].symbol` -- two `[]` segments -- must flatten to a
+    single list of symbols, not a list of one-item lists. Appending each
+    outer item's own projection whole (`[["to_rgb"]]`) would make every
+    containment check against it silently fail, since `"to_rgb" in
+    [["to_rgb"]]` is False."""
+    runner = _load_runner()
+    payload = {
+        "groups": [
+            {"changes": [{"symbol": "to_rgb"}, {"symbol": "from_rgb"}]},
+            {"changes": [{"symbol": "convert"}]},
+        ]
+    }
+    assert (
+        runner._check_json(
+            payload, {"groups[].changes[].symbol": ["to_rgb", "convert"]}
+        )
+        == []
+    )
+
+
 def test_a_list_projection_reports_a_missing_value():
     runner = _load_runner()
     failures = runner._check_json(

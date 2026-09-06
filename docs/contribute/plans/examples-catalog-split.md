@@ -25,8 +25,10 @@ the `examples/README.md`/`catalog/README.md` split, the probes-directory
 consumers, and the four bidirectional directory-sync audits); Phase 6
 implemented (now reporting duplicate/variant families separately); "What is
 left" item 5, now closed — `taxonomy` split out of `ground_truth.json` into
-its own sibling manifest, `catalog/taxonomy.json`. See the table below for
-per-phase detail.
+its own sibling manifest, `catalog/taxonomy.json`; item 4, now closed too —
+a second, broader semantic dedup pass was run and confirmed zero new
+duplicate/variant pairs beyond Phase 2's original seven. See the table
+below for per-phase detail.
 
 ## Problem
 
@@ -616,17 +618,131 @@ in it is open.
    product regression against the flat table's 99.5% for that lane) —
    re-running all four lanes together to populate the remaining rows is a
    tracked follow-up, not fabricated here.
-4. **A second semantic dedup pass.** Phase 2 clustered rule cases on their
-   exact `expected_kinds` set and hand-reviewed 13 clusters. That cannot
-   find a pair where one case emits an incidental secondary kind, one uses
-   a generic kind where the other uses a dedicated one, or the source and
-   binary manifestations differ. The seven confirmed pairs are an initial
-   confirmed set, not proof the catalog holds no more duplication — and
-   the canonical rule registry now gives such a pass a vocabulary to work
-   against. **Note the standing restraint before attempting one**: this
-   plan's own "clusters reviewed and deliberately *not* merged" list is
-   longer than its merge list, and `case74`/`75`/`76`/`77` in particular
-   are four distinct mechanisms kept as four rules on purpose.
+4. **A second semantic dedup pass — investigated, complete, zero new pairs
+   confirmed.** Phase 2 clustered rule cases on their exact `expected_kinds`
+   set and hand-reviewed 13 clusters. This pass ran a broader clustering
+   script (throwaway, not committed) against `catalog/taxonomy.json` across
+   the three failure modes this item names: (a) one case's `expected_kinds`
+   a strict superset of another's by exactly one incidental secondary kind,
+   (b) a small symmetric-difference join (shared kinds outweighing the
+   differing ones) surfacing pairs that might use a generic kind on one
+   side and a dedicated one on the other, and (c) same-kind-set pairs whose
+   `artifact_shape` differs (a proxy for a source-only vs. binary-visible
+   manifestation of the same mechanism). The script proposed roughly 140
+   raw candidate pairs, almost all of them noise from a handful of
+   extremely generic, high-frequency kinds (`func_removed`, `func_added`,
+   `type_size_changed`, `public_api_internal_dependency_added`) pairing
+   every case that happens to use them regardless of mechanism — exactly
+   the false-positive shape a naive pass over these axes would produce.
+   Every candidate cluster with at least one plausible pairing was read in
+   full (both cases' READMEs plus `ground_truth.json` verdicts), holding to
+   the same bar Phase 2 already established (a duplicate has no
+   meaningfully distinguishing condition; a variant demonstrates the same
+   rule under a genuinely different condition; two cases that merely share
+   a `ChangeKind` while demonstrating different mechanisms must not be
+   merged — `case74`/`75`/`76`/`77`'s own calibration example). None
+   cleared that bar. Reviewed and deliberately *not* merged, beyond what
+   Phase 2's own list already covers:
+   - `case160_public_api_internal_dep_added`/
+     `case187_public_struct_private_field_type`/
+     `case188_public_class_private_base_class`/
+     `case189_public_function_private_parameter_type`/
+     `case190_public_inline_function_references_internal_constant` — all
+     five share a "public surface exposes an internal/private type or
+     dependency" narrative theme (the same shape as `case74`-`77`'s shared
+     "leaked internal types" theme), but 187/188/189 each already carry
+     their own dedicated, mechanically-derived `rule_slug`
+     (`public-struct-private-field-type`, `public-class-private-base-class`,
+     `public-function-private-parameter-type`) because each is a genuinely
+     distinct ABI-breaking mechanism — a field retyped to an internal
+     pointee (layout-invisible, symbol-invisible), a private base class
+     added (offset/layout shift), and a parameter retyped (mangled-name
+     change) — while only 160/190 correctly share
+     `public-api-gains-internal-dependency`, since both are the *risk-only*,
+     source-graph-detected case (no artifact-level signal at all) narrowed
+     to a specific call shape. Correctly already un-merged; no change made.
+   - `case37_base_class` vs. `case188_public_class_private_base_class` —
+     share base-class layout mechanics (`type_base_changed`), but case37 is
+     a three-mechanisms-in-one compound stress case on *ordinary public*
+     base classes (reorder, virtual, add), while case188 is a single,
+     specific mechanism on an *internal/leaked* base class — the same
+     "a compound stress case is not a duplicate of the single-mechanism
+     one" principle Phase 2's own `case09`/`38` entry already established,
+     applied to a new pairing.
+   - `case09_cpp_vtable` / `case38_virtual_methods` /
+     `case72_covariant_return_changed` / `case76_detail_pimpl_vtable_changed`
+     — four distinct vtable-affecting mechanisms sharing
+     `type_vtable_changed`/`type_base_changed`: a single slot insertion; a
+     four-changes-at-once compound stress case (already covered by Phase 2's
+     `case09`/`38` entry); a covariant return-type change combined with a
+     newly-inserted intermediate base class (vtable growth *and* RTTI *and*
+     a field-offset shift, substantially more complex than a bare slot
+     insert); and the internal-base vtable-slot insertion already accounted
+     for under `case74`-`77`. None restates another.
+   - `case53_namespace_pollution` vs. `case141_versioned_symbol_scheme` —
+     both a library-wide bulk rename (N `func_removed` + N `func_added` at
+     once, no dedicated detector), but for two different real lessons:
+     fixing a C namespace-pollution anti-pattern (adding a library prefix)
+     versus an ICU-style versioned-symbol-scheme major-version bump (suffix
+     rename at a stable SONAME) — the same "shares a `ChangeKind`, reaches a
+     different lesson" restraint already applied to `case65`/`139`/`183`.
+   - `case59_func_became_inline` vs. `case97_api_depends_on_consumer_env` —
+     both make an exported symbol vanish from `.dynsym`
+     (`func_removed_elf_only`), by unrelated root causes: outlined-to-inline
+     migration vs. a symbol whose export depends on a consumer-set build
+     macro.
+   - `case15_noexcept_change` vs. `case170_env_runtime_floor_raised` — both
+     raise a runtime version floor (`runtime_floor_raised`), but via
+     unrelated libraries and mechanisms: a `noexcept` removal pulling in
+     `__cxa_throw`/`libstdc++` symbol-version dependencies, vs. a glibc
+     relink shifting `__libc_start_main`'s version node.
+   - `case123_default_argument_removed` vs. `case32_param_defaults` — a
+     default value *removed entirely* vs. a default value *changed to a
+     different value*; both API_BREAK-with-binary-compatibility, but
+     genuinely different source-level mechanisms.
+   - `case26_union_field_added` vs. `case26b_union_field_added_compatible` —
+     already an intentional, un-flagged minimal contrastive pair (breaking
+     vs. compatible union growth depending on whether the new member exceeds
+     the union's existing largest member) rather than a redundant
+     restatement; correctly carries no `variant_of` today, and this pass
+     found no reason to add one.
+   - `case73_typedef_underlying_changed` vs. `case80_pimpl_shared_to_unique`
+     — a generic typedef underlying-type change vs. a pimpl-idiom-specific
+     ownership-model change (`shared_ptr`→`unique_ptr`) that happens to also
+     shrink the containing type; different mechanism, different lesson.
+   - The extended `type_size_changed`-sharing set the clustering script
+     surfaced beyond Phase 2's original eight (`case117_no_unique_address`,
+     `case140_empty_base_optimization_lost`, `case43_base_class_member_added`)
+     was checked against being folded into the `embedded-type-size-increased`
+     family (`case07`/`14`): all three already carry their own dedicated,
+     non-generic `rule_slug` (`no-unique-address`,
+     `empty-base-optimization-lost`, `base-class-member-added`) precisely
+     because each names a distinct, specific C++ ABI phenomenon rather than
+     a bare "a type got bigger" restatement — correctly never folded into
+     the generic family to begin with.
+   - `abicheck/model/change_catalog/types.py`'s `struct_size_changed`
+     (DWARF-tier) and `type_size_changed` (header-AST-tier) are already
+     recognized as the same underlying fact by the *engine* itself
+     (`diff_filtering._EQUIVALENT_CHANGE_CATEGORIES` collapses them for
+     finding-identity/dedup purposes) — the generic-vs-dedicated-kind axis
+     this item worried a case-clustering pass would miss is, for this
+     specific pair, already handled one layer down from the catalog. No
+     rule-case pair in the corpus demonstrates the identical real-world
+     condition through both kinds at once (`case80`, the one case using
+     `struct_size_changed`, is the pimpl-ownership-model mechanism above,
+     not a plain size-only demonstration `case07`/`14` already cover), so
+     there was nothing here for this pass to merge.
+
+   **Final count: 0 new confirmed duplicate/variant pairs.** The seven pairs
+   Phase 2 found remain the complete confirmed set. This is a legitimate,
+   thorough negative result, not a shortcut: the standing restraint this
+   item already named — a longer reviewed-and-rejected list than merge
+   list, `case74`-`77` as the calibration example of "looks similar, isn't
+   a duplicate" — held up against a substantially wider net than Phase 2's
+   own exact-`expected_kinds`-set clustering cast, most of which turned out
+   to be the theme-shares-a-`ChangeKind`-but-differs-in-mechanism pattern
+   Phase 2 had already established as the dominant failure mode of a naive
+   clustering pass.
 5. **Splitting `taxonomy` out of `ground_truth.json` — done.** `taxonomy`
    now lives in its own sibling manifest, `catalog/taxonomy.json`, generated
    by `scripts/gen_catalog_taxonomy.py` (which writes that file directly
