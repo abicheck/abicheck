@@ -747,13 +747,13 @@ class TestBaselineSetFallback:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
-            "This test builds a `python` symlink via Path.symlink_to() to "
-            "simulate a python3-less PATH -- creating a symlink on Windows "
-            "needs Developer Mode or an elevated process (raises OSError "
-            "otherwise), a privilege this test has no need to require just "
-            "to exercise a fallback that already has its own dedicated "
-            "coverage of the real Windows shape via the win32-only "
-            "`only 'python' on PATH` runners this whole PR targets."
+            "This test builds a `python` shell-script wrapper to simulate "
+            "a python3-less PATH -- a `#!/bin/sh` shebang script isn't "
+            "executable on Windows, a privilege this test has no need to "
+            "require just to exercise a fallback that already has its own "
+            "dedicated coverage of the real Windows shape via the "
+            "win32-only `only 'python' on PATH` runners this whole PR "
+            "targets."
         ),
     )
     def test_extraction_and_resolution_work_when_python3_is_absent(
@@ -770,17 +770,31 @@ class TestBaselineSetFallback:
         Simulates that shape without depending on the test runner's own
         PATH layout: a `command` shell-function override makes
         ``command -v python3`` fail regardless of what's really installed,
-        while a fabricated ``python`` symlink (built from whatever real
-        interpreter this runner has) proves `_PY_BIN`'s fallback resolution
-        actually gets exercised, not merely defined.
+        while a fabricated ``python`` on ``PATH`` -- an exec wrapper around
+        `sys.executable`, not merely *some* interpreter `shutil.which`
+        happens to find first, which can be a bare system Python with no
+        `abicheck` installed whenever the dev environment installs
+        `abicheck` into a separate venv than the one that's first on
+        ``PATH`` -- proves `_PY_BIN`'s fallback resolution actually gets
+        exercised against an interpreter the fallback script can really
+        import `abicheck` from, not merely defined. A plain symlink to
+        `sys.executable` isn't enough: when `sys.executable` is itself a
+        venv symlink chain down to a base interpreter (the common venv
+        shape), adding one more symlink hop from an unrelated directory can
+        make CPython's own venv/pyvenv.cfg discovery walk straight past the
+        venv to the base interpreter, silently losing `abicheck`'s editable
+        install -- an `exec` wrapper invokes `sys.executable`'s real path
+        directly, the same single hop a normal invocation would.
         """
         archive = _build_baseline_set_archive(tmp_path)
-        real_python = shutil.which("python3") or shutil.which("python")
-        if real_python is None:
-            pytest.skip("no python interpreter found on this runner")
+        real_python = sys.executable
         fake_bin = tmp_path / "fake-bin"
         fake_bin.mkdir()
-        (fake_bin / "python").symlink_to(real_python)
+        fake_python = fake_bin / "python"
+        fake_python.write_text(
+            f'#!/bin/sh\nexec "{real_python}" "$@"\n', encoding="utf-8"
+        )
+        fake_python.chmod(0o755)
 
         script = (
             f'PATH="{fake_bin}:$PATH"\n'

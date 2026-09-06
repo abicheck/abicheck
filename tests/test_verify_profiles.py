@@ -36,6 +36,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 _VERIFY_PATH = ROOT / "scripts" / "verify.py"
+_MODULE_RUNNER_PATH = ROOT / "scripts" / "run_isolated_module.py"
 _spec = importlib.util.spec_from_file_location("abicheck_scripts_verify", _VERIFY_PATH)
 assert _spec and _spec.loader
 verify = importlib.util.module_from_spec(_spec)
@@ -167,6 +168,20 @@ def test_isolated_module_runner_preserves_user_site_without_root_shadowing(
     """A user-site tool is usable, but a same-named cwd module cannot win."""
     import os
     import subprocess
+
+    _runner_spec = importlib.util.spec_from_file_location(
+        "abicheck_scripts_run_isolated_module", _MODULE_RUNNER_PATH
+    )
+    assert _runner_spec and _runner_spec.loader
+    _runner = importlib.util.module_from_spec(_runner_spec)
+    _runner_spec.loader.exec_module(_runner)
+    if not _runner._normally_enables_user_site():
+        pytest.skip(
+            "this interpreter (e.g. a venv without "
+            "include-system-site-packages=true) does not enable the user "
+            "site by default, so a user-site tool has no normal precedence "
+            "here for run_isolated_module.py to preserve"
+        )
 
     user_base = tmp_path / "user-base"
     env = {**os.environ, "PYTHONUSERBASE": str(user_base)}
