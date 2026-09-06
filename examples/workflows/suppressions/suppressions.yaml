@@ -1,0 +1,4 @@
+version: 1
+suppressions:
+  - symbol: to_rgb
+    reason: "Renamed to convert_to_rgb in v2; approved API rename, tracked in RELEASE_NOTES"
