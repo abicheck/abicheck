@@ -33,7 +33,19 @@ the degraded stranded-library marker (`BundleFacts.degraded_members`), and
 the `comparison_scope` report section (`abicheck/report/comparison_scope.py`),
 with `--on-incomplete-scope warn|block` as the D6 setting; exit `8` now
 requires D2's completeness proof (migration note in
-`docs/reference/exit-codes.md`). S0/S1/S3/S4 remain open. Design record for
+`docs/reference/exit-codes.md`). S1 also implemented (2026-09-06, landed
+after S2): `abicheck/model/release_selection.py`'s `ReleaseSelection`,
+`--select`/`--select-required` on `compare`'s directory/package fan-out,
+and the `--dry-run` "Comparison plan" preview
+(`abicheck/workflows/release_plan.py`, `abicheck/frontends/cli/release_dry_run.py`)
+— identity/coordinate member selection with a plan preview, through the
+typed API and CLI. `bundle_variants_config.py` was deleted outright in this
+slice rather than given a consumer (see the plan's own A1.6 note). S0
+(executable scenario table), S3 (package component inventories), and S4
+(Action/project/aggregate parity, scalar/bundle convergence, deletion of
+the set-difference/canonical-fallback paths, including
+`_match_release_keys`'s own removal path, which S1 does not touch) remain
+open. Design record for
 the vision's "partial matrices" and "scope-sensitive analysis" decisions
 (`vision.md`). Implementation is sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
