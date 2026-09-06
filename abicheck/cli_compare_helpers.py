@@ -345,6 +345,8 @@ def _render_compare_dry_run(
     header_backend: str,
     used_by_apps: tuple[Path, ...] = (),
     required_symbols: tuple[str, ...] = (),
+    select: tuple[str, ...] = (),
+    select_required: tuple[str, ...] = (),
 ) -> Any:
     """Build the ``compare --dry-run`` report (ADR-043 D4): resolve, never diff."""
     from .dry_run import DryRunResult, tool_status
@@ -394,6 +396,11 @@ def _render_compare_dry_run(
     )
     if {old_kind, new_kind} & {"directory", "package"}:
         result.add("Consumer/contract scoping", "dispatch: per-library release fan-out")
+        from .frontends.cli.release_dry_run import add_comparison_plan_section
+
+        add_comparison_plan_section(
+            result, old_input, new_input, old_kind, new_kind, select, select_required
+        )
     if used_by_apps:
         from .appcompat import parse_app_requirements
 
@@ -1299,6 +1306,7 @@ def run_compare(
     old_input: Path, new_input: Path,
     jobs: int, dso_only: bool, output_dir: Path | None,
     fail_on_removed: bool, on_incomplete_scope: str = "warn",
+    select: tuple[str, ...] = (), select_required: tuple[str, ...] = (),
     debug_info1: Path | None, debug_info2: Path | None,
     devel_pkg1: Path | None, devel_pkg2: Path | None,
     include_private_dso: bool, keep_extracted: bool,
@@ -1608,6 +1616,7 @@ def run_compare(
             exit_code_scheme=dry_run_scheme_label(resolved_cfg, pack_paths),
             header_backend=header_backend,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
+            select=select, select_required=select_required,
         ))
 
     if {old_kind, new_kind} & {"directory", "package"}:
@@ -1640,6 +1649,7 @@ def run_compare(
             policy=policy, policy_file_path=policy_file_path,
             dso_only=dso_only, jobs=jobs,
             fail_on_removed=fail_on_removed, on_incomplete_scope=on_incomplete_scope,
+            select=select, select_required=select_required,
             debug_info1=debug_info1, debug_info2=debug_info2,
             devel_pkg1=devel_pkg1, devel_pkg2=devel_pkg2,
             include_private_dso=include_private_dso, keep_extracted=keep_extracted,
@@ -1667,7 +1677,10 @@ def run_compare(
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
     _reject_bundle_facts_out_for_single_pair(bundle_facts_out)
     jobs_explicit = ctx.get_parameter_source("jobs") == click.core.ParameterSource.COMMANDLINE
-    _warn_unused_set_flags(jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir)
+    _warn_unused_set_flags(
+        jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir,
+        select=select, select_required=select_required,
+    )
 
     # Preserved before _normalize_compare_options resolves `demangle` against
     # the *primary* fmt below — the secondary render needs the same tri-state

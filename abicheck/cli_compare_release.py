@@ -102,6 +102,7 @@ from .frontends.cli.options import (
     secondary_output_options,
 )
 from .model import AbiSnapshot
+from .model.release_selection import ReleaseSelection
 from .model.scope_acquisition import AcquisitionState
 from .pack_application import resolve_bundle_policy_file
 from .report.comparison_scope import comparison_scope_terms
@@ -177,6 +178,27 @@ if TYPE_CHECKING:
     help="What an incompletely checked comparison scope does to the exit code "
     "(ADR-065 D6): 'warn' reports every unchecked member and contributes 0; "
     "'block' contributes 1, folded with max() like the contract-coverage axis.",
+)
+@click.option(
+    "--select",
+    "select",
+    multiple=True,
+    metavar="KEY",
+    help="Declare an expected release member by its canonical release-"
+    "matching key (e.g. 'libfoo.so', never a raw filename stem -- ADR-065 "
+    "S1). Repeatable. With any --select/--select-required given, only "
+    "declared members are compared; a discovered member not named here is "
+    "out of scope. Missing on one side is reported but does not, by "
+    "itself, make the scope incomplete (that gate is --select-required).",
+)
+@click.option(
+    "--select-required",
+    "select_required",
+    multiple=True,
+    metavar="KEY",
+    help="Like --select, but a missing declared member here contributes to "
+    "--on-incomplete-scope's completeness gate (ADR-065 S1/D6). A key "
+    "named in both --select and --select-required is required.",
 )
 @click.option(
     "--debug-info1",
@@ -351,6 +373,8 @@ def compare_release_cmd(
     probe_matrix_new: Path | None,
     severity_preset: str | None,
     on_incomplete_scope: str = "warn",
+    select: tuple[str, ...] = (),
+    select_required: tuple[str, ...] = (),
     # Not Click options: `compare`'s directory/package fan-out `ctx.invoke`s
     # this engine with the *already-merged* per-category severity levels it
     # resolved from `.abicheck.yml` (the four `--severity-<category>` CLI
@@ -470,6 +494,19 @@ def compare_release_cmd(
             new_variant = variant_kwargs["new_variant"]
 
     _setup_verbosity(verbose)
+
+    # ADR-065 S1: an explicit, identity-keyed release member selection --
+    # see abicheck.model.release_selection's own docstring. `None` (no
+    # --select/--select-required given) is a true no-op: every discovered
+    # member is compared exactly as it was before this parameter existed.
+    release_selection: ReleaseSelection | None = None
+    if select or select_required:
+        try:
+            release_selection = ReleaseSelection.from_lists(
+                required=select_required, optional=select
+            )
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from exc
 
     # CLI cleanup phase two, PR E: shared with `compare` so it can't drift.
     reject_incoherent_secondary_output(
@@ -659,8 +696,16 @@ def compare_release_cmd(
             except SnapshotError as exc:  # a damaged marker section (Codex review)
                 raise click.UsageError(str(exc)) from exc
             degraded_matched = degraded.matched
+            # ADR-065 S1: with an explicit selection, a matched key the
+            # caller did not declare is never run through the (expensive)
+            # per-library dump/compare pass at all -- it is reported
+            # `OUT_OF_SCOPE` on the scope record below, not silently
+            # compared anyway.
+            compare_keys = [k for k in matched_keys if k not in degraded_matched]
+            if release_selection is not None:
+                compare_keys = [k for k in compare_keys if k in release_selection]
             library_results, worst_verdict, diff_pairs = _compare_release_libraries(
-                [k for k in matched_keys if k not in degraded_matched],
+                compare_keys,
                 old_map,
                 new_map,
                 old_debug_dir,
@@ -711,7 +756,8 @@ def compare_release_cmd(
                         }
                     )
                     click.echo(
-                        f"Failed: {old_map[key].name}: {degraded_matched[key]}", err=True
+                        f"Failed: {old_map[key].name}: {degraded_matched[key]}",
+                        err=True,
                     )
 
             # ADR-065 D1/D2/D6/D7 (S2): the per-member acquisition record.
@@ -720,15 +766,37 @@ def compare_release_cmd(
             # complete) -- what exit 8, the verdict bump, and the Markdown
             # removed/added sections read; the raw set difference stays in
             # the record and is reported as `unmatched_old`/`unmatched_new`.
-            scope_record = build_release_scope_record(
-                old_map,
-                new_map,
-                matched_keys,
-                library_results,
-                inventory_evidence,
-                old_failed={**degraded.old_unmatched, **old_unclassified},
-                new_failed={**degraded.new_unmatched, **new_unclassified},
-            )
+            _scope_failed = {
+                "old_failed": {**degraded.old_unmatched, **old_unclassified},
+                "new_failed": {**degraded.new_unmatched, **new_unclassified},
+            }
+            if release_selection is not None and not (
+                inventory_evidence.direct_pair
+                or list(matched_keys) == [DIRECT_PAIR_KEY]
+            ):
+                # ADR-065 S1: an explicit selection overrides D9's inference
+                # entirely -- built by workflows.release_plan, which is not
+                # release_scope's own no_growth-budgeted module.
+                from .workflows.release_plan import build_declared_selection_record
+
+                scope_record = build_declared_selection_record(
+                    old_map,
+                    new_map,
+                    matched_keys,
+                    library_results,
+                    inventory_evidence,
+                    release_selection,
+                    **_scope_failed,
+                )
+            else:
+                scope_record = build_release_scope_record(
+                    old_map,
+                    new_map,
+                    matched_keys,
+                    library_results,
+                    inventory_evidence,
+                    **_scope_failed,
+                )
             # A member --dso-only could not classify is this run's own
             # acquisition failure: an operational `ERROR` library result
             # (the same rank a failed extraction takes, floored at exit 4

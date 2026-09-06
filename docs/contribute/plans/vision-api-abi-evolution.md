@@ -85,32 +85,53 @@ boundary; the degraded stranded-library snapshot.
 
 **Slices.** S0 executable scenario table (`tests/scenarios/`, existing
 catalogue). S1 selection by identity/coordinates with a `--dry-run` plan
-view, on the typed API and the release/bundle CLI. S2 acquisition states
+view, on the typed API and the release/bundle CLI — **landed 2026-09-06**:
+`model/release_selection.py`'s `ReleaseSelection` (`{canonical key:
+required}`, mirroring `workflows.aggregate.resolve.ExpectedTargets`'s own
+required/optional shape rather than inventing a second one), `--select`/
+`--select-required` on `compare`'s directory/package fan-out (forwarded
+through `_dispatch_release_compare` to `compare_release_cmd`),
+`workflows/release_plan.py`'s `build_declared_selection_record` (a
+declared-selection `ScopeAcquisitionRecord` builder, called from
+`cli_compare_release.py` instead of `_match_release_keys`'s inferred
+partition whenever a selection is given — D9's narrow inference is skipped
+entirely in that case) and `build_release_plan`/
+`build_release_plan_from_directories` (the `--dry-run` preview,
+rendered by `frontends/cli/release_dry_run.py`'s new "Comparison plan"
+section). `MemberAcquisition.required` (schema 1.1, additive) is the one
+schema change this slice makes: `False` only for a member an explicit
+selection declared optional, so its absence never trips
+`ScopeAcquisitionRecord.is_incomplete` the way a required member's does —
+every pre-S1 producer leaves every member `required=True` by default,
+unchanged. D9's narrow current-artifact inference stays the default when no
+selection is given. `bundle_variants_config` (see the deletion gate below)
+was deleted in this slice, not given a consumer: its `required:` field is
+about multibuild *variant* fingerprint identity, a different axis from a
+release's *member* selection, and no capture pipeline can tag a variant
+name yet (that module's own long-standing gap) — wiring a consumer for it
+would have been the parser-only slice this file's own "Finish the
+workflow" principle warns against. S2 acquisition states
 and the completeness axis on `RunOutcome`/`ExitDecision`; `no comparison
 completed` outcome; stranded-library persistence marked — **landed
 2026-09-05, ahead of S1** (it has the smallest surface and fixes the two
 worst behaviors with no new request field): `model/scope_acquisition.py`,
 `policy/scope_completeness.py`, `workflows/release_scope.py`,
 `report/comparison_scope.py`, `--on-incomplete-scope warn|block` on the
-release fan-out, `BundleFacts.degraded_members`; D9's narrow
-current-artifact inference is applied on the filename tier until S1
-replaces it with identity/coordinates. `bundle_variants_config` is *not*
-deleted or consumed by this slice (see the deletion gate below) — its
-`required:` consumer needs S1's declared selection, so that gate moves to
-S1. S3 package
+release fan-out, `BundleFacts.degraded_members`. S3 package
 component inventories; support-promise findings under a contract-policy
 field. S4 Action/project/aggregate parity; scalar/bundle operand
 convergence as a slice of `cli-cleanup-phase-two.md` PR I/J; delete the
-set-difference pairing and the silent canonical fallback.
+set-difference pairing and the silent canonical fallback -- now that S1's
+declared selection exists as the alternative, but `_match_release_keys`
+itself is untouched by S1 and still runs the discovery/matching a
+selection filters.
 
 **Deletion gates.** `_match_release_keys`'s set-difference removal path is
 deleted in S4 once every removal finding flows from proven completeness
 (S2 already stopped exit `8`, the verdict bump, and the Markdown/PR-comment
 "removed" sections from reading it; only the JSON `unmatched_old` key and
-the stderr warnings still do, by name); `bundle_variants_config` either
-gains its consumer in S1 (moved from S2, which introduced no declared
-selection to read `required:` against) or is deleted in S1 — not left as
-dead code.
+the stderr warnings still do, by name). `bundle_variants_config` — **deleted
+in S1** (see above) rather than given a consumer.
 
 ### B. Longitudinal history and versioning policy — ADR-066
 

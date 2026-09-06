@@ -1270,16 +1270,39 @@ def env_matrix_option(func: F) -> F:
 
 
 def set_input_options(func: F) -> F:
-    """Set-input fan-out knobs: ``-j/--jobs`` / ``--dso-only`` / ``--output-dir``.
+    """Set-input fan-out knobs: ``-j/--jobs`` / ``--dso-only`` / ``--output-dir``
+    / ``--select``/``--select-required``.
 
     ADR-037 D7 folds ``compare-release`` into ``compare`` via input-type
     dispatch: when ``compare``'s operands are directories or packages it fans out
-    to a per-library comparison, and these three flags tune that fan-out (parallel
-    jobs, executable filtering, per-library report directory). On single-file
+    to a per-library comparison, and these flags tune that fan-out (parallel
+    jobs, executable filtering, per-library report directory, and -- ADR-065
+    S1 -- an explicit member selection). On single-file
     inputs they are a no-op and ``compare`` warns. Declared once here so the
     dispatch and the deprecated ``compare-release`` alias share one surface.
     Applied bottom-up, so listed in reverse of displayed order.
     """
+    func = click.option(
+        "--select-required",
+        "select_required",
+        multiple=True,
+        metavar="KEY",
+        help="Declare a required expected release member by its canonical "
+        "release-matching key (e.g. 'libfoo.so', never a raw filename stem "
+        "-- ADR-065 S1; directory/package inputs only). Repeatable. With "
+        "any --select/--select-required given, only declared members are "
+        "compared. A missing declared-required member contributes to "
+        "--on-incomplete-scope's completeness gate; a plain --select "
+        "member does not.",
+    )(func)
+    func = click.option(
+        "--select",
+        "select",
+        multiple=True,
+        metavar="KEY",
+        help="Declare an optional expected release member -- see "
+        "--select-required (directory/package inputs only).",
+    )(func)
     func = click.option(
         "--output-dir",
         "output_dir",

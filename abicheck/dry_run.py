@@ -61,6 +61,10 @@ SECTION_ORDER: tuple[str, ...] = (
     # No other command populates this section today.
     "Execution options",
     "Consumer/contract scoping",
+    # ADR-065 S1: `compare`'s directory/package release fan-out's own
+    # "what would be compared" preview (`cli_compare_helpers.
+    # _render_compare_dry_run`). No other command populates this section.
+    "Comparison plan",
     "Output and exit-code behavior",
 )
 

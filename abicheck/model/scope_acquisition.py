@@ -63,7 +63,13 @@ __all__ = [
 
 #: Self-contained sub-object version, the same convention
 #: ``policy.outcome.RUN_OUTCOME_SCHEMA_VERSION`` uses.
-SCOPE_ACQUISITION_SCHEMA_VERSION = "1.0"
+#:
+#: ``1.1`` (ADR-065 S1) adds :attr:`MemberAcquisition.required`, additive and
+#: backward-compatible: a ``1.0`` document has no ``required`` key on any
+#: member, and :meth:`MemberAcquisition.from_dict` defaults it to ``True`` --
+#: the value every pre-S1 member implicitly had, since S1 is what first lets
+#: a member be declared optional at all.
+SCOPE_ACQUISITION_SCHEMA_VERSION = "1.1"
 
 
 class AcquisitionState(str, Enum):
@@ -161,6 +167,15 @@ class MemberAcquisition:
     reason: str = ""
     #: The user-facing name (a real basename) when it differs from *member*.
     display_name: str = ""
+    #: Whether this member's absence makes the scope incomplete (ADR-065 S1).
+    #: ``True`` for every member a run infers on its own (D9's narrow
+    #: inference, "all discovered members" default) -- a caller cannot opt
+    #: out of a member the run itself decided to expect. ``False`` is only
+    #: ever set by an explicit :class:`~abicheck.model.release_selection.
+    #: ReleaseSelection` declaring that specific member optional; see
+    #: :attr:`ScopeAcquisitionRecord.unchecked_members`, the one place this
+    #: flag has an effect.
+    required: bool = True
 
     @property
     def name(self) -> str:
@@ -176,11 +191,15 @@ class MemberAcquisition:
             "old_present": self.old_present,
             "new_present": self.new_present,
             "reason": self.reason,
+            "required": self.required,
         }
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> MemberAcquisition:
-        """Parse the JSON shape :meth:`to_dict` produces."""
+        """Parse the JSON shape :meth:`to_dict` produces. ``required``
+        defaults to ``True`` when absent (a schema-1.0 document, or any
+        producer predating ADR-065 S1) -- the value every such member
+        implicitly had."""
         member = str(data["member"])
         name = str(data.get("name", member))
         return cls(
@@ -190,6 +209,7 @@ class MemberAcquisition:
             new_present=bool(data.get("new_present", False)),
             reason=str(data.get("reason", "")),
             display_name=name if name != member else "",
+            required=bool(data.get("required", True)),
         )
 
 
@@ -245,14 +265,22 @@ class ScopeAcquisitionRecord:
         for. A proven removal/addition (D2) is a *finding* about the
         release, not a gap in what this run could check, so it never
         makes the scope read incomplete; an unmatched member under an
-        unproven inventory does."""
+        unproven inventory does.
+
+        A member an explicit :class:`~abicheck.model.release_selection.
+        ReleaseSelection` declared *optional* (:attr:`MemberAcquisition.
+        required` ``False``, ADR-065 S1) is excluded too: its own declared
+        contract is that its absence is not a gap, so it must not still
+        make ``is_incomplete`` true just because nothing else changed about
+        it. Every other member (``required`` defaults ``True``) is
+        unaffected -- this is additive, not a relaxation of D6's default."""
         answered = {m.member for m in self.proven_removed_members} | {
             m.member for m in self.proven_added_members
         }
         return tuple(
             m
             for m in self.members
-            if m.state in UNCHECKED_STATES and m.member not in answered
+            if m.state in UNCHECKED_STATES and m.member not in answered and m.required
         )
 
     @property
