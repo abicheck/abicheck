@@ -328,6 +328,8 @@ def visibility(
     exported_static: set[str],
     mangled: str,
     name: str = "",
+    *,
+    no_binary_evidence: bool = False,
 ) -> Visibility:
     """Resolve API visibility from the binary's exported-symbol tables.
 
@@ -346,6 +348,11 @@ def visibility(
     Read by function-entity parsing (``functions.py``) and variable/constant
     parsing (``dumper_clang.py``'s still-unmigrated ``parse_variables``/
     ``parse_constants``) alike.
+
+    *no_binary_evidence* (workstream F S1, "Header-only comparison"):
+    identical meaning and fallback as ``castxml.location.visibility``'s own
+    parameter of the same name -- see that function's docstring. False for
+    every ordinary binary dump, unchanged.
     """
     for cand in symbol_candidates(mangled):
         if cand in exported_dynamic:
@@ -357,6 +364,8 @@ def visibility(
             return Visibility.ELF_ONLY
     if name and name in exported_static:
         return Visibility.ELF_ONLY
+    if no_binary_evidence:
+        return Visibility.PUBLIC
     return Visibility.HIDDEN
 
 

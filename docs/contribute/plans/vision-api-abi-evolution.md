@@ -460,14 +460,110 @@ selector — historical, superseded by ADR-061/063 and the existing
 honest `NOT_APPLICABLE` L0/L1 semantics for that task; the deeper
 macro/inline/template evidence beyond what L4 already gives.
 
-**Slices.** S1 route header-only inputs through `DumpRequest`/
-`CompareRequest` with explicit parse context (no compile database
-required, no synthesized binary); exercise unchanged headers, removed
-declaration, added API, changed enum/constant, signature change,
-access/qualifier/default-argument change; emit source-compatibility
-findings, versioning advice, scope, and unsupported-capability rows. S2
-extend only demonstrably missing macro/inline/template capability;
-record frontend differences rather than switching backends silently.
+**Slices.** **S1 landed**: a binary-less `DumpRequest` (`dump -H api.h`, no
+`SO_PATH`/`--sources`/`--build-info`) now runs a real header-AST parse
+through the shared typed pipeline instead of the legacy
+`dump_source_only()`, which never read `-H` at all —
+`workflows.artifact.execute_header_only.is_header_only_evidence` is the
+one dispatch point distinguishing this shape from the pre-existing L3–L5
+source-only one, so the two can never overlap or silently disagree.
+`header_only_dump.build_header_only_snapshot` runs `dumper_manifest.
+resolve_header_ast_result` — the identical function a binary dump's own L2
+pass calls — with an empty observed-export set on both sides (no binary to
+have exported anything from) and a new explicit tier marker,
+`AbiSnapshot.header_only` (schema v44), so a report/policy consumer never
+mistakes this shape for the source-only one (both share `platform=None`).
+`compare` needs no changes at all: it already consumes any two stored
+snapshots, so `dump -H old.h -o old.json` + `dump -H new.h -o new.json` +
+`compare old.json new.json` is the whole invocation. `api_types.py`'s
+`_path_required_errors` now accepts `headers`/`public_header_dirs` alone as
+valid binary-less-dump evidence (previously only `sources`/`build_info`/
+`dump_manifest` counted), which is what makes the request reach this path
+at all.
+
+A real, load-bearing correctness fix landed alongside the plumbing, not
+just the operand-routing scaffold: `extract.headers.{castxml,clang}`'s
+shared `visibility()` used to fall back to `HIDDEN` whenever a mangled
+name matched neither the (necessarily empty, for this shape)
+`exported_dynamic`/`exported_static` sets — correct for an ordinary binary
+dump (unexported = hidden), but it silently marked *every* header-only
+declaration `HIDDEN`, which made `_public_functions()` filter every
+function out and produced a false `NO_CHANGE` for real changes. A new
+`no_binary_evidence` flag (threaded through
+`dumper._header_ast_parser`/`dumper_manifest.resolve_header_ast_result`
+down to both backends' parser contexts, `False` — inert — for every
+ordinary binary dump) flips that one fallback to `PUBLIC` instead,
+mirroring the identical "declared public in a public header, without
+contrary evidence" principle `dumper_castxml.py` already applies to a
+constructor/destructor/CPO with no ELF symbol to look up. Verified against
+all six named scenarios (unchanged headers, removed declaration, added
+API, changed enum value reachable from a public root, a signature change,
+and an access-level change), each with a real castxml/clang parse, in
+`tests/test_header_only_dump.py`.
+
+Source-compatibility findings, versioning advice, and scope all come free
+from the existing pipeline, unextended: `compare()`'s ordinary
+`ChangeKind`/verdict machinery, `release_recommendation`, and
+`surface_scope`/`out_of_surface_changes` (a header-only snapshot's
+unreached types are correctly recorded — never dropped — under
+`non-public-type`, same as a binary snapshot's). **Unsupported-capability
+rows are the existing `DetectorRegistry`/`not_evaluated` convention
+(ADR-067 D3, `_has_any_dwarf`), extended, not a new mechanism**: a new
+shared support gate, `diff_platform._has_elf_on_both_sides`, closes a
+real pre-existing silent gap this workstream's own testing surfaced —
+`elf`/`tls_checks`/`protected_visibility`/`symbol_version_alias`/
+`vtable_identity`/`abi_surface`/`elf_deleted_fallback` (the seven
+detectors that genuinely read `AbiSnapshot.elf`) each used to substitute
+an empty `ElfMetadata()` for a missing side and record a real, evaluated
+zero rather than the coverage gap it actually is. The gate is keyed on
+real ELF-evidence presence — `.elf` populated on both sides, or
+`.elf_only_mode` for the one sub-check (`elf`'s own
+`_diff_visibility_leak`) that reads `.functions`/`.elf_only_mode`
+directly and never `.elf` — mirroring the `pe`/`macho` gates immediately
+alongside it, rather than a `header_only`-only proxy. Two review rounds
+each found and reverted a narrower version of this gate that broke
+pre-existing tests: first keying it on a bare `elf is None` (broke every
+synthetic test snapshot — and every pre-existing L3-L5 source-only dump —
+that never bothers populating `.elf` while still representing an ordinary
+ELF library or an `elf_only_mode` symbol-table-only dump); then keying it
+on `AbiSnapshot.header_only` alone and applying it to `glibcxx_dual_abi`/
+`inline_namespace` too (broke every test exercising mass mangled-name
+churn via bare `functions=` fixtures, since those two detectors never
+read `.elf` at all and were never gated before this workstream).
+`glibcxx_dual_abi`/`inline_namespace` are therefore deliberately left
+ungated, unchanged from their pre-workstream form — a header-only
+snapshot's guessed mangled names carry exactly the same
+spelling-not-linkage-proof status an ordinary headers-augmented binary
+dump's mangled names already carry, which this workstream did not
+newly introduce and is not the one to start gating. Because the real
+gate closes a genuine pre-existing bug (silently comparing two fabricated
+empty `ElfMetadata()` objects whenever `.elf` was missing on *either*
+side, binary or header-only), it surfaces new `not_evaluated` rows for
+several golden fixtures that never populate `.elf` — those fixtures were
+deliberately regenerated as part of this fix. Now three of the plan's four
+capability classes — symbol presence/versioning, ELF layout, and
+vtable/RTTI linkage identity — surface as an explicit, reasoned
+`not_evaluated` row (`elf`/`tls_checks`/`protected_visibility`/
+`symbol_version_alias`/`vtable_identity`/`abi_surface`/
+`elf_deleted_fallback`, alongside the pre-existing `dwarf`/
+`advanced_dwarf`) in `disposition_audit.not_evaluated_detectors`, never
+silently absent; the fourth class (mangled-name linkage-level churn) is
+covered by the same `elf` family's own not-evaluated status rather than a
+per-detector gate on `glibcxx_dual_abi`/`inline_namespace` themselves, per
+the paragraph above. No detector's emitted findings change anywhere (two
+empty `ElfMetadata()` objects always compare equal), only whether the
+absence is now recorded explicitly.
+
+**Explicitly still open, deferred to S2 or later**: the deeper macro/
+inline/template evidence beyond what L4 already gives; layering L3–L5
+build/source evidence *on top of* a headers-only base (today `sources`/
+`build_info` and bare headers are still two disjoint binary-less shapes,
+never combined); frontend-difference recording (S2's own stated scope);
+and honest `NOT_APPLICABLE` L0/L1 semantics as a first-class, reusable
+concept beyond this slice's own `not_evaluated` detector rows. **Static
+archives are untouched by S1** — that investigation remains its own,
+separately-scoped, lower-priority note below, with no change to archive
+acceptance or defaults.
 Fixture consumers compiled against old/new headers are test oracles only
 (ADR-060 stays deferred). **Static archives**: a separate, lower-priority
 investigation note (full rebuild vs. relinking precompiled objects,

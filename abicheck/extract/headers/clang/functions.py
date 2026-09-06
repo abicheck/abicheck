@@ -436,6 +436,7 @@ def parse_functions(
     virtual_mangled_names: frozenset[str],
     target_triple: str | None,
     default_value: DefaultValueEvaluator,
+    no_binary_evidence: bool = False,
 ) -> list[Function]:
     funcs: list[Function] = []
     for entry in functions:
@@ -622,6 +623,7 @@ def parse_functions(
                     exported_static,
                     str(node.get("mangledName", "")),
                     name,
+                    no_binary_evidence=no_binary_evidence,
                 ),
                 # bool(node.get("virtual")) alone misses a signature-
                 # matched override with neither `virtual` nor `override`

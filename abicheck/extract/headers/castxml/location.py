@@ -263,6 +263,20 @@ def visibility(ctx: CastxmlParserContext, mangled: str, name: str = "") -> Visib
     Read by more than one entity kind's parsing (functions, variables
     today) — see :func:`qualified_name` above for why this lives here
     rather than in one entity module.
+
+    ``ctx.no_binary_evidence`` (workstream F S1, "Header-only comparison"):
+    when true, *neither* export set was ever populated -- there is no
+    binary at all to have exported anything from, so "not found in either
+    set" carries none of the meaning it does for an ordinary binary dump
+    (a genuine unexported/internal declaration). Falls back to PUBLIC in
+    that case instead of HIDDEN -- the identical "declared public in a
+    public header, without contrary evidence" principle
+    :func:`_variable_visibility`/:func:`_ctor_or_dtor_visibility`
+    (``dumper_castxml.py``) already apply for their own no-symbol-emitted
+    fallback cases. Unreachable for any snapshot with real ELF/PE/Mach-O
+    evidence: ``ctx.no_binary_evidence`` is only ever set by the header-only
+    dump path (``header_only_dump.build_header_only_snapshot``), never by
+    an ordinary binary dump -- see ``CastxmlParserContext``'s own docstring.
     """
     if mangled and mangled in ctx.exported_dynamic:
         return Visibility.PUBLIC
@@ -272,6 +286,8 @@ def visibility(ctx: CastxmlParserContext, mangled: str, name: str = "") -> Visib
         return Visibility.ELF_ONLY
     if name and name in ctx.exported_static:
         return Visibility.ELF_ONLY
+    if ctx.no_binary_evidence:
+        return Visibility.PUBLIC
     return Visibility.HIDDEN
 
 
