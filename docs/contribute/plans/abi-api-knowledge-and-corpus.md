@@ -181,19 +181,27 @@ work) rather than collapsing to one.
 
 ### Phase 3 — classify every mechanism's coverage status
 
-Assign each taxonomy leaf exactly one status, using values general enough to
-distinguish a corpus gap from a product gap from a real absence (not an
-open-ended free-text field — a fixed vocabulary is what makes the matrix a
-gate rather than a spreadsheet):
+Assign each taxonomy leaf exactly one status. The six values below are
+evaluated **in the listed order** (first match wins) precisely because
+their plain-language descriptions overlap — e.g. a mechanism with an
+explanation and a working detector but no catalog case satisfies both
+"detection is real" and "no case exists" — so the order, not the prose
+alone, is what makes the assignment deterministic and keeps the values
+mutually exclusive in practice. A fixed vocabulary evaluated in a fixed
+order is what makes the matrix a gate rather than a spreadsheet:
 
-| Status | Meaning |
-|---|---|
-| `COVERED` | Explained in `docs/learn/`, demonstrated by a case, and detected by abicheck at the evidence tier the case exercises. |
-| `PARTIALLY_COVERED` | At least one of knowledge/case/detection exists, but not all three, or detection works only for a narrower sub-case than the mechanism as stated. |
-| `KNOWN_UNDETECTABLE` | The mechanism is real and explained, but no static evidence abicheck can collect distinguishes it — a documented, accepted limitation (belongs in `docs/learn/limitations.md`/`docs/contribute/known-gaps.md`, cross-referenced here, not silently absent). |
-| `NOT_IMPLEMENTED` | Detection is a real, tractable product gap — abicheck could detect this with evidence it doesn't yet collect or a detector that doesn't yet exist. Distinct from `KNOWN_UNDETECTABLE`: this is a backlog item, not an accepted limit. |
-| `MISSING_CASE` | Detection exists and the mechanism is understood, but no `catalog/` case demonstrates it — a corpus gap, the most directly actionable status for this plan's own Phase 4. |
-| `NOT_APPLICABLE` | The mechanism does not apply to abicheck's stated scope (`vision.md`'s "Scope and priorities" — e.g. a mechanism specific to a platform/language pairing abicheck does not target). |
+| Order | Status | Meaning |
+|---|---|---|
+| 1 | `NOT_APPLICABLE` | The mechanism does not apply to abicheck's stated scope (`vision.md`'s "Scope and priorities" — e.g. a mechanism specific to a platform/language pairing abicheck does not target). Checked first: an out-of-scope mechanism is never also "missing" or "undetectable". |
+| 2 | `KNOWN_UNDETECTABLE` | The mechanism is real and explained, but no static evidence abicheck can collect distinguishes it — a documented, accepted limitation (belongs in `docs/learn/limitations.md`/`docs/contribute/known-gaps.md`, cross-referenced here, not silently absent). |
+| 3 | `NOT_IMPLEMENTED` | No detector/`ChangeKind` claims this mechanism at any evidence tier, and it is not `KNOWN_UNDETECTABLE` — a real, tractable product gap: abicheck could detect this with evidence it doesn't yet collect or a detector that doesn't yet exist. This is a backlog item, not an accepted limit. |
+| 4 | `MISSING_CASE` | A detector exists for this mechanism (so it cleared status 3), but no `catalog/` case demonstrates it — a corpus gap, and the most directly actionable status for this plan's own Phase 4. |
+| 5 | `PARTIALLY_COVERED` | A detector and at least one case both exist, but detection only covers a narrower sub-case than the mechanism as stated, or no `docs/learn/` page explains it. |
+| 6 | `COVERED` | Explained in `docs/learn/`, demonstrated by a case, and detected by abicheck at the evidence tier the case exercises — the only status that requires all three Phase 2 columns to be non-empty and adequate. |
+
+Each leaf receives the status of the *first* row above whose condition
+holds; later rows are only reached once every earlier row's condition has
+been ruled out.
 
 Produce one generated report (mirroring the pattern of
 `scripts/gen_catalog_coverage_report.py` → `docs/contribute/catalog-coverage.md`)
@@ -208,15 +216,20 @@ cases."
 For every `MISSING_CASE` finding, and opportunistically for an existing
 `COVERED` mechanism that has a breaking case but no adjacent safe-variant
 control, add the nearest-safe-transformation sibling alongside the existing
-or new breaking case — the two together prove both directions:
+or new breaking case — the two together act as a **positive control** and
+a **negative control** for that one fixture pair, not a recall/precision
+measurement over the whole taxonomy leaf (a single pair of fixtures cannot
+establish either — that would need the complete population of a leaf's
+variants and a defined aggregation rule, which is out of this plan's scope):
 
-- a breaking case (`X changed in a way that breaks compatibility`)
-  demonstrates recall (no false negative);
+- the breaking case (`X changed in a way that breaks compatibility`) is
+  the **positive control**: abicheck must flag it, or this one fixture has
+  a false negative;
 - its nearest safe sibling (`the closest non-breaking transformation of the
   same construct`, e.g. a private-field addition next to the same
   addition on a public struct, or a non-virtual helper method next to a
-  virtual-slot insertion) demonstrates precision (no false positive) on
-  the mechanism the breaking case is proving.
+  virtual-slot insertion) is the **negative control**: abicheck must not
+  flag it, or this one fixture has a false positive.
 
 This generalizes the pattern the corpus already uses ad hoc in scattered
 cases into a systematic property of every mechanism this plan tracks, not a
