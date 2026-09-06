@@ -103,3 +103,9 @@ and [What Each Level Sees](../learn/what-each-level-sees.md).
 ## Next
 
 ➡️ **[Understand your first report](first-report.md)**
+
+Have no second release to compare against yet? See the `audit-release`
+workflow example instead —
+`examples/workflows/audit-release/README.md` checks a single build against
+itself for things like an accidentally-exported symbol, no baseline
+required.

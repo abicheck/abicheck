@@ -15,6 +15,7 @@ the output means.
 | Workflow | Task |
 |---|---|
 | [`workflows/compare-release/`](workflows/compare-release/README.md) | Did my next release break anything for existing consumers? |
+| [`workflows/audit-release/`](workflows/audit-release/README.md) | Did I accidentally ship an undocumented export consumers could start depending on? |
 
 Each one carries a `workflow.yaml` stating the commands, the expected exit
 code, and the expected verdict; `validation/scripts/run_workflow_examples.py`
