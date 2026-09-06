@@ -272,6 +272,7 @@
       ],
       "legacy_paths": [
         "abicheck/appcompat.py",
+        "abicheck/appcompat_consumer_impact.py",
         "abicheck/binder.py",
         "abicheck/buildsource/baseline_publish.py",
         "abicheck/bundle.py",
@@ -604,6 +605,7 @@
     "annotations.py",
     "annotations_step_summary.py",
     "appcompat.py",
+    "appcompat_consumer_impact.py",
     "appcompat_html.py",
     "binary_fingerprint.py",
     "binary_utils.py",
