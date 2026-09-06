@@ -582,6 +582,11 @@ class ConfidenceSection:
     evidence_tier: str
     evidence_tiers_str: str
     coverage_warnings: tuple[str, ...]
+    # E-S2 (docs/contribute/plans/cli-cleanup-phase-two.md, Block 5) — the
+    # per-dimension comparability breakdown, sorted by dimension name;
+    # ``()`` when the run carried no ``--diagnostic-comparison`` mismatch to
+    # report (see ``checker_types.DiffResult.comparability_assurance``).
+    comparability_dimensions: tuple[tuple[str, str], ...] = ()
 
 
 def render_confidence_section(section: ConfidenceSection | None) -> list[str]:
@@ -598,6 +603,8 @@ def render_confidence_section(section: ConfidenceSection | None) -> list[str]:
     ]
     for warning in section.coverage_warnings:
         lines.append(f"| Coverage gap | {warning} |")
+    for dimension, status in section.comparability_dimensions:
+        lines.append(f"| Comparability: {dimension} | {status} |")
     lines.append("")
     return lines
 

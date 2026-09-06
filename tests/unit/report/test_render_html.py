@@ -460,6 +460,27 @@ def test_expired_reclassify_rules_are_not_disclosed() -> None:
     assert "expired waiver" not in generate_html_report(result, lib_name="libfoo.so")
 
 
+def test_comparability_dimensions_render_in_confidence_table() -> None:
+    """E-S2 (Block 5): the per-dimension --diagnostic-comparison breakdown
+    reaches the HTML "Analysis Confidence" table, not just JSON."""
+    result = _result()
+    result.assurance = "none"
+    result.comparability_assurance = {
+        "symbol": "trusted",
+        "declaration": "trusted",
+        "layout": "unverified",
+        "runtime": "unverified",
+        "source": "trusted",
+    }
+    data = compute_confidence(result)
+    assert data is not None
+    assert ("layout", "unverified") in data.comparability_dimensions
+    assert ("declaration", "trusted") in data.comparability_dimensions
+    html = generate_html_report(result, lib_name="libfoo.so")
+    assert "Comparability: layout" in html
+    assert "unverified" in html
+
+
 def test_confidence_absent_renders_no_section() -> None:
     """``None`` from a compute function means "this section does not exist",
     not "render an empty one" -- the distinction the ``| None`` return types

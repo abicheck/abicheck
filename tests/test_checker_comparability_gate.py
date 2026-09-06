@@ -84,6 +84,7 @@ def test_compare_with_no_contract_on_either_side_is_unaffected():
     result = compare(old, new)
     assert result.contract_coverage is None
     assert result.assurance is None
+    assert result.comparability_assurance is None
 
 
 def test_compare_diagnostic_comparison_downgrades_mismatch_to_tentative_diff(
@@ -110,6 +111,76 @@ def test_compare_diagnostic_comparison_downgrades_mismatch_to_tentative_diff(
     # message; the diagnostic path must surface the same reason through the
     # existing coverage_warnings disclosure instead of discarding it.
     assert any("scope" in w.lower() for w in result.coverage_warnings)
+    # E-S2 (Block 5): a header-set mismatch only ever bears on `declaration`
+    # (comparability.COMPARABILITY_DIMENSIONS's own vocabulary) -- every
+    # other dimension stays "trusted", replacing the previous all-or-nothing
+    # `assurance: "none"` with the per-dimension breakdown.
+    assert result.comparability_assurance == {
+        "symbol": "trusted",
+        "declaration": "unverified",
+        "layout": "trusted",
+        "runtime": "trusted",
+        "source": "trusted",
+    }
+
+
+def test_compare_diagnostic_comparison_preserves_proven_changes_despite_unverified_dimension(
+    tmp_path,
+):
+    """E-S2 (Block 5) -- an earlier, complete stage's already-proven finding
+    must survive an incomplete later stage rather than being erased or
+    silently downgraded. Here the two sides differ only in `compiler_family`
+    (a `profile_fields` mismatch mapping to exactly `{"layout", "runtime"}`
+    per `comparability._PROFILE_FIELD_DIMENSIONS`) -- a real public function
+    removal, proven purely from symbol-table evidence that neither `layout`
+    nor `runtime` has anything to do with, must still be reported as a
+    breaking change, and the `declaration`/`symbol`/`source` dimensions that
+    mismatch never touched must read "trusted", not swept into one coarse
+    "untrustworthy" verdict."""
+    dep = tmp_path / "dep.h"
+    dep.write_text("struct Dep { int x; };\n")
+    common = dict(
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(tmp_path)],
+        depfile_resolved_paths=[dep],
+    )
+    old_contract = compute_extraction_contract(compiler_family="gcc", **common)
+    new_contract = compute_extraction_contract(compiler_family="clang", **common)
+
+    old = AbiSnapshot(
+        library="libtest.so.1",
+        version="1.0",
+        contract=old_contract,
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fv",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+    )
+    new = AbiSnapshot(
+        library="libtest.so.1",
+        version="2.0",
+        contract=new_contract,
+        functions=[],
+    )
+
+    result = compare(old, new, diagnostic_comparison=True)
+
+    assert result.comparability_assurance == {
+        "symbol": "trusted",
+        "declaration": "trusted",
+        "layout": "unverified",
+        "runtime": "unverified",
+        "source": "trusted",
+    }
+    # The proven removal survives: it is not erased, suppressed, or excluded
+    # from the verdict just because an unrelated dimension is unverified.
+    removed_symbols = {c.symbol for c in result.changes}
+    assert "_Z1fv" in removed_symbols
+    assert len(result.breaking) >= 1
 
 
 def test_compare_contract_coverage_partial_when_exactly_one_side_has_a_contract(

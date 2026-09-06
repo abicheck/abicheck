@@ -709,7 +709,17 @@ from typing import Any
 #:       ``scope``, and, under the severity scheme, ``exit_code``/
 #:       ``exit_code_scheme``), purely informational. ``used_by``/
 #:       ``required_symbol_contract`` are unchanged.
-REPORT_SCHEMA_VERSION = "3.0"
+#: 3.1 -- E-S2 (docs/contribute/plans/cli-cleanup-phase-two.md, Block 5):
+#:      new optional top-level ``comparability_assurance`` object, present
+#:      under the same condition as the existing ``assurance`` key (a
+#:      genuine ``ComparabilityMismatch`` bypassed via
+#:      ``--diagnostic-comparison``) -- one entry per
+#:      ``comparability.COMPARABILITY_DIMENSIONS`` name (``symbol``,
+#:      ``declaration``, ``layout``, ``runtime``, ``source``), each
+#:      ``"unverified"`` or ``"trusted"``. Additive only: ``assurance``
+#:      itself is unchanged, and every existing consumer of this report is
+#:      unaffected.
+REPORT_SCHEMA_VERSION = "3.1"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

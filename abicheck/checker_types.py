@@ -532,6 +532,21 @@ class DiffResult(ReportSideFacts):
     # to the whole DiffResult (the gate failed for the pair as a whole
     # before any diff ran), not per-Change.
     assurance: Literal["none"] | None = None
+    # E-S2 (docs/contribute/plans/cli-cleanup-phase-two.md, Block 5) — the
+    # per-dimension counterpart to `assurance` above. Populated only under
+    # the same condition (`--diagnostic-comparison` bypassed a genuine
+    # comparability mismatch): one entry per
+    # `comparability.COMPARABILITY_DIMENSIONS` name ("symbol", "declaration",
+    # "layout", "runtime", "source"), each either "unverified" (this
+    # dimension is exactly one `comparability.ComparabilityMismatch.
+    # dimensions` named) or "trusted" (the mismatch never touched it — its
+    # conclusions remain as trustworthy as an ordinary comparable pair's).
+    # Report-level metadata, same as `assurance` — never a Change/ChangeKind
+    # finding, so it stays unreachable by severity promotion. `None` (not an
+    # empty dict) when there is no mismatch to report, and omitted from the
+    # JSON report entirely in that case, matching `assurance`'s own
+    # optional-field convention.
+    comparability_assurance: dict[str, str] | None = None
     # ADR-049 Phase 4 — the three persisted blocks (``contract_evidence`` /
     # ``evaluation_context`` / ``decision_receipt``) for this comparison,
     # assembled by ``contract_context.build_persisted_context``. Populated

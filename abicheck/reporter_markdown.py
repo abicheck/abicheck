@@ -1480,11 +1480,16 @@ def compute_confidence_section(result: DiffResult) -> _rmd.ConfidenceSection | N
     etier_val = (
         etier.value if (etier is not None and hasattr(etier, "value")) else str(etier)
     )
+    comparability = getattr(result, "comparability_assurance", None)
+    comparability_dimensions = (
+        tuple(sorted(comparability.items())) if comparability else ()
+    )
     return _rmd.ConfidenceSection(
         confidence_upper=conf_val.upper(),
         evidence_tier=etier_val,
         evidence_tiers_str=tier_str,
         coverage_warnings=tuple(cov_warns) if cov_warns else (),
+        comparability_dimensions=comparability_dimensions,
     )
 
 

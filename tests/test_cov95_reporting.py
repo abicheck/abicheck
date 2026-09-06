@@ -454,6 +454,32 @@ class TestReporterConfidenceSection:
         assert "Analysis Confidence" in joined
         assert "dwarf stripped" in joined
 
+    def test_append_confidence_section_renders_comparability_dimensions(self) -> None:
+        # E-S2 (Block 5): a --diagnostic-comparison run's per-dimension
+        # breakdown surfaces as its own Markdown rows, not just the coarse
+        # `assurance: none` flag.
+        from abicheck.reporter import _append_confidence_section
+
+        result = _diff_result(
+            [],
+            confidence=Confidence.HIGH,
+            evidence_tiers=["elf", "dwarf"],
+            evidence_tier=EvidenceTier.DWARF_AWARE,
+            assurance="none",
+            comparability_assurance={
+                "symbol": "trusted",
+                "declaration": "trusted",
+                "layout": "unverified",
+                "runtime": "unverified",
+                "source": "trusted",
+            },
+        )
+        lines: list[str] = []
+        _append_confidence_section(lines, result)
+        joined = "\n".join(lines)
+        assert "Comparability: layout | unverified" in joined
+        assert "Comparability: declaration | trusted" in joined
+
 
 # ===========================================================================
 # post_processing.py

@@ -41,7 +41,7 @@ from .checker_types import (  # noqa: F401
     DiffResult,
     LibraryMetadata,
 )
-from .comparability import check_contracts_comparable
+from .comparability import COMPARABILITY_DIMENSIONS, check_contracts_comparable
 from .confidence import _compute_confidence
 from .contract_pipeline import (
     ContractEvaluationStage,
@@ -847,6 +847,15 @@ def compare(
             :class:`~abicheck.errors.ScopeMismatchError` before any diff runs.
             Setting this True downgrades that hard-fail into an ordinary diff
             whose ``DiffResult.assurance`` is stamped ``"none"`` instead.
+            ``DiffResult.comparability_assurance`` (E-S2) carries the same
+            escape hatch's per-dimension breakdown -- ``"unverified"`` for
+            exactly the :data:`~abicheck.comparability.COMPARABILITY_DIMENSIONS`
+            the detected mismatch actually leaves unproven (see
+            :class:`~abicheck.comparability.ComparabilityMismatch`'s own
+            ``dimensions`` field), ``"trusted"`` for the rest -- so a caller
+            can keep trusting, say, a ``declaration``-only conclusion even
+            while ``layout`` reads unverified, instead of discarding every
+            axis alongside the coarse ``assurance: "none"`` flag.
         contract_evaluation: ADR-049 contract evaluation. When True, stamps
             every finding's ``Change.contract_relevance``/
             ``contract_reason_code``/``contract_assurance`` from
@@ -917,6 +926,23 @@ def compare(
     """
     mismatch = check_contracts_comparable(old, new, diagnostic=diagnostic_comparison)
     assurance: Literal["none"] | None = "none" if mismatch is not None else None
+    # E-S2 (docs/contribute/plans/cli-cleanup-phase-two.md, Block 5) -- the
+    # per-dimension counterpart to the report-wide `assurance` above.
+    # `mismatch.dimensions` names which of comparability.COMPARABILITY_DIMENSIONS
+    # this specific mismatch leaves unverified; every other dimension stays
+    # "trusted" -- an intentional cross-profile diagnostic compare keeps its
+    # valid `declaration` conclusions even while `layout` reads unverified,
+    # rather than the previous all-or-nothing `assurance: "none"`. `None`
+    # (not an empty dict) when there is no mismatch to report, matching
+    # `assurance`'s own "only set under --diagnostic-comparison" contract.
+    comparability_assurance: dict[str, str] | None = (
+        {
+            dimension: ("unverified" if dimension in mismatch.dimensions else "trusted")
+            for dimension in sorted(COMPARABILITY_DIMENSIONS)
+        }
+        if mismatch is not None
+        else None
+    )
     # Propagate *why* a diagnostic-mode comparison is untrustworthy into the
     # existing human-readable coverage_warnings disclosure (CodeRabbit
     # review, PR #624): the non-diagnostic (raising) path already surfaces
@@ -1304,6 +1330,7 @@ def compare(
         pattern_modulations=pattern_modulations,
         contract_coverage=contract_coverage,
         assurance=assurance,
+        comparability_assurance=comparability_assurance,
         contract_context=contract_context,
     )
     # ADR-067 C-S1/D3, see `finalize_ledger`: `verdict_scored` is the redundant

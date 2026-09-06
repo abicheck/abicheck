@@ -167,6 +167,9 @@ def _confidence_from_mapping(d: Mapping[str, Any] | None) -> ConfidenceData | No
         policy_overrides=tuple(tuple(pair) for pair in d["policy_overrides"]),
         policy_reclassify=tuple(d["policy_reclassify"]),
         coverage_warnings=tuple(d["coverage_warnings"]),
+        comparability_dimensions=tuple(
+            tuple(pair) for pair in d["comparability_dimensions"]
+        ),
     )
 
 

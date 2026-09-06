@@ -144,6 +144,17 @@
         null
       ]
     },
+    "comparability_assurance": {
+      "type": "object",
+      "description": "Schema 3.1 (E-S2, docs/contribute/plans/cli-cleanup-phase-two.md Block 5). Present under the same condition as `assurance` above -- a genuine contract mismatch bypassed via --diagnostic-comparison -- and gives its per-dimension breakdown instead of one coarse flag: one entry per abicheck.comparability.COMPARABILITY_DIMENSIONS name (\"symbol\", \"declaration\", \"layout\", \"runtime\", \"source\"), each \"unverified\" (this dimension is one the detected mismatch actually leaves unproven) or \"trusted\" (the mismatch never touched it). Lets a reader keep trusting a still-valid `declaration` conclusion even while `layout` reads unverified. Omitted entirely for an ordinary comparable diff.",
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "trusted",
+          "unverified"
+        ]
+      }
+    },
     "consumer_scope": {
       "type": "object",
       "description": "Schema 3.0 (workstream D-S1). Present only when --used-by/--required-symbol(s) was given: a supplied consumer's own confirmed/potential/unresolved assessment, purely informational -- it never affects verdict/severity/run_outcome/summary or this run's exit code, which always describe the full-library result. Replaces the removed full_verdict/full_severity/full_run_outcome/full_summary swap (schema 2.9/2.9/ADR-063 Phase 7/2.9 respectively).",
