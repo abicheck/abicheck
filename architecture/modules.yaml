@@ -287,7 +287,6 @@
         "abicheck/bundle_side_input.py",
         "abicheck/bundle_signature_evidence.py",
         "abicheck/bundle_soname.py",
-        "abicheck/bundle_variants_config.py",
         "abicheck/checker.py",
         "abicheck/compatibility_evaluation_frontend.py",
         "abicheck/compatibility_evaluation_wiring.py",
@@ -533,7 +532,7 @@
       "bundle_side_input.py",
       "bundle_signature_evidence.py",
       "bundle_soname.py",
-      "bundle_variants_config.py"
+      "bundle_soname.py"
     ],
     "aggregate_": [
       "aggregate_findings.py",
@@ -623,7 +622,6 @@
     "bundle_side_input.py",
     "bundle_signature_evidence.py",
     "bundle_soname.py",
-    "bundle_variants_config.py",
     "castxml_policy.py",
     "cc_wrapper.py",
     "change_registry.py",

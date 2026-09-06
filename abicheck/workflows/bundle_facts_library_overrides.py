@@ -27,8 +27,10 @@ library. This module is the manifest half that closes that gap --
 ``compare_bundle_facts.dispatch()`` is the caller.
 
 **Not wired into ``.abicheck.yml`` discovery, and deliberately so** -- the
-identical reasoning ``bundle_variants_config.py``'s own module docstring
-already gives for its ``bundle_variants:`` block applies here without
+identical reasoning the now-removed ``bundle_variants_config.py``'s own
+module docstring gave for its ``bundle_variants:`` block (ADR-065 S1
+deleted that module as dead code: its ``required:`` field never gained a
+production caller) applies here without
 change: ``BuildConfig`` (``abicheck/buildsource/inline.py``) has a fixed,
 declared-field schema, and a genuinely new top-level config block would need
 real schema/model work and loading/precedence plumbing a CLI-only manifest
@@ -36,23 +38,23 @@ file avoids entirely. This module therefore takes an already-parsed raw
 ``dict`` (whatever a caller's own YAML/JSON loader produced), not a
 ``.abicheck.yml`` path.
 
-**Physically under ``abicheck/workflows/``, unlike ``bundle_variants_
-config.py``'s own flat-root placement (Codex review, verified against
-AGENTS.md's task-routing table).** Root AGENTS.md's "Task routing and
-dependency direction" section is explicit: "route new behavior to the
-target owner rather than extending a flat root prefix family" -- the
-pre-existing flat `bundle_*.py` siblings (`bundle_variants_config.py`
-included) predate ADR-061 and are grandfathered into that family's
-`legacy_paths`/`architecture/debt.yaml` entries, not a precedent for where
-genuinely *new* code should land. This module coordinates a `compare`-shaped
-workflow's manifest input (`workflows`'s own routing-table row: "Coordinate
-dump, compare, scan, release, aggregate, project, or dependency behavior"),
-so it lives here from the start, with no `architecture/modules.yaml`
-allowlist edit needed at all -- physical location under `abicheck/
-workflows/` is what classifies it, exactly as ADR-061 intends for new code.
+**Physically under ``abicheck/workflows/``, unlike the now-removed
+``bundle_variants_config.py``'s own flat-root placement (Codex review,
+verified against AGENTS.md's task-routing table).** Root AGENTS.md's "Task
+routing and dependency direction" section is explicit: "route new behavior to
+the target owner rather than extending a flat root prefix family" -- the
+pre-existing flat `bundle_*.py` siblings predate ADR-061 and were
+grandfathered into that family's `legacy_paths`/`architecture/debt.yaml`
+entries, not a precedent for where genuinely *new* code should land. This
+module coordinates a `compare`-shaped workflow's manifest input (`workflows`'s
+own routing-table row: "Coordinate dump, compare, scan, release, aggregate,
+project, or dependency behavior"), so it lives here from the start, with no
+`architecture/modules.yaml` allowlist edit needed at all -- physical location
+under `abicheck/workflows/` is what classifies it, exactly as ADR-061
+intends for new code.
 
-Validates eagerly and completely before returning anything, mirroring
-``bundle_variants_config.parse_bundle_variants_config()``'s own convention:
+Validates eagerly and completely before returning anything, the same
+``PolicyFile``/``BuildConfig`` convention this codebase applies throughout:
 a malformed entry is a hard :class:`BundleFactsLibraryOverridesError`, never
 a silent no-op or a partial result a caller might not notice. A library name
 not present in the bundle it's applied against (when *known_libraries* is

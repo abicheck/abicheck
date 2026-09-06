@@ -53,6 +53,7 @@ from typing import Any
 
 __all__ = [
     "SCOPE_ACQUISITION_SCHEMA_VERSION",
+    "OPTIONAL_EXCUSABLE_STATES",
     "UNCHECKED_STATES",
     "AcquisitionState",
     "InventoryCompleteness",
@@ -63,7 +64,13 @@ __all__ = [
 
 #: Self-contained sub-object version, the same convention
 #: ``policy.outcome.RUN_OUTCOME_SCHEMA_VERSION`` uses.
-SCOPE_ACQUISITION_SCHEMA_VERSION = "1.0"
+#:
+#: ``1.1`` (ADR-065 S1) adds :attr:`MemberAcquisition.required`, additive and
+#: backward-compatible: a ``1.0`` document has no ``required`` key on any
+#: member, and :meth:`MemberAcquisition.from_dict` defaults it to ``True`` --
+#: the value every pre-S1 member implicitly had, since S1 is what first lets
+#: a member be declared optional at all.
+SCOPE_ACQUISITION_SCHEMA_VERSION = "1.1"
 
 
 class AcquisitionState(str, Enum):
@@ -107,6 +114,19 @@ UNCHECKED_STATES: frozenset[AcquisitionState] = frozenset(
         AcquisitionState.NOT_SUPPLIED,
         AcquisitionState.UNSUPPORTED,
         AcquisitionState.AMBIGUOUS,
+    }
+)
+
+#: The subset of :data:`UNCHECKED_STATES` an explicit ``required: false``
+#: (ADR-065 S1) may excuse: pure *absence* -- the member was never produced.
+#: ``FAILED``/``UNSUPPORTED``/``AMBIGUOUS`` are never excusable this way,
+#: however a member was declared: they mean acquisition was *attempted* and
+#: did not succeed, which ``required: false`` never promised to paper over
+#: (see :attr:`ScopeAcquisitionRecord.unchecked_members`).
+OPTIONAL_EXCUSABLE_STATES: frozenset[AcquisitionState] = frozenset(
+    {
+        AcquisitionState.EXPECTED_NOT_PRODUCED,
+        AcquisitionState.NOT_SUPPLIED,
     }
 )
 
@@ -161,6 +181,15 @@ class MemberAcquisition:
     reason: str = ""
     #: The user-facing name (a real basename) when it differs from *member*.
     display_name: str = ""
+    #: Whether this member's absence makes the scope incomplete (ADR-065 S1).
+    #: ``True`` for every member a run infers on its own (D9's narrow
+    #: inference, "all discovered members" default) -- a caller cannot opt
+    #: out of a member the run itself decided to expect. ``False`` is only
+    #: ever set by an explicit :class:`~abicheck.model.release_selection.
+    #: ReleaseSelection` declaring that specific member optional; see
+    #: :attr:`ScopeAcquisitionRecord.unchecked_members`, the one place this
+    #: flag has an effect.
+    required: bool = True
 
     @property
     def name(self) -> str:
@@ -176,13 +205,26 @@ class MemberAcquisition:
             "old_present": self.old_present,
             "new_present": self.new_present,
             "reason": self.reason,
+            "required": self.required,
         }
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> MemberAcquisition:
-        """Parse the JSON shape :meth:`to_dict` produces."""
+        """Parse the JSON shape :meth:`to_dict` produces. ``required``
+        defaults to ``True`` when absent (a schema-1.0 document, or any
+        producer predating ADR-065 S1) -- the value every such member
+        implicitly had -- but a *present* value must be a real boolean:
+        silently coercing e.g. ``0``/``""`` to ``False`` would let a
+        malformed document quietly excuse a member from D6's completeness
+        axis (Codex review on #1094)."""
         member = str(data["member"])
         name = str(data.get("name", member))
+        required = data.get("required", True)
+        if not isinstance(required, bool):
+            raise ValueError(
+                f"scope acquisition member {member!r}: 'required' must be a "
+                f"boolean, got {type(required).__name__}"
+            )
         return cls(
             member=member,
             state=AcquisitionState(data["state"]),
@@ -190,6 +232,7 @@ class MemberAcquisition:
             new_present=bool(data.get("new_present", False)),
             reason=str(data.get("reason", "")),
             display_name=name if name != member else "",
+            required=required,
         )
 
 
@@ -245,14 +288,34 @@ class ScopeAcquisitionRecord:
         for. A proven removal/addition (D2) is a *finding* about the
         release, not a gap in what this run could check, so it never
         makes the scope read incomplete; an unmatched member under an
-        unproven inventory does."""
+        unproven inventory does.
+
+        A member an explicit :class:`~abicheck.model.release_selection.
+        ReleaseSelection` declared *optional* (:attr:`MemberAcquisition.
+        required` ``False``, ADR-065 S1) is excluded too, but **only** for an
+        *absence* state (``NOT_SUPPLIED``/``EXPECTED_NOT_PRODUCED`` --
+        :data:`OPTIONAL_EXCUSABLE_STATES`): the declared contract of
+        ``required: false`` is "this member may not exist", never "this
+        member's comparison may fail". ``FAILED``/``UNSUPPORTED``/
+        ``AMBIGUOUS`` stay incomplete regardless of ``required`` -- an
+        optional member a stored NEW side marks degraded, or whose
+        extraction crashes, still reached acquisition and failed there; that
+        is exactly the operational-error signal D8 exists to keep visible,
+        not something a caller's own optimism about the member's existence
+        should silently excuse (Codex security review on #1094: an
+        attacker-controlled NEW artifact could otherwise mark a declared-
+        optional member ``failed`` and have the scope still read complete).
+        Every other member (``required`` defaults ``True``) is unaffected --
+        this is additive, not a relaxation of D6's default."""
         answered = {m.member for m in self.proven_removed_members} | {
             m.member for m in self.proven_added_members
         }
         return tuple(
             m
             for m in self.members
-            if m.state in UNCHECKED_STATES and m.member not in answered
+            if m.state in UNCHECKED_STATES
+            and m.member not in answered
+            and (m.required or m.state not in OPTIONAL_EXCUSABLE_STATES)
         )
 
     @property

@@ -100,6 +100,8 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--required-symbols",
         "--scope-public-headers",
         "--search-path",
+        "--select",
+        "--select-required",
         "--severity-preset",
         "--show-filtered",
         "--show-only",

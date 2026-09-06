@@ -110,7 +110,12 @@ def _reject_application_operand(
 
 
 def _warn_unused_set_flags(
-    *, jobs_explicit: bool, dso_only: bool, output_dir: Path | None
+    *,
+    jobs_explicit: bool,
+    dso_only: bool,
+    output_dir: Path | None,
+    select: tuple[str, ...] = (),
+    select_required: tuple[str, ...] = (),
 ) -> None:
     """Warn that the set-input fan-out flags do not apply to single-file inputs."""
     used = []
@@ -120,6 +125,10 @@ def _warn_unused_set_flags(
         used.append("--dso-only")
     if output_dir is not None:
         used.append("--output-dir")
+    if select:
+        used.append("--select")
+    if select_required:
+        used.append("--select-required")
     if used:
         click.echo(
             "Warning: " + ", ".join(used) + " only apply to directory/package "
