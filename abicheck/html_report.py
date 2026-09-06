@@ -339,6 +339,7 @@ def compute_confidence(result: object) -> ConfidenceData | None:
         reclassify = tuple(
             rule.describe() for rule in active_reclassify_rules(policy_file.reclassify)
         )
+    comparability = getattr(result, "comparability_assurance", None)
     return ConfidenceData(
         confidence=conf_val,
         evidence_tiers=tuple(getattr(result, "evidence_tiers", []) or []),
@@ -346,6 +347,9 @@ def compute_confidence(result: object) -> ConfidenceData | None:
         policy_overrides=overrides,
         policy_reclassify=reclassify,
         coverage_warnings=tuple(getattr(result, "coverage_warnings", []) or []),
+        comparability_dimensions=(
+            tuple(sorted(comparability.items())) if comparability else ()
+        ),
     )
 
 

@@ -498,6 +498,10 @@ class ConfidenceData:
     policy_overrides: tuple[tuple[str, str], ...]
     policy_reclassify: tuple[str, ...]
     coverage_warnings: tuple[str, ...]
+    # E-S2 (docs/contribute/plans/cli-cleanup-phase-two.md, Block 5) — the
+    # per-dimension comparability breakdown, sorted by dimension name; ``()``
+    # when the run carried no ``--diagnostic-comparison`` mismatch to report.
+    comparability_dimensions: tuple[tuple[str, str], ...] = ()
 
 
 def render_confidence(data: ConfidenceData | None) -> str:
@@ -530,6 +534,10 @@ def render_confidence(data: ConfidenceData | None) -> str:
         rows.append(f"<tr><th>Policy reclassify</th><td>{rules}</td></tr>")
     for w in data.coverage_warnings:
         rows.append(f"<tr><th>Coverage gap</th><td>{h(w)}</td></tr>")
+    for dimension, status in data.comparability_dimensions:
+        rows.append(
+            f"<tr><th>Comparability: {h(dimension)}</th><td>{h(status)}</td></tr>"
+        )
 
     body = "\n".join(rows)
     return (

@@ -532,6 +532,11 @@ class DiffResult(ReportSideFacts):
     # to the whole DiffResult (the gate failed for the pair as a whole
     # before any diff ran), not per-Change.
     assurance: Literal["none"] | None = None
+    # E-S2 (cli-cleanup-phase-two.md Block 5) — `assurance`'s per-dimension
+    # breakdown: one entry per `comparability.COMPARABILITY_DIMENSIONS` name,
+    # each "unverified" or "trusted". Same population/omission rule as
+    # `assurance` above; see `comparability.dimension_assurance`'s own doc.
+    comparability_assurance: dict[str, str] | None = None
     # ADR-049 Phase 4 — the three persisted blocks (``contract_evidence`` /
     # ``evaluation_context`` / ``decision_receipt``) for this comparison,
     # assembled by ``contract_context.build_persisted_context``. Populated

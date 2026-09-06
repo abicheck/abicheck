@@ -1080,6 +1080,12 @@ def _add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
         d["contract_coverage"] = result.contract_coverage
     if result.assurance is not None:
         d["assurance"] = result.assurance
+    # E-S2 (docs/contribute/plans/cli-cleanup-phase-two.md, Block 5,
+    # report_schema_version 3.1) — the per-dimension breakdown behind the
+    # coarse `assurance` flag above. Same "only under --diagnostic-comparison,
+    # omitted entirely otherwise" convention.
+    if result.comparability_assurance is not None:
+        d["comparability_assurance"] = dict(result.comparability_assurance)
 
 
 def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:

@@ -41,7 +41,7 @@ from .checker_types import (  # noqa: F401
     DiffResult,
     LibraryMetadata,
 )
-from .comparability import check_contracts_comparable
+from .comparability import check_contracts_comparable, dimension_assurance
 from .confidence import _compute_confidence
 from .contract_pipeline import (
     ContractEvaluationStage,
@@ -847,6 +847,8 @@ def compare(
             :class:`~abicheck.errors.ScopeMismatchError` before any diff runs.
             Setting this True downgrades that hard-fail into an ordinary diff
             whose ``DiffResult.assurance`` is stamped ``"none"`` instead.
+            ``DiffResult.comparability_assurance`` (E-S2) is the same escape
+            hatch's per-dimension breakdown -- see its own field doc.
         contract_evaluation: ADR-049 contract evaluation. When True, stamps
             every finding's ``Change.contract_relevance``/
             ``contract_reason_code``/``contract_assurance`` from
@@ -917,6 +919,9 @@ def compare(
     """
     mismatch = check_contracts_comparable(old, new, diagnostic=diagnostic_comparison)
     assurance: Literal["none"] | None = "none" if mismatch is not None else None
+    # E-S2 (cli-cleanup-phase-two.md Block 5): `assurance`'s per-dimension
+    # breakdown -- see comparability.dimension_assurance's own doc.
+    comparability_assurance = dimension_assurance(mismatch)
     # Propagate *why* a diagnostic-mode comparison is untrustworthy into the
     # existing human-readable coverage_warnings disclosure (CodeRabbit
     # review, PR #624): the non-diagnostic (raising) path already surfaces
@@ -1304,6 +1309,7 @@ def compare(
         pattern_modulations=pattern_modulations,
         contract_coverage=contract_coverage,
         assurance=assurance,
+        comparability_assurance=comparability_assurance,
         contract_context=contract_context,
     )
     # ADR-067 C-S1/D3, see `finalize_ledger`: `verdict_scored` is the redundant
