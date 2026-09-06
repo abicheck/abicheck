@@ -71,12 +71,14 @@ Every case, rule or scenario, tagged with the real-world ecosystem it models (`g
 
 ## Workflow coverage
 
-**3 workflow examples** so far, out of the 8 task-oriented workflows Phase 5 of the examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) targets: compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions.
+**5 workflow examples** so far, out of the 8 task-oriented workflows Phase 5 of the examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) targets: compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions.
 
 | Workflow | Task | Platforms | Executed steps |
 |---|---|---|---|
 | `audit-release` | Did I accidentally ship an undocumented export consumers could start depending on? | linux, macos | 2 |
 | `compare-release` | Did my next release break anything for existing consumers? | linux, macos | 3 |
+| `github-actions` | How do I run this check automatically on every pull request, without anyone remembering to run it (or writing a CI script myself)? | linux, macos | 3 |
+| `python-api` | I want to run this check from my own build script or test suite, not by shelling out to the CLI -- how do I call abicheck from Python? | linux, macos | 3 |
 | `suppressions` | I renamed a function on purpose -- how do I stop CI from failing on it, without turning off detection for everything else? | linux, macos | 4 |
 
 Each row is a `workflow.yaml` that `validation/scripts/run_workflow_examples.py` runs end to end -- the documented commands themselves, in a scratch copy, checked against the exit code and the verdict/change kinds the walkthrough claims. A directory without that contract is a hard error rather than a free point of coverage.

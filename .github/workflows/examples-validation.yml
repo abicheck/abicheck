@@ -51,11 +51,10 @@ jobs:
   # code and verdict the walkthrough claims. Deliberately *not*
   # continue-on-error: there is no artifact-collecting step downstream to
   # re-derive its result from, and a rotted walkthrough is a user-facing
-  # defect. `--require compare-release --require audit-release --require
-  # suppressions` fails the job if any of the three is skipped, so a
-  # toolchain regression can't turn this lane green with zero work done
-  # (the same silent-skip guard tests/conftest.py's ABICHECK_MIN_EXECUTED
-  # provides for the marker lanes).
+  # defect. `--require` (one per workflow, below) fails the job if any of
+  # them is skipped, so a toolchain regression can't turn this lane green
+  # with zero work done (the same silent-skip guard tests/conftest.py's
+  # ABICHECK_MIN_EXECUTED provides for the marker lanes).
   workflow-examples:
     name: Validate workflow examples
     runs-on: ubuntu-24.04
@@ -64,13 +63,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # compare-release's, audit-release's, and suppressions's documented
-      # commands all pass --header, which goes through the default CastXML
-      # AST backend -- `pip install -e ".[dev]"` alone leaves the runner
-      # without it, and each manifest's `requires:` lists castxml, so the
-      # job would skip rather than fail silently. Both halves are needed:
-      # the toolchain here, and `--require` below turning a skip into a
-      # failure if this step ever stops providing it.
+      # compare-release's, audit-release's, suppressions's, python-api's,
+      # and github-actions's documented commands all pass a public header
+      # (CLI `--header` or `run_compare`'s `old_headers`/`new_headers`),
+      # which goes through the default CastXML AST backend -- `pip install
+      # -e ".[dev]"` alone leaves the runner without it, and each
+      # manifest's `requires:` lists castxml, so the job would skip rather
+      # than fail silently. Both halves are needed: the toolchain here,
+      # and `--require` below turning a skip into a failure if this step
+      # ever stops providing it.
       - name: Install system deps
         uses: ./.github/actions/install-system-deps
         with:
@@ -94,7 +95,8 @@ jobs:
           mkdir -p results
           PYTHONPATH=. python validation/scripts/run_workflow_examples.py \
             --require compare-release --require audit-release \
-            --require suppressions \
+            --require suppressions --require python-api \
+            --require github-actions \
             --json results/workflow-examples.json
 
       - name: Upload workflow-example receipt
