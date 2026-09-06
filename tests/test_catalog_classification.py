@@ -83,6 +83,59 @@ def test_a_stale_manifest_entry_is_rejected():
     assert any("not a case" in e for e in errors)
 
 
+def test_a_duplicate_scenario_key_is_rejected(tmp_path):
+    """`yaml.safe_load` silently keeps only the *last* value for a repeated
+    mapping key -- a hand-edited manifest with two `case01_symbol_removal:`
+    entries under `scenarios` would otherwise reclassify the case with no
+    warning at all. Bug class: a duplicate-key manifest edit must fail
+    loudly, not resolve to whichever entry happened to parse last."""
+    bad = tmp_path / "catalog_classification.yaml"
+    bad.write_text(
+        "scenarios:\n"
+        "  case01_symbol_removal: {scenario_kind: capability, ecosystem: generic}\n"
+        "  case01_symbol_removal: {scenario_kind: case-study, ecosystem: sycl}\n"
+    )
+    with pytest.raises(ValueError, match="duplicate key"):
+        catalog_classification.load_classification(bad)
+
+
+def test_a_duplicate_rule_entry_is_rejected(tmp_path):
+    """The `rules:` list sibling of the case above: a plain YAML sequence
+    doesn't collapse duplicates the way a mapping does, so this needs its
+    own explicit check rather than falling out of the duplicate-key
+    loader."""
+    bad = tmp_path / "catalog_classification.yaml"
+    bad.write_text(
+        "rules:\n  - case02_param_type_change\n  - case02_param_type_change\n"
+    )
+    with pytest.raises(ValueError, match="more than once under 'rules'"):
+        catalog_classification.load_classification(bad)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("scenarios: [not, a, mapping]\n", id="scenarios-is-a-list"),
+        pytest.param(
+            "scenarios:\n  case01_symbol_removal: [not, a, mapping]\n",
+            id="scenario-entry-is-a-list",
+        ),
+        pytest.param("rules: {not: a-list}\n", id="rules-is-a-mapping"),
+        pytest.param("- top level is a list, not a mapping\n", id="root-is-a-list"),
+    ],
+)
+def test_a_malformed_manifest_shape_raises_a_clear_error(tmp_path, content):
+    """Every one of these used to reach a bare `.get()`/`.items()` call on
+    the wrong container type and crash with an unrelated AttributeError
+    instead of this module's own clear ValueError -- validate the shape
+    before touching it, at each container level a hand-edited YAML file
+    could get wrong."""
+    bad = tmp_path / "catalog_classification.yaml"
+    bad.write_text(content)
+    with pytest.raises(ValueError):
+        catalog_classification.load_classification(bad)
+
+
 def test_a_case_listed_under_both_scenarios_and_rules_is_rejected(tmp_path):
     bad = tmp_path / "catalog_classification.yaml"
     bad.write_text(

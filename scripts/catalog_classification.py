@@ -41,6 +41,36 @@ import example_catalog  # noqa: E402
 
 CLASSIFICATION_PATH = example_catalog.CATALOG_DIR / "catalog_classification.yaml"
 
+
+class _NoDuplicateKeysLoader(yaml.SafeLoader):
+    """`yaml.safe_load` silently keeps the *last* value for a repeated
+    mapping key (PyYAML follows the YAML spec here, which treats a document
+    with a duplicate key as the loader's problem, not an error) -- which
+    would let a hand-edited `catalog_classification.yaml` reclassify a case
+    (e.g. two `case01_symbol_removal:` entries under `scenarios`) with no
+    warning at all, silently keeping only the second. This loader raises
+    instead, at every mapping level, so a duplicate key fails exactly the
+    same way `validate_classification()`'s other checks do: loudly, at load
+    time, rather than resolving to whichever entry happened to parse last.
+    """
+
+    def construct_mapping(
+        self, node: yaml.nodes.MappingNode, deep: bool = False
+    ) -> dict[object, object]:
+        seen: set[object] = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=True)
+            if key in seen:
+                raise yaml.constructor.ConstructorError(
+                    None,
+                    None,
+                    f"found duplicate key {key!r}",
+                    node.start_mark,
+                )
+            seen.add(key)
+        return super().construct_mapping(node, deep=deep)
+
+
 #: Mirrors gen_catalog_taxonomy.py's own docstring enumeration of the values
 #: `scenario_kind`/`ecosystem` may take.
 SCENARIO_KINDS = {"case-study", "project-topology", "capability"}
@@ -60,22 +90,55 @@ def load_classification(
     path: Path | None = None,
 ) -> dict[str, CaseClassification]:
     """Parse `catalog/catalog_classification.yaml` into case_name -> entry."""
-    raw = (
-        yaml.safe_load((path or CLASSIFICATION_PATH).read_text(encoding="utf-8")) or {}
-    )
+    manifest = path or CLASSIFICATION_PATH
+    try:
+        raw = yaml.load(
+            manifest.read_text(encoding="utf-8"), Loader=_NoDuplicateKeysLoader
+        )
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{manifest}: invalid YAML ({exc})") from exc
+    raw = raw or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{manifest}: top level must be a mapping, got {raw!r}")
+
+    scenarios = raw.get("scenarios") or {}
+    if not isinstance(scenarios, dict):
+        raise ValueError(
+            f"{manifest}: 'scenarios' must be a mapping of case name -> "
+            f"{{scenario_kind, ecosystem}}, got {scenarios!r}"
+        )
+
     out: dict[str, CaseClassification] = {}
-    for case_name, entry in (raw.get("scenarios") or {}).items():
+    for case_name, entry in scenarios.items():
         entry = entry or {}
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{manifest}: 'scenarios' entry {case_name!r} must be a mapping "
+                f"with scenario_kind/ecosystem, got {entry!r}"
+            )
         out[case_name] = CaseClassification(
             entity="scenario",
             scenario_kind=str(entry.get("scenario_kind", "")).strip() or None,
             ecosystem=str(entry.get("ecosystem", "generic")).strip() or "generic",
         )
-    for case_name in raw.get("rules") or []:
+
+    rules = raw.get("rules") or []
+    if not isinstance(rules, (list, tuple)):
+        raise ValueError(
+            f"{manifest}: 'rules' must be a list of case names, got {rules!r}"
+        )
+    seen_rules: set[str] = set()
+    for case_name in rules:
+        if case_name in seen_rules:
+            raise ValueError(
+                f"{case_name!r} is listed more than once under 'rules' in "
+                f"{manifest.name} -- a case belongs to exactly one entry"
+            )
+        seen_rules.add(case_name)
         if case_name in out:
             raise ValueError(
                 f"{case_name!r} is listed under both 'scenarios' and 'rules' in "
-                f"{CLASSIFICATION_PATH.name} -- a case belongs to exactly one"
+                f"{manifest.name} -- a case belongs to exactly one"
             )
         out[case_name] = CaseClassification(
             entity="rule", scenario_kind=None, ecosystem="generic"
