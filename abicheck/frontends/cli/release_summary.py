@@ -156,6 +156,15 @@ def _write_release_summary_file(
     }
     if terms.section is not None:
         summary_data["comparison_scope"] = terms.section
+    # ADR-067 C-S2: the same folded release-level `disposition_audit` the
+    # primary report carries (`cli_compare_release_helpers._format_release_
+    # json`), via the identical shared helper, so this sidecar cannot drift
+    # from it.
+    from ...cli_compare_receipt import release_disposition_audit_block
+
+    summary_data["disposition_audit"] = release_disposition_audit_block(
+        library_results, matrix_result, severity_config
+    )
     summary_path = output_dir / "summary.json"
     writer = write_output if write_output is not None else _write_text
     writer(summary_path, json.dumps(summary_data, indent=2))

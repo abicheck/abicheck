@@ -61,6 +61,7 @@ from typing import TYPE_CHECKING, Any, cast
 from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 
 if TYPE_CHECKING:
+    from .checker_types import DiffResult
     from .pack_application import PackApplication
     from .workflows.gate import SeverityConfig
 
@@ -945,3 +946,46 @@ def _release_md_library_findings(library_results: list[dict[str, object]]) -> li
                 "list._"
             )
     return ["", "## Per-Library Findings", *lines] if lines else []
+
+
+def release_disposition_audit_block(
+    library_results: list[dict[str, object]],
+    matrix_result: DiffResult | None = None,
+    severity_config: SeverityConfig | None = None,
+) -> dict[str, object]:
+    """ADR-067 C-S2: the release/bundle fan-out's own ``disposition_audit``.
+
+    Folds every library's already-computed per-library block (each library
+    entry carries one, set alongside ``entry["findings"]`` in
+    ``cli_compare_release_pairwise._compare_one_library`` -- the identical
+    scalar-``compare`` shape, so a consumer parses one shape everywhere) plus
+    the release-global probe-matrix comparison's own audit, into one
+    release-level total via :func:`~abicheck.report.disposition_audit.
+    fold_disposition_audits`. A library entry with no ``disposition_audit``
+    (an operational-error/not-comparable/unsupported outcome that never
+    reached a real comparison) contributes nothing, the same way such a
+    library contributes no ``findings`` either -- it is not a comparison the
+    audit's raw total should silently pretend happened.
+
+    Lives here rather than in ``cli_compare_release_helpers.py``/
+    ``cli_compare_release_matrix.py`` for the identical reason
+    :func:`_release_summary_effective_config_block`/
+    :func:`_release_md_library_findings` above do: both original candidate
+    homes are at their own ``no_growth`` cap with zero headroom, and this
+    module is the established shared home for a release-summary-wide fold
+    neither has room for.
+    """
+    from .report.disposition_audit import (
+        DispositionAudit,
+        compute_disposition_audit,
+        fold_disposition_audits,
+    )
+
+    audits: list[DispositionAudit] = []
+    for lib in library_results:
+        block = lib.get("disposition_audit")
+        if isinstance(block, dict):
+            audits.append(DispositionAudit.from_dict(block))
+    if matrix_result is not None:
+        audits.append(compute_disposition_audit(matrix_result, severity_config))
+    return fold_disposition_audits(audits).to_dict()

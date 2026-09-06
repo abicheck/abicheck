@@ -209,6 +209,7 @@ class DispositionLedger:
                 verdict_class=_verdict_class_of(change),
                 rule=rule,
                 reclassified_by=getattr(change, "reclassified_by", None),
+                reason_code=getattr(change, "contract_reason_code", None),
                 gate_excluded=gate_excluded,
                 scope_decided=scope_decided,
                 policy_overlay=policy_overlay,
@@ -480,6 +481,37 @@ class DispositionLedger:
                 ).value,
             )
 
+    def resolve_reclassifications(self, result: DiffResult) -> None:
+        """Fill in :attr:`DispositionRecord.reclassified_by` (ADR-067 C-S2).
+
+        ``Change`` carries no such attribute -- the value is computed on
+        demand, like :meth:`resolve_verdict_classes` computes
+        ``verdict_class``, so every record started out ``None`` here. Mirrors
+        :func:`abicheck.reporter._reclassified_by_for_change`'s own
+        precedence (``rule.label or rule.reason or rule.to_verdict.value``)
+        without importing that ``frontends``-adjacent helper (``policy/``
+        may not depend on it); both read
+        :func:`abicheck.reclassify.reclassify_rule_for_change`, so they
+        cannot disagree on *which* rule decided a change. Every record is a
+        candidate, not only ``gating``/``non_gating`` ones: reclassification
+        is an overlay attribute (D2), independent of the terminal
+        disposition policy or scope later assigned.
+        """
+        from ..reclassify import reclassify_rule_for_change
+
+        gate = _GateContext.of(result)
+        for index, (record, change) in enumerate(zip(self._records, self._anchors)):
+            if record.reclassified_by is not None:
+                continue  # already resolved (e.g. a re-closed scoped record)
+            rule = reclassify_rule_for_change(
+                change,  # type: ignore[arg-type]
+                gate.policy_file,
+            )
+            if rule is None:
+                continue
+            reclassified_by = rule.label or rule.reason or rule.to_verdict.value
+            self._records[index] = replace(record, reclassified_by=reclassified_by)
+
     def refresh_promoted(self, result: DiffResult) -> None:
         """Re-answer any record whose finding an explicit scope *promoted*.
 
@@ -675,7 +707,16 @@ class DispositionLedger:
         return sum(1 for r in self._records if r.policy_overlay)
 
     def to_dict(self) -> dict[str, object]:
-        """The JSON ``disposition_audit`` block (report schema 2.51)."""
+        """The JSON ``disposition_audit`` block (report schema 2.51).
+
+        ADR-067 C-S2's reclassification/scope-reason breakdowns
+        (:func:`abicheck.policy.disposition_close.reclassifications`/
+        :func:`~abicheck.policy.disposition_close.scope_reasons`) are
+        deliberately not folded in here: they read :attr:`records` alone, so
+        they live in the sibling *closing* module that already owns
+        derived-from-records reporting, keeping this leaf under the
+        architecture gate's per-file line ceiling.
+        """
         return {
             "detected_total": self.detected_total,
             "effective_total": self.effective_total,

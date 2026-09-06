@@ -54,6 +54,7 @@ Three orthogonal axes, kept separate on purpose (ADR-042):
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -142,7 +143,17 @@ from .resolve import (
 #: published ``run_outcome.scope`` while its canonical consumer folded only
 #: ``gate``/``operational``). Additive in shape, not inert: the
 #: contribution folds into ``gate.exit_code``.
-AGGREGATE_SCHEMA_VERSION = "1.8"
+#:
+#: ``1.9`` (ADR-067 C-S2) adds the top-level ``disposition_audit`` block
+#: (the folded raw-versus-effective count across every target that carries
+#: one -- ``report.disposition_audit.fold_disposition_audits``, the same
+#: shape scalar ``compare``'s report-schema-2.51 block and the release/
+#: bundle fan-out's own C-S2 block carry), ``disposition_audit_missing_
+#: targets`` (analyzed targets whose report predates schema 2.51 or came
+#: from ``scan``, which carries none), and a ``disposition_audit`` field on
+#: every target entry that has one. Additive and inert like ``1.4``/``1.6``/
+#: ``1.7``: no *_contribution field, so it never changes ``gate.exit_code``.
+AGGREGATE_SCHEMA_VERSION = "1.9"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
@@ -416,6 +427,12 @@ class TargetReport:
     #: when ``--on-incomplete-scope warn`` zeroed the contribution above.
     #: Reported, never folded into an exit code (the contract-coverage rule).
     scope_completeness_incomplete: bool = False
+    #: ADR-067 C-S2: this target's own ``disposition_audit`` block, read
+    #: verbatim off its report (``disposition_axis.disposition_audit_block``)
+    #: -- ``None`` for an unavailable target or a report that carries none
+    #: (every `scan` report today). Declared last for the same positional-
+    #: construction-safety reason as the fields above.
+    disposition_audit: Mapping[str, Any] | None = None
 
     @property
     def analyzed(self) -> bool:
@@ -464,6 +481,8 @@ class TargetReport:
             value = getattr(self, key)
             if value is not None:
                 d[key] = value
+        if self.disposition_audit is not None:
+            d["disposition_audit"] = dict(self.disposition_audit)
         return d
 
 

@@ -719,7 +719,28 @@ from typing import Any
 #:      ``"unverified"`` or ``"trusted"``. Additive only: ``assurance``
 #:      itself is unchanged, and every existing consumer of this report is
 #:      unaffected.
-REPORT_SCHEMA_VERSION = "3.1"
+#:
+#: 3.2 -- ADR-067 C-S2 (bundle/aggregate/reclassification/scope disposition
+#:       parity): ``disposition_audit`` gains three additive fields --
+#:       ``reclassified_total``/``reclassifications`` (a ``reclassify:``
+#:       rule's overlay, now actually recorded through the ledger --
+#:       previously always zero/empty, since ``Change`` carries no
+#:       ``reclassified_by`` attribute of its own for the ledger to read)
+#:       and ``scope_reasons`` (the contract-relevance reason code behind
+#:       every ``out_of_contract``/``unresolved_relevance`` record, the
+#:       scope-exclusion counterpart of ``rules``). The release/bundle
+#:       fan-out's own JSON summary and ``--output-dir`` sidecar gain an
+#:       additive top-level ``disposition_audit`` block (each library entry
+#:       already carries one; this is their fold,
+#:       ``report.disposition_audit.fold_disposition_audits``) --
+#:       unconditional, the same "never dropped, only collapsed" rule the
+#:       scalar block follows. Additive only: no existing key changes shape
+#:       or meaning, and no verdict, gate, or exit code moves. Renumbered
+#:       from a conflicting 3.1 when the origin/main merge claimed that
+#:       version first for E-S2's ``comparability_assurance`` block (same
+#:       "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/
+#:       2.49/2.51/2.53 entries above).
+REPORT_SCHEMA_VERSION = "3.2"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

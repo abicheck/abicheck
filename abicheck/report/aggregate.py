@@ -25,10 +25,27 @@ from typing import Any
 
 from abicheck.workflows.aggregate.fold import AggregateResult
 
+from .disposition_audit import DispositionAudit, fold_disposition_audits
+
 
 def render_aggregate_json(result: AggregateResult) -> dict[str, Any]:
-    """Project *result* to the stable JSON-compatible aggregate document."""
-    return result.to_dict()
+    """Project *result* to the stable JSON-compatible aggregate document.
+
+    Adds the top-level ``disposition_audit`` block (ADR-067 C-S2): the same
+    raw-versus-effective fold the release/bundle fan-out carries, one level
+    up again, over every analyzed/unexpected target's own already-emitted
+    block (``fold.AggregateResult.disposition_audit_targets`` -- exposed
+    rather than folded there, since ``workflows/`` may not import
+    ``report/``, and this function is where the two are allowed to meet).
+    """
+    d = result.to_dict()
+    audits = (
+        DispositionAudit.from_dict(t.disposition_audit)
+        for t in result.disposition_audit_targets
+        if t.disposition_audit is not None
+    )
+    d["disposition_audit"] = fold_disposition_audits(audits).to_dict()
+    return d
 
 
 def render_aggregate_text(result: AggregateResult) -> str:

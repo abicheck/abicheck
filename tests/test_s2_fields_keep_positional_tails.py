@@ -34,7 +34,14 @@ _S2_EXIT_FIELDS = (
     "no_comparison_completed_contribution",
 )
 _S2_BUNDLE_FIELDS = ("scope_record", "extraction_failures", "not_comparable_members")
-_S2_TARGET_FIELDS = ("scope_completeness_exit", "scope_completeness_incomplete")
+_S2_TARGET_FIELDS = (
+    "scope_completeness_exit",
+    "scope_completeness_incomplete",
+    # ADR-067 C-S2: appended after the S2 fields for the identical reason --
+    # a positional caller written before this field existed keeps binding
+    # the older tail rather than silently feeding it into this one.
+    "disposition_audit",
+)
 
 
 def _names(cls: type) -> list[str]:
@@ -44,7 +51,7 @@ def _names(cls: type) -> list[str]:
 def test_the_s2_fields_are_the_tail_of_each_type() -> None:
     assert _names(ExitDecision)[-2:] == list(_S2_EXIT_FIELDS)
     assert _names(BundleDiffResult)[-3:] == list(_S2_BUNDLE_FIELDS)
-    assert _names(TargetReport)[-2:] == list(_S2_TARGET_FIELDS)
+    assert _names(TargetReport)[-len(_S2_TARGET_FIELDS) :] == list(_S2_TARGET_FIELDS)
 
 
 def test_exit_decision_positional_tail_binds_the_older_fields() -> None:

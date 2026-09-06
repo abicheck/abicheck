@@ -1079,6 +1079,7 @@ def _format_release_summary(
         worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
         old_map, new_map, bundle_result, matrix_result,
         scope_section=scope_terms.section if scope_terms is not None else None,
+        severity_config=severity_config,
     )
 
 
@@ -1302,7 +1303,10 @@ def _format_release_json(
     # both this function and `_write_release_summary_file`
     # (`cli_compare_release_matrix.py`) call, so the two summary documents
     # can never independently drift.
-    from .cli_compare_receipt import _release_summary_effective_config_block
+    from .cli_compare_receipt import (
+        _release_summary_effective_config_block,
+        release_disposition_audit_block,
+    )
 
     digest, fields = _release_summary_effective_config_block(
         severity_config, policy=policy, policy_file_path=policy_file_path,
@@ -1311,6 +1315,12 @@ def _format_release_json(
     )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields
+    # ADR-067 C-S2: unconditional, like scalar `compare`'s own block -- D3's
+    # rule is that the raw-versus-effective counts are never dropped, only
+    # ever collapsed in detail.
+    summary["disposition_audit"] = release_disposition_audit_block(
+        library_results, matrix_result, severity_config
+    )
     return json.dumps(summary, indent=2)
 
 
@@ -1346,6 +1356,7 @@ def _format_release_markdown(
     bundle_result: BundleDiffResult | None,
     matrix_result: DiffResult | None,
     scope_section: Mapping[str, object] | None = None,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
     """Render the release summary as a Markdown document.
 
@@ -1353,10 +1364,20 @@ def _format_release_markdown(
     rendered by ``report.comparison_scope.render_comparison_scope_markdown``,
     and when it says no comparison completed the verdict row says so too,
     rather than showing the compared-members floor ``NO_CHANGE`` as the
-    whole scope's answer.
+    whole scope's answer. *severity_config* (ADR-067 C-S2) feeds the release-
+    global probe-matrix comparison's own audit contribution to the folded
+    ``disposition_audit`` section, the same gate every per-library block was
+    already computed under.
     """
-    from .cli_compare_receipt import _release_md_library_findings
+    from .cli_compare_receipt import (
+        _release_md_library_findings,
+        release_disposition_audit_block,
+    )
     from .report.comparison_scope import render_comparison_scope_markdown
+    from .report.disposition_audit import (
+        DispositionAudit,
+        render_disposition_audit_section,
+    )
 
     _VERDICT_EMOJI = {
         "NO_CHANGE": "✅",
@@ -1398,4 +1419,11 @@ def _format_release_markdown(
     lines += _release_md_library_findings(library_results)
     lines += _release_md_bundle_findings(bundle_result)
     lines += _release_md_matrix_findings(matrix_result)
+    lines += render_disposition_audit_section(
+        DispositionAudit.from_dict(
+            release_disposition_audit_block(
+                library_results, matrix_result, severity_config
+            )
+        )
+    )
     return "\n".join(lines)

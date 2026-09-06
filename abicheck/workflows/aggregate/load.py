@@ -44,6 +44,7 @@ from .contracts import (
     DEFAULT_REPORT_PREFIX,
     GateInfo,
 )
+from .disposition_axis import disposition_audit_block
 from .gate import (
     _VALID_GATE_EXIT,
     COVERAGE_INCOMPLETE_EXIT,
@@ -120,6 +121,11 @@ class _LoadedReport:
     scope_completeness_exit: int = 0
     #: Whether the report recorded an incomplete scope, gating or accepted.
     scope_completeness_incomplete: bool = False
+    #: ADR-067 C-S2: the report's own ``disposition_audit`` block, read
+    #: verbatim (``disposition_axis.disposition_audit_block``), never
+    #: recomputed here -- ``None`` for a report that carries none (every
+    #: `scan` report today, and an unreadable/malformed one).
+    disposition_audit: Mapping[str, Any] | None = None
 
 
 def _malformed_gate_report(
@@ -451,6 +457,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             analysis_assurance_exit=_analysis_assurance_exit(data),
             scope_completeness_exit=scope_completeness_exit(data),
             scope_completeness_incomplete=scope_completeness_incomplete(data),
+            disposition_audit=disposition_audit_block(data),
             # An operational ERROR means *a* library failed, not that nothing
             # was compared: real `bundle_findings`/`matrix_findings` from
             # whatever did complete are worth keeping, but never complete --
@@ -546,6 +553,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             analysis_assurance_exit=max(_analysis_assurance_exit(data), assurance_axis),
             scope_completeness_exit=scope_completeness_exit(data),
             scope_completeness_incomplete=scope_completeness_incomplete(data),
+            disposition_audit=disposition_audit_block(data),
             # No comparison ran at all for a true abort -- no partial finding
             # set to preserve. `BUNDLE_INCOMPLETE` (compat_verdict resolved
             # above) is the exception: its members did complete.
@@ -611,6 +619,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             analysis_assurance_exit=_analysis_assurance_exit(data),
             scope_completeness_exit=scope_completeness_exit(data),
             scope_completeness_incomplete=scope_completeness_incomplete(data),
+            disposition_audit=disposition_audit_block(data),
             # A completed sibling/global comparison still leaves real
             # bundle_findings/matrix_findings even though this library
             # refused -- mirrors the ERROR/scan-abort branches.
@@ -708,6 +717,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 analysis_assurance_exit=_analysis_assurance_exit(data),
                 scope_completeness_exit=scope_completeness_exit(data),
                 scope_completeness_incomplete=scope_completeness_incomplete(data),
+                disposition_audit=disposition_audit_block(data),
                 effective_config_digest=effective_config_digest,
             )
     verdict = parse_report_verdict(data)
@@ -785,6 +795,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         analysis_assurance_exit=_analysis_assurance_exit(data),
         scope_completeness_exit=scope_completeness_exit(data),
         scope_completeness_incomplete=scope_completeness_incomplete(data),
+        disposition_audit=disposition_audit_block(data),
         # Only a report that produced a real verdict has a finding set worth
         # reading: a verdictless one is unavailable, and its `changes` array
         # (if any) describes a comparison that never reached a conclusion.
