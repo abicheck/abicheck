@@ -152,6 +152,12 @@ _OPERATION_OVERRIDES: dict[str, str] = {
     "experimental_removed_without_replacement": "removed",
     # Ends in "_deleted_dwarf", not "_deleted".
     "func_deleted_dwarf": "removed",
+    # ADR-065 S3: a component leaves (or joins) the release's declared
+    # component set. Ends in "_retired"/"_introduced", neither of which is a
+    # suffix the heuristic below knows -- and both are genuinely an added/
+    # removed *entity*, not a property change on a persisting one.
+    "support_promise_component_retired": "removed",
+    "support_promise_component_introduced": "added",
     # A whole ISA-dispatch family's concrete symbols vanish (case83), not a
     # property change on a persisting symbol.
     "cpu_dispatch_isa_dropped": "removed",

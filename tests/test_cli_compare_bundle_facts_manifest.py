@@ -524,15 +524,17 @@ class TestBundleFactsLibraryManifest:
             is_package,
             detect_extractor,
         ):
-            lib_dir, debug_dir, _header_dir, symbols_file = real_extract_if_package(
-                input_path,
-                debug_pkg,
-                devel_pkg,
-                make_temp_dir,
-                is_package,
-                detect_extractor,
+            lib_dir, debug_dir, _header_dir, symbols_file, whole = (
+                real_extract_if_package(
+                    input_path,
+                    debug_pkg,
+                    devel_pkg,
+                    make_temp_dir,
+                    is_package,
+                    detect_extractor,
+                )
             )
-            return lib_dir, debug_dir, header_dir, symbols_file
+            return lib_dir, debug_dir, header_dir, symbols_file, whole
 
         monkeypatch.setattr(
             cli_compare_release_helpers_mod,

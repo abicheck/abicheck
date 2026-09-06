@@ -1,5 +1,19 @@
 # ADR-047: GitHub Actions Integration Model — Project Lifecycle Over Aggregate-Centric Design
 
+> **Amendment (2026-09-06, [ADR-068](068-one-comparison-product-and-scan-retirement.md)).**
+> §8's **S5 (single-build audit, no baseline)** stays a real, distinct,
+> advisory check kind — only its routing changes. `baseline-channel: none`
+> no longer routes to `abicheck scan`; it routes to
+> `abicheck compare --no-baseline`, which carries the same candidate-side
+> checks plus the ones `scan` never had. The Action's own `mode: scan` is
+> first re-implemented over `compare` with every documented input unchanged
+> (so user workflow YAML keeps working while the CLI beneath it changes), and
+> is then removed on this ADR's normal input-lifecycle terms — the CLI's
+> hard-removal policy does not propagate to Action inputs. `action/run.sh`'s
+> ~40 `scan`-mode branches collapse into the `compare` path in the same work.
+> Sequenced as Phase 4 of
+> [`plans/one-comparison-product.md`](../plans/one-comparison-product.md).
+
 **Date:** 2026-07-19
 **Status:** Accepted — substantially implemented. P0 (onboarding blockers)
 and the main P1 project-integration lifecycle (`build-output.json`,

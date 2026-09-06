@@ -34,6 +34,12 @@ from .checker_policy import ChangeKind, ReachabilityState, Verdict, compute_verd
 from .diff_helpers import make_change
 from .impact.engine import assess_change
 from .model import AbiSnapshot, Visibility
+from .model.consumer_spec import (
+    ConsumerAppInput,
+    ConsumerUnreadableError,
+    as_consumer_spec,
+    verify_digest,
+)
 from .policy.disposition_close import (
     close_consumer_scope,
     ledger_for,
@@ -94,6 +100,21 @@ class AppCompatResult:
 
     # Coverage
     symbol_coverage: float = 100.0  # % of app's required symbols present in new lib
+
+    # Consumer-specification provenance (Workstream D-S1: a ConsumerSpec's
+    # optional identity, e.g. via --used-by-manifest), reported purely as
+    # provenance -- see model.consumer_spec.
+    platform: str | None = None
+    profile: str | None = None
+    provider_baseline: str | None = None
+    digest: str | None = None
+    requirement: str = "required"
+
+    # Set only for an ADVISORY consumer that could not be read (a REQUIRED
+    # one raises instead); left at its NO_CHANGE/empty defaults and excluded
+    # from a scoped gate's worst-wins (cli_helpers_compare._apply_used_by_scoping).
+    unreadable: bool = False
+    unreadable_reason: str | None = None
 
 
 @dataclass
@@ -453,30 +474,33 @@ def _parse_macho_app_requirements(
 # ---------------------------------------------------------------------------
 
 def parse_app_requirements(
-    app_path: Path, library_name: str,
+    app_path: ConsumerAppInput, library_name: str,
 ) -> AppRequirements:
     """Extract app's requirements for a specific library.
 
-    Args:
-        app_path: Path to the application binary (ELF, PE, or Mach-O).
-        library_name: SONAME/DLL name/dylib path to filter by.
+    *app_path* is a bare Path (ELF/PE/Mach-O), or a
+    :class:`~abicheck.model.consumer_spec.ConsumerSpec` carrying one plus
+    optional digest/platform/profile/provider-baseline provenance
+    (Workstream D-S1) -- a supplied digest is verified against the real file
+    first. *library_name* is the SONAME/DLL name/dylib path to filter by.
 
-    Returns:
-        AppRequirements with the app's needed libs, undefined symbols,
-        and required versions.
-
-    Raises:
-        ValueError: If the binary format cannot be detected.
+    Raises :class:`ConsumerUnreadableError` (or its
+    ``ConsumerDigestMismatchError`` subclass) when the format can't be
+    detected or the digest mismatches -- both subclass ``ValueError``, so an
+    existing bare ``except ValueError``/``except Exception`` is unaffected.
     """
-    fmt = _detect_app_format(app_path)
+    spec = as_consumer_spec(app_path)
+    verify_digest(spec)
+    path = spec.path
+    fmt = _detect_app_format(path)
     if fmt == "elf":
-        return _parse_elf_app_requirements(app_path, library_name)
+        return _parse_elf_app_requirements(path, library_name)
     if fmt == "pe":
-        return _parse_pe_app_requirements(app_path, library_name)
+        return _parse_pe_app_requirements(path, library_name)
     if fmt == "macho":
-        return _parse_macho_app_requirements(app_path, library_name)
-    raise ValueError(
-        f"Cannot detect binary format of '{app_path}'. "
+        return _parse_macho_app_requirements(path, library_name)
+    raise ConsumerUnreadableError(
+        f"Cannot detect binary format of '{path}'. "
         "Expected: ELF, PE, or Mach-O executable."
     )
 
@@ -1402,7 +1426,7 @@ def _attach_consumer_impact(
 
 def scope_diff_to_app(
     diff: DiffResult,
-    app_path: Path,
+    app_path: ConsumerAppInput,
     old_lib: Path | AbiSnapshot,
     new_lib: Path | AbiSnapshot,
     *,
@@ -1441,9 +1465,39 @@ def scope_diff_to_app(
     snapshot should pass the snapshot here so the join can explain *why* a
     consumer required a removed symbol. It never affects which symbols,
     exports, or versions are read — see :func:`_library_source_graph`.
+
+    *app_path* (Workstream D-S1) may be a bare :class:`~pathlib.Path` or a
+    :class:`~abicheck.model.consumer_spec.ConsumerSpec` (digest/platform/
+    profile/provider-baseline provenance, advisory/required). An unreadable
+    REQUIRED consumer (the default) raises
+    :class:`~abicheck.model.consumer_spec.ConsumerUnreadableError`, as an
+    unreadable bare path always has; ADVISORY instead returns a
+    ``NO_CHANGE``/``unreadable=True`` result, excluded from a scoped gate's
+    worst-wins.
     """
+    spec = as_consumer_spec(app_path)
+    app_path = spec.path
     library_soname = _get_lib_soname(old_lib)
-    app_reqs = parse_app_requirements(app_path, library_soname)
+    try:
+        app_reqs = parse_app_requirements(spec, library_soname)
+    except ConsumerUnreadableError as exc:
+        if not spec.is_advisory:
+            raise
+        return AppCompatResult(
+            app_path=str(spec.path),
+            old_lib_path=str(old_lib) if isinstance(old_lib, Path) else old_lib.library,
+            new_lib_path=str(new_lib) if isinstance(new_lib, Path) else new_lib.library,
+            full_diff=diff,
+            verdict=Verdict.NO_CHANGE,
+            symbol_coverage=0.0,
+            platform=spec.platform,
+            profile=spec.profile,
+            provider_baseline=spec.provider_baseline,
+            digest=spec.digest,
+            requirement=spec.requirement.value,
+            unreadable=True,
+            unreadable_reason=str(exc),
+        )
 
     # Guard against over-collection in ELF consumers with many dependencies:
     # keep only symbols that are actually exported by the target old library.
@@ -1623,11 +1677,16 @@ def scope_diff_to_app(
         full_diff=diff,
         verdict=verdict,
         symbol_coverage=coverage,
+        platform=spec.platform,
+        profile=spec.profile,
+        provider_baseline=spec.provider_baseline,
+        digest=spec.digest,
+        requirement=spec.requirement.value,
     )
 
 
 def check_appcompat(
-    app_path: Path,
+    app_path: ConsumerAppInput,
     old_lib_path: Path,
     new_lib_path: Path,
     *,

@@ -5543,8 +5543,12 @@ looked like the obvious fix and wasn't.
   > where the earlier "flip it to `effective_frontend`" attempt (recorded
   > above) was not, and exactly what is still open: the plan's own **item 2**
   > in
-  > [`cli-cleanup-phase-two.md`](plans/cli-cleanup-phase-two.md), which is the
-  > narrative owner for this item's status. The one thing worth keeping here,
+  > [`cli-cleanup-phase-two.md`](plans/cli-cleanup-phase-two.md), which was the
+  > narrative owner for this item's status. **Update (2026-09-06): that plan
+  > is closed and this item dissolves rather than closing** — ADR-068 retires
+  > `scan`, so the unflagged-default half disappears with `scan_engine`
+  > itself; the full investigation narrative is in that file's git history
+  > (last full-length revision `a92a4a89`). The one thing worth keeping here,
   > since it is what this file exists for: the reverted attempt was reverted
   > for surfacing the castxml L4 phantom-implicit-member bug, and that bug
   > (`Function.is_compiler_generated`, elsewhere in this file) being fixed is

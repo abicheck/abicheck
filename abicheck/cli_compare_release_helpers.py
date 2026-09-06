@@ -219,8 +219,18 @@ def _match_release_keys(
     old_files: list[Path],
     new_files: list[Path],
     is_package: Callable[[Path], bool],
-) -> tuple[list[str], list[str], list[str], dict[str, Path], dict[str, Path]]:
-    """Match library keys between old and new, handling direct file pairs."""
+) -> tuple[list[str], dict[str, Path], dict[str, Path]]:
+    """Match library keys between old and new, handling direct file pairs.
+
+    ADR-065 S4 deleted this function's old-minus-new / new-minus-old return
+    values. Pairing is all this may answer: *which* members have a
+    counterpart. What an unpaired member *means* -- unmatched, expected but
+    not produced, out of scope, or (only against a proven-complete inventory)
+    removed or added -- is decided exclusively by
+    :func:`~abicheck.workflows.release_scope.build_release_scope_record`, and
+    every consumer reads that record. A second, evidence-free set difference
+    here is how a name miss, a SONAME bump, a partial build and a genuine
+    deletion became one state (D2, the deletion gate)."""
     direct_file_pair = (
         old_dir.is_file()
         and new_dir.is_file()
@@ -228,36 +238,13 @@ def _match_release_keys(
         and not is_package(new_dir)
     )
     if direct_file_pair:
-        matched_keys = ["__direct_pair__"]
-        old_map = {"__direct_pair__": old_files[0]}
-        new_map = {"__direct_pair__": new_files[0]}
-        return matched_keys, [], [], old_map, new_map
-
-    matched_keys = sorted(set(old_map) & set(new_map))
-    removed_keys = sorted(set(old_map) - set(new_map))
-    added_keys = sorted(set(new_map) - set(old_map))
-    return matched_keys, removed_keys, added_keys, old_map, new_map
-
-
-def _collect_release_warnings(
-    warning_msgs: list[str],
-    matched_keys: list[str],
-    removed_keys: list[str],
-    added_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
-) -> None:
-    """Collect warning messages for unmatched libraries."""
-    # ADR-065 D2: the raw set difference is *unmatched*, never removed/added.
-    for k in removed_keys:
-        warning_msgs.append(f"Warning: library unmatched (no counterpart on NEW): {old_map[k].name}")
-    for k in added_keys:
-        warning_msgs.append(f"Info: library unmatched (no counterpart on OLD): {new_map[k].name}")
-    if not matched_keys:
-        warning_msgs.append(
-            "Warning: no matching library pairs found between OLD and NEW inputs -- "
-            "no comparison completed (ADR-065 D7)."
+        return (
+            ["__direct_pair__"],
+            {"__direct_pair__": old_files[0]},
+            {"__direct_pair__": new_files[0]},
         )
+
+    return sorted(set(old_map) & set(new_map)), old_map, new_map
 
 
 def _resolve_bundle_manifest(
@@ -455,9 +442,16 @@ def _extract_if_package(
     make_temp_dir: Callable[[str], Path],
     is_package: Callable[[Path], bool],
     detect_extractor: Callable[[Path], PackageExtractor | None],
-) -> tuple[Path, Path | None, Path | None, Path | None]:
+) -> tuple[Path, Path | None, Path | None, Path | None, bool]:
     """Extract package to tempdir if needed, return
-    (lib_dir, debug_dir, header_dir, symbols_file).
+    (lib_dir, debug_dir, header_dir, symbols_file, container_complete).
+
+    *container_complete* (ADR-065 S3) is the primary operand's own
+    :attr:`~abicheck.package.ExtractResult.container_complete`: ``True`` when
+    *input_path* was a package archive this extractor unpacked in full, so a
+    component absent from *lib_dir* is genuinely absent; ``False`` for a
+    directory operand, which proves nothing (D2). *debug_pkg*/*devel_pkg*
+    never affect it -- they carry debug info and headers, not components.
 
     When *input_path* is a plain directory (not a package archive), it is used
     as-is for lib_dir.  Side packages (*debug_pkg*, *devel_pkg*) are still
@@ -475,6 +469,7 @@ def _extract_if_package(
     debug_dir: Path | None = None
     header_dir: Path | None = None
     symbols_file: Path | None = None
+    container_complete = False
 
     if is_package(input_path):
         extractor = detect_extractor(input_path)
@@ -486,6 +481,7 @@ def _extract_if_package(
         debug_dir = result.debug_dir
         header_dir = result.header_dir
         symbols_file = result.symbols_file
+        container_complete = result.container_complete
 
     if debug_pkg is not None:
         dbg_ext = detect_extractor(debug_pkg)
@@ -507,7 +503,7 @@ def _extract_if_package(
         dev_result = dev_ext.extract(devel_pkg, dev_target)
         header_dir = dev_result.header_dir or dev_result.lib_dir
 
-    return lib_dir, debug_dir, header_dir, symbols_file
+    return lib_dir, debug_dir, header_dir, symbols_file, container_complete
 
 
 def _debian_symbols_warning(
@@ -1159,8 +1155,9 @@ def _format_release_json(
     scope_terms: ComparisonScopeTerms | None = None,
 ) -> str:
     """Render the release summary as a JSON document. ``unmatched_old``/
-    ``unmatched_new`` are the raw set difference (ADR-065 D2), read off the
-    record; *removed_keys*/*added_keys* are the **proven** sets ``exit`` reads."""
+    ``unmatched_new`` name the members with no counterpart, read off the
+    acquisition record (ADR-065 D2/S4); *removed_keys*/*added_keys* are the
+    **proven** sets ``exit`` reads."""
     changed_libraries = [
         str(lib["library"])
         for lib in library_results
@@ -1184,8 +1181,11 @@ def _format_release_json(
         "new_dir": str(new_dir),
         "libraries": library_results,
         "changed_libraries": changed_libraries,
-        "unmatched_old": unmatched_names(record, side="old") if record else [old_map[k].name for k in removed_keys],
-        "unmatched_new": unmatched_names(record, side="new") if record else [new_map[k].name for k in added_keys],
+        # ADR-065 S4: read off the acquisition record, never a set
+        # difference. A driver with no record has nothing that could
+        # establish what is unmatched, so it reports nothing here.
+        "unmatched_old": unmatched_names(record, side="old") if record else [],
+        "unmatched_new": unmatched_names(record, side="new") if record else [],
         "warnings": warning_msgs,
         "exit": exit_dict,
         "run_outcome": run_outcome_dict_for_release(

@@ -133,12 +133,10 @@ def _write_release_summary_file(
     summary_data: dict[str, object] = {
         "verdict": worst_verdict,
         "libraries": library_results,
-        "unmatched_old": unmatched_names(record, side="old")
-        if record
-        else [old_map[k].name for k in removed_keys],
-        "unmatched_new": unmatched_names(record, side="new")
-        if record
-        else [new_map[k].name for k in added_keys],
+        # ADR-065 S4: read off the acquisition record, never off the deleted
+        # set difference; a driver with no record reports nothing here.
+        "unmatched_old": unmatched_names(record, side="old") if record else [],
+        "unmatched_new": unmatched_names(record, side="new") if record else [],
         "effective_config_digest": digest,
         "effective_config_fields": fields,
         "exit": exit_dict,

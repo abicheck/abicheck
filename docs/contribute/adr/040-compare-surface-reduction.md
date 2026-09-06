@@ -1,5 +1,18 @@
 # ADR-040: `compare` Surface Reduction — Side-Aware Flags, Config Demotion, Run Profiles
 
+> **Amendment (2026-09-06, [ADR-068](068-one-comparison-product-and-scan-retirement.md)).**
+> Levers 1 and 2 are **continued and extended** — side-aware flags stay, and
+> config demotion widens to the whole `compile.*`/`debug.*` block that Phase
+> D's "constraint-aware subset" deliberately left on the CLI, plus release
+> topology, declared contracts and deployment constraints. **Lever 3 (run
+> profiles) is reversed:** `--profile` is removed, because it bundles three
+> axes ADR-068 D4/D5 separate — evidence depth, report rendering, and CI gate
+> policy — behind one word, and a rendering choice may not carry a gate
+> setting. The `--scope-public-headers` retention this ADR's Rollout records
+> is likewise still correct and still gated: it collapses into `--contract
+> public` only once [`plans/public-contract-default.md`](../plans/public-contract-default.md)'s
+> open relevance defects close, never as CLI cleanup.
+
 **Status:** Accepted — phased implementation (Phase A run profiles + Phase B
 evidence-family collapse landed; Phase C Lever-1 remainder landed except the
 `ast-frontend` carve-out; Phase D landed as a constraint-aware subset —

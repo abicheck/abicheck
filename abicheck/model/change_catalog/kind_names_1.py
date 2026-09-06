@@ -456,4 +456,14 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "var_access_widened",
         "private/protected→public variable (widening)",
     ),
+    (
+        "SUPPORT_PROMISE_COMPONENT_RETIRED",
+        "support_promise_component_retired",
+        "ADR-065 D1/S3: a component the OLD release shipped is confirmed absent from the NEW side's PROVEN-complete inventory -- a change to what the project promises to ship, not an inference from a member simply not being supplied → BREAKING",
+    ),
+    (
+        "SUPPORT_PROMISE_COMPONENT_INTRODUCED",
+        "support_promise_component_introduced",
+        "ADR-065 D1/S3: the symmetric rule -- a component only the NEW release ships, provable only against a PROVEN-complete OLD inventory → COMPATIBLE (an addition)",
+    ),
 )

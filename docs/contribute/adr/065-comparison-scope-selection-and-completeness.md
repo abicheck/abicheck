@@ -1,7 +1,31 @@
 # ADR-065: Comparison Scope, Member Selection, and Input Completeness
 
+> **Amendment (2026-09-06, [ADR-068](068-one-comparison-product-and-scan-retirement.md)).**
+> This ADR's model is **depended on, not changed**: `unselected`, `expected
+> but not produced`, `failed` and `deliberately retired` stay four states, a
+> partial local build still never reads as a removal, and a run that
+> completed zero comparisons still never reads as a pass. Two additions
+> follow from retiring `scan`:
+>
+> 1. One new acquisition state, **`declared_absent`** — the OLD side of an
+>    `abicheck compare --no-baseline NEW` run, which replaces `scan`'s
+>    audit-only mode. It is explicitly *not* `not_supplied`: the user
+>    declared there is no prior surface, so the evolution axis is reported
+>    `not_evaluated` and contributes no compatibility verdict, rather than
+>    the scope being reported incomplete.
+> 2. `scan --artifact-set`'s multi-library members become **this ADR's**
+>    members. [ADR-056](056-multi-artifact-library-set-scan.md) is superseded,
+>    so its parallel set model does not survive alongside the acquisition and
+>    selection model here; S3's package component inventories are the
+>    prerequisite for that fold.
+>
+> Sequenced as Phase 1 of
+> [`plans/one-comparison-product.md`](../plans/one-comparison-product.md).
+
 **Date:** 2026-09-05
-**Status:** Proposed — S2 implemented (2026-09-05): the acquisition record
+**Status:** Proposed — S1, S2, S3 and S4 implemented.
+
+**S2** (2026-09-05): the acquisition record
 (`abicheck/model/scope_acquisition.py`), the completeness axis on
 `RunOutcome`/`ExitDecision` (`abicheck/policy/outcome.py`,
 `abicheck/policy/exit_decision.py`, `abicheck/policy/scope_completeness.py`),
@@ -15,15 +39,42 @@ requires D2's completeness proof (migration note in
 after S2): `abicheck/model/release_selection.py`'s `ReleaseSelection`,
 `--select`/`--select-required` on `compare`'s directory/package fan-out,
 and the `--dry-run` "Comparison plan" preview
-(`abicheck/workflows/release_plan.py`, `abicheck/frontends/cli/release_dry_run.py`)
-— identity/coordinate member selection with a plan preview, through the
-typed API and CLI. `bundle_variants_config.py` was deleted outright in this
-slice rather than given a consumer (see the plan's own A1.6 note). S0
-(executable scenario table), S3 (package component inventories), and S4
-(Action/project/aggregate parity, scalar/bundle convergence, deletion of
-the set-difference/canonical-fallback paths, including
-`_match_release_keys`'s own removal path, which S1 does not touch) remain
-open. Design record for
+(`abicheck/workflows/release_plan.py`,
+`abicheck/frontends/cli/release_dry_run.py`) — identity/coordinate member
+selection with a plan preview, through the typed API and CLI.
+`bundle_variants_config.py` was deleted outright in this slice rather than
+given a consumer (see the plan's own A1.6 note).
+
+**S3** (2026-09-06): package component inventories and support-promise
+findings. `abicheck/model/package_inventory.py` is the declared component
+set with its own completeness flag; `abicheck/package.py`'s
+`package_component_inventory` builds one from an archive the extractor
+unpacked in full (`ExtractResult.container_complete`), which makes a live
+package operand a D2 completeness proof for the first time — a directory
+operand still proves nothing. `EXPECTED_NOT_PRODUCED`, reserved by S2 and
+unproduced until now, gets its producer (a declared component the tree
+cannot reach). `abicheck/policy/support_promise.py` is D1's fifth concept
+under the `--support-promise off|declared` contract-policy field, emitting
+`support_promise_component_retired`/`_introduced` from proven inventory
+changes only; `abicheck/workflows/release_support_promise.py` wires it into
+the release fan-out's own results.
+
+**S4** (2026-09-06): the deletion gate. `_match_release_keys`'s
+old-minus-new / new-minus-old set difference is gone
+(`abicheck/cli_compare_release_helpers.py`) — its last two consumers, the
+JSON `unmatched_old`/`unmatched_new` keys and the fan-out's stderr notices,
+read the acquisition record instead
+(`abicheck/report/comparison_scope.py`'s `release_scope_warnings`). The
+Action/aggregate parity this slice also names landed with S2 (the
+`SCOPE_INCOMPLETE` verdict tier in `action/run.sh`, aggregate report schema
+1.8's `scope_completeness` axis). Scalar-versus-bundle *operand*
+convergence stays with `plans/cli-cleanup-phase-two.md`'s open PR I rather
+than being done twice — see that plan's own row. The silent canonical
+fallback in `compare_product_directories` (D3's `ambiguous` diagnostic)
+is also left for a later slice, since turning it into a refusal-to-compare
+is a behaviour change with its own migration note.
+
+S0 (executable scenario table) remains open. Design record for
 the vision's "partial matrices" and "scope-sensitive analysis" decisions
 (`vision.md`). Implementation is sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
@@ -57,6 +108,9 @@ The current code answers these unevenly (file references are from the
   reports that set under the JSON key `unmatched_old` **and** feeds it to
   `--fail-on-removed-library`'s exit `8`. A name-normalization miss, a
   SONAME bump, a failed extraction, and a genuine deletion are one state.
+  *(Closed: S2 took exit `8`, the verdict bump and the Markdown/PR-comment
+  sections off it; S4 deleted the set difference itself, so the JSON key and
+  the stderr notices read the acquisition record.)*
 - `compare_product_directories` (`abicheck/product_baseline.py`) has richer
   pairing (exact path, then an ambiguity-guarded SONAME/case-folded
   fallback), but an *ambiguous* group is silently left unpaired and then
@@ -90,6 +144,10 @@ The current code answers these unevenly (file references are from the
 - Package extraction (`abicheck/package.py`) returns directories, never a
   declared component inventory, so a component the extractor failed to
   unpack and a component the package no longer ships are indistinguishable.
+  *(Closed by S3: `package_component_inventory` returns a declared component
+  set whose `complete` flag is the extractor's own "this container was
+  unpacked in full" statement, and a declared component the tree cannot
+  reach is `EXPECTED_NOT_PRODUCED` rather than absent.)*
 - A stranded old-side library in the release fan-out degrades to an
   ELF-only `AbiSnapshot` written into the baseline with only a stderr line
   (`cli_compare_release.py`, `_resolve_stranded_library`) — a degraded
@@ -334,13 +392,16 @@ settable exit-code scheme (ADR-064).
 ## Implementation slices
 
 See the plan for status. S0: this ADR plus an executable scenario table.
-S1: identity-and-coordinates member selection with a plan preview, through
-the typed API and CLI. S2: expected/observed inventory, acquisition states,
-and the completeness axis on `RunOutcome`/`ExitDecision`. S3: package
-component inventories and support-promise findings under contract policy.
-S4: Action/project/aggregate parity, scalar-versus-bundle operand
-convergence as a slice of the existing convergence plans, and deletion of
-the replaced set-difference and canonical-fallback paths.
+S1 (landed): identity-and-coordinates member selection with a plan preview,
+through the typed API and CLI. S2 (landed): expected/observed inventory,
+acquisition states, and the completeness axis on `RunOutcome`/`ExitDecision`.
+S3 (landed): package component inventories and support-promise findings under
+contract policy. S4 (landed): Action/project/aggregate parity and deletion of
+the replaced set-difference path; scalar-versus-bundle operand convergence
+stays a slice of `plans/cli-cleanup-phase-two.md`'s PR I, and
+`compare_product_directories`' canonical fallback (D3) is not yet an
+`ambiguous` diagnostic — both are recorded as open in the plan rather than
+claimed here.
 
 ## Acceptance tests (contract)
 

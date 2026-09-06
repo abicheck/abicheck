@@ -146,30 +146,52 @@ subset of the header a given consumer's own code actually reaches:
   silently absent from every consumer that hasn't rebuilt either, right up
   until the moment they do.
 - Because there's no separate binary artifact, checking a header-only
-  library needs source-level evidence rather than binary evidence. **This is
-  a genuine gap in today's tooling, not a solved problem with an
-  unintuitive flag combination**: `dump`'s no-binary path
-  (`dump --sources`/`--build-info` with no artifact) produces an L3/L4/L5
-  source-fact snapshot that is **diagnostic output with no supported
-  consumer today** — no user-facing command folds it onto a binary-side
-  snapshot (the `merge` command that once did was removed in ADR-043, and
-  nothing replaced it), and comparing two such snapshots against each other
-  isn't a supported path either. The closest
-  practical workaround today is compiling a small stub translation unit
-  that `#include`s and instantiates the public API into an actual `.so`,
-  and dumping/comparing *that* — an ordinary binary+headers comparison, on
-  an artifact that exists only to give the header-only API something to
-  attach evidence to — rather than relying on any no-binary snapshot
-  comparison this tool doesn't yet fully support. The stub carries the same
-  export-visibility caveat as the static-library surrogate above, and one
-  extra: it must both *force emission of* and *default-export* every
-  representative entry point (explicit instantiation plus an export
-  annotation; note `-fvisibility-inlines-hidden`, common in real builds,
-  hides instantiated inline/template functions by default). Once a binary
-  carries any ELF exports at all, the header-declared surface is narrowed
-  to that export set — so a stub whose instantiations stay hidden yields a
-  clean comparison of almost nothing. Keep source/consumer compile tests as
-  an independent second check either way. See
+  library needs declared-surface (or deeper, source-level) evidence rather
+  than binary evidence. **`dump -H api.h` with no `SO_PATH` (and no
+  `--sources`/`--build-info`) now runs a real header-AST parse and
+  produces a real, comparable snapshot** — `compare old.json new.json`
+  against two such snapshots is a supported path, not a workaround: it
+  goes through the identical typed dump/compare pipeline a binary+headers
+  comparison uses, just with no ELF/PE/Mach-O metadata at all. What it
+  structurally *cannot* provide — because there was never a binary to
+  observe — shows up as explicit, reasoned rows in the report's
+  `disposition_audit.not_evaluated_detectors` rather than a silently clean
+  result: real symbol presence/versioning, ABI layout (field offsets,
+  padding), vtable/RTTI linkage identity, and mangled-name linkage-level
+  churn are all unconfirmed for a header-only snapshot (a mangled name it
+  reports is the header frontend's own *guessed* spelling, never a
+  linker-observed export). Deeper macro/inline/template-instantiation
+  evidence beyond an ordinary L2 header-AST parse is also still open — see
+  `docs/contribute/plans/vision-api-abi-evolution.md`'s "F. Header-only
+  comparison" section for exactly what is and isn't covered yet. It does
+  **not** replace the "does this actually compile/link/behave correctly
+  for a real consumer" question either: the stub-translation-unit approach
+  below remains the way to get *binary* evidence (real export-table/DWARF
+  confirmation, or a consumer-model behavioral check) for a header-only
+  library's compiled surface — the two techniques answer different
+  questions and are not mutually exclusive.
+
+  ```bash
+  abicheck dump -H old/api.h --version 1.0 -o old.json
+  abicheck dump -H new/api.h --version 2.0 -o new.json
+  abicheck compare old.json new.json
+  ```
+
+  The closest practical route to *binary* evidence remains compiling a
+  small stub translation unit that `#include`s and instantiates the public
+  API into an actual `.so`, and dumping/comparing *that* — an ordinary
+  binary+headers comparison, on an artifact that exists only to give the
+  header-only API something to attach binary-level evidence to. The stub
+  carries the same export-visibility caveat as the static-library
+  surrogate above, and one extra: it must both *force emission of* and
+  *default-export* every representative entry point (explicit
+  instantiation plus an export annotation; note
+  `-fvisibility-inlines-hidden`, common in real builds, hides instantiated
+  inline/template functions by default). Once a binary carries any ELF
+  exports at all, the header-declared surface is narrowed to that export
+  set — so a stub whose instantiations stay hidden yields a clean
+  comparison of almost nothing. Keep source/consumer compile tests as an
+  independent second check either way. See
   [Producing Source Facts](../use/producing-source-facts.md) and
   [Dump/Compare Flags](../use/dump-compare-flags.md) for how the supported
   binary+headers path works; every mechanism in

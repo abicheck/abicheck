@@ -546,6 +546,75 @@ class TestSupportPredicateSemantics:
                 "evidence — is it a conclusive trigger instead?"
             )
 
+    def test_elf_only_mode_without_elf_metadata_still_reads_as_missing(self):
+        """Regression (CodeRabbit review, this PR): ``elf_only_mode=True``
+        with ``.elf is None`` must NOT be treated as sufficient evidence for
+        the seven detectors that genuinely read ``AbiSnapshot.elf`` -- an
+        earlier revision of ``_has_elf_on_both_sides`` accepted
+        ``elf_only_mode`` as an alternate evidence path (to cover the
+        ``elf`` detector's own ``_diff_visibility_leak`` sub-check, which
+        needs only ``.elf_only_mode``/``.functions``), which silently
+        defeated the gate for the *other* eight sub-checks/six sibling
+        detectors: they would still substitute a fabricated empty
+        ``ElfMetadata()`` and get recorded as an ordinary evaluated zero
+        under this exact shape, exactly the silent-gap bug the whole gate
+        exists to close.
+        """
+        from abicheck.detector_registry import registry
+
+        old = AbiSnapshot(library="l", version="1", elf_only_mode=True)
+        new = AbiSnapshot(library="l", version="2", elf_only_mode=True)
+        assert old.elf is None and new.elf is None
+
+        metadata_dependent = {
+            "elf",
+            "tls_checks",
+            "protected_visibility",
+            "symbol_version_alias",
+            "vtable_identity",
+            "abi_surface",
+            "elf_deleted_fallback",
+        }
+        for name in metadata_dependent:
+            entry = next(e for e in registry._detectors if e.name == name)
+            assert entry.support_fn is not None, f"{name} lost its evidence gate"
+            enabled, reason = entry.support_fn(old, new)
+            assert enabled is False, (
+                f"{name} reported enabled=True with elf_only_mode=True and "
+                "elf=None -- it would substitute a fabricated empty "
+                "ElfMetadata() and silently hide the coverage gap"
+            )
+            assert reason == "missing ELF metadata"
+
+        # visibility_leak needs no `.elf` at all -- it must stay evaluated
+        # under this exact same input (that's the whole reason it's a
+        # separate, ungated detector).
+        leak_entry = next(e for e in registry._detectors if e.name == "visibility_leak")
+        assert leak_entry.support_fn is None
+
+    def test_asymmetric_elf_evidence_never_manufactures_a_soname_finding(self):
+        """Regression (CodeRabbit review, this PR): the gate's own docstring
+        used to claim gating changes no detector's emitted findings, citing
+        "two empty ElfMetadata() objects always compare equal" -- true only
+        for the *symmetric* no-evidence case. The *asymmetric* case (one
+        side has a real, populated ``.elf``, the other has none) is not
+        neutral: before this gate existed, the old code compared that real
+        object against a fabricated-empty one, so a populated
+        ``new.elf.soname`` against a substituted-empty old side would
+        manufacture a spurious ``SONAME_MISSING`` from a side that was
+        never actually observed. This states the gate now correctly
+        suppresses that finding instead."""
+        from abicheck.elf_metadata import ElfMetadata
+
+        old = AbiSnapshot(library="l", version="1")  # elf=None
+        new = AbiSnapshot(library="l", version="2", elf=ElfMetadata(soname="libl.so.1"))
+        result = compare(old, new)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.SONAME_MISSING not in kinds
+        elf_det = next(d for d in result.detector_results if d.name == "elf")
+        assert elf_det.not_evaluated is True
+        assert elf_det.coverage_gap == "missing ELF metadata"
+
     def test_a_conclusive_trigger_reports_an_evaluated_zero(self):
         """The reported case, through a real comparison: two snapshots that
         both record `matched` coherence leave the detector reporting zero,

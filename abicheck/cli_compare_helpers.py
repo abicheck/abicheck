@@ -110,6 +110,7 @@ from .service_render import ONELINE_FORMAT
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
     from .model import AbiSnapshot
+    from .model.consumer_spec import ConsumerAppInput
     from .workflows.extraction import DumpManifest
     from .workflows.policy_file import PolicyFile
 
@@ -342,7 +343,7 @@ def _render_compare_dry_run(
     fmt: str,
     exit_code_scheme: str | None,
     header_backend: str,
-    used_by_apps: tuple[Path, ...] = (),
+    used_by_apps: tuple[ConsumerAppInput, ...] = (),
     required_symbols: tuple[str, ...] = (),
     select: tuple[str, ...] = (),
     select_required: tuple[str, ...] = (),
@@ -402,17 +403,19 @@ def _render_compare_dry_run(
         )
     if used_by_apps:
         from .appcompat import parse_app_requirements
+        from .model.consumer_spec import as_consumer_spec
 
         for app in used_by_apps:
+            app_label = as_consumer_spec(app).path
             try:
                 reqs = parse_app_requirements(app, old_input.stem)
                 result.add(
                     "Consumer/contract scoping",
-                    f"--used-by {app}: {len(reqs.undefined_symbols)} required "
+                    f"--used-by {app_label}: {len(reqs.undefined_symbols)} required "
                     f"symbol(s), {len(reqs.required_versions)} required version(s)",
                 )
             except Exception as exc:  # noqa: BLE001 - best-effort dry-run probe
-                result.warn(f"--used-by {app}: could not parse requirements: {exc}")
+                result.warn(f"--used-by {app_label}: could not parse requirements: {exc}")
     if required_symbols:
         result.add(
             "Consumer/contract scoping",
@@ -648,7 +651,7 @@ def _reject_manifest_non_elf(
 def _apply_scoped_gating(
     result: Any, old: Any, new: Any, policy: str, pf: PolicyFile | None,
     *,
-    used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
+    used_by_apps: tuple[ConsumerAppInput, ...], required_symbols: tuple[str, ...],
     used_by_old_input: Path, used_by_new_input: Path,
     exit_code_scheme: str, sev_config: Any,
     suppression: Any,
@@ -1031,7 +1034,7 @@ def _reject_flags_unsupported_for_set_inputs(
     ctx: click.Context, *,
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
-    used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
+    used_by_apps: tuple[ConsumerAppInput, ...], required_symbols: tuple[str, ...],
     diagnostic_comparison: bool, audit_suppressions: bool,
     include_labels: dict[Path, str] | None,
     require_complete_analysis: bool = False,
@@ -1078,7 +1081,7 @@ def _report_compare_result(
     show_redundant: bool, show_filtered: bool,
     contract_evaluation: bool,
     policy: str, pf: PolicyFile | None,
-    used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
+    used_by_apps: tuple[ConsumerAppInput, ...], required_symbols: tuple[str, ...],
     used_by_old_input: Path, used_by_new_input: Path,
     suppression: Any, audit_suppressions: bool,
     fmt: str, output: Path | None, show_only: str | None, report_mode: str,
@@ -1272,6 +1275,7 @@ def run_compare(
     old_input: Path, new_input: Path,
     jobs: int, dso_only: bool, output_dir: Path | None,
     fail_on_removed: bool, on_incomplete_scope: str = "warn",
+    support_promise: str = "off",
     select: tuple[str, ...] = (), select_required: tuple[str, ...] = (),
     debug_info1: Path | None, debug_info2: Path | None,
     devel_pkg1: Path | None, devel_pkg2: Path | None,
@@ -1325,7 +1329,8 @@ def run_compare(
     secondary_fmt: str | None = None,
     secondary_output: Path | None = None,
     dry_run: bool = False,
-    used_by_apps: tuple[Path, ...] = (),
+    used_by_apps: tuple[ConsumerAppInput, ...] = (),
+    used_by_manifests: tuple[Path, ...] = (),
     required_symbols_opt: tuple[str, ...] = (),
     required_symbols_file: Path | None = None,
     diagnostic_comparison: bool = False,
@@ -1371,6 +1376,22 @@ def run_compare(
     lang_explicit = (
         ctx.get_parameter_source("lang") == click.core.ParameterSource.COMMANDLINE
     )
+
+    # Workstream D-S1: merge --used-by-manifest-named consumers into the same
+    # --used-by pipeline before anything else looks at used_by_apps -- every
+    # downstream consumer (the mutual-exclusivity check just below, the
+    # release-fan-out rejection, the dry-run preview, and the real scoped
+    # gate) then sees one combined tuple and needs no manifest-specific
+    # branch of its own.
+    if used_by_manifests:
+        from .model.consumer_spec import parse_consumer_manifest
+
+        manifest_specs: tuple[ConsumerAppInput, ...] = tuple(
+            spec
+            for manifest_path_ in used_by_manifests
+            for spec in parse_consumer_manifest(manifest_path_)
+        )
+        used_by_apps = (*used_by_apps, *manifest_specs)
 
     required_symbols, required_symbols_from_file, required_symbols_sha = (
         load_required_symbols(required_symbols_opt, required_symbols_file)
@@ -1615,6 +1636,7 @@ def run_compare(
             policy=policy, policy_file_path=policy_file_path,
             dso_only=dso_only, jobs=jobs,
             fail_on_removed=fail_on_removed, on_incomplete_scope=on_incomplete_scope,
+            support_promise=support_promise,
             select=select, select_required=select_required,
             debug_info1=debug_info1, debug_info2=debug_info2,
             devel_pkg1=devel_pkg1, devel_pkg2=devel_pkg2,

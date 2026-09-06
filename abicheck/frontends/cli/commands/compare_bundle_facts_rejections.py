@@ -160,7 +160,15 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
     _reject_set_input_flags(
         bool(kwargs.get("reconcile_build_context", False)),
         kwargs.get("env_matrix_path"),
-        used_by_apps=tuple(kwargs.get("used_by_apps") or ()),
+        # Workstream D-S1: a --used-by-manifest-named consumer is exactly as
+        # unsupported here as a bare --used-by one (this dispatch runs before
+        # run_compare's own used_by_apps/used_by_manifests merge) -- folded
+        # into the same tuple purely so _reject_set_input_flags's single
+        # truthiness check covers both spellings.
+        used_by_apps=(
+            tuple(kwargs.get("used_by_apps") or ())
+            + tuple(kwargs.get("used_by_manifests") or ())
+        ),
         required_symbols=(
             tuple(kwargs.get("required_symbols_opt") or ())
             or (
