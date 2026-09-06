@@ -1272,7 +1272,7 @@ class TestExtractIfPackage:
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
 
-        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
             input_path=lib_dir,
             debug_pkg=None,
             devel_pkg=None,
@@ -1308,7 +1308,7 @@ class TestExtractIfPackage:
             lib_dir=extracted_debug, debug_dir=extracted_debug
         )
 
-        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
             input_path=lib_dir,
             debug_pkg=dbg_pkg,
             devel_pkg=None,
@@ -1344,7 +1344,7 @@ class TestExtractIfPackage:
             lib_dir=extracted_headers, header_dir=extracted_headers
         )
 
-        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
             input_path=lib_dir,
             debug_pkg=None,
             devel_pkg=dev_pkg,
@@ -1392,7 +1392,7 @@ class TestExtractIfPackage:
                 return dev_extractor
             return None
 
-        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
             input_path=lib_dir,
             debug_pkg=dbg_pkg,
             devel_pkg=dev_pkg,
@@ -1427,7 +1427,7 @@ class TestExtractIfPackage:
         # debug_dir=None in ExtractResult: fallback must use lib_dir
         dbg_extractor = _make_mock_extractor(lib_dir=extracted, debug_dir=None)
 
-        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
             input_path=lib_dir,
             debug_pkg=dbg_pkg,
             devel_pkg=None,
@@ -1476,7 +1476,7 @@ class TestExtractIfPackage:
                 return dbg_extractor
             return None
 
-        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out, _whole = _extract_if_package(
             input_path=pkg,
             debug_pkg=dbg_pkg,
             devel_pkg=None,
@@ -1569,7 +1569,7 @@ class TestDebianSymbolsWarning:
 
         def _fake_extract(p, _dbg, _dev):
             symbols = old_symbols if p == old else new_symbols
-            return p, None, None, symbols
+            return p, None, None, symbols, False
 
         result = _prepare_compare_release_inputs(
             old,
@@ -1641,7 +1641,7 @@ class TestCompareReleaseIncludes:
             (old_inc_only,),
             (new_inc_only,),
             (),
-            lambda p, _dbg, _dev: (p, None, None, None),
+            lambda p, _dbg, _dev: (p, None, None, None, False),
             lambda *_args, **_kwargs: [],
             lambda _p: False,
             lambda _p: True,
@@ -1691,7 +1691,7 @@ class TestCompareReleaseIncludes:
             (old_inc_only,),  # old side overridden
             (),  # new side not overridden -- uses `includes` directly
             (config_dir,),  # config_includes: same dir, passed separately
-            lambda p, _dbg, _dev: (p, None, None, None),
+            lambda p, _dbg, _dev: (p, None, None, None, False),
             lambda *_args, **_kwargs: [],
             lambda _p: False,
             lambda _p: True,

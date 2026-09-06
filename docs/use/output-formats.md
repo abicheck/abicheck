@@ -829,7 +829,21 @@ that result, never in place of it:
 
 - `used_by` — a list of per-app summaries (`app`, `verdict`, `missing_symbols`,
   `missing_versions`, `relevant_change_count`, `symbol_coverage`), one per
-  `--used-by` app.
+  `--used-by`/`--used-by-manifest` consumer. A consumer named through
+  `--used-by-manifest` (Workstream D-S1) additionally carries whichever of
+  `platform`/`profile`/`provider_baseline`/`digest` its manifest entry
+  supplied, `requirement` (`"required"`/`"advisory"`, omitted when
+  `"required"` — the default, matching a bare `--used-by` consumer), and,
+  for an unreadable **advisory** consumer, `unreadable: true` plus
+  `unreadable_reason` (schema 3.3). An unreadable **required** consumer
+  (the default) still aborts the run instead of producing an entry, exactly
+  as an unreadable bare `--used-by <path>` always has.
+- `consumer_impact_summary` — present under the same condition as `used_by`:
+  "N of M consumers affected" (`total`, `evaluated`, `affected`,
+  `unreadable_advisory`, `unreadable_paths`) across every supplied consumer
+  (schema 3.3). `evaluated` excludes an unreadable-advisory consumer (there
+  is no verdict to call affected or not); `affected` counts an evaluated
+  consumer whose own verdict is neither `NO_CHANGE` nor `COMPATIBLE`.
 - `required_symbol_contract` — the equivalent single object for
   `--required-symbol(s)`.
 - `consumer_scope` — one object stating what a consumer-only assessment would

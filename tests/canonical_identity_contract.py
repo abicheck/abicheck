@@ -380,6 +380,18 @@ UNVERIFIED = frozenset(
         "struct_return_convention_changed",
         "suppression_reachability_unknown",
         "suppression_would_hide_public_break",
+        # ADR-065 S3. Verified, and deliberately spelling-sensitive rather
+        # than a backlog entry: these two carry a *completeness receipt* in
+        # old_value/new_value (which side's inventory proved the absence, and
+        # what established it -- D2's 2026-09 clarification), not a C/C++ type
+        # spelling. Two runs that prove the same absence from two different
+        # inventory sources are genuinely two different findings to review, so
+        # canonicalizing the receipt away would erase the evidence the finding
+        # exists to carry. No header backend produces either kind, so the
+        # cross-backend suppression-stability promise this contract is about
+        # does not apply to them at all.
+        "support_promise_component_introduced",
+        "support_promise_component_retired",
         "sycl_backend_driver_req_changed",
         "sycl_implementation_changed",
         "sycl_overload_set_removed",

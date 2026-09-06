@@ -2151,6 +2151,120 @@ class TestScopeDiffToAppWithSnapshots:
 
 
 # ---------------------------------------------------------------------------
+# ConsumerSpec advisory/required (Workstream D-S1)
+# ---------------------------------------------------------------------------
+
+
+class TestScopeDiffToAppConsumerSpec:
+    def _snap(self, version: str, soname: str, symbol_names: list[str]) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libfoo.so.1",
+            version=version,
+            elf=ElfMetadata(
+                soname=soname,
+                symbols=[ElfSymbol(name=n) for n in symbol_names],
+            ),
+        )
+
+    def _diff(self) -> DiffResult:
+        return DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+
+    def test_required_unreadable_consumer_raises(self, tmp_path):
+        """A ConsumerSpec's default requirement (REQUIRED) preserves the
+        historical hard-error behavior for an unreadable consumer -- same as
+        a bare unrecognized-format Path."""
+        from abicheck.model.consumer_spec import ConsumerSpec, ConsumerUnreadableError
+
+        unreadable = tmp_path / "not-a-binary"
+        unreadable.write_bytes(b"\x00\x00\x00\x00")
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        spec = ConsumerSpec(path=unreadable)
+        with pytest.raises(ConsumerUnreadableError, match="Cannot detect binary format"):
+            scope_diff_to_app(self._diff(), spec, old_snap, new_snap)
+
+    def test_advisory_unreadable_consumer_is_skipped_not_raised(self, tmp_path):
+        """An ADVISORY consumer's identical failure is downgraded to a
+        recorded, non-fatal result instead of aborting the run."""
+        from abicheck.model.consumer_spec import ConsumerRequirement, ConsumerSpec
+
+        unreadable = tmp_path / "not-a-binary"
+        unreadable.write_bytes(b"\x00\x00\x00\x00")
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        spec = ConsumerSpec(
+            path=unreadable,
+            platform="linux-x86_64",
+            profile="release",
+            provider_baseline="nightly-2026-09-05",
+            requirement=ConsumerRequirement.ADVISORY,
+        )
+        result = scope_diff_to_app(self._diff(), spec, old_snap, new_snap)
+        assert result.unreadable is True
+        assert result.unreadable_reason is not None
+        assert result.verdict == Verdict.NO_CHANGE
+        assert result.breaking_for_app == []
+        assert result.platform == "linux-x86_64"
+        assert result.profile == "release"
+        assert result.provider_baseline == "nightly-2026-09-05"
+        assert result.requirement == "advisory"
+
+    def test_digest_mismatch_advisory_is_skipped(self, tmp_path):
+        from abicheck.model.consumer_spec import ConsumerRequirement, ConsumerSpec
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        spec = ConsumerSpec(
+            path=app,
+            digest="sha256:" + "0" * 64,
+            requirement=ConsumerRequirement.ADVISORY,
+        )
+        result = scope_diff_to_app(self._diff(), spec, old_snap, new_snap)
+        assert result.unreadable is True
+        assert "digest mismatch" in result.unreadable_reason
+
+    def test_digest_match_succeeds(self, tmp_path):
+        import hashlib
+
+        from abicheck.model.consumer_spec import ConsumerSpec
+
+        app = tmp_path / "app"
+        content = b"\x7fELF" + b"\x00" * 100
+        app.write_bytes(content)
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        digest = "sha256:" + hashlib.sha256(content).hexdigest()
+        spec = ConsumerSpec(path=app, digest=digest)
+        app_reqs = AppRequirements(undefined_symbols={"foo_init"})
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(self._diff(), spec, old_snap, new_snap)
+        assert result.unreadable is False
+        assert result.digest == digest
+
+    def test_bare_path_summary_carries_no_provenance(self, tmp_path):
+        """A plain Path consumer (the pre-S1 shape) reports the default
+        'required' provenance -- no behavior change for an existing caller."""
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        app_reqs = AppRequirements(undefined_symbols={"foo_init"})
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(self._diff(), tmp_path / "app", old_snap, new_snap)
+        assert result.requirement == "required"
+        assert result.platform is None
+        assert result.digest is None
+        assert result.unreadable is False
+
+
+# ---------------------------------------------------------------------------
 # _lib_fmt / _lib_pe_meta / _lib_macho_meta: PE/Mach-O snapshot + Path branches
 # ---------------------------------------------------------------------------
 

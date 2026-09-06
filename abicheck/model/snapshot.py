@@ -610,8 +610,7 @@ class AbiSnapshot:
     # originally-reported danger (a filtered ``dump`` baseline compared
     # against an unfiltered ``compare`` live dump, e.g. one built by a
     # direct Python API caller) once both sides come from a current abicheck
-    # build, without touching the irrecoverable ambiguity of an old,
-    # untagged snapshot.
+    # build, without touching the irrecoverable ambiguity of an old, untagged snapshot.
     dependency_scope: str | None = field(default=None, kw_only=True)
 
     # Fully-qualified typedef alias -> underlying type name (schema v25,
@@ -666,10 +665,8 @@ class AbiSnapshot:
     # the one remaining case-(b) field outside the four declaration
     # dataclasses. Same "None already unambiguously means not captured"
     # shape as RecordType/EnumType/Variable/Function's own case-(b) fields;
-    # see __post_init__ below for the bridge. Appended at the tail rather
-    # than beside the legacy field it bridges, per this package's own
-    # "append new fields at the end" convention (model/AGENTS.md) -- Codex
-    # review, PR #982.
+    # see __post_init__ below for the bridge. Appended at the tail per this
+    # package's own field-order convention (model/AGENTS.md) -- Codex review, PR #982.
     ast_resolved_standard_fact: Fact[str | None] | None = field(
         default=None, kw_only=True
     )
@@ -683,9 +680,12 @@ class AbiSnapshot:
     semantic_ir: SemanticIR | None = field(default=None, kw_only=True)
     # Every fact BOTH header-AST backends resolved, disagreeing, on a hybrid
     # merge — keyed by ``semantic_ir_conflict_key``, absent key == none. Not
-    # ``fact_provenance``: that keeps only the winner's name, per declaration
-    # (``extract/semantic_ir_merge.py``: why neither half of that suffices).
+    # ``fact_provenance``: that keeps only the winner's name, per declaration.
     semantic_ir_conflicts: dict[str, str] = field(default_factory=dict, kw_only=True)
+
+    # Workstream F S1 (v44): True only for a binary-less header-AST dump
+    # (no SO_PATH) -- no ELF/PE/Mach-O evidence, mangled names are guessed.
+    header_only: bool = field(default=False, kw_only=True)
 
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy

@@ -91,7 +91,91 @@ def _pe_export_id(e: Any) -> str:
 _COPY_RELOC_TYPES = (SymbolType.OBJECT, SymbolType.COMMON)
 
 
-@registry.detector("elf")
+def _has_elf_on_both_sides(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[bool, str | None]:
+    """Support gate (ADR-067 D3) for a detector whose evidence is real,
+    observed ELF symbol-table facts (``.dynsym``/``.gnu.version``/RTTI
+    mangled symbols) -- never header-declared/guessed ones.
+
+    Mirrors the ``pe``/``macho`` gates immediately above/below exactly:
+    keyed on the real per-format metadata object (``.elf``) being present
+    on *both* sides, no alternate evidence path. Applies to ``elf``/
+    ``tls_checks``/``protected_visibility``/``symbol_version_alias``/
+    ``vtable_identity``/``abi_surface``/``elf_deleted_fallback`` -- every
+    detector that actually reads ``AbiSnapshot.elf``.
+
+    Before this gate existed, each of these detectors instead silently
+    substituted an empty ``ElfMetadata()`` (via ``getattr(old, "elf", None)
+    or ElfMetadata()``) whenever a side had none, so a comparison with no
+    real ELF evidence at all -- not only the new binary-less headers-only
+    tier this workstream introduces (``AbiSnapshot.header_only``), but any
+    pre-existing snapshot that simply never populated ``.elf`` -- recorded
+    an ordinary evaluated zero rather than the real coverage gap it is.
+    That is exactly the "silently absent" failure mode ADR-067 D3's own
+    ``not_evaluated`` convention exists to close (see ``_has_any_dwarf``
+    below, the sibling gate this mirrors). The **symmetric** case (neither
+    side has ``.elf``) is a pure recording change: two empty ``ElfMetadata()``
+    objects always compare equal, so no detector's emitted findings differ,
+    only whether the absence is now recorded explicitly. The **asymmetric**
+    case (one side has a real, populated ``.elf``, the other has none) is
+    not neutral, and this gate deliberately changes its behavior too: the
+    old code compared that real object against a fabricated empty one --
+    e.g. a populated ``new.soname`` against a substituted-empty old side
+    could emit a spurious ``SONAME_MISSING``, or the reverse a spurious
+    ``SONAME_CHANGED`` -- a real ABI-layout claim manufactured from a side
+    that was never actually observed. Gating this case too (CodeRabbit
+    review, fresh evidence) suppresses exactly that manufactured finding,
+    correctly reporting the comparison as incomplete instead.
+
+    ``glibcxx_dual_abi``/``inline_namespace`` are deliberately NOT gated by
+    this predicate (or any other): they never read ``.elf`` at all -- they
+    cluster mass churn in ``Function.mangled``, evidence that is exactly as
+    present (and exactly as much a spelling rather than a linkage proof) in
+    an ordinary headers-augmented binary dump as in a header-only one, so
+    singling out ``header_only`` for a gate these two never carried even for
+    that pre-existing, unremarked case would be an inconsistent, ad hoc
+    carve-out rather than a real evidence gate.
+
+    Deliberately **strict** -- an earlier revision of this gate also
+    accepted ``elf_only_mode=True`` (a Sprint 2 ELF-symbols-but-no-
+    debug-info dump) as sufficient evidence even with ``.elf is None``, to
+    cover ``elf``'s own ``_diff_visibility_leak`` sub-check, which reads
+    ``.elf_only_mode``/``.functions`` directly and never touches ``.elf``.
+    That carve-out defeated this gate's own purpose for the *other* eight
+    sub-checks bundled into the ``elf`` detector (``_diff_elf_dynamic_section``,
+    version-node/versioning diffs, import-set, allocator-replacement, leaked-
+    dependency-symbol, version-script-missing): under ``elf_only_mode=True,
+    elf=None`` they would still substitute a fabricated empty ``ElfMetadata()``
+    and get recorded as an ordinary evaluated zero, exactly the silent-gap bug
+    this whole gate exists to close (CodeRabbit review on this PR).
+    ``_diff_visibility_leak`` is therefore registered as its own, separate
+    ``visibility_leak`` detector below instead, with no evidence gate of its
+    own -- it already answers its one "not applicable" case (not
+    ``elf_only_mode``) correctly via its own in-body check, which is a
+    genuine "zero by construction" (headers/debug info means visibility is
+    already known, not "leaked"), never a missing-evidence question.
+    """
+    if old.elf is None or new.elf is None:
+        return False, "missing ELF metadata"
+    return True, None
+
+
+@registry.detector("visibility_leak")
+def _diff_visibility_leak_detector(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Registered wrapper for :func:`_diff_visibility_leak` (Sprint 2).
+
+    Split out of the ``elf`` detector (see ``_has_elf_on_both_sides``'s own
+    docstring for why): this check needs only ``.elf_only_mode``/
+    ``.functions``, never ``.elf``, so it must not share ``elf``'s
+    strict ``.elf``-presence gate. Left ungated -- its own in-body
+    ``elf_only_mode`` check already distinguishes "not applicable" from
+    "missing evidence" correctly for its one input.
+    """
+    return _diff_visibility_leak(old, new)
+
+
+@registry.detector("elf", requires_support=_has_elf_on_both_sides)
 def _diff_elf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """ELF-only detectors (Sprint 2): no debug info required."""
     from .diff_versioning import (
@@ -112,7 +196,6 @@ def _diff_elf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes.extend(_diff_elf_symbol_metadata(old, new, o, n))
     changes.extend(_diff_elf_import_set(o, n))
     changes.extend(_diff_allocator_replacement(o, n))
-    changes.extend(_diff_visibility_leak(old, new))
     changes.extend(_diff_leaked_dependency_symbols(o, n))
     changes.extend(detect_version_script_missing(o, n))
     return changes
@@ -881,7 +964,7 @@ def _diff_macho_weak_exports(o: Any, n: Any) -> list[Change]:
 # ── Gap analysis: new ELF-level detectors ─────────────────────────────────────
 
 
-@registry.detector("tls_checks")
+@registry.detector("tls_checks", requires_support=_has_elf_on_both_sides)
 def _diff_tls_symbols(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect size changes for exported TLS (thread-local) symbols."""
     from .model.elf_facts import ElfMetadata
@@ -913,7 +996,7 @@ def _diff_tls_symbols(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-@registry.detector("protected_visibility")
+@registry.detector("protected_visibility", requires_support=_has_elf_on_both_sides)
 def _diff_protected_visibility(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect DEFAULT ↔ PROTECTED visibility changes for non-function symbols.
 
@@ -958,7 +1041,7 @@ def _diff_protected_visibility(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
     return changes
 
 
-@registry.detector("symbol_version_alias")
+@registry.detector("symbol_version_alias", requires_support=_has_elf_on_both_sides)
 def _diff_symbol_version_aliases(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect default symbol version alias changes.
 
@@ -1148,7 +1231,7 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-@registry.detector("vtable_identity")
+@registry.detector("vtable_identity", requires_support=_has_elf_on_both_sides)
 def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect vtable/typeinfo symbol identity changes while class layout is stable.
 
@@ -1278,7 +1361,7 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-@registry.detector("abi_surface")
+@registry.detector("abi_surface", requires_support=_has_elf_on_both_sides)
 def _diff_abi_surface(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect dramatic ABI surface growth or shrinkage.
 
@@ -1814,7 +1897,7 @@ def _diff_enum_layouts(o: object, n: object) -> list[Change]:
 # ── PR #89: ELF fallback for = delete (issue #100) ───────────────────────────
 
 
-@registry.detector("elf_deleted_fallback")
+@registry.detector("elf_deleted_fallback", requires_support=_has_elf_on_both_sides)
 def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """ELF fallback for detecting implicitly-deleted / disappeared symbols.
 

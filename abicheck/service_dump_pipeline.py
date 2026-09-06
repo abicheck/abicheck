@@ -60,6 +60,10 @@ from .workflows.artifact.execute import (
     _resolve_side_snapshot_impl,
     enforce_requested_depth,
 )
+from .workflows.artifact.execute_header_only import (
+    execute_header_only_dump_request,
+    is_header_only_evidence,
+)
 from .workflows.artifact.execute_source_only import execute_source_only_dump_request
 from .workflows.artifact.resolve import (
     is_raw_source_tree,
@@ -414,15 +418,24 @@ def execute_dump_request(
     request = resolved.request
     side = request.input
     if side.path is None:
-        # A source-only dump (ADR-063 Track T4's own tracked gap, now
-        # closed): a sibling module's function rather than a branch
-        # continuing below, since nearly every remaining line here reads
-        # `side.path` or a value `_resolve_side_snapshot_impl` only
-        # produces from a real artifact -- see that function's own
-        # docstring for why it lives in its own module. It returns a plain
-        # `SourceOnlyDumpOutcome`, not a `DumpResult`, so this is the one
-        # place that constructs the latter for this shape (see that
-        # module's own docstring for why -- avoiding a real import cycle).
+        # Two binary-less shapes share this branch (workstream F S1 added
+        # the first of the two): a headers-only dump (`-H api.h`, no
+        # sources/build_info -- `is_header_only_evidence`) routes through
+        # the real header-AST parse; every other binary-less shape (the
+        # pre-existing L3-L5 `--sources`/`--build-info` dump, ADR-063 Track
+        # T4's own tracked gap) keeps its original path unchanged. Neither
+        # branch constructs a `DumpResult` itself -- each returns its own
+        # plain outcome type, so this is the one place that builds the
+        # former from either (see either sibling module's own docstring for
+        # why -- avoiding a real import cycle).
+        if is_header_only_evidence(resolved):
+            header_outcome = execute_header_only_dump_request(resolved, options)
+            return DumpResult(
+                resolved=resolved,
+                snapshot=header_outcome.snapshot,
+                effective_depth=header_outcome.effective_depth,
+                resolved_execution_context=header_outcome.resolved_execution_context,
+            )
         outcome = execute_source_only_dump_request(resolved, options)
         return DumpResult(
             resolved=resolved,

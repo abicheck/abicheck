@@ -167,6 +167,12 @@ def apply_scoped_gate(
         return
     if used_by is not None:
         payload["used_by"] = used_by
+        # Workstream D-S1: "N of M consumers affected" -- only meaningful for
+        # --used-by (a --required-symbol run has exactly one host contract,
+        # not a population of consumers to summarize).
+        consumer_impact_summary = getattr(result, "consumer_impact_summary", None)
+        if consumer_impact_summary is not None:
+            payload["consumer_impact_summary"] = consumer_impact_summary
     if required_symbols is not None:
         payload["required_symbol_contract"] = required_symbols
     consumer_scope = _consumer_scope_block(result)

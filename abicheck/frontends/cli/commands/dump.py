@@ -617,8 +617,36 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         add_execution_options_dry_run_section(_dry_result, _resolved)
         emit_dry_run(_dry_result)
 
-    # Source-only dump (no binary) for the parallel-baseline flow.
+    # Source-only dump (no binary), or a headers-only dump (workstream F S1,
+    # "Header-only comparison" -- vision-api-abi-evolution.md) -- the two
+    # binary-less shapes `is_header_only_evidence` tells apart.
     if so_path is None:
+        from ....workflows.artifact.execute_header_only import (
+            is_header_only_evidence,
+        )
+
+        if is_header_only_evidence(_resolved):
+            # A real header-AST execution, through the same shared
+            # `execute_dump_request` tail the ELF/PE/Mach-O real-run branch
+            # below uses -- unlike the legacy `dump_source_only()`, which
+            # never reads `headers` at all.
+            from ..dump_execute import execute_and_write_header_only_dump_cli_run
+
+            execute_and_write_header_only_dump_cli_run(
+                _resolved,
+                notify=_click_notify,
+                build_config=build_config,
+                stamp_provenance=_stamp_provenance,
+                write_snapshot_output=_write_snapshot_output_fn,
+                git_tag=git_tag, build_id=build_id, no_git=no_git,
+                output=output, build_info=build_info, sources=sources,
+                build_targets=build_targets,
+                include_dependencies=include_dependencies,
+                headers=tuple(headers),
+                gcc_path=gcc_path, gcc_prefix=gcc_prefix,
+                snapshot_compression=snapshot_compression,
+            )
+            return
         # dump_source_only() below embeds only L3/L4/L5 build/source facts
         # into an otherwise-empty snapshot -- it has no L2 header-AST pass
         # and never receives `headers` at all, so -H/--header has no effect

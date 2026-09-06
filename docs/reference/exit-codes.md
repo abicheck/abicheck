@@ -99,9 +99,13 @@ Both appear in the report's `exit` block (`incomplete_scope_contribution`,
 exited `8` on the raw old-minus-new filename set difference, so a partial
 local build compared against a full baseline read as "N libraries removed".
 Exit `8` now requires the removal to be *proven*: the NEW side's inventory
-must be proven complete (a stored `ProjectSnapshot` package or bundle-facts
-document whose capture asserted `inventory_complete`; a package without the
-assertion, a live directory, or an extracted archive cannot prove absence). An
+must be proven complete. Two things prove it, and nothing else does — a
+stored `ProjectSnapshot` package or bundle-facts document whose capture
+asserted `inventory_complete`, or (since ADR-065 S3) a **package archive**
+operand, whose extractor unpacks the container in full or fails, so the
+components found in the extracted tree are the whole set the package ships.
+A stored package *without* the assertion and a live directory still cannot
+prove absence: a directory may simply have been populated partially. An
 unmatched library under an unproven inventory is reported as an incomplete
 scope instead — exit `0` under `warn`, `1` under `block` — and the JSON key
 `unmatched_old` keeps listing it. When NEW is *named as a single file* (not a
@@ -111,6 +115,16 @@ comparison (D9): the other OLD members are `out_of_scope` and the scope is
 complete. A one-member NEW directory is not narrowed: its unmatched OLD
 members stay unchecked, so `block` still gates — discovered cardinality is
 never read as intent.
+
+**Migration note (exit `8`, second step — ADR-065 S3).** S3 makes a package
+*archive* pair a completeness proof, so `--fail-on-removed-library` reaches
+exit `8` again for `abicheck compare old.rpm new.rpm` (or `.deb`/`.tar.*`/
+`.whl`/`.conda`) where S2 had left it reachable only for a stored snapshot.
+This is the correction S2's note anticipated, not a reversal of it: a
+directory pair still exits `0`, because a directory proves nothing. If a
+release genuinely ships fewer components on purpose, that is what
+`--support-promise declared` reports as a finding
+(`support_promise_component_retired`) rather than as a bare exit code.
 
 **Without `--contract` there is no selected domain, so the
 contribution is always `0`** and every other exit code below is unchanged.

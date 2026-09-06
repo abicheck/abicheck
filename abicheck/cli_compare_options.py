@@ -37,7 +37,7 @@ modules deliberately stayed behind.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import click
 
@@ -93,7 +93,7 @@ def _resolve_profile_severity_preset(
 def _reject_set_input_flags(
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
-    used_by_apps: tuple[Path, ...] = (),
+    used_by_apps: tuple[Any, ...] = (),
     required_symbols: tuple[str, ...] = (),
     use_cases_manifest: Path | None = None,
     diagnostic_comparison: bool = False,
@@ -131,9 +131,10 @@ def _reject_set_input_flags(
         )
     if used_by_apps:
         raise click.UsageError(
-            "--used-by is not supported for directory/package (release) "
-            "comparisons: the per-library fan-out has no per-app scoping. "
-            "Compare the specific library individually with --used-by."
+            "--used-by/--used-by-manifest is not supported for "
+            "directory/package (release) comparisons: the per-library "
+            "fan-out has no per-app scoping. Compare the specific library "
+            "individually with --used-by/--used-by-manifest."
         )
     if required_symbols:
         raise click.UsageError(

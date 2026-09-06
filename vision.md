@@ -199,6 +199,23 @@ answered; today they remain unsupported input, and that is a current
 limitation rather than a permanent exclusion. Kernel-specific debug formats
 and similar niche domains stay lower priority unless a real need arrives.
 
+## Knowledge and validation corpus
+
+abicheck is backed by a maintained body of ABI/API compatibility knowledge
+and an executable compatibility corpus, kept separate from each other and
+from the product's own task-oriented documentation. The educational
+material explains why compatibility failures occur, how to reason about
+them, and how libraries can design and evolve stable contracts — knowledge
+that stays useful independently of this tool.
+
+The compatibility catalog turns that knowledge into reproducible cases. Its
+goal is systematic coverage of known ABI/API failure modes and safe
+controls, not a large example count: every mechanism the catalog claims
+support for should connect a domain explanation, a reproducible case, the
+evidence required to observe it, and abicheck's actual detection behavior.
+A mechanism abicheck cannot yet detect, or cannot detect at all, stays
+visible as a stated gap rather than disappearing from the count.
+
 ## What exists today and what is direction
 
 Shipped today: two-sided comparison of binaries, snapshots, release

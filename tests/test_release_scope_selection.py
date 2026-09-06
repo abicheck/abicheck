@@ -1091,7 +1091,9 @@ class TestGhostMarkerInAStoredPackageIsRefused:
         from abicheck.storage.variant_composition import (
             read_variant_composition_degraded_members,
         )
-        from abicheck.workflows.release_scope import stored_side_degraded_members
+        from abicheck.workflows.release_stored_inventory import (
+            stored_side_degraded_members,
+        )
 
         pkg = tmp_path / "pkg"
         _write_stored_package(pkg, {"libfoo.so": _lib("libfoo.so", exports=("foo",))})

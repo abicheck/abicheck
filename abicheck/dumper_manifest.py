@@ -200,6 +200,7 @@ def run_tu_fragment(
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
     pruning_header_roots: tuple[str, ...] | None = None,
+    no_binary_evidence: bool = False,
 ) -> TuFragment:
     """Run one castxml/clang invocation for *tu* via *header_ast_parser*
     (``dumper._header_ast_parser``, injected -- see this module's own
@@ -261,6 +262,7 @@ def run_tu_fragment(
         extra_hash_dirs=extra_hash_dirs,
         frontend_context=frontend_context,
         pruning_header_roots=pruning_header_roots,
+        no_binary_evidence=no_binary_evidence,
     )
     return TuFragment(
         tu_name=tu.name,
@@ -304,6 +306,7 @@ def _run_tu_fragments(
     extra_hash_dirs: tuple[Path, ...],
     frontend_context: str = "host",
     pruning_header_roots: tuple[str, ...] | None = None,
+    no_binary_evidence: bool = False,
 ) -> list[TuFragment]:
     """Run :func:`run_tu_fragment` for every TU in *tus*, under a
     RAM-aware thread pool (ADR-050 D6, G32 Phase E) instead of a fully
@@ -362,6 +365,7 @@ def _run_tu_fragments(
             extra_hash_dirs=extra_hash_dirs,
             frontend_context=frontend_context,
             pruning_header_roots=pruning_header_roots,
+            no_binary_evidence=no_binary_evidence,
         )
 
     def _handle_failure(tu: TranslationUnit, exc: BaseException) -> None:
@@ -478,6 +482,7 @@ def run_tu_loop(
     exported_static: set[str],
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
+    no_binary_evidence: bool = False,
 ) -> MergedTuFragments:
     """Run every TU in *tus* (one castxml/clang invocation each) and merge
     the results via :func:`merge_tu_fragments` -- ADR-050 D3's "one
@@ -571,6 +576,7 @@ def run_tu_loop(
         extra_hash_dirs=extra_hash_dirs,
         frontend_context=frontend_context,
         pruning_header_roots=manifest_pruning_roots,
+        no_binary_evidence=no_binary_evidence,
     )
 
     # A `contributes_to_abi: false` TU exists purely to satisfy other TUs'
@@ -652,6 +658,7 @@ def resolve_header_ast_result(
     public_header_dirs: list[Path] | None,
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
+    no_binary_evidence: bool = False,
 ) -> ElfHeaderAstResult:
     """Run the header-AST parse for one dump -- manifest-driven (one
     invocation per TU, merged) when *dump_manifest* is given, otherwise the
@@ -672,6 +679,11 @@ def resolve_header_ast_result(
     today; ``_dump_pe``/``_dump_macho`` once they support manifests) needs
     only one call site instead of duplicating the branch inline (``dumper.py``
     has no line-count headroom for that -- see this module's own docstring).
+
+    ``no_binary_evidence`` (workstream F S1, "Header-only comparison"):
+    forwarded unchanged down either branch -- see
+    ``extract.headers.castxml.location.visibility``'s own docstring for what
+    it changes. ``False`` (the default) for every ordinary binary dump.
     """
     if dump_manifest is not None:
         merged = run_tu_loop(
@@ -699,6 +711,7 @@ def resolve_header_ast_result(
             # how public_header_paths/public_header_dirs above already
             # prefer the manifest's own fields.
             frontend_context=dump_manifest.frontend_context,
+            no_binary_evidence=no_binary_evidence,
         )
         provenance_headers = tuple(dump_manifest.roots)
     else:
@@ -726,6 +739,7 @@ def resolve_header_ast_result(
             public_dir_paths=[str(d) for d in (public_header_dirs or [])],
             extra_hash_dirs=extra_hash_dirs,
             frontend_context=frontend_context,
+            no_binary_evidence=no_binary_evidence,
         )
         merged = MergedTuFragments(
             functions=fragment.functions,

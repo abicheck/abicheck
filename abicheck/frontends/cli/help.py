@@ -405,6 +405,7 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "severity_preset",
         # Scoped comparison (ADR-043) — headline feature, not a long-tail knob
         "used_by_apps",
+        "used_by_manifests",
         "required_symbols_opt",
         "required_symbols_file",
         # Build & source evidence

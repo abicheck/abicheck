@@ -71,10 +71,19 @@ class CastxmlParserContext:
         exported_static: set[str],
         public_header_paths: list[str] | None = None,
         public_dir_paths: list[str] | None = None,
+        no_binary_evidence: bool = False,
     ) -> None:
         self.root = root
         self.exported_dynamic = exported_dynamic
         self.exported_static = exported_static
+        # Workstream F S1 ("Header-only comparison"): true only for the
+        # binary-less header-AST dump path, where exported_dynamic/
+        # exported_static are deliberately both empty because there is no
+        # binary to have exported anything from -- see
+        # `extract.headers.castxml.location.visibility`'s own docstring for
+        # what this changes. False (the default) for every ordinary binary
+        # dump, unchanged.
+        self.no_binary_evidence = no_binary_evidence
         # Public-header surface used to scope constant extraction
         # (parse_constants). Seeded from the parsed headers (-H/--header) plus
         # any explicit public-header inputs, and matched with the same

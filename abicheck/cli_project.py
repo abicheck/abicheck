@@ -71,6 +71,7 @@ from .workflows.extraction import (
     check_profile_toolchain_identity,
     load_bindings_file,
 )
+from .workflows.history import HistoryError, run_history_request
 
 
 @main.group("project")
@@ -82,6 +83,7 @@ def project_group() -> None:
       validate         Check .abicheck.yml's targets/bundles/profiles/channels block.
       validate-build   Check a project-produced abicheck-build/ directory.
       plan             Derive run-plan.json from .abicheck.yml + build-output.json.
+      history          Derive lifecycle events + coverage from N stored snapshots (ADR-066 S1).
 
     Most libraries never need this group — it exists for projects that check
     several targets/build profiles/baseline channels together, wired through
@@ -645,3 +647,138 @@ def project_plan_cmd(
         click.echo(text)
 
     sys.exit(0 if report.ok else 1)
+
+
+# --------------------------------------------------------------------------
+# project history  (ADR-066 S1: offline longitudinal compatibility history)
+# --------------------------------------------------------------------------
+
+
+@project_group.command("history")
+@click.argument(
+    "snapshots",
+    nargs=-1,
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--version",
+    "versions",
+    multiple=True,
+    metavar="LABEL",
+    help=(
+        "Explicit release label for one SNAPSHOT, in the same order as the "
+        "SNAPSHOTS arguments (repeatable — pass one per snapshot, or omit "
+        "entirely). Without this, each snapshot's own recorded "
+        "AbiSnapshot.version is used as its release label."
+    ),
+)
+@click.option(
+    "--policy",
+    default="strict_abi",
+    show_default=True,
+    help=(
+        "Policy profile passed to each pairwise comparison in the chain "
+        "(same values as `compare --policy`)."
+    ),
+)
+@output_options(
+    ["json", "text"],
+    default="json",
+    format_help="Output format for the derived history.",
+)
+@verbose_option
+def project_history_cmd(
+    snapshots: tuple[Path, ...],
+    versions: tuple[str, ...],
+    policy: str,
+    fmt: str,
+    output: Path | None,
+    verbose: bool,
+) -> None:
+    """Derive per-API lifecycle events from an ordered chain of SNAPSHOTS
+    (ADR-066 S1: offline longitudinal compatibility history).
+
+    SNAPSHOTS are two or more stored ``AbiSnapshot`` files (any format
+    ``compare``/``dump --dump-manifest`` write, including the compressed
+    ADR-059 storage envelope), given **oldest first — this order IS the
+    release order** (ADR-066 D1: history never infers or reorders from
+    version labels or file timestamps).
+
+    abicheck composes its existing pairwise ``compare()`` engine across each
+    adjacent pair in the chain (never a second, independently-invented N-way
+    diff) and derives, per function/variable/type entity: ``first_observed``
+    (present in the very first supplied snapshot — its true introduction
+    point may predate this history, unlike a proven ``introduced``),
+    ``introduced``, ``deprecated``, ``removed``, and ``reintroduced`` events
+    (ADR-066 D2). A ``removed`` event carries ``evidence_uncertain: true``
+    when the backing comparison's own evidence confidence was not HIGH — a
+    coarse proxy that this snapshot's evidence may not have been complete
+    enough to prove absence, not a claim that it was.
+
+    The report's ``coverage.gaps`` section flags a suspected missing
+    intermediate release: two adjacent, SemVer-parseable labels that are not
+    consecutive under the ordinary major/minor/patch increment rule. A
+    non-SemVer label pair reports no gap verdict at all (there is no
+    project-declared version scheme yet to check against — ADR-066 D4/S2).
+
+    Deliberately narrower than ADR-066's full design (recorded in the ADR's
+    own S0 amendment): entity correspondence uses each finding's own
+    resolved identity as-is, not the ADR's full signature-discriminator
+    overload disambiguation with provenance corroboration — a function
+    whose signature changes is conservatively read as removed+introduced
+    rather than asserted as one continuous, changed declaration.
+
+    \b
+    Exit codes:
+      0   History generated (lifecycle events and coverage are reported
+          facts, not a pass/fail gate — ADR-066 D5: this command never
+          decides acceptance, only observes).
+      64  Usage error (fewer than one snapshot, a snapshot fails to load, or
+          --version was given a different number of times than SNAPSHOTS).
+    """
+    _setup_verbosity(verbose)
+
+    try:
+        result = run_history_request(
+            [str(p) for p in snapshots],
+            versions=list(versions) if versions else None,
+            policy=policy,
+        )
+    except HistoryError as exc:
+        raise click.UsageError(str(exc)) from exc
+    except (OSError, ValueError) as exc:
+        raise click.UsageError(f"cannot load snapshot: {exc}") from exc
+
+    if fmt == "json":
+        text = json.dumps(result.to_dict(), indent=2)
+    else:
+        lines = [
+            f"longitudinal history: {result.library} "
+            f"({len(result.entries)} snapshot(s))"
+        ]
+        lines.append("")
+        lines.append("entries:")
+        lines.extend(f"  - {e.version} ({e.path})" for e in result.entries)
+        lines.append("")
+        lines.append(f"events ({len(result.events)}):")
+        lines.extend(
+            f"  - {e.version}: {e.event} {e.entity_kind} {e.display_name}"
+            + (" [evidence uncertain]" if e.evidence_uncertain else "")
+            for e in result.events
+        )
+        if result.gaps:
+            lines.append("")
+            lines.append(f"coverage gaps ({len(result.gaps)}):")
+            lines.extend(
+                f"  - {g.from_version} -> {g.to_version}: {g.detail}"
+                for g in result.gaps
+            )
+        text = "\n".join(lines)
+
+    if output is not None:
+        _safe_write_output(output, text)
+    else:
+        click.echo(text)
+
+    sys.exit(0)

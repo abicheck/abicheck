@@ -1,7 +1,15 @@
 # Examples/catalog split — taxonomy first, then the physical move
 
-**Effort:** XL (six phases) · **Status:** All six phases have landed, Phase 5
-(curated workflow examples) now complete at 7 of 7 planned workflows. Phase 1
+**Effort:** XL (six phases) · **Status:** Completed — all six phases have
+landed, Phase 5 (curated workflow examples) complete at 7 of 7 planned
+workflows, and every item in "What is left" below is closed. The follow-on
+work this split's own external review anticipated — whether the resulting
+`docs/learn/` (knowledge) and `catalog/` (corpus) trees actually cover the
+*space* of known ABI/API compatibility failure mechanisms, rather than just
+being internally well-organized — is a separate, harder question this plan
+does not attempt; see
+[ABI/API knowledge and corpus](abi-api-knowledge-and-corpus.md) for that
+follow-on plan. Phase 1
 implemented (now also distinguishing
 `operation` from `scenario_kind`, and — per "What is left" item 6, now
 closed — classifying every case declaratively via
