@@ -42,35 +42,55 @@ Lives in this package, not as a new flat ``abicheck/reporter_*.py`` sibling:
 ``architecture/modules.yaml``'s ``frozen_root_families`` closes the
 ``reporter_`` flat-namespace family to new members (ADR-061), so new
 report-construction logic goes to its real responsibility-package owner --
-``report/`` -- even though it must locally import the still-flat, legacy
-``reporter``/``reporter_markdown`` (both already ``layers.report.
-legacy_paths`` members, i.e. the same architectural layer as this file, so
-the import is same-layer and not a direction violation).
+``report/``.
+
+ADR-063 T10: this module used to resolve ``abicheck.reporter`` via
+``importlib`` (``_reporter()``) purely to reach six small per-change
+helpers still defined in ``reporter.py``/``reporter_markdown.py``
+(``_change_to_dict``, ``_add_entries_to_root_causes``, ``_finding_id``,
+``_root_cause_key_and_display``, ``root_cause_for_change``,
+``_resolve_scoped_gate_findings``) -- a static import back to ``reporter``
+would have closed a real cycle (``reporter`` imports
+``reporter_contract_blocks``, which imports this module's
+:func:`apply_scoped_gate`). Rather than keep bridging the cycle with
+``importlib``, the caller that already holds all six names --
+``reporter_contract_blocks.render_json_with_side_facts``, via
+``reporter.py``'s own module-level re-exports -- now passes them down as
+data (:class:`ScopedGateChangeHelpers`), which makes this module a pure
+leaf with no dependency on ``reporter``/``reporter_markdown`` at all,
+static or dynamic.
 """
 
 from __future__ import annotations
 
-from typing import Any, cast
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 from ..contract_gating import zero_scoped_out_gate_contributions
 
 
-def _reporter() -> Any:
-    """``abicheck.reporter``, resolved via ``importlib`` rather than a
-    static ``from ..reporter import ...`` (Codex review, fresh evidence):
-    ``reporter.py`` imports ``reporter_contract_blocks.py``, which imports
-    this module's :func:`apply_scoped_gate` -- a static import back to
-    ``reporter`` here would close that into a real cycle
-    ``check_ai_readiness.py``'s ``import-cycle-growth`` gate flags (it walks
-    every ``ast.Import``/``ast.ImportFrom`` node regardless of function
-    scope). ``importlib.import_module`` is the same escape hatch
-    ``workflows/render.py``'s own ``_service_render()`` already uses for an
-    identical reason -- see that module's docstring. Every call site below
-    ``cast``s its own result, since a module resolved this way carries no
-    static attribute types."""
-    import importlib
+@dataclass(frozen=True)
+class ScopedGateChangeHelpers:
+    """The ``reporter``/``reporter_markdown`` per-change helpers
+    :func:`apply_scoped_gate` needs to turn a scoped-only ``Change`` into a
+    report row and register its root-cause grouping key.
 
-    return importlib.import_module("..reporter", __package__)
+    Supplied by the caller (``reporter_contract_blocks.
+    render_json_with_side_facts``, via ``reporter.py``'s own
+    :data:`~abicheck.reporter._SCOPED_GATE_HELPERS`) rather than resolved
+    here via ``importlib`` -- see this module's own docstring for why.
+    """
+
+    change_to_dict: Callable[..., dict[str, Any]]
+    add_entries_to_root_causes: Callable[..., None]
+    finding_id: Callable[[Any], str]
+    root_cause_key_and_display: Callable[..., tuple[str, str]]
+    root_cause_for_change: Callable[..., Any]
+    resolve_scoped_gate_findings: Callable[
+        [Any, Any, str | None], tuple[Any, Any, bool, Any]
+    ]
+
 
 # Maps a rendered change's "severity" label (report_model.VERDICT_PRESENTATION,
 # and the "breaking"/"compatible" literals a missing-contract entry uses) to
@@ -91,23 +111,21 @@ def _scoped_verdict_value(result: Any) -> Any:
 
 
 def _scoped_gate_findings(
-    result: Any, severity_config: Any, show_only: str | None
+    result: Any,
+    severity_config: Any,
+    show_only: str | None,
+    helpers: ScopedGateChangeHelpers,
 ) -> tuple[Any, Any, bool, Any]:
     """The scoped-only changes, missing-contract labels, and gate blocking
     decision this run's scoped gate actually rests on."""
-    # cast: resolved via importlib (see _reporter()'s docstring), so mypy
-    # sees this call's return as Any rather than
-    # `_resolve_scoped_gate_findings`'s own concrete, fully-typed signature.
-    return cast(
-        "tuple[Any, Any, bool, Any]",
-        _reporter()._resolve_scoped_gate_findings(result, severity_config, show_only),
-    )
+    return helpers.resolve_scoped_gate_findings(result, severity_config, show_only)
 
 
 def apply_scoped_gate(
     payload: dict[str, Any],
     result: Any,
     *,
+    helpers: ScopedGateChangeHelpers,
     severity_config: Any = None,
     show_only: str | None = None,
     contract_evaluation: bool = False,
@@ -155,6 +173,7 @@ def apply_scoped_gate(
             changes_list,
             full_summary,
             result,
+            helpers=helpers,
             severity_config=severity_config,
             show_only=show_only,
             contract_evaluation=contract_evaluation,
@@ -164,6 +183,7 @@ def apply_scoped_gate(
             payload,
             full_summary,
             result,
+            helpers=helpers,
             severity_config=severity_config,
             show_only=show_only,
         )
@@ -268,6 +288,7 @@ def _fold_findings_into_changes(
     full_summary: Any,
     result: Any,
     *,
+    helpers: ScopedGateChangeHelpers,
     severity_config: Any,
     show_only: str | None,
     contract_evaluation: bool,
@@ -283,16 +304,15 @@ def _fold_findings_into_changes(
         root_cause_evidence_lookup_for_changes,
     )
 
-    _rep = _reporter()
-    _add_entries_to_root_causes = _rep._add_entries_to_root_causes
-    _change_to_dict = _rep._change_to_dict
-    _finding_id = _rep._finding_id
-    _root_cause_key_and_display = _rep._root_cause_key_and_display
-    root_cause_for_change = _rep.root_cause_for_change
+    _add_entries_to_root_causes = helpers.add_entries_to_root_causes
+    _change_to_dict = helpers.change_to_dict
+    _finding_id = helpers.finding_id
+    _root_cause_key_and_display = helpers.root_cause_key_and_display
+    root_cause_for_change = helpers.root_cause_for_change
 
     eff_sets = result._effective_kind_sets()
     scoped_only, missing_labels, blocks, missing_kind = _scoped_gate_findings(
-        result, severity_config, show_only
+        result, severity_config, show_only, helpers
     )
     # G29 Phase 6 follow-up (Codex review): the scoped-only entries built
     # below never routed through _add_changes_block's own evidence
@@ -500,6 +520,7 @@ def _fold_findings_into_stat_summary(
     full_summary: dict[str, Any],
     result: Any,
     *,
+    helpers: ScopedGateChangeHelpers,
     severity_config: Any,
     show_only: str | None,
 ) -> None:
@@ -521,10 +542,10 @@ def _fold_findings_into_stat_summary(
     """
     from ..checker_policy import EvidenceStatus
 
-    _change_to_dict = _reporter()._change_to_dict
+    _change_to_dict = helpers.change_to_dict
 
     scoped_only, missing_labels, blocks, _missing_kind = _scoped_gate_findings(
-        result, severity_config, show_only
+        result, severity_config, show_only, helpers
     )
     if scoped_only or missing_labels:
         payload["full_summary"] = full_summary

@@ -1855,7 +1855,7 @@ track, the steps are ordered.
 | **T7 — Canonical export index** | One raw export index plus named projections (versioned ELF / default versions / Mach-O normalization / named PE / ordinal imports / missing-vs-empty); delete the five sibling implementations | `policy/depth_projection.py`, `buildsource/crosscheck_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, `diff_unnamed_types.py` | nothing |
 | **T8 — Action boundary** | Remove the residual raw-exit/stderr verdict reconstruction; keep only a transport-level no-result fallback; keep `fail-on-*` as step policy that never rewrites the verdict | `action/run.sh`, `action/` tests | nothing |
 | **T9 — Fact provenance and scope** (first and second slices landed 2026-09-05 — see notes below the table) | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, `storage/fact_backfill.py`, the import adapter | ~~T2~~ — satisfied (T2 landed 2026-09-05, so the ladder and `investigated_declined` are available to record this work's status); otherwise independent |
-| **T10 — Shared report preparation** | Compute evaluated findings/outcomes once ahead of format-specific construction; remove **both** runtime cycle escape hatches, which are distinct sites with distinct fixes: `render_markdown_document._reporter_markdown()`'s `..reporter_markdown` load (the Markdown cycle) and `report/scoped_gate.py`'s `..reporter` load (scoped-JSON construction, whose cycle exists only because `apply_scoped_gate` mutates an already-built payload); give consumer scoping an explicit finalization boundary instead of mutating shared changes | `report/render_markdown_document.py`, `report/render_markdown_alternate.py`, `report/scoped_gate.py`, `reporter_markdown.py`, `appcompat.py`'s `scope_diff_to_app` | T5's appcompat half for the scoping item |
+| ~~**T10 — Shared report preparation**~~ ✅ **done (2026-09-06)** | Compute evaluated findings/outcomes once ahead of format-specific construction; remove **both** runtime cycle escape hatches, which are distinct sites with distinct fixes: `render_markdown_document._reporter_markdown()`'s `..reporter_markdown` load (the Markdown cycle) and `report/scoped_gate.py`'s `..reporter` load (scoped-JSON construction, whose cycle exists only because `apply_scoped_gate` mutates an already-built payload); give consumer scoping an explicit finalization boundary instead of mutating shared changes | `report/render_markdown_document.py`, `report/render_markdown_alternate.py`, `report/scoped_gate.py`, `reporter_markdown.py`, `report/dispatch_markdown.py` (new), `appcompat.py`'s `scope_diff_to_app` | ~~T5's appcompat half for the scoping item~~ — satisfied (T5 landed 2026-09-05) |
 
 **T4 status note (2026-09-05, stated precisely rather than as a blanket
 "done" so it can't be mistaken for closing the whole item — Codex review on
@@ -1892,9 +1892,9 @@ selection from fallback policy, and a source-only dump execution variant
 function's own docstring reference).
 
 **Recommended first wave (fully parallel, no shared files):** ~~T1~~ (done),
-~~T2~~ (done), T6, T7, T8. **Second wave:** ~~T3~~ (done), T4, T9 (each large
-enough to be its own multi-PR effort). **Third wave:** ~~T5~~ (done), T10,
-once T4/T5's shared surfaces settle.
+~~T2~~ (done), T6 (landed with caveats — see its own row), T7, T8. **Second
+wave:** ~~T3~~ (done), T4, T9 (each large enough to be its own multi-PR
+effort). **Third wave:** ~~T5~~ (done), ~~T10~~ (done).
 
 **T9's first slice (2026-09-05): the PDB `vtable` fabrication is closed;
 the rest of the item's scope is not.** `Fact[T]` gained a `producer: str |
@@ -1973,6 +1973,75 @@ ambiguous), mangled-name-keyed, value-preserving, and non-hybrid-producer-
 unaffected shapes directly. Still open, unchanged by this slice: the DWARF
 per-TU completeness gap and the shared declined-comparison accounting
 named above.
+
+**T10 (2026-09-06):** all three named items landed, scoped exactly to this
+track's own "Touches" column (no SARIF/JUnit/HTML change — those formats
+never shared the cycle or the escape hatch this track exists to close).
+
+- **Compute once:** `--show-only`-filtered/dangling-correlation-suppressed
+  display changes are the one piece of "evaluated findings" preparation
+  that was genuinely duplicated within this track's own files — full mode
+  (`render_markdown_document.build_markdown_document`) and leaf/root-cause
+  mode (`render_markdown_alternate._view_preamble_mapping`) each ran their
+  own copy of the identical `apply_show_only` -> `_suppress_dangling_
+  correlation_notes` pipeline and separately re-derived the same filter-note
+  shape from it. `render_markdown_document._resolve_displayed_changes` is
+  now the one place that runs, called by both. The headline table's
+  unfiltered totals (`DiffResult.breaking`/`.source_breaks`/`.risk`/
+  `.compatible`/`.not_evaluated`) and the display-filtered `ReportModel`
+  buckets remain two intentionally different computations over two
+  different change lists (full-run totals vs. what `--show-only` actually
+  displays) — collapsing those would be a behavior change, not a
+  deduplication, so this track leaves that distinction as-is.
+- **Both cycle escape hatches removed:** `reporter_markdown.py`'s Markdown
+  dispatch (`to_markdown`/`to_review_digest`/`_to_markdown_leaf`/
+  `_to_markdown_root_cause`/`_markdown_alternate_rendering`) moved to a new
+  `report/dispatch_markdown.py` — the only edge that made `reporter_
+  markdown.py` depend on `report/render_markdown_document.py`/
+  `render_markdown_alternate.py`, so once it moved, `render_markdown_
+  document.py`'s own `_reporter_markdown()` became a plain static
+  `import abicheck.reporter_markdown` instead of an `importlib` resolve
+  (`render_markdown_alternate.py` inherits the same fix via the helper it
+  already imported from that module). `reporter_markdown.py` keeps a lazy
+  `__getattr__` shim for the moved names so every existing `from abicheck.
+  reporter_markdown import to_markdown`-shaped call site (including
+  `tests/`) is unaffected — the same shim shape `cli_buildsource.py`'s own
+  tail already establishes for this exact situation. `report/scoped_gate.py`
+  no longer imports `reporter`/`reporter_markdown` at all, dynamically or
+  otherwise: its six needed per-change helpers (`_change_to_dict`,
+  `_add_entries_to_root_causes`, `_finding_id`, `_root_cause_key_and_
+  display`, `root_cause_for_change`, `_resolve_scoped_gate_findings`) are
+  now passed in as a `ScopedGateChangeHelpers` bundle
+  (`reporter.py`'s own `_SCOPED_GATE_HELPERS`, built once since `reporter.py`
+  already holds or re-exports every one of those six names), threaded
+  through `reporter_contract_blocks.render_json_with_side_facts`'s new
+  `helpers` parameter — dependency inversion rather than relocating
+  `_change_to_dict` itself, which stays exactly where it already was.
+- **Consumer-scoping finalization boundary:** `appcompat.scope_diff_to_app`'s
+  two free-standing mutations of the already-returned `diff` (the
+  `disposition_ledger` attachment, previously assigned right before the
+  overlay loop, and the `_promote_scoped_contract` call, previously the
+  last statement before building `AppCompatResult`) are now one named,
+  called-once `_finalize_consumer_scope_diff`, whose own docstring states
+  why both are instances of `policy.disposition_close.
+  close_consumer_scope`'s own "a second producer joining after the close"
+  problem and why their relative order (ledger attach, then promotion,
+  then the verdict recompute promotion triggers) is fixed rather than left
+  implicit across two call sites. Provably behavior-preserving: nothing
+  between the ledger's resolution and this new call reads
+  `diff.disposition_ledger` (every `record_consumer_overlay` call already
+  goes through the local `overlay_ledger` reference), so deferring the
+  attachment changes nothing observable.
+
+Verified via the full fast unit suite plus the Markdown/JSON golden suites
+(`tests/test_golden_output.py`, `tests/test_golden_root_cause.py`,
+`tests/test_golden_review_digest.py`), `tests/test_appcompat.py`,
+`mypy abicheck/`, and `scripts/check_architecture.py` — zero output
+changes, zero new cycles, zero new architecture-debt errors (the
+`appcompat.py` `no_growth` baseline was raised 1887 -> 1928 for the new
+`_finalize_consumer_scope_diff` function's own docstring and signature;
+see that file's own entry in `architecture/debt.yaml` for the itemized
+rationale).
 
 ## Acceptance tests
 

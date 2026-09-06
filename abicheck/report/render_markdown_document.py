@@ -66,15 +66,14 @@ headroom before ``to_markdown``'s own full-mode body collapsed into a
 five-line call to this module, freeing most of it back) or a new flat
 ``abicheck/reporter_*.py`` sibling (``architecture/modules.yaml``'s
 ``frozen_root_families`` closes that flat namespace to new members, same as
-``report/scoped_gate.py``). Reaches ``reporter_markdown.py`` (a
-``layers.report.legacy_paths`` member, same layer as this file) via
-``importlib`` rather than a static import, mirroring ``report/
-scoped_gate.py``'s own ``_reporter()`` helper: ``reporter_markdown.py``
-imports this module's entry points via function-local (not module-level)
-imports (``to_markdown``/``render_review_digest`` call the matching
-``build_*``/``render_*`` pair above), so a static, module-level import back
-here would close a real cycle ``check_ai_readiness.py``'s
-``import-cycle-growth`` gate flags.
+``report/scoped_gate.py``). Imports ``reporter_markdown.py`` (a
+``layers.report.legacy_paths`` member, same layer as this file) statically
+at module level -- ADR-063 T10 moved the entry points that used to call
+*into* this module (``to_markdown``/``to_review_digest``) out of
+``reporter_markdown.py`` and into ``report/dispatch_markdown.py``, which
+retired the only edge that ran the other way, so the ``importlib``
+indirection this module previously needed to avoid closing that into a
+real cycle is gone too.
 
 Every view's byte-for-byte output is unchanged by this split --
 ``tests/test_golden_output.py``/``tests/test_golden_review_digest.py`` pin
@@ -87,6 +86,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
+
+# ADR-063 T10: static now that `reporter_markdown.py` no longer imports
+# anything from this module (see this module's own docstring) -- the
+# `_reporter_markdown()` importlib indirection this file used to need is
+# retired; every call site below keeps the same `rm.compute_*(...)` shape
+# it always had, just resolved through this module-level import.
+import abicheck.reporter_markdown as _reporter_markdown_module
 
 from .disposition_audit import (
     DispositionAudit,
@@ -131,16 +137,49 @@ from .render_markdown import (
 
 
 def _reporter_markdown() -> Any:
-    """``abicheck.reporter_markdown``, resolved via ``importlib``. See this
-    module's own docstring for why -- mirrors ``report/scoped_gate.py``'s
-    identical ``_reporter()`` helper."""
-    import importlib
-
-    return importlib.import_module("..reporter_markdown", __package__)
+    """``abicheck.reporter_markdown`` -- kept as a function for a minimal
+    diff against every existing ``rm = _reporter_markdown()`` call site
+    below (ADR-063 T10 made the underlying import static; this wrapper is
+    not itself dynamic any more)."""
+    return _reporter_markdown_module
 
 
 def _opt_asdict(value: Any) -> dict[str, Any] | None:
     return None if value is None else asdict(value)
+
+
+def _resolve_displayed_changes(
+    result: Any, show_only: str | None
+) -> tuple[list[Any], dict[str, Any] | None]:
+    """The changes this render actually displays, plus the ``--show-only``
+    filter note describing it when one was applied (``None`` otherwise).
+
+    ADR-063 T10: computed once here rather than independently re-derived by
+    both full mode (:func:`build_markdown_document` below) and leaf/
+    root-cause mode (``render_markdown_alternate.py``'s own
+    ``_view_preamble_mapping``), which used to each run their own copy of
+    the identical ``apply_show_only`` -> ``_suppress_dangling_correlation_
+    notes`` pipeline and independently re-derive the same filter-note shape
+    from it.
+    """
+    rm = _reporter_markdown()
+    changes = list(result.changes)
+    show_only_note: dict[str, Any] | None = None
+    if show_only:
+        changes = rm.apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+        show_only_note = {
+            "show_only": show_only,
+            "shown": len(changes),
+            "total": len(result.changes),
+        }
+        changes = rm._suppress_dangling_correlation_notes(changes)
+    return changes, show_only_note
 
 
 def build_review_digest_document(
@@ -372,16 +411,7 @@ def build_markdown_document(
     old_meta = getattr(result, "old_metadata", None)
     new_meta = getattr(result, "new_metadata", None)
 
-    changes = list(result.changes)
-    if show_only:
-        changes = rm.apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-        changes = rm._suppress_dangling_correlation_notes(changes)
+    changes, show_only_note = _resolve_displayed_changes(result, show_only)
 
     from ..report_model import ReportModel
 
@@ -424,15 +454,7 @@ def build_markdown_document(
             if severity_config is not None
             else None
         ),
-        "show_only_note": (
-            {
-                "show_only": show_only,
-                "shown": len(changes),
-                "total": len(result.changes),
-            }
-            if show_only
-            else None
-        ),
+        "show_only_note": show_only_note,
         "library_files": (
             asdict(rm.compute_library_files(old_meta, new_meta))
             if (old_meta or new_meta)
