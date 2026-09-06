@@ -599,6 +599,7 @@
     "__main__.py",
     "_compiler_options.py",
     "analysis_assurance.py",
+    "analysis_assurance_layout.py",
     "annotations.py",
     "annotations_step_summary.py",
     "appcompat.py",

@@ -3,12 +3,12 @@
   "files": [
     {
       "path": "abicheck/analysis_assurance.py",
-      "baseline_lines": 1539,
+      "baseline_lines": 1550,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Bumped by 11 lines for E-S1 (vision-api-abi-evolution.md section E / cli-cleanup-phase-two.md Block 5): the layout_unverified_detectors dataclass field, its to_dict()/compute_analysis_assurance() wiring, and the one import -- the field itself cannot live outside this dataclass, and the detector-name/predicate logic it wires to was already moved out to the new analysis_assurance_layout.py leaf module rather than added here.",
       "review_by": "2026-11-30"
     },
     {

@@ -62,3 +62,25 @@ class ExtractionContract:
     # / ``comparability.SCOPE_FIELD_KEYS`` for the recognized keys.
     profile_fields: dict[str, str] = field(default_factory=dict)
     scope_fields: dict[str, str] = field(default_factory=dict)
+    # E-S1 (docs/contribute/plans/vision-api-abi-evolution.md, "E. Evidence
+    # adequacy, contract-source conflicts, cross-profile comparison" /
+    # cli-cleanup-phase-two.md Block 5): the toolchain-identity probe's own
+    # ``model.availability.FactStatus.value`` behind this side's
+    # ``profile_fields["compiler_family"]`` -- ``"present"`` when a host
+    # compiler identity was actually resolved, ``"failed"`` when resolution
+    # was attempted and errored (``dumper_toolchain._stamp_ast_parser``'s own
+    # ``compiler_error``), or ``None`` when this contract predates the field
+    # or no L2 frontend ran at all (nothing was ever attempted -- not a gap,
+    # since nothing here asserts one). A plain ``str``, like every other
+    # field on this dataclass, not a ``FactStatus`` instance itself: this
+    # keeps the whole dataclass serializing through the ordinary
+    # ``dataclasses.asdict()``/``json.dumps()`` round-trip
+    # ``serialization.py`` already uses for it, with no new codec --
+    # callers translate to/from ``FactStatus`` at the two edges
+    # (``dumper_toolchain.py`` writes it, ``comparability_profile.py`` reads
+    # it back via ``FactStatus(value)``). Deliberately never silently
+    # collapsed into an absent/``None`` ``compiler_family`` on a probe
+    # failure (see ``dumper_toolchain._compiler_family_from_toolchain``) --
+    # that indistinguishability from "never attempted" is exactly what
+    # previously let a mismatched GCC/Clang pair compare silently.
+    compiler_identity_status: str | None = None
