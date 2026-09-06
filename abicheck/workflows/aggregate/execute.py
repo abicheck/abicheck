@@ -112,6 +112,7 @@ def aggregate(
             scope_completeness_incomplete=report.scope_completeness_incomplete,
             findings=report.findings,
             effective_config_digest=report.effective_config_digest,
+            disposition_audit=report.disposition_audit,
         )
 
     targets = tuple(

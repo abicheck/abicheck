@@ -261,6 +261,31 @@ class AggregateResult:
             )
         )
 
+    @property
+    def disposition_audit_targets(self) -> tuple[TargetReport, ...]:
+        """Every analyzed (or unexpected) target, for a *report-layer*
+        caller to fold their ``disposition_audit`` blocks over (ADR-067
+        C-S2). Folding itself lives in ``report.aggregate`` -- this module
+        is `workflows/`, which ADR-061's dependency direction forbids from
+        importing `report/`, so it exposes the population rather than the
+        fold."""
+        return self.analyzed + self.unexpected_targets
+
+    @property
+    def disposition_audit_missing_targets(self) -> tuple[str, ...]:
+        """Analyzed targets whose report carried no ``disposition_audit`` --
+        the honest counterpart to :attr:`scope_completeness_targets`: a
+        pre-2.51 or `scan`-sourced report contributes nothing to
+        :attr:`disposition_audit`, and naming it here is what stops that
+        silent zero from reading as "this target had no findings"."""
+        return tuple(
+            sorted(
+                t.target_id
+                for t in self.analyzed + self.unexpected_targets
+                if t.disposition_audit is None
+            )
+        )
+
     def exit_code(self) -> int:
         """The single CI gate exit code.
 
@@ -777,6 +802,13 @@ class AggregateResult:
                 "exit_contribution": self.scope_completeness_exit,
                 "incomplete_targets": list(self.scope_completeness_targets),
             },
+            # ADR-067 C-S2: `disposition_audit`/`disposition_audit_missing_
+            # targets` are added by `report.aggregate.render_aggregate_json`
+            # (a *report*-layer concern -- see `disposition_audit_targets`'s
+            # own docstring), not this workflows-layer `to_dict()`.
+            "disposition_audit_missing_targets": list(
+                self.disposition_audit_missing_targets
+            ),
             # CLI cleanup phase two, PR 2: the resolved gate policy this run
             # actually applied, and where it came from -- expectation and the
             # consequence of breaking it are now one versioned contract

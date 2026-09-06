@@ -41,11 +41,16 @@ before this slice.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..policy.disposition_close import ledger_for
+from ..policy.disposition_close import (
+    ledger_for,
+    reclassifications as _reclassifications,
+    reclassified_total as _reclassified_total,
+    scope_reasons as _scope_reasons,
+)
 from ..policy.disposition_ledger import (
     Disposition,
     RuleProvenance,
@@ -99,6 +104,18 @@ class DispositionAudit:
     #: in no raw total and no disposition count, and cannot tell whether that
     #: is an overlay or a bug (Codex review).
     policy_overlays: int = 0
+    #: ADR-067 C-S2: findings a ``reclassify:`` rule moved to another verdict
+    #: class -- an overlay fact independent of `counts`, like
+    #: :attr:`policy_overlays` (a reclassified finding keeps its own terminal
+    #: disposition).
+    reclassified_total: int = 0
+    #: ``(reclassify rule id, matched count)`` -- :attr:`rules`'s counterpart
+    #: for reclassification.
+    reclassifications: tuple[tuple[str, int], ...] = ()
+    #: ``(contract-relevance reason code, matched count)`` behind every
+    #: ``out_of_contract``/``unresolved_relevance`` record -- :attr:`rules`'s
+    #: counterpart for a scope/contract exclusion.
+    scope_reasons: tuple[tuple[str, int], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -112,6 +129,15 @@ class DispositionAudit:
                 det.to_dict() for det in self.not_evaluated_detectors
             ],
             "policy_overlays": self.policy_overlays,
+            "reclassified_total": self.reclassified_total,
+            "reclassifications": [
+                {"rule_id": rule_id, "matched_count": count}
+                for rule_id, count in self.reclassifications
+            ],
+            "scope_reasons": [
+                {"reason_code": reason, "matched_count": count}
+                for reason, count in self.scope_reasons
+            ],
         }
 
     @classmethod
@@ -143,6 +169,15 @@ class DispositionAudit:
                 for row in d.get("not_evaluated_detectors") or ()
             ),
             policy_overlays=int(d.get("policy_overlays") or 0),
+            reclassified_total=int(d.get("reclassified_total") or 0),
+            reclassifications=tuple(
+                (str(row["rule_id"]), int(row.get("matched_count", 0)))
+                for row in d.get("reclassifications") or ()
+            ),
+            scope_reasons=tuple(
+                (str(row["reason_code"]), int(row.get("matched_count", 0)))
+                for row in d.get("scope_reasons") or ()
+            ),
         )
 
 
@@ -173,6 +208,89 @@ def compute_disposition_audit(
             if getattr(det, "not_evaluated", False)
         ),
         policy_overlays=ledger.policy_overlay_total,
+        reclassified_total=_reclassified_total(ledger),
+        reclassifications=_reclassifications(ledger),
+        scope_reasons=_scope_reasons(ledger),
+    )
+
+
+def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAudit:
+    """ADR-067 C-S2: fold N independent per-comparison audits into one total.
+
+    The release/bundle fan-out and ``aggregate`` each run several independent
+    comparisons (one per library, one per matrix target) and need one
+    summary-level raw-versus-effective statement rather than N per-member
+    blocks with no rollup -- the same D3 invariant scalar `compare` already
+    states, one level up.
+
+    Every field here is a plain count (or a count keyed by rule/reason/
+    detector), never a state, so summing is the correct fold at any level:
+    the sum of N conserved per-comparison totals is itself a conserved total
+    (``sum(folded.counts) == folded.detected_total`` holds whenever it held
+    for every member). Rule/reclassification/scope-reason tallies are merged
+    by key (rule id / reason code), in first-appearance order across the
+    members in the order given, with counts summed across whichever members
+    matched; ``not_evaluated_detectors`` is deduplicated by name for the same
+    reason a homogeneous release's members legitimately share one missing-
+    evidence detector and should not report it N times.
+
+    ``()`` in gives back the zero audit (every count ``0``, every sequence
+    empty) rather than raising -- a release/aggregate run with zero members
+    still owes every consumer an audit block it can render unconditionally,
+    the same "state zero, don't omit" rule :func:`render_disposition_audit_note`
+    already applies at the single-comparison level.
+    """
+    detected_total = 0
+    effective_total = 0
+    policy_overlays = 0
+    reclassified_total = 0
+    counts: dict[str, int] = {d.value: 0 for d in Disposition}
+    rule_order: list[RuleProvenance] = []
+    rule_tally: dict[RuleProvenance, int] = {}
+    reclass_order: list[str] = []
+    reclass_tally: dict[str, int] = {}
+    reason_order: list[str] = []
+    reason_tally: dict[str, int] = {}
+    detector_order: list[str] = []
+    detectors: dict[str, NotEvaluatedDetector] = {}
+    for audit in audits:
+        detected_total += audit.detected_total
+        effective_total += audit.effective_total
+        policy_overlays += audit.policy_overlays
+        reclassified_total += audit.reclassified_total
+        for name, count in audit.counts:
+            counts[name] = counts.get(name, 0) + count
+        for rule, count in audit.rules:
+            if rule not in rule_tally:
+                rule_order.append(rule)
+                rule_tally[rule] = 0
+            rule_tally[rule] += count
+        for rule_id, count in audit.reclassifications:
+            if rule_id not in reclass_tally:
+                reclass_order.append(rule_id)
+                reclass_tally[rule_id] = 0
+            reclass_tally[rule_id] += count
+        for reason, count in audit.scope_reasons:
+            if reason not in reason_tally:
+                reason_order.append(reason)
+                reason_tally[reason] = 0
+            reason_tally[reason] += count
+        for det in audit.not_evaluated_detectors:
+            if det.name not in detectors:
+                detector_order.append(det.name)
+                detectors[det.name] = det
+    return DispositionAudit(
+        detected_total=detected_total,
+        effective_total=effective_total,
+        counts=tuple((d.value, counts[d.value]) for d in Disposition),
+        rules=tuple((rule, rule_tally[rule]) for rule in rule_order),
+        not_evaluated_detectors=tuple(detectors[name] for name in detector_order),
+        policy_overlays=policy_overlays,
+        reclassified_total=reclassified_total,
+        reclassifications=tuple(
+            (rule_id, reclass_tally[rule_id]) for rule_id in reclass_order
+        ),
+        scope_reasons=tuple((reason, reason_tally[reason]) for reason in reason_order),
     )
 
 
@@ -220,12 +338,15 @@ def render_disposition_audit_note(audit: DispositionAudit) -> str:
     ]
     if audit.policy_overlays:
         parts.append(f"{audit.policy_overlays} policy overlay(s)")
+    if audit.reclassified_total:
+        parts.append(f"{audit.reclassified_total} reclassified")
     if audit.not_evaluated_detectors:
         parts.append(f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated")
     if (
         audit.detected_total == 0
         and not audit.not_evaluated_detectors
         and not audit.policy_overlays
+        and not audit.reclassified_total
     ):
         # Nothing detected and every detector ran: the counts are true but say
         # nothing the line beside them ("no changes (0 total)") does not
@@ -266,6 +387,21 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
             f"**Policy overlays:** {audit.policy_overlays} "
             "(diagnostics the gate can score; not counted as detections)"
         )
+        lines.append("")
+    if audit.reclassifications:
+        lines.append(
+            f"**Reclassified:** {audit.reclassified_total} "
+            "(verdict moved by a `reclassify:` rule; disposition unchanged)"
+        )
+        lines.append("")
+        for rule_id, count in audit.reclassifications:
+            lines.append(f"- `{rule_id}` — {count} finding(s)")
+        lines.append("")
+    if audit.scope_reasons:
+        lines.append("**Out-of-contract/scope reasons:**")
+        lines.append("")
+        for reason, count in audit.scope_reasons:
+            lines.append(f"- `{reason}` — {count} finding(s)")
         lines.append("")
     if audit.not_evaluated_detectors:
         # Collapsed to one line on purpose: D3 requires the *state* and its
@@ -320,6 +456,8 @@ def render_disposition_audit_comment_lines(audit: DispositionAudit) -> list[str]
     tail = f" · {counts}" if counts else ""
     if audit.policy_overlays:
         tail += f" · {audit.policy_overlays} policy overlay(s)"
+    if audit.reclassified_total:
+        tail += f" · {audit.reclassified_total} reclassified"
     if audit.not_evaluated_detectors:
         # Same reason as the one-line view: on a zero-delta comparison this
         # row is the only place the reader learns a detector could not run,

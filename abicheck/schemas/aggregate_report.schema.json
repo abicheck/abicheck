@@ -89,6 +89,24 @@
         }
       }
     },
+    "disposition_audit": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Added in schema 1.9 (ADR-067 C-S2). The folded raw-versus-effective disposition audit across every analyzed/unexpected target that carries one (report.disposition_audit.fold_disposition_audits) -- the same shape a scalar compare report's own disposition_audit block carries. Not one of the four gating axes above: it never contributes to exit_code, it only states what was detected and what gated it. Added by report.aggregate.render_aggregate_json rather than AggregateResult.to_dict() itself (workflows/ may not import report/); a caller reading AggregateResult.to_dict() directly instead of going through the CLI's JSON renderer will not see this key.",
+      "properties": {
+        "detected_total": {"type": "integer", "minimum": 0},
+        "effective_total": {"type": "integer", "minimum": 0},
+        "counts": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "disposition_audit_missing_targets": {
+      "type": "array",
+      "description": "Added in schema 1.9 (ADR-067 C-S2). Analyzed/unexpected target ids whose own report carried no disposition_audit block (a report older than compare_report schema 2.51, or a `scan`-sourced report, which carries none) -- the honest counterpart to scope_completeness's own incomplete_targets: such a target contributes nothing to disposition_audit above, and this list is what stops that silent zero from reading as \"no findings\".",
+      "items": {"type": "string"}
+    },
     "gate": {
       "type": "object",
       "description": "The single CI gate decision.",
@@ -240,6 +258,11 @@
         "reason": {
           "type": "string",
           "description": "Present when the target is unavailable — why it could not be analyzed."
+        },
+        "disposition_audit": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Added in schema 1.9 (ADR-067 C-S2). This target's own disposition_audit block, read verbatim off its report. Absent for an unavailable target or a report that carries none (a pre-2.51 or `scan`-sourced report) -- present exactly when this target_id is not in the top-level disposition_audit_missing_targets list."
         },
         "effective_config_digest": {
           "type": "string",

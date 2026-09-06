@@ -289,6 +289,7 @@ def finalize_ledger(
             change, rule=None, application_point="unrecorded_suppression"
         )
     ledger.resolve_verdict_classes(result)
+    ledger.resolve_reclassifications(result)
     return ledger
 
 
@@ -376,6 +377,7 @@ def close_consumer_scope(
     ledger.refresh_promoted(result)
     ledger.apply_scope(result, gating)
     ledger.resolve_verdict_classes(result)
+    ledger.resolve_reclassifications(result)
 
 
 def ledger_for(
@@ -419,3 +421,73 @@ def conservation_holds(ledger: DispositionLedger) -> bool:
     detected total. Exposed as a function (rather than only asserted in a
     test) so any consumer can check it against a ledger it did not build."""
     return sum(ledger.counts().values()) == ledger.detected_total
+
+
+def reclassifications(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:
+    """ADR-067 C-S2: distinct reclassify rule ids with the number of changes
+    each moved, ordered by first appearance -- the same shape
+    :meth:`DispositionLedger.rules` reports for suppression, for the overlay
+    attribute a finding carries independently of its terminal disposition (a
+    reclassified finding stays visible; only its verdict class moved).
+
+    A module function here rather than a :class:`DispositionLedger` method:
+    it derives purely from :attr:`DispositionLedger.records`, and that leaf
+    module is at the architecture gate's per-file line ceiling -- the same
+    reason :func:`conservation_holds` above lives here instead of there.
+    """
+    ordered: list[str] = []
+    tally: dict[str, int] = {}
+    for record in ledger.records:
+        if record.reclassified_by is None:
+            continue
+        if record.reclassified_by not in tally:
+            ordered.append(record.reclassified_by)
+            tally[record.reclassified_by] = 0
+        tally[record.reclassified_by] += 1
+    return tuple((rule_id, tally[rule_id]) for rule_id in ordered)
+
+
+def reclassified_total(ledger: DispositionLedger) -> int:
+    """Findings a ``reclassify:`` rule moved to another verdict class.
+
+    Not part of :meth:`DispositionLedger.counts` or
+    :attr:`DispositionLedger.detected_total`: like ``reclassified_by``
+    itself, this is an overlay fact about a finding that still carries its
+    own terminal disposition (D2) -- a reclassified-and-suppressed finding
+    is still ``suppressed``.
+    """
+    return sum(1 for r in ledger.records if r.reclassified_by is not None)
+
+
+#: The two dispositions a contract/scope decision -- as opposed to
+#: suppression -- actually produces (D2's ``_POLICY_TERMINAL_DISPOSITIONS``
+#: minus ``suppressed``).
+_SCOPE_DISPOSITIONS = frozenset(
+    {Disposition.OUT_OF_CONTRACT, Disposition.UNRESOLVED_RELEVANCE}
+)
+
+
+def scope_reasons(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:
+    """ADR-067 C-S2: distinct contract-relevance reason codes behind every
+    ``out_of_contract``/``unresolved_relevance`` record, with the number of
+    findings each decided -- :func:`reclassifications`'s (and
+    :meth:`DispositionLedger.rules`'s) counterpart for the *scope* exclusion
+    mechanism, so "which reason took this finding out of the contract" is as
+    answerable as "which rule suppressed it".
+
+    A record with no ``reason_code`` reflects an unstamped finding -- every
+    run without ``--contract`` -- not a missing audit fact, and is skipped
+    rather than counted under a synthetic key.
+    """
+    ordered: list[str] = []
+    tally: dict[str, int] = {}
+    for record in ledger.records:
+        if record.disposition not in _SCOPE_DISPOSITIONS:
+            continue
+        if record.reason_code is None:
+            continue
+        if record.reason_code not in tally:
+            ordered.append(record.reason_code)
+            tally[record.reason_code] = 0
+        tally[record.reason_code] += 1
+    return tuple((reason, tally[reason]) for reason in ordered)

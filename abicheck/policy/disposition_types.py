@@ -72,6 +72,19 @@ class DispositionRecord:
     #: D2 overlay attribute, independent of ``disposition``: the policy
     #: reclassification rule that moved this finding's verdict, if any.
     reclassified_by: str | None = None
+    #: ADR-067 C-S2: the contract-relevance reason code that decided this
+    #: finding's scope exclusion, when one exists -- read verbatim off
+    #: ``Change.contract_reason_code`` (``contract_relevance_types.py``'s
+    #: registry) at recording time, the same way ``reclassified_by`` is. Set
+    #: on any record (not only ``out_of_contract``/``unresolved_relevance``
+    #: ones), but only those two dispositions are the ones a *scope*
+    #: excluded -- ``DispositionLedger.scope_reasons`` is scoped to them, the
+    #: same restriction :attr:`suppressed_gating_records` applies to
+    #: ``verdict_class``. This is what lets the audit answer "which reason
+    #: excluded this finding" the same way it already answers "which rule
+    #: suppressed it" (:attr:`rule`), instead of leaving `scope`/
+    #: out-of-contract exclusions as a bare count with no provenance.
+    reason_code: str | None = None
     #: Set when something *other than severity* already put this finding
     #: outside the gate that decides the run: a consumer scope
     #: (``--used-by``/``--required-symbol``) judged it irrelevant, ADR-039
@@ -133,4 +146,6 @@ class DispositionRecord:
             entry["rule"] = self.rule.to_dict()
         if self.reclassified_by is not None:
             entry["reclassified_by"] = self.reclassified_by
+        if self.reason_code is not None:
+            entry["reason_code"] = self.reason_code
         return entry

@@ -317,6 +317,15 @@ def _compare_one_library(
         from .checker_policy import ADDITION_KINDS
 
         n_quality = sum(1 for c in result.compatible if c.kind not in ADDITION_KINDS)
+        # ADR-067 C-S2: this library's own raw-versus-effective disposition
+        # audit, the same shape scalar `compare`'s JSON report carries
+        # (`report.disposition_audit.compute_disposition_audit`/`.to_dict()`)
+        # -- stamped here, before `_strip_diff_results_and_adjust_verdict`
+        # discards `_diff_result`, so the release-level fold
+        # (`cli_compare_receipt.release_disposition_audit_block`) has
+        # something to read per library.
+        from .report.disposition_audit import compute_disposition_audit
+
         entry: dict[str, object] = {
             "library": old_path.name,
             "verdict": v,
@@ -325,6 +334,9 @@ def _compare_one_library(
             "risk_changes": len(result.risk),
             "compatible_additions": len(result.compatible),
             "quality_issues": n_quality,
+            "disposition_audit": compute_disposition_audit(
+                result, severity_config
+            ).to_dict(),
             "_diff_result": result,
             **(
                 {"coverage_warnings": list(result.coverage_warnings)}

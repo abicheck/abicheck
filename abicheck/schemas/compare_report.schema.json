@@ -486,7 +486,7 @@
     "disposition_audit": {
       "type": "object",
       "additionalProperties": true,
-      "description": "ADR-067 D3 (schema 2.51; `policy_overlays` added in 2.52): the raw-versus-effective audit -- every atomically detected change with the single terminal disposition it received. `counts` sums to `detected_total` by construction, and the block is structurally unsuppressible: it is derived from the run's conserved disposition ledger, not from the post-disposition `changes` list.",
+      "description": "ADR-067 D3 (schema 2.51; `policy_overlays` added in 2.52; `reclassified_total`/`reclassifications`/`scope_reasons` added in 2.54, C-S2): the raw-versus-effective audit -- every atomically detected change with the single terminal disposition it received. `counts` sums to `detected_total` by construction, and the block is structurally unsuppressible: it is derived from the run's conserved disposition ledger, not from the post-disposition `changes` list.",
       "required": [
         "detected_total",
         "effective_total",
@@ -542,6 +542,28 @@
                 ]
               }
             }
+          }
+        },
+        "reclassified_total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ADR-067 C-S2: findings a `reclassify:` rule moved to another verdict class. An overlay fact independent of `counts`/`detected_total`, like `policy_overlays` -- a reclassified-and-suppressed finding is still `suppressed`.",
+          "default": 0
+        },
+        "reclassifications": {
+          "type": "array",
+          "description": "Distinct reclassify rule ids with the number of findings each moved -- `rules`'s counterpart for the reclassification overlay.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "scope_reasons": {
+          "type": "array",
+          "description": "Distinct contract-relevance reason codes behind every out_of_contract/unresolved_relevance record, with the number of findings each decided -- `rules`'s counterpart for a scope/contract exclusion.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
           }
         }
       }
