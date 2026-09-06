@@ -104,6 +104,24 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
               "passes the type by value or reads its fields is now miscompiled."),
     _E("bundle_library_added", _C, is_addition=True,
        impact="A new library appears in the bundle; existing consumers unaffected."),
+    _E("support_promise_component_retired", _B,
+       impact="ADR-065 D1/S3: the release stopped shipping a component it used "
+              "to ship, and the NEW side's inventory is PROVEN complete, so "
+              "this is evidence of a retired promise rather than a member a "
+              "partial input happened not to supply. Every consumer that links "
+              "the component fails to load, whether or not a sibling in this "
+              "same release consumed it -- which is what distinguishes this "
+              "from bundle_library_removed, whose detection deliberately fires "
+              "only for an intra-bundle consumer. Emitted only under the "
+              "contract policy that asks for it (--support-promise declared); "
+              "never inferred from acquisition state alone.",
+       description_template="{name} was shipped by the old release and is absent from the new release's proven-complete component inventory."),
+    _E("support_promise_component_introduced", _C, is_addition=True,
+       impact="ADR-065 D1/S3: the symmetric rule -- the release now ships a "
+              "component it did not before, established against a PROVEN-"
+              "complete OLD inventory (a partial old input cannot prove the "
+              "component was absent). No existing consumer is affected.",
+       description_template="{name} is shipped by the new release and is absent from the old release's proven-complete component inventory."),
     _E("bundle_library_removed", _B,
        impact="A library present in the old bundle is absent in the new bundle "
               "and at least one of its exported symbols was consumed by a sibling. "

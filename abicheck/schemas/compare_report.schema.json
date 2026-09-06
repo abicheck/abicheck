@@ -215,8 +215,27 @@
           "missing_symbols": {"type": "array", "items": {"type": "string"}},
           "missing_versions": {"type": "array", "items": {"type": "string"}},
           "relevant_change_count": {"type": "integer"},
-          "symbol_coverage": {"type": "number"}
+          "symbol_coverage": {"type": "number"},
+          "platform": {"type": "string"},
+          "profile": {"type": "string"},
+          "provider_baseline": {"type": "string"},
+          "digest": {"type": "string"},
+          "requirement": {"type": "string", "enum": ["required", "advisory"]},
+          "unreadable": {"type": "boolean"},
+          "unreadable_reason": {"type": "string"}
         }
+      }
+    },
+    "consumer_impact_summary": {
+      "type": "object",
+      "description": "Present only when --used-by/--used-by-manifest was given: \"N of M consumers affected\" statistics across every supplied consumer (Workstream D-S1). Purely informational.",
+      "additionalProperties": true,
+      "properties": {
+        "total": {"type": "integer"},
+        "evaluated": {"type": "integer"},
+        "affected": {"type": "integer"},
+        "unreadable_advisory": {"type": "integer"},
+        "unreadable_paths": {"type": "array", "items": {"type": "string"}}
       }
     },
     "required_symbol_contract": {
@@ -581,7 +600,7 @@
     },
     "cross_source_evolution": {
       "type": "object",
-      "description": "Schema 3.3 (ADR-068 D3 / plan P2): present only when at least one finding in this report carries a `finding_evolution` value (i.e. compare(..., cross_source_checks=True) was requested and flagged something on at least one side). Per-state counts over every such finding, mirroring each finding's own `finding_evolution` field one level up.",
+      "description": "Schema 3.4 (ADR-068 D3 / plan P2): present only when at least one finding in this report carries a `finding_evolution` value (i.e. compare(..., cross_source_checks=True) was requested and flagged something on at least one side). Per-state counts over every such finding, mirroring each finding's own `finding_evolution` field one level up.",
       "required": [
         "introduced",
         "resolved",
@@ -2193,7 +2212,7 @@
         },
         "finding_evolution": {
           "type": "string",
-          "description": "Schema 3.3 (ADR-068 D3): present only on a finding produced by compare(..., cross_source_checks=True) evaluating a cross-source hygiene check independently on OLD and NEW. 'introduced' \u2014 absent on OLD (OLD evidence sufficient to say so), present on NEW. 'resolved' \u2014 present on OLD, absent on NEW. 'persistent' \u2014 present on both. 'not_evaluated' \u2014 at least one side's evidence could not answer the question, so neither introduced/resolved/persistent can be asserted (mandatory, not a convenience \u2014 never infer 'introduced' from missing baseline evidence). Purely descriptive: never changes this finding's severity/verdict.",
+          "description": "Schema 3.4 (ADR-068 D3): present only on a finding produced by compare(..., cross_source_checks=True) evaluating a cross-source hygiene check independently on OLD and NEW. 'introduced' \u2014 absent on OLD (OLD evidence sufficient to say so), present on NEW. 'resolved' \u2014 present on OLD, absent on NEW. 'persistent' \u2014 present on both. 'not_evaluated' \u2014 at least one side's evidence could not answer the question, so neither introduced/resolved/persistent can be asserted (mandatory, not a convenience \u2014 never infer 'introduced' from missing baseline evidence). Purely descriptive: never changes this finding's severity/verdict.",
           "enum": ["introduced", "resolved", "persistent", "not_evaluated"]
         },
         "reviewer_action": {

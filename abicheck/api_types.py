@@ -431,17 +431,44 @@ def _path_required_errors(
     named only ``sources``/``build_info`` rejected it — caught by
     ``tests/test_cli_dump_manifest.py``'s dry-run cases, exactly the "the model
     can't say what the CLI accepts" gap this widening exists to close.
+
+    ``headers`` counts too (workstream F S1, ``vision-api-abi-evolution.md``
+    "F. Header-only comparison"): a bare ``dump -H api.h`` with no SO_PATH
+    previously validated only because ``dump_source_only``'s CLI branch
+    silently ignored ``-H`` and wrote an empty snapshot -- this widening is
+    what makes the real, typed header-AST execution path
+    (``workflows.artifact.execute_header_only.execute_header_only_dump_request``)
+    reachable at all: without it, a genuinely headers-only request failed
+    this check before that path ever ran.
+
+    ``public_header_dirs`` deliberately does **not** count on its own
+    (CodeRabbit review on this PR) -- it is a pure declaration-provenance
+    classifier (public-vs-internal, consumed by ``cli_resolve.py`` and
+    ``export_surface.py``'s scope classification), never a source of
+    headers to parse: :func:`~abicheck.workflows.artifact.
+    execute_header_only.is_header_only_evidence` only recognizes
+    :attr:`ResolvedDumpRequest.headers`\\ /a real ``dump_manifest``, so a
+    request naming only ``public_header_dirs`` reached this far and then
+    fell through to the source-only path with nothing to embed, failing
+    later with a confusing "needs sources and/or build_info" error instead
+    of failing here with the right guidance.
     """
     if side.path is not None:
         return []
     if not source_only_allowed:
         return [f"the {label} side needs a path (a binary or a snapshot file)"]
-    if not (side.sources or side.build_info or side.dump_manifest is not None):
+    if not (
+        side.sources
+        or side.build_info
+        or side.dump_manifest is not None
+        or side.headers
+    ):
         return [
             f"the {label} side has no path and no sources/build_info/"
-            "dump_manifest: a binary-less dump needs at least one of them to "
-            "have anything to extract -- pass a binary (SO_PATH), or "
-            "--sources/--build-info for a source-only snapshot"
+            "dump_manifest/headers: a binary-less dump needs at least one of "
+            "them to have anything to extract -- pass a binary (SO_PATH), "
+            "-H/--header for a header-only snapshot, or --sources/"
+            "--build-info for a source-only snapshot"
         ]
     return []
 

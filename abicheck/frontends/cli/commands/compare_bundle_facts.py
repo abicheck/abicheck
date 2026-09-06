@@ -405,7 +405,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
             # instead of the clean CLI error every other SnapshotError here
             # produces.
             try:
-                lib_dir, _new_debug_dir, header_dir, _new_symbols_file = (
+                lib_dir, _new_debug_dir, header_dir, _new_symbols_file, _whole = (
                     _extract_if_package(
                         new_dir,
                         None,

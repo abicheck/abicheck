@@ -220,6 +220,13 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "the comparison to one or more applications' actual imports. Which "
         "application(s) to check against varies per run, not a project setting."
     ),
+    "--used-by-manifest": (
+        "Workstream D-S1: a JSON document naming one or more consumer "
+        "binaries with optional digest/platform/profile/provider-baseline "
+        "provenance and an advisory/required distinction, merged into the "
+        "same --used-by pipeline. Which manifest(s) to check against varies "
+        "per run, exactly like --used-by itself, not a project setting."
+    ),
     "--required-symbol": (
         "ADR-043: folds the removed `plugin-check` command into compare -- an "
         "explicit required-entrypoint contract for a plugin-host pairing. Varies "

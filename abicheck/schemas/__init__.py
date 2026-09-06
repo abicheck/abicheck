@@ -740,8 +740,21 @@ from typing import Any
 #:       version first for E-S2's ``comparability_assurance`` block (same
 #:       "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/
 #:       2.49/2.51/2.53 entries above).
-#: 3.3 -- ADR-068 D3 / plan P2: ``compare(..., cross_source_checks=True)`` stamps a ``change``'s ``finding_evolution`` (introduced/resolved/persistent/not_evaluated) and an additive top-level ``cross_source_evolution`` per-state count object; off by default, never changes the finding's default verdict.
-REPORT_SCHEMA_VERSION = "3.3"
+#: 3.3 -- Workstream D-S1 (consumer specification): each ``used_by[]`` entry
+#:      gains six additive, optional fields -- ``platform``/``profile``/
+#:      ``provider_baseline``/``digest`` (provenance from a
+#:      ``--used-by-manifest``-named consumer) and ``requirement``/
+#:      ``unreadable``/``unreadable_reason`` (the advisory/required
+#:      distinction for an unreadable consumer) -- present only when the
+#:      supplied consumer actually carried that information; a bare
+#:      ``--used-by <path>`` consumer's entry is unchanged. A new additive
+#:      top-level ``consumer_impact_summary`` object reports "N of M
+#:      consumers affected" across every supplied ``--used-by``/
+#:      ``--used-by-manifest`` consumer, present under the same condition as
+#:      ``used_by``. Additive only: no existing key changes shape or
+#:      meaning, and no verdict, gate, or exit code moves.
+#: 3.4 -- ADR-068 D3 / plan P2: ``compare(..., cross_source_checks=True)`` stamps a ``change``'s ``finding_evolution`` (introduced/resolved/persistent/not_evaluated) and an additive top-level ``cross_source_evolution`` per-state count object; off by default, never changes the finding's default verdict. Renumbered from a conflicting 3.3 claimed first by workstream D-S1's consumer-specification additions (same "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2 entries above).
+REPORT_SCHEMA_VERSION = "3.4"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

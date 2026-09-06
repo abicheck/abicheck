@@ -306,6 +306,19 @@ inputs:
       required-symbol/required-symbols (the CLI rejects both being set).
       compare mode only.
     required: false
+  used-by-manifest:
+    description: >
+      Path(s) to a JSON document naming one or more consumer binaries
+      (space-separated; maps to repeated compare --used-by-manifest), each
+      with optional digest/platform/profile/provider_baseline provenance and
+      a requirement ("required", the default -- an unreadable consumer
+      aborts the run, same as used-by -- or "advisory" -- an unreadable
+      consumer is skipped and reported instead). Merged into the same
+      scoping pipeline as used-by; every listed consumer counts toward the
+      reported "N of M consumers affected" summary
+      (consumer_impact_summary in --format json). Mutually exclusive with
+      required-symbol/required-symbols. compare mode only.
+    required: false
   required-symbol:
     description: >
       An exported linker symbol a plugin host resolves via dlopen/dlsym
@@ -930,6 +943,7 @@ runs:
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
         INPUT_USED_BY: ${{ inputs.used-by }}
+        INPUT_USED_BY_MANIFEST: ${{ inputs.used-by-manifest }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
@@ -1104,6 +1118,7 @@ runs:
         INPUT_OLD_ROOT: ${{ inputs.old-root }}
         INPUT_NEW_ROOT: ${{ inputs.new-root }}
         INPUT_USED_BY: ${{ inputs.used-by }}
+        INPUT_USED_BY_MANIFEST: ${{ inputs.used-by-manifest }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
         INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_AGAINST: ${{ inputs.against }}

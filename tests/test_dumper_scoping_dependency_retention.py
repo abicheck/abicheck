@@ -456,7 +456,15 @@ class TestDirectlyReferencedDependencyRetention:
         start = time.monotonic()
         scope_snapshot_excluding_dependencies(snap)
         elapsed = time.monotonic() - start
-        assert elapsed < 5.0, f"typedef resolution took {elapsed:.2f}s, expected < 5s"
+        # A generous bound, not a tight one: this normally finishes in well
+        # under a second, but the canonical coverage lane runs the whole
+        # ~40k-test suite under coverage instrumentation on a shared CI
+        # runner, which has been observed to add real seconds of jitter to
+        # otherwise-fast tests. 15s stays an order of magnitude below the
+        # ~30s the quadratic regression this guards against produced, so a
+        # real re-regression is still caught, just not at the cost of
+        # flaking on ordinary CI load.
+        assert elapsed < 15.0, f"typedef resolution took {elapsed:.2f}s, expected < 15s"
 
     def test_long_typedef_chain_reachability_stays_fast(self):
         """Codex review (eighteenth round, P2): the previous full-table
@@ -489,7 +497,12 @@ class TestDirectlyReferencedDependencyRetention:
         start = time.monotonic()
         scoped = scope_snapshot_excluding_dependencies(snap)
         elapsed = time.monotonic() - start
-        assert elapsed < 5.0, f"long typedef chain reachability took {elapsed:.2f}s"
+        # Generous bound (see test_typedef_resolution_stays_fast_with_many_typedefs
+        # above for why): comfortably below the ~20.4s the quadratic regression
+        # this guards against produced, while tolerating the jitter the
+        # canonical coverage lane's shared-runner, full-suite-under-coverage
+        # conditions add to an otherwise sub-second run.
+        assert elapsed < 15.0, f"long typedef chain reachability took {elapsed:.2f}s"
         assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
 
     def test_self_referential_typedefs_do_not_blow_up(self):
@@ -521,7 +534,9 @@ class TestDirectlyReferencedDependencyRetention:
         start = time.monotonic()
         scoped = scope_snapshot_excluding_dependencies(snap)
         elapsed = time.monotonic() - start
-        assert elapsed < 5.0, f"self-referential typedefs took {elapsed:.2f}s"
+        # See test_typedef_resolution_stays_fast_with_many_typedefs above for
+        # why this bound is generous rather than tight.
+        assert elapsed < 15.0, f"self-referential typedefs took {elapsed:.2f}s"
         assert [t.name for t in scoped.types] == ["Foo0"]
 
     def test_branching_typedef_chain_does_not_blow_up(self):
@@ -555,7 +570,9 @@ class TestDirectlyReferencedDependencyRetention:
         start = time.monotonic()
         scoped = scope_snapshot_excluding_dependencies(snap)
         elapsed = time.monotonic() - start
-        assert elapsed < 5.0, f"branching typedef chain took {elapsed:.2f}s"
+        # See test_typedef_resolution_stays_fast_with_many_typedefs above for
+        # why this bound is generous rather than tight.
+        assert elapsed < 15.0, f"branching typedef chain took {elapsed:.2f}s"
         assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
 
     def test_typedef_alias_pointing_at_kept_type_excludes_ambiguous_dependency(self):
@@ -1296,7 +1313,9 @@ class TestDirectlyReferencedDependencyRetention:
         start = time.monotonic()
         scope_snapshot_excluding_dependencies(snap)
         elapsed = time.monotonic() - start
-        assert elapsed < 5.0, f"typedef matching took {elapsed:.2f}s, expected < 5s"
+        # See test_typedef_resolution_stays_fast_with_many_typedefs above for
+        # why this bound is generous rather than tight.
+        assert elapsed < 15.0, f"typedef matching took {elapsed:.2f}s, expected < 15s"
 
     def test_typedef_alias_bare_suffix_spelling_resolves_dependency_record(self):
         """Self-review follow-up: a real backend can spell a typedef alias

@@ -109,6 +109,16 @@ package extraction without a component inventory (`abicheck/package.py`
 returns directories); the Action's typed outcomes ending at the composite
 boundary; the degraded stranded-library snapshot.
 
+**Still missing after S1-S4** (the list above is the 2026-09-05 assessment,
+kept verbatim; this is what it has *not* closed): `compare_product_
+directories`' canonical fallback still leaves an ambiguous group silently
+unpaired rather than emitting D3's `ambiguous` diagnostic
+(`abicheck/product_baseline.py`), and no `CompareRequest`/`BundleCompareRequest`
+carries a selection or expected inventory as a typed field -- the release
+fan-out's selection and inventory reach the engine as CLI parameters, which
+is why scalar-versus-bundle operand convergence stays with
+`cli-cleanup-phase-two.md`'s PR I rather than being solved twice here.
+
 **Slices.** S0 executable scenario table (`tests/scenarios/`, existing
 catalogue). S1 selection by identity/coordinates with a `--dry-run` plan
 view, on the typed API and the release/bundle CLI — **landed 2026-09-06**:
@@ -145,18 +155,73 @@ worst behaviors with no new request field): `model/scope_acquisition.py`,
 `report/comparison_scope.py`, `--on-incomplete-scope warn|block` on the
 release fan-out, `BundleFacts.degraded_members`. S3 package
 component inventories; support-promise findings under a contract-policy
-field. S4 Action/project/aggregate parity; scalar/bundle operand
+field — **landed 2026-09-06**: `model/package_inventory.py`'s
+`PackageInventory`/`PackageComponent` (declared components, an explicit
+`complete` flag, and a separate `unproduced` map — the three answers this
+slice exists to keep apart), built by `package.package_component_inventory`
+from `ExtractResult.container_complete`, which every archive extractor now
+sets and `DirExtractor` deliberately does not: an archive extractor unpacks
+its container in full or raises, so a successfully extracted package
+operand is a D2 completeness proof, while a directory a user may have
+populated partially is not. Threaded through
+`cli_compare_release_matrix._prepare_compare_release_inputs` into
+`release_scope.release_inventory_evidence` (a new `PROVEN` source beside
+S2's stored `inventory_complete` assertion) and into
+`build_release_scope_record`/`build_declared_selection_record` as
+`old_unproduced`/`new_unproduced`, which gives `EXPECTED_NOT_PRODUCED` —
+reserved by S2 with no producer — a real one: a declared component whose
+content the extracted tree cannot reach (a dangling link, an unreadable
+file) is an *acquisition failure*, never an absence the other side's proof
+may read as a removal. The support-promise half is
+`policy/support_promise.py` (D1's fifth concept: the `--support-promise
+off|declared` contract-policy field, `off` by default so every existing
+invocation is unchanged) plus the two new `ChangeKind`s
+`SUPPORT_PROMISE_COMPONENT_RETIRED`/`_INTRODUCED`, derived *only* from
+`proven_removed_members`/`proven_added_members` and carrying D2's
+completeness receipt in their `old_value`/`new_value`;
+`workflows/release_support_promise.py` places each one in the fan-out's own
+`library_results` so the existing verdict fold, severity aggregation,
+renderers and disposition audit see it without a parallel path.
+Deliberately not a duplicate of `BUNDLE_LIBRARY_REMOVED`, which fires only
+when a surviving sibling imports the missing library. **One consequence
+worth stating: `--fail-on-removed-library`'s exit `8` is reachable again
+for a package-archive pair** (S2 had left it reachable only for a stored
+`ProjectSnapshot`); a directory pair still cannot reach it. S4
+Action/project/aggregate parity; scalar/bundle operand
 convergence as a slice of `cli-cleanup-phase-two.md` PR I/J; delete the
-set-difference pairing and the silent canonical fallback -- now that S1's
-declared selection exists as the alternative, but `_match_release_keys`
-itself is untouched by S1 and still runs the discovery/matching a
-selection filters.
+set-difference pairing and the silent canonical fallback — **landed
+2026-09-06 except the two items named below**: `_match_release_keys` now
+returns only the matched keys and the two maps, and its last two consumers
+were migrated — the JSON `unmatched_old`/`unmatched_new` keys (which already
+read `unmatched_names(record)` when a record existed, and now report `[]`
+rather than re-deriving a difference when one does not) and the fan-out's
+stderr notices, which moved to `report/comparison_scope.release_scope_
+warnings` and are emitted after the record exists. That move is what lets
+one line distinguish a *proven* removal (naming the inventory that proved
+it) from an unmatched member, an `expected_not_produced` one, and an
+`out_of_scope` one the set difference reported identically. The
+Action/aggregate parity this slice names had already landed with S2
+(`action/run.sh`'s `SCOPE_INCOMPLETE` verdict tier, aggregate report schema
+1.8's `scope_completeness` axis), so S4 added no second copy.
 
-**Deletion gates.** `_match_release_keys`'s set-difference removal path is
-deleted in S4 once every removal finding flows from proven completeness
-(S2 already stopped exit `8`, the verdict bump, and the Markdown/PR-comment
-"removed" sections from reading it; only the JSON `unmatched_old` key and
-the stderr warnings still do, by name). `bundle_variants_config` — **deleted
+**Still open in S4, deliberately.** Two items keep their existing owners
+rather than being duplicated here: the **scalar/bundle operand
+convergence** is `cli-cleanup-phase-two.md`'s PR I (live/stored driver plus
+one evaluation/gate/report/dry-run path across all four operand shapes),
+still open there and explicitly cross-referenced by that plan's own row as
+overlapping this workstream; and **the silent canonical fallback** in
+`compare_product_directories` (`abicheck/product_baseline.py`) is not yet
+D3's `ambiguous` diagnostic — the deletion gate below covers
+`_match_release_keys`'s set difference, and turning an ambiguity into a
+refusal-to-compare in the whole-product path is a behaviour change of its
+own that needs its own slice and migration note.
+
+**Deletion gates.** `_match_release_keys`'s set-difference removal path was
+**deleted in S4** (2026-09-06), once every removal finding flowed from proven
+completeness: S2 had already stopped exit `8`, the verdict bump, and the
+Markdown/PR-comment "removed" sections from reading it, and S4 migrated the
+two remaining readers that still did so by name (the JSON `unmatched_old`
+key and the stderr warnings). `bundle_variants_config` — **deleted
 in S1** (see above) rather than given a consumer.
 
 ### B. Longitudinal history and versioning policy — ADR-066
@@ -182,16 +247,37 @@ releases — S1/S2 consume `deprecated_fact` as-is and introduce no second
 deprecation representation); a version window on suppressions
 (`version_range` does not exist in `abicheck/`).
 
-**Slices.** S0 model trade-offs on real fixtures (three-release sequences
-built from `examples/` cases); retention design. S1 offline history:
-`N` user-supplied snapshots in, machine-readable events + coverage out,
-through the typed API and one CLI surface chosen per ADR-054's admission
-bar (an option or `project` subcommand, not a new root command). S2 the
+**Slices.** **S0 done.** Model trade-offs validated against snapshots built
+from `examples/workflows/compare-release/{v1,v2}/mathutils.h`'s real
+`add`/`subtract`/`multiply` surface (extended with a synthetic third/fourth
+release for deprecate/remove/reintroduce coverage); recorded as a dated
+amendment on `docs/contribute/adr/066-longitudinal-history-and-versioning-
+policy.md` (2026-09-06) — correspondence-key narrowing (existing `EntityId`/
+`(kind, symbol)`, not D2's full overload-disambiguation-with-corroboration
+algorithm), a bounded `DiffResult.confidence`-based absence-uncertainty proxy
+in place of ADR-065's full evidence ledger, a bounded SemVer-shape gap
+heuristic in place of D4's real version scheme, and retention deferred to S4
+(nothing to prune from an offline one-shot run yet). **S1 landed.** `N`
+user-supplied stored-snapshot paths in (explicit release order — D4's
+scheme-derived ordering is not implemented), machine-readable
+`first_observed`/`introduced`/`deprecated`/`removed`/`reintroduced` events +
+coverage gaps out (D2's `changed` event is not emitted — see the amendment).
+Typed API: `abicheck.workflows.history.run_history_request`/
+`build_longitudinal_history` (new module, composing the existing pairwise
+`checker.compare` — no second N-way engine). CLI: `abicheck project history
+SNAPSHOTS... [--version LABEL]... [--policy NAME] --format {json,text}`
+(`abicheck/cli_project.py`), per ADR-054's admission bar (a `project`
+subcommand, not a new root command). Tests:
+`tests/test_workflows_history.py` (typed API, covering the ADR's mandatory
+three-release add/deprecate/remove sequence, missing-intermediate-release
+gap, removed-and-reintroduced, first-observed-vs-introduced, and non-SemVer
+labels) and `tests/test_cli_project_history.py` (CLI end to end). S2 the
 versioning policy model in `policy/`, resolved through ADR-049 D7's
 precedence; support/deprecation evaluation; integration with the existing
-advice. S3 CI publication/resolution via the existing baseline channels.
-S4 timeline projections through `ReportDocument`; bounded retention;
-cached-comparison reuse under complete keys.
+advice; the full D2 correspondence algorithm S1 deferred. S3 CI
+publication/resolution via the existing baseline channels. S4 timeline
+projections through `ReportDocument`; bounded retention; cached-comparison
+reuse under complete keys.
 
 ### C. Policy-disposition audit and change acknowledgment — ADR-067
 
@@ -256,24 +342,25 @@ static scoping (`abicheck/appcompat.py`: `parse_app_requirements`,
 consumer graph and join (`abicheck/impact/consumer_graph.py`); **use-case
 manifests are implemented** (`abicheck/impact/use_cases.py`,
 `use_case_impact.py`, `compare --use-cases`); Action inputs `used-by`/
-`required-symbol(s)` and `actions/check-target`'s `app-consumer` kind;
-no consumer code is ever executed (ADR-060 deferred; the only subprocess
-adjacency is a demangler prewarm). **`--used-by`/`--required-symbol(s)`
-no longer replace the gate (S1's gate-enrichment slice, landed)** — see
-below; S1's consumer-*specification* half (identity/digest/platform/
-profile/provider-baseline) remains open, tracked under "Missing".
+`required-symbol(s)`/**`used-by-manifest`** and `actions/check-target`'s
+`app-consumer` kind; no consumer code is ever executed (ADR-060 deferred;
+the only subprocess adjacency is a demangler prewarm). **`--used-by`/
+`--required-symbol(s)` no longer replace the gate (S1's gate-enrichment
+slice, landed)**; **the consumer-*specification* half is now also landed
+(S1 complete)** — see below.
 
-**Missing.** A consumer input is a single binary path only — no manifest,
-no digest, no platform/profile, no provider-baseline provenance; an
-unreadable consumer is a hard error, not an advisory/required distinction;
-no "N of M consumers affected" statement; no staging/caching of consumer
-artifacts in the Action; runtime-trace ingestion unimplemented.
+**Missing.** No staging/caching of consumer artifacts in the Action (S2);
+no exact-version selection or existing-Actions-acquisition/publishing-
+channel parity beyond the CLI/manifest surface itself (S2); no declared
+source/use-case enrichment with coverage-qualified reports (S3);
+runtime-trace ingestion unimplemented; a real compiled consumer/provider
+fixture (rather than mocked/stubbed test binaries) is still open.
 
-**Slices.** **S1's gate-enrichment slice (landed).** A supplied consumer's per-`confirmed/
-potential/unresolved` impact (`scoped_verdict`/`scoped_exit_code`/
-`used_by`/`required_symbol_contract`, still computed by
-`abicheck/appcompat.py`'s `scope_diff_to_app`/
-`scope_diff_to_required_symbols`) is now reported **beside** the global
+**Slices.** **S1 (complete).** Gate-enrichment half (landed): a supplied
+consumer's per-`confirmed/potential/unresolved` impact
+(`scoped_verdict`/`scoped_exit_code`/`used_by`/`required_symbol_contract`,
+still computed by `abicheck/appcompat.py`'s `scope_diff_to_app`/
+`scope_diff_to_required_symbols`) is reported **beside** the global
 contract status, never in place of it: the compare command's exit code
 and JSON `verdict`/`severity`/`run_outcome`/`summary` always describe the
 full-library result, exactly as an unscoped run would, and a supplied
@@ -284,21 +371,54 @@ scoped_gate.py`), SARIF's informational `scopedGate` block, JUnit's
 box, and the PR comment's own consumer summary note — none of which drive
 that surface's own pass/fail decision any more (`abicheck/sarif.py`,
 `abicheck/junit_report.py`, `abicheck/html_report.py`,
-`abicheck/pr_comment_render.py`). This is a **behavior change** from the
+`abicheck/pr_comment_render.py`). This was a **behavior change** from the
 prior "scoped gate wins" design (worst-app-wins `sys.exit(scoped_exit_
-code)`, JSON `verdict`/`full_verdict` swap): a `--used-by`/
-`--required-symbol` run's exit code can differ from before when the
-consumer's own result and the full-library result disagree — see the
-changelog fragment landing this slice. Identity/digest/platform/profile/
-provider-baseline provenance (the rest of the consumer-specification
-scope this slice's own name describes) remains unaddressed — a consumer
-input is still a single binary path only, tracked under "Missing" above,
-not S1. Real compiled consumer/provider fixture: still open. S2 existing Actions
-acquisition/publishing channels; exact-version selection; missing
-advisory/required handling. S3 declared source/use-case enrichment with
-coverage-qualified reports. S4 separately designed, opt-in compile/link/
-runtime validation with its own execution design review — never implied
-by S1–S3, and not a reauthorization of ADR-060.
+code)`, JSON `verdict`/`full_verdict` swap) — see that slice's own
+changelog fragment.
+
+Consumer-*specification* half (landed): a consumer input is no longer only
+a bare binary path. `abicheck/model/consumer_spec.py`'s `ConsumerSpec`
+carries identity/provenance beyond `path` — `digest` (an expected content
+digest, verified against the real file at resolution time via
+`verify_digest`), `platform`, `profile`, `provider_baseline`, and
+`requirement` (`ConsumerRequirement.REQUIRED`, the default, or `ADVISORY`).
+`--used-by-manifest PATH` (repeatable; `parse_consumer_manifest`) names one
+or more consumers via a small JSON document and merges them into the same
+`--used-by` pipeline (`cli_compare_helpers.run_compare`), so a manifest
+consumer contributes to the same worst-wins scoped gate and the same
+`used_by[]` report block as a bare `--used-by <path>` consumer — the two
+are one population, not two. An unreadable **required** consumer (the
+default, matching every pre-S1 `--used-by <path>`) still raises
+(`ConsumerUnreadableError`/`ConsumerDigestMismatchError`, both
+`ValueError` subclasses) and aborts the run; an unreadable **advisory**
+consumer (`scope_diff_to_app`) instead returns a `NO_CHANGE`-verdict,
+`unreadable=True` result that is skipped, reported, and never contributes
+to the worst-wins computation. `--format json` gains a `consumer_impact_summary`
+object — "N of M consumers affected" (`total`/`evaluated`/`affected`/
+`unreadable_advisory`/`unreadable_paths`) across every supplied consumer
+(`cli_helpers_compare._consumer_impact_summary`) — and each `used_by[]`
+entry gains the new fields only when a manifest consumer actually supplied
+them, so a bare `--used-by <path>` consumer's entry is byte-for-byte
+unchanged (report schema 3.3, additive; SARIF/JUnit/HTML do not yet carry
+`consumer_impact_summary` — JSON only for now, tracked as a small
+remaining gap rather than folded into "Missing" above). The GitHub Action
+gained a matching `used-by-manifest` input (space-separated, repeated
+`--used-by-manifest`), validated the same way `used-by` is
+(`action/validate-inputs.sh`, `action/run.sh`).
+
+**S2 (started).** Action-input parity for the new consumer-manifest surface
+(landed, above: `used-by-manifest` mirrors `used-by`/`required-symbol(s)`
+exactly — same mutual-exclusivity check, same compare-mode-only scoping
+warning). Still open: staging/caching consumer artifacts *in* the Action
+(so a manifest-named consumer can be fetched/cached across workflow runs
+rather than assumed already checked out), exact-version selection against
+an existing acquisition/publishing channel, and parity for the advisory/
+required distinction in the Action's own `check-target`/`app-consumer`
+kind (today a Python-API/CLI-only distinction). **S3** declared source/
+use-case enrichment with coverage-qualified reports. **S4** separately
+designed, opt-in compile/link/runtime validation with its own execution
+design review — never implied by S1–S3, and not a reauthorization of
+ADR-060.
 
 ### E. Evidence adequacy, contract-source conflicts, cross-profile comparison — amend ADR-028/049/050/063/064
 
@@ -374,14 +494,110 @@ selector — historical, superseded by ADR-061/063 and the existing
 honest `NOT_APPLICABLE` L0/L1 semantics for that task; the deeper
 macro/inline/template evidence beyond what L4 already gives.
 
-**Slices.** S1 route header-only inputs through `DumpRequest`/
-`CompareRequest` with explicit parse context (no compile database
-required, no synthesized binary); exercise unchanged headers, removed
-declaration, added API, changed enum/constant, signature change,
-access/qualifier/default-argument change; emit source-compatibility
-findings, versioning advice, scope, and unsupported-capability rows. S2
-extend only demonstrably missing macro/inline/template capability;
-record frontend differences rather than switching backends silently.
+**Slices.** **S1 landed**: a binary-less `DumpRequest` (`dump -H api.h`, no
+`SO_PATH`/`--sources`/`--build-info`) now runs a real header-AST parse
+through the shared typed pipeline instead of the legacy
+`dump_source_only()`, which never read `-H` at all —
+`workflows.artifact.execute_header_only.is_header_only_evidence` is the
+one dispatch point distinguishing this shape from the pre-existing L3–L5
+source-only one, so the two can never overlap or silently disagree.
+`header_only_dump.build_header_only_snapshot` runs `dumper_manifest.
+resolve_header_ast_result` — the identical function a binary dump's own L2
+pass calls — with an empty observed-export set on both sides (no binary to
+have exported anything from) and a new explicit tier marker,
+`AbiSnapshot.header_only` (schema v44), so a report/policy consumer never
+mistakes this shape for the source-only one (both share `platform=None`).
+`compare` needs no changes at all: it already consumes any two stored
+snapshots, so `dump -H old.h -o old.json` + `dump -H new.h -o new.json` +
+`compare old.json new.json` is the whole invocation. `api_types.py`'s
+`_path_required_errors` now accepts `headers`/`public_header_dirs` alone as
+valid binary-less-dump evidence (previously only `sources`/`build_info`/
+`dump_manifest` counted), which is what makes the request reach this path
+at all.
+
+A real, load-bearing correctness fix landed alongside the plumbing, not
+just the operand-routing scaffold: `extract.headers.{castxml,clang}`'s
+shared `visibility()` used to fall back to `HIDDEN` whenever a mangled
+name matched neither the (necessarily empty, for this shape)
+`exported_dynamic`/`exported_static` sets — correct for an ordinary binary
+dump (unexported = hidden), but it silently marked *every* header-only
+declaration `HIDDEN`, which made `_public_functions()` filter every
+function out and produced a false `NO_CHANGE` for real changes. A new
+`no_binary_evidence` flag (threaded through
+`dumper._header_ast_parser`/`dumper_manifest.resolve_header_ast_result`
+down to both backends' parser contexts, `False` — inert — for every
+ordinary binary dump) flips that one fallback to `PUBLIC` instead,
+mirroring the identical "declared public in a public header, without
+contrary evidence" principle `dumper_castxml.py` already applies to a
+constructor/destructor/CPO with no ELF symbol to look up. Verified against
+all six named scenarios (unchanged headers, removed declaration, added
+API, changed enum value reachable from a public root, a signature change,
+and an access-level change), each with a real castxml/clang parse, in
+`tests/test_header_only_dump.py`.
+
+Source-compatibility findings, versioning advice, and scope all come free
+from the existing pipeline, unextended: `compare()`'s ordinary
+`ChangeKind`/verdict machinery, `release_recommendation`, and
+`surface_scope`/`out_of_surface_changes` (a header-only snapshot's
+unreached types are correctly recorded — never dropped — under
+`non-public-type`, same as a binary snapshot's). **Unsupported-capability
+rows are the existing `DetectorRegistry`/`not_evaluated` convention
+(ADR-067 D3, `_has_any_dwarf`), extended, not a new mechanism**: a new
+shared support gate, `diff_platform._has_elf_on_both_sides`, closes a
+real pre-existing silent gap this workstream's own testing surfaced —
+`elf`/`tls_checks`/`protected_visibility`/`symbol_version_alias`/
+`vtable_identity`/`abi_surface`/`elf_deleted_fallback` (the seven
+detectors that genuinely read `AbiSnapshot.elf`) each used to substitute
+an empty `ElfMetadata()` for a missing side and record a real, evaluated
+zero rather than the coverage gap it actually is. The gate is keyed on
+real ELF-evidence presence — `.elf` populated on both sides, or
+`.elf_only_mode` for the one sub-check (`elf`'s own
+`_diff_visibility_leak`) that reads `.functions`/`.elf_only_mode`
+directly and never `.elf` — mirroring the `pe`/`macho` gates immediately
+alongside it, rather than a `header_only`-only proxy. Two review rounds
+each found and reverted a narrower version of this gate that broke
+pre-existing tests: first keying it on a bare `elf is None` (broke every
+synthetic test snapshot — and every pre-existing L3-L5 source-only dump —
+that never bothers populating `.elf` while still representing an ordinary
+ELF library or an `elf_only_mode` symbol-table-only dump); then keying it
+on `AbiSnapshot.header_only` alone and applying it to `glibcxx_dual_abi`/
+`inline_namespace` too (broke every test exercising mass mangled-name
+churn via bare `functions=` fixtures, since those two detectors never
+read `.elf` at all and were never gated before this workstream).
+`glibcxx_dual_abi`/`inline_namespace` are therefore deliberately left
+ungated, unchanged from their pre-workstream form — a header-only
+snapshot's guessed mangled names carry exactly the same
+spelling-not-linkage-proof status an ordinary headers-augmented binary
+dump's mangled names already carry, which this workstream did not
+newly introduce and is not the one to start gating. Because the real
+gate closes a genuine pre-existing bug (silently comparing two fabricated
+empty `ElfMetadata()` objects whenever `.elf` was missing on *either*
+side, binary or header-only), it surfaces new `not_evaluated` rows for
+several golden fixtures that never populate `.elf` — those fixtures were
+deliberately regenerated as part of this fix. Now three of the plan's four
+capability classes — symbol presence/versioning, ELF layout, and
+vtable/RTTI linkage identity — surface as an explicit, reasoned
+`not_evaluated` row (`elf`/`tls_checks`/`protected_visibility`/
+`symbol_version_alias`/`vtable_identity`/`abi_surface`/
+`elf_deleted_fallback`, alongside the pre-existing `dwarf`/
+`advanced_dwarf`) in `disposition_audit.not_evaluated_detectors`, never
+silently absent; the fourth class (mangled-name linkage-level churn) is
+covered by the same `elf` family's own not-evaluated status rather than a
+per-detector gate on `glibcxx_dual_abi`/`inline_namespace` themselves, per
+the paragraph above. No detector's emitted findings change anywhere (two
+empty `ElfMetadata()` objects always compare equal), only whether the
+absence is now recorded explicitly.
+
+**Explicitly still open, deferred to S2 or later**: the deeper macro/
+inline/template evidence beyond what L4 already gives; layering L3–L5
+build/source evidence *on top of* a headers-only base (today `sources`/
+`build_info` and bare headers are still two disjoint binary-less shapes,
+never combined); frontend-difference recording (S2's own stated scope);
+and honest `NOT_APPLICABLE` L0/L1 semantics as a first-class, reusable
+concept beyond this slice's own `not_evaluated` detector rows. **Static
+archives are untouched by S1** — that investigation remains its own,
+separately-scoped, lower-priority note below, with no change to archive
+acceptance or defaults.
 Fixture consumers compiled against old/new headers are test oracles only
 (ADR-060 stays deferred). **Static archives**: a separate, lower-priority
 investigation note (full rebuild vs. relinking precompiled objects,

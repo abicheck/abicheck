@@ -55,6 +55,7 @@ Compare two ABI surfaces and report changes.
 | `--output-dir` | no | — | Directory to write per-library reports (directory/package inputs only). |
 | `--select` | no | — | Declare an optional expected release member. Repeatable -- see --select-required (directory/package inputs only). |
 | `--select-required` | no | — | Declare a required expected release member by its canonical release-matching key (e.g. 'libfoo.so', never a raw filename stem -- ADR-065 S1; directory/package inputs only). Repeatable. With any --select/--select-required given, only declared members are compared. A missing declared-required member contributes to --on-incomplete-scope's completeness gate; a plain --select member does not. |
+| `--support-promise` | no | `off` | Report a proven change to the release's declared component set as a finding (ADR-065 D1/D6, a contract-policy field): 'off' (the default) emits nothing; 'declared' emits support\_promise\_component\_retired/\_introduced for every member whose absence the *other* side's proven-complete inventory establishes -- a package archive unpacked in full, or a stored snapshot whose capture asserted inventory\_complete. Never fires on an unmatched member under an unproven inventory, whatever the setting. (directory/package inputs only) Choices: `off`, `declared`. |
 | `--on-incomplete-scope` | no | `warn` | What an incompletely checked comparison scope does to the exit code (ADR-065 D6): 'warn' reports every unchecked member and contributes 0; 'block' contributes 1, folded with max() like the contract-coverage axis. A run that completed no comparison at all contributes 1 under either setting. (directory/package inputs only) Choices: `warn`, `block`. |
 | `--fail-on-removed-library`, `--no-fail-on-removed-library` | no | `False` | Exit 8 when a library present in old\_dir is proven removed in new\_dir -- NEW's inventory must be proven complete (ADR-065 D2); an unmatched library under an unproven inventory is reported as an incomplete scope instead. (directory/package inputs only) |
 | `--debug-info` | no | — | Debug info package (RPM/Deb/tar), scoped per side with an 'old='/'new=' prefix (e.g. --debug-info old=a-dbg.rpm --debug-info new=b-dbg.rpm). Directory/package inputs only (ADR-040). |
@@ -90,6 +91,7 @@ Compare two ABI surfaces and report changes.
 | `--used-by` | no | — | Application binary whose actual imports/required symbol versions scope the comparison (repeatable; folds `appcompat`). The full library comparison always determines this run's own verdict/exit code, exactly as it would without --used-by; the supplied application's own confirmed/potential/unresolved impact is reported alongside it (informational), never in place of it. OLD/NEW may be real library binaries or JSON snapshots carrying binary evidence (a `dump` of a real library, not headers-only). Mutually exclusive with --required-symbol/--required-symbols. |
 | `--required-symbol` | no | — | An exported linker symbol a plugin host resolves via dlopen/dlsym and requires (repeatable; folds `plugin-check`). The full library comparison always determines this run's own verdict/exit code; this contract's own confirmed/potential/unresolved impact is reported alongside it (informational), never in place of it. Mutually exclusive with --used-by. |
 | `--required-symbols` | no | — | File of required symbols, one per line (blank lines and '#' comments ignored). Combined with any --required-symbol values. |
+| `--used-by-manifest` | no | — | A JSON document naming one or more consumer binaries (repeatable), each with optional 'digest'/'platform'/'profile'/'provider\_baseline' provenance and a 'requirement': 'required' (default, an unreadable consumer aborts the run, same as --used-by) or 'advisory' (an unreadable consumer is skipped and reported, never aborts the run). Merged into the same scoping pipeline as --used-by; every listed consumer counts toward the reported 'N of M consumers affected' summary. Mutually exclusive with --required-symbol/--required-symbols. |
 | `--severity-preset` | no | — | Severity preset: 'default', 'strict', or 'info-only'. Controls exit codes and report labels. A project config's severity: block overrides individual categories of the preset. Choices: `default`, `strict`, `info-only`. |
 | `--config` | no | — | Path to the project .abicheck.yml (ADR-037 D4). Default: the nearest .abicheck.yml found from the current directory upward. Supplies stable project settings (severity map, scope/FP tuning, suppression policy); CLI flags override it. |
 | `--follow-deps` | no | `False` | Resolve transitive dependencies for both old and new, compute symbol bindings, and include a dependency-change section in the report. ELF only. |
@@ -318,6 +320,26 @@ Dump ABI snapshot of a shared library to JSON.
 ## `project`
 
 Advanced multi-target project integration (ADR-047).
+
+### `project history`
+
+Derive per-API lifecycle events from an ordered chain of SNAPSHOTS (ADR-066 S1: offline longitudinal compatibility history).
+
+**Arguments**
+
+| Name | Required | Description |
+|---|:--:|---|
+| `snapshots` | yes |  |
+
+**Options**
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--version` | no | — | Explicit release label for one SNAPSHOT, in the same order as the SNAPSHOTS arguments (repeatable — pass one per snapshot, or omit entirely). Without this, each snapshot's own recorded AbiSnapshot.version is used as its release label. |
+| `--policy` | no | `strict_abi` | Policy profile passed to each pairwise comparison in the chain (same values as `compare --policy`). |
+| `--format` | no | `json` | Output format for the derived history. Choices: `json`, `text`. |
+| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ### `project plan`
 

@@ -18,7 +18,7 @@
   ADR-035 D1): these findings keep their ordinary `RISK` default verdict
   regardless of evolution state. `compare --format json`'s report gains an
   additive `finding_evolution` field on the affected `change` entries plus a
-  top-level `cross_source_evolution` summary object (schema 3.3), present
+  top-level `cross_source_evolution` summary object (schema 3.4), present
   only when the caller opts in -- off by default, so every existing caller's
   output is unchanged. The other ten cross-source checks `scan` owns remain
   unmigrated; this lands the vertical slice (model + one real producer + one

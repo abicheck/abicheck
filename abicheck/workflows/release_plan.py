@@ -74,6 +74,8 @@ def build_declared_selection_record(
     *,
     old_failed: Mapping[str, str] | None,
     new_failed: Mapping[str, str] | None,
+    old_unproduced: Mapping[str, str] | None = None,
+    new_unproduced: Mapping[str, str] | None = None,
 ) -> ScopeAcquisitionRecord:
     """ADR-065 S1: the ``ScopeAcquisitionRecord`` for an explicit
     :class:`~abicheck.model.release_selection.ReleaseSelection`.
@@ -83,9 +85,17 @@ def build_declared_selection_record(
     own ``all_expected``/``current_artifact`` path rather than
     reimplementing them -- only the partition rule differs (declared vs.
     inferred), not how a matched or unmatched member's state is read.
+
+    *old_unproduced*/*new_unproduced* (ADR-065 S3) are that side's declared
+    package-inventory members that were not present after extraction: a
+    *declared* member among them is ``EXPECTED_NOT_PRODUCED``, exactly as a
+    member neither side produced already is here, and never an absence a
+    proven-complete inventory on the other side may read as a removal.
     """
     old_failed = dict(old_failed or {})
     new_failed = dict(new_failed or {})
+    old_unproduced = dict(old_unproduced or {})
+    new_unproduced = dict(new_unproduced or {})
     results_by_name: dict[str, Mapping[str, object]] = {}
     for entry in library_results:
         name = entry.get("library")
@@ -95,12 +105,18 @@ def build_declared_selection_record(
     matched = set(matched_keys)
     declared = selection.members
     all_keys = (
-        set(old_map) | set(new_map) | set(old_failed) | set(new_failed) | set(declared)
+        set(old_map)
+        | set(new_map)
+        | set(old_failed)
+        | set(new_failed)
+        | set(old_unproduced)
+        | set(new_unproduced)
+        | set(declared)
     )
     members: list[MemberAcquisition] = []
     for key in sorted(all_keys):
-        old_present = key in old_map or key in old_failed
-        new_present = key in new_map or key in new_failed
+        old_present = key in old_map or key in old_failed or key in old_unproduced
+        new_present = key in new_map or key in new_failed or key in new_unproduced
         display = (old_map.get(key) or new_map.get(key) or Path(key)).name
         required = declared.get(key, True)
         if key not in declared:
@@ -113,6 +129,18 @@ def build_declared_selection_record(
             state, reason = (
                 AcquisitionState.EXPECTED_NOT_PRODUCED,
                 "declared expected member was not produced on either side (ADR-065 S1)",
+            )
+        elif key in old_unproduced or key in new_unproduced:
+            state, reason = (
+                AcquisitionState.EXPECTED_NOT_PRODUCED,
+                "; ".join(
+                    f"{side}: {why}"
+                    for side, why in (
+                        ("OLD", old_unproduced.get(key)),
+                        ("NEW", new_unproduced.get(key)),
+                    )
+                    if why is not None
+                ),
             )
         elif key in old_failed or key in new_failed:
             state, reason = (

@@ -13,18 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-065 S2: the release fan-out's acquisition record.
+"""ADR-065 S2/S3/S4: the release fan-out's acquisition record.
 
 ``cli_compare_release_helpers._match_release_keys`` pairs libraries by
 canonical filename key and used to define ``removed = old_keys - new_keys``
 -- one state for a name-normalization miss, a SONAME bump, a failed
 extraction, a partial local build, and a genuine deletion. This module
-replaces that reading with D1's per-member acquisition record: the raw set
-difference still exists (it is what the JSON key ``unmatched_old`` has
-always reported, and keeps reporting), but a removal *finding* and exit
-``8`` now read :attr:`~abicheck.model.scope_acquisition.
+replaces that reading with D1's per-member acquisition record, and **S4
+deleted the set difference outright**: pairing now answers only *which*
+members have a counterpart, and every consumer -- the removal finding and
+exit ``8``, the JSON ``unmatched_old``/``unmatched_new`` keys, and the
+stderr notices, the last two holdouts -- reads this record instead. A
+removal is :attr:`~abicheck.model.scope_acquisition.
 ScopeAcquisitionRecord.proven_removed_members`, which is empty unless the
-NEW side's inventory is proven complete (D2).
+side that lacks the member has a proven-complete inventory (D2).
 
 **D9's narrow-task inference** is applied here, deliberately conservative:
 when the caller *named* exactly one NEW artifact (a single-file operand,
@@ -42,11 +44,15 @@ clean pass. S1 replaces the filename tier with identity/coordinate
 selection and a ``--dry-run`` plan view; the record shape it populates is
 this one.
 
-**Inventory proof in S2.** A stored ``ProjectSnapshot`` package operand
-carries its own declared variant composition, which is a trusted complete
-inventory for the selected variant; a live directory, a direct file pair,
-and an extracted archive (``package.py`` returns directories, never a
-declared component inventory -- S3) are all ``UNPROVEN``.
+**Inventory proof.** Two things prove a side complete, and nothing else
+does. A stored ``ProjectSnapshot`` package (or ``BundleFacts`` document)
+whose capture asserted ``inventory_complete`` carries its own declared
+variant composition (S2). A **package archive** operand carries a declared
+component inventory built from a container the extractor unpacked in full
+(S3, ``package.package_component_inventory`` -- ``package.py`` used to
+return only directories, which is why an archive was ``UNPROVEN`` before).
+A live directory and a direct file pair still prove nothing: a directory
+may have been populated partially, and one artifact is not a release.
 
 Order-independent by construction: members are emitted in sorted key
 order, so the record -- and everything derived from it -- cannot depend on
@@ -56,15 +62,15 @@ directory listing order (an ADR-065 acceptance invariant).
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..bundle_facts import BundleFacts
     from ..bundle_manifest import InstantiationManifest
+    from ..model.package_inventory import PackageInventory
 
-from ..errors import SnapshotError
 from ..model.scope_acquisition import (
     AcquisitionState,
     InventoryCompleteness,
@@ -88,10 +94,6 @@ __all__ = [
     "release_inventory_evidence",
     "restrict_bundle_facts",
     "scope_manifest_to_members",
-    "StoredDegradedMembers",
-    "stored_degraded_members",
-    "stored_side_degraded_members",
-    "stored_side_inventory_complete",
     "scoped_bundle_maps",
     "unmatched_names",
 ]
@@ -174,6 +176,8 @@ def release_inventory_evidence(
     new_single_artifact: bool = False,
     old_unclassified: Mapping[str, str] | None = None,
     new_unclassified: Mapping[str, str] | None = None,
+    old_inventory: PackageInventory | None = None,
+    new_inventory: PackageInventory | None = None,
 ) -> ReleaseInventoryEvidence:
     """S2's inventory-proof rule, in one place.
 
@@ -194,7 +198,10 @@ def release_inventory_evidence(
     """
 
     def _side(
-        stored: bool, complete: bool, unclassified: Mapping[str, str] | None
+        stored: bool,
+        complete: bool,
+        unclassified: Mapping[str, str] | None,
+        inventory: PackageInventory | None,
     ) -> SideInventory:
         """One side's inventory proof from its container, assertion, and selection."""
         if direct_pair:
@@ -216,11 +223,23 @@ def release_inventory_evidence(
             return SideInventory(
                 InventoryCompleteness.UNPROVEN, _STORED_PACKAGE_UNASSERTED_PROVENANCE
             )
+        # ADR-065 S3: a package *archive* operand carries a real component
+        # inventory (`package.package_component_inventory`), and its
+        # `complete` flag is the extractor's own statement that the operand
+        # was unpacked in full -- the same class of proof a stored package's
+        # `inventory_complete` assertion is, reached from the container
+        # rather than from a capture. A directory operand still proves
+        # nothing, and neither does an inventory whose container this build
+        # could not enumerate.
+        if inventory is not None and inventory.complete:
+            return SideInventory(InventoryCompleteness.PROVEN, inventory.provenance)
+        if inventory is not None:
+            return SideInventory(InventoryCompleteness.UNPROVEN, inventory.provenance)
         return SideInventory(InventoryCompleteness.UNPROVEN, _LIVE_PROVENANCE)
 
     return ReleaseInventoryEvidence(
-        old=_side(old_stored, old_complete, old_unclassified),
-        new=_side(new_stored, new_complete, new_unclassified),
+        old=_side(old_stored, old_complete, old_unclassified, old_inventory),
+        new=_side(new_stored, new_complete, new_unclassified, new_inventory),
         direct_pair=direct_pair,
         new_single_artifact=new_single_artifact,
     )
@@ -254,6 +273,8 @@ def build_release_scope_record(
     *,
     old_failed: Mapping[str, str] | None = None,
     new_failed: Mapping[str, str] | None = None,
+    old_unproduced: Mapping[str, str] | None = None,
+    new_unproduced: Mapping[str, str] | None = None,
 ) -> ScopeAcquisitionRecord:
     """The release's :class:`ScopeAcquisitionRecord` (see module docstring).
 
@@ -265,9 +286,21 @@ def build_release_scope_record(
     that side failed before matching (``--dso-only`` could not classify
     them): recorded ``FAILED``, present on that side, never as an unmatched
     or removed member.
+
+    *old_unproduced*/*new_unproduced* (ADR-065 S3) are the members that
+    side's own **declared component inventory** names but that were not
+    present after extraction (``package_component_inventory``'s
+    ``unproduced``): recorded ``EXPECTED_NOT_PRODUCED``, present on that
+    side. This is the state D1 reserved and S2 left without a producer, and
+    the distinction it draws is the whole point of a declared inventory --
+    the package plainly still ships the component, so its counterpart on the
+    other side is *not* an absence a proven-complete inventory may read as a
+    removal; it is an acquisition failure the completeness axis reports.
     """
     old_failed = dict(old_failed or {})
     new_failed = dict(new_failed or {})
+    old_unproduced = dict(old_unproduced or {})
+    new_unproduced = dict(new_unproduced or {})
     results_by_name: dict[str, Mapping[str, object]] = {}
     for entry in library_results:
         name = entry.get("library")
@@ -306,7 +339,12 @@ def build_release_scope_record(
     # removals -- never demoted to out-of-scope.
     # An OLD member whose acquisition failed still counts toward OLD's
     # cardinality here: it is a baseline member the caller did not select.
-    old_unselected = (set(old_map) | set(old_failed)) - set(new_map) - set(new_failed)
+    old_unselected = (
+        (set(old_map) | set(old_failed) | set(old_unproduced))
+        - set(new_map)
+        - set(new_failed)
+        - set(new_unproduced)
+    )
     narrow = (
         evidence.new_single_artifact
         and len(new_map) == 1
@@ -317,9 +355,16 @@ def build_release_scope_record(
     )
     candidate = next(iter(new_map.values())).name if narrow else ""
     members: list[MemberAcquisition] = []
-    for key in sorted(set(old_map) | set(new_map) | set(old_failed) | set(new_failed)):
-        old_present = key in old_map or key in old_failed
-        new_present = key in new_map or key in new_failed
+    for key in sorted(
+        set(old_map)
+        | set(new_map)
+        | set(old_failed)
+        | set(new_failed)
+        | set(old_unproduced)
+        | set(new_unproduced)
+    ):
+        old_present = key in old_map or key in old_failed or key in old_unproduced
+        new_present = key in new_map or key in new_failed or key in new_unproduced
         display = (old_map.get(key) or new_map.get(key) or Path(key)).name
         if narrow and key in old_unselected:
             # D9 first: an unselected baseline member is out of scope
@@ -333,6 +378,18 @@ def build_release_scope_record(
                 f"unselected baseline member: NEW named one artifact ({candidate}) "
                 "explicitly, so this run is a current-artifact comparison (ADR-065 D9)"
                 + (f"; OLD acquisition also failed: {failure}" if failure else ""),
+            )
+        elif key in old_unproduced or key in new_unproduced:
+            state, reason = (
+                AcquisitionState.EXPECTED_NOT_PRODUCED,
+                "; ".join(
+                    f"{side}: {why}"
+                    for side, why in (
+                        ("OLD", old_unproduced.get(key)),
+                        ("NEW", new_unproduced.get(key)),
+                    )
+                    if why is not None
+                ),
             )
         elif key in old_failed or key in new_failed:
             state, reason = (
@@ -681,108 +738,6 @@ def scope_manifest_to_members(
         f"({', '.join(m.name for m in excluded)}) may provide them (ADR-065 D2)"
     )
     return (replace(manifest, entries=kept) if kept else None), note
-
-
-def stored_side_degraded_members(
-    side_dir: Path, *, variant_id: str | None
-) -> dict[str, str]:
-    """One side's own persisted ADR-065 D8 marker, ``{release match key:
-    reason}`` -- non-empty only for a stored ``ProjectSnapshot`` package
-    (a live directory or archive carries none)."""
-    from .release_package import resolve_release_package_degraded_members
-    from .storage import is_project_snapshot_package_dir
-
-    if not (side_dir.is_dir() and is_project_snapshot_package_dir(side_dir)):
-        return {}
-    try:
-        return resolve_release_package_degraded_members(side_dir, variant_id=variant_id)
-    except (SnapshotError, OSError, ValueError, TypeError, KeyError) as exc:
-        # Fail closed (Codex review): a damaged marker section must not
-        # read as "no member is degraded".
-        raise SnapshotError(
-            f"{side_dir}: the stored package's degraded-member marker could not "
-            f"be read ({exc}); refusing to compare its members as complete evidence"
-        ) from exc
-
-
-@dataclass(frozen=True)
-class StoredDegradedMembers:
-    """Every *selected* member either side's stored ``ProjectSnapshot``
-    package marks degraded (ADR-065 D8), split by where it sits in the
-    release: ``matched`` (in both maps -- skipped by the fan-out and
-    recorded ``failed``), ``old_unmatched``/``new_unmatched`` (in one map
-    only -- fed to the record builder's ``old_failed``/``new_failed`` so
-    the member is ``FAILED`` there, never ``NOT_SUPPLIED``: a degraded
-    capture is not the kind of evidence a proven inventory on the other
-    side may turn into a removal or an addition). Values are the reason
-    text the scope record and library results carry."""
-
-    matched: dict[str, str] = field(default_factory=dict)
-    old_unmatched: dict[str, str] = field(default_factory=dict)
-    new_unmatched: dict[str, str] = field(default_factory=dict)
-
-
-def stored_side_inventory_complete(side_dir: Path, *, variant_id: str | None) -> bool:
-    """One side's own persisted ADR-065 D2 ``inventory_complete`` assertion
-    -- ``True`` only for a stored ``ProjectSnapshot`` package whose capture
-    made it (a live directory or archive never does). Fails closed the way
-    :func:`stored_side_degraded_members` does: a damaged composition must
-    not read as "unasserted" any more than as "nothing is degraded"."""
-    from .release_package import resolve_release_package_inventory_complete
-    from .storage import is_project_snapshot_package_dir
-
-    if not (side_dir.is_dir() and is_project_snapshot_package_dir(side_dir)):
-        return False
-    try:
-        return resolve_release_package_inventory_complete(
-            side_dir, variant_id=variant_id
-        )
-    except (SnapshotError, OSError, ValueError, TypeError, KeyError) as exc:
-        raise SnapshotError(
-            f"{side_dir}: the stored package's inventory assertion could not "
-            f"be read ({exc}); refusing to compare its members as complete evidence"
-        ) from exc
-
-
-def stored_degraded_members(
-    old_dir: Path,
-    new_dir: Path,
-    old_map: Mapping[str, Path],
-    new_map: Mapping[str, Path],
-    *,
-    old_variant: str | None,
-    new_variant: str | None,
-) -> StoredDegradedMembers:
-    """Read both sides' D8 markers and place each marked *selected* member
-    (a key of *old_map*/*new_map*) into :class:`StoredDegradedMembers`.
-    A live directory or archive side carries no marker and contributes
-    nothing; a marker on a key neither map selects is not this run's
-    concern (the reader already refused a key the package does not store).
-    An OLD-only degraded member used to be dropped here as "not matched",
-    which let a proven-complete NEW side promote it to a removal even though
-    its OLD acquisition failed (Codex review, twenty-seventh round).
-    """
-    found: dict[str, str] = {}
-    for label, side_dir, variant in (
-        ("OLD", old_dir, old_variant),
-        ("NEW", new_dir, new_variant),
-    ):
-        degraded = stored_side_degraded_members(side_dir, variant_id=variant)
-        for key, reason in degraded.items():
-            found.setdefault(
-                key,
-                f"{label} side was captured degraded ({reason}); comparison skipped (ADR-065 D8)",
-            )
-    result = StoredDegradedMembers()
-    for key, reason in found.items():
-        in_old, in_new = key in old_map, key in new_map
-        if in_old and in_new:
-            result.matched[key] = reason
-        elif in_old:
-            result.old_unmatched[key] = reason
-        elif in_new:
-            result.new_unmatched[key] = reason
-    return result
 
 
 def unmatched_names(record: ScopeAcquisitionRecord, *, side: str) -> list[str]:
