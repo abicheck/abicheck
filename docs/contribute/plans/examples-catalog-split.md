@@ -23,12 +23,17 @@ surface that model's own section names (CMake discovery, CI path filters,
 `case01_symbol_removal` paths, `gen_examples_docs.py`'s path templates and
 the `examples/README.md`/`catalog/README.md` split, the probes-directory
 consumers, and the four bidirectional directory-sync audits); Phase 6
-implemented (now reporting duplicate/variant families separately); "What is
-left" item 5, now closed — `taxonomy` split out of `ground_truth.json` into
-its own sibling manifest, `catalog/taxonomy.json`; item 4, now closed too —
-a second, broader semantic dedup pass was run and confirmed zero new
-duplicate/variant pairs beyond Phase 2's original seven. See the table
-below for per-phase detail.
+implemented (now reporting duplicate/variant families separately). Every
+item in "What is left" is now closed: item 5 — `taxonomy` split out of
+`ground_truth.json` into its own sibling manifest, `catalog/taxonomy.json`;
+item 4 — a second, broader semantic dedup pass was run and confirmed zero
+new duplicate/variant pairs beyond Phase 2's original seven; item 3 —
+benchmark reporting gained its own rule-family accuracy dimension
+alongside the existing flat per-case table; item 2 — a 25-subject
+by-subject view and two hand-authored pattern pages now cover all 197
+cases, the one navigation dimension the original external review asked
+for that the taxonomy alone couldn't project. See the table below for
+per-phase detail.
 
 ## Problem
 
@@ -541,8 +546,10 @@ the equivalent manual/CI drift gate; run either after any
 
 ## What is left
 
-Everything below is the complete remaining scope of this plan. Nothing else
-in it is open.
+**All six items below are now closed.** This section is kept as the
+complete record of this plan's full remaining scope at the point every
+phase had landed, rather than deleted once finished — each item states
+what was done and how it was verified.
 
 1. **Phase 5 — complete.** All 7 target workflows have landed:
    `examples/workflows/audit-release/`, a real `gcc` + `abicheck scan`
