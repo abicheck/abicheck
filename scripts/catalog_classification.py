@@ -42,33 +42,59 @@ import example_catalog  # noqa: E402
 CLASSIFICATION_PATH = example_catalog.CATALOG_DIR / "catalog_classification.yaml"
 
 
-class _NoDuplicateKeysLoader(yaml.SafeLoader):
-    """`yaml.safe_load` silently keeps the *last* value for a repeated
-    mapping key (PyYAML follows the YAML spec here, which treats a document
-    with a duplicate key as the loader's problem, not an error) -- which
-    would let a hand-edited `catalog_classification.yaml` reclassify a case
-    (e.g. two `case01_symbol_removal:` entries under `scenarios`) with no
-    warning at all, silently keeping only the second. This loader raises
-    instead, at every mapping level, so a duplicate key fails exactly the
-    same way `validate_classification()`'s other checks do: loudly, at load
-    time, rather than resolving to whichever entry happened to parse last.
+class _DuplicateKeyCheckingLoader(yaml.SafeLoader):
+    """`yaml.SafeLoader` with one behavior change: a mapping that repeats a
+    key is a load error instead of the PyYAML default of silently keeping
+    only the last value.
+
+    A hand-edited `catalog_classification.yaml` that accidentally repeats a
+    case (two `case01_symbol_removal:` entries under `scenarios`, most
+    plausibly from a copy-paste) would otherwise reclassify the case with no
+    signal at all -- exactly the silent-misclassification failure mode this
+    whole module exists to close. Mirrors
+    `abicheck/impact/use_cases.py`'s identical `_DuplicateKeyCheckingLoader`
+    (same name, same technique) -- scoped to this loader class alone, not a
+    process-wide `yaml` monkeypatch, so it affects nothing outside this
+    module.
     """
 
-    def construct_mapping(
-        self, node: yaml.nodes.MappingNode, deep: bool = False
-    ) -> dict[object, object]:
-        seen: set[object] = set()
-        for key_node, _ in node.value:
-            key = self.construct_object(key_node, deep=True)
-            if key in seen:
-                raise yaml.constructor.ConstructorError(
-                    None,
-                    None,
-                    f"found duplicate key {key!r}",
-                    node.start_mark,
-                )
-            seen.add(key)
-        return super().construct_mapping(node, deep=deep)
+
+def _construct_mapping_rejecting_duplicates(
+    loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
+) -> dict[object, object]:
+    """PyYAML's own `SafeConstructor.construct_mapping` already rejects an
+    unhashable key (e.g. `- {[a, b]: x}`, a YAML sequence used as a mapping
+    key) with a `ConstructorError` -- this override keeps that check, not
+    just the duplicate-key check it adds, or a syntactically valid-but-
+    unhashable-keyed document would raise a bare `TypeError` that escapes
+    `load_classification`'s own `except yaml.YAMLError` handling entirely."""
+    mapping: dict[object, object] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        try:
+            hash(key)
+        except TypeError as exc:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found unhashable key: {key!r}",
+                key_node.start_mark,
+            ) from exc
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key: {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_DuplicateKeyCheckingLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_mapping_rejecting_duplicates,
+)
 
 
 #: Mirrors gen_catalog_taxonomy.py's own docstring enumeration of the values
@@ -91,10 +117,9 @@ def load_classification(
 ) -> dict[str, CaseClassification]:
     """Parse `catalog/catalog_classification.yaml` into case_name -> entry."""
     manifest = path or CLASSIFICATION_PATH
+    text = manifest.read_text(encoding="utf-8")
     try:
-        raw = yaml.load(
-            manifest.read_text(encoding="utf-8"), Loader=_NoDuplicateKeysLoader
-        )
+        raw = yaml.load(text, Loader=_DuplicateKeyCheckingLoader)  # nosec B506
     except yaml.YAMLError as exc:
         raise ValueError(f"{manifest}: invalid YAML ({exc})") from exc
     raw = raw or {}
