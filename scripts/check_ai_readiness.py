@@ -2636,23 +2636,22 @@ _RESOLVE_INPUT_WRAPPER_MODULES: frozenset[str] = frozenset({"cli_resolve"})
 # call is still there, not just that *some* finding exists at that site.
 # Pre-populated with the pre-existing, already-documented
 # `dumper.dump`/`service.resolve_input` direct-call sites Phase 1 of the
-# same plan names as duplication to converge (`appcompat.check_appcompat`,
-# `cli_scan_baseline`'s baseline resolution) — a new entry beyond these
-# needs the same reviewed sign-off (mirrors the INTENTIONAL_SUBSET
-# philosophy of D10.2). `cli_dump_helpers.perform_elf_dump`'s own entry was
-# the first to leave this list, and it left the way the plan intends one
-# to: not by rerouting the call, but by deleting the dead function that
-# made it (ADR-063 Track 1) once `dump_cmd` had already migrated onto the
-# shared typed executor.
+# same plan names as duplication to converge (`appcompat.check_appcompat`)
+# — a new entry beyond these needs the same reviewed sign-off (mirrors the
+# INTENTIONAL_SUBSET philosophy of D10.2). `cli_dump_helpers.
+# perform_elf_dump`'s own entry was the first to leave this list, and it
+# left the way the plan intends one to: not by rerouting the call, but by
+# deleting the dead function that made it (ADR-063 Track 1) once `dump_cmd`
+# had already migrated onto the shared typed executor.
+# `cli_scan_baseline`'s baseline resolution (P0 item 4's baseline half) was
+# the second to leave this list: its `service.resolve_input()` call now
+# routes through `service_input_resolution.resolve_side_snapshot`, same as
+# every other resolver P0 item 4 converged.
 CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
     {
         # `appcompat.check_appcompat`'s two `dumper.dump()` call sites left
         # this list in T5 (direct-bypass migration): both now route through
         # `service.run_dump` instead.
-        # Scan baseline resolution (P0 item 4's baseline half): calls
-        # `service.resolve_input()` directly rather than through
-        # `service_input_resolution.resolve_side_snapshot`.
-        "abicheck/cli_scan_baseline.py:1092:19:service.resolve_input",
         # ABICC compatibility wrapper (P1 "ABICC compatibility is a parallel
         # frontend and engine path"): its own parallel engine path calls
         # both `dumper.dump()` and `checker.compare()` directly.
