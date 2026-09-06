@@ -28,8 +28,8 @@ v2/mathutils.h   v2/mathutils.c
 cd examples/workflows/compare-release
 
 # Build both releases as shared libraries
-gcc -shared -fPIC -g v1/mathutils.c -o libmathutils_v1.so
-gcc -shared -fPIC -g v2/mathutils.c -o libmathutils_v2.so
+python3 build_shared_lib.py -fPIC -g v1/mathutils.c -o libmathutils_v1.so
+python3 build_shared_lib.py -fPIC -g v2/mathutils.c -o libmathutils_v2.so
 
 # Compare, giving abicheck each side's public header for the strongest evidence
 abicheck compare libmathutils_v1.so libmathutils_v2.so \

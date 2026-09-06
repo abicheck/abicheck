@@ -1,7 +1,8 @@
 # Executable contract for this workflow example (Phase 5 of the
 # examples/catalog split). `validation/scripts/run_workflow_examples.py`
 # copies the directory to a scratch tree, runs each `run:` line below as a
-# real shell command, and checks what it claims.
+# single program invocation -- no shell, `shlex.split` + `shell=False` --
+# and checks what it claims.
 #
 # Every `run:` line must appear verbatim in this directory's README.md
 # (whitespace-normalized) -- that is the whole point: without it this file
@@ -28,9 +29,9 @@ requires:
   - python3
 steps:
   - name: build-v1
-    run: gcc -shared -fPIC -g v1/shapes.c -o libshapes_v1.so
+    run: python3 build_shared_lib.py -fPIC -g v1/shapes.c -o libshapes_v1.so
   - name: build-v2
-    run: gcc -shared -fPIC -g v2/shapes.c -o libshapes_v2.so
+    run: python3 build_shared_lib.py -fPIC -g v2/shapes.c -o libshapes_v2.so
   - name: check
     run: python3 check.py
     expect:

@@ -26,8 +26,8 @@ v2/shapes.h   double square_area(double side);   -- square_perimeter removed
 cd examples/workflows/python-api
 
 # Build both releases as shared libraries
-gcc -shared -fPIC -g v1/shapes.c -o libshapes_v1.so
-gcc -shared -fPIC -g v2/shapes.c -o libshapes_v2.so
+python3 build_shared_lib.py -fPIC -g v1/shapes.c -o libshapes_v1.so
+python3 build_shared_lib.py -fPIC -g v2/shapes.c -o libshapes_v2.so
 
 # Run the check from a Python script instead of the CLI
 python3 check.py

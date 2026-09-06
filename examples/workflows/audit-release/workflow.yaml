@@ -1,7 +1,8 @@
 # Executable contract for this workflow example (Phase 5 of the
 # examples/catalog split). `validation/scripts/run_workflow_examples.py`
 # copies the directory to a scratch tree, runs each `run:` line below as a
-# real shell command, and checks what it claims.
+# single program invocation -- no shell, `shlex.split` + `shell=False` --
+# and checks what it claims.
 #
 # Every `run:` line must appear verbatim in this directory's README.md
 # (whitespace-normalized) -- that is the whole point: without it this file
@@ -15,6 +16,9 @@ platforms:
   - macos
 requires:
   - gcc
+  # build_shared_lib.py needs python3 to pick the right link-mode flag
+  # for the host platform (gcc -shared on Linux, -dynamiclib on macOS).
+  - python3
   # The audit step passes --header, which goes through the default CastXML
   # AST backend to classify what's public. Declaring it here is what makes
   # a host without CastXML report an honest skip instead of a failure that
@@ -28,7 +32,7 @@ requires:
   - abicheck
 steps:
   - name: build
-    run: gcc -shared -fPIC -g -Iinclude greet.c -o libgreet.so
+    run: python3 build_shared_lib.py -fPIC -g -Iinclude greet.c -o libgreet.so
   - name: audit
     run: abicheck scan libgreet.so --header include
     expect:

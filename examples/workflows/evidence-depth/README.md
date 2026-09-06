@@ -58,8 +58,8 @@ the header changes.
 ```bash
 cd examples/workflows/evidence-depth
 
-gcc -shared -fPIC -Iv1 v1/widget.c -o v1/libwidget.so
-gcc -shared -fPIC -Iv2 v2/widget.c -o v2/libwidget.so
+python3 build_shared_lib.py -fPIC -Iv1 v1/widget.c -o v1/libwidget.so
+python3 build_shared_lib.py -fPIC -Iv2 v2/widget.c -o v2/libwidget.so
 
 abicheck compare v1/libwidget.so v2/libwidget.so
 ```

@@ -1,7 +1,8 @@
 # Executable contract for this workflow example (Phase 5 of the
 # examples/catalog split). `validation/scripts/run_workflow_examples.py`
 # copies the directory to a scratch tree, runs each `run:` line below as a
-# real shell command, and checks what it claims.
+# single program invocation -- no shell, `shlex.split` + `shell=False` --
+# and checks what it claims.
 #
 # Every `run:` line must appear verbatim in this directory's README.md
 # (whitespace-normalized) -- that is the whole point: without it this file
@@ -33,9 +34,9 @@ requires:
   - abicheck
 steps:
   - name: build-v1
-    run: gcc -shared -fPIC -Iv1 v1/widget.c -o v1/libwidget.so
+    run: python3 build_shared_lib.py -fPIC -Iv1 v1/widget.c -o v1/libwidget.so
   - name: build-v2
-    run: gcc -shared -fPIC -Iv2 v2/widget.c -o v2/libwidget.so
+    run: python3 build_shared_lib.py -fPIC -Iv2 v2/widget.c -o v2/libwidget.so
   - name: compare-binary-only
     run: abicheck compare v1/libwidget.so v2/libwidget.so
     expect:

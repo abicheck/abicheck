@@ -38,10 +38,11 @@ looks different.
 ```bash
 cd examples/workflows/compare-project
 
-gcc -shared -fPIC -g core_v1.c -o old/libcore.so
-gcc -shared -fPIC -g algo.c -o old/libalgo.so -L old -lcore
-gcc -shared -fPIC -g core_v2.c -o new/libcore.so
-gcc -shared -fPIC -g algo.c -o new/libalgo.so -L new -lcore
+mkdir -p old new
+python3 build_shared_lib.py -fPIC -g core_v1.c -o old/libcore.so
+python3 build_shared_lib.py -fPIC -g algo.c -o old/libalgo.so -L old -lcore
+python3 build_shared_lib.py -fPIC -g core_v2.c -o new/libcore.so
+python3 build_shared_lib.py -fPIC -g algo.c -o new/libalgo.so -L new -lcore
 ```
 
 ## Compare the two release directories

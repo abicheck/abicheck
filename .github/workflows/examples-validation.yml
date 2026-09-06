@@ -76,7 +76,10 @@ jobs:
       # bundle/cross-library path), so it needs gcc but not castxml -- its
       # manifest's `requires:` reflects that. evidence-depth needs both:
       # castxml for its header/source-evidence steps and python3 for its
-      # compile_commands.json generator.
+      # compile_commands.json generator. Every workflow's own
+      # `build_shared_lib.py` (a portable `gcc -shared`/`-dynamiclib`
+      # wrapper, since Apple's system compiler has no `-shared`) also needs
+      # python3, already on this runner for the harness itself.
       - name: Install system deps
         uses: ./.github/actions/install-system-deps
         with:

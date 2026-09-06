@@ -29,8 +29,8 @@ see what it would report:
 cd examples/workflows/github-actions
 
 # Build both releases as shared libraries
-gcc -shared -fPIC -g v1/counter.c -o libcounter_v1.so
-gcc -shared -fPIC -g v2/counter.c -o libcounter_v2.so
+python3 build_shared_lib.py -fPIC -g v1/counter.c -o libcounter_v1.so
+python3 build_shared_lib.py -fPIC -g v2/counter.c -o libcounter_v2.so
 
 # Compare, giving abicheck each side's public header for the strongest evidence
 abicheck compare libcounter_v1.so libcounter_v2.so \
@@ -57,6 +57,9 @@ on:
 jobs:
   abi-check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # needed for pr-comment (default true) to post
     steps:
       - uses: actions/checkout@v6
 

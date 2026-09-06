@@ -31,8 +31,8 @@ and intends it.
 cd examples/workflows/suppressions
 
 # Build both releases as shared libraries
-gcc -shared -fPIC -g v1/color.c -o libcolor_v1.so
-gcc -shared -fPIC -g v2/color.c -o libcolor_v2.so
+python3 build_shared_lib.py -fPIC -g v1/color.c -o libcolor_v1.so
+python3 build_shared_lib.py -fPIC -g v2/color.c -o libcolor_v2.so
 
 # Compare — this reports the rename as a break, correctly
 abicheck compare libcolor_v1.so libcolor_v2.so \
