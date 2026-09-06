@@ -1373,3 +1373,30 @@ def check_contracts_comparable(
             return mismatch
         raise _MISMATCH_ERRORS[mismatch.kind](mismatch.reason)
     return None
+
+
+def dimension_assurance(
+    mismatch: ComparabilityMismatch | None,
+) -> dict[str, str] | None:
+    """E-S2 (cli-cleanup-phase-two.md Block 5): checker.compare()'s
+    ``DiffResult.comparability_assurance``, computed from a
+    ``check_contracts_comparable(..., diagnostic=True)`` result.
+
+    One entry per :data:`COMPARABILITY_DIMENSIONS` name, each
+    ``"unverified"`` (this dimension is one *mismatch* actually named) or
+    ``"trusted"`` (the mismatch never touched it -- its conclusions stay as
+    trustworthy as an ordinary comparable pair's). Replaces the previous
+    all-or-nothing ``assurance: "none"``: an intentional cross-profile
+    diagnostic compare keeps its valid ``declaration`` conclusions even
+    while ``layout`` reads unverified.
+
+    ``None`` (not an empty dict) when *mismatch* is ``None`` -- there is no
+    mismatch to report, matching ``assurance``'s own "only set under
+    --diagnostic-comparison" contract.
+    """
+    if mismatch is None:
+        return None
+    return {
+        dimension: ("unverified" if dimension in mismatch.dimensions else "trusted")
+        for dimension in sorted(COMPARABILITY_DIMENSIONS)
+    }
