@@ -44,11 +44,21 @@ the same suppressible, ledger-recorded `CONSUMER_REQUIRED_SYMBOL_REMOVED`
 overlay for a missing symbol/entrypoint no diff `Change` names, sharing one
 recording primitive
 (`abicheck/policy/disposition_close.record_and_maybe_suppress_overlay`).
-Report schema 3.0 -> 3.1. Implementation is sequenced in
+Report schema 3.0 -> 3.1. **One S2-adjacent gap remains, outside S2's own
+scope:** `scan` reports carry no `disposition_audit` block at all (that
+command has no scalar `compare`-shaped audit to fold from), so
+`aggregate`'s own fold can only distinguish "no block present" (a
+`scan`-sourced or pre-schema-2.51 target, listed in
+`disposition_audit_missing_targets`) from "an audit exists" — `aggregate`
+does not itself supply the missing block for `scan`. Implementation is
+sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
 (workstream "Policy-disposition audit and change acknowledgment").
 **Decision maker:** maintainer (product decision recorded in `vision.md`);
-technical sign-off pending review of this document.
+accepted as recorded above — the "technical sign-off pending" note in an
+earlier draft of this line referred to review of this ADR document itself,
+which review and merge have since completed (S1/S2 landing implies sign-off
+occurred).
 
 ## Context
 

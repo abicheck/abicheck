@@ -127,6 +127,7 @@ class _FakeDiff:
 
 class _FakeSnap:
     build_source = None
+    elf = None
 
 
 @pytest.fixture
@@ -137,7 +138,7 @@ def _patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 
     captured: dict[str, object] = {}
 
-    def fake_resolve_input(path, headers, includes, **kw):  # type: ignore[no-untyped-def]
+    def fake_resolve_input(path, headers, includes, version, lang, **kw):  # type: ignore[no-untyped-def]
         if "headers" not in captured:
             captured["headers"] = list(headers)
             captured["includes"] = list(includes)
@@ -263,7 +264,7 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
 
     captured: dict[str, object] = {}
 
-    def fake_resolve_input(path, headers, includes, **kw):  # type: ignore[no-untyped-def]
+    def fake_resolve_input(path, headers, includes, version, lang, **kw):  # type: ignore[no-untyped-def]
         return _FakeSnap()
 
     def fake_compare_snapshots(
@@ -345,7 +346,7 @@ def test_run_baseline_compare_forwards_policy_file_to_embedded_build_source(
 
     captured: dict[str, object] = {}
 
-    def fake_resolve_input(path, headers, includes, **kw):  # type: ignore[no-untyped-def]
+    def fake_resolve_input(path, headers, includes, version, lang, **kw):  # type: ignore[no-untyped-def]
         return _FakeSnap()
 
     def fake_prepare_embedded_build_source(old, new, cm, extra, *rest, **kw):  # type: ignore[no-untyped-def]

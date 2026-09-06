@@ -424,6 +424,7 @@ def test_run_baseline_compare_forwards_collapse_versioned_symbols(
 
     class _FakeSnap:
         build_source = None
+        elf = None
 
     class _FakeVerdict:
         value = "NO_CHANGE"
@@ -435,7 +436,7 @@ def test_run_baseline_compare_forwards_collapse_versioned_symbols(
         risk: list[object] = []
         compatible: list[object] = []
 
-    def fake_resolve_input(path, headers, includes, **kw):  # type: ignore[no-untyped-def]
+    def fake_resolve_input(path, headers, includes, version, lang, **kw):  # type: ignore[no-untyped-def]
         return _FakeSnap()
 
     def fake_compare_snapshots(old, new, suppression=None, *, extra_changes, **kw):
