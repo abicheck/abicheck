@@ -76,7 +76,7 @@ Every case, rule or scenario, tagged with the real-world ecosystem it models (`g
 | Workflow | Task | Platforms | Executed steps |
 |---|---|---|---|
 | `audit-release` | Did I accidentally ship an undocumented export consumers could start depending on? | linux, macos | 2 |
-| `compare-project` | Did removing a function from one library in my project break a sibling library that depends on it? | linux, macos | 5 |
+| `compare-project` | Did removing a function from one library in my project break a sibling library that depends on it? | linux, macos | 6 |
 | `compare-release` | Did my next release break anything for existing consumers? | linux, macos | 3 |
 | `evidence-depth` | What does the evidence I give abicheck actually let it see, and what does each additional layer add? | linux, macos | 7 |
 | `github-actions` | How do I run this check automatically on every pull request, without anyone remembering to run it (or writing a CI script myself)? | linux, macos | 3 |
