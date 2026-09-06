@@ -184,13 +184,13 @@ failures structurally unsuppressible; `effective_config_digest` with policy
 and suppression content hashes; `report_finding_id`/
 `report_canonical_finding_id`.
 
-**Missing.** Rule provenance in the JSON suppression ledger; a
-disposition-keyed ledger for reclassified/reconciled changes; suppression
-totals in the one-line and review-digest views; a `not_evaluated` detector
-state; any acknowledgment concept beyond `allow_public_break` (which then
-degrades the release recommendation silently); a unique-per-run,
+**Missing.** Any acknowledgment concept beyond `allow_public_break` (which
+then degrades the release recommendation silently); a unique-per-run,
 backend-stable acknowledgment key; the suppression file path in the
-report; base/head policy-delta analysis.
+report; base/head policy-delta analysis. (S1/S2 closed the rest of this
+section's original list — rule provenance, a disposition-keyed ledger for
+reclassified/reconciled changes, one-line/review-digest suppression
+totals, and `not_evaluated` — see "Slices" below.)
 
 **Slices.** **S1 landed** (scalar `compare` only): one conserved ledger
 (`abicheck/policy/disposition_ledger.py`) behind all five application points
@@ -198,15 +198,44 @@ report; base/head policy-delta analysis.
 — raw-versus-effective counts and rule provenance in every scalar projection
 (`abicheck/report/disposition_audit.py`, report schema 2.50), a
 `not_evaluated` detector state, and `semver.recommend_release` reading the
-conserved delta. S2-S4 unimplemented. S1 (audit, first): inventory the four application points
+conserved delta. S1 (audit, first): inventory the four application points
 above and route each through one ledger-recording primitive (converging
 them where the call shapes allow, covering each explicitly where they do
 not) so the raw-versus-effective totals reconcile by construction; then
 raw-versus-effective counts and rule provenance on native `compare`, every
 projection, with a 100-suppressed-removals fixture; `not_evaluated` in
 `DetectorRegistry`.
-S2: bundle/consumer/aggregate parity; reclassification, scoping, and
-disabled-upstream coverage. S3: acknowledgment records (YAML, same
+**S2 landed**: bundle/aggregate/consumer parity, plus reclassification and
+scoping coverage. The release/bundle fan-out's JSON/Markdown reports and
+`--output-dir summary.json` sidecar carry a folded `disposition_audit`
+block over every library (`abicheck/cli_compare_receipt.py`'s
+`release_disposition_audit_block`, `report/disposition_audit.py`'s
+`fold_disposition_audits`); `abicheck aggregate --format json` carries the
+same folded block plus a `disposition_audit_missing_targets` list for a
+target whose report predates report schema 2.51 or came from `scan`
+(aggregate schema 1.9, `workflows/aggregate/disposition_axis.py`);
+`reclassify:` rules are recorded through the ledger as a from/to overlay
+(`DispositionLedger.resolve_reclassifications`, surfaced as
+`reclassified_total`/`reclassifications`); an `out_of_contract`/
+`unresolved_relevance` scope exclusion carries a `scope_reasons` breakdown
+by contract-relevance reason code, the scope counterpart of the existing
+suppression `rules` breakdown; and the consumer-scoped path
+(`appcompat.py`) reached full parity across *both* its own overlay
+mechanisms — `scope_diff_to_app` (`--used-by`) already had it from S1,
+and `scope_diff_to_required_symbols` (`--required-symbol(s)`) gained the
+identical suppressible, ledger-recorded `CONSUMER_REQUIRED_SYMBOL_REMOVED`
+overlay for a missing entrypoint no diff `Change` names (previously only a
+bespoke, unsuppressible `missing_entrypoints` string), sharing one
+evaluate/record/withheld-rule-diagnostic primitive
+(`policy/disposition_close.record_and_maybe_suppress_overlay`) with the
+`--used-by` path rather than duplicating it a third time. Report schema
+3.0 -> 3.1 (additive). "Disabled-upstream coverage" (a detector never
+evaluated at all, e.g. a bundle member whose own comparison failed or was
+never selected) is carried by each member's own scalar `disposition_audit`
+block folding in its own `not_evaluated` detector rows (S1's mechanism,
+unchanged) — the fold above sums those rows across members rather than
+re-deriving disabled-detector state at the bundle/aggregate level.
+S3: acknowledgment records (YAML, same
 loader), the additions review gate (`allow` default), shared record ids
 with B. S4: policy-delta and suppression-growth warnings.
 

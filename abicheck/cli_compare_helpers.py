@@ -670,6 +670,7 @@ def _apply_scoped_gating(
         return _apply_required_symbol_scoping(
             result, required_symbols, old, new, policy, pf,
             exit_code_scheme=exit_code_scheme, sev_config=sev_config,
+            suppression=suppression,
         )
     return None
 

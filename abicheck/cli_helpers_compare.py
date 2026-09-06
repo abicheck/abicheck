@@ -1202,8 +1202,17 @@ def _apply_required_symbol_scoping(
     policy_file: PolicyFile | None,
     exit_code_scheme: str = "legacy",
     sev_config: Any = None,
+    suppression: Any = None,
 ) -> int:
-    """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
+    """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043).
+
+    *suppression* (ADR-067 C-S2, mirrors :func:`_apply_used_by_scoping`'s
+    identical parameter -- ADR-044 P2) is forwarded to
+    :func:`~abicheck.appcompat.scope_diff_to_required_symbols`: its missing-
+    entrypoint overlay is synthesized *after* the pipeline's own suppression
+    pass already ran over ``result.changes``, so without this it would be
+    unsuppressible even by an exact rule.
+    """
     from .appcompat import scope_diff_to_required_symbols, uncovered_missing_symbols
     from .reporter import _finding_id
     from .workflows.disposition import close_consumer_scope, ledger_for
@@ -1215,6 +1224,7 @@ def _apply_required_symbol_scoping(
         required_symbols,
         policy=policy,
         policy_file=policy_file,
+        suppression=suppression,
     )
     result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
     result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]

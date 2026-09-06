@@ -37,7 +37,7 @@ from .model import AbiSnapshot, Visibility
 from .policy.disposition_close import (
     close_consumer_scope,
     ledger_for,
-    record_consumer_overlay,
+    record_and_maybe_suppress_overlay,
 )
 
 if TYPE_CHECKING:
@@ -1556,61 +1556,34 @@ def scope_diff_to_app(
         # cache read in impact.engine.assess_change touches the evidence
         # fields just set above.
         overlay_change.impact_assessment = assess_change(overlay_change)
-        if suppression is None:
-            record_consumer_overlay(overlay_ledger, overlay_change, diff)
-            breaking_for_app.append(overlay_change)
-            continue
         # evaluate() (not the cheaper is_suppressed) so a broad rule whose
         # selectors matched but was withheld by the reachability/
         # allow_public_break gate still emits the same
         # SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK diagnostic ApplySuppression
         # produces for changes it sees directly (mirrors checker.py's
         # _filter_suppressed_changes / post_processing.py's
-        # _merge_findings_respecting_suppression).
-        outcome = suppression.evaluate(overlay_change)
-        if outcome.suppressed:
-            # Codex review (fresh evidence): missing_symbols independently
-            # forces Verdict.BREAKING in _compute_appcompat_verdict below
-            # regardless of breaking_for_app, and feeds the scoped exit-code
-            # floor / missing-label text output the same way -- dropping only
-            # the synthesized Change left the suppression cosmetic. This
-            # overlay IS the suppressible representation of a missing symbol
-            # (that was the point of promoting it out of a bespoke string),
-            # so a suppressed overlay must also remove its raw string from
-            # every one of those consumers.
-            # ADR-067 C-S1's fourth application point. This overlay's *input*
-            # shape is a raw ``missing_symbols`` string rather than a detected
-            # change, but what suppression acts on here is a real ``Change``,
-            # so it records through the identical primitive the library-diff
-            # points use -- one record type, one query surface (D2), with the
-            # consumer overlay named as its own application point.
-            record_consumer_overlay(
-                overlay_ledger,
-                overlay_change,
-                diff,
-                rule=outcome.matched_rule,
-                suppression=suppression,
-            )
+        # _merge_findings_respecting_suppression). Codex review (fresh
+        # evidence): missing_symbols independently forces Verdict.BREAKING in
+        # _compute_appcompat_verdict below regardless of breaking_for_app, and
+        # feeds the scoped exit-code floor / missing-label text output the
+        # same way -- dropping only the synthesized Change left the
+        # suppression cosmetic, so a suppressed overlay must also remove its
+        # raw string from every one of those consumers (below).
+        #
+        # ADR-067 C-S2: the evaluate/record/overreach sequence itself is
+        # shared with scope_diff_to_required_symbols's identical loop, in
+        # record_and_maybe_suppress_overlay -- one record type, one query
+        # surface (D2), with the consumer overlay named as its own
+        # application point.
+        kept, overreach = record_and_maybe_suppress_overlay(
+            overlay_ledger, overlay_change, diff, suppression=suppression,
+        )
+        if not kept:
             suppressed_missing.add(sym)
             continue
-        # Recorded on *both* branches, not only when a rule fires (ADR-067
-        # D1): the overlay is an atomically detected consumer finding either
-        # way, so recording it only when suppressed would make adding a
-        # matching rule change the *detected* total rather than move the
-        # finding between dispositions -- exactly the conservation the audit
-        # exists to make checkable.
-        record_consumer_overlay(overlay_ledger, overlay_change, diff)
         breaking_for_app.append(overlay_change)
-        # outcome.withheld_unknown_rule is never set here: overlay_change is
-        # always constructed with reachability_state=PROVEN_REACHABLE above
-        # (it is by construction consumer-proven), and
-        # would_withhold_unknown_reachability only ever fires on UNKNOWN.
-        if outcome.withheld_rule is not None:
-            from .post_processing import _build_suppression_overreach_change
-
-            breaking_for_app.append(
-                _build_suppression_overreach_change(overlay_change, outcome.withheld_rule)
-            )
+        if overreach is not None:
+            breaking_for_app.append(overreach)
     # After the overlay loop: an overlay already carries its own (consumer-
     # named) explanation and a cached ImpactAssessment, so _has_impact_evidence
     # skips it here and only the shared library-diff findings are considered.
@@ -1845,6 +1818,7 @@ def scope_diff_to_required_symbols(
     *,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
+    suppression: SuppressionList | None = None,
 ) -> PluginHostContractResult:
     """Scope an already-computed diff to an explicit required-symbol contract.
 
@@ -1854,6 +1828,12 @@ def scope_diff_to_required_symbols(
     only intersects the given ``required_entrypoints`` with that diff. See
     :func:`check_plugin_host_contract` for the standalone convenience wrapper
     that also runs the comparison itself.
+
+    *suppression* (ADR-067 C-S2, mirrors :func:`scope_diff_to_app`'s own
+    *suppression* parameter — ADR-044 P2): the same rule set already used to
+    compute *diff*, evaluated again here because the missing-entrypoint
+    overlay below is synthesized fresh *after* that pass already ran, so it
+    would otherwise be unsuppressible even by an exact rule.
     """
     required = set(required_entrypoints)
     new_exports = _snapshot_export_names(new_plugin)
@@ -1863,6 +1843,50 @@ def scope_diff_to_required_symbols(
     # ("undefined") symbols, identical in shape to an app's symbol needs.
     host_reqs = AppRequirements(undefined_symbols=set(required))
     breaking_for_host, _ = _partition_app_changes(diff, host_reqs)
+
+    # ADR-067 C-S2: the host-contract mirror of scope_diff_to_app's own
+    # CONSUMER_REQUIRED_SYMBOL_REMOVED overlay loop (ADR-044 P2 item 1) --
+    # promote a missing entrypoint not already represented by a diff Change
+    # into the same first-class, suppressible, ledger-recorded finding,
+    # instead of leaving it as a bespoke string only special-cased by the
+    # CLI's own `_apply_required_symbol_scoping`/reporter code. Without this
+    # the ledger's raw-versus-effective totals never accounted for a
+    # required-symbol contract's missing entrypoints at all -- exactly the
+    # gap the C-S1 slice already closed for `--used-by`.
+    overlay_ledger = ledger_for(diff)
+    suppressed_missing: set[str] = set()
+    for sym in uncovered_missing_symbols(missing, breaking_for_host):
+        # public_reachable=True/PROVEN_REACHABLE, mirroring
+        # scope_diff_to_app's identical overlay: this finding only ever
+        # exists because a real declared entrypoint contract's own required
+        # symbol genuinely resolved to nothing in the new plugin -- there is
+        # no "maybe internal, maybe not" ambiguity a broad namespace/
+        # source_location suppression rule's default "unreachable-only"
+        # reachability should be allowed to read as unreachable.
+        overlay_change = make_change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol=sym,
+            name=new_plugin.library or "new",
+            public_reachable=True,
+            reachability_kind="consumer_proven",
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
+        )
+        overlay_change.impact_assessment = assess_change(overlay_change)
+        kept, overreach = record_and_maybe_suppress_overlay(
+            overlay_ledger,
+            overlay_change,
+            diff,
+            suppression=suppression,
+            application_point="required_symbol_overlay",
+        )
+        if not kept:
+            suppressed_missing.add(sym)
+            continue
+        breaking_for_host.append(overlay_change)
+        if overreach is not None:
+            breaking_for_host.append(overreach)
+    if suppressed_missing:
+        missing = [s for s in missing if s not in suppressed_missing]
 
     verdict = _compute_appcompat_verdict(
         missing, [], breaking_for_host, len(required), policy, policy_file,
@@ -1912,7 +1936,7 @@ def check_plugin_host_contract(
 
     scoped = scope_diff_to_required_symbols(
         diff, old_plugin, new_plugin, required_entrypoints,
-        policy=policy, policy_file=policy_file,
+        policy=policy, policy_file=policy_file, suppression=suppression,
     )
     # ADR-067: the standalone plugin-host entry point is the orchestrator for
     # its own single host contract, exactly as `check_appcompat` is for its
