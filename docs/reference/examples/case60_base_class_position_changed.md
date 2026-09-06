@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `base_class_position_changed` |
 | **Source files** | `catalog/cases/case60_base_class_position_changed/` |
 | **Rule family** | [`base-class-position-changed`](by-rule/base-class-position-changed.md) |
+| **Subject** | [Inheritance layout and base subobjects](by-subject/inheritance-layout-and-base-subobjects.md) |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +141,4 @@ abidiff v1.xml v2.xml
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Base class position changed](by-rule/base-class-position-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Base class position changed](by-rule/base-class-position-changed.md) · [Subject: Inheritance layout and base subobjects](by-subject/inheritance-layout-and-base-subobjects.md)._

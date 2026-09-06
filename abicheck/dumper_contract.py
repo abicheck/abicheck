@@ -165,7 +165,10 @@ def _attach_extraction_contract(
         compute_extraction_contract,
         manifest_tu_scope_field,
     )
-    from .dumper_toolchain import _compiler_family_from_toolchain
+    from .extract.toolchain_identity import (
+        _compiler_family_from_toolchain,
+        compiler_identity_status,
+    )
     from .header_conditionals import (
         ordered_macro_ops,
         pass_through_flags_from_tokens,
@@ -179,9 +182,13 @@ def _attach_extraction_contract(
         except ValueError:
             pass  # malformed --gcc-options must not abort the dump
 
+    _compiler_status = compiler_identity_status(snapshot.ast_toolchain)
     snapshot.contract = compute_extraction_contract(
         compiler_family=_compiler_family_from_toolchain(snapshot.ast_toolchain),
         compiler_version=_profile_compiler_version(snapshot.ast_toolchain),
+        compiler_identity_status=(
+            _compiler_status.value if _compiler_status is not None else None
+        ),
         abi_dialect=snapshot.ast_toolchain.get("abi_dialect"),
         language_standard=language_standard_field(
             lang,

@@ -63,7 +63,9 @@ __all__ = [
     "dump_collect_mode_for",
     "L4_SOURCE_EXTRACTORS",
     "effective_frontend",
+    "effective_frontend_for_context",
     "explicit_source_extractor",
+    "requested_frontend_override",
     "normalized_debug_format",
     "reject_compile_db_filter_scope_mismatch",
     "reject_debug_format_for_binaries",
@@ -72,6 +74,26 @@ __all__ = [
     "resolve_dump_request_evidence",
     "resolve_side_evidence",
 ]
+
+
+def requested_frontend_override(
+    compile: CompileContext | None, header_backend: str
+) -> str:
+    """The *unresolved* frontend name an explicit `compile.frontend` or the
+    bare `header_backend` default names -- the override-precedence half of
+    :func:`effective_frontend`, split out so a caller that needs the raw
+    request (not yet resolved to a concrete backend) doesn't reimplement
+    this precedence rule a second time. An explicit `compile.frontend` wins
+    over `header_backend` unless it is itself the case-insensitive no-op
+    spelling `"auto"` (`compile.frontend="AUTO"` is an accepted spelling --
+    `frontend_value_errors` validates case-insensitively -- and must mean
+    "no override", not a literal request for whatever `_resolve_header_
+    backend` does with the string `"AUTO"`)."""
+    return (
+        compile.frontend
+        if (compile is not None and compile.frontend.lower() != "auto")
+        else header_backend
+    )
 
 
 def effective_frontend(compile: CompileContext | None, header_backend: str) -> str:
@@ -86,15 +108,51 @@ def effective_frontend(compile: CompileContext | None, header_backend: str) -> s
     "is this actually 'auto'" check itself was still case-sensitive in the
     third -- `compile.frontend="AUTO"` is an accepted spelling
     (`frontend_value_errors` validates case-insensitively) that used to be
-    treated as an *explicit* override instead of the no-op it means)."""
+    treated as an *explicit* override instead of the no-op it means).
+
+    This is the "host" projection only -- it ignores `compile.frontend_
+    context` entirely, which is correct for its own callers (source-ABI
+    replay has no host/device concept) but under-reports the backend a
+    non-"host" `frontend_context` would actually select (dumper.
+    _header_ast_parser routes ANY such context to clang unconditionally).
+    See :func:`effective_frontend_for_context` for the context-aware
+    prediction `service_dump_pipeline.resolve_dump_request` needs."""
     from .dumper import _resolve_header_backend
 
-    requested = (
-        compile.frontend
-        if (compile is not None and compile.frontend.lower() != "auto")
-        else header_backend
-    )
-    return _resolve_header_backend(requested)
+    return _resolve_header_backend(requested_frontend_override(compile, header_backend))
+
+
+def effective_frontend_for_context(
+    compile: CompileContext | None, header_backend: str
+) -> str | None:
+    """Predict the L2 backend a non-``"host"`` `compile.frontend_context`
+    would select, or ``None`` when `compile` is absent, names ``"host"``, or
+    the resulting request is one no single parser could satisfy (e.g. an
+    explicit ``castxml`` under a non-``"host"`` context, or ``"hybrid"``) --
+    a `None` here means the caller should keep whatever host-only value
+    :func:`effective_frontend` already produced, exactly mirroring how
+    `dumper._header_ast_parser` itself would raise rather than silently
+    substitute a different backend for those same requests.
+
+    Delegates the actual selection to `dumper._resolve_effective_ast_
+    backend` -- the one place `_header_ast_parser`'s own dispatch is
+    predicted -- rather than re-deriving that dispatch rule here a second
+    time (the gap this function closes: `resolve_dump_request` used to
+    inline both `requested_frontend_override`'s precedence rule and the
+    context-forces-clang rule directly, so a future change to either could
+    silently diverge between the two functions predicting the same thing)."""
+    if compile is None or compile.frontend_context.lower() == "host":
+        return None
+    from .dumper import _resolve_effective_ast_backend
+    from .errors import AstContextMissingError, ValidationError
+
+    requested = requested_frontend_override(compile, header_backend)
+    try:
+        return _resolve_effective_ast_backend(
+            requested, compile.frontend_context.lower()
+        )
+    except (AstContextMissingError, ValidationError):
+        return None
 
 
 #: The backends an ``--ast-frontend`` request can actually select for L4

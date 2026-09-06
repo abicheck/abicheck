@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `private_header_leak` |
 | **Source files** | `catalog/cases/case147_scan_depth_ladder/` |
 | **Related rules** | [`audit-private-header-leak`](by-rule/audit-private-header-leak.md) |
+| **Subject** | [Export/declaration mismatches](by-subject/export-declaration-mismatches.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -131,4 +132,4 @@ each other at a single, fixed evidence level.
 
 - `snapshot.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Subject: Export/declaration mismatches](by-subject/export-declaration-mismatches.md)._

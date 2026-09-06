@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `toolchain_flag_drift` |
 | **Source files** | `catalog/cases/case103_toolchain_flag_drift/` |
 | **Rule family** | [`toolchain-flag-drift`](by-rule/toolchain-flag-drift.md) |
+| **Subject** | [Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md) |
 
 **Category:** Build quality signal | **Verdict:** ✅ COMPATIBLE
 
@@ -141,4 +142,4 @@ here).
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Toolchain flag drift](by-rule/toolchain-flag-drift.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Toolchain flag drift](by-rule/toolchain-flag-drift.md) · [Subject: Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md)._

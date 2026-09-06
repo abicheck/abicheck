@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `union_field_added`, `type_size_changed` |
 | **Source files** | `catalog/cases/case26_union_field_added/` |
 | **Rule family** | [`union-field-added`](by-rule/union-field-added.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -132,4 +133,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Union gained a member that grows it](by-rule/union-field-added.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Union gained a member that grows it](by-rule/union-field-added.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

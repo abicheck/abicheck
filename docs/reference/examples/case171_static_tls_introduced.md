@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `static_tls_introduced` |
 | **Source files** | `catalog/cases/case171_static_tls_introduced/` |
 | **Rule family** | [`static-tls-introduced`](by-rule/static-tls-introduced.md) |
+| **Subject** | [ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md) |
 
 **Category:** Deployment Risk (ELF/Loader) | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -143,4 +144,4 @@ fact above, not whether this particular run happens to fail.
 - `v1.c`
 - `v2.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Static TLS model introduced](by-rule/static-tls-introduced.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Static TLS model introduced](by-rule/static-tls-introduced.md) · [Subject: ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `catalog/cases/case07_struct_layout/` |
 | **Rule family** | [`embedded-type-size-increased`](by-rule/embedded-type-size-increased.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -127,4 +128,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Embedded type size increased](by-rule/embedded-type-size-increased.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Embedded type size increased](by-rule/embedded-type-size-increased.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_params_changed`, `func_return_changed` |
 | **Source files** | `catalog/cases/case102_frozen_runtime_signature_changed/` |
 | **Rule family** | [`frozen-runtime-signature-changed`](by-rule/frozen-runtime-signature-changed.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Runtime contract | **Verdict:** ❌ BREAKING
 
@@ -161,4 +162,4 @@ environment (`abidiff` is not installed here).
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Frozen runtime entry point signature changed](by-rule/frozen-runtime-signature-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Frozen runtime entry point signature changed](by-rule/frozen-runtime-signature-changed.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

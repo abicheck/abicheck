@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `rtti_for_internal_type` |
 | **Source files** | `catalog/cases/case146_audit_rtti_for_internal/` |
 | **Rule family** | [`audit-rtti-for-internal`](by-rule/audit-rtti-for-internal.md) |
+| **Subject** | [Export/declaration mismatches](by-subject/export-declaration-mismatches.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -109,4 +110,4 @@ against its own header provenance).
 
 - `snapshot.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: RTTI emitted for an internal type](by-rule/audit-rtti-for-internal.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: RTTI emitted for an internal type](by-rule/audit-rtti-for-internal.md) · [Subject: Export/declaration mismatches](by-subject/export-declaration-mismatches.md)._

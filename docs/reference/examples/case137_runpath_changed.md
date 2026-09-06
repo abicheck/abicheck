@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `runpath_changed` |
 | **Source files** | `catalog/cases/case137_runpath_changed/` |
 | **Rule family** | [`runpath-changed`](by-rule/runpath-changed.md) |
+| **Subject** | [ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md) |
 
 **Category:** Quality | **Verdict:** 🟢 COMPATIBLE
 
@@ -111,4 +112,4 @@ to check it against their environment.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: RUNPATH changed](by-rule/runpath-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: RUNPATH changed](by-rule/runpath-changed.md) · [Subject: ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md)._

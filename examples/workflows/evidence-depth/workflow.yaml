@@ -1,0 +1,70 @@
+# Executable contract for this workflow example (Phase 5 of the
+# examples/catalog split). `validation/scripts/run_workflow_examples.py`
+# copies the directory to a scratch tree, runs each `run:` line below as a
+# single program invocation -- no shell, `shlex.split` + `shell=False` --
+# and checks what it claims.
+#
+# Every `run:` line must appear verbatim in this directory's README.md
+# (whitespace-normalized) -- that is the whole point: without it this file
+# is a second copy of the walkthrough, free to keep passing while the
+# documented commands rot. `tests/test_workflow_examples.py` enforces it in
+# the fast lane, with no compiler needed.
+#
+# This single workflow stands in for both "evidence depth" and "build/source
+# evidence" from the Phase 5 target list (examples-catalog-split.md's own
+# "What is left" section flagged these as worth merging rather than shipping
+# as two nearly identical projects) -- the same release, compared three
+# times with progressively more evidence, is a stronger demonstration of
+# *why* build/source evidence matters than a second, unrelated fixture would
+# be: step 3 catches a real break steps 1-2 structurally cannot see.
+id: evidence-depth
+task: What does the evidence I give abicheck actually let it see, and what does each additional layer add?
+platforms:
+  - linux
+  - macos
+requires:
+  - gcc
+  - python3
+  # Step 2's --header and step 3's --sources/--build-info/--depth source
+  # both go through the default CastXML AST/source backend.
+  - castxml
+  # The tool under test. Declaring it is not ceremony: without it a host
+  # without abicheck on PATH reports a launch failure per step instead of an
+  # honest skip.
+  - abicheck
+steps:
+  - name: build-v1
+    run: python3 build_shared_lib.py -fPIC -Iv1 v1/widget.c -o v1/libwidget.so
+  - name: build-v2
+    run: python3 build_shared_lib.py -fPIC -Iv2 v2/widget.c -o v2/libwidget.so
+  - name: compare-binary-only
+    run: abicheck compare v1/libwidget.so v2/libwidget.so
+    expect:
+      exit_code: 0
+      stdout_contains:
+        - NO_CHANGE
+  - name: compare-with-headers
+    run: >-
+      abicheck compare v1/libwidget.so v2/libwidget.so --header old=v1/widget.h --header new=v2/widget.h
+    expect:
+      exit_code: 4
+      stdout_contains:
+        - BREAKING
+        - type_size_changed
+        - type_field_offset_changed
+  - name: gen-build-info-v1
+    run: python3 gen_build_info.py v1
+  - name: gen-build-info-v2
+    run: python3 gen_build_info.py v2
+  - name: compare-with-source-evidence
+    run: >-
+      abicheck compare v1/libwidget.so v2/libwidget.so
+      --header old=v1/widget.h --header new=v2/widget.h
+      --sources old=v1 --sources new=v2
+      --build-info old=v1/compile_commands.json --build-info new=v2/compile_commands.json
+      --depth source
+    expect:
+      exit_code: 4
+      stdout_contains:
+        - BREAKING
+        - public_macro_value_changed

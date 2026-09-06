@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `inline_namespace_version_bumped` |
 | **Source files** | `catalog/cases/case101_inline_namespace_version_bumped/` |
 | **Rule family** | [`inline-namespace-version-bumped`](by-rule/inline-namespace-version-bumped.md) |
+| **Subject** | [Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md) |
 
 **Category:** Symbol API | **Verdict:** ❌ BREAKING
 
@@ -149,4 +150,4 @@ not installed here).
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline namespace version bumped](by-rule/inline-namespace-version-bumped.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Inline namespace version bumped](by-rule/inline-namespace-version-bumped.md) · [Subject: Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md)._

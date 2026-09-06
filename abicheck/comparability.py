@@ -448,6 +448,7 @@ def compute_extraction_contract(
     public_header_dirs: Sequence[Path] = (),
     manifest_tu_scope: str | None = None,
     frontend_context_kind: str | None = None,
+    compiler_identity_status: str | None = None,
 ) -> ExtractionContract | None:
     """Compute one side's :class:`ExtractionContract`, for either the legacy
     non-manifest CLI path or a ``--dump-manifest`` (ADR-050 D1/D3).
@@ -527,6 +528,17 @@ def compute_extraction_contract(
       external slot, a system-bucket file has no declared ``-I`` directory
       to make its path side-local against, so including its raw resolved
       path would make the fingerprint checkout/cache-root-dependent.
+
+    ``compiler_identity_status`` (E-S1, vision-api-abi-evolution.md section
+    E / cli-cleanup-phase-two.md Block 5): the caller's already-resolved
+    ``dumper_toolchain._compiler_identity_status(...).value`` for this
+    side, or ``None``. Recorded verbatim onto the returned
+    :class:`ExtractionContract` -- never hashed into ``profile_fingerprint``
+    itself (it isn't a member of :data:`PROFILE_FIELD_KEYS`) -- so
+    :func:`check_contracts_comparable` can refuse a compiler-probe failure
+    unconditionally, independent of whether the two sides' (necessarily
+    incomplete) ``profile_fields["compiler_family"]`` happen to still
+    collide.
     """
     scope_inputs_present = bool(
         declared_headers or public_header_paths or public_header_dirs
@@ -606,6 +618,7 @@ def compute_extraction_contract(
         scope_fingerprint=scope_fingerprint,
         profile_fields=profile_fields,
         scope_fields=scope_fields,
+        compiler_identity_status=compiler_identity_status,
     )
 
 
@@ -1373,3 +1386,30 @@ def check_contracts_comparable(
             return mismatch
         raise _MISMATCH_ERRORS[mismatch.kind](mismatch.reason)
     return None
+
+
+def dimension_assurance(
+    mismatch: ComparabilityMismatch | None,
+) -> dict[str, str] | None:
+    """E-S2 (cli-cleanup-phase-two.md Block 5): checker.compare()'s
+    ``DiffResult.comparability_assurance``, computed from a
+    ``check_contracts_comparable(..., diagnostic=True)`` result.
+
+    One entry per :data:`COMPARABILITY_DIMENSIONS` name, each
+    ``"unverified"`` (this dimension is one *mismatch* actually named) or
+    ``"trusted"`` (the mismatch never touched it -- its conclusions stay as
+    trustworthy as an ordinary comparable pair's). Replaces the previous
+    all-or-nothing ``assurance: "none"``: an intentional cross-profile
+    diagnostic compare keeps its valid ``declaration`` conclusions even
+    while ``layout`` reads unverified.
+
+    ``None`` (not an empty dict) when *mismatch* is ``None`` -- there is no
+    mismatch to report, matching ``assurance``'s own "only set under
+    --diagnostic-comparison" contract.
+    """
+    if mismatch is None:
+        return None
+    return {
+        dimension: ("unverified" if dimension in mismatch.dimensions else "trusted")
+        for dimension in sorted(COMPARABILITY_DIMENSIONS)
+    }

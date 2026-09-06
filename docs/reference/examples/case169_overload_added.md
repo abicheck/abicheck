@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `overload_added` |
 | **Source files** | `catalog/cases/case169_overload_added/` |
 | **Rule family** | [`overload-added`](by-rule/overload-added.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Overload Resolution / Source Compatibility | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -145,4 +146,4 @@ evolution.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Overload added](by-rule/overload-added.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Overload added](by-rule/overload-added.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

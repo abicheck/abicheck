@@ -13,11 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""catalog/ground_truth.json's `taxonomy` block stays in sync with
-scripts/gen_catalog_taxonomy.py -- mirrors gen_platform_matrix.py's own
-test_platform_matrix.py pattern so drift fails the ordinary fast pytest
-lane, not just a --check someone has to remember to run (a real gap a
-review flagged on the PR that introduced this generator)."""
+"""catalog/taxonomy.json stays in sync with scripts/gen_catalog_taxonomy.py
+-- mirrors gen_platform_matrix.py's own test_platform_matrix.py pattern so
+drift fails the ordinary fast pytest lane, not just a --check someone has to
+remember to run (a real gap a review flagged on the PR that introduced this
+generator).
+
+`taxonomy.json` is a sibling manifest of `ground_truth.json`, not a key
+inside it (examples-catalog-split.md's "What is left" item 5) -- kept
+separate so a taxonomy-only edit never perturbs `ground_truth.json`'s own
+bytes, and therefore never perturbs the whole-file digest
+`benchmark_comparison._ground_truth_digest()` pins the frozen abidiff/ABICC
+competitor-result cache to."""
 
 from __future__ import annotations
 
@@ -36,6 +43,7 @@ if str(REPO_DIR / "scripts") not in sys.path:
 import example_catalog  # noqa: E402
 
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
+TAXONOMY_PATH = example_catalog.TAXONOMY_PATH
 
 
 def _load_gen():
@@ -51,28 +59,33 @@ def _load_ground_truth() -> dict[str, object]:
     return json.loads(GROUND_TRUTH.read_text())
 
 
+def _load_taxonomy() -> dict[str, dict]:
+    return json.loads(TAXONOMY_PATH.read_text())
+
+
 def test_taxonomy_is_in_sync_with_generator():
     gen = _load_gen()
     gt = _load_ground_truth()
-    current = gt.get("taxonomy")
+    current = _load_taxonomy()
     expected = gen.build_taxonomy(gt)
     assert current == expected, (
-        "catalog/ground_truth.json's 'taxonomy' block is stale -- "
+        "catalog/taxonomy.json is stale -- "
         "regenerate with `python scripts/gen_catalog_taxonomy.py`"
     )
 
 
 def test_taxonomy_covers_every_verdicts_case():
     gt = _load_ground_truth()
-    assert set(gt["taxonomy"]) == set(gt["verdicts"])
+    taxonomy = _load_taxonomy()
+    assert set(taxonomy) == set(gt["verdicts"])
 
 
 def test_scenario_kind_only_set_for_scenario_entities():
     """The generator's own module docstring states this contract --
     scenario_kind is set only when entity == 'scenario' -- so a violation
     is a real classification bug, not just a stale-cache drift."""
-    gt = _load_ground_truth()
-    for case_name, entry in gt["taxonomy"].items():
+    taxonomy = _load_taxonomy()
+    for case_name, entry in taxonomy.items():
         if entry["scenario_kind"] is not None:
             assert entry["entity"] == "scenario", (
                 f"{case_name}: scenario_kind={entry['scenario_kind']!r} but "
@@ -81,8 +94,7 @@ def test_scenario_kind_only_set_for_scenario_entities():
 
 
 def test_variant_of_names_a_real_case():
-    gt = _load_ground_truth()
-    taxonomy = gt["taxonomy"]
+    taxonomy = _load_taxonomy()
     for case_name, entry in taxonomy.items():
         variant_of = entry["variant_of"]
         if variant_of is not None:
@@ -102,8 +114,8 @@ def test_relation_type_agrees_with_variant_of_and_axis():
     "duplicate" exactly when variant_of is set with no axis, "variant"
     exactly when variant_of is set with an axis. relation_axis itself is
     null on every case that isn't a "variant"."""
-    gt = _load_ground_truth()
-    for case_name, entry in gt["taxonomy"].items():
+    taxonomy = _load_taxonomy()
+    for case_name, entry in taxonomy.items():
         variant_of = entry["variant_of"]
         relation_type = entry["relation_type"]
         relation_axis = entry["relation_axis"]
@@ -132,7 +144,8 @@ def test_operation_is_audit_only_for_audit_mode_cases():
     field against its own source of truth rather than just its enum."""
     gt = _load_ground_truth()
     verdicts = gt["verdicts"]
-    for case_name, entry in gt["taxonomy"].items():
+    taxonomy = _load_taxonomy()
+    for case_name, entry in taxonomy.items():
         assert entry["operation"] in ("compare", "audit"), (
             f"{case_name}: unexpected operation={entry['operation']!r}"
         )
@@ -144,8 +157,8 @@ def test_operation_is_audit_only_for_audit_mode_cases():
 
 
 def test_related_rules_are_non_empty_strings():
-    gt = _load_ground_truth()
-    for case_name, entry in gt["taxonomy"].items():
+    taxonomy = _load_taxonomy()
+    for case_name, entry in taxonomy.items():
         for rule in entry["related_rules"]:
             assert isinstance(rule, str) and rule, case_name
 
@@ -155,8 +168,8 @@ def test_every_rule_entity_has_a_rule_slug_scenarios_do_not():
     depend on whether a sibling duplicate happens to have been found yet
     (see _default_rule_slug's docstring) -- a scenario composes rules via
     related_rules instead and carries no rule_slug of its own."""
-    gt = _load_ground_truth()
-    for case_name, entry in gt["taxonomy"].items():
+    taxonomy = _load_taxonomy()
+    for case_name, entry in taxonomy.items():
         if entry["entity"] == "rule":
             assert entry["rule_slug"], f"{case_name}: rule entity with no rule_slug"
         else:
@@ -170,8 +183,7 @@ def test_rule_slug_unique_outside_confirmed_variant_families():
     relationship -- an accidental slug collision (e.g. two differently-named
     cases mechanically deriving the same slug) would otherwise silently
     merge two unrelated rules."""
-    gt = _load_ground_truth()
-    taxonomy = gt["taxonomy"]
+    taxonomy = _load_taxonomy()
     by_slug: dict[str, list[str]] = {}
     for case_name, entry in taxonomy.items():
         if entry["entity"] != "rule":
@@ -203,8 +215,9 @@ def test_a_scenario_with_no_related_rules_is_rejected():
     """
     gen = _load_gen()
     gt = _load_ground_truth()
+    taxonomy = _load_taxonomy()
     scenarios = [
-        name for name, entry in gt["taxonomy"].items() if entry["entity"] == "scenario"
+        name for name, entry in taxonomy.items() if entry["entity"] == "scenario"
     ]
     assert scenarios
     for name in scenarios:
@@ -243,3 +256,35 @@ def test_an_unclassified_case_fails_build_taxonomy_instead_of_defaulting():
     gt["verdicts"]["case999_unclassified"] = next(iter(gt["verdicts"].values()))
     with pytest.raises(ValueError, match="case999_unclassified"):
         gen.build_taxonomy(gt)
+
+
+def test_every_case_has_at_least_one_subject():
+    """"What is left" item 2: `subjects` is the one field this taxonomy
+    generates from a hand-authored manifest (catalog/catalog_subjects.yaml)
+    rather than deriving mechanically -- a case with no subject would be the
+    same silent-default gap catalog_classification.py's own docstring closes
+    for entity/ecosystem, so this pins that every case in the generated
+    taxonomy actually carries at least one."""
+    taxonomy = _load_taxonomy()
+    for case_name, entry in taxonomy.items():
+        assert entry["subjects"], f"{case_name}: no subjects assigned"
+        assert isinstance(entry["subjects"], list)
+        for subject in entry["subjects"]:
+            assert isinstance(subject, str) and subject
+
+
+def test_subjects_are_sourced_from_catalog_subjects_manifest():
+    """Cross-checks the taxonomy's own `subjects` field against a fresh read
+    of catalog/catalog_subjects.yaml via catalog_subjects.py, so a drift
+    between the manifest and the generated taxonomy (e.g. a stale case in
+    the manifest that a rename left dangling) fails here too, not only via
+    `gen_catalog_taxonomy.py --check`."""
+    if str(REPO_DIR / "scripts") not in sys.path:
+        sys.path.insert(0, str(REPO_DIR / "scripts"))
+    import catalog_subjects
+
+    subjects = catalog_subjects.load_subjects()
+    expected_by_case = catalog_subjects.case_subjects(subjects)
+    taxonomy = _load_taxonomy()
+    for case_name, entry in taxonomy.items():
+        assert entry["subjects"] == expected_by_case.get(case_name, []), case_name

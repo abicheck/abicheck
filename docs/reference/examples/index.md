@@ -54,6 +54,11 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 Several cases demonstrate the same atomic compatibility rule under a different condition (variant) or restate it with no distinguishing condition (duplicate); a scenario composes several rules at once. See [Rule families](by-rule/index.md) for the complete grouping, and [Rule coverage](../../contribute/catalog-coverage.md) for the aggregate rule/variant/duplicate counts.
 
 
+## Browse by subject
+
+A **subject** is a reader-facing compatibility pattern a maintainer would actually search for -- e.g. "leaked internal types" for case74/75/76/77's four different embedding mechanisms -- rather than a projection of which detector owns the underlying `ChangeKind` the way `topics` is. See [Subjects](by-subject/index.md) for the complete list.
+
+
 ## Browse by ecosystem
 
 | Ecosystem | Cases |

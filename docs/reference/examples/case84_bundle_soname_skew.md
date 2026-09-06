@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `bundle_soname_skew` |
 | **Source files** | `catalog/cases/case84_bundle_soname_skew/` |
 | **Related rules** | [`soname-inconsistent`](by-rule/soname-inconsistent.md) |
+| **Subject** | [Multi-library bundle topology](by-subject/multi-library-bundle-topology.md) |
 
 **Category:** Bundle / cross-artifact ABI | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +141,4 @@ per-file diff.
 - `onedal_dpc.c`
 - `onedal_thread.c`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md) · [Subject: Multi-library bundle topology](by-subject/multi-library-bundle-topology.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_language_linkage_changed` |
 | **Source files** | `catalog/cases/case66_language_linkage_changed/` |
 | **Rule family** | [`language-linkage-changed`](by-rule/language-linkage-changed.md) |
+| **Subject** | [Calling convention and integer-model changes](by-subject/calling-convention-and-integer-model-changes.md) |
 | **Known kind gap** | `func_language_linkage_changed` — verdict is correct; see note below |
 
 **Category:** Function ABI | **Verdict:** 🔴 BREAKING
@@ -155,4 +156,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Language linkage changed](by-rule/language-linkage-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Language linkage changed](by-rule/language-linkage-changed.md) · [Subject: Calling convention and integer-model changes](by-subject/calling-convention-and-integer-model-changes.md)._

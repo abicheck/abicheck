@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `enum_member_removed` |
 | **Source files** | `catalog/cases/case19_enum_member_removed/` |
 | **Rule family** | [`enum-member-removed`](by-rule/enum-member-removed.md) |
+| **Subject** | [Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -119,4 +120,4 @@ codes.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enumerator removed](by-rule/enum-member-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enumerator removed](by-rule/enum-member-removed.md) · [Subject: Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md)._

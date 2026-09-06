@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `vtable_thunk_offset_changed` |
 | **Source files** | `catalog/cases/case172_vtable_thunk_offset_changed/` |
 | **Rule family** | [`vtable-thunk-offset-changed`](by-rule/vtable-thunk-offset-changed.md) |
+| **Subject** | [Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md) |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
@@ -138,4 +139,4 @@ function's name or signature.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Vtable thunk offset changed](by-rule/vtable-thunk-offset-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Vtable thunk offset changed](by-rule/vtable-thunk-offset-changed.md) · [Subject: Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md)._

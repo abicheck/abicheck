@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `catalog/cases/case184_internal_enum_churn_scoped/` |
 | **Rule family** | [`internal-enum-churn-scoped`](by-rule/internal-enum-churn-scoped.md) |
+| **Subject** | [Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md) |
 
 **Category:** Public-surface scoping (ADR-024) | **Verdict:** ✅ NO_CHANGE
 
@@ -137,4 +138,4 @@ cross-tool reproduction is included here.
 - `v2.h`
 - `v2_internal.h`
 
-_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal enumeration churn, out of contract](by-rule/internal-enum-churn-scoped.md)._
+_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Internal enumeration churn, out of contract](by-rule/internal-enum-churn-scoped.md) · [Subject: Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md)._

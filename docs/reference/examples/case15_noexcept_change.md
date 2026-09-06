@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `runtime_floor_raised` |
 | **Source files** | `catalog/cases/case15_noexcept_change/` |
 | **Rule family** | [`noexcept-change`](by-rule/noexcept-change.md) |
+| **Subject** | [Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md) |
 
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -185,4 +186,4 @@ echo "exit: $?"   # → 0 — abidiff misses this change entirely
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: noexcept specification changed](by-rule/noexcept-change.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: noexcept specification changed](by-rule/noexcept-change.md) · [Subject: Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md)._

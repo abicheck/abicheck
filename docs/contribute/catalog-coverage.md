@@ -2,7 +2,7 @@
 
 # Catalog coverage by dimension
 
-Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the calibration catalog under `examples/` is 197 `caseNN_*` fixtures, but not 197 independent ABI/API concepts -- several are variants of the same rule, or scenarios composing rules already counted elsewhere. This page reports the catalog along five independent dimensions instead of one flat case count, so "three demonstrations of one rule" reads as "1 rule, 3 cases (1 canonical + 2 variants)" rather than "3 ABI concepts". Regenerate with `python scripts/gen_catalog_coverage_report.py` after any `ground_truth.json` change.
+Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the calibration catalog under `examples/` is 197 `caseNN_*` fixtures, but not 197 independent ABI/API concepts -- several are variants of the same rule, or scenarios composing rules already counted elsewhere. This page reports the catalog along five independent dimensions instead of one flat case count, so "three demonstrations of one rule" reads as "1 rule, 3 cases (1 canonical + 2 variants)" rather than "3 ABI concepts". Regenerate with `python scripts/gen_catalog_coverage_report.py` after any `ground_truth.json`, `catalog/taxonomy.json`, or `catalog/catalog_classification.yaml` change.
 
 ## Rule coverage
 
@@ -71,11 +71,16 @@ Every case, rule or scenario, tagged with the real-world ecosystem it models (`g
 
 ## Workflow coverage
 
-**2 workflow examples** so far, out of the 8 task-oriented workflows Phase 5 of the examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) targets: compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions.
+**7 workflow examples** so far, out of the 7 task-oriented workflows Phase 5 of the examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) targets: compare one library, audit a release, multi-library project, evidence depth (including build/source evidence), Python API, suppressions, GitHub Actions.
 
 | Workflow | Task | Platforms | Executed steps |
 |---|---|---|---|
 | `audit-release` | Did I accidentally ship an undocumented export consumers could start depending on? | linux, macos | 2 |
+| `compare-project` | Did removing a function from one library in my project break a sibling library that depends on it? | linux, macos | 6 |
 | `compare-release` | Did my next release break anything for existing consumers? | linux, macos | 3 |
+| `evidence-depth` | What does the evidence I give abicheck actually let it see, and what does each additional layer add? | linux, macos | 7 |
+| `github-actions` | How do I run this check automatically on every pull request, without anyone remembering to run it (or writing a CI script myself)? | linux, macos | 3 |
+| `python-api` | I want to run this check from my own build script or test suite, not by shelling out to the CLI -- how do I call abicheck from Python? | linux, macos | 3 |
+| `suppressions` | I renamed a function on purpose -- how do I stop CI from failing on it, without turning off detection for everything else? | linux, macos | 4 |
 
 Each row is a `workflow.yaml` that `validation/scripts/run_workflow_examples.py` runs end to end -- the documented commands themselves, in a scratch copy, checked against the exit code and the verdict/change kinds the walkthrough claims. A directory without that contract is a hard error rather than a free point of coverage.

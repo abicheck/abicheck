@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the `taxonomy` block of catalog/ground_truth.json.
+"""Generate catalog/taxonomy.json.
 
 Phase 1 (taxonomy metadata) and Phase 2 (rule/variant classification) of
 the examples/catalog split (see
@@ -16,11 +16,17 @@ enum-member-value-changed rule under public-surface scoping) sit in the
 catalog as though they were three independent compatibility concepts.
 
 This script does not move or rename anything -- it is additive metadata only,
-generated into a `taxonomy` object in `ground_truth.json` (a sibling of the
-existing `verdicts` object, never merged into it, so every existing consumer
-of `verdicts` is unaffected). Each entry classifies its case along axes that
-are orthogonal to implementation language and independent of the physical
-`catalog/cases/caseNN_*/` directory layout:
+generated into `catalog/taxonomy.json`, a sibling *manifest* of
+`ground_truth.json` rather than a key inside it (examples-catalog-split.md's
+"What is left" item 5 -- Phase 1 originally wrote a `taxonomy` object into
+`ground_truth.json` itself, sibling of `verdicts`; splitting it into its own
+file means a taxonomy-only edit no longer changes `ground_truth.json`'s own
+bytes, so it can no longer perturb the whole-file digest
+`benchmark_comparison._ground_truth_digest()` pins the frozen abidiff/ABICC
+competitor-result cache to). Every existing consumer of `ground_truth.json`'s
+`verdicts` object is unaffected either way. Each entry classifies its case
+along axes that are orthogonal to implementation language and independent of
+the physical `catalog/cases/caseNN_*/` directory layout:
 
     entity          "rule" | "scenario"
     scenario_kind   set only for entity == "scenario":
@@ -74,6 +80,17 @@ are orthogonal to implementation language and independent of the physical
                      release-evaluation operation does this case exercise"
                      doesn't have to be inferred from either the entity or
                      the "audit" topics entry.
+    subjects        hand-authored, reader-facing semantic groupings from
+                     `catalog/catalog_subjects.yaml` (via `catalog_subjects.py`)
+                     -- "What is left" item 2 of the examples-catalog-split
+                     plan. Unlike every other field above, this is NOT a
+                     projection of `topics`/`rule_slug`/`ecosystem`: it is a
+                     genuinely new, bottom-up classification of what pattern
+                     a maintainer would actually search for (e.g. "leaked
+                     internal types" for case74/75/76/77's four different
+                     embedding mechanisms), independent of which detector
+                     owns the underlying `ChangeKind`. A case may carry more
+                     than one subject slug.
 
 Run `python scripts/gen_catalog_taxonomy.py` to regenerate; `--check` fails
 (exit 1) if regeneration would change the file, without writing anything.
@@ -97,10 +114,12 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog_classification  # noqa: E402
 import catalog_rule_registry  # noqa: E402
+import catalog_subjects  # noqa: E402
 import example_catalog  # noqa: E402
 
 EXAMPLES = example_catalog.CASES_DIR
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
+TAXONOMY_PATH = example_catalog.TAXONOMY_PATH
 
 # ---------------------------------------------------------------------------
 # Per-case entity/scenario_kind/ecosystem classification is declarative --
@@ -559,6 +578,16 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             + "\n".join(f"  - {m}" for m in classification_errors)
         )
 
+    subjects = catalog_subjects.load_subjects()
+    subjects_errors = catalog_subjects.validate_subjects(subjects, verdicts.keys())
+    if subjects_errors:
+        raise ValueError(
+            f"{catalog_subjects.SUBJECTS_PATH} disagrees with "
+            "ground_truth.json['verdicts']:\n"
+            + "\n".join(f"  - {m}" for m in subjects_errors)
+        )
+    subjects_by_case = catalog_subjects.case_subjects(subjects)
+
     taxonomy: dict[str, dict[str, object]] = {}
     for case_name, entry in verdicts.items():
         case_dir = example_catalog.case_dir(case_name)
@@ -632,6 +661,7 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             "variant_of": variant_of,
             "relation_type": relation_type,
             "relation_axis": relation_axis,
+            "subjects": subjects_by_case.get(case_name, []),
         }
     # A scenario is *defined* as several rules composed into one realistic
     # problem, so a scenario with no `related_rules` is a contradiction the
@@ -673,7 +703,7 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="fail if regeneration would change ground_truth.json['taxonomy']",
+        help="fail if regeneration would change taxonomy.json",
     )
     args = parser.parse_args()
 
@@ -686,7 +716,7 @@ def main() -> int:
     # Every rule slug the freshly-built taxonomy names must resolve to a
     # definition in catalog/catalog_rules.yaml, and every definition there
     # must be used. Checked against `new_taxonomy` rather than the committed
-    # block so a slug typo introduced by this very run fails before it is
+    # file so a slug typo introduced by this very run fails before it is
     # written to disk.
     registry_errors = catalog_rule_registry.validate_registry(new_taxonomy)
     if registry_errors:
@@ -698,24 +728,33 @@ def main() -> int:
             print(f"  - {message}", file=sys.stderr)
         return 1
 
+    # `taxonomy.json` is a sibling manifest of ground_truth.json, not a key
+    # inside it (examples-catalog-split.md's "What is left" item 5) -- kept
+    # separate so a taxonomy-only edit never perturbs ground_truth.json's own
+    # bytes, and therefore never perturbs the whole-file digest
+    # `benchmark_comparison._ground_truth_digest()` pins the frozen
+    # abidiff/ABICC competitor-result cache to.
+    current_taxonomy: dict[str, dict[str, object]] | None = None
+    if TAXONOMY_PATH.exists():
+        current_taxonomy = json.loads(TAXONOMY_PATH.read_text())
+
     if args.check:
-        if gt.get("taxonomy") != new_taxonomy:
+        if current_taxonomy != new_taxonomy:
             print(
-                "ground_truth.json['taxonomy'] is stale -- run "
+                f"{TAXONOMY_PATH} is stale -- run "
                 "`python scripts/gen_catalog_taxonomy.py` and commit the result.",
                 file=sys.stderr,
             )
             return 1
-        print("ground_truth.json['taxonomy'] is up to date.")
+        print(f"{TAXONOMY_PATH} is up to date.")
         return 0
 
-    if gt.get("taxonomy") == new_taxonomy:
-        print("ground_truth.json['taxonomy'] already up to date; nothing to do.")
+    if current_taxonomy == new_taxonomy:
+        print(f"{TAXONOMY_PATH} already up to date; nothing to do.")
         return 0
 
-    gt["taxonomy"] = new_taxonomy
-    GROUND_TRUTH.write_text(json.dumps(gt, indent=1) + "\n")
-    print(f"Wrote taxonomy for {len(new_taxonomy)} cases to {GROUND_TRUTH}.")
+    TAXONOMY_PATH.write_text(json.dumps(new_taxonomy, indent=1) + "\n")
+    print(f"Wrote taxonomy for {len(new_taxonomy)} cases to {TAXONOMY_PATH}.")
     return 0
 
 

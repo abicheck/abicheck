@@ -709,8 +709,18 @@ from typing import Any
 #:       ``scope``, and, under the severity scheme, ``exit_code``/
 #:       ``exit_code_scheme``), purely informational. ``used_by``/
 #:       ``required_symbol_contract`` are unchanged.
+#: 3.1 -- E-S2 (docs/contribute/plans/cli-cleanup-phase-two.md, Block 5):
+#:      new optional top-level ``comparability_assurance`` object, present
+#:      under the same condition as the existing ``assurance`` key (a
+#:      genuine ``ComparabilityMismatch`` bypassed via
+#:      ``--diagnostic-comparison``) -- one entry per
+#:      ``comparability.COMPARABILITY_DIMENSIONS`` name (``symbol``,
+#:      ``declaration``, ``layout``, ``runtime``, ``source``), each
+#:      ``"unverified"`` or ``"trusted"``. Additive only: ``assurance``
+#:      itself is unchanged, and every existing consumer of this report is
+#:      unaffected.
 #:
-#: 3.1 -- ADR-067 C-S2 (bundle/aggregate/reclassification/scope disposition
+#: 3.2 -- ADR-067 C-S2 (bundle/aggregate/reclassification/scope disposition
 #:       parity): ``disposition_audit`` gains three additive fields --
 #:       ``reclassified_total``/``reclassifications`` (a ``reclassify:``
 #:       rule's overlay, now actually recorded through the ledger --
@@ -725,8 +735,12 @@ from typing import Any
 #:       ``report.disposition_audit.fold_disposition_audits``) --
 #:       unconditional, the same "never dropped, only collapsed" rule the
 #:       scalar block follows. Additive only: no existing key changes shape
-#:       or meaning, and no verdict, gate, or exit code moves.
-REPORT_SCHEMA_VERSION = "3.1"
+#:       or meaning, and no verdict, gate, or exit code moves. Renumbered
+#:       from a conflicting 3.1 when the origin/main merge claimed that
+#:       version first for E-S2's ``comparability_assurance`` block (same
+#:       "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/
+#:       2.49/2.51/2.53 entries above).
+REPORT_SCHEMA_VERSION = "3.2"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

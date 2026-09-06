@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `unversioned_exported_symbol` |
 | **Source files** | `catalog/cases/case145_audit_unversioned_export/` |
 | **Rule family** | [`audit-unversioned-export`](by-rule/audit-unversioned-export.md) |
+| **Subject** | [Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -105,4 +106,4 @@ isn't something `abidiff`/`abi-compliance-checker` do.
 
 - `snapshot.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Exported symbol carries no version](by-rule/audit-unversioned-export.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Exported symbol carries no version](by-rule/audit-unversioned-export.md) · [Subject: Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_vtable_changed` |
 | **Source files** | `catalog/cases/case09_cpp_vtable/` |
 | **Rule family** | [`cpp-vtable`](by-rule/cpp-vtable.md) |
+| **Subject** | [Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md) |
 
 **Category:** C++ ABI | **Verdict:** 🔴 BREAKING
 
@@ -133,4 +134,4 @@ echo "exit: $?"   # → 4
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual table layout changed](by-rule/cpp-vtable.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual table layout changed](by-rule/cpp-vtable.md) · [Subject: Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md)._

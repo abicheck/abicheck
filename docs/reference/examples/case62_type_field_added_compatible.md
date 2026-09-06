@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `catalog/cases/case62_type_field_added_compatible/` |
 | **Rule family** | [`type-field-added-compatible`](by-rule/type-field-added-compatible.md) |
+| **Subject** | [Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md) |
 
 **Category:** Addition | **Verdict:** 🟢 COMPATIBLE
 
@@ -127,4 +128,4 @@ without breaking callers.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Field added behind an accessor](by-rule/type-field-added-compatible.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Field added behind an accessor](by-rule/type-field-added-compatible.md) · [Subject: Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md)._

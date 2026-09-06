@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `catalog/cases/case17_template_abi/` |
 | **Rule family** | [`template-abi`](by-rule/template-abi.md) |
+| **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -148,4 +149,4 @@ echo "exit: $?"   # → 4 (with -g / DWARF present)
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Template instantiation layout changed](by-rule/template-abi.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Template instantiation layout changed](by-rule/template-abi.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

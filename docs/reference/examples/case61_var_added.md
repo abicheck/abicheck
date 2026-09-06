@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `var_added` |
 | **Source files** | `catalog/cases/case61_var_added/` |
 | **Rule family** | [`var-added`](by-rule/var-added.md) |
+| **Subject** | [Exported variable and data-object changes](by-subject/exported-variable-and-data-object-changes.md) |
 
 **Category:** Addition | **Verdict:** 🟢 COMPATIBLE
 
@@ -99,4 +100,4 @@ once shipped.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Exported variable added](by-rule/var-added.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Exported variable added](by-rule/var-added.md) · [Subject: Exported variable and data-object changes](by-subject/exported-variable-and-data-object-changes.md)._

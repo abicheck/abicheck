@@ -12,6 +12,7 @@
 | **Source files** | `catalog/cases/case110_concurrent_unordered_map_api_drift/` |
 | **Ecosystem** | [oneTBB](by-ecosystem/onetbb.md) |
 | **Related rules** | [`compat-addition`](by-rule/compat-addition.md), [`exported-function-removed`](by-rule/exported-function-removed.md) |
+| **Subject** | [Removed types and classes](by-subject/removed-types-and-classes.md) |
 
 **Category:** ABI + source break / regression suite | **Verdict:** 🔴 BREAKING
 
@@ -127,4 +128,4 @@ hint parameters were dropped or reordered between releases.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md) · [Subject: Removed types and classes](by-subject/removed-types-and-classes.md)._

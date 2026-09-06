@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `public_macro_removed` |
 | **Source files** | `catalog/cases/case156_public_macro_removed/` |
 | **Rule family** | [`public-macro-removed`](by-rule/public-macro-removed.md) |
+| **Subject** | [Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md) |
 
 **Category:** API Break | **Verdict:** 🟠 API_BREAK
 
@@ -128,4 +129,4 @@ the macro-removal fact at all.
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public macro removed](by-rule/public-macro-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Public macro removed](by-rule/public-macro-removed.md) · [Subject: Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md)._

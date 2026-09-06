@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_field_added`, `type_field_offset_changed`, `type_size_changed` |
 | **Source files** | `catalog/cases/case77_detail_templated_base_changed/` |
 | **Rule family** | [`detail-templated-base-changed`](by-rule/detail-templated-base-changed.md) |
+| **Subject** | [Leaked internal types](by-subject/leaked-internal-types.md) |
 
 **Category:** Internal Leak | **Verdict:** 🔴 BREAKING
 
@@ -155,4 +156,4 @@ layout of every shipped algorithm descriptor built on it.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal templated base leaks](by-rule/detail-templated-base-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal templated base leaks](by-rule/detail-templated-base-changed.md) · [Subject: Leaked internal types](by-subject/leaked-internal-types.md)._

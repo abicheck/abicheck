@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `bundle_intra_dep_removed` |
 | **Source files** | `catalog/cases/case90_bundle_intra_dep_removed/` |
 | **Related rules** | [`exported-function-removed`](by-rule/exported-function-removed.md) |
+| **Subject** | [Multi-library bundle topology](by-subject/multi-library-bundle-topology.md) |
 
 **Category:** Bundle / cross-library | **Verdict:** 🔴 BREAKING
 (per-library: `libalgo.so` COMPATIBLE, `libcore.so` BREAKING)
@@ -147,4 +148,4 @@ The bundle-level verdict above is the cohort's. Each library in the cohort is se
 - `old/`
 - `CMakeLists.txt`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md) · [Subject: Multi-library bundle topology](by-subject/multi-library-bundle-topology.md)._

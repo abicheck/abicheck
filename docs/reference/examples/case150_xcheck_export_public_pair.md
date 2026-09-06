@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `exported_not_public`, `public_not_exported` |
 | **Source files** | `catalog/cases/case150_xcheck_export_public_pair/` |
 | **Related rules** | [`audit-accidental-export`](by-rule/audit-accidental-export.md), [`audit-public-not-exported`](by-rule/audit-public-not-exported.md) |
+| **Subject** | [Export/declaration mismatches](by-subject/export-declaration-mismatches.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -117,4 +118,4 @@ own headers).
 
 - `snapshot.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Subject: Export/declaration mismatches](by-subject/export-declaration-mismatches.md)._

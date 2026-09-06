@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `vtable_slot_count_changed` |
 | **Source files** | `catalog/cases/case142_vtable_slot_count_binary_only/` |
 | **Rule family** | [`vtable-slot-count-binary-only`](by-rule/vtable-slot-count-binary-only.md) |
+| **Subject** | [Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md) |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
@@ -145,4 +146,4 @@ place.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Vtable slot count changed, binary evidence only](by-rule/vtable-slot-count-binary-only.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Vtable slot count changed, binary evidence only](by-rule/vtable-slot-count-binary-only.md) · [Subject: Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md)._

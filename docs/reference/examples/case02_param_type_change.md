@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_params_changed` |
 | **Source files** | `catalog/cases/case02_param_type_change/` |
 | **Rule family** | [`param-type-change`](by-rule/param-type-change.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -118,4 +119,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Parameter type changed](by-rule/param-type-change.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Parameter type changed](by-rule/param-type-change.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

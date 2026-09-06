@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `atomic_qualifier_changed` |
 | **Source files** | `catalog/cases/case116_atomic_qualifier_changed/` |
 | **Rule family** | [`atomic-qualifier-changed`](by-rule/atomic-qualifier-changed.md) |
+| **Subject** | [Modern C/C++ standard-feature hazards](by-subject/modern-cpp-standard-feature-hazards.md) |
 
 **Category:** Modern C/C++ Contract | **Verdict:** 🔴 BREAKING
 
@@ -142,4 +143,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Atomic qualifier changed](by-rule/atomic-qualifier-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Atomic qualifier changed](by-rule/atomic-qualifier-changed.md) · [Subject: Modern C/C++ standard-feature hazards](by-subject/modern-cpp-standard-feature-hazards.md)._

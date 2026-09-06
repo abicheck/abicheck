@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_virtual_became_pure` |
 | **Source files** | `catalog/cases/case23_pure_virtual_added/` |
 | **Rule family** | [`pure-virtual-added`](by-rule/pure-virtual-added.md) |
+| **Subject** | [Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md) |
 
 **Verdict:** 🔴 BREAKING
 **abicheck verdict: BREAKING**
@@ -137,4 +138,4 @@ Became pure virtual: direct instantiation causes SIGABRT
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual function became pure](by-rule/pure-virtual-added.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual function became pure](by-rule/pure-virtual-added.md) · [Subject: Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md)._

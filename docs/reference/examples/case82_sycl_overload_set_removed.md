@@ -12,6 +12,7 @@
 | **Source files** | `catalog/cases/case82_sycl_overload_set_removed/` |
 | **Ecosystem** | [SYCL](by-ecosystem/sycl.md) |
 | **Related rules** | [`exported-function-removed`](by-rule/exported-function-removed.md), [`exported-type-removed`](by-rule/exported-type-removed.md), [`overload-set-removed`](by-rule/overload-set-removed.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Overload-Family ABI | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +141,4 @@ typically 30-80 symbols.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: SYCL](by-ecosystem/sycl.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: SYCL](by-ecosystem/sycl.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

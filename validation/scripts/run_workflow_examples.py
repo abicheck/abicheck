@@ -153,24 +153,75 @@ def _run(argv: list[str] | tuple[str, ...], cwd: Path, timeout: int) -> RunResul
     return RunResult(returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 
 
+def _resolve_json_path(payload: object, path: str) -> tuple[object, bool]:
+    """Walk a dotted `expect_json` key, projecting through `[]` list segments.
+
+    A plain key (`"verdict"`) is a single `dict.get`. A dotted key
+    (`"suppression.suppressed_count"`) walks nested dicts. A `[]` segment
+    (`"suppression.suppressed_changes[].symbol"`) resolves the list at the
+    segment before it, then projects the remaining path out of every item in
+    that list -- so a nested field inside a report's own list-of-findings
+    shape (suppressions, changes, ...) is reachable without a bespoke
+    special case per field, the way `_change_kinds` below needed one before
+    this existed. A remainder that itself contains another `[]` segment
+    (`"groups[].changes[].symbol"`) is flattened one level rather than
+    nested -- each outer item's own projection is already a list, and
+    appending it whole would produce `[["to_rgb"]]` instead of `["to_rgb"]`,
+    silently failing every containment check downstream. Returns
+    `(value, resolved)`; `resolved` is `False` when a segment's container is
+    missing or the wrong shape, distinct from a present-but-`None` value.
+    """
+    segments = path.split(".")
+    current: object = payload
+    for i, segment in enumerate(segments):
+        if segment.endswith("[]"):
+            key = segment[:-2]
+            if not isinstance(current, dict) or key not in current:
+                return None, False
+            items = current[key]
+            if not isinstance(items, list):
+                return None, False
+            remainder = ".".join(segments[i + 1 :])
+            nested = "[]" in remainder
+            projected = []
+            for item in items:
+                value, ok = (
+                    _resolve_json_path(item, remainder) if remainder else (item, True)
+                )
+                if not ok:
+                    continue
+                if nested and isinstance(value, list):
+                    projected.extend(value)
+                else:
+                    projected.append(value)
+            return projected, True
+        if not isinstance(current, dict) or segment not in current:
+            return None, False
+        current = current[segment]
+    return current, True
+
+
 def _check_json(payload: object, expected: dict[str, object]) -> list[str]:
     """Compare a report against the manifest's expectations.
 
     A list expectation is containment, not equality: a walkthrough names the
     finding it is teaching, and pinning the complete kind set would make
-    every unrelated detector improvement fail an unrelated tutorial.
+    every unrelated detector improvement fail an unrelated tutorial. A key
+    may be a dotted/`[]`-projected path (see `_resolve_json_path`) to reach a
+    field nested inside the report, e.g. a suppression record or a per-change
+    detail, without flattening the whole report first.
     """
     failures: list[str] = []
     if not isinstance(payload, dict):
         return ["report is not a JSON object"]
     for key, want in expected.items():
-        got = payload.get(key)
+        got, resolved = _resolve_json_path(payload, key)
         if isinstance(want, list):
-            got_items = got if isinstance(got, list) else []
+            got_items = got if resolved and isinstance(got, list) else []
             missing = [item for item in want if item not in got_items]
             if missing:
                 failures.append(f"{key}: missing {missing} (got {got_items})")
-        elif got != want:
+        elif not resolved or got != want:
             failures.append(f"{key}: expected {want!r}, got {got!r}")
     return failures
 

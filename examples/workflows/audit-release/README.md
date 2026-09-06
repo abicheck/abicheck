@@ -38,7 +38,7 @@ or link against it, whether the author meant to publish it or not.
 cd examples/workflows/audit-release
 
 # Build the release as a shared library
-gcc -shared -fPIC -g -Iinclude greet.c -o libgreet.so
+python3 build_shared_lib.py -fPIC -g -Iinclude greet.c -o libgreet.so
 
 # Audit it: no baseline needed -- just check that everything the ELF
 # export table exposes is something the public headers actually declare

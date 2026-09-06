@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `var_became_const` |
 | **Source files** | `catalog/cases/case39_var_const/` |
 | **Rule family** | [`var-const`](by-rule/var-const.md) |
+| **Subject** | [Exported variable and data-object changes](by-subject/exported-variable-and-data-object-changes.md) |
 
 **Category:** Global Variable Qualifiers | **Verdict:** 🔴 BREAKING
 
@@ -149,4 +150,4 @@ echo "exit: $?"   # → 12 (detected at binary level)
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported variable became const](by-rule/var-const.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported variable became const](by-rule/var-const.md) · [Subject: Exported variable and data-object changes](by-subject/exported-variable-and-data-object-changes.md)._

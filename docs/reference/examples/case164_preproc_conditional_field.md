@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `catalog/cases/case164_preproc_conditional_field/` |
 | **Rule family** | [`preproc-conditional-field`](by-rule/preproc-conditional-field.md) |
+| **Subject** | [Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md) |
 
 **Category:** Build-Context Reconciliation (ADR-039) | **Verdict:** ✅ NO_CHANGE
 (only with `--reconcile-build-context`; a context-free header read
@@ -130,4 +131,4 @@ tool, so there is nothing to reproduce with them here.
 - `v1.abi.json`
 - `v2.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Preprocessor-conditional field](by-rule/preproc-conditional-field.md)._
+_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Preprocessor-conditional field](by-rule/preproc-conditional-field.md) · [Subject: Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md)._

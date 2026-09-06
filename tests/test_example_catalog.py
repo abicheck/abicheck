@@ -48,6 +48,8 @@ def test_examples_dir_matches_real_repo_layout():
     assert catalog.CASES_DIR.is_dir()
     assert catalog.GROUND_TRUTH_PATH == REPO_DIR / "catalog" / "ground_truth.json"
     assert catalog.GROUND_TRUTH_PATH.is_file()
+    assert catalog.TAXONOMY_PATH == REPO_DIR / "catalog" / "taxonomy.json"
+    assert catalog.TAXONOMY_PATH.is_file()
 
 
 def test_case_dir_is_byte_identical_to_the_hand_rolled_join():
@@ -84,4 +86,15 @@ def test_load_ground_truth_round_trips_the_real_file():
     catalog = _catalog()
     gt = catalog.load_ground_truth()
     assert "verdicts" in gt
-    assert "taxonomy" in gt
+    # `taxonomy` was split out into its own sibling manifest
+    # (examples-catalog-split.md's "What is left" item 5) so a
+    # taxonomy-only edit no longer changes ground_truth.json's own bytes --
+    # it must not reappear here as a ground_truth.json key.
+    assert "taxonomy" not in gt
+
+
+def test_load_taxonomy_round_trips_the_real_file():
+    catalog = _catalog()
+    gt = catalog.load_ground_truth()
+    taxonomy = catalog.load_taxonomy()
+    assert set(taxonomy) == set(gt["verdicts"])

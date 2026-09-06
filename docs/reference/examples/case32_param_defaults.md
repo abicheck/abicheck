@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `param_default_value_changed`, `param_default_value_removed` |
 | **Source files** | `catalog/cases/case32_param_defaults/` |
 | **Rule family** | [`param-defaults`](by-rule/param-defaults.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** C++ Defaults | **Verdict:** 🟠 API_BREAK (binary compatible)
 
@@ -164,4 +165,4 @@ echo "exit: $?"   # → 0 (no binary ABI change; abidiff doesn't read header
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Parameter default value changed](by-rule/param-defaults.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Parameter default value changed](by-rule/param-defaults.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

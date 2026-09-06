@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `enum_member_renamed` |
 | **Source files** | `catalog/cases/case31_enum_rename/` |
 | **Rule family** | [`enum-rename`](by-rule/enum-rename.md) |
+| **Subject** | [Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md) |
 
 **Category:** Enum API | **Verdict:** 🟠 API_BREAK (binary compatible)
 
@@ -150,4 +151,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Enumerator renamed](by-rule/enum-rename.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Enumerator renamed](by-rule/enum-rename.md) · [Subject: Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md)._

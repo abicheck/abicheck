@@ -62,7 +62,24 @@ from .comparability_sequences import (
     _include_sequence_is_additive_owned_growth,
     _scope_newly_added_headers,
 )
-from .model import AbiSnapshot, ExtractionContract
+from .model import AbiSnapshot, ExtractionContract, FactStatus
+
+
+def _toolchain_identity_status(
+    contract: ExtractionContract | None,
+) -> FactStatus | None:
+    """The typed :class:`FactStatus` behind *contract*'s own
+    ``compiler_identity_status`` string (E-S1), or ``None`` when there is no
+    contract, no recorded status, or an unrecognized/corrupt value -- the
+    same fail-safe-to-"no assertion" degradation
+    :func:`extraction_contract_from_dict` already applies on load.
+    """
+    if contract is None or contract.compiler_identity_status is None:
+        return None
+    try:
+        return FactStatus(contract.compiler_identity_status)
+    except ValueError:
+        return None
 
 
 def _platform_identity_confirmed(
@@ -316,9 +333,41 @@ def _check_profile_fingerprint_comparable(
     axis for that ordinary depth difference alone. Returns the mismatch that
     would raise :class:`ProfileMismatchError`, or ``None`` when this axis is
     comparable.
+
+    **Toolchain-identity FAILED check (E-S1), run before anything else in
+    this function, unconditionally:** a compiler-probe failure on either
+    side (``ExtractionContract.compiler_identity_status ==
+    FactStatus.FAILED.value``) always refuses the comparison, regardless of
+    whether ``profile_fingerprint``/``profile_fields["compiler_family"]``
+    happen to still agree. A failed probe collapses
+    ``profile_fields["compiler_family"]`` to the same empty string a probe
+    that was simply never attempted produces (see
+    ``dumper_toolchain._compiler_family_from_toolchain``) — so two
+    independent failed probes on a genuinely mismatched GCC/Clang pair
+    would otherwise fingerprint identically and fall straight through the
+    ``profile_fingerprint == ...`` shortcut below as "comparable", exactly
+    the silent-compare bug this check exists to close. This is checked
+    ahead of, and independent of, the early-return shortcut immediately
+    below (which would otherwise treat a matching/absent
+    ``profile_fingerprint`` as nothing further to check).
     """
     old_contract = old.contract
     new_contract = new.contract
+    old_toolchain_status = _toolchain_identity_status(old_contract)
+    new_toolchain_status = _toolchain_identity_status(new_contract)
+    if FactStatus.FAILED in (old_toolchain_status, new_toolchain_status):
+        return ComparabilityMismatch(
+            kind="profile",
+            reason=(
+                "the resolved host-compiler identity behind at least one "
+                "side's header-AST parse could not be determined (a "
+                "compiler-identity probe failed) — the extraction "
+                "context cannot be verified comparable, since the "
+                "compiler that actually produced this snapshot's layout "
+                "and calling-convention facts is unknown."
+            ),
+            dimensions=_PROFILE_FIELD_DIMENSIONS["compiler_family"],
+        )
     if (
         old_contract is None
         or new_contract is None

@@ -25,8 +25,8 @@ cd examples/workflows/compare-release
 
 ```bash
 # Build both releases as shared libraries
-gcc -shared -fPIC -g v1/mathutils.c -o libmathutils_v1.so
-gcc -shared -fPIC -g v2/mathutils.c -o libmathutils_v2.so
+python3 build_shared_lib.py -fPIC -g v1/mathutils.c -o libmathutils_v1.so
+python3 build_shared_lib.py -fPIC -g v2/mathutils.c -o libmathutils_v2.so
 ```
 
 ```bash

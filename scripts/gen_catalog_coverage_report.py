@@ -2,7 +2,7 @@
 """Generate docs/contribute/catalog-coverage.md -- Phase 6 of the
 examples/catalog split (docs/contribute/plans/examples-catalog-split.md).
 
-Phases 1-2 gave every case in `catalog/ground_truth.json["taxonomy"]` an
+Phases 1-2 gave every case in `catalog/taxonomy.json` an
 `entity` (rule/scenario), a `rule_slug`/`variant_of`/`relation_type`/
 `relation_axis` set, a `scenario_kind`, and an `ecosystem`. Before this
 generator, every consumer that reported on catalog size
@@ -84,8 +84,7 @@ PHASE5_TARGET_WORKFLOWS: tuple[str, ...] = (
     "compare one library",
     "audit a release",
     "multi-library project",
-    "evidence depth",
-    "build/source evidence",
+    "evidence depth (including build/source evidence)",
     "Python API",
     "suppressions",
     "GitHub Actions",
@@ -290,8 +289,7 @@ def _workflow_coverage() -> str:
 
 
 def render() -> str:
-    gt = example_catalog.load_ground_truth()
-    taxonomy: dict[str, dict[str, object]] = gt["taxonomy"]  # type: ignore[assignment]
+    taxonomy = example_catalog.load_taxonomy()
 
     parts = [
         GENERATED_NOTE,
@@ -308,7 +306,8 @@ def render() -> str:
         '"three demonstrations of one rule" reads as "1 rule, 3 cases (1 '
         'canonical + 2 variants)" rather than "3 ABI concepts". Regenerate with '
         "`python scripts/gen_catalog_coverage_report.py` after any "
-        "`ground_truth.json` change.",
+        "`ground_truth.json`, `catalog/taxonomy.json`, or "
+        "`catalog/catalog_classification.yaml` change.",
         "",
         _rule_coverage(taxonomy),
         _scenario_coverage(taxonomy),

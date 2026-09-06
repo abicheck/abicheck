@@ -581,6 +581,93 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
 
 ---
 
+## Rule-family accuracy (160 demonstrated rule families)
+
+Every table above scores accuracy **per raw case** — three demonstrations of
+the same rule (a canonical case plus its confirmed duplicate/variant
+siblings, see [`scripts/catalog_rule_registry.py`](https://github.com/abicheck/abicheck/blob/main/scripts/catalog_rule_registry.py))
+count as three ABI concepts, so a rule with more sibling fixtures than
+another contributes more to (or costs more from) a tool's apparent accuracy
+for a reason that has nothing to do with how many *rules* it actually
+understands. `docs/contribute/plans/examples-catalog-split.md`'s "What is
+left" item 3 tracked this as a real, separate change: adding a rule-family
+dimension changes what is measured, not just how the existing number is
+labelled.
+
+This table answers a different question: **for how many of the catalog's
+160 demonstrated compatibility rules does a tool get *every* member case
+right** — the canonical demonstration and every confirmed duplicate/variant
+sibling? One miss anywhere in a family makes the whole family a miss,
+mirroring how a maintainer actually judges "does this tool understand this
+rule" rather than "how many near-identical fixtures did it happen to get
+right." `benchmark_comparison._rule_family_accuracy()` computes it by
+joining each run's per-case results against `catalog_rule_registry.
+build_families()`; `scripts/generate_benchmark_report.py` renders it as the
+table below and drift-checks it against this section the same way it
+drift-checks the flat table above (`parse_rule_family_table`/
+`diff_rule_family_against_doc`).
+
+Only `catalog_rule_registry.STATUS_DEMONSTRATED` families are scored — a
+"referenced-only" family (named only by a scenario's `related_rules`, a
+mechanism no single-library case demonstrates alone yet) has no rule-entity
+case of its own to attribute a verdict to, so it is out of scope for this
+table by construction, not by gap; see
+[`docs/contribute/catalog-coverage.md`](../contribute/catalog-coverage.md)
+for that count.
+
+> **Reproducibility envelope.** Measured 2026-09-06 against commit
+> `75aa966f9a08`, `catalog/ground_truth.json` sha256 `56ece287a3d8`. Only
+> `abicheck (L2, headers)` was live-measured this pass, over the full
+> 197-case catalog: gcc/g++ 13.3.0 + castxml 0.7.0. `libabigail`/`ABICC` are
+> omitted rather than shown at their last frozen values — this catalog has
+> grown since `scripts/frozen_competitor_results.json` was last refreshed
+> against those tools (its `ground_truth_sha256` no longer matches, the same
+> staleness the "Cache state & status detail" appendix these reports emit
+> already reports as `n/a` for exactly this reason), and re-deriving a
+> family-level number from a stale per-case cache would misrepresent it as
+> current. `abicheck (L3-L5, +sources)` is omitted for a different reason:
+> this pass's environment has no working `contrib/abicheck-clang-plugin`
+> build, so every compiled case in that lane reported `ERROR` rather than a
+> real verdict — publishing that pass's number would record an environment
+> gap as a product regression against the 99.5% per-case accuracy the
+> full-catalog benchmark above already measured for that lane, rather than
+> a genuine family-level result. Re-running all four lanes together (the
+> same live-plus-freshly-frozen pass the full-catalog benchmark above
+> describes) to populate this table's remaining rows is a tracked follow-up,
+> not fabricated here.
+
+| Tool | Correct / 160 families | Family accuracy |
+|------|:---:|:---:|
+| **abicheck (L2, headers)** | 152 | **95.0%** |
+
+**Reading the family-vs-case gap.** abicheck (L2, headers) misses 9/197
+cases individually (95.4% per-case, from this same run) but only 8/160
+rule families (95.0% per-family) — the two counts differ by exactly one,
+and for a revealing reason rather than because two misses share a family:
+`case111_enumerable_thread_specific_lambda_ambiguity` (the one documented
+detector gap named above) is a `scenario`-entity case, not a `rule`-entity
+one — it names `constructor-overload-ambiguity` only in its own
+`related_rules`, a referenced-only family with no rule-entity case of its
+own — so its miss is outside this dimension's scope entirely, by the same
+"only demonstrated families are scored" rule stated above, not because it
+was scored and happened to overlap another miss. The remaining eight
+misses are each in their own single-case family, so none of this run's
+family misses overlap either: seven are the L2-evidence-floor misses named
+above (`case98`, `case105`, `case122`, `case130`-`case133`), plus
+`case115_bit_int_width_changed`, which reports `ERROR` rather than
+`BREAKING` in this run's environment for the reason its own module docstring
+documents — no GCC 14+ available to build its C23 `_BitInt` fixture, a
+toolchain gap rather than a detector gap. The two totals track each other
+closely for this particular tool and run purely because none of its misses
+happen to share a family or fall outside the rule-entity scope more than
+once. The two numbers diverge more sharply for a tool with uneven family
+coverage — e.g. one that gets a rule's canonical case right but a
+documented variant (language, public-surface, symbol-versioning) wrong
+scores that whole family as a miss even though its per-case tally looks
+almost identical.
+
+---
+
 ## Pinned vendor benchmark summary (2026-07-18, 74-case subset)
 
 > **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases)

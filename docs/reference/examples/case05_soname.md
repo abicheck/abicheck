@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `soname_missing` |
 | **Source files** | `catalog/cases/case05_soname/` |
 | **Rule family** | [`soname`](by-rule/soname.md) |
+| **Subject** | [ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md) |
 
 **Category:** ELF/Linker | **Verdict:** ✅ COMPATIBLE (bad practice)
 
@@ -130,4 +131,4 @@ readelf -d libfoo_v2.so | grep SONAME   # → (SONAME) Library soname: [libv2.so
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: SONAME missing](by-rule/soname.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: SONAME missing](by-rule/soname.md) · [Subject: ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md)._

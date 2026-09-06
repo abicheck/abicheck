@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `enum_member_value_changed` |
 | **Source files** | `catalog/cases/case20_enum_member_value_changed/` |
 | **Rule family** | [`enum-member-value-changed`](by-rule/enum-member-value-changed.md) — Variant (public-surface) of [case08_enum_value_change](case08_enum_value_change.md) |
+| **Subject** | [Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -135,4 +136,4 @@ to schema evolution.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enumerator value changed](by-rule/enum-member-value-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enumerator value changed](by-rule/enum-member-value-changed.md) · [Subject: Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md)._

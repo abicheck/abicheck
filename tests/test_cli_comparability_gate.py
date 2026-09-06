@@ -418,3 +418,27 @@ class TestJsonReporterContractFields:
         doc = json.loads(to_json(result))
         assert "contract_coverage" not in doc
         assert "assurance" not in doc
+        assert "comparability_assurance" not in doc
+
+    def test_comparability_assurance_present_when_set(self):
+        # E-S2 (Block 5, report_schema_version 3.1): the per-dimension
+        # breakdown behind the coarse `assurance` flag.
+        result = self._result(
+            assurance="none",
+            comparability_assurance={
+                "symbol": "trusted",
+                "declaration": "trusted",
+                "layout": "unverified",
+                "runtime": "unverified",
+                "source": "trusted",
+            },
+        )
+        doc = json.loads(to_json(result))
+        assert doc["assurance"] == "none"
+        assert doc["comparability_assurance"] == {
+            "symbol": "trusted",
+            "declaration": "trusted",
+            "layout": "unverified",
+            "runtime": "unverified",
+            "source": "trusted",
+        }

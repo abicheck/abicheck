@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `flexible_array_member_changed`, `func_return_changed` |
 | **Source files** | `catalog/cases/case70_flexible_array_member_changed/` |
 | **Rule family** | [`flexible-array-member-changed`](by-rule/flexible-array-member-changed.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -147,4 +148,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Flexible array member changed](by-rule/flexible-array-member-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Flexible array member changed](by-rule/flexible-array-member-changed.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

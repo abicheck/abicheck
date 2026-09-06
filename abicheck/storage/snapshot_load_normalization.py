@@ -190,6 +190,7 @@ def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
         return None
     profile_fingerprint = raw.get("profile_fingerprint")
     scope_fingerprint = raw.get("scope_fingerprint")
+    compiler_identity_status = raw.get("compiler_identity_status")
     return ExtractionContract(
         profile_fingerprint=profile_fingerprint
         if isinstance(profile_fingerprint, str)
@@ -199,6 +200,13 @@ def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
         else None,
         profile_fields=_str_field_mapping(raw.get("profile_fields"), "profile_fields"),
         scope_fields=_str_field_mapping(raw.get("scope_fields"), "scope_fields"),
+        # E-S1: absent on every pre-existing contract (the field did not
+        # exist) and on a malformed/wrong-typed value alike -- both degrade
+        # to ``None`` ("no assertion recorded"), never to a fabricated
+        # status; only a genuine matching string round-trips.
+        compiler_identity_status=compiler_identity_status
+        if isinstance(compiler_identity_status, str)
+        else None,
     )
 
 

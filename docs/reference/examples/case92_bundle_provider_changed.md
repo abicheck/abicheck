@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `bundle_provider_changed` |
 | **Source files** | `catalog/cases/case92_bundle_provider_changed/` |
 | **Related rules** | [`compat-addition`](by-rule/compat-addition.md), [`exported-function-removed`](by-rule/exported-function-removed.md), [`symbol-source-owner-changed`](by-rule/symbol-source-owner-changed.md) |
+| **Subject** | [Multi-library bundle topology](by-subject/multi-library-bundle-topology.md) |
 
 **Category:** Bundle / cross-library | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 (bundle-level finding) — combined `abicheck compare` verdict is 🔴 BREAKING
@@ -154,4 +155,4 @@ The bundle-level verdict above is the cohort's. Each library in the cohort is se
 - `old/`
 - `CMakeLists.txt`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Bundle (Multi-library)](by-category/bundle.md) · [Subject: Multi-library bundle topology](by-subject/multi-library-bundle-topology.md)._

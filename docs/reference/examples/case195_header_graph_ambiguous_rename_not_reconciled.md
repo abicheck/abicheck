@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `public_api_internal_dependency_added` |
 | **Source files** | `catalog/cases/case195_header_graph_ambiguous_rename_not_reconciled/` |
 | **Related rules** | [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md) |
+| **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 
 **Category:** Risk (Source Graph / Reconciliation) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -133,4 +134,4 @@ positive case where an unambiguous single rename does reconcile.
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._

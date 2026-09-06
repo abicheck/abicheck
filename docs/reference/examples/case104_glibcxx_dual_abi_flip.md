@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `glibcxx_dual_abi_flip_detected`, `func_removed` |
 | **Source files** | `catalog/cases/case104_glibcxx_dual_abi_flip/` |
 | **Rule family** | [`glibcxx-dual-abi-flip`](by-rule/glibcxx-dual-abi-flip.md) |
+| **Subject** | [Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md) |
 
 **Category:** Symbol API | **Verdict:** ❌ BREAKING
 
@@ -166,4 +167,4 @@ environment (`abidiff` is not installed here).
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: libstdc++ dual ABI flipped](by-rule/glibcxx-dual-abi-flip.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: libstdc++ dual ABI flipped](by-rule/glibcxx-dual-abi-flip.md) · [Subject: Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md)._

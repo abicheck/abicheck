@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_removed` |
 | **Source files** | `catalog/cases/case193_ordinary_exported_fn_call_not_reachable/` |
 | **Related rules** | [`exported-function-removed`](by-rule/exported-function-removed.md) |
+| **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 
 **Category:** Breaking (Source Graph / Suppression) | **Verdict:** 🔴 BREAKING (without suppression)
 
@@ -147,4 +148,4 @@ behavior it enables, is unique to abicheck's L5 evidence layer (ADR-044).
 - `old.abi.json`
 - `suppress.yaml`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._

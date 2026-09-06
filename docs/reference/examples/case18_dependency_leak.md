@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `catalog/cases/case18_dependency_leak/` |
 | **Rule family** | [`dependency-leak`](by-rule/dependency-leak.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -172,4 +173,4 @@ naive symbol-only or header-blind comparison (plain `nm`/`readelf` diff, or
 - `thirdparty_v1.h`
 - `thirdparty_v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Dependency type leaks into layout](by-rule/dependency-leak.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Dependency type leaks into layout](by-rule/dependency-leak.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

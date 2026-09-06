@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `relro_weakened` |
 | **Source files** | `catalog/cases/case134_relro_weakened/` |
 | **Rule family** | [`relro-weakened`](by-rule/relro-weakened.md) |
+| **Subject** | [ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md) |
 
 **Category:** ELF / Security | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -109,4 +110,4 @@ one pass over the binary.
 - `v1.c`
 - `v2.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: RELRO hardening weakened](by-rule/relro-weakened.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: RELRO hardening weakened](by-rule/relro-weakened.md) · [Subject: ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md)._

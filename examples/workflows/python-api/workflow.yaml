@@ -1,0 +1,41 @@
+# Executable contract for this workflow example (Phase 5 of the
+# examples/catalog split). `validation/scripts/run_workflow_examples.py`
+# copies the directory to a scratch tree, runs each `run:` line below as a
+# single program invocation -- no shell, `shlex.split` + `shell=False` --
+# and checks what it claims.
+#
+# Every `run:` line must appear verbatim in this directory's README.md
+# (whitespace-normalized) -- that is the whole point: without it this file
+# is a second copy of the walkthrough, free to keep passing while the
+# documented commands rot. `tests/test_workflow_examples.py` enforces it in
+# the fast lane, with no compiler needed.
+id: python-api
+task: I want to run this check from my own build script or test suite, not by shelling out to the CLI -- how do I call abicheck from Python?
+platforms:
+  - linux
+  - macos
+requires:
+  - gcc
+  # The check step passes headers, which go through the default CastXML
+  # AST backend. Declaring it here is what makes a host without CastXML
+  # report an honest skip instead of a failure that looks like a real ABI
+  # regression -- and what lets a CI lane that just installed CastXML turn
+  # that skip back into a failure with `--require python-api`.
+  - castxml
+  # The tool under test -- here it's the abicheck *package* being
+  # importable, not a `abicheck` binary on PATH, but `python3` itself is
+  # still the right thing to declare: without it a host with no Python 3
+  # reports a launch failure per step instead of an honest skip.
+  - python3
+steps:
+  - name: build-v1
+    run: python3 build_shared_lib.py -fPIC -g v1/shapes.c -o libshapes_v1.so
+  - name: build-v2
+    run: python3 build_shared_lib.py -fPIC -g v2/shapes.c -o libshapes_v2.so
+  - name: check
+    run: python3 check.py
+    expect:
+      exit_code: 4
+      stdout_contains:
+        - BREAKING
+        - func_removed

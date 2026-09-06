@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `concept_tightened` |
 | **Source files** | `catalog/cases/case105_concept_tightening/` |
 | **Rule family** | [`concept-tightening`](by-rule/concept-tightening.md) |
+| **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
 **Category:** Subtle source break / regression suite | **Verdict:** 🟠 API_BREAK
 
@@ -194,4 +195,4 @@ for whoever was relying on the relaxed contract.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Concept tightened](by-rule/concept-tightening.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Concept tightened](by-rule/concept-tightening.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

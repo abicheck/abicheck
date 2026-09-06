@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_removed`, `func_added` |
 | **Source files** | `catalog/cases/case53_namespace_pollution/` |
 | **Rule family** | [`namespace-pollution`](by-rule/namespace-pollution.md) |
+| **Subject** | [API design and hygiene anti-patterns](by-subject/api-design-and-hygiene-anti-patterns.md) |
 
 **Category:** API Design | **Verdict:** 🔴 BREAKING (bad practice)
 
@@ -156,4 +157,4 @@ nm -D libfoo_v2.so | grep ' T '
 - `bad.c`
 - `good.c`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Declarations moved between namespaces](by-rule/namespace-pollution.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Declarations moved between namespaces](by-rule/namespace-pollution.md) · [Subject: API design and hygiene anti-patterns](by-subject/api-design-and-hygiene-anti-patterns.md)._

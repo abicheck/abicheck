@@ -12,6 +12,7 @@
 | **Source files** | `catalog/cases/case94_empty_tag_gained_state/` |
 | **Ecosystem** | [oneTBB](by-ecosystem/onetbb.md) |
 | **Related rules** | [`embedded-type-size-increased`](by-rule/embedded-type-size-increased.md), [`empty-tag-type-gains-state`](by-rule/empty-tag-type-gains-state.md), [`type-field-added-compatible`](by-rule/type-field-added-compatible.md) |
+| **Subject** | [Tag-dispatch and empty-class ABI](by-subject/tag-dispatch-and-empty-class-abi.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -138,4 +139,4 @@ comparison on the same class of change (a plain struct size growth).
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md) · [Subject: Tag-dispatch and empty-class ABI](by-subject/tag-dispatch-and-empty-class-abi.md)._

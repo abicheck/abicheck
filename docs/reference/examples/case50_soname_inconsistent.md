@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `soname_changed` |
 | **Source files** | `catalog/cases/case50_soname_inconsistent/` |
 | **Rule family** | [`soname-inconsistent`](by-rule/soname-inconsistent.md) |
+| **Subject** | [ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md) |
 
 **Category:** Risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK (bad practice)
 
@@ -146,4 +147,4 @@ readelf -d libfoo_v2.so | grep SONAME
 - `bad.c`
 - `good.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: SONAME inconsistent with the release](by-rule/soname-inconsistent.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: SONAME inconsistent with the release](by-rule/soname-inconsistent.md) · [Subject: ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md)._

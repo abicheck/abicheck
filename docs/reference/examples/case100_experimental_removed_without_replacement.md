@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `experimental_removed_without_replacement`, `func_removed` |
 | **Source files** | `catalog/cases/case100_experimental_removed_without_replacement/` |
 | **Rule family** | [`experimental-removed-without-replacement`](by-rule/experimental-removed-without-replacement.md) |
+| **Subject** | [API design and hygiene anti-patterns](by-subject/api-design-and-hygiene-anti-patterns.md) |
 
 **Category:** Symbol API | **Verdict:** ❌ BREAKING
 
@@ -149,4 +150,4 @@ environment (`abidiff` is not installed here).
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Experimental API removed without replacement](by-rule/experimental-removed-without-replacement.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Experimental API removed without replacement](by-rule/experimental-removed-without-replacement.md) · [Subject: API design and hygiene anti-patterns](by-subject/api-design-and-hygiene-anti-patterns.md)._

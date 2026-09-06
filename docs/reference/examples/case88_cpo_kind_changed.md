@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `cpo_kind_changed` |
 | **Source files** | `catalog/cases/case88_cpo_kind_changed/` |
 | **Rule family** | [`cpo-kind-changed`](by-rule/cpo-kind-changed.md) |
+| **Subject** | [Modern C/C++ standard-feature hazards](by-subject/modern-cpp-standard-feature-hazards.md) |
 
 ## What this case demonstrates
 
@@ -52,4 +53,4 @@ with `lib::sort` must be updated.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Customization point object kind changed](by-rule/cpo-kind-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Customization point object kind changed](by-rule/cpo-kind-changed.md) · [Subject: Modern C/C++ standard-feature hazards](by-subject/modern-cpp-standard-feature-hazards.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `enum_underlying_size_changed` |
 | **Source files** | `catalog/cases/case57_enum_underlying_size_changed/` |
 | **Rule family** | [`enum-underlying-size-changed`](by-rule/enum-underlying-size-changed.md) |
+| **Subject** | [Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +141,4 @@ abidiff v1.xml v2.xml
 - `good.c`
 - `good.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enumeration underlying type changed](by-rule/enum-underlying-size-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enumeration underlying type changed](by-rule/enum-underlying-size-changed.md) · [Subject: Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md)._
