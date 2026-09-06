@@ -7,18 +7,33 @@ generated: false
 
 # Vision workstreams — visible, intentional, traceable API/ABI evolution
 
-**Status:** Proposed — planning document. One slice has landed since it was
-written (**workstream C's S1**, the scalar policy-disposition audit — see that
-section); everything else here is unimplemented. Each workstream below records
-what *already exists* (verified
-against the tree at `2f5ef696` on 2026-09-05, file references included),
-what is missing, the ADR that owns the decision, the slices, and the
+**Status:** Proposed — planning document, partially implemented. Several
+slices have landed since it was written: workstream **A**'s S1 (explicit
+release-member selection + dry-run plan) and S2 (scope acquisition and
+completeness), **C**'s S1 (the scalar policy-disposition audit) and part of
+S2 (release/aggregate audit folding, reclassification, scope-reason
+accounting), **D**'s S1 gate-enrichment slice (`--used-by`/
+`--required-symbol(s)` report consumer impact beside the global gate
+instead of replacing it), and **E**'s S1 (`FAILED` toolchain identity,
+no-DWARF layout-unverified rows) and S2's per-dimension comparability
+record. See each workstream's own section below for what landed and what
+remains — this line is a summary, not a second source of truth. Each
+workstream below records what *already exists* (originally verified
+against the tree at `2f5ef696` on 2026-09-05, file references included;
+`2f5ef696` is an ancestor of, and therefore older than, the slices named
+above — those were independently re-verified against a later tree and are
+called out with **updated 2026-09-06** wherever they change what the
+2026-09-05 sweep found; the two baselines mark two different sweeps of the
+same document, not a contradiction), what is missing, the
+ADR that owns the decision, the slices, and the
 acceptance tests. The product decisions themselves are in the repository
 root [`vision.md`](../vision.md); the technical decisions are
-[ADR-065](../adr/065-comparison-scope-selection-and-completeness.md),
-[ADR-066](../adr/066-longitudinal-history-and-versioning-policy.md), and
+[ADR-065](../adr/065-comparison-scope-selection-and-completeness.md) and
+[ADR-066](../adr/066-longitudinal-history-and-versioning-policy.md)
+(both Proposed) and
 [ADR-067](../adr/067-change-intent-acknowledgment-and-disposition-audit.md)
-(all Proposed) plus amendments to existing ADRs named per workstream.
+(Accepted, partially implemented) plus amendments to existing ADRs named
+per workstream.
 **Origin:** maintainer vision discussion and the nine-prompt agent pack
 prepared from it (2026-09-04), reconciled against the current tree.
 
@@ -263,7 +278,19 @@ report; base/head policy-delta analysis.
 — raw-versus-effective counts and rule provenance in every scalar projection
 (`abicheck/report/disposition_audit.py`, report schema 2.50), a
 `not_evaluated` detector state, and `semver.recommend_release` reading the
-conserved delta. S2-S4 unimplemented. S1 (audit, first): inventory the four application points
+conserved delta. **S2 partially implemented (2026-09-06):** the
+release/bundle fan-out's primary JSON/Markdown report and `--output-dir`
+`summary.json` sidecar gain a folded `disposition_audit` block
+(`report/disposition_audit.py`'s `fold_disposition_audits`, report schema
+3.1); `abicheck aggregate --format json` gains the same folded block plus a
+`disposition_audit_missing_targets` list (aggregate schema 1.9);
+reclassification is now recorded through the ledger
+(`DispositionLedger.resolve_reclassifications`); contract/scope exclusions
+gain a `scope_reasons` breakdown. Still open within S2: `appcompat.py`'s own
+`scope_diff_to_required_symbols` ledger accounting (excluded — that file is
+at its `no_growth` line-count baseline); `scan` reports carry no
+`disposition_audit` block, so `aggregate`'s fold can only mark such a
+target as missing one, not supply it. S3-S4 unimplemented. S1 (audit, first): inventory the four application points
 above and route each through one ledger-recording primitive (converging
 them where the call shapes allow, covering each explicitly where they do
 not) so the raw-versus-effective totals reconcile by construction; then
@@ -344,29 +371,47 @@ carry a profile fingerprint; the G13 arch guard; G34's producer/consumer
 toolchain split; `aggregate`'s per-profile reconciliation with
 `undetermined`.
 
-**Missing.** No `INCONSISTENT`/`CONFLICTING` fact status, and "not
+**S1 and part of S2 have landed** (below); the "Missing" list here is the
+**original assessment** and has not been fully re-swept since — items S1/S2
+closed are called out explicitly rather than silently dropped from the list:
+No `INCONSISTENT`/`CONFLICTING` fact status, and "not
 requested" vs "capped" collapse onto `NOT_COLLECTED`; two provider-status
 vocabularies (`FactStatus` vs `EvidenceProviderStatus`) not unified;
-no per-detector "layout unverified" row when both sides lack DWARF (the
-`dwarf` detector reads `enabled=True, 0`); `DetectorRegistry.run_all` has
-no per-detector `FAILED`; a compiler-probe failure feeds an *absent*
-toolchain identity rather than `FAILED`; no reverse declared/observed
+~~no per-detector "layout unverified" row when both sides lack DWARF~~ —
+**closed by S1**: `analysis_assurance_layout.py`'s `layout_unverified_detectors`
+names `dwarf`/`advanced_dwarf`/`layout_descriptor` as unverified when
+neither side carries DWARF; `DetectorRegistry.run_all` has
+no per-detector `FAILED`; ~~a compiler-probe failure feeds an *absent*
+toolchain identity rather than `FAILED`~~ — **closed by S1**:
+`extract/toolchain_identity.py` now yields `FactStatus.FAILED` on a probe
+failure, and `comparability_profile.py` refuses comparison whenever either
+side is `FAILED`; no reverse declared/observed
 detector (exported but undeclared) and no manifest-narrowing detector;
 `configuration_coverage` always `NOT_STARTED`; a GCC/Clang pair with a
-missing fingerprint on either side is compared silently; comparability
-yields one `kind`, not a per-dimension record; an out-of-band build/source
-pack can bypass the depth ceiling; `dump` never applies the ceiling.
+missing fingerprint on either side is compared silently; ~~comparability
+yields one `kind`, not a per-dimension record~~ — **partially closed by S2**:
+`DiffResult.comparability_assurance` now reports a per-`COMPARABILITY_DIMENSIONS`
+`"unverified"`/`"trusted"` value (JSON/Markdown/HTML), though comparability
+*refusal* (`ComparabilityMismatch`) itself still yields one `kind`; an
+out-of-band build/source pack can bypass the depth ceiling; `dump` never
+applies the ceiling.
 
 **Slices.** S0 the requested-capability × availability × input-type ×
-policy × result table mapped to owners (this section's seed). S1
+policy × result table mapped to owners (this section's seed). **S1 —
 no-DWARF/missing-header/failed-extraction semantics on binary and snapshot
-paths: per-detector `not_evaluated`/`failed`, unverified-layout rows,
-`FAILED` toolchain identity. S2 per-dimension comparability record and
-profile-delta explanation; preserve already-known changes through an
-incomplete later stage. S3 multi-source contract conflicts with
+paths — implemented ([#1099](https://github.com/abicheck/abicheck/pull/1099)):**
+per-detector `not_evaluated`/`failed` semantics via
+`analysis_assurance_layout.py`'s unverified-layout rows, and `FAILED`
+toolchain identity via `extract/toolchain_identity.py`. **S2's per-dimension
+comparability record — implemented ([#1098](https://github.com/abicheck/abicheck/pull/1098)):**
+`DiffResult.comparability_assurance`, populated from `ComparabilityMismatch`'s
+`dimensions` field, reaches JSON (schema 3.1), Markdown, and HTML, and is
+proven to preserve an earlier-proven change through a later incomplete
+stage; profile-delta explanation beyond the per-dimension record itself
+remains open. S3 multi-source contract conflicts with
 provenance (exported-but-undeclared, manifest narrowing since baseline,
-package-claim vs. contained-binary). S4 parity through scan/project/
-bundle/API/Action/report; retire conflicting legacy decisions.
+package-claim vs. contained-binary) — not started. S4 parity through scan/project/
+bundle/API/Action/report; retire conflicting legacy decisions — not started.
 
 ### F. Header-only comparison; bounded static-archive investigation — revise G4, extend G45
 

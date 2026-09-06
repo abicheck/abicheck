@@ -474,10 +474,21 @@ shared-evidence size); it scales with (sum of per-library sizes) +
 
 #### A1.6 — `bundle_variants:` CLI wiring
 
-**Status: not implemented** (the config schema and pairing algorithm are —
-`bundle_variants_config.py`'s `parse_bundle_variants_config`/
-`pair_variants` are real and tested; nothing yet resolves a `.abicheck.yml`
-`bundle_variants:` block into an actual capture run).
+**Status: not implemented, and the module this item originally named as
+"exists, just needs a consumer" is gone.** `abicheck/bundle_variants_config.py`
+(`parse_bundle_variants_config`/`pair_variants`) was deleted outright in
+ADR-065 S1 (2026-09-06, [`model/release_selection.py`]'s `ReleaseSelection`
+landed instead) rather than given a consumer — its `required:` field
+addressed a different axis (multibuild *variant* identity) from what S1
+needed (release *member* selection), and no capture pipeline tags a variant
+name to feed it, so wiring the old module would have been a parser-only
+slice with nothing downstream to drive. This item therefore needs a
+**deliberately new, specified** config-schema-and-pairing design — not
+"wire the existing module" — before any of the "Design" paragraph below can
+be implemented; the design below still describes the target shape
+(`VariantRef.declared`/`.captured`) correctly, but its own reference to a
+`BundleVariantSpec` producer no longer has a starting implementation to
+build from.
 
 **Goal.** A project's `bundle_variants:` block (variant name →
 `target_triple`/`compiler_family`/`feature_toggles`/`required`) drives a
@@ -495,8 +506,10 @@ capture run from whatever the toolchain/build actually reports (compiler
 version, resolved standard, resolved feature-toggle values where a build
 system can confirm them) — the same "two independent coordinate maps"
 split `VariantRef`'s own docstring already specifies, so this item is
-wiring a real producer for a schema that already exists, not designing a
-new one. A `required: true` variant that fails to capture is a hard error
+wiring a real producer for the `VariantRef` schema that already exists —
+the config-parsing/pairing half (formerly `bundle_variants_config.py`,
+deleted per the note above) needs to be designed and written fresh,
+not restored. A `required: true` variant that fails to capture is a hard error
 for the release-capture command (mirrors `AnalysisPlanner`'s "reject before
 extraction" discipline: knowing a required variant is unreachable belongs
 at plan time, not discovered as a silently-incomplete package after a long
@@ -522,10 +535,10 @@ capture failure raises before any file is written (no partial package);
 (e.g. `.abicheck.yml` under-specifies a compiler version the real build
 reports), asserting both maps are kept, not merged/overwritten.
 
-**Acceptance criteria.** `pair_variants()` (already real) operates
-correctly over `VariantRef`s produced by a real capture run, not only over
-hand-constructed `BundleVariantSpec` fixtures — closing the "modelled but
-not captured" half of finding #7.
+**Acceptance criteria.** The new pairing algorithm (replacing the deleted
+`pair_variants()`) operates correctly over `VariantRef`s produced by a real
+capture run, not only over hand-constructed fixtures — closing the
+"modelled but not captured" half of finding #7.
 
 ---
 

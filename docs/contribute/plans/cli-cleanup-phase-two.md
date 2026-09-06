@@ -209,7 +209,7 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > the account itself, per the same review's DRY finding). PR A/B/D/E/F and
 > PR 1/1b/2 are done.
 
-## Status 2026-09-05 — what remains here, and three parallel tracks
+## Status 2026-09-06 — what remains here, and three parallel tracks
 
 **This plan is no longer the owner of the CLI's direction.**
 [`vision-api-abi-evolution.md`](vision-api-abi-evolution.md) is, together with
@@ -252,16 +252,27 @@ three positions this plan used to hold are explicitly revised by the vision:
 | `contract=public` default flip | Open | `EntityId`-based public closure (ADR-063 Phase 2), **not** a string heuristic |
 | PR 0/0B, PR 1, 1b, 2, A, B, C (binary formats), C tail (config parity), D, E, F, G1, G2 | Done / closed by decision | — |
 
-**Two vision blocks this section pointed at have since landed**, which is what
-moved on `main` between #1073 and `d1a486bb`:
+**Four more vision-plan slices landed on `main` since that pass** (all four
+of the "ready now" chunks this file's own review handed out landed within
+the day, one PR each):
 
 | Landed | What shipped |
 |---|---|
 | **C-S1, the scalar disposition audit** ([#1082](https://github.com/abicheck/abicheck/pull/1082)) | One conserved ledger (`policy/disposition_ledger.py`) all five suppression application points route through — a fifth turned up beyond the four C-S1 named; raw-vs-effective counts and rule provenance in *every* projection (JSON, `--stat`, review digest, PR comment, SARIF, JUnit, HTML, all Markdown modes); `not_evaluated` detectors; report schema 2.52. Includes this plan's one named behavior fix: `recommend_release` reads the conserved ledger, so a fully suppressed break is `major`/`review`, not "no bump needed" |
-| **A-S2, scope acquisition and completeness** ([#1079](https://github.com/abicheck/abicheck/pull/1079)) | `RunOutcome.scope` plus two `0`/`1` `ExitDecision` folds; per-member acquisition states in a `comparison_scope` block; `--on-incomplete-scope warn\|block`; zero completed comparisons exits `1` as `no_comparison_completed` instead of a silent `NO_CHANGE`/`0`; degraded stranded members marked and skipped rather than diffed as ELF-only stand-ins; exit `8` now requires a *proven* removal (the NEW side's capture must have asserted `inventory_complete`). Landed **ahead of A-S1**, which is now A's next slice |
+| **A-S2, scope acquisition and completeness** ([#1079](https://github.com/abicheck/abicheck/pull/1079)) | `RunOutcome.scope` plus two `0`/`1` `ExitDecision` folds; per-member acquisition states in a `comparison_scope` block; `--on-incomplete-scope warn\|block`; zero completed comparisons exits `1` as `no_comparison_completed` instead of a silent `NO_CHANGE`/`0`; degraded stranded members marked and skipped rather than diffed as ELF-only stand-ins; exit `8` now requires a *proven* removal (the NEW side's capture must have asserted `inventory_complete`). Landed **ahead of A-S1**, which was A's next slice |
+| **A-S1, explicit release-member selection + dry-run plan** ([#1094](https://github.com/abicheck/abicheck/pull/1094)) | `model/release_selection.py`'s `ReleaseSelection`; repeatable `--select`/`--select-required` on `compare`'s directory/package fan-out; `MemberAcquisition.required` (schema 1.1); `workflows/release_plan.py`'s declared-selection scope record and `--dry-run` "Comparison plan" preview (`frontends/cli/release_dry_run.py`). **Deletion gate closed**: `bundle_variants_config.py` had no production caller and gained none here, so it was deleted outright rather than left dead. `_match_release_keys`'s set-difference pairing itself is untouched — that's still A-S4's gate, now unblocked in principle since a declared selection exists to check against, but not yet exercised |
+| **D-S1, `--used-by`/`--required-symbol` enrich instead of replace the gate** ([#1096](https://github.com/abicheck/abicheck/pull/1096)) | **Behavior change, report schema 2.53 → 3.0 (MAJOR)**: the compare command's exit code and JSON `verdict`/`severity`/`run_outcome`/`summary` now always describe the full-library result; a new `consumer_scope` object reports the supplied consumer's own impact *beside* it. The four `full_*` override keys are removed outright. SARIF/JUnit/HTML/PR-comment consumer sections are now purely informational, driving no surface's exit code |
+| **E-S1, `FAILED` toolchain identity + layout-unverified rows** ([#1099](https://github.com/abicheck/abicheck/pull/1099)) | `extract/toolchain_identity.py` (new, relocated from `dumper_toolchain.py`): a compiler-probe failure now yields `FactStatus.FAILED` instead of an absent fingerprint, and `comparability_profile.py` refuses comparison whenever either side is FAILED, even if the opaque `compiler_family` values happen to coincide. `analysis_assurance_layout.py` (new) names `dwarf`/`advanced_dwarf`/`layout_descriptor` as unverified when neither side carries DWARF |
+| **E-S2 remainder, per-dimension assurance reaches the report** ([#1098](https://github.com/abicheck/abicheck/pull/1098)) | `DiffResult.comparability_assurance` (per-`COMPARABILITY_DIMENSIONS` `"unverified"`/`"trusted"`), populated from the `dimensions` field #1085 already added to `ComparabilityMismatch`; JSON (schema 3.1), Markdown and HTML now show e.g. `layout: unverified` beside a still-trusted `declaration` row instead of one coarse `assurance: "none"`. Proven to preserve an earlier-proven change through a later incomplete stage |
 
-One consequence worth acting on: **D-S1 (`--used-by` enrichment) is no longer
-blocked** — it was waiting on exactly the disposition model C-S1 shipped.
+Workstream E's slices S1 and S2 are now both fully landed (the "data model
+only" / "untouched" caveats this section used to carry no longer apply).
+Workstream A's S1 and S2 are landed; **S3 (package component inventories)
+and S4 (parity + the set-difference deletion) are next**. Workstream D's S1
+is landed; S2-S4 (real Actions acquisition channels, declared source/use-case
+enrichment, opt-in compile/link/runtime validation) are untouched. **C-S2
+(bundle/aggregate/consumer disposition-ledger parity) is the one Tier-2 slice
+still sitting exactly where it was** — nothing landed against it this round.
 
 Everything else this file used to track (`--exit-code-scheme`,
 `--old-bundle-facts`, the compare provider/cohort switches, bare compare
@@ -329,11 +340,11 @@ plus `docs/reference/cli-reference.md` were regenerated.
 
 ### Parallel work blocks an agent can start now
 
-Eight blocks, each with a disjoint primary file set. **Three of them are now
-done** (1, 2, and A-S2's half of 3) and one more closed in `main` as PR C's
-tail (the former block 7); of the rest, **E-S1/S2 (5), A-S1 (3) and D-S1 (8)
-can start immediately**, and the other two are listed with the dependency
-that holds them rather than as free parallelism. The tiers
+Eight blocks, each with a disjoint primary file set. **Six of them are now
+done** (1, 2, 3, 5, 7, 8) — everything that was "Tier 1 — now" or earlier has
+landed. Of the remaining two, **block 4 (F-S1, header-only) is newly
+unblocked** now that E-S1 is done; block 6 still needs A-S3's component
+inventory, which hasn't started. The tiers
 are the owning plan's own global order — *A and E first under one integration
 owner, then C's audit half with G's first reporting slice, then B/D/F* — not a
 re-sequencing of it (Codex review on #1073). **The requirements for every block live in the workstream
@@ -345,11 +356,11 @@ checklist: where the two ever disagree, `vision-api-abi-evolution.md` wins.
 | # | Block | Start | Owning workstream | Primary files | Shared types |
 |---|---|---|---|---|---|
 | 1 | H1 hidden-shim deletion | **DONE** (#1080 + #1087 — all six spellings) | this plan (H1 above) | `frontends/cli/options/release.py`, `frontends/cli/commands/dump.py`, `options/inventory.py`, `help.py` | No |
-| 3 | Release-path scope & completeness | **A-S2 DONE (#1079)**; A-S1 selection is the live slice | A-S1 (deletion gate A-S4) | `cli_compare_release*`, `workflows/`, `policy/outcome.py` | **Yes — integration owner** |
-| 5 | Per-dimension comparability + failed evidence | **Tier 1 — now** (untouched) | E-S1/S2 | `comparability.py`, `analysis_assurance.py`, `workflows/plan.py` | **Yes — integration owner** |
+| 3 | Release-path scope & completeness | **A-S1 + A-S2 DONE (#1079, #1094)**; A-S3 (component inventories) is the live slice | A-S3 → A-S4 (deletion gate) | `cli_compare_release*`, `workflows/`, `policy/outcome.py` | **Yes — integration owner** |
+| 5 | Per-dimension comparability + failed evidence | **DONE (#1099, #1098)** — both S1 and S2 landed | E-S1/S2 | `comparability.py`, `analysis_assurance.py`, `workflows/plan.py` | **Yes — integration owner** |
 | 2 | Scalar disposition audit | **DONE (#1082)**; C-S2's multi-member parity is the next slice | C-S1 + G-S1 | `policy/`, `report/`, `checker.py`, `semver.py` | No |
-| 8 | `--used-by` enriches instead of replacing the gate | **DONE** | D-S1 | `appcompat.py`, `impact/`, `report/` | No |
-| 4 | Header-only capture and comparison | Tier 3 — after E-S1 (untouched) | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `service_dump_pipeline.py`, `workflows/artifact/` | No |
+| 8 | `--used-by` enriches instead of replacing the gate | **DONE (#1096)** | D-S1 | `appcompat.py`, `impact/`, `report/` | No |
+| 4 | Header-only capture and comparison | **Newly unblocked** — E-S1 landed (untouched otherwise) | F-S1 | `buildsource/project_targets.py`, `cli_buildsource.py`, `service_dump_pipeline.py`, `workflows/artifact/` | No |
 | 6 | `scan --artifact-set` member-identity manifest | Tier 3 — needs A-S3's component inventory (untouched) | this plan (PR H, last piece) | `cli_scan*`, a member-identity schema that does not exist yet | Indirectly (A's inventory) |
 
 Tier 0 was outside the vision sequence entirely — pure interface hygiene with
@@ -411,6 +422,18 @@ owning plan's own sequencing). `--fail-on-removed-library` keeps its spelling
 throughout and starts consuming proven removals at that gate; exit `8`'s
 precedence over the coverage contribution is unchanged.
 
+> **A-S1 landed** ([#1094](https://github.com/abicheck/abicheck/pull/1094)):
+> `ReleaseSelection`, repeatable `--select`/`--select-required`, and the
+> `--dry-run` comparison-plan preview, all as a *filter* on
+> `_match_release_keys`'s existing discovery — the set-difference pairing
+> itself is untouched. `bundle_variants_config` was deleted outright rather
+> than given a consumer (its `required:` field addressed a different axis —
+> multibuild variant identity, not release member selection — and no
+> capture pipeline tags a variant name to feed it). **Next:** A-S3 (package
+> component inventories, `abicheck/package.py` still returns bare
+> directories) must land before A-S4 can actually delete the set-difference
+> path and retire `unmatched_old`.
+
 **Block 4 — header-only capture and comparison (F-S1).** Make
 `abicheck dump -H include/api.hpp --lang c++ -o old.abi.json` a real operand,
 with no synthesized binary and no required compile database, so two such
@@ -448,28 +471,28 @@ block 2 — it is the one E/C overlap, and two blocks adding it is a conflict.
 `--require-complete-analysis` keeps its spelling; only its meaning becomes
 task-relative.
 
-> **Partially landed (data model only).** `ComparabilityMismatch` now
-> carries a real `dimensions: frozenset[str]` field (`symbol`, `declaration`,
-> `layout`, `runtime`, `source`) alongside the unchanged `kind`/`reason`,
-> computed from the specific `scope_fields`/`profile_fields` that actually
-> differ for a given mismatch rather than a coarse per-`kind` guess (see
-> `abicheck/comparability.py`'s `COMPARABILITY_DIMENSIONS`/
-> `_PROFILE_FIELD_DIMENSIONS`/`_SCOPE_FIELD_DIMENSIONS`, and
-> `tests/test_comparability_dimensions.py`). This module's own contract
-> (scope/profile/dependency-scope fingerprints) only ever populates
-> `declaration`/`layout`/`runtime` — it never claims authority over `symbol`
-> (binary export-table identity, wholly independent of header/compile-context
-> evidence) or `source` (a separate, L4/L5 axis). **Still open, and
-> deliberately not attempted in this slice:** consuming `dimensions` into the
-> diff pipeline's own per-finding assurance and the report (so a report can
-> read `layout: unverified` beside a still-trusted `declaration` conclusion,
-> replacing today's single report-wide `assurance: none`) — that is a
-> `checker.py`/`DiffResult`/report-schema change, not a `comparability.py`
-> one, and needs its own report-schema bump under `report/AGENTS.md`'s
-> invariants. The failed-evidence half of this block (E-S1's `FAILED`
-> toolchain identity on a compiler-probe failure, and preserving an
-> earlier-proven change through an incomplete later stage) is untouched by
-> this slice.
+> **Landed — both halves.** The data model landed first
+> ([#1085](https://github.com/abicheck/abicheck/pull/1085)):
+> `ComparabilityMismatch.dimensions: frozenset[str]` (`symbol`, `declaration`,
+> `layout`, `runtime`, `source`), computed from the specific
+> `scope_fields`/`profile_fields` that actually differ rather than a coarse
+> per-`kind` guess (`abicheck/comparability.py`'s `COMPARABILITY_DIMENSIONS`/
+> `_PROFILE_FIELD_DIMENSIONS`/`_SCOPE_FIELD_DIMENSIONS`). The failed-evidence
+> half landed next ([#1099](https://github.com/abicheck/abicheck/pull/1099)):
+> `extract/toolchain_identity.py` yields `FactStatus.FAILED` on a
+> compiler-probe failure instead of an absent fingerprint, comparison is
+> refused whenever either side is FAILED even on a coincidentally-matching
+> `compiler_family`, and `analysis_assurance_layout.py` names the
+> `dwarf`/`advanced_dwarf`/`layout_descriptor` detectors as unverified when
+> neither side carries DWARF. Finally `dimensions` reached the diff pipeline
+> and every report format ([#1098](https://github.com/abicheck/abicheck/pull/1098)):
+> `DiffResult.comparability_assurance` (report schema 3.1) shows e.g.
+> `layout: unverified` beside a still-trusted `declaration` row instead of
+> one coarse `assurance: "none"`, and an earlier-proven change is proven (by
+> a dedicated regression test) to survive a later incomplete comparability
+> stage rather than being erased by it. This block is fully closed; E's
+> remaining slices (S3 multi-source contract conflicts, S4 parity/legacy
+> retirement) are untouched and not part of it.
 
 **Block 6 — `scan --artifact-set` member-identity manifest (PR H's last
 piece).** Syntax refinement, cost/dry-run, and audit-mode ownership all

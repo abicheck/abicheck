@@ -13,12 +13,15 @@ the degraded stranded-library marker (`BundleFacts.degraded_members`), and
 the `comparison_scope` report section (`abicheck/report/comparison_scope.py`),
 with `--on-incomplete-scope warn|block` as the D6 setting; exit `8` now
 requires D2's completeness proof (migration note in
-`docs/reference/exit-codes.md`).
-
-**S1** (2026-09-06): explicit selection by canonical member key
-(`abicheck/model/release_selection.py`, `--select`/`--select-required`) and
-the `--dry-run` comparison-plan view
-(`abicheck/workflows/release_plan.py`).
+`docs/reference/exit-codes.md`). S1 also implemented (2026-09-06, landed
+after S2): `abicheck/model/release_selection.py`'s `ReleaseSelection`,
+`--select`/`--select-required` on `compare`'s directory/package fan-out,
+and the `--dry-run` "Comparison plan" preview
+(`abicheck/workflows/release_plan.py`,
+`abicheck/frontends/cli/release_dry_run.py`) — identity/coordinate member
+selection with a plan preview, through the typed API and CLI.
+`bundle_variants_config.py` was deleted outright in this slice rather than
+given a consumer (see the plan's own A1.6 note).
 
 **S3** (2026-09-06): package component inventories and support-promise
 findings. `abicheck/model/package_inventory.py` is the declared component
@@ -44,9 +47,12 @@ Action/aggregate parity this slice also names landed with S2 (the
 `SCOPE_INCOMPLETE` verdict tier in `action/run.sh`, aggregate report schema
 1.8's `scope_completeness` axis). Scalar-versus-bundle *operand*
 convergence stays with `plans/cli-cleanup-phase-two.md`'s open PR I rather
-than being done twice — see that plan's own row.
+than being done twice — see that plan's own row. The silent canonical
+fallback in `compare_product_directories` (D3's `ambiguous` diagnostic)
+is also left for a later slice, since turning it into a refusal-to-compare
+is a behaviour change with its own migration note.
 
-S0 remains open. Design record for
+S0 (executable scenario table) remains open. Design record for
 the vision's "partial matrices" and "scope-sensitive analysis" decisions
 (`vision.md`). Implementation is sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)

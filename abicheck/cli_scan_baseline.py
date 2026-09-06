@@ -1070,9 +1070,12 @@ def _run_baseline_compare(
     *diff* is stamped and ``analysis_assurance`` recomputed below so the
     requested-vs-effective gate has something real to check.
     """
+    from .api_types import InputSpec
     from .cli_buildsource import prepare_embedded_build_source
     from .errors import AbicheckError
-    from .service import collect_metadata, compare_snapshots, resolve_input
+    from .service import collect_metadata, compare_snapshots
+    from .service_compare_evidence import SideEvidence
+    from .service_input_resolution import resolve_side_snapshot
 
     # note_if_same_binary_compared lives in workflows.gate, not workflows.extraction (Codex review) -- see that module's own docstring for why a post-comparison coverage warning belongs there.
     from .workflows.gate import note_if_same_binary_compared
@@ -1089,23 +1092,46 @@ def _run_baseline_compare(
         )
     )
     try:
-        old_snap = resolve_input(
-            baseline,
-            bl_headers,
-            bl_includes,
-            version="",
+        # Routed through the shared `resolve_side_snapshot` primitive
+        # (P0 item 4 of the duplication-and-convergence-assessment plan)
+        # rather than calling `service.resolve_input()` directly. `sources`/
+        # `build_info` are left `None` -- this side's own embedded L3-L5
+        # evidence is diffed separately below via
+        # `prepare_embedded_build_source`, the same split `compare`'s
+        # implicit-dump operand keeps -- so no build/source evidence is
+        # embedded here and `_seeded_includes_and_compile_context`'s L2
+        # include/compile-context fold is a no-op, leaving `bl_includes`/
+        # `compile_context` exactly as given (unchanged behavior). The
+        # ADR-039 build-context collector this primitive also runs is
+        # likewise a no-op with no compile database resolvable
+        # (`compile_db`/`build_info` both unset here).
+        old_snap = resolve_side_snapshot(
+            InputSpec(
+                path=baseline,
+                headers=tuple(bl_headers),
+                includes=tuple(bl_includes),
+                version="",
+                compile=compile_context,
+                # Matches the candidate's own resolve_input() default in
+                # scan_engine.py's run_scan_core -- a no-op for a JSON
+                # snapshot baseline (already-serialized, no dumping
+                # happens), but keeps a *native* --baseline library filtered
+                # consistently with the candidate (Codex review).
+                include_dependencies=False,
+            ),
+            SideEvidence(
+                headers=bl_headers,
+                compile=compile_context,
+                collect_mode="off",
+                dump_manifest=None,
+            ),
             lang=lang,
+            header_backend="auto",
+            fmt=None,
             public_headers=bl_public_headers,
             public_header_dirs=bl_public_dirs,
-            compile=compile_context,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
-            # Matches the candidate's own resolve_input() default in
-            # scan_engine.py's run_scan_core -- a no-op for a JSON snapshot
-            # baseline (already-serialized, no dumping happens), but keeps a
-            # *native* --baseline library filtered consistently with the
-            # candidate (Codex review).
-            include_dependencies=False,
         )
     except AbicheckError as exc:
         raise click.ClickException(
