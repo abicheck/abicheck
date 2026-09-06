@@ -91,6 +91,14 @@ DOC_HEADING_RE = re.compile(
     r"## Full-catalog benchmark \((?P<date>[^,]+), all (?P<count>\d+) cases\)"
 )
 
+# Rule-family accuracy (docs/contribute/plans/examples-catalog-split.md "What
+# is left" item 3) — a second, independent dimension alongside the flat
+# per-case table above, so it gets its own heading anchor/parser/drift check
+# rather than being folded into DOC_HEADING_RE's table.
+RULE_FAMILY_HEADING_RE = re.compile(
+    r"## Rule-family accuracy \((?P<count>\d+) demonstrated rule families\)"
+)
+
 
 def _peak_rss_mb() -> float | None:
     """Process peak RSS in MiB (self + terminated children), or None.
@@ -222,6 +230,38 @@ def render_markdown(report: dict[str, Any], cache_state: dict[str, str]) -> str:
             f"{cov['false_positives']} | {cov['false_negatives']} | {total_s} |"
         )
 
+    # Rule-family accuracy (docs/contribute/plans/examples-catalog-split.md
+    # "What is left" item 3): a *second*, independent accuracy dimension
+    # alongside the per-case table above — a rule family (canonical case plus
+    # every confirmed duplicate/variant, see catalog_rule_registry.py) counts
+    # as correct only when the tool scores every one of its member cases
+    # correctly. This does not replace the flat per-case table; it answers a
+    # different question ("how many distinct rules does this tool understand"
+    # rather than "how many fixtures did it get right").
+    family_total = next(
+        (fam["total"] for fam in report.get("rule_family_accuracy", {}).values()), 0
+    )
+    lines += [
+        "",
+        f"## Rule-family accuracy ({family_total} demonstrated rule families)",
+        "",
+        "A rule family (its canonical case plus every confirmed "
+        "duplicate/variant sibling — see `scripts/catalog_rule_registry.py`) "
+        "counts as correct for a tool only when every one of its member "
+        "cases is correct; one miss anywhere in the family makes the whole "
+        "family a miss. This is independent of the flat per-case accuracy "
+        'above — it answers "how many distinct compatibility rules does '
+        'this tool understand" rather than "how many near-identical '
+        'fixtures did it get right".',
+        "",
+        f"| Tool | Correct / {family_total} families | Family accuracy |",
+        "|------|:---:|:---:|",
+    ]
+    for name, fam in report.get("rule_family_accuracy", {}).items():
+        label = LANE_DOC_LABELS.get(name, name)
+        pct = f"{fam['pct']}%" if fam["pct"] is not None else "n/a"
+        lines.append(f"| {label} | {fam['correct']} | {pct} |")
+
     lines += [
         "",
         "## Cache state & status detail",
@@ -282,6 +322,50 @@ def parse_doc_table(text: str) -> dict[str, Any] | None:
     return {
         "date": heading.group("date").strip(),
         "case_count": int(heading.group("count")),
+        "rows": rows,
+    }
+
+
+def parse_rule_family_table(text: str) -> dict[str, Any] | None:
+    """Parse the committed 'Rule-family accuracy' heading + table.
+
+    Sibling of :func:`parse_doc_table` for the independent rule-family
+    dimension (see :func:`render_markdown`/`benchmark_comparison.
+    _rule_family_accuracy` for what it measures). Returns ``None`` if the
+    heading anchor can't be found — the caller should treat that as
+    "this dimension's drift check is blind" rather than silently reporting a
+    clean match.
+    """
+    heading = RULE_FAMILY_HEADING_RE.search(text)
+    if heading is None:
+        return None
+    label_to_tool = {_clean_label(v): k for k, v in LANE_DOC_LABELS.items()}
+    rows: dict[str, dict[str, Any]] = {}
+    in_table = False
+    for line in text[heading.end() :].splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            if in_table:
+                break
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if len(cells) < 3:
+            continue
+        label = _clean_label(cells[0])
+        tool = label_to_tool.get(label)
+        if tool is None:
+            continue
+        in_table = True
+        m_correct = re.match(r"(\d+)", _clean_label(cells[1]))
+        m_pct = re.match(r"([\d.]+)%", _clean_label(cells[2]))
+        if not m_correct:
+            continue
+        rows[tool] = {
+            "correct": int(m_correct.group(1)),
+            "pct": float(m_pct.group(1)) if m_pct else None,
+        }
+    return {
+        "family_total": int(heading.group("count")),
         "rows": rows,
     }
 
@@ -371,6 +455,71 @@ def diff_against_doc(
             drift.append(
                 f"{label}: doc says {doc_row['false_negatives']} false negatives, "
                 f"generated report says {fresh['false_negatives']}"
+            )
+    return drift
+
+
+def diff_rule_family_against_doc(
+    report: dict[str, Any], rule_family_table: dict[str, Any] | None
+) -> list[str]:
+    """Human-readable drift lines for the 'Rule-family accuracy' dimension.
+
+    Sibling of :func:`diff_against_doc` for the independent rule-family
+    dimension. Deliberately does not require ``report["full_catalog_run"]``
+    the way the flat table's numeric check does — a rule family is scored
+    only over whichever of its member cases actually ran (see
+    ``benchmark_comparison._rule_family_accuracy``'s own docstring), so a
+    partial run genuinely can produce a comparable, if smaller,
+    ``family_total`` rather than needing to be skipped outright the way the
+    flat per-case table's full-catalog-only numeric check does.
+    """
+    if rule_family_table is None:
+        return [
+            "could not find the 'Rule-family accuracy (N demonstrated rule "
+            f"families)' heading in {_display_path(DOC_PATH)} — wording "
+            "changed? update RULE_FAMILY_HEADING_RE in this script."
+        ]
+    drift: list[str] = []
+    fam = report.get("rule_family_accuracy")
+    if not fam:
+        return [
+            "this run has no rule_family_accuracy data to check the doc's "
+            "'Rule-family accuracy' table against"
+        ]
+    generated_total = next(iter(fam.values()))["total"]
+    if rule_family_table["family_total"] != generated_total:
+        drift.append(
+            f"doc heading says '{rule_family_table['family_total']} demonstrated "
+            f"rule families' but the generated report covers {generated_total}"
+        )
+
+    missing_rows = set(fam) - set(rule_family_table["rows"])
+    for tool_name in sorted(missing_rows):
+        drift.append(
+            f"rule-family accuracy table is missing the row for "
+            f"{LANE_DOC_LABELS.get(tool_name, tool_name)!r} ({tool_name}) — "
+            "row deleted, or its label no longer matches LANE_DOC_LABELS"
+        )
+
+    for tool_name, doc_row in rule_family_table["rows"].items():
+        if tool_name not in fam:
+            continue
+        fresh = fam[tool_name]
+        label = LANE_DOC_LABELS.get(tool_name, tool_name)
+        if fresh["correct"] != doc_row["correct"]:
+            drift.append(
+                f"{label} (rule-family): doc says {doc_row['correct']}/"
+                f"{rule_family_table['family_total']} correct, generated "
+                f"report says {fresh['correct']}/{fresh['total']}"
+            )
+        if (
+            fresh["pct"] is not None
+            and doc_row["pct"] is not None
+            and abs(fresh["pct"] - doc_row["pct"]) >= 0.1
+        ):
+            drift.append(
+                f"{label} (rule-family): doc says {doc_row['pct']}% family "
+                f"accuracy, generated report says {fresh['pct']}%"
             )
     return drift
 
@@ -509,6 +658,8 @@ def main(argv: list[str] | None = None) -> int:
     doc_text = DOC_PATH.read_text(encoding="utf-8") if DOC_PATH.is_file() else ""
     doc_table = parse_doc_table(doc_text)
     drift = diff_against_doc(report, doc_table)
+    rule_family_table = parse_rule_family_table(doc_text)
+    drift += diff_rule_family_against_doc(report, rule_family_table)
     if drift:
         print("BENCHMARK DOC DRIFT DETECTED:", file=sys.stderr)
         for line in drift:
