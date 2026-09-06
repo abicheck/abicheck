@@ -224,14 +224,17 @@ class TestConsumerImpactSummary:
         }
 
     def test_to_json_reflects_fields(self):
+        # Not an actual filesystem path (Bandit B108 flags a literal "/tmp/"
+        # prefix as insecure temp-file usage even in a plain data literal) --
+        # any placeholder string exercises the field the same way.
         summary = ConsumerImpactSummary(
             total=3, evaluated=2, affected=1, unreadable_advisory=1,
-            unreadable_paths=("/tmp/app",),
+            unreadable_paths=("consumers/app",),
         )
         assert summary.to_json() == {
             "total": 3,
             "evaluated": 2,
             "affected": 1,
             "unreadable_advisory": 1,
-            "unreadable_paths": ["/tmp/app"],
+            "unreadable_paths": ["consumers/app"],
         }
