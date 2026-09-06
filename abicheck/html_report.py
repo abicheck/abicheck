@@ -396,32 +396,19 @@ def compute_gate_card(result: DiffResult, severity_config: Any) -> GateCardData 
     :func:`abicheck.policy.gate_decision.gate_decision_for_result`, the same
     single call site ``reporter._build_severity_json`` and
     ``sarif._severity_gate_properties`` read (ADR-061 D9): this function makes
-    no policy decision of its own. What it *does* decide is which of the two
-    gates the card reports: ``--used-by``/``--required-symbol(s)`` scoping
-    (ADR-043) means the CLI exits on the *scoped* gate, not this full-library
-    one (CodeRabbit review), so a scoped run reports that one and names the
-    full-library gate only as context. ``blocking_categories`` is left empty
-    for a scoped card because those categories correspond 1:1 to the full gate
-    alone -- attributing them to a scoped-only failure (e.g. a missing
-    ``--required-symbol`` entrypoint) would name the wrong decision.
+    no policy decision of its own.
+
+    Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+    prebuilt-consumer lifecycle") reverted the earlier design where a
+    supplied ``--used-by``/``--required-symbol(s)`` consumer's own scoped
+    gate replaced this card: the CLI process always exits on the full-library
+    gate this function reports, consumer or no consumer supplied. A
+    consumer's own assessment is surfaced separately, see
+    :func:`compute_scoped_verdict`.
     """
     full_gate = gate_decision_for_result(result, severity_config)
     if full_gate is None:
         return None
-    scoped_exit_code = getattr(result, "scoped_exit_code", None)
-    scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
-    if scoped_exit_code is not None and scoped_exit_code_scheme == "severity":
-        return GateCardData(
-            scoped=True,
-            passed=scoped_exit_code == 0,
-            exit_code=scoped_exit_code,
-            full_gate_label=(
-                "PASS"
-                if not full_gate.blocking
-                else f"FAIL (exit {full_gate.exit_code})"
-            ),
-            blocking_categories=(),
-        )
     return GateCardData(
         scoped=False,
         passed=not full_gate.blocking,
@@ -433,12 +420,14 @@ def compute_gate_card(result: DiffResult, severity_config: Any) -> GateCardData 
 
 def compute_scoped_verdict(result: DiffResult) -> ScopedVerdictData | None:
     """Collect the ``--used-by``/``--required-symbol(s)`` scoped-verdict box
-    (ADR-043), or ``None`` when the run was not scoped.
+    (ADR-043), or ``None`` when no consumer was supplied.
 
-    The verdict box above this one stays computed from the full, unscoped
-    diff, but the CLI process exits on the *scoped* verdict floor -- surfaced
-    so a reader can't miss the disagreement (mirrors the human-format banner,
-    ``_fold_scoped_compat_into_text``).
+    Purely informational (workstream D-S1): the verdict box above this one is
+    computed from the full-library diff, and the CLI process's own exit code
+    always comes from it -- this box states what a supplied consumer's own
+    assessment would have concluded on its own, beside that full-library
+    result, so a reader can see the two without either one overriding the
+    other (mirrors the human-format banner, ``_fold_scoped_compat_into_text``).
     """
     scoped_verdict = getattr(result, "scoped_verdict", None)
     if scoped_verdict is None:

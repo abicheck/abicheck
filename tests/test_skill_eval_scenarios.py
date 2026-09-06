@@ -189,10 +189,11 @@ def _scoped(scenarios: list[dict]) -> list[dict]:
 
 
 def test_consumer_scoped_scenarios_state_both_verdicts(scenarios: list[dict]) -> None:
-    """In a scoped run the top-level `verdict` is the *scoped* answer and
-    `full_verdict` is the library-wide one. A scenario stating only one of them
-    cannot distinguish a correct scoped answer from an agent reading the report
-    the wrong way round — the inversion the skill explicitly warns against."""
+    """`verdict` is always the library-wide answer (workstream D-S1) and
+    `consumer_verdict` is the informational consumer-scoped one. A scenario
+    stating only the former cannot distinguish a correct, fully-reported
+    answer from an agent that silently drops the consumer-side context —
+    the inversion the skill explicitly warns against."""
     scoped = _scoped(scenarios)
     if not scoped:
         # `check-abi-compatibility` still explicitly directs
@@ -206,23 +207,25 @@ def test_consumer_scoped_scenarios_state_both_verdicts(scenarios: list[dict]) ->
         # scoped scenario exists.
         pytest.skip("no consumer-scoped scenario is currently defined")
     for scenario in scoped:
-        assert "full_verdict" in scenario["expected"], (
-            f"{scenario['id']} is consumer-scoped but states no full_verdict"
+        assert "consumer_verdict" in scenario["expected"], (
+            f"{scenario['id']} is consumer-scoped but states no consumer_verdict"
         )
 
 
 def test_at_least_one_scoped_scenario_diverges(scenarios: list[dict]) -> None:
     """The divergent case is the whole reason consumer scoping exists. If every
-    scoped scenario had `verdict == full_verdict`, an agent that always reported
-    the library-wide result would pass all of them."""
+    scoped scenario had `verdict == consumer_verdict`, an agent that always
+    reported the library-wide result would pass all of them."""
     scoped = _scoped(scenarios)
     if not scoped:
         # See test_consumer_scoped_scenarios_state_both_verdicts above.
         pytest.skip("no consumer-scoped scenario is currently defined")
     diverging = [
-        s for s in scoped if s["expected"]["verdict"] != s["expected"]["full_verdict"]
+        s
+        for s in scoped
+        if s["expected"]["verdict"] != s["expected"]["consumer_verdict"]
     ]
-    assert diverging, "no scoped scenario has verdict != full_verdict"
+    assert diverging, "no scoped scenario has verdict != consumer_verdict"
 
 
 # --- the rubric ------------------------------------------------------------

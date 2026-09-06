@@ -410,24 +410,32 @@ def test_gate_card_projects_the_shared_gate_decision(
     assert card.blocking_categories == tuple(shared.blocking_categories)
 
 
-def test_scoped_gate_card_reports_the_exit_code_the_process_uses() -> None:
-    """A ``--used-by``/``--required-symbol`` run exits on the *scoped* gate,
-    so the card must report that one -- and must leave ``blocking_categories``
-    empty, since those describe the full-library decision alone."""
+def test_gate_card_always_reports_the_full_library_gate_not_the_scoped_one() -> None:
+    """Originally: a ``--used-by``/``--required-symbol`` run exited on the
+    *scoped* gate, so the card had to report that one, leaving
+    ``blocking_categories`` empty (those describe the full-library decision
+    alone).
+
+    Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+    prebuilt-consumer lifecycle") reverts that: `compute_gate_card` always
+    projects the full-library gate (`gate_decision_for_result`) -- a
+    consumer's own `scoped_exit_code`/`scoped_exit_code_scheme` (still
+    populated by `cli_compare_helpers._apply_scoped_gating` for the
+    informational `ScopedVerdictData` box) has no effect on it at all, and
+    `GateCardData.scoped` is never produced True by this function any more
+    (see `render_gate_card`'s own note about the field surviving only for a
+    directly-constructed `GateCardData`)."""
     result = _result()
     result.scoped_exit_code = 2
     result.scoped_exit_code_scheme = "severity"
     card = compute_gate_card(result, SeverityConfig())
     assert card is not None
-    assert card.scoped is True
-    assert card.exit_code == 2
-    assert card.passed is False
-    assert card.blocking_categories == ()
-    # The full-library gate is still named, as context.
     full = gate_decision_for_result(result, SeverityConfig())
     assert full is not None
-    expected = "PASS" if not full.blocking else f"FAIL (exit {full.exit_code})"
-    assert card.full_gate_label == expected
+    assert card.scoped is False
+    assert card.exit_code == full.exit_code
+    assert card.passed == (not full.blocking)
+    assert card.blocking_categories == tuple(full.blocking_categories)
 
 
 def test_expired_reclassify_rules_are_not_disclosed() -> None:

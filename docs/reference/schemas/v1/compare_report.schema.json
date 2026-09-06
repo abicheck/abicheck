@@ -144,16 +144,84 @@
         null
       ]
     },
-    "full_verdict": {
-      "type": "string",
-      "description": "Schema 2.9. The full-library verdict, present alongside verdict only when a --used-by/--required-symbol(s) scoped compare's gating verdict differs from the unscoped library-wide result (verdict becomes the scoped, gate-relevant one; full_verdict preserves the original).",
-      "enum": [
-        "NO_CHANGE",
-        "COMPATIBLE",
-        "COMPATIBLE_WITH_RISK",
-        "API_BREAK",
-        "BREAKING"
+    "consumer_scope": {
+      "type": "object",
+      "description": "Schema 3.0 (workstream D-S1). Present only when --used-by/--required-symbol(s) was given: a supplied consumer's own confirmed/potential/unresolved assessment, purely informational -- it never affects verdict/severity/run_outcome/summary or this run's exit code, which always describe the full-library result. Replaces the removed full_verdict/full_severity/full_run_outcome/full_summary swap (schema 2.9/2.9/ADR-063 Phase 7/2.9 respectively).",
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "NO_CHANGE",
+            "COMPATIBLE",
+            "COMPATIBLE_WITH_RISK",
+            "API_BREAK",
+            "BREAKING"
+          ]
+        },
+        "scope": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "used_by",
+            "required_symbol",
+            null
+          ]
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "exit_code_scheme": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "verdict",
+        "scope",
+        "note"
       ]
+    },
+    "used_by": {
+      "type": "array",
+      "description": "Present only when --used-by was given: one summary per supplied application binary (ADR-043). Purely informational -- see consumer_scope.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "app": {"type": "string"},
+          "verdict": {
+            "type": "string",
+            "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+          },
+          "required_symbol_count": {"type": "integer"},
+          "missing_symbols": {"type": "array", "items": {"type": "string"}},
+          "missing_versions": {"type": "array", "items": {"type": "string"}},
+          "relevant_change_count": {"type": "integer"},
+          "symbol_coverage": {"type": "number"}
+        }
+      }
+    },
+    "required_symbol_contract": {
+      "type": "object",
+      "description": "Present only when --required-symbol(s) was given: the plugin-host entrypoint contract's own summary (ADR-043). Purely informational -- see consumer_scope.",
+      "additionalProperties": true,
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+        },
+        "required_entrypoints": {"type": "array", "items": {"type": "string"}},
+        "missing_entrypoints": {"type": "array", "items": {"type": "string"}},
+        "relevant_change_count": {"type": "integer"},
+        "coverage": {"type": "number"}
+      }
     },
     "check_id": {
       "type": "string",
@@ -308,10 +376,6 @@
     "summary": {
       "$ref": "#/$defs/summary"
     },
-    "full_summary": {
-      "description": "Schema 2.9. The full-library summary counts, present alongside summary only for a scoped (--used-by/--required-symbol(s)) compare: summary is recomputed from the complete (post-scoping) changes array so it never contradicts it, and full_summary preserves the original pre-scoping counts (audit finding: a scoped run gated only by a scoped-only synthetic finding could report a non-zero verdict next to summary.total_changes: 0).",
-      "$ref": "#/$defs/summary"
-    },
     "policy": {
       "type": "string"
     },
@@ -344,14 +408,6 @@
       "$ref": "#/$defs/severity"
     },
     "run_outcome": {
-      "$ref": "#/$defs/run_outcome"
-    },
-    "full_severity": {
-      "description": "Schema 2.9. The full-library severity gate result, present alongside severity only for a scoped (--used-by/--required-symbol(s)) compare whose gating result was recomputed for the scoped changes array -- mirrors the verdict/full_verdict split.",
-      "$ref": "#/$defs/severity"
-    },
-    "full_run_outcome": {
-      "description": "ADR-063 Phase 7. The full-library run_outcome, present alongside run_outcome only for a scoped (--used-by/--required-symbol(s)) compare whose run_outcome was recomputed for the scoped changes array -- mirrors the verdict/full_verdict and severity/full_severity splits.",
       "$ref": "#/$defs/run_outcome"
     },
     "changes": {
@@ -1311,12 +1367,12 @@
               "no_comparison_completed"
             ]
           },
-          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"incomplete_scope\"/\"no_comparison_completed\" (schema 2.50, ADR-065 S2) only ever appear on a directory/package release report. \"scoped_gate\" replaces \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping is in effect (see compatibility_contribution). \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code."
+          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"incomplete_scope\"/\"no_comparison_completed\" (schema 2.50, ADR-065 S2) only ever appear on a directory/package release report. \"scoped_gate\" (schema < 3.0 only, kept in this enum for historical/persisted documents) used to replace \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping was in effect; as of schema 3.0 (workstream D-S1) this resolver never produces it -- \"compatibility_contribution\"/\"reasons\" always describe the full-library gate regardless of consumer scoping. \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code."
         },
         "compatibility_contribution": {
           "type": "integer",
           "minimum": 0,
-          "description": "The compatibility-gate exit code alone (severity.compute_exit_code under an effective severity map, else severity.legacy_exit_code from the verdict) -- UNLESS --used-by/--required-symbol(s) scoping is in effect, in which case this is the PRE-FOLD scoped application/plugin-host contract's own exit code (cli_compare_helpers._apply_scoped_gating's result.scoped_compatibility_contribution, captured before the coverage/assurance floors below are applied to it), not the informational full-library gate and not the already-folded result.scoped_exit_code -- so a genuine tie between the scoped gate and contract_coverage_contribution/analysis_assurance_contribution is visible here rather than hidden behind an already-maxed value; reasons carries scoped_gate rather than compatibility_gate in that case."
+          "description": "The compatibility-gate exit code alone (severity.compute_exit_code under an effective severity map, else severity.legacy_exit_code from the verdict). As of schema 3.0 (workstream D-S1), this always describes the full-library gate -- --used-by/--required-symbol(s) scoping no longer substitutes the scoped application/plugin-host contract's own exit code here. A supplied consumer's own assessment is reported separately under the top-level consumer_scope object."
         },
         "contract_coverage_contribution": {
           "type": "integer",

@@ -46,7 +46,7 @@ binaries, JSON snapshots, or a mix.
 ## Named-consumer invocations
 
 Both branches start from the canonical comparison above; only the scoping
-dial changes. Full model, failure modes, and the `verdict`/`full_verdict`
+dial changes. Full model, failure modes, and the `verdict`/`consumer_scope`
 reading rule: [consumer scoping](../../shared/consumer-scoping.md).
 
 ### Application consumer — `--used-by`
@@ -102,5 +102,5 @@ This is only the map from workflow step to field:
 | The compatibility answer | `verdict`, `summary` |
 | The grading of that answer | `severity.exit_code`, `severity.blocking`, `severity.blocking_categories` |
 | Root causes | `root_causes`, `root_cause_count`, `changes[].caused_by_type`, `changes[].caused_count` |
-| Named-consumer scope | `verdict` (the scoped answer), `full_verdict` (the library-wide answer), `changes[].affected_symbols`, `changes[].public_reachable`, `changes[].reachability_state`, `changes[].reachability_kind`, `changes[].impact_is_direct`, `changes[].affected_public_roots` |
+| Named-consumer scope | `verdict` (always the library-wide answer), `consumer_scope.verdict` (the supplied consumer's own answer, informational), `used_by`/`required_symbol_contract` (per-consumer detail), `changes[].affected_symbols`, `changes[].public_reachable`, `changes[].reachability_state`, `changes[].reachability_kind`, `changes[].impact_is_direct`, `changes[].affected_public_roots` |
 | Orthogonal coverage axis | `contract_coverage_failures`, `contract_coverage_exit_contribution` |

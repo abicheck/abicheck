@@ -168,12 +168,13 @@ class CommentModel:
     scope_notice: str | None = None
     scope_blocking: bool = False
     no_comparison_completed: bool = False
-    # compare --used-by/--required-symbol(s) scoping (ADR-043): the headline
-    # emoji/title and check gate follow *this* verdict when set, not the raw
-    # bucket counts below (which stay the full, unscoped library diff, kept as
-    # informational context per this module's own "content channel" design) —
-    # otherwise a scoped-compatible run could render an alarming "ABI BREAKING"
-    # headline that disagrees with the actual (scoped) exit code (Codex review).
+    # compare --used-by/--required-symbol(s) (ADR-043; workstream D-S1
+    # reverted the earlier "headline follows the scoped verdict" design): a
+    # supplied consumer's own confirmed/potential/unresolved assessment
+    # (`scoped_verdict`) is purely informational, rendered beside the
+    # headline (`_scoped_notes`), never in place of it -- the headline
+    # emoji/title and this comment's check gate always follow the full-library
+    # result (`full_verdict`, and the raw bucket counts below).
     scoped_verdict: str | None = None
     full_verdict: str | None = None
     used_by_summaries: list[dict[str, object]] = field(default_factory=list)

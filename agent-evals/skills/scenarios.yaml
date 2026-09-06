@@ -51,8 +51,19 @@
 # `shared/consumer-scoping.md`) — that capability was *absorbed*, not
 # dropped, by the reset. Reassigned to `check-abi-compatibility` rather
 # than removed, so the inversion this corpus exists to catch (an agent that
-# always reports the library-wide `full_verdict` instead of the scoped
-# `verdict`) still has coverage.
+# silently drops the informational `consumer_verdict` context instead of
+# reporting it alongside the library-wide `verdict`) still has coverage.
+#
+# Workstream D-S1 (vision-api-abi-evolution.md "D. Optional prebuilt-consumer
+# lifecycle") reverted `--used-by`/`--required-symbol(s)` from *replacing*
+# the compatibility gate to merely *enriching* it: `verdict` is now always
+# the library-wide result (never swapped for a supplied consumer's own
+# scoped result), and a supplied consumer's own result is reported under the
+# separate, purely informational `consumer_verdict` (report JSON:
+# `consumer_scope.verdict`). The three scenarios below were updated in place
+# for this — `verdict` restated as the full-library truth and the old
+# `full_verdict` field renamed `consumer_verdict` — rather than reassigned,
+# since the underlying inversion they guard against is unchanged.
 
 schema_version: 1
 
@@ -120,12 +131,13 @@ scenarios:
       verdict: COMPATIBLE
       uncertainty: contract_coverage_incomplete
 
-  # The three consumer scenarios state both verdicts on purpose. In a scoped
-  # run the top-level `verdict` is the *scoped* answer and `full_verdict`
-  # carries the library-wide one; the skill's own worked example is this
-  # exact pair (`full_verdict: BREAKING` with `verdict: COMPATIBLE`). Stating
-  # only the global value here would reward reading the report the wrong way
-  # round — the inversion the skill explicitly warns against.
+  # The three consumer scenarios state both verdicts on purpose. `verdict` is
+  # always the library-wide answer, and `consumer_verdict` is the informational
+  # consumer-scoped one (report JSON: `consumer_scope.verdict`) — the skill's
+  # own worked example is this exact pair (`verdict: BREAKING` with
+  # `consumer_verdict: COMPATIBLE`). Stating only the library-wide value here
+  # would reward silently dropping the consumer-side context — the inversion
+  # the skill explicitly warns against.
 
   - id: consumer-unaffected-despite-break
     category: B
@@ -140,8 +152,8 @@ scenarios:
     invocation:
       used_by: ["renderer"]
     expected:
-      verdict: COMPATIBLE
-      full_verdict: BREAKING
+      verdict: BREAKING
+      consumer_verdict: COMPATIBLE
 
   - id: consumer-actually-affected
     category: B
@@ -159,7 +171,7 @@ scenarios:
       # The non-diverging half of the pair: scoped and global agree, so an
       # agent cannot pass both consumer scenarios by always reporting one field.
       verdict: BREAKING
-      full_verdict: BREAKING
+      consumer_verdict: BREAKING
 
   - id: plugin-required-symbol-loss
     category: B
@@ -179,7 +191,7 @@ scenarios:
       # `--required-symbol` scopes the same way `--used-by` does, so this one
       # states both verdicts too.
       verdict: BREAKING
-      full_verdict: BREAKING
+      consumer_verdict: BREAKING
 
   # ---------------------------------------------------------------- Category A
   # Expected outcome comes from examples/ground_truth.json — never restated.

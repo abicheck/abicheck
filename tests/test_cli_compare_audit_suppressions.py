@@ -709,7 +709,13 @@ class TestUsedByScopedOnlyChange:
                 "--format", "json",
             ],
         )
-        assert result.exit_code == 4, result.output
+        # Workstream D-S1: old/new are identical, so the global comparison
+        # found nothing and exits 0 regardless of the stubbed consumer's own
+        # BREAKING assessment (reported informationally under
+        # consumer_scope) -- the exit code no longer follows scope_diff_to_app's
+        # stubbed result. The suppression-audit assertion below is this
+        # test's actual subject and is unaffected by that reversion.
+        assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)
         audit = payload["suppression_audit"]
         assert audit["stale_rules"] == []

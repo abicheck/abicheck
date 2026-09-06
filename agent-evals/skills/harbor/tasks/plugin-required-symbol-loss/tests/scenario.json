@@ -4,9 +4,9 @@
   ],
   "architectures": [],
   "category": "B",
-  "digest": "sha256:60f54ed0b89d31abd12dcb59d7211cb960532d6fc038bc94c5d565228de9c41a",
+  "digest": "sha256:ea2ede1f0f6d4d33f65965a04b6d366c1554a05c156f2a20def0d449563c98ca",
   "expected": {
-    "full_verdict": "BREAKING",
+    "consumer_verdict": "BREAKING",
     "verdict": "BREAKING"
   },
   "inputs": "agent-evals/skills/fixtures/plugin-required-symbol-loss",

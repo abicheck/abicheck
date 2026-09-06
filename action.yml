@@ -299,19 +299,22 @@ inputs:
     description: >
       Application binary/binaries whose actual imports/required symbol
       versions scope the comparison (space-separated; maps to repeated
-      compare --used-by). The full library comparison still runs; the
-      worst app-scoped result becomes the primary verdict/exit code, with
-      the full verdict kept as informational context. Mutually exclusive
-      with required-symbol/required-symbols (the CLI rejects both being
-      set). compare mode only.
+      compare --used-by). The full library comparison always determines
+      this run's own verdict/exit code; the supplied application's own
+      confirmed/potential/unresolved impact is reported alongside it
+      (informational), never in place of it. Mutually exclusive with
+      required-symbol/required-symbols (the CLI rejects both being set).
+      compare mode only.
     required: false
   required-symbol:
     description: >
       An exported linker symbol a plugin host resolves via dlopen/dlsym
       and requires (space-separated; maps to repeated compare
-      --required-symbol). Scopes the comparison to this explicit
-      entrypoint contract instead of the full diff. Mutually exclusive
-      with used-by. compare mode only.
+      --required-symbol). The full library comparison always determines
+      this run's own verdict/exit code; this contract's own confirmed/
+      potential/unresolved impact is reported alongside it (informational),
+      never in place of it. Mutually exclusive with used-by. compare mode
+      only.
     required: false
   required-symbols:
     description: >

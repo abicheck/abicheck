@@ -533,15 +533,21 @@ def test_contract_coverage_failures_join_incomplete_bucket():
     assert "🛑 Analysis incomplete" in body
 
 
-def test_contract_coverage_blocking_overrides_scoped_compatible_headline():
-    # Codex review: contract_coverage_exit_contribution folds into the real
-    # exit code unconditionally, on top of ANY other verdict — including a
-    # --used-by/--required-symbol scoped COMPATIBLE one. A scoped-compatible
-    # run whose contract coverage also failed must not render
-    # "✅ Compatible (scoped)" as if that were the whole story: the real
-    # exit code is already non-zero from the orthogonal coverage axis.
+def test_contract_coverage_blocking_overrides_clean_full_library_headline():
+    # Codex review, originally: contract_coverage_exit_contribution folds
+    # into the real exit code unconditionally, on top of ANY other verdict —
+    # including a --used-by/--required-symbol scoped COMPATIBLE one. A
+    # scoped-compatible run whose contract coverage also failed had to not
+    # render "✅ Compatible (scoped)" as if that were the whole story.
+    #
+    # Workstream D-S1: the headline never comes from the scoped verdict at
+    # all any more -- the consumer's own COMPATIBLE assessment is read from
+    # `consumer_scope` as pure enrichment. Here the full-library diff is
+    # also clean (empty `changes`), so the coverage axis is what correctly
+    # drives the "Source analysis incomplete" headline.
     report = _compare_report([])  # clean full-library diff too
     report["verdict"] = "COMPATIBLE"
+    report["consumer_scope"] = {"verdict": "COMPATIBLE"}
     report["used_by"] = [
         {
             "app": "/opt/app/bin/myapp",
@@ -574,16 +580,22 @@ def test_contract_coverage_blocking_overrides_scoped_compatible_headline():
     assert "Compatible (scoped)" not in body
 
 
-def test_contract_coverage_blocking_wins_over_unscoped_breaking_bucket_too():
-    # Codex review (second round): the fix above must return the coverage
-    # headline directly, not merely skip the scoped-header return and fall
-    # through to the rest of _header() — the full-library `breaking` bucket
-    # is informational-only under scoping (not part of the actual gate), so
-    # it must not steal the headline back from the orthogonal coverage axis
-    # that is what's actually failing the scoped consumer's own gate.
+def test_full_library_breaking_bucket_keeps_headline_priority_over_coverage():
+    # Codex review (second round), originally: the coverage-blocking headline
+    # had to win even when the full-library `breaking` bucket was nonzero,
+    # since under the old design that bucket was "informational-only under
+    # scoping (not part of the actual gate)".
+    #
+    # Workstream D-S1 inverts the premise entirely: the full-library
+    # `breaking` bucket is never merely informational -- it is what the real
+    # gate/exit code are based on, unconditionally. `_header()`'s existing
+    # priority order (`b` before the coverage-incomplete check) is therefore
+    # correct here: a real ABI break takes headline priority over an
+    # orthogonal, merely-advisory-shaped coverage gap, exactly as it would
+    # for a run with no `--used-by` consumer at all. The consumer's own
+    # COMPATIBLE assessment is still reported, informationally, in the body.
     report = _compare_report()  # non-empty: carries real breaking findings
-    report["full_verdict"] = report["verdict"]
-    report["verdict"] = "COMPATIBLE"
+    report["consumer_scope"] = {"verdict": "COMPATIBLE"}
     report["used_by"] = [
         {
             "app": "/opt/app/bin/myapp",
@@ -611,20 +623,21 @@ def test_contract_coverage_blocking_wins_over_unscoped_breaking_bucket_too():
     model = build_model(report)
     assert model.scoped_verdict == "COMPATIBLE"
     assert model.contract_coverage_blocking is True
-    assert model.counts[0] > 0  # the unscoped bucket really does have breaks
+    assert model.counts[0] > 0  # the full-library bucket really does have breaks
     body = render_comment(model, sha="x")
-    assert "Source analysis incomplete" in body
-    assert "ABI BREAKING" not in body
+    assert "ABI BREAKING" in body
+    assert "Consumer-scoped verdict: COMPATIBLE" in body
 
 
-def test_contract_coverage_advisory_does_not_override_scoped_compatible():
+def test_contract_coverage_advisory_does_not_override_the_headline():
     # The inverse: when contract coverage did NOT contribute to the exit
-    # code (contribution 0, or the key absent entirely), the scoped
-    # COMPATIBLE headline is untouched — this is the pre-existing,
-    # already-tested behavior, confirmed unaffected by the fix above.
+    # code (contribution 0, or the key absent entirely), the headline is
+    # untouched by it either way -- this is the pre-existing, already-tested
+    # behavior, confirmed unaffected by workstream D-S1. The headline here
+    # comes from the full-library `breaking` bucket (`_compare_report()`
+    # carries real findings), not from the informational consumer scope.
     report = _compare_report()
-    report["full_verdict"] = report["verdict"]
-    report["verdict"] = "COMPATIBLE"
+    report["consumer_scope"] = {"verdict": "COMPATIBLE"}
     report["used_by"] = [
         {
             "app": "/opt/app/bin/myapp",
@@ -640,7 +653,8 @@ def test_contract_coverage_advisory_does_not_override_scoped_compatible():
     assert model.scoped_verdict == "COMPATIBLE"
     assert model.contract_coverage_blocking is False
     body = render_comment(model, sha="x")
-    assert "Compatible (scoped)" in body
+    assert "ABI BREAKING" in body
+    assert "Consumer-scoped verdict: COMPATIBLE" in body
 
 
 def test_contract_coverage_exit_contribution_zero_is_advisory():

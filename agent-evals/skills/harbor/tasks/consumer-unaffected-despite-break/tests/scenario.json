@@ -4,10 +4,10 @@
   ],
   "architectures": [],
   "category": "B",
-  "digest": "sha256:69a7c6288e82b822baad821f9cd1e524022787e00b01e9bc1966409f6d6d275a",
+  "digest": "sha256:8fbe54b1a246f48b622f712743a943d997d1ce0e5fb638e5591d8893580e3b09",
   "expected": {
-    "full_verdict": "BREAKING",
-    "verdict": "COMPATIBLE"
+    "consumer_verdict": "COMPATIBLE",
+    "verdict": "BREAKING"
   },
   "inputs": "agent-evals/skills/fixtures/consumer-unaffected-despite-break",
   "invocation": {

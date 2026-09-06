@@ -51,8 +51,6 @@ growing the import graph.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 from .contract_relevance_types import (
     CompatibilityEvaluationStatus,
     ContractRelevance,
@@ -102,53 +100,11 @@ def is_evaluated(change: object) -> bool:
 #: comprehension around it is one line and correctly typed where it lives.
 
 
-def zero_scoped_out_gate_contributions(payload: object, result: object) -> None:
-    """Reset ``gate_contribution`` on findings the *scoped* gate does not score.
-
-    The predicates above answer "did compatibility policy evaluate this
-    finding". This answers the second question a run under
-    ``--used-by``/``--required-symbol`` raises: policy may well have scored
-    the finding against the *full library*, but the number the process
-    actually exits on comes from the scoped gate, and a finding the selected
-    consumer never uses contributes nothing to it. ADR-049 D1 defines
-    ``gate_contribution`` as what actually gated, so leaving the full-library
-    number in place published ``gate_contribution: 4`` on a run that exited
-    ``0`` (Codex review, reproduced with a removal outside the
-    required-symbol contract).
-
-    Walks *every* representation of a finding in *payload*, not just a flat
-    ``changes`` array: ``--report-mode root-cause`` also nests each finding
-    under ``root_causes[].findings``, and after ``json.loads`` those are
-    independent dicts rather than the shared objects the reporter built -- so
-    zeroing one left the same finding reading ``0`` in one place and ``4`` in
-    another within a single document (Codex review, reproduced). A future
-    third representation is covered by construction.
-
-    Shared by the CLI's JSON fold (``cli_compare_fold``) and the MCP
-    ``abi_compare`` response (``mcp_server``) because both publish their own
-    finding array off the same scoped run: the MCP response embedded a
-    correctly-zeroed CLI report beside a top-level ``changes`` array still
-    carrying the full-library contributions, which is the same divergence one
-    document over (Codex review, reproduced).
-
-    Call it *before* folding in scoped-only and missing-contract entries:
-    those are the scoped gate's own findings, and only the ones already
-    tracked in ``scoped_relevant_finding_ids`` would survive this filter.
-    Only entries that already carry the field are touched, so a run without
-    ``--contract`` is unaffected.
-    """
-    scoped_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
-
-    def _entries(node: object) -> Iterator[dict[str, object]]:
-        if isinstance(node, dict):
-            if "gate_contribution" in node:
-                yield node
-            for value in node.values():
-                yield from _entries(value)
-        elif isinstance(node, list):
-            for item in node:
-                yield from _entries(item)
-
-    for entry in _entries(payload):
-        if entry.get("finding_id") not in scoped_ids:
-            entry["gate_contribution"] = 0
+#: Workstream D-S1 (vision-api-abi-evolution.md "D. Optional prebuilt-consumer
+#: lifecycle") removed ``zero_scoped_out_gate_contributions``, which used to
+#: reset ``gate_contribution`` to ``0`` on every full-diff finding a supplied
+#: ``--used-by``/``--required-symbol`` consumer did not happen to use -- that
+#: was this module's own instance of the scoped gate *narrowing* the global
+#: one; a finding's `gate_contribution` (ADR-049 D1) now always reflects the
+#: full-library compatibility axis, exactly as it would without a consumer
+#: supplied at all.

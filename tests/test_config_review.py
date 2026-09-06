@@ -405,17 +405,20 @@ class TestScopedExitRespectsSeverity:
         )
         assert result.exit_code == 4
 
-    def test_required_symbol_never_present_floors_severity_at_4(
+    def test_required_symbol_never_present_does_not_affect_global_exit(
         self,
         tmp_path: Path,
     ) -> None:
-        # Regression (Codex P1): a required symbol absent from *both* old and
-        # new is a missing contract with no corresponding diff Change (the
-        # symbol was never removed -- it never existed), so
-        # `scoped.breaking_for_host` is empty even though `scoped.verdict` is
-        # BREAKING. `_scoped_exit_code` used to compute the severity-scheme
-        # exit purely from `breaking_for_host`, silently exiting 0 for a
-        # scoped compare that can never satisfy the contract at all.
+        # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+        # prebuilt-consumer lifecycle"): a required symbol absent from *both*
+        # old and new is a missing contract with no corresponding diff Change
+        # (the symbol was never removed -- it never existed) -- a real,
+        # confirmed fact about this contract's own consumer, but purely
+        # informational. Old/new are identical, so the *global* comparison
+        # found nothing and exits 0 regardless -- a consumer's own contract
+        # being permanently unsatisfiable never narrows or widens the run's
+        # own gate (reverting the prior design this test used to pin, where
+        # the scoped gate replaced the process's exit code outright).
         old_p, new_p = _write_identical(tmp_path)
         result = CliRunner().invoke(
             main,
@@ -429,7 +432,27 @@ class TestScopedExitRespectsSeverity:
                 "default",
             ],
         )
-        assert result.exit_code == 4
+        assert result.exit_code == 0
+        data = json.loads(
+            CliRunner()
+            .invoke(
+                main,
+                [
+                    "compare",
+                    str(old_p),
+                    str(new_p),
+                    "--required-symbol",
+                    "never_existed",
+                    "--severity-preset",
+                    "default",
+                    "--format",
+                    "json",
+                ],
+            )
+            .stdout
+        )
+        assert data["verdict"] == "NO_CHANGE"
+        assert data["required_symbol_contract"]["verdict"] == "BREAKING"
 
     def test_required_symbol_never_present_severity_info_only_exits_zero(
         self,
@@ -450,15 +473,19 @@ class TestScopedExitRespectsSeverity:
         )
         assert result.exit_code == 0
 
-    def test_required_symbol_json_severity_block_reflects_scoped_gate(
+    def test_required_symbol_json_severity_block_reports_the_full_library_gate(
         self,
         tmp_path: Path,
     ) -> None:
-        # Regression (Codex P2): the JSON `severity` block used to always
-        # describe the full-library gate, even for a --required-symbol scope
-        # whose contract (kept_entry) is untouched by the removal of an
-        # unrelated symbol -- the scoped gate here is COMPATIBLE/exit 0, but
-        # `severity.exit_code` used to still report the full library's 4.
+        # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+        # prebuilt-consumer lifecycle"): a supplied --required-symbol
+        # contract's own COMPATIBLE assessment (its contract, kept_entry, is
+        # untouched by the removal of an unrelated symbol) is informational
+        # only -- it never narrows the JSON `verdict`/`severity` block, which
+        # always describes the full-library gate (here genuinely BREAKING,
+        # from the real removal of `unrelated`). This reverts the prior
+        # design's "the JSON severity block must follow the scoped gate"
+        # regression test.
         old = AbiSnapshot(
             library="libtest.so",
             version="1.0",
@@ -508,16 +535,16 @@ class TestScopedExitRespectsSeverity:
                 "default",
             ],
         )
-        assert result.exit_code == 0
+        assert result.exit_code == 4
         data = json.loads(result.stdout)
-        assert data["full_verdict"] == "BREAKING"
-        assert data["verdict"] == "COMPATIBLE"
-        assert data["severity"]["exit_code"] == 0
-        assert data["severity"]["blocking"] is False
-        assert data["severity"]["categories"]["abi_breaking"]["count"] == 0
-        assert data["full_severity"]["exit_code"] == 4
-        assert data["full_severity"]["blocking"] is True
-        assert data["full_severity"]["categories"]["abi_breaking"]["count"] == 1
+        assert data["verdict"] == "BREAKING"
+        assert data["severity"]["exit_code"] == 4
+        assert data["severity"]["blocking"] is True
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+        # The required-symbol contract's own (informational) assessment is
+        # reported beside the full-library result, never in place of it.
+        assert data["consumer_scope"]["verdict"] == "COMPATIBLE"
+        assert data["required_symbol_contract"]["verdict"] == "COMPATIBLE"
 
 
 # ── §1 appcompat warnings + scope ───────────────────────────────────────────

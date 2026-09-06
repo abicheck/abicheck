@@ -698,7 +698,18 @@ from typing import Any
 #: 2.51 -- ADR-067 C-S1 (scalar policy-disposition audit): every JSON report gains an additive top-level ``disposition_audit`` block (``report.disposition_audit.compute_disposition_audit`` -- ``detected_total``/``effective_total``/per-``Disposition`` ``counts``/``rules``/``not_evaluated_detectors``), each ``suppression.suppressed_changes[]`` entry gains an additive ``rule`` object (rule id, source file, reason, label, expiry, intent, ``allow_public_break``) recording *which* suppression hid the finding, and each ``detectors[]`` entry gains an additive ``not_evaluated`` boolean distinguishing "did not run" from "ran, found nothing". Additive only: no existing key changes shape or meaning, and no verdict, gate, or exit code moves. Renumbered from a conflicting 2.50 when the origin/main merge claimed that version first for ADR-065 S2's ``comparison_scope`` block (same "renumber, don't reuse" convention as the 2.32/2.36/2.38 entries above).
 #: 2.52 -- ADR-067 C-S1 review follow-up: ``disposition_audit`` gains an additive ``policy_overlays`` integer -- findings policy generated *about* another finding (a withheld-suppression advisory), which appear in ``effective_total`` but in neither ``detected_total`` nor ``counts``, so a consumer reconciling the three can account for the difference. Additive only.
 #: 2.53 -- ADR-063 Track T3 (Codex review, PR #1078, twenty-fourth round): ``finding_id``'s documented algorithm gains a seventh, conditional input -- ``Change.disambiguator`` (never itself a reported field) -- appended only for a typedef/constant occurrence-level finding needing collision disambiguation. Every other finding's id is unchanged; the schema's own description was updated to match (previously undocumented since the seventeenth round introduced the conditional append). Renumbered twice by successive origin/main merges: first from a conflicting 2.50 (ADR-065 S2's ``comparison_scope``/``run_outcome`` additions), then from the resulting conflicting 2.51 (ADR-067 C-S1's ``disposition_audit`` block) -- same "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/2.49/2.51 entries above.
-REPORT_SCHEMA_VERSION = "2.53"
+#: 3.0 -- workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+#:       prebuilt-consumer lifecycle"): ``--used-by``/``--required-symbol(s)``
+#:       no longer replaces ``verdict``/``severity``/``run_outcome``/
+#:       ``summary`` with the consumer's own scoped result -- those always
+#:       describe the full-library result now. **Breaking**: the
+#:       ``full_verdict``/``full_severity``/``full_run_outcome``/
+#:       ``full_summary`` keys that swap used to populate are removed.
+#:       Replaced by an additive ``consumer_scope`` object (``verdict``,
+#:       ``scope``, and, under the severity scheme, ``exit_code``/
+#:       ``exit_code_scheme``), purely informational. ``used_by``/
+#:       ``required_symbol_contract`` are unchanged.
+REPORT_SCHEMA_VERSION = "3.0"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

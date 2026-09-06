@@ -144,15 +144,21 @@ def test_compare_detail_text_renders_value_delta():
 # (this file's own line-count cap; CLAUDE.md's "Files that are large" section).
 
 
-def test_used_by_scoped_compatible_overrides_breaking_headline():
-    # ADR-043 `compare --used-by`: the full library still has breaking
-    # changes (unrelated to the app), but the scoped verdict is COMPATIBLE —
-    # the comment headline must follow the scoped verdict (what the exit
-    # code actually reflects), not the raw full-library bucket counts
-    # (Codex review).
+def test_used_by_scoped_compatible_reported_beside_breaking_headline():
+    # ADR-043 `compare --used-by`, originally: the full library still had
+    # breaking changes (unrelated to the app), but the scoped verdict was
+    # COMPATIBLE -- the comment headline followed the scoped verdict (what
+    # the exit code used to reflect), not the raw full-library bucket
+    # counts.
+    #
+    # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+    # prebuilt-consumer lifecycle") reverts that: `verdict` is always the
+    # plain full-library value (no more `full_verdict`/`verdict` swap), and
+    # a supplied consumer's own result is read from the `consumer_scope`
+    # block as pure enrichment -- it can never override the headline, which
+    # always follows the full-library bucket counts and exit code.
     report = _compare_report()
-    report["full_verdict"] = report["verdict"]
-    report["verdict"] = "COMPATIBLE"
+    report["consumer_scope"] = {"verdict": "COMPATIBLE"}
     report["used_by"] = [
         {
             "app": "/opt/app/bin/myapp",
@@ -167,21 +173,21 @@ def test_used_by_scoped_compatible_overrides_breaking_headline():
     model = build_model(report)
     assert model.scoped_verdict == "COMPATIBLE"
     assert model.full_verdict == "BREAKING"
-    # Full-library buckets are still populated (informational context).
+    # Full-library buckets are still populated and drive the headline.
     assert model.counts == (2, 1, 2)
 
     body = render_comment(model, sha="abc1234")
-    assert "Compatible (scoped)" in body
-    assert "ABI BREAKING" not in body.split("\n")[2]  # headline line, not body
-    assert "Scoped verdict: COMPATIBLE" in body
+    assert "ABI BREAKING" in body.split("\n")[2]  # headline line: full-library verdict
+    assert "Compatible (scoped)" not in body
+    assert "Consumer-scoped verdict: COMPATIBLE" in body
     assert "full library" in body
     assert "/opt/app/bin/myapp" in body
 
 
-def test_required_symbol_scoped_breaking_overrides_compatible_headline():
+def test_required_symbol_scoped_breaking_reported_beside_compatible_headline():
     report = _compare_report(changes=[])
-    report["full_verdict"] = "COMPATIBLE"
-    report["verdict"] = "BREAKING"
+    report["verdict"] = "COMPATIBLE"
+    report["consumer_scope"] = {"verdict": "BREAKING"}
     report["required_symbol_contract"] = {
         "verdict": "BREAKING",
         "required_entrypoints": ["plugin_init"],
@@ -194,8 +200,9 @@ def test_required_symbol_scoped_breaking_overrides_compatible_headline():
     assert model.full_verdict == "COMPATIBLE"
 
     body = render_comment(model, sha="abc1234")
-    assert "ABI BREAKING (scoped)" in body
-    assert "plugin_init" not in body.split("Scoped verdict")[0]  # sanity: appears in banner
+    assert "ABI BREAKING (scoped)" not in body
+    assert "Consumer-scoped verdict: BREAKING" in body
+    assert "plugin_init" not in body.split("Consumer-scoped verdict")[0]  # only in the note
     assert "--required-symbol" in body
 
 

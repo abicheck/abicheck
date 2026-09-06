@@ -214,12 +214,14 @@ contributes anything positive, so `reasons` can carry `promoted_crosscheck`
 even when the crosscheck only *ties* — rather than exceeds — the baseline
 comparison's own exit code.
 
-Under `--used-by`/`--required-symbol(s)` scoping, `compatibility_contribution`
-and `reasons` describe the **scoped** application/plugin-host gate (the one
-the process actually exits on — see the section below), not the
-informational full-library verdict/severity gate `full_verdict`/
-`full_severity` still report; `reasons` carries `scoped_gate` rather than
-`compatibility_gate` in that case.
+`--used-by`/`--required-symbol(s)` scoping does not change
+`compatibility_contribution`/`reasons` at all (workstream D-S1,
+`docs/contribute/plans/vision-api-abi-evolution.md` "D. Optional
+prebuilt-consumer lifecycle"): they always describe the full-library
+compatibility gate, exactly as an unscoped run's would. A supplied
+consumer's own confirmed/potential/unresolved assessment is reported
+separately (`used_by`/`required_symbol_contract`/`consumer_scope` in the
+JSON report — see the section below) and never feeds into this field.
 
 This field is additive and does not itself change any exit code — it is a
 persisted view of a resolution every axis above already performs. It does
@@ -637,15 +639,21 @@ Their scoping now folds into `compare` itself:
   dlopen/dlsym entrypoint contract instead of the full diff. Mutually
   exclusive with `--used-by`.
 
-The full library comparison still runs once; **the worst app/plugin-scoped
-result becomes the primary verdict/exit code**, with the full verdict and
-unrelated changes kept as informational context. There is no separate
-exit-code scheme for this scoping — it uses exactly the `compare` codes
-documented above (legacy `0/2/4`, severity-aware `0/1/2/4`, `64` for a usage
-error). In particular, exit `4`/`BREAKING` is also the result when the
-application requires symbols or ELF version tags absent from the new
-library — even if the unscoped library diff is otherwise compatible —
-because the application would fail to load.
+The full library comparison still runs once, and (workstream D-S1,
+`docs/contribute/plans/vision-api-abi-evolution.md` "D. Optional
+prebuilt-consumer lifecycle") **its own verdict/exit code is always what
+this run reports** — exactly the `compare` codes documented above (legacy
+`0/2/4`, severity-aware `0/1/2/4`, `64` for a usage error) — whether or not
+a consumer was supplied. In particular, an application requiring symbols or
+ELF version tags absent from the new library does **not**, by itself, raise
+this run's own exit code: that fact is real and reported (`used_by`/
+`required_symbol_contract`/`consumer_scope` in the JSON report), but it is
+the supplied consumer's own informational assessment, separate from the
+library's own compatibility result. A library removal the consumer's own
+imports happen to name is still exactly as breaking as any other removal,
+through the ordinary compatibility axis — supplying `--used-by`/
+`--required-symbol` changes what is *reported*, never what the library's
+own exit code *is*.
 
 ---
 

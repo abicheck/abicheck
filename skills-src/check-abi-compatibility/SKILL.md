@@ -195,16 +195,19 @@ report the global verdict from step 5 and stop there.
 
 Exact invocations for both: [the abicheck adapter](references/abicheck-adapter.md#named-consumer-invocations).
 
-**Read the verdict the right way round.** On a scoped run, the top-level
-`verdict` is promoted to the *scoped* answer — the CLI puts it there because
-it is what a gate acts on — and `full_verdict` carries the library-wide
-result from step 5, preserved separately on every scoped run whether or not
-it differs. So **compare the two fields**; they diverge exactly when
-`full_verdict != verdict`, and that divergence is usually the entire point
-of having asked the narrower question. Report both, explicitly labelled,
-whenever they differ. When the user's question implies both answers matter
-(e.g. "is this safe to ship, and specifically will `myapp` still work"),
-answer both rather than only the narrower one.
+**`verdict` stays the library-wide answer from step 5, scoped run or not.**
+The supplied consumer's own confirmed/potential/unresolved answer is
+reported alongside it, never in place of it — `used_by`/
+`required_symbol_contract` (per-consumer detail) and a `consumer_scope`
+object naming that consumer's own verdict (`consumer_scope.verdict`).
+**Compare `verdict` against `consumer_scope.verdict`**; they diverge exactly
+when the library-wide result and the supplied consumer's own exposure
+disagree, and that divergence is usually the entire point of having asked
+the narrower question. Report both, explicitly labelled, whenever they
+differ. When the user's question implies both answers matter (e.g. "is this
+safe to ship, and specifically will `myapp` still work"), answer both rather
+than only the narrower one. Never report `consumer_scope.verdict` as if it
+were this run's own gate/exit code — it never is.
 
 State the residual uncertainty this branch always carries: an import scan
 cannot see a symbol resolved via `dlopen`/`dlsym`/`GetProcAddress` or a

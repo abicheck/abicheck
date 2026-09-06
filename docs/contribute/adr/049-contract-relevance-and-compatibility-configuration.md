@@ -863,3 +863,24 @@ attribution, the natural home for a "beside the global result" enrichment
 block), and [ADR-057](057-consumer-graph-and-impact-join.md) (the consumer
 graph the `--used-by` scoping already reads) for where this change, if
 picked up, intersects each of their own status.
+
+**Landed (workstream D-S1, `docs/contribute/plans/vision-api-abi-evolution.md`
+"D. Optional prebuilt-consumer lifecycle").** The migration this amendment
+named as target design is implemented: `compare --used-by`/
+`--required-symbol(s)` no longer overrides `verdict`/`severity`/
+`run_outcome`/`summary` or the process exit code — those always describe
+the full-library result, exactly as an unscoped run would. A supplied
+consumer's own confirmed/potential/unresolved result is reported beside it
+(JSON `used_by`/`required_symbol_contract`/`consumer_scope`; SARIF's
+`scopedGate` block, JUnit's `abicheck.gate_*` properties, the HTML report's
+"Consumer-scoped verdict" box, and the PR comment's own consumer note are
+all purely informational now). The compare-report JSON schema bumped to
+`3.0` (breaking: `full_verdict`/`full_severity`/`full_run_outcome`/
+`full_summary` are gone) with a changelog fragment flagging the exit-code
+behavior change. Note this reaches only the ADR-049 `--used-by`/
+`--required-symbol` axis this amendment names — the separate `--contract`
+explicit-scope *promotion* mechanism (§4.3, `contract_scoped_promotion.py`)
+is unaffected: it still ranks a real consumer's imports above a
+header/export-derived relevance conclusion when `--contract` is given, and
+still operates on `DiffResult.changes` before this ADR's own D9
+policy-scoring pipeline runs.

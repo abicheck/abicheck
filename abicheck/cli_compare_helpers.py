@@ -106,7 +106,6 @@ from .frontends.cli.runtime import (
     _write_or_echo,
 )
 from .service_render import ONELINE_FORMAT
-from .workflows.gate import announce_coverage_floor, fold_coverage_exit
 
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
@@ -1165,62 +1164,33 @@ def _report_compare_result(
         contract_evaluation=contract_evaluation,
     )
 
-    scoped_exit_code = _apply_scoped_gating(
+    # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+    # prebuilt-consumer lifecycle"): a supplied `--used-by`/`--required-symbol`
+    # consumer used to *replace* the process's gate outright (`scoped_verdict`/
+    # `gate_scope`, worst-app-wins, `sys.exit(scoped_exit_code)` below). That is
+    # reverted -- a consumer's confirmed/potential/unresolved impact is
+    # reported *beside* the full-library compatibility result computed by
+    # `_exit_with_severity_or_verdict` further down; it never substitutes for
+    # it and never narrows what the run gates on. `_apply_scoped_gating` still
+    # runs (unchanged) to populate `result.used_by`/`result.required_symbols`/
+    # `result.scoped_verdict`/`result.scoped_exit_code`/etc. for the report's
+    # enrichment section -- those fields are read by
+    # `report/scoped_gate.py`/`sarif.py`/`junit_report.py`/`html_report.py` to
+    # render the per-consumer breakdown -- but the value returned here is no
+    # longer used to pick the process exit code.
+    _apply_scoped_gating(
         result, old, new, policy, pf,
         used_by_apps=used_by_apps, required_symbols=required_symbols,
         used_by_old_input=used_by_old_input, used_by_new_input=used_by_new_input,
         exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
         suppression=suppression,
     )
-
-    # P0.4 (P2 review): fold the orthogonal coverage/analysis-assurance
-    # floors into the scoped exit code *before* any report gets rendered
-    # below, and write the folded value back onto `result.scoped_exit_code`
-    # -- the exact field SARIF's `gateExitCode`/`scopedExitCode`, JUnit's
-    # `abicheck.gate_exit_code`/`abicheck.scoped_exit_code`, and HTML's gate
-    # banner all read directly (`getattr(result, "scoped_exit_code", ...)`,
-    # no folding of their own). Previously this fold ran only right before
-    # `sys.exit` below, *after* `_write_or_echo` had already serialized both
-    # the primary and secondary reports from the pre-floor value -- so an
-    # artifact could show a passing 0 gate while the process actually exited
-    # 1 under `--require-complete-analysis` (Codex review, reproduced).
-    # Folding here, and persisting the result back onto `result` rather than
-    # only a local variable, means every renderer downstream -- present or
-    # future -- reads the one authoritative, already-floored value with no
-    # render-order dependency, mirroring how `_exit_with_severity_or_verdict`
-    # (cli.py) applies both floors immediately after computing its own base
-    # exit code and before returning control to its caller.
-    if scoped_exit_code is not None:
-        from .workflows.gate import (
-            assurance_floor_diagnostic,
-            fold_analysis_assurance_exit,
-        )
-
-        # `exit_decision.resolve_compare_exit_decision`'s own reasons need
-        # the *pre-fold* scoped contribution, not the already-folded value
-        # `result.scoped_exit_code` ends up holding below -- otherwise a
-        # scoped gate floored by (say) `--require-complete-analysis` alone
-        # reports `reasons: ["scoped_gate"]` even though the scoped gate
-        # itself never contributed to that number (Codex review).
-        result.scoped_compatibility_contribution = scoped_exit_code  # type: ignore[attr-defined]
-        announce_coverage_floor(
-            result,
-            base_exit=scoped_exit_code,
-            fmt=fmt,
-            secondary_fmt=secondary_fmt,
-        )
-        scoped_exit_code = fold_coverage_exit(scoped_exit_code, result)
-        diagnostic = assurance_floor_diagnostic(
-            result,
-            require_complete=require_complete_analysis,
-            base_exit=scoped_exit_code,
-        )
-        if diagnostic is not None:
-            click.echo(diagnostic, err=True)
-        scoped_exit_code = fold_analysis_assurance_exit(
-            scoped_exit_code, result, require_complete=require_complete_analysis
-        )
-        result.scoped_exit_code = scoped_exit_code  # type: ignore[attr-defined]
+    # `result.scoped_exit_code` (as computed by `_apply_scoped_gating`) is
+    # still the *pre-orthogonal-floor* per-consumer number at this point --
+    # left as-is (informational) rather than folded against
+    # coverage/analysis-assurance, since neither axis is scored against a
+    # per-consumer scope; both fold only against the global exit code
+    # `_exit_with_severity_or_verdict` computes below.
 
     if audit_suppressions:
         _attach_suppression_audit(result, suppression)
@@ -1282,17 +1252,12 @@ def _report_compare_result(
             ),
         )
 
-    if scoped_exit_code is not None:
-        # ADR-043: --used-by / --required-symbol(s) scope the primary verdict
-        # to the application/plugin-host contract, floored at the worst
-        # scoped result -- the full library verdict stays informational only.
-        # ADR-049 §7's coverage axis and P0.4's analysis-assurance axis are
-        # both orthogonal to that scoping. Both floors were already folded
-        # into `scoped_exit_code` (and persisted onto `result.scoped_exit_code`)
-        # above, before any report was rendered (P2 review) -- this is just
-        # the terminal exit, not a second fold.
-        sys.exit(scoped_exit_code)
-
+    # Workstream D-S1: no early `sys.exit` on the scoped/consumer result here
+    # any more -- `--used-by`/`--required-symbol(s)` no longer float their own
+    # exit code over the full-library one. Every run, scoped or not, exits
+    # through the identical `_exit_with_severity_or_verdict` path below, so
+    # the compatibility verdict a supplied consumer enriches can never be
+    # narrowed or replaced by that consumer's own result.
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt)
     _exit_with_severity_or_verdict(
         result, sev_config, resolved_cfg.exit_code_scheme, fmt, secondary_fmt,

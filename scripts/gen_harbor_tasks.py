@@ -354,7 +354,7 @@ ENV ABICHECK_ALLOW_AST_FALLBACK=1
 # itself contains scenario-identifying comments naming specific
 # fixtures/consumers, and `tests/test_skill_eval_graders_consumer_
 # scoping.py`'s own hand-written unit-test fixtures independently restate
-# real scenario data (a real consumer name, its real verdict/full_verdict
+# real scenario data (a real consumer name, its real verdict/consumer_verdict
 # pair) as example input for testing the grader.
 #
 # The graders and `verify_run.py` are therefore no longer part of this

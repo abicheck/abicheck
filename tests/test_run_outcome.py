@@ -482,21 +482,38 @@ class TestGateInfoFromReportDataStructuredFirst:
         with pytest.raises(_MalformedGate):
             GateInfo.from_report_data(data)
 
-    def test_scoped_gate_divergence_from_severity_is_not_a_contradiction(self):
-        """The scoped-gate case (Codex review, fresh evidence following the
-        contradiction check above): a --used-by/--required-symbol report's
-        severity.exit_code is scoped_exit_code (already folded with the
-        orthogonal contract-coverage/analysis-assurance floors), while
-        run_outcome.gate is derived from scoped_compatibility_contribution
-        (deliberately pre-fold, compatibility-only, per D6's axis
-        separation) -- the two legitimately differ whenever a coverage/
-        assurance floor applies. full_run_outcome's presence (only set by
-        report.scoped_gate._swap_in_scoped_run_outcome) is what must exempt
-        this from the contradiction check, not silently coincide with it.
+    def test_used_by_report_gets_no_exemption_from_the_contradiction_check(self):
+        """Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+        prebuilt-consumer lifecycle") reverted the scoped-report exemption
+        this class used to test at length below: a --used-by/--required-
+        symbol report's severity.exit_code/run_outcome.gate are never
+        rewritten to a scoped result any more (report.scoped_gate no longer
+        swaps them), so they can never legitimately disagree with
+        result.exit_code the way they used to -- a genuine mismatch on such
+        a report is corruption exactly like any other, `used_by`'s presence
+        notwithstanding. `_fold_top_level_run_outcome` no longer accepts a
+        `scoped_exempt` parameter at all."""
+        from abicheck.workflows.aggregate.gate import _MalformedGate
 
-        A genuine compatibility break on the scoped gate (run_outcome.gate
-        != none) still surfaces here -- unlike the coverage-only sibling
-        test below, which the exemption rebuilds down to a clean gate."""
+        data = {
+            "severity": {
+                "exit_code": 0,
+                "blocking": False,
+                "blocking_categories": [],
+            },
+            "run_outcome": self._run_outcome_block(
+                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
+            ),
+            "used_by": ["app.so"],
+        }
+        with pytest.raises(_MalformedGate):
+            GateInfo.from_report_data(data)
+
+    def test_used_by_report_with_agreeing_gate_and_severity_reads_normally(self):
+        """The positive control for the above: a --used-by report whose
+        severity/run_outcome genuinely agree (the only shape a real report
+        produces since workstream D-S1) reads exactly like an unscoped one
+        -- `used_by`'s presence changes nothing about this gate."""
         data = {
             "severity": {
                 "exit_code": 4,
@@ -506,10 +523,6 @@ class TestGateInfoFromReportDataStructuredFirst:
             "run_outcome": self._run_outcome_block(
                 PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
             ),
-            "full_run_outcome": self._run_outcome_block(
-                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
-            ),
-            "full_verdict": "BREAKING",
             "used_by": ["app.so"],
         }
         gate = GateInfo.from_report_data(data)
@@ -517,179 +530,6 @@ class TestGateInfoFromReportDataStructuredFirst:
         assert gate.exit_code == 4
         assert gate.blocking is True
         assert gate.blocking_categories == ("abi_breaking",)
-
-    def test_scoped_coverage_only_severity_does_not_read_as_a_compatibility_break(
-        self,
-    ):
-        """Codex review (P1), fresh evidence: retaining the folded
-        `severity.exit_code` for a scoped report (rather than rebuilding
-        from the pure `run_outcome.gate`) meant a scoped report whose only
-        contribution was contract-coverage/analysis-assurance (compatibility
-        clean, run_outcome.gate: none) still built a GateInfo with
-        exit_code=1/blocking=True -- so aggregation counted the target as a
-        *compatibility* blocker even though that same coverage/assurance
-        contribution is folded onto the aggregate's own orthogonal axis
-        independently, double-counting one contribution as two kinds of
-        blocker. The exemption must rebuild purely from run_outcome.gate."""
-        data = {
-            "severity": {
-                "exit_code": 1,
-                "blocking": True,
-                "blocking_categories": ["contract_coverage"],
-            },
-            "run_outcome": self._run_outcome_block(
-                PolicyGateDecision.NONE, OperationalStatus.NONE
-            ),
-            "full_run_outcome": self._run_outcome_block(
-                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
-            ),
-            "full_verdict": "BREAKING",
-            "used_by": ["app.so"],
-        }
-        gate = GateInfo.from_report_data(data)
-        assert gate is not None
-        assert gate.exit_code == 0
-        assert gate.blocking is False
-        assert gate.blocking_categories == ()
-
-    def test_garbage_full_run_outcome_does_not_bypass_the_contradiction_check(self):
-        """Codex review (P2), fresh evidence beyond the contradiction fix
-        above: the exemption used to be earned by mere key presence
-        (`"full_run_outcome" in data`), so an unscoped, corrupted report
-        could pair a genuinely contradictory severity/run_outcome pair with
-        an arbitrary `full_run_outcome` value (anything, even None) and have
-        the authoritative cross-check silently disabled. The exemption must
-        require full_run_outcome to itself be a well-formed RunOutcome
-        block, the only shape report.scoped_gate._swap_in_scoped_run_outcome
-        ever actually produces."""
-        from abicheck.workflows.aggregate.gate import _MalformedGate
-
-        data = {
-            "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []},
-            "run_outcome": self._run_outcome_block(
-                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
-            ),
-            "full_run_outcome": None,
-        }
-        with pytest.raises(_MalformedGate):
-            GateInfo.from_report_data(data)
-
-    def test_well_formed_but_unrelated_full_run_outcome_does_not_bypass_the_check(self):
-        """Codex review (P2), fresh evidence beyond the previous garbage-
-        value fix: a *well-formed* full_run_outcome alone was still enough
-        to earn the exemption, even attached to an otherwise-unscoped
-        corrupt report -- the real writer (report.scoped_gate.
-        apply_scoped_gate) never emits full_run_outcome without also unconditionally
-        emitting full_verdict and at least one of used_by/
-        required_symbol_contract. Without those markers too, the exemption
-        must not apply."""
-        from abicheck.workflows.aggregate.gate import _MalformedGate
-
-        data = {
-            "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []},
-            "run_outcome": self._run_outcome_block(
-                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
-            ),
-            "full_run_outcome": self._run_outcome_block(
-                PolicyGateDecision.ABI_BREAKING, OperationalStatus.NONE
-            ),
-        }
-        with pytest.raises(_MalformedGate):
-            GateInfo.from_report_data(data)
-
-    def test_minimal_full_run_outcome_does_not_bypass_the_check(self):
-        """Codex review (P2), fresh evidence beyond the two fixes above:
-        RunOutcome.from_dict only requires gate/operational to parse (a
-        deliberately lenient reader for its OTHER callers) -- so a minimal,
-        forged two-key full_run_outcome (missing schema_version/
-        compatibility/assurance/lifecycle) alongside full_verdict/used_by
-        still earned the exemption. The exemption must additionally
-        require every key $defs.run_outcome declares required to actually
-        be present, not merely that the two present keys parse."""
-        from abicheck.workflows.aggregate.gate import _MalformedGate
-
-        data = {
-            "severity": {
-                "exit_code": 4,
-                "blocking": True,
-                "blocking_categories": ["abi_breaking"],
-            },
-            "run_outcome": self._run_outcome_block(
-                PolicyGateDecision.NONE, OperationalStatus.NONE
-            ),
-            "full_run_outcome": {"gate": "none", "operational": "none"},
-            "full_verdict": "BREAKING",
-            "used_by": ["app.so"],
-        }
-        with pytest.raises(_MalformedGate):
-            GateInfo.from_report_data(data)
-
-    def test_schema_invalid_full_run_outcome_values_do_not_bypass_the_check(self):
-        """Codex review (P2), fresh evidence beyond the required-key fix
-        above: requiring the six keys to be *present* still let schema-
-        invalid *values* through (schema_version: null, compatibility: {},
-        lifecycle: "bogus" all satisfy "key present" while RunOutcome.
-        from_dict silently ignores/defaults every one of them). The
-        exemption must validate the required fields' schema types/enums,
-        not only their names."""
-        from abicheck.workflows.aggregate.gate import _MalformedGate
-
-        data = {
-            "severity": {
-                "exit_code": 4,
-                "blocking": True,
-                "blocking_categories": ["abi_breaking"],
-            },
-            "run_outcome": self._run_outcome_block(
-                PolicyGateDecision.NONE, OperationalStatus.NONE
-            ),
-            "full_run_outcome": {
-                "schema_version": None,
-                "compatibility": {},
-                "assurance": None,
-                "gate": "none",
-                "operational": "none",
-                "lifecycle": "bogus",
-            },
-            "full_verdict": "BREAKING",
-            "used_by": ["app.so"],
-        }
-        with pytest.raises(_MalformedGate):
-            GateInfo.from_report_data(data)
-
-    def test_null_scoped_markers_do_not_bypass_the_check(self):
-        """Codex review, fresh evidence beyond the schema-type fix above:
-        `report.scoped_gate.apply_scoped_gate` never emits `full_verdict`/`used_by`/
-        `required_symbol_contract` with an explicit null -- but the exemption
-        previously only checked *key presence*. `full_verdict: None` (fails
-        Verdict parsing), or both scoped markers explicitly `None` (matches
-        neither), must not earn the exemption; an otherwise-BREAKING severity
-        block must still fail closed."""
-        from abicheck.workflows.aggregate.gate import _MalformedGate
-
-        outcome = self._run_outcome_block(
-            PolicyGateDecision.NONE, OperationalStatus.NONE
-        )
-        base = {
-            "severity": {
-                "exit_code": 4,
-                "blocking": True,
-                "blocking_categories": ["x"],
-            },
-            "run_outcome": outcome,
-            "full_run_outcome": outcome,
-        }
-        with pytest.raises(_MalformedGate):
-            GateInfo.from_report_data({**base, "full_verdict": None, "used_by": ["a"]})
-        with pytest.raises(_MalformedGate):
-            GateInfo.from_report_data(
-                {
-                    **base,
-                    "full_verdict": "BREAKING",
-                    "used_by": None,
-                    "required_symbol_contract": None,
-                }
-            )
 
     def test_operational_failure_folds_into_an_otherwise_clean_severity_block(self):
         """The orthogonal-axes fold: RunOutcome.operational raises an
@@ -1106,12 +946,20 @@ class TestNotComparableRunOutcome:
 
 
 class TestRunOutcomeSchemaValidation:
-    def test_full_run_outcome_is_a_defined_schema_property(self):
-        """Codex review (P1), fresh evidence: scoped (--used-by/--required-
-        symbol) compare JSON emits the public full_run_outcome field
-        (report.scoped_gate._swap_in_scoped_run_outcome), but neither copy of
-        compare_report.schema.json defined it -- unlike the analogous
-        full_severity, which the two are meant to mirror."""
+    def test_full_run_outcome_is_no_longer_a_schema_property(self):
+        """Codex review (P1), originally: scoped (--used-by/--required-
+        symbol) compare JSON emitted the public full_run_outcome field
+        (report.scoped_gate._swap_in_scoped_run_outcome), so both copies of
+        compare_report.schema.json had to define it, mirroring the analogous
+        full_severity.
+
+        Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+        prebuilt-consumer lifecycle", schema 3.0) removed the entire
+        full_verdict/full_severity/full_run_outcome/full_summary swap --
+        `run_outcome` always describes the full-library result now, so there
+        is nothing left for a `full_run_outcome` sibling to be "full" beside.
+        Its replacement, the informational `consumer_scope` object, is what
+        both schema copies define instead."""
         from pathlib import Path
 
         for rel in (
@@ -1121,13 +969,16 @@ class TestRunOutcomeSchemaValidation:
             schema_path = Path(__file__).resolve().parent.parent / rel
             schema = json.loads(schema_path.read_text())
             props = schema["properties"]
-            assert "full_run_outcome" in props, rel
-            assert props["full_run_outcome"]["$ref"] == "#/$defs/run_outcome"
+            assert "full_run_outcome" not in props, rel
+            assert "consumer_scope" in props, rel
+            consumer_scope_props = props["consumer_scope"]["properties"]
+            assert consumer_scope_props["verdict"]["type"] == "string"
 
-    def test_scoped_json_with_full_run_outcome_validates_against_the_schema(self):
+    def test_scoped_json_with_consumer_scope_validates_against_the_schema(self):
         """A real (--used-by/--required-symbol) scoped compare report -- the
-        one shape that actually emits full_run_outcome -- still validates
-        against the published schema mirror now that the field is defined."""
+        one shape that actually emits `consumer_scope` -- validates against
+        the published schema mirror (workstream D-S1's replacement for the
+        removed full_run_outcome field)."""
         from pathlib import Path
 
         from abicheck import reporter
@@ -1146,13 +997,13 @@ class TestRunOutcomeSchemaValidation:
         )
         result.analysis_assurance = compute_analysis_assurance(result, old, new)
         data = json.loads(reporter.to_json(result))
-        data["full_run_outcome"] = RunOutcome(
-            compatibility=None,
-            assurance=None,
-            gate=PolicyGateDecision.ABI_BREAKING,
-            operational=OperationalStatus.NONE,
-            lifecycle=TargetLifecycle.EXISTING,
-        ).to_dict()
+        data["consumer_scope"] = {
+            "verdict": "BREAKING",
+            "scope": "used_by",
+            "exit_code": 4,
+            "exit_code_scheme": "legacy",
+            "note": "Informational: this consumer's own assessment.",
+        }
 
         schema_path = (
             Path(__file__).resolve().parent.parent

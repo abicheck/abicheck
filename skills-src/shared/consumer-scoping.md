@@ -46,15 +46,26 @@ show the difference. Confirm `layer_coverage` reports the source layers
 
 ## Reading the result
 
-**Read the verdict the right way round.** In a scoped run the top-level
-`verdict` is the *scoped* answer — the CLI promotes it there because it is
-what the gate acts on — and `full_verdict` carries the library-wide result.
-Treating `verdict` as the global answer inverts the report contract and
-discards the very thing a consumer-scoped run exists to produce.
+**`verdict` is always the library-wide answer, scoped run or not.** A
+`--used-by`/`--required-symbol(s)` run's own top-level `verdict`/`severity`/
+`run_outcome`/`summary` describe the full library — exactly what an unscoped
+`compare` would report — and this run's exit code always comes from that
+result. The supplied consumer's own confirmed/potential/unresolved answer is
+reported *beside* it, never in place of it: `used_by` (per-app detail,
+`--used-by`) / `required_symbol_contract` (`--required-symbol(s)`), plus a
+`consumer_scope` object stating what that consumer's own assessment
+concluded (`consumer_scope.verdict`, and, under the severity exit-code
+scheme, `consumer_scope.exit_code`). Treating `verdict` as the *consumer's*
+answer, or `consumer_scope.verdict` as authoritative for this run's exit
+code, inverts the report contract.
 
-`full_verdict` is written on every scoped run, equal or not, so **compare the
-two values** rather than reading anything into the field being there. They
-diverge when `full_verdict != verdict`.
+**Compare `verdict` against `consumer_scope.verdict`** to see whether the
+supplied consumer's own exposure differs from the library's own result —
+that divergence (a globally `BREAKING` change the consumer never touches, or
+a globally `COMPATIBLE` build the consumer's own imports are still broken
+by) is usually the whole point of supplying a consumer in the first place.
+`consumer_scope` is present only on a scoped run; it is always informational,
+never a second gate.
 
 Findings carry consumer-relevant fields when the run establishes them:
 

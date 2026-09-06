@@ -158,11 +158,14 @@ If `confident` is false, add an `"uncertainty"` object with `"reason"` (one of
 `contract_coverage_incomplete`) and `"unresolved"` naming what specifically is
 unresolved. Give exactly one such block.
 
-If you scoped a comparison to a named consumer or plugin host (e.g. with
-`--used-by` or `--required-symbol`/`--required-symbols`), also add
-`"full_verdict"` with that same run's library-wide verdict (the same
+`"verdict"` is always the library-wide compatibility result — exactly what an
+unscoped comparison of the same pair would report, even when you also scoped
+a comparison to a named consumer or plugin host. If you did that scoping
+(e.g. with `--used-by` or `--required-symbol`/`--required-symbols`), also add
+`"consumer_verdict"` with that consumer's own scoped result (the same
 vocabulary as `verdict`) — the two answer different questions and can
-legitimately differ. Omit `full_verdict` entirely for an unscoped comparison.
+legitimately differ. Omit `consumer_verdict` entirely for an unscoped
+comparison.
 
 Optionally, also add `"decision"` — one of `VERIFIED_COMPATIBLE`,
 `COMPATIBLE_WITH_DEPLOYMENT_RISK`, `SOURCE_BREAK`, `BINARY_BREAK`, or

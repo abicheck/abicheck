@@ -162,9 +162,9 @@
       ],
       "architectures": [],
       "category": "B",
-      "digest": "sha256:5bf36287df0f37aa9a41f146064399f394820d261a1ddcace2c840d2acd728fb",
+      "digest": "sha256:4838330dd14de022b167b3629e668eb7790678535281941e299ca3cdd2757182",
       "expected": {
-        "full_verdict": "BREAKING",
+        "consumer_verdict": "BREAKING",
         "verdict": "BREAKING"
       },
       "inputs": "agent-evals/skills/fixtures/consumer-actually-affected",
@@ -191,10 +191,10 @@
       ],
       "architectures": [],
       "category": "B",
-      "digest": "sha256:69a7c6288e82b822baad821f9cd1e524022787e00b01e9bc1966409f6d6d275a",
+      "digest": "sha256:8fbe54b1a246f48b622f712743a943d997d1ce0e5fb638e5591d8893580e3b09",
       "expected": {
-        "full_verdict": "BREAKING",
-        "verdict": "COMPATIBLE"
+        "consumer_verdict": "COMPATIBLE",
+        "verdict": "BREAKING"
       },
       "inputs": "agent-evals/skills/fixtures/consumer-unaffected-despite-break",
       "invocation": {
@@ -333,9 +333,9 @@
       ],
       "architectures": [],
       "category": "B",
-      "digest": "sha256:60f54ed0b89d31abd12dcb59d7211cb960532d6fc038bc94c5d565228de9c41a",
+      "digest": "sha256:ea2ede1f0f6d4d33f65965a04b6d366c1554a05c156f2a20def0d449563c98ca",
       "expected": {
-        "full_verdict": "BREAKING",
+        "consumer_verdict": "BREAKING",
         "verdict": "BREAKING"
       },
       "inputs": "agent-evals/skills/fixtures/plugin-required-symbol-loss",
@@ -481,7 +481,7 @@
       "affects": [
         "check-abi-compatibility"
       ],
-      "digest": "sha256:f70011ab33b719b96932530adb3e02e28bd910be9b6635669709917ed02f6158",
+      "digest": "sha256:cb29d20d731afa6e46a351f70ac9cba0ea8d332d91059ca0053b27aafb2c35f5",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
         "agent-evals/skills/graders",
@@ -522,7 +522,7 @@
       "roots": [
         ".agents/skills/check-abi-compatibility"
       ],
-      "tree": "sha256:73541e43acdeb8e45ac388bb0489ad6286c4e522832b0c9ebd9a6a93be7c73a9"
+      "tree": "sha256:539273e489f607ba5a5ee30b3eec7afa36298b15e8e0ff6c4bfee6db9d2e8564"
     }
   }
 }

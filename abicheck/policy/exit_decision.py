@@ -555,29 +555,19 @@ def resolve_compare_exit_decision(
     `DiffResult` for this resolver to read from, so no ``exit`` block is
     emitted for that case either.
 
-    **`--used-by`/`--required-symbol(s)` scoped gating overrides the
-    compatibility axis entirely (Codex review, fresh evidence).**
-    `cli_compare_helpers._apply_scoped_gating` floors the *full-library*
-    verdict/severity gate this function would otherwise compute to the
-    scoped application/plugin-host contract's own result -- `cli.py` itself
-    exits on the (separately, already-folded) `result.scoped_exit_code`
-    directly (`sys.exit(scoped_exit_code)`), never reaching
-    `_exit_with_severity_or_verdict`/this function's own compatibility-axis
-    computation. An earlier revision of this function ignored that and
-    derived `compatibility_contribution` from `result.verdict`/severity
-    regardless -- reporting the full-library gate's code (informational-only
-    under scoping) while the real process exited on the scoped one.
-
-    **A later revision fixed that but introduced a second bug (Codex
-    review): it read the already-folded `result.scoped_exit_code` as the
-    compatibility contribution, so a tie with coverage/assurance was hidden
-    behind a `SCOPED_GATE` reason that may not have contributed at all.**
-    `result.scoped_compatibility_contribution` (`cli_compare_helpers`,
-    persisted immediately before that fold runs) is the *pre-fold* scoped
-    value -- passed through the same `resolve_exit_decision` every other
-    caller uses, with `compatibility_reason=SCOPED_GATE`, so a genuine tie
-    between the scoped gate and coverage/assurance is named correctly
-    instead of always attributed to scoping.
+    **`--used-by`/`--required-symbol(s)` scoped gating no longer overrides
+    the compatibility axis (workstream D-S1, vision-api-abi-evolution.md
+    "D. Optional prebuilt-consumer lifecycle" -- reverting the behavior an
+    earlier revision of this function introduced).** A supplied consumer's
+    own result (`result.scoped_verdict`/`result.scoped_exit_code`, still
+    populated by `cli_compare_helpers._apply_scoped_gating` for the report's
+    enrichment section) is per-consumer information reported *beside* the
+    full-library compatibility result, never a substitute for it: this
+    function always derives `compatibility_contribution` from
+    `result.verdict`/the resolved severity config, exactly as it would for a
+    run with no `--used-by`/`--required-symbol` at all. `ExitReason.
+    SCOPED_GATE` is kept as a reason value (still reachable from historical
+    persisted reports/tests) but is no longer produced by this resolver.
     """
     from ..analysis_assurance import analysis_assurance_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor
@@ -587,18 +577,6 @@ def resolve_compare_exit_decision(
     assurance_contribution = analysis_assurance_exit_contribution(
         result, require_complete=require_complete_analysis
     )
-
-    scoped_exit_code = getattr(result, "scoped_exit_code", None)
-    if scoped_exit_code is not None:
-        scoped_compatibility_contribution = getattr(
-            result, "scoped_compatibility_contribution", scoped_exit_code,
-        )
-        return resolve_exit_decision(
-            compatibility_contribution=scoped_compatibility_contribution,
-            contract_coverage_contribution=coverage_contribution,
-            analysis_assurance_contribution=assurance_contribution,
-            compatibility_reason=ExitReason.SCOPED_GATE,
-        )
 
     if scheme == "severity":
         assert sev_config is not None

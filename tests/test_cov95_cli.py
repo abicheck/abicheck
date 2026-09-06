@@ -1342,32 +1342,44 @@ class TestUsedByScoping:
         data = json.loads(result.stdout)
         assert data["used_by"][0]["verdict"] == "COMPATIBLE"
 
-    def test_full_mode_breaking_exit_4(self, tmp_path, monkeypatch) -> None:
+    def test_scoped_breaking_verdict_does_not_change_full_library_exit_code(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Workstream D-S1: `old`/`new` are identical (no real full-library
+        change), so the process's own exit code is the full-library one (0)
+        regardless of a stubbed consumer-scoped BREAKING verdict -- exit
+        codes never come from `scoped_exit_code`/`AppCompatResult.verdict`
+        any more."""
         res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke("compare", str(old), str(new), "--used-by", str(app))
-        assert result.exit_code == 4
+        assert result.exit_code == 0
 
-    def test_full_mode_api_break_exit_2(self, tmp_path, monkeypatch) -> None:
+    def test_scoped_api_break_verdict_does_not_change_full_library_exit_code(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Workstream D-S1: same as above for a stubbed API_BREAK scoped
+        verdict -- the full-library diff has no changes, so exit code is 0."""
         res = self._result(verdict=Verdict.API_BREAK)
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke("compare", str(old), str(new), "--used-by", str(app))
-        assert result.exit_code == 2
+        assert result.exit_code == 0
 
-    def test_json_run_outcome_reflects_scoped_gate_not_full_library(
+    def test_json_run_outcome_always_reflects_the_full_library_gate(
         self, tmp_path, monkeypatch
     ) -> None:
-        """ADR-063 Phase 7 regression (Codex review, P1): the full-library
-        compare below removes `foo` (a real, unrelated ABI break), but the
-        app-scoped gate is stubbed compatible -- the app never actually
-        called `foo`. `run_outcome` must describe the *scoped* gate (the one
-        the process exit code actually reflects), not the stale full-library
-        one `report_run_outcome.run_outcome_dict_for_diff_result` computed
-        before scoping ran; the full-library value moves to
-        `full_run_outcome`, mirroring the existing `verdict`/`full_verdict`
-        and `severity`/`full_severity` swap."""
+        """Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+        prebuilt-consumer lifecycle"): the full-library compare below removes
+        `foo` (a real, unrelated ABI break), and the app-scoped gate is
+        stubbed compatible -- the app never actually called `foo`. `verdict`/
+        `run_outcome` always describe the full-library gate (the one the
+        process's own exit code reflects, consumer or no consumer supplied);
+        the consumer's own COMPATIBLE assessment is reported informationally
+        under `consumer_scope`/`used_by`, never in place of the full-library
+        result (reverting the prior design this test used to pin, where the
+        scoped gate replaced `verdict`/`run_outcome` outright)."""
         from abicheck import dumper as dumper_mod
 
         app = tmp_path / "app"
@@ -1382,22 +1394,22 @@ class TestUsedByScoping:
             "dump",
             MagicMock(side_effect=[_snap("1.0"), _snap("2.0", funcs=[])]),
         )
-        # The app itself never used `foo` -- scoped gate stays compatible.
+        # The app itself never used `foo` -- its own scoped assessment stays
+        # compatible, but that never changes what the process exits with.
         res = self._result(verdict=Verdict.COMPATIBLE)
         self._patch_scope(monkeypatch, res)
 
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
         )
-        assert result.exit_code == 0
+        assert result.exit_code == 4
         data = json.loads(result.stdout)
-        assert data["full_verdict"] == "BREAKING"
-        assert data["verdict"] == "COMPATIBLE"
+        assert data["verdict"] == "BREAKING"
         assert "run_outcome" in data
-        assert "full_run_outcome" in data
-        assert data["full_run_outcome"]["gate"] == "abi_breaking"
-        assert data["run_outcome"]["gate"] == "none"
-        assert data["run_outcome"]["compatibility"] == "COMPATIBLE"
+        assert "full_run_outcome" not in data
+        assert data["run_outcome"]["gate"] == "abi_breaking"
+        assert data["run_outcome"]["compatibility"] == "BREAKING"
+        assert data["consumer_scope"]["verdict"] == "COMPATIBLE"
 
     def test_full_mode_output_to_file(self, tmp_path, monkeypatch) -> None:
         res = self._result()
@@ -1416,7 +1428,13 @@ class TestUsedByScoping:
     ) -> None:
         """Codex review: the default (markdown) report must name the actual
         missing symbol, not just its count -- otherwise a human reading the
-        default output has no way to tell which symbol broke the gate."""
+        default output has no way to tell which symbol broke the gate.
+
+        Workstream D-S1: the full-library diff has no changes (`old`/`new`
+        are identical), so the process's exit code is the full-library one
+        (0) even though the stubbed consumer scope is BREAKING -- the
+        missing symbol/version are still named in the report as consumer
+        enrichment, they just no longer drive the exit code."""
         res = self._result(
             verdict=Verdict.BREAKING, missing=["foo_removed"],
             missing_versions=["FOO_1.2"],
@@ -1424,7 +1442,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke("compare", str(old), str(new), "--used-by", str(app))
-        assert result.exit_code == 4
+        assert result.exit_code == 0
         assert "missing symbol: `foo_removed`" in result.output
         assert "missing version: `FOO_1.2`" in result.output
         assert "## Additional scoped-gate findings" in result.output
@@ -1446,12 +1464,15 @@ class TestUsedByScoping:
         assert "## Additional scoped-gate findings" in result.output
         assert "pe_ordinal_retargeted: ordinal changed from 5 to 7" in result.output
 
-    def test_severity_missing_symbols_default_preset_floors_at_4(
+    def test_severity_missing_symbols_default_preset_does_not_affect_exit_code(
         self, tmp_path, monkeypatch
     ) -> None:
-        # A required symbol's removal is a real Change in breaking_for_app
-        # (as scope_diff_to_app would report it) -- abi_breaking defaults to
-        # error, so the scoped exit code still floors at 4.
+        # Workstream D-S1: a required symbol's removal reported only via the
+        # stubbed consumer scope (`breaking_for_app`) is per-consumer
+        # enrichment, not a second gate -- the full-library diff (`old`/`new`
+        # are identical) has no changes at all, so `--severity-preset
+        # default`'s abi_breaking=error still floors the *real* exit code at
+        # 0, regardless of what the consumer scope reports.
         res = self._result(
             verdict=Verdict.BREAKING, missing=["foo"],
             breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
@@ -1462,16 +1483,20 @@ class TestUsedByScoping:
             "compare", str(old), str(new), "--used-by", str(app),
             "--severity-preset", "default",
         )
-        assert result.exit_code == 4
+        assert result.exit_code == 0
 
-    def test_severity_missing_symbol_covered_by_change_not_double_counted(
+    def test_severity_missing_symbol_covered_by_change_reported_as_additive_enrichment(
         self, tmp_path, monkeypatch
     ) -> None:
-        # Regression (Codex P2 follow-up): "foo" is both a missing symbol
-        # (absent from the new exports) *and* the subject of a scoped
-        # FUNC_REMOVED Change -- that's one ABI break, not two. Before the
-        # fix, the missing-contract count was added on top of the
-        # categorized Change count unconditionally.
+        # Workstream D-S1: this used to pin that "foo" being both a missing
+        # symbol and the subject of a scoped FUNC_REMOVED Change counted as
+        # one ABI break, not two, in the *gating* severity block. Since the
+        # scoped gate no longer feeds the gating severity block at all, the
+        # gating `severity.categories.abi_breaking.count` reflects only the
+        # full-library diff (0, since `old`/`new` are identical) -- the
+        # consumer-side Change is still visible, additively, in `changes`/
+        # `summary` (see the JSON `changes` fold-in tests below), just no
+        # longer folded into the severity gate or the exit code.
         res = self._result(
             verdict=Verdict.BREAKING, missing=["foo"],
             breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
@@ -1482,9 +1507,9 @@ class TestUsedByScoping:
             "compare", str(old), str(new), "--used-by", str(app),
             "--format", "json", "--severity-preset", "default",
         )
-        assert result.exit_code == 4
+        assert result.exit_code == 0
         data = json.loads(result.stdout)
-        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 0
 
     def test_sarif_missing_symbol_covered_by_change_not_double_synthesized(
         self, tmp_path, monkeypatch
@@ -1536,16 +1561,15 @@ class TestUsedByScoping:
         assert len(sarif_results) == 1
         assert sarif_results[0]["ruleId"] == "func_removed"
 
-    def test_severity_missing_symbols_only_floors_at_4(
+    def test_severity_missing_symbols_only_does_not_affect_exit_code(
         self, tmp_path, monkeypatch
     ) -> None:
-        # Regression (Codex P1): a required symbol absent from both old and
-        # new libraries is a missing contract with no corresponding diff
-        # Change -- `scope_diff_to_app` reports it purely via
-        # `missing_symbols`, leaving `breaking_for_app` empty. Before the
-        # fix, `_scoped_exit_code` computed the severity-scheme exit solely
-        # from `breaking_for_app`, silently exiting 0 for an app that can
-        # never resolve the required symbol at all.
+        # Workstream D-S1: a required symbol absent from both old and new
+        # libraries is a missing contract reported purely through the
+        # supplied consumer's own `missing_symbols` -- it is per-consumer
+        # enrichment, not a second gate, so the real (full-library) exit
+        # code stays 0 (`old`/`new` are identical) no matter what the
+        # consumer scope reports.
         res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
@@ -1553,15 +1577,16 @@ class TestUsedByScoping:
             "compare", str(old), str(new), "--used-by", str(app),
             "--severity-preset", "default",
         )
-        assert result.exit_code == 4
+        assert result.exit_code == 0
 
-    def test_severity_missing_symbols_only_json_blocking_categories(
+    def test_severity_missing_symbols_only_json_blocking_categories_reflect_full_library(
         self, tmp_path, monkeypatch
     ) -> None:
-        # The missing-contract-only case (no diff Change) must still surface
-        # "abi_breaking" in the scoped JSON severity block's
-        # blocking_categories -- otherwise a nonzero exit_code with an empty
-        # blocking_categories list would be an unexplained gate result.
+        # Workstream D-S1: the gating JSON severity block always describes
+        # the full-library result -- with no full-library changes at all
+        # (`old`/`new` are identical), `blocking_categories` is empty and
+        # `blocking` is False, even though the consumer-scope-only missing
+        # symbol is still visible (additively) elsewhere in the report.
         res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
@@ -1569,21 +1594,23 @@ class TestUsedByScoping:
             "compare", str(old), str(new), "--used-by", str(app),
             "--format", "json", "--severity-preset", "default",
         )
-        assert result.exit_code == 4
+        assert result.exit_code == 0
         data = json.loads(result.stdout)
-        assert data["severity"]["exit_code"] == 4
-        assert data["severity"]["blocking"] is True
-        assert data["severity"]["blocking_categories"] == ["abi_breaking"]
-        # The missing symbol itself (not a diff Change) still counts.
-        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+        assert data["severity"]["exit_code"] == 0
+        assert data["severity"]["blocking"] is False
+        assert data["severity"]["blocking_categories"] == []
+        # The missing symbol itself does not contribute to the gating count.
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 0
 
     def test_severity_info_only_preset_overrides_missing_symbols_exit(
         self, tmp_path, monkeypatch
     ) -> None:
         # Regression: --severity-preset used to have NO effect on the scoped
-        # exit code at all -- an info-only preset must now floor exit_code at
-        # 0 despite the scoped verdict staying BREAKING (post-merge PR #566
-        # review).
+        # exit code at all. Workstream D-S1 additionally made the consumer
+        # scope stop feeding the real exit code altogether -- with `old`/
+        # `new` identical, `info-only` (or any preset) leaves exit_code at 0
+        # here regardless of the stubbed consumer scope's own BREAKING
+        # verdict.
         res = self._result(
             verdict=Verdict.BREAKING, missing=["foo"],
             breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
@@ -1602,9 +1629,15 @@ class TestUsedByScoping:
         # Regression: under a severity scheme, a BREAKING app can carry exit
         # code 0 (info-only preset). Picking the reported scoped_verdict by
         # exit code (both apps tie at 0) let the second, merely-COMPATIBLE
-        # app overwrite the first BREAKING app's verdict -- the JSON/report
-        # verdict must stay BREAKING even though the gated exit code is
-        # floored at 0 by the severity config (Codex review).
+        # app overwrite the first BREAKING app's verdict.
+        #
+        # Workstream D-S1: `verdict`/exit code are now always the
+        # full-library result (0/NO_CHANGE here, since `old`/`new` are
+        # identical) regardless of any consumer scope. The worst-app-wins
+        # rule this test originally pinned still applies to the informational
+        # `consumer_scope` block: it must report BREAKING (app1's own
+        # verdict), not the merely-COMPATIBLE app2 that happens to tie with
+        # it on (now-irrelevant) exit code.
         import abicheck.appcompat as appcompat_mod
         from abicheck.appcompat import AppCompatResult
 
@@ -1630,17 +1663,24 @@ class TestUsedByScoping:
             "--severity-preset", "info-only", "--format", "json",
         )
         data = json.loads(result.stdout)
-        assert result.exit_code == 0  # severity config still floors the gate
-        assert data["verdict"] == "BREAKING"  # but the reported verdict is not lost
+        assert result.exit_code == 0  # full-library result: no real changes
+        assert data["verdict"] == "NO_CHANGE"  # full-library verdict, unaffected
+        assert data["consumer_scope"]["verdict"] == "BREAKING"  # worst-app-wins
 
     def test_multi_app_shared_change_not_double_counted(
         self, tmp_path, monkeypatch
     ) -> None:
-        # Regression (Codex P2): when two --used-by apps tie on the worst
-        # exit code and both depend on the *same* removed symbol, the shared
-        # Change object must be counted once in
-        # severity.categories.abi_breaking.count, not once per app -- the
-        # library only has one ABI finding, not two.
+        # Regression (Codex P2): when two --used-by apps depend on the *same*
+        # removed symbol, the shared Change object must be counted once, not
+        # once per app.
+        #
+        # Workstream D-S1: the gating `severity.categories.abi_breaking`
+        # block reflects only the full-library diff (0, since `old`/`new`
+        # are identical here), and the real exit code is 0 -- the shared
+        # consumer-scope Change no longer feeds the gate at all. This test
+        # now pins the JSON `changes` fold-in dedup instead: both apps'
+        # `scope_diff_to_app` calls return the *same* `shared_change` object,
+        # and it must still appear once in `changes`/`summary`, not twice.
         import abicheck.appcompat as appcompat_mod
         from abicheck.appcompat import AppCompatResult
 
@@ -1668,8 +1708,12 @@ class TestUsedByScoping:
             "--severity-preset", "default", "--format", "json",
         )
         data = json.loads(result.stdout)
-        assert result.exit_code == 4
-        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+        # Full-library diff is empty and the consumer scope never feeds the
+        # real gate, so the process exit code stays 0.
+        assert result.exit_code == 0
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 0
+        removed_entries = [c for c in data["changes"] if c["symbol"] == "foo"]
+        assert len(removed_entries) == 1
 
     def test_multi_app_semantically_identical_change_not_double_counted(
         self, tmp_path, monkeypatch
@@ -1709,8 +1753,14 @@ class TestUsedByScoping:
             "--severity-preset", "default", "--format", "json",
         )
         data = json.loads(result.stdout)
-        assert result.exit_code == 4
-        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+        # Workstream D-S1: the real gate/exit code reflect only the empty
+        # full-library diff; the content-keyed (finding_id) dedup this test
+        # targets is now visible in the additive `changes` fold-in instead
+        # of the gating severity block.
+        assert result.exit_code == 0
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 0
+        removed_entries = [c for c in data["changes"] if c["symbol"] == "foo"]
+        assert len(removed_entries) == 1
 
     def test_severity_clean_exit_0(self, tmp_path, monkeypatch) -> None:
         res = self._result(verdict=Verdict.COMPATIBLE)
@@ -1737,9 +1787,14 @@ class TestUsedByScoping:
     ) -> None:
         # ADR-043 Codex review: the full-library verdict (BREAKING, from the
         # symbol removal below) disagrees with the app-scoped verdict
-        # (COMPATIBLE, since the app never touches the removed symbol) --
-        # exit_code reflects the scoped one, so the markdown report must say
-        # so instead of only showing the full-library BREAKING headline.
+        # (COMPATIBLE, since the app never touches the removed symbol) -- the
+        # markdown report must call this out.
+        #
+        # Workstream D-S1: exit_code always reflects the full-library
+        # verdict now (4, BREAKING) -- the disagreement note is purely
+        # informational and must say so, not claim the scoped verdict is
+        # what the process exits with (reverting the prior design this test
+        # used to pin).
         old_snap = _snap(
             "1.0", library="libfoo.so",
             funcs=[Function(
@@ -1763,18 +1818,29 @@ class TestUsedByScoping:
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "markdown",
         )
-        assert result.exit_code == 0  # the scoped verdict, not the full BREAKING
-        assert "Scoped verdict: COMPATIBLE" in result.stdout
+        assert result.exit_code == 4  # the full-library BREAKING verdict
+        assert "Consumer-scoped verdict: COMPATIBLE" in result.stdout
+        assert (
+            "this run's compatibility verdict and exit code are always "
+            "based on the full library verdict, BREAKING"
+        ) in result.stdout
 
-    def test_quick_profile_one_liner_states_scoped_verdict_not_full(
+    def test_quick_profile_one_liner_always_states_the_full_library_verdict(
         self, tmp_path, monkeypatch
     ) -> None:
-        """CLI cleanup phase two, PR 1 (Codex review, fresh evidence): the
-        internal one-line format (``--profile quick``) used to fall through
-        ``_fold_scoped_compat_into_text``'s dispatch untouched, so the
-        printed one-liner showed the full-library BREAKING verdict/counts
-        even though the process exits 0 on the scoped-compatible result --
-        the identical setup as
+        """CLI cleanup phase two, PR 1 originally made the internal one-line
+        format (``--profile quick``) route through a scoped-replacement
+        renderer so it printed the scoped-compatible verdict instead of the
+        full-library BREAKING one, to match the (then-authoritative) scoped
+        exit code.
+
+        Workstream D-S1 reverts that: `--used-by`/`--required-symbol` no
+        longer replace the process's own gate, so `service_render.
+        ONELINE_FORMAT`'s dispatch is a no-op passthrough (`_ScopedFold.
+        into_oneline` was deleted) -- the plain one-liner already states the
+        full-library BREAKING verdict correctly, exactly as it would for an
+        unscoped run, and that is what the exit code (4) reflects too. The
+        identical setup as
         ``test_markdown_states_scoped_verdict_when_it_disagrees_with_full``
         above, just through the one-line renderer instead of markdown."""
         old_snap = _snap(
@@ -1801,37 +1867,36 @@ class TestUsedByScoping:
             "compare", str(old), str(new), "--used-by", str(app),
             "--profile", "quick",
         )
-        assert result.exit_code == 0  # the scoped verdict, not the full BREAKING
-        # The verdict label leads with the scoped result (COMPATIBLE), the
-        # same swap `into_json`'s `payload["verdict"]` makes -- not the
-        # full-library BREAKING that would exit 4. Unlike `--format json`
-        # (which keeps the full-library "1 breaking" count alongside a
-        # `changes` array a reader can inspect for context -- see
-        # test_json_severity_block_reflects_scoped_gate_not_full_library
-        # above), the one-line format has no room for that context, so its
-        # counts are recomputed from only what the scoped gate actually
-        # rests on (Codex review, fresh evidence): the removed symbol isn't
-        # one of the app's required symbols, so there are no scoped-only
-        # findings and no missing-contract labels, and the one-liner
-        # correctly shows "no changes" instead of an unexplained "1
-        # breaking" next to a COMPATIBLE verdict.
-        # The trailing ADR-067 audit note is the raw-versus-effective half of
-        # the same statement: the library change really was detected, and the
-        # scoped gate really does not count it. Asserted rather than stripped,
-        # since "0 total, 1 detected, 0 gating" is what makes the COMPATIBLE
-        # verdict above trustworthy instead of merely quiet.
-        assert result.stdout.strip().startswith("COMPATIBLE: no changes (0 total)")
+        assert result.exit_code == 4  # the full-library BREAKING verdict
+        # The verdict label leads with the full-library result (BREAKING),
+        # not the consumer's own COMPATIBLE assessment -- workstream D-S1
+        # made the scoped result purely informational, so the one-liner
+        # (which has no room for a separate consumer-scope note) simply
+        # reports the same thing it would for an unscoped run: the removed
+        # symbol was detected but is not one of this ADR-067 disposition
+        # ledger's "gating" findings for the supplied consumer.
+        assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
         assert "1 detected, 0 gating, 1 non_gating" in result.stdout
 
-    def test_quick_profile_one_liner_counts_the_scoped_only_finding(
+    def test_quick_profile_one_liner_does_not_count_a_scoped_only_finding(
         self, tmp_path, monkeypatch
     ) -> None:
-        """The mirror case of the test above: a scoped-only finding (one with
-        no backing full-library `Change`, e.g. a synthesized
-        `PE_ORDINAL_RETARGETED`) is the *only* thing making this run
-        BREAKING -- the full library itself is unchanged (`NO_CHANGE`).
-        The one-liner must count it, not print "no changes" just because
-        `result.changes` is empty (Codex review, fresh evidence)."""
+        """Originally: a scoped-only finding (one with no backing
+        full-library `Change`, e.g. a synthesized `PE_ORDINAL_RETARGETED`)
+        was the *only* thing making the run BREAKING under the old
+        scoped-gate-wins design, so the one-liner had to count it instead of
+        printing "no changes" just because `result.changes` was empty.
+
+        Workstream D-S1: `service_render.ONELINE_FORMAT`'s dispatch is a
+        no-op passthrough now (`_ScopedFold.into_oneline` was deleted) --
+        the one-liner states the plain full-library result unconditionally.
+        The full library here is genuinely unchanged (`old`/`new` are
+        identical), so it reports `NO_CHANGE: no changes (0 total)`
+        regardless of the stubbed consumer-scope-only BREAKING finding, and
+        the exit code is 0. The ADR-067 audit note still shows the
+        consumer-scope finding was detected and counted as "gating" for the
+        *disposition ledger* (a per-consumer audit concept, unrelated to the
+        process's own exit code)."""
         scoped_only = Change(
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
             symbol="ordinal:5",
@@ -1845,22 +1910,22 @@ class TestUsedByScoping:
             "compare", str(old), str(new), "--used-by", str(app),
             "--profile", "quick",
         )
-        assert result.exit_code == 4
-        assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
+        assert result.exit_code == 0
+        assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
         assert "1 detected, 1 gating" in result.stdout
 
-    def test_quick_profile_one_liner_counts_scoped_only_finding_under_show_only(
+    def test_quick_profile_one_liner_unaffected_by_show_only(
         self, tmp_path, monkeypatch
     ) -> None:
-        """Codex review, fresh evidence: `_scoped_gate_findings()` applies
-        `--show-only` to `scoped_only`/`missing_labels` for *display*
-        purposes elsewhere, but this method's own printed counts must track
-        what actually decided the scoped verdict/exit code -- which
-        `--show-only` never changes. Filtering the count inputs by
-        `--show-only compatible` here let a purely-breaking scoped-only
-        finding (this test's `PE_ORDINAL_RETARGETED`) get silently excluded
-        from the count while the process still exited 4, printing the
-        self-contradictory "BREAKING: no changes (0 total)"."""
+        """Originally targeted a "self-contradictory 'BREAKING: no changes
+        (0 total)'" bug caused by `--show-only` filtering the scoped-gate
+        count inputs out from under a still-4-exiting scoped run.
+
+        Workstream D-S1: the one-liner no longer folds the scoped gate in at
+        all (`service_render.ONELINE_FORMAT` is a no-op passthrough), so
+        `--show-only` has nothing scoped-only left to filter here -- the
+        one-liner reports the plain, unchanged full-library result
+        (`NO_CHANGE`, exit 0) the same as the un-filtered case above."""
         scoped_only = Change(
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
             symbol="ordinal:5",
@@ -1874,8 +1939,8 @@ class TestUsedByScoping:
             "compare", str(old), str(new), "--used-by", str(app),
             "--profile", "quick", "--show-only", "compatible",
         )
-        assert result.exit_code == 4
-        assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
+        assert result.exit_code == 0
+        assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
         assert "1 detected, 1 gating" in result.stdout
 
     def test_quick_profile_one_liner_counts_an_ordinary_in_scope_removal(
@@ -1942,14 +2007,19 @@ class TestUsedByScoping:
     def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(
         self, tmp_path, monkeypatch
     ) -> None:
-        # Regression (Codex P2): under a severity scheme, the scoped exit
-        # code is NOT a fixed mapping of the scoped verdict -- e.g.
-        # --severity-preset info-only can floor it at 0 even for a BREAKING
-        # scoped verdict. The markdown banner used to unconditionally claim
-        # "this is what the exit code reflects" whenever the scoped and full
-        # verdicts disagreed, which is false here (BREAKING scoped verdict,
-        # exit code 0) -- it must state the actual computed exit code/scheme
-        # instead, mirroring the SARIF/JUnit/HTML wording.
+        # Regression (Codex P2), originally: under a severity scheme, the
+        # scoped exit code was NOT a fixed mapping of the scoped verdict --
+        # e.g. --severity-preset info-only could floor it at 0 even for a
+        # BREAKING scoped verdict, so the markdown banner had to state the
+        # actual computed exit code/scheme rather than unconditionally
+        # claiming "this is what the exit code reflects".
+        #
+        # Workstream D-S1 supersedes that entirely: the banner is now always
+        # purely informational (`_ScopedFold._scoped_verdict_header`) and
+        # never claims to describe the process's own exit code at all, under
+        # any severity scheme -- here `old`/`new` are identical, so the
+        # full-library verdict is NO_CHANGE and exit_code is 0 regardless of
+        # `--severity-preset`.
         res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
@@ -1958,20 +2028,24 @@ class TestUsedByScoping:
             "--format", "markdown", "--severity-preset", "info-only",
         )
         assert result.exit_code == 0
-        assert "Scoped verdict: BREAKING" in result.stdout
-        assert "the CLI process exits 0 under the severity exit-code scheme" in result.stdout
+        assert "Consumer-scoped verdict: BREAKING" in result.stdout
+        assert (
+            "this run's compatibility verdict and exit code are always "
+            "based on the full library verdict, NO_CHANGE"
+        ) in result.stdout
         assert "this is what the exit code reflects" not in result.stdout
 
-    def test_json_severity_block_reflects_scoped_gate_not_full_library(
+    def test_json_severity_block_always_reflects_the_full_library_gate(
         self, tmp_path, monkeypatch
     ) -> None:
-        # Regression (Codex P2): under --severity-preset, the JSON `severity`
-        # block used to always describe the *full-library* gate decision --
-        # here the full library has an error-level BREAKING removal but the
-        # app-scoped result is COMPATIBLE. The process exits 0 (the scoped
-        # gate), so `severity.exit_code`/`blocking` in the JSON body must
-        # agree with that, not silently claim `exit_code: 4`/`blocking: true`
-        # for a run that just exited 0.
+        # Workstream D-S1: under --severity-preset, the JSON `severity` block
+        # always describes the *full-library* gate decision -- here the full
+        # library has an error-level BREAKING removal, and the app-scoped
+        # result is COMPATIBLE. The process exits 4 (the full-library gate;
+        # a supplied consumer's own result never narrows it), so
+        # `severity.exit_code`/`blocking` agree with that. Reverts the prior
+        # design this test used to pin, where the scoped gate swapped in its
+        # own (here more lenient) severity block.
         old_snap = _snap(
             "1.0", library="libfoo.so",
             funcs=[Function(
@@ -1996,35 +2070,39 @@ class TestUsedByScoping:
             "compare", str(old), str(new), "--used-by", str(app),
             "--format", "json", "--severity-preset", "default",
         )
-        assert result.exit_code == 0
+        assert result.exit_code == 4
         data = json.loads(result.stdout)
-        assert data["full_verdict"] == "BREAKING"
-        assert data["verdict"] == "COMPATIBLE"
-        # The scoped gate, not the full-library one that would exit 4.
-        assert data["severity"]["exit_code"] == 0
-        assert data["severity"]["blocking"] is False
-        assert data["severity"]["blocking_categories"] == []
-        # Category counts also move to the scoped tally -- not left over
-        # from the full-library breakdown alongside a non-blocking gate.
-        assert data["severity"]["categories"]["abi_breaking"]["count"] == 0
-        # The full-library breakdown is preserved, just demoted to a
-        # secondary key -- it still shows the real BREAKING removal.
-        assert data["full_severity"]["exit_code"] == 4
-        assert data["full_severity"]["blocking"] is True
-        assert "abi_breaking" in data["full_severity"]["blocking_categories"]
-        assert data["full_severity"]["categories"]["abi_breaking"]["count"] == 1
+        assert data["verdict"] == "BREAKING"
+        assert "full_severity" not in data
+        # The full-library gate, unaffected by the consumer's own COMPATIBLE
+        # assessment.
+        assert data["severity"]["exit_code"] == 4
+        assert data["severity"]["blocking"] is True
+        assert "abi_breaking" in data["severity"]["blocking_categories"]
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+        # The consumer's own (informational) assessment is reported beside
+        # the full-library result.
+        assert data["consumer_scope"]["verdict"] == "COMPATIBLE"
 
     def test_json_scoped_only_change_is_included_in_changes(
         self, tmp_path, monkeypatch
     ) -> None:
         # Regression (Codex review): scope_diff_to_app can synthesize a fresh
-        # Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to the gate but
-        # never lands in result.changes -- SARIF/JUnit already fold this into
-        # their own rendering (scoped_only_changes), but the JSON `changes`
-        # array (which the GitHub Action's `--on changes` PR-comment gate
-        # buckets off directly) did not, so a --used-by run whose only gated
-        # issue is one of these reported an empty `changes` array despite a
-        # nonzero scoped exit code.
+        # Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to a supplied
+        # consumer but never lands in result.changes -- SARIF/JUnit already
+        # fold this into their own rendering (scoped_only_changes), but the
+        # JSON `changes` array (which the GitHub Action's `--on changes`
+        # PR-comment gate buckets off directly) did not, so a --used-by run
+        # whose only consumer-relevant issue is one of these reported an
+        # empty `changes` array.
+        #
+        # Workstream D-S1: this fold-in is unconditional, additive
+        # enrichment -- it happens regardless of whether the finding affects
+        # the real (full-library) exit code, which here is 0 (`old`/`new`
+        # are identical, so there is no full-library change at all; there is
+        # no `full_verdict` key any more, `verdict` is just the plain
+        # full-library value). The consumer's own BREAKING assessment is
+        # reported informationally under `consumer_scope`.
         scoped_only = Change(
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
             symbol="ordinal:5",
@@ -2037,10 +2115,11 @@ class TestUsedByScoping:
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
         )
-        assert result.exit_code == 4
+        assert result.exit_code == 0
         data = json.loads(result.stdout)
-        assert data["full_verdict"] == "NO_CHANGE"
-        assert data["verdict"] == "BREAKING"
+        assert "full_verdict" not in data
+        assert data["verdict"] == "NO_CHANGE"
+        assert data["consumer_scope"]["verdict"] == "BREAKING"
         kinds = [c["kind"] for c in data["changes"]]
         assert "pe_ordinal_retargeted" in kinds
         entry = next(c for c in data["changes"] if c["kind"] == "pe_ordinal_retargeted")
@@ -2051,13 +2130,18 @@ class TestUsedByScoping:
     ) -> None:
         # Same gap as above, for a missing required symbol/version with no
         # backing Change at all (scoped_missing_labels, not scoped_only_changes).
+        #
+        # Workstream D-S1: the fold-in is unconditional, additive enrichment
+        # -- `blocks_gate` here still describes whether the finding would
+        # block the *consumer's own* scope (unrelated to the real exit code,
+        # which is 0 since the full-library diff has no changes at all).
         res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
         )
-        assert result.exit_code == 4
+        assert result.exit_code == 0
         data = json.loads(result.stdout)
         entry = next(
             c for c in data["changes"] if c["kind"] == "used_by_missing_symbol"
@@ -2075,8 +2159,13 @@ class TestUsedByScoping:
     ) -> None:
         # Codex review: --report-mode root-cause groups result.changes before
         # the scoped fold-in appends scoped_only_changes to `changes` -- a
-        # scoped run whose only gated issue is one of these must still show
-        # up in root_causes, not just the flat backward-compat `changes[]`.
+        # scoped run whose only consumer-relevant issue is one of these must
+        # still show up in root_causes, not just the flat backward-compat
+        # `changes[]`.
+        #
+        # Workstream D-S1: this fold-in is unconditional additive
+        # enrichment, independent of the real exit code -- 0 here, since
+        # `old`/`new` are identical and there is no full-library change.
         scoped_only = Change(
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
             symbol="ordinal:5",
@@ -2090,7 +2179,7 @@ class TestUsedByScoping:
             "compare", str(old), str(new), "--used-by", str(app),
             "--format", "json", "--report-mode", "root-cause",
         )
-        assert result.exit_code == 4
+        assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data["root_cause_count"] == 1
         group = data["root_causes"][0]
@@ -2294,6 +2383,11 @@ class TestUsedByScoping:
         # An uncorrelated scoped-only finding must still show up as its own
         # singleton group, not silently disappear now that the flat
         # appendix is suppressed for root-cause mode.
+        #
+        # Workstream D-S1: this fold-in is unconditional additive
+        # enrichment -- exit code is 0 here (`old`/`new` are identical, no
+        # full-library change), independent of whether the scoped-only
+        # finding shows up in the root-cause grouping.
         scoped_only = Change(
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
             symbol="ordinal:5",
@@ -2311,7 +2405,7 @@ class TestUsedByScoping:
             "--report-mode",
             "root-cause",
         )
-        assert result.exit_code == 4
+        assert result.exit_code == 0
         assert "### `ordinal:5` (1 finding)" in result.output
         assert "ordinal 5 retargeted" in result.output
         assert "## Additional scoped-gate findings" not in result.output
@@ -2324,12 +2418,22 @@ class TestUsedByScoping:
     def test_markdown_root_cause_severity_table_reflects_scoped_only_finding(
         self, tmp_path, monkeypatch
     ) -> None:
-        # Codex review: the "## Severity Configuration" table was built from
-        # `result.changes` before the scoped-only change/missing-contract
-        # label below was resolved -- a scoped run whose only breaking issue
-        # is one of these showed every category at Count 0/"no exit impact"
-        # immediately above a "## Root Causes" section naming a real,
-        # gate-blocking finding.
+        # Codex review, originally: the "## Severity Configuration" table was
+        # built from `result.changes` before the scoped-only change/
+        # missing-contract label below was resolved -- a scoped run whose
+        # only breaking issue was one of these showed every category at
+        # Count 0/"no exit impact" immediately above a "## Root Causes"
+        # section naming that same finding, an internally contradictory
+        # report.
+        #
+        # Workstream D-S1: the table is still built from the changes list
+        # *after* the (still-unconditional, additive) scoped-only fold-in,
+        # so it still counts this finding and labels its category
+        # "causes non-zero exit" per the category's own configured level --
+        # that labeling describes the category's severity level in the
+        # abstract, not this particular run's own exit code, which stays 0
+        # here (`old`/`new` are identical, so there is no full-library
+        # change for this consumer-scope-only finding to gate).
         scoped_only = Change(
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
             symbol="ordinal:5",
@@ -2349,7 +2453,7 @@ class TestUsedByScoping:
             "--config",
             str(_severity_config(tmp_path, abi_breaking="error")),
         )
-        assert result.exit_code == 4
+        assert result.exit_code == 0
         assert "### `ordinal:5` (1 finding)" in result.output
         table_line = next(
             line for line in result.output.splitlines()
@@ -2498,31 +2602,42 @@ class TestUsedByScoping:
     def test_json_summary_reflects_scoped_only_and_missing_findings(
         self, tmp_path, monkeypatch
     ) -> None:
-        """Audit finding: `summary` is computed from the real diff's
-        result.changes *before* scoped-only/missing-contract entries are
-        folded into `changes` -- a scoped run whose only gating issue is one
-        of these synthetic entries (real diff: no changes; scoped gate:
-        BREAKING on a missing required symbol) used to report
-        verdict "BREAKING" next to summary.total_changes: 0, an internally
-        contradictory JSON body. `summary` must count the synthetic entries
-        too; the pre-scoped counts move to `full_summary`."""
+        """Audit finding, originally: `summary` was computed from the real
+        diff's result.changes *before* scoped-only/missing-contract entries
+        were folded into `changes` -- a scoped run whose only gating issue
+        was one of these synthetic entries (real diff: no changes; scoped
+        gate: BREAKING on a missing required symbol) reported verdict
+        "BREAKING" next to summary.total_changes: 0, an internally
+        contradictory JSON body. The fix made `summary` count the synthetic
+        entries too, moving the pre-fold counts to `full_summary`.
+
+        Workstream D-S1 supersedes the `full_summary` half of that fix:
+        `verdict`/`summary` are always the plain full-library values (here,
+        NO_CHANGE / 0 total changes, since `old`/`new` are identical) -- no
+        `full_verdict`/`full_summary` swap any more. The missing-contract
+        fold-in itself is still unconditional, additive enrichment: it still
+        appears in `changes`/`summary` (1 entry) regardless of the real
+        exit code (0), and the consumer's own BREAKING assessment is
+        reported separately under `consumer_scope`."""
         res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
         )
+        assert result.exit_code == 0
         data = json.loads(result.stdout)
-        assert data["verdict"] == "BREAKING"
+        assert data["verdict"] == "NO_CHANGE"
+        assert "full_verdict" not in data
+        assert "full_summary" not in data
         assert data["summary"]["total_changes"] == len(data["changes"]) == 1
         assert data["summary"]["breaking"] == 1
-        assert data["full_summary"]["total_changes"] == 0
+        assert data["consumer_scope"]["verdict"] == "BREAKING"
 
-        # Schema-validation regression (external review): full_summary is a
-        # schema-2.9 top-level key -- assert this exact scoped-only payload
-        # (the shape that motivated adding it) validates against the
-        # packaged compare_report.schema.json, not just that reading it by
-        # hand looks right.
+        # Schema-validation regression (external review): assert this exact
+        # scoped-only payload validates against the packaged
+        # compare_report.schema.json, not just that reading it by hand
+        # looks right.
         try:
             import jsonschema
         except ImportError:

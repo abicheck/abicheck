@@ -23,8 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # real fix (vendoring the runtime sources directly, or a published
 # release tag) is a bigger, cross-cutting change than this generator's
 # own scope; see agent-evals/skills/harbor/CLAUDE.md.
-ARG ABICHECK_REF=370f1ddc67360112ac8859f2dffc15e758a0147d
-# ABICHECK_RUNTIME_DIGEST=180d964c18abac98965be45c8ab7f5b8072c62b80f979802ae9180062eca2ed2
+ARG ABICHECK_REF=7a02eb6767cc1752de6e454f899c17be35c3c3f0
+# ABICHECK_RUNTIME_DIGEST=b8fe7c215df9e7a259fb957ebbc343f691f8deca30d3b70e62bd9310dfe38757
 # ^ content digest of `_RUNTIME_RELEVANT_PATHS` at generation time -- what
 # `--check` (scripts/gen_harbor_tasks.py) actually compares to detect real
 # staleness, independent of whether ABICHECK_REF above is still a
@@ -157,7 +157,7 @@ ENV ABICHECK_ALLOW_AST_FALLBACK=1
 # itself contains scenario-identifying comments naming specific
 # fixtures/consumers, and `tests/test_skill_eval_graders_consumer_
 # scoping.py`'s own hand-written unit-test fixtures independently restate
-# real scenario data (a real consumer name, its real verdict/full_verdict
+# real scenario data (a real consumer name, its real verdict/consumer_verdict
 # pair) as example input for testing the grader.
 #
 # The graders and `verify_run.py` are therefore no longer part of this
