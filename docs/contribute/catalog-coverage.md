@@ -71,13 +71,14 @@ Every case, rule or scenario, tagged with the real-world ecosystem it models (`g
 
 ## Workflow coverage
 
-**6 workflow examples** so far, out of the 8 task-oriented workflows Phase 5 of the examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) targets: compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions.
+**7 workflow examples** so far, out of the 7 task-oriented workflows Phase 5 of the examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) targets: compare one library, audit a release, multi-library project, evidence depth (including build/source evidence), Python API, suppressions, GitHub Actions.
 
 | Workflow | Task | Platforms | Executed steps |
 |---|---|---|---|
 | `audit-release` | Did I accidentally ship an undocumented export consumers could start depending on? | linux, macos | 2 |
 | `compare-project` | Did removing a function from one library in my project break a sibling library that depends on it? | linux, macos | 5 |
 | `compare-release` | Did my next release break anything for existing consumers? | linux, macos | 3 |
+| `evidence-depth` | What does the evidence I give abicheck actually let it see, and what does each additional layer add? | linux, macos | 7 |
 | `github-actions` | How do I run this check automatically on every pull request, without anyone remembering to run it (or writing a CI script myself)? | linux, macos | 3 |
 | `python-api` | I want to run this check from my own build script or test suite, not by shelling out to the CLI -- how do I call abicheck from Python? | linux, macos | 3 |
 | `suppressions` | I renamed a function on purpose -- how do I stop CI from failing on it, without turning off detection for everything else? | linux, macos | 4 |

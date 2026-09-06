@@ -74,7 +74,9 @@ jobs:
       # ever stops providing it. compare-project's own `compare` step passes
       # no headers (it demonstrates the symbols-only, directory-vs-directory
       # bundle/cross-library path), so it needs gcc but not castxml -- its
-      # manifest's `requires:` reflects that.
+      # manifest's `requires:` reflects that. evidence-depth needs both:
+      # castxml for its header/source-evidence steps and python3 for its
+      # compile_commands.json generator.
       - name: Install system deps
         uses: ./.github/actions/install-system-deps
         with:
@@ -100,6 +102,7 @@ jobs:
             --require compare-release --require audit-release \
             --require suppressions --require python-api \
             --require github-actions --require compare-project \
+            --require evidence-depth \
             --json results/workflow-examples.json
 
       - name: Upload workflow-example receipt

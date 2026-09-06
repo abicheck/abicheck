@@ -236,7 +236,7 @@ A fifth Codex review round pointed at `.github/workflows/test-action.yml` (three
 
 A sixth Codex review round (on the PR that corrected Phase 4's target model, prompted by the corrected `catalog/ground_truth.json` path in the new diagram) found the "Complete" claim above still had two real, unmigrated readers: `benchmark_comparison.py` kept its own hardcoded `_GT_PATH = Path(__file__).parent.parent / "examples" / "ground_truth.json"` module-level constant even though it already imports `example_catalog` and uses `example_catalog.GROUND_TRUTH_PATH` elsewhere in the same file (line 1968) — an inconsistency within one file, not just a missed file; and `gen_repo_facts.py`'s `_example_cases()` read `(ROOT / "examples" / "ground_truth.json")` directly and had never imported `example_catalog` at all (it postdates the original Phase 3 migration pass). Both fixed by routing through `example_catalog.GROUND_TRUTH_PATH`, following the standard sys.path bootstrap guard every other script here uses. Verified: `python scripts/gen_repo_facts.py --check` and `tests/test_generate_benchmark_report.py` both still pass unchanged (behavior-preserving — same path, same content). | — | Make every path resolver in the codebase (`benchmark_comparison.py`, `gen_examples_docs.py`, `check_ai_readiness.py`, the various validators) go through a declarative `catalog.resolve(case_id)` rather than a hard-coded `EXAMPLES_DIR / case_name`, so Phase 4 doesn't require touching every consumer at once. |
 | 4 | **Complete** — the original four-subtree target model was found unsound by an external review before any directory moved (see "Corrected Phase 4 target model" below for the full argument); the corrected flat `catalog/cases/` model has now landed: `examples/case*` → `catalog/cases/case*`, `examples/ground_truth.json` → `catalog/ground_truth.json`, `examples/CMakeLists.txt` → `catalog/CMakeLists.txt`, `examples/probes` → `catalog/probes`, `examples/catalog_rules.yaml` → `catalog/catalog_rules.yaml`. `scripts/example_catalog.py`'s `case_dir()`/`CASES_DIR`/`CATALOG_DIR` are the only things that changed to make every existing resolver-routed consumer (Phase 3's row) work unmodified. The four "bidirectional directory-sync audit" discovery steps now walk `catalog/cases/` directly; `case01_symbol_removal`'s literal path in `.github/workflows/test-action.yml`/`test-baseline-rotation.yml`/`test-baseline-publish-e2e.yml` now reads `catalog/cases/case01_symbol_removal`; CMake discovery, CI path filters, `mutation.yml`'s `also_copy`, and `gen_examples_docs.py`'s path templates (including the `examples/README.md` vs. `catalog/README.md` split) were all updated in the same change. `examples/CLAUDE.md`/`catalog/CLAUDE.md` were split the same way: the former documents the curated workflows tree, the latter the calibration catalog (owner families, per-case layout, ground truth, taxonomy). | Phase 3 |  |
-| 5 | In progress — 6 of 8 workflows, contract complete. `examples/workflows/compare-release/` (`gcc` + `abicheck compare`), `examples/workflows/audit-release/` (`gcc` + `abicheck scan`, no baseline — a single-release audit catching an accidental undocumented export via `crosscheck:exported_not_public`), `examples/workflows/suppressions/` (`gcc` + `abicheck compare --suppress` — approving a known, intentional rename via a suppression rule, showing both the pre-suppression `BREAKING` verdict and the honest "this hides a real break, not proves one absent" caveat abicheck itself prints), `examples/workflows/python-api/` (calling `abicheck.service.run_compare` directly instead of the CLI, exiting with `result.exit_decision.code`), `examples/workflows/github-actions/` (the same comparison reproduced locally, plus an illustrative `.github/workflows/*.yml` snippet using the composite Action — the YAML is fenced ```yaml, not ```bash/sh/shell/console, so `documented_commands()` never scans it for a step, since a real Actions run only proves out by actually running in CI), and `examples/workflows/compare-project/` (`gcc` + `abicheck compare <old-dir> <new-dir>` — no manifest, no headers: two sibling libraries where one still imports a symbol the other stopped exporting, caught only by the bundle/cross-library `DT_NEEDED` graph, not by either library's own isolated diff) are all real, verified walkthroughs independent of the `caseNN_*` calibration catalog, and every workflow carries a `workflow.yaml` (`scripts/workflow_examples.py`) stating its commands, exit code, output substrings and expected verdict/change kinds. `validation/scripts/run_workflow_examples.py` executes those documented commands in a scratch copy and checks all of it; the `workflow-examples` job in `examples-validation.yml` runs it with one `--require` per workflow so the lane cannot pass having run nothing. The load-bearing rule is that every manifest command must appear verbatim in that workflow's own README (`readme_drift`, adversarially falsified per step in `tests/test_workflow_examples.py`) — without it the manifest is a second copy of the walkthrough, free to keep passing against commands the README no longer shows. A workflow directory with no manifest is now a hard error, and Phase 6's workflow-coverage figure counts validated manifests rather than subdirectories, so an empty directory can no longer raise it. Remaining: two other workflows (evidence depth, build/source evidence) — each is now "add a directory with a README and a manifest", with the gate already in place. | — | Rebuild `examples/` as a small, curated, task-oriented set (compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions). Independent of Phase 4 — the curated set and the calibration catalog are different trees regardless of which one physically moves first. |
+| 5 | **Complete — 7 of 7 workflows, contract complete.** `examples/workflows/compare-release/` (`gcc` + `abicheck compare`), `examples/workflows/audit-release/` (`gcc` + `abicheck scan`, no baseline — a single-release audit catching an accidental undocumented export via `crosscheck:exported_not_public`), `examples/workflows/suppressions/` (`gcc` + `abicheck compare --suppress` — approving a known, intentional rename via a suppression rule, showing both the pre-suppression `BREAKING` verdict and the honest "this hides a real break, not proves one absent" caveat abicheck itself prints), `examples/workflows/python-api/` (calling `abicheck.service.run_compare` directly instead of the CLI, exiting with `result.exit_decision.code`), `examples/workflows/github-actions/` (the same comparison reproduced locally, plus an illustrative `.github/workflows/*.yml` snippet using the composite Action — the YAML is fenced ```yaml, not ```bash/sh/shell/console, so `documented_commands()` never scans it for a step, since a real Actions run only proves out by actually running in CI), `examples/workflows/compare-project/` (`gcc` + `abicheck compare <old-dir> <new-dir>` — no manifest, no headers: two sibling libraries where one still imports a symbol the other stopped exporting, caught only by the bundle/cross-library `DT_NEEDED` graph, not by either library's own isolated diff), and `examples/workflows/evidence-depth/` (one release compared three times with progressively more evidence — no headers misses a struct-layout break entirely; `--header` catches it; `--sources`/`--build-info --depth source` additionally catches a public macro's value change that no artifact tier, including headers, can ever see, since a `#define` never survives past the preprocessor — deliberately standing in for both "evidence depth" and "build/source evidence" from the original target list, since one progressive fixture demonstrates the point more convincingly than two separate near-identical projects would) are all real, verified walkthroughs independent of the `caseNN_*` calibration catalog, and every workflow carries a `workflow.yaml` (`scripts/workflow_examples.py`) stating its commands, exit code, output substrings and expected verdict/change kinds. `validation/scripts/run_workflow_examples.py` executes those documented commands in a scratch copy and checks all of it; the `workflow-examples` job in `examples-validation.yml` runs it with one `--require` per workflow so the lane cannot pass having run nothing. The load-bearing rule is that every manifest command must appear verbatim in that workflow's own README (`readme_drift`, adversarially falsified per step in `tests/test_workflow_examples.py`) — without it the manifest is a second copy of the walkthrough, free to keep passing against commands the README no longer shows. A workflow directory with no manifest is now a hard error, and Phase 6's workflow-coverage figure counts validated manifests rather than subdirectories, so an empty directory can no longer raise it. | — | Rebuild `examples/` as a small, curated, task-oriented set (compare one library, audit a release, multi-library project, evidence depth, build/source evidence, Python API, suppressions, GitHub Actions). Independent of Phase 4 — the curated set and the calibration catalog are different trees regardless of which one physically moves first. |
 | 6 | Implemented, and adopted beyond the report itself. `scripts/gen_catalog_coverage_report.py` generates `docs/contribute/catalog-coverage.md`, reporting rule/variant/scenario/ecosystem/workflow coverage independently, with the rule dimension now derived from `scripts/catalog_rule_registry.py`'s join rather than re-derived locally, duplicates reported separately from variants, and the 17 referenced-only rules listed by name rather than folded into one "177 rules" headline. Workflow coverage counts validated `workflow.yaml` manifests. The root `README.md` now states the same breakdown (160 demonstrated rules / 5 variants / 2 duplicates / 30 scenarios / 17 referenced-only) alongside the 197-case figure, with the demonstrated-rule count gated by `check_ai_readiness.py`'s `doc-count-sync` so it cannot drift. **Still flat-count-only:** `docs/reference/tool-comparison.md`'s benchmark tables and `scripts/generate_benchmark_report.py`'s own output — a benchmark measures per-case verdict accuracy, so adding a rule-family accuracy dimension there is a real change to what is measured, not a relabeling. Report-only for gating: no existing gate's case count changed. | — | Split benchmark/coverage reporting into separate rule, variant, scenario, ecosystem, and workflow dimensions instead of one flat case count, per this plan's "stop reporting all cases as semantically equal" motivation above. Depends on Phase 2's `related_rules`/`rule_slug` data (done) but not on Phases 3-5. |
 
 Each phase is its own PR against this plan, not a single follow-up commit —
@@ -286,14 +286,16 @@ doc pages — never as directory ownership:
 examples/
 ├── README.md
 └── workflows/                # Phase 5's curated, task-oriented workflows
-    ├── compare-release/      # already landed (Phase 5, 6 of 8)
-    ├── audit-release/        # already landed (Phase 5, 6 of 8)
-    ├── suppressions/         # already landed (Phase 5, 6 of 8)
-    ├── python-api/           # already landed (Phase 5, 6 of 8)
-    ├── github-actions/       # already landed (Phase 5, 6 of 8)
-    ├── compare-project/      # already landed (Phase 5, 6 of 8)
-    ├── evidence-depth/
-    └── build-source-evidence/  # one directory per PHASE5_TARGET_WORKFLOWS entry
+    ├── compare-release/      # already landed (Phase 5, complete: 7 of 7)
+    ├── audit-release/        # already landed (Phase 5, complete: 7 of 7)
+    ├── suppressions/         # already landed (Phase 5, complete: 7 of 7)
+    ├── python-api/           # already landed (Phase 5, complete: 7 of 7)
+    ├── github-actions/       # already landed (Phase 5, complete: 7 of 7)
+    ├── compare-project/      # already landed (Phase 5, complete: 7 of 7)
+    └── evidence-depth/       # already landed (Phase 5, complete: 7 of 7) --
+                              # one workflow standing in for both "evidence
+                              # depth" and "build/source evidence" (see
+                              # "What is left" item 1)
 
 catalog/
 ├── README.md
@@ -505,14 +507,12 @@ the equivalent manual/CI drift gate; run either after any
 Everything below is the complete remaining scope of this plan. Nothing else
 in it is open.
 
-1. **Phase 5 — two more workflow examples**: evidence depth, build/source
-   evidence (audit a release, suppressions, Python API, GitHub Actions, and
-   multi-library project have all landed: `examples/workflows/audit-release/`,
-   a real `gcc` + `abicheck scan` walkthrough with no baseline, catching an
-   accidental undocumented export via `crosscheck:exported_not_public`;
-   `examples/workflows/suppressions/`, a real `gcc` +
-   `abicheck compare --suppress` walkthrough approving a known, intentional
-   rename; `examples/workflows/python-api/`, calling
+1. **Phase 5 — complete.** All 7 target workflows have landed:
+   `examples/workflows/audit-release/`, a real `gcc` + `abicheck scan`
+   walkthrough with no baseline, catching an accidental undocumented export
+   via `crosscheck:exported_not_public`; `examples/workflows/suppressions/`,
+   a real `gcc` + `abicheck compare --suppress` walkthrough approving a
+   known, intentional rename; `examples/workflows/python-api/`, calling
    `abicheck.service.run_compare` directly instead of the CLI;
    `examples/workflows/github-actions/`, the same comparison reproduced
    locally plus an illustrative Action-usage YAML snippet;
@@ -520,14 +520,25 @@ in it is open.
    `abicheck compare <old-dir> <new-dir>` walkthrough with no manifest and no
    headers — two sibling libraries where one still imports a symbol the
    other stopped exporting, caught only by the bundle/cross-library
-   `DT_NEEDED` graph, not by either library's own isolated diff). The
-   contract, runner, CI job and coverage accounting are all in place, so
-   each remaining one is now "add a directory with a README and a
-   `workflow.yaml`". Worth revisiting whether "evidence depth" and
-   "build/source evidence" are one progressive example rather than two
-   nearly identical projects, and grouping the published set (core
-   workflows / advanced analysis / ecosystem / operational recipes) rather
-   than presenting eight peers.
+   `DT_NEEDED` graph, not by either library's own isolated diff; and
+   `examples/workflows/evidence-depth/`, one release compared three times
+   with progressively more evidence (no headers misses a struct-layout
+   break; `--header` catches it; `--sources`/`--build-info --depth source`
+   additionally catches a public macro value change no artifact tier can
+   ever see). That last one deliberately merges what the original target
+   list carried as two separate entries — "evidence depth" and "build/source
+   evidence" — into one progressive fixture: revisiting the question this
+   item used to leave open, one release demonstrating why *each additional
+   layer* of evidence matters is a stronger teaching tool than two
+   near-identical projects would have been, and `PHASE5_TARGET_WORKFLOWS`
+   (`scripts/gen_catalog_coverage_report.py`) and this plan's Phase 5 row
+   were updated together to reflect the merged 7-workflow target set. Still
+   open, and deliberately deferred rather than done as part of this pass:
+   grouping the published set (core workflows / advanced analysis /
+   ecosystem / operational recipes) instead of presenting seven peers in one
+   flat list — a presentation change to `examples/README.md`, not a new
+   workflow, and worth doing once there's enough of the set to make the
+   grouping earn its keep.
 2. **A by-subject view and the pattern pages that go with it** — the one
    navigation dimension the review asked for that today's metadata cannot
    project. See the end of "Taxonomy visibility on the public docs site"

@@ -18,6 +18,7 @@ the output means.
 | [`workflows/audit-release/`](workflows/audit-release/README.md) | Did I accidentally ship an undocumented export consumers could start depending on? |
 | [`workflows/suppressions/`](workflows/suppressions/README.md) | I renamed a function on purpose — how do I stop CI from failing on it? |
 | [`workflows/compare-project/`](workflows/compare-project/README.md) | Did removing a function from one library in my project break a sibling library that depends on it? |
+| [`workflows/evidence-depth/`](workflows/evidence-depth/README.md) | What does the evidence I give abicheck actually let it see, and what does each additional layer add? |
 | [`workflows/python-api/`](workflows/python-api/README.md) | How do I run this check from my own Python build script or test suite? |
 | [`workflows/github-actions/`](workflows/github-actions/README.md) | How do I run this check automatically on every pull request? |
 
