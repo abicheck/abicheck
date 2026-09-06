@@ -10,17 +10,35 @@ gates run against.
 
 `workflows/<task>/` is a small, curated, task-oriented walkthrough: a tiny
 purpose-built project, the real `abicheck` command you would run, and what
-the output means.
+the output means. Grouped below by the kind of question each one answers,
+rather than as seven undifferentiated peers.
+
+**Core workflows** — the everyday release-comparison loop:
 
 | Workflow | Task |
 |---|---|
 | [`workflows/compare-release/`](workflows/compare-release/README.md) | Did my next release break anything for existing consumers? |
 | [`workflows/audit-release/`](workflows/audit-release/README.md) | Did I accidentally ship an undocumented export consumers could start depending on? |
-| [`workflows/suppressions/`](workflows/suppressions/README.md) | I renamed a function on purpose — how do I stop CI from failing on it? |
 | [`workflows/compare-project/`](workflows/compare-project/README.md) | Did removing a function from one library in my project break a sibling library that depends on it? |
+
+**Advanced analysis** — how much evidence you give abicheck changes what it can see:
+
+| Workflow | Task |
+|---|---|
 | [`workflows/evidence-depth/`](workflows/evidence-depth/README.md) | What does the evidence I give abicheck actually let it see, and what does each additional layer add? |
+
+**Ecosystem examples** — driving abicheck from something other than the CLI:
+
+| Workflow | Task |
+|---|---|
 | [`workflows/python-api/`](workflows/python-api/README.md) | How do I run this check from my own Python build script or test suite? |
+
+**Operational recipes** — wiring abicheck into CI and policy:
+
+| Workflow | Task |
+|---|---|
 | [`workflows/github-actions/`](workflows/github-actions/README.md) | How do I run this check automatically on every pull request? |
+| [`workflows/suppressions/`](workflows/suppressions/README.md) | I renamed a function on purpose — how do I stop CI from failing on it? |
 
 Each one carries a `workflow.yaml` stating the commands, the expected exit
 code, and the expected verdict; `validation/scripts/run_workflow_examples.py`

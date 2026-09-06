@@ -576,13 +576,20 @@ what was done and how it was verified.
    layer* of evidence matters is a stronger teaching tool than two
    near-identical projects would have been, and `PHASE5_TARGET_WORKFLOWS`
    (`scripts/gen_catalog_coverage_report.py`) and this plan's Phase 5 row
-   were updated together to reflect the merged 7-workflow target set. Still
-   open, and deliberately deferred rather than done as part of this pass:
-   grouping the published set (core workflows / advanced analysis /
-   ecosystem / operational recipes) instead of presenting seven peers in one
-   flat list — a presentation change to `examples/README.md`, not a new
-   workflow, and worth doing once there's enough of the set to make the
-   grouping earn its keep.
+   were updated together to reflect the merged 7-workflow target set. The
+   presentation grouping this item originally deferred — core workflows /
+   advanced analysis / ecosystem examples / operational recipes, instead of
+   seven peers in one flat list — has since landed too: `examples/README.md`'s
+   workflow table is now four grouped tables (core: `compare-release`/
+   `audit-release`/`compare-project`; advanced analysis: `evidence-depth`;
+   ecosystem examples: `python-api`; operational recipes: `github-actions`/
+   `suppressions`), matching the external review's own recommended grouping.
+   Hand-authored, not generated — `gen_examples_docs.py` never writes
+   `examples/README.md` (only `catalog/README.md`'s generated regions), so
+   this needed no generator change, and `check_ai_readiness.py`'s
+   `examples-readme-sync` check (despite its name) pins `catalog/README.md`,
+   not this file, so the grouping is free to be presentational without a
+   drift gate to satisfy.
 2. **A by-subject view and the pattern pages that go with it — done.** All
    197 cases hand-classified into **25 subjects** (bottom-up, from what the
    catalog actually contains, not a re-derivation of `topics`/`rule_slug`/
