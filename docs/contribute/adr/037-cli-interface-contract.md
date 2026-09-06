@@ -1,5 +1,20 @@
 # ADR-037: CLI Interface Contract, Configuration Balance, and Extension Policy
 
+> **Amendment (2026-09-06, [ADR-068](068-one-comparison-product-and-scan-retirement.md)).**
+> The `scan` command this ADR treats as a peer front end of `dump`/`compare`
+> is being **retired**, not reshaped again. Consequences for the contract
+> below: D5's one `--depth` dial keeps its vocabulary but has one owner
+> (`compare`/`dump`); D8.1's "`dump` and `scan` share the L2 compile context"
+> becomes "`dump` and `compare` share it", and that shared context moves to
+> `.abicheck.yml` (ADR-068 D5); D7's "fewer verbs, clear new-command bar"
+> gains its first *removal* precedent, taking the root surface to six; D10.1's
+> Tier-1/Tier-2 routing rules and the `cli-contract` gate are unchanged, but
+> the `cli_scan*` allowlist entries disappear with the modules. D12's declared
+> exit-code scheme is unaffected ([ADR-064](064-canonical-gate-algorithm-and-exit-decision.md)
+> already made it automatic), though `scan`'s budget-overflow (`5`) and
+> evidence-contract (`7`) axes must reach `compare` before `scan` is deleted.
+> Sequenced in [`plans/one-comparison-product.md`](../plans/one-comparison-product.md).
+
 > **Historical note (2026-08-09).** The MCP server was removed entirely
 > (see `docs/contribute/adr/021-mcp-security-model.md`, retired the same
 > date). Every MCP-specific reference below — `mcp_server` as a Tier-3

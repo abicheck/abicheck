@@ -22,6 +22,17 @@ root [`vision.md`](../vision.md); the technical decisions are
 **Origin:** maintainer vision discussion and the nine-prompt agent pack
 prepared from it (2026-09-04), reconciled against the current tree.
 
+> **Cross-reference (2026-09-06).** This plan remains the owner of what a
+> *result means*. [`one-comparison-product.md`](one-comparison-product.md)
+> ([ADR-068](../adr/068-one-comparison-product-and-scan-retirement.md)) is
+> the new owner of the CLI's **capability topology** — which command owns
+> which analysis — and is subordinate to this plan wherever the two touch.
+> Two of its phases depend directly on workstreams here: `compare
+> --no-baseline`'s `declared_absent` acquisition state extends **A**'s
+> ADR-065 model, and the always-on suppression/disposition accounting it
+> assumes is **C**'s landed S1 ledger. Its Phase 1 must not invent a second
+> outcome vocabulary alongside `RunOutcome`/`ExitDecision`.
+
 ## Problem
 
 abicheck's compatibility engine is mature, but seven product rules the

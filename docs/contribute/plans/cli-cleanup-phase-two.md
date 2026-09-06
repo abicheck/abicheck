@@ -209,6 +209,38 @@ its own section below), PR 4 changes what a CI job's exit code means.
 > the account itself, per the same review's DRY finding). PR A/B/D/E/F and
 > PR 1/1b/2 are done.
 
+## Status 2026-09-06 (later) — closed; remaining scope superseded
+
+**This plan is closed.** Its remaining scope moved to
+[`one-comparison-product.md`](one-comparison-product.md), owned by
+[ADR-068](../adr/068-one-comparison-product-and-scan-retirement.md), on a
+finding this file could not have reached from inside its own frame: the
+next milestone is not "remove five more flags" *or* the three convergence
+items below — it is that **`compare` cannot reach `scan`'s checks at all.**
+Import-graph verified on `main@309c8a82`: none of the eleven cross-source
+checks (`buildsource/crosscheck.py`), the lexical pattern pre-scan, or the
+preprocessor scan is reachable from `checker.compare` or any `compare` CLI
+path. The command the vision names as the product owns the *smaller* check
+set, and no amount of interface hygiene on either command fixes that. So
+`scan` is retired and its capabilities move into `compare`, rather than
+both being tidied in parallel.
+
+Disposition of this file's own open items:
+
+| Item here | Disposition |
+|---|---|
+| **PR H** — `scan --artifact-set` member-identity manifest | **Cancelled.** The mode is deleted, not extended; the declared-provider capability becomes `.abicheck.yml` configuration read by the canonical multi-component path (ADR-056 superseded) |
+| **PR I** — one operand driver; one evaluation/gate/report/dry-run path | Re-homed as Phase 7d, narrowed — with `scan` gone there are fewer operand shapes to unify |
+| **PR J** — per-library topology in `BundleSpec`; `--max-json-object-nodes` → a calibrated resource limit | Re-homed as Phase 7d + 7g, unchanged in intent (both still need G42 provider resolution and a real bytes-per-node calibration) |
+| `scan --artifact-set` bundle-topology config read | Cancelled with the mode |
+| `contract=public` default flip | Re-homed as Phase 9, still gated on `EntityId`-based public closure — **not** a string heuristic, and never traded for a shorter CLI |
+
+Everything this plan landed stays landed and **must not be re-opened**. The
+sections below are kept as the historical record of which convergence
+prerequisite sat behind each deletion — that record is the reason the
+deletions were safe, and it is still the reference for the flag work in the
+new plan's Phase 7.
+
 ## Status 2026-09-06 — what remains here, and three parallel tracks
 
 **This plan is no longer the owner of the CLI's direction.**

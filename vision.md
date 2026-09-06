@@ -91,6 +91,38 @@ it; source-level analysis is a normal part of pull request review, not
 something reserved for releases. Adding an optional input must never make
 the ordinary path harder.
 
+## The shape of the tool
+
+One command analyzes evolution, one captures evidence, one answers runtime
+deployment questions. `compare` is the product: it takes an old and a new
+surface and reports how the supported surface changed, enriched with every
+check the available evidence supports. `dump` captures a component's
+evidence as a reusable snapshot and never produces a verdict. `deps` answers
+a different question with different operands — what the loader will resolve
+for a binary in a given environment, and whether a consumer survives an
+environment change — and stays separate for that reason, not merged to
+shorten a list of verbs. Beyond those, `aggregate` and `project` are
+advanced CI and multi-target integration surfaces, and the
+abi-compliance-checker adapter is a frozen legacy compatibility layer.
+
+There is no second, parallel analysis workflow. Baseline availability and
+cardinality are *scope*, not new commands: a package pair, a release
+directory pair, a selected build variant, and a build with no prior release
+to compare against are all the one comparison product, and a run that has
+been told there is no baseline says so rather than reporting a first
+release as if everything had just been added. Checks that are naturally
+one-sided are evaluated on each side and reported as evolution — newly
+introduced, resolved, still present, or not answerable from that side's
+evidence — so a pre-existing problem is never presented as a new one.
+
+What a user types should be a per-invocation decision or operand. Stable
+properties of a project — its toolchain, its debug-resolution settings, its
+declared contracts, its deployment constraints, its release topology —
+belong in the project's own configuration, stated once. But supplying
+evidence for a single experiment must stay cheap: headers, sources, build
+context, and a known consumer's binary are always available on the command
+line, with no project file required to compare two files.
+
 ## Evidence and trust
 
 Evidence is layered, from the binary alone through debug information,

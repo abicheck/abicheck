@@ -1,5 +1,18 @@
 # ADR-055: Typed Request/Result Completeness and a Schema-Version Registry
 
+> **Amendment (2026-09-06, [ADR-068](068-one-comparison-product-and-scan-retirement.md)).**
+> `ScanRequest`/`ScanResult` and `SCAN_SCHEMA_VERSION` leave the registry: the
+> `scan` command is being retired, and its request fields are absorbed into
+> `CompareRequest`/`CompareResult` rather than mirrored. This *strengthens*
+> D1's completeness rule rather than weakening it — the parity obligation
+> ("equivalent input, equivalent answer, whichever front end") is easier to
+> hold with one request/result pair than two, and the `scan` pair was the
+> largest standing exception, with `compare`'s own result nested inside it
+> under `diff`. Registry retirement happens only after every consumer moves
+> (Phase 4 of
+> [`plans/one-comparison-product.md`](../plans/one-comparison-product.md)),
+> per that plan's deletion-follows-callers rule.
+
 **Date:** 2026-07-27 (D1–D3); Gap 3/D4 added 2026-07-27 after a second,
 more detailed external review of the same subject was checked line-by-line
 against `mcp_server.py` (see "Amendment" note below Gap 2)

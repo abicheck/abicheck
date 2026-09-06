@@ -1,5 +1,38 @@
 # ADR-008: Full-Stack Dependency Validation
 
+> **Amendment (2026-09-06, [ADR-068](068-one-comparison-product-and-scan-retirement.md) D6).**
+> `deps` is **kept**, and its distinct user question is stated here so it is
+> not later folded into `compare` for command-count reasons:
+>
+> - `deps tree BINARY` — *which transitive shared libraries will the dynamic
+>   loader actually resolve for this binary in this environment, and are its
+>   required symbols bindable?* Operand: one binary plus a search
+>   configuration.
+> - `deps compare BINARY --old-root R1 --new-root R2` — *will this consumer
+>   still load and work, from an ABI/loadability standpoint, when its
+>   complete deployment environment changes from R1 to R2?* Operands: a
+>   consumer, and two **environments**.
+>
+> `compare OLD NEW`'s operands are two *surfaces of the same component*.
+> Neither question reduces to the other, so `deps` is not merged, and no
+> `--search-path`/`--sysroot`/`--ld-library-path`/`--old-root`/`--new-root`
+> flag is removed — here the environment *is* the operand, not a toolchain
+> property to demote to config.
+>
+> What does change is internal convergence, none of it user-visible: the
+> per-library ABI comparison inside `deps compare` must keep going through
+> the canonical engine (it already does, via `service.run_dump`/`compare` in
+> `stack_checker._run_abi_diff` — that must not regress); `StackVerdict`'s
+> independent taxonomy and `cli_stack.py`'s hand-rolled `0/1/4/5` exits are
+> re-expressed as [ADR-064](064-canonical-gate-algorithm-and-exit-decision.md)
+> `RunOutcome`/`ExitDecision` axes, with loadability as an operational axis
+> rather than a parallel verdict vocabulary; and the stack report becomes a
+> `ReportDocument` projection. No compatibility taxonomy, policy engine, or
+> suppression mechanism may evolve inside `deps`. A later unification is
+> recorded as future direction only, conditional on a clean operand model.
+> Sequenced as Phase 8 of
+> [`plans/one-comparison-product.md`](../plans/one-comparison-product.md).
+
 **Date:** 2026-03-17
 **Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
