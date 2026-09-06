@@ -125,19 +125,21 @@ class TestFieldDefaultsToNone:
         `contract_evidence_refs` and `compatibility_evaluation_status`,
         which would have silently shifted every later field's position for
         such a caller). `entity_id` (ADR-063 Phase 2) is appended immediately
-        after this one, and `disambiguator` (ADR-063 Track T3) is the newest
-        field, appended immediately after `entity_id` -- all three must stay
-        keyword-only, and `disambiguator` must stay last until some
-        still-newer field is appended after it in turn."""
+        after this one, `disambiguator` (ADR-063 Track T3) immediately after
+        `entity_id`, and `finding_evolution` (ADR-068 D3 / plan P2) is the
+        newest field, appended immediately after `disambiguator` -- all four
+        must stay keyword-only, and `finding_evolution` must stay last until
+        some still-newer field is appended after it in turn."""
         import dataclasses
 
         by_name = {f.name: f for f in dataclasses.fields(Change)}
         assert by_name["evidence_provenance"].kw_only is True
         assert by_name["entity_id"].kw_only is True
         assert by_name["disambiguator"].kw_only is True
+        assert by_name["finding_evolution"].kw_only is True
         all_names = [f.name for f in dataclasses.fields(Change)]
-        assert all_names[-1] == "disambiguator", (
-            "disambiguator must be the last-declared field on Change"
+        assert all_names[-1] == "finding_evolution", (
+            "finding_evolution must be the last-declared field on Change"
         )
         assert (
             all_names.index("entity_id") == all_names.index("evidence_provenance") + 1
@@ -145,6 +147,9 @@ class TestFieldDefaultsToNone:
         assert all_names.index("disambiguator") == all_names.index("entity_id") + 1, (
             "disambiguator must be appended immediately after entity_id"
         )
+        assert (
+            all_names.index("finding_evolution") == all_names.index("disambiguator") + 1
+        ), "finding_evolution must be appended immediately after disambiguator"
 
 
 class TestVerifiedBucketsHaveProducerCoverage:
