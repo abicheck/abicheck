@@ -188,6 +188,41 @@
         "note"
       ]
     },
+    "used_by": {
+      "type": "array",
+      "description": "Present only when --used-by was given: one summary per supplied application binary (ADR-043). Purely informational -- see consumer_scope.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "app": {"type": "string"},
+          "verdict": {
+            "type": "string",
+            "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+          },
+          "required_symbol_count": {"type": "integer"},
+          "missing_symbols": {"type": "array", "items": {"type": "string"}},
+          "missing_versions": {"type": "array", "items": {"type": "string"}},
+          "relevant_change_count": {"type": "integer"},
+          "symbol_coverage": {"type": "number"}
+        }
+      }
+    },
+    "required_symbol_contract": {
+      "type": "object",
+      "description": "Present only when --required-symbol(s) was given: the plugin-host entrypoint contract's own summary (ADR-043). Purely informational -- see consumer_scope.",
+      "additionalProperties": true,
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+        },
+        "required_entrypoints": {"type": "array", "items": {"type": "string"}},
+        "missing_entrypoints": {"type": "array", "items": {"type": "string"}},
+        "relevant_change_count": {"type": "integer"},
+        "coverage": {"type": "number"}
+      }
+    },
     "check_id": {
       "type": "string",
       "description": "Schema 2.12 (ADR-047 report-identity envelope, G30 P0.3). This check's full identity: \"target@profile#baseline_channel@requested_depth\", optionally followed by a \"!<environment_id>\" and/or \"~<explicit_id>\" tail (schema 2.49, G42). Each of the four base components is constrained to ADR-047 \u00a77's safe identifier charset (no further '@'/'#' inside a component) so the delimiter-joined form stays unambiguous. \"!<environment_id>\" is a named-environment qualifier (reserved -- no generator sets it yet); \"~<explicit_id>\" is a project author's checks[].id (G42's \"Explicit check identifiers\" phase). Both are independently optional and compose in this fixed order.",
