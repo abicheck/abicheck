@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `catalog/cases/case47_inline_to_outlined/` |
 | **Rule family** | [`inline-function-outlined`](by-rule/inline-function-outlined.md) — Variant (callable-kind) of [case16_inline_to_non_inline](case16_inline_to_non_inline.md) |
+| **Subject** | [Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md) |
 
 **Category:** Compatible | **Verdict:** 🟢 COMPATIBLE
 
@@ -139,4 +140,4 @@ abidiff v1.xml v2.xml
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Inline function outlined](by-rule/inline-function-outlined.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Inline function outlined](by-rule/inline-function-outlined.md) · [Subject: Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md)._

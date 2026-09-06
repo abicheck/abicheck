@@ -443,9 +443,10 @@ out of scope, and added four more views:
   `examples/README.md` now lead with the `compare-release` workflow and
   present the 197 cases as the calibration material they are.
 
-**Still out of scope**, and the one navigation dimension the review asked
-for that is genuinely not buildable from today's metadata: a **by-subject**
-view and the **pattern** pages that go with it (e.g. one page grouping
+**Update ("What is left" item 2, now done):** at the time this section was
+written, the one navigation dimension the review asked for that was
+genuinely not buildable from today's metadata was a **by-subject** view and
+the **pattern** pages that go with it (e.g. one page grouping
 case74/75/76/77 as "leaked internal types"). Every other dimension above
 is a projection of a field the taxonomy already has; `subjects` is new,
 hand-authored, per-case semantic metadata -- `topics` is derived from the
@@ -453,9 +454,10 @@ change-catalog's own detector-owner split (symbols/types/platform/build/
 source), which is the right partition for a detector author and too coarse
 for a reader (a `NO_CHANGE` control gets `topics: [controls]` and nothing
 else, so a C qualification control is not discoverable beside the
-function-signature cases it belongs with). Adding it means classifying 197
-cases by hand, the same way `RULE_FAMILIES` and `RELATED_RULES` were, and
-is its own pass.
+function-signature cases it belongs with). That classification pass has
+since landed -- see "What is left" item 2 for the resulting 25-subject
+manifest, the generated `by-subject/` views, and the two hand-authored
+pattern pages.
 
 ## Files & surfaces
 
@@ -574,10 +576,52 @@ in it is open.
    flat list — a presentation change to `examples/README.md`, not a new
    workflow, and worth doing once there's enough of the set to make the
    grouping earn its keep.
-2. **A by-subject view and the pattern pages that go with it** — the one
-   navigation dimension the review asked for that today's metadata cannot
-   project. See the end of "Taxonomy visibility on the public docs site"
-   for why `topics` is not a substitute and what adding `subjects` costs.
+2. **A by-subject view and the pattern pages that go with it — done.** All
+   197 cases hand-classified into **25 subjects** (bottom-up, from what the
+   catalog actually contains, not a re-derivation of `topics`/`rule_slug`/
+   `ecosystem`): `leaked-internal-types` (4),
+   `internal-dependency-reachability` (15),
+   `vtable-and-virtual-dispatch` (12), `inheritance-layout-and-base-subobjects`
+   (4), `enum-abi-and-api-changes` (6), `struct-and-type-layout-changes` (20),
+   `calling-convention-and-integer-model-changes` (6),
+   `template-and-generic-programming-issues` (7),
+   `build-flag-and-toolchain-mode-drift` (12),
+   `elf-security-hardening-and-deployment-risk` (8),
+   `elf-export-and-linker-metadata` (10), `symbol-visibility-scoping` (4),
+   `symbol-versioning-and-kabi` (10), `export-declaration-mismatches` (9),
+   `inline-function-and-odr-boundary-changes` (4),
+   `tag-dispatch-and-empty-class-abi` (3), `removed-types-and-classes` (5),
+   `modern-cpp-standard-feature-hazards` (6),
+   `opaque-types-typedefs-and-contract-identifiers` (9),
+   `exported-variable-and-data-object-changes` (6),
+   `function-signature-and-source-api-changes` (18),
+   `api-design-and-hygiene-anti-patterns` (5),
+   `multi-library-bundle-topology` (5), `safe-changes-correctly-not-flagged`
+   (7), `textbook-symbol-add-remove` (3) — 197 memberships across 25
+   subjects, plus one dual-tagged case
+   (`case181_xcheck_public_to_internal_dependency`, both an
+   `export-declaration-mismatches` audit case and an
+   `internal-dependency-reachability` case) genuinely belonging to two.
+   `catalog/catalog_subjects.yaml` is the new declarative manifest (one
+   entry per subject, mirroring `catalog_classification.yaml`'s pattern but
+   keyed the other way since a case may belong to more than one subject),
+   loaded/validated by `scripts/catalog_subjects.py` with the same
+   anti-silent-default bidirectional validation
+   `catalog_classification.py` established. Wired into
+   `catalog/taxonomy.json`'s new `subjects` field
+   (`scripts/gen_catalog_taxonomy.py`) and published as
+   `docs/reference/examples/by-subject/<slug>.md` per subject plus a
+   `by-subject/index.md` (`scripts/gen_examples_docs.py`, wired into
+   `mkdocs.yml`'s **Examples** nav alongside By Rule/By Ecosystem), with a
+   new **Subject** row on every case's own meta table. Two subjects
+   (`leaked-internal-types`, covering the plan's own case74-77 worked
+   example, and `internal-dependency-reachability`, the L5 source-graph
+   evidence-tier family) carry a hand-authored `pattern_summary` — real
+   prose explaining *why* their member cases share a mechanism and what a
+   maintainer should watch for — rendered onto that subject's by-subject
+   page as the "pattern page" this item's own worked example called for;
+   every other subject renders from its `blurb` and case list alone, the
+   same as an ordinary by-rule/by-ecosystem page.
 3. **Benchmark reporting — done.** `docs/reference/tool-comparison.md`'s
    "Rule-family accuracy" section and `scripts/generate_benchmark_report.py`
    now report a second, independent accuracy dimension alongside the

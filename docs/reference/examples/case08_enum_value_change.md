@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `enum_member_value_changed` |
 | **Source files** | `catalog/cases/case08_enum_value_change/` |
 | **Rule family** | [`enum-member-value-changed`](by-rule/enum-member-value-changed.md) |
+| **Subject** | [Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -132,4 +133,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enumerator value changed](by-rule/enum-member-value-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Enumerator value changed](by-rule/enum-member-value-changed.md) · [Subject: Enum ABI and API changes](by-subject/enum-abi-and-api-changes.md)._

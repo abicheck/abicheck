@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `catalog/cases/case48_leaf_struct_through_pointer/` |
 | **Rule family** | [`leaf-struct-through-pointer`](by-rule/leaf-struct-through-pointer.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -138,4 +139,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pointed-to struct changed size](by-rule/leaf-struct-through-pointer.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pointed-to struct changed size](by-rule/leaf-struct-through-pointer.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
 | **Source files** | `catalog/cases/case74_detail_base_class_changed/` |
 | **Rule family** | [`detail-base-class-changed`](by-rule/detail-base-class-changed.md) |
+| **Subject** | [Leaked internal types](by-subject/leaked-internal-types.md) |
 
 **Category:** Internal-leak | **Verdict:** 🔴 BREAKING
 
@@ -176,4 +177,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal base class leaks through a public type](by-rule/detail-base-class-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal base class leaks through a public type](by-rule/detail-base-class-changed.md) · [Subject: Leaked internal types](by-subject/leaked-internal-types.md)._

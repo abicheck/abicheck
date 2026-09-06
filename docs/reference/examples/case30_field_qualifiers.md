@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_field_type_changed` |
 | **Source files** | `catalog/cases/case30_field_qualifiers/` |
 | **Rule family** | [`field-qualifiers`](by-rule/field-qualifiers.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 | **Underlying fact** | API_BREAK (policy-escalated to BREAKING) |
 
 **Category:** Type Qualifiers | **Verdict:** 🔴 BREAKING (policy-escalated API break)
@@ -163,4 +164,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Field type qualifiers changed](by-rule/field-qualifiers.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Field type qualifiers changed](by-rule/field-qualifiers.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

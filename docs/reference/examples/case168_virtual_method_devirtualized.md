@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_virtual_removed` |
 | **Source files** | `catalog/cases/case168_virtual_method_devirtualized/` |
 | **Rule family** | [`virtual-method-devirtualized`](by-rule/virtual-method-devirtualized.md) |
+| **Subject** | [Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md) |
 
 **Category:** Class Layout / Vtable | **Verdict:** 🔴 BREAKING
 
@@ -150,4 +151,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual function devirtualized](by-rule/virtual-method-devirtualized.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual function devirtualized](by-rule/virtual-method-devirtualized.md) · [Subject: Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md)._

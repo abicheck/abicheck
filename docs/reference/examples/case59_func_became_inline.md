@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_removed_elf_only`, `func_visibility_changed` |
 | **Source files** | `catalog/cases/case59_func_became_inline/` |
 | **Rule family** | [`func-became-inline`](by-rule/func-became-inline.md) |
+| **Subject** | [Symbol visibility scoping](by-subject/symbol-visibility-scoping.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -142,4 +143,4 @@ the symbol-table regression is easy to miss in review.
 - `good.c`
 - `good.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Function became inline](by-rule/func-became-inline.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Function became inline](by-rule/func-became-inline.md) · [Subject: Symbol visibility scoping](by-subject/symbol-visibility-scoping.md)._

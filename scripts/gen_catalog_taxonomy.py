@@ -80,6 +80,17 @@ the physical `catalog/cases/caseNN_*/` directory layout:
                      release-evaluation operation does this case exercise"
                      doesn't have to be inferred from either the entity or
                      the "audit" topics entry.
+    subjects        hand-authored, reader-facing semantic groupings from
+                     `catalog/catalog_subjects.yaml` (via `catalog_subjects.py`)
+                     -- "What is left" item 2 of the examples-catalog-split
+                     plan. Unlike every other field above, this is NOT a
+                     projection of `topics`/`rule_slug`/`ecosystem`: it is a
+                     genuinely new, bottom-up classification of what pattern
+                     a maintainer would actually search for (e.g. "leaked
+                     internal types" for case74/75/76/77's four different
+                     embedding mechanisms), independent of which detector
+                     owns the underlying `ChangeKind`. A case may carry more
+                     than one subject slug.
 
 Run `python scripts/gen_catalog_taxonomy.py` to regenerate; `--check` fails
 (exit 1) if regeneration would change the file, without writing anything.
@@ -103,6 +114,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog_classification  # noqa: E402
 import catalog_rule_registry  # noqa: E402
+import catalog_subjects  # noqa: E402
 import example_catalog  # noqa: E402
 
 EXAMPLES = example_catalog.CASES_DIR
@@ -566,6 +578,16 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             + "\n".join(f"  - {m}" for m in classification_errors)
         )
 
+    subjects = catalog_subjects.load_subjects()
+    subjects_errors = catalog_subjects.validate_subjects(subjects, verdicts.keys())
+    if subjects_errors:
+        raise ValueError(
+            f"{catalog_subjects.SUBJECTS_PATH} disagrees with "
+            "ground_truth.json['verdicts']:\n"
+            + "\n".join(f"  - {m}" for m in subjects_errors)
+        )
+    subjects_by_case = catalog_subjects.case_subjects(subjects)
+
     taxonomy: dict[str, dict[str, object]] = {}
     for case_name, entry in verdicts.items():
         case_dir = example_catalog.case_dir(case_name)
@@ -639,6 +661,7 @@ def build_taxonomy(gt: dict[str, object]) -> dict[str, dict[str, object]]:
             "variant_of": variant_of,
             "relation_type": relation_type,
             "relation_axis": relation_axis,
+            "subjects": subjects_by_case.get(case_name, []),
         }
     # A scenario is *defined* as several rules composed into one realistic
     # problem, so a scenario with no `related_rules` is a contradiction the

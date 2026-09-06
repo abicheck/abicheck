@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_removed`, `internal_symbol_required_by_public_api` |
 | **Source files** | `catalog/cases/case192_call_graph_break_survives_suppression/` |
 | **Related rules** | [`exported-function-removed`](by-rule/exported-function-removed.md), [`internal-symbol-required-by-public-api`](by-rule/internal-symbol-required-by-public-api.md) |
+| **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 
 **Category:** Breaking (Source Graph / Suppression) | **Verdict:** 🔴 BREAKING
 
@@ -160,4 +161,4 @@ compiles.
 - `suppress-acknowledged.yaml`
 - `suppress-refused.yaml`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._

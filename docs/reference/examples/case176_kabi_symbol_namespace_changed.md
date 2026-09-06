@@ -12,6 +12,7 @@
 | **Source files** | `catalog/cases/case176_kabi_symbol_namespace_changed/` |
 | **Ecosystem** | [Linux kernel](by-ecosystem/linux-kernel.md) |
 | **Related rules** | [`symbol-export-namespace-changed`](by-rule/symbol-export-namespace-changed.md) |
+| **Subject** | [Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md) |
 
 **Category:** Linux Kernel Module ABI (kABI) | **Verdict:** 🔴 BREAKING
 
@@ -115,4 +116,4 @@ fixture pair.
 - `v1.symvers`
 - `v2.symvers`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: Linux kernel](by-ecosystem/linux-kernel.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: Linux kernel](by-ecosystem/linux-kernel.md) · [Subject: Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md)._

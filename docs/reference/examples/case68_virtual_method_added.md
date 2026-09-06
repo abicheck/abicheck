@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_virtual_added` |
 | **Source files** | `catalog/cases/case68_virtual_method_added/` |
 | **Rule family** | [`virtual-method-added`](by-rule/virtual-method-added.md) |
+| **Subject** | [Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md) |
 
 **Category:** Class Layout / Vtable | **Verdict:** 🔴 BREAKING
 
@@ -158,4 +159,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual function added](by-rule/virtual-method-added.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual function added](by-rule/virtual-method-added.md) · [Subject: Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md)._

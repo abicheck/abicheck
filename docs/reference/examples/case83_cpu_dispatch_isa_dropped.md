@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `cpu_dispatch_isa_dropped` |
 | **Source files** | `catalog/cases/case83_cpu_dispatch_isa_dropped/` |
 | **Rule family** | [`cpu-dispatch-isa-dropped`](by-rule/cpu-dispatch-isa-dropped.md) |
+| **Subject** | [ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md) |
 
 **Category:** Dispatch ABI | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -138,4 +139,4 @@ exit-code comparison on the same kind of raw symbol removal.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Dispatched ISA variant dropped](by-rule/cpu-dispatch-isa-dropped.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Dispatched ISA variant dropped](by-rule/cpu-dispatch-isa-dropped.md) · [Subject: ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md)._

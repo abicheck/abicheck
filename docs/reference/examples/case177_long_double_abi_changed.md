@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `long_double_abi_changed` |
 | **Source files** | `catalog/cases/case177_long_double_abi_changed/` |
 | **Rule family** | [`long-double-abi-changed`](by-rule/long-double-abi-changed.md) |
+| **Subject** | [Calling convention and integer-model changes](by-subject/calling-convention-and-integer-model-changes.md) |
 
 **Category:** Floating-Point ABI | **Verdict:** 🔴 BREAKING
 
@@ -142,4 +143,4 @@ reproduced here.
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: long double ABI changed](by-rule/long-double-abi-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: long double ABI changed](by-rule/long-double-abi-changed.md) · [Subject: Calling convention and integer-model changes](by-subject/calling-convention-and-integer-model-changes.md)._

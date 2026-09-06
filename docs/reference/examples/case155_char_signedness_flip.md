@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `char_signedness_changed` |
 | **Source files** | `catalog/cases/case155_char_signedness_flip/` |
 | **Rule family** | [`char-signedness-flip`](by-rule/char-signedness-flip.md) |
+| **Subject** | [Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md) |
 
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -129,4 +130,4 @@ directly localizes the cause to the signedness flag flip.
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Plain char signedness flipped](by-rule/char-signedness-flip.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Plain char signedness flipped](by-rule/char-signedness-flip.md) · [Subject: Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md)._

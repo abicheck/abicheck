@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `public_to_internal_dependency` |
 | **Source files** | `catalog/cases/case181_xcheck_public_to_internal_dependency/` |
 | **Rule family** | [`xcheck-public-to-internal-dependency`](by-rule/xcheck-public-to-internal-dependency.md) |
+| **Subject** | [Export/declaration mismatches](by-subject/export-declaration-mismatches.md), [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -142,4 +143,4 @@ edges at all).
 
 - `snapshot.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Public declaration depends on an internal one](by-rule/xcheck-public-to-internal-dependency.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Public declaration depends on an internal one](by-rule/xcheck-public-to-internal-dependency.md) · [Subject: Export/declaration mismatches](by-subject/export-declaration-mismatches.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._

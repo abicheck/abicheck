@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `symbol_version_node_removed` |
 | **Source files** | `catalog/cases/case183_internal_version_node_churn/` |
 | **Rule family** | [`internal-version-node-churn`](by-rule/internal-version-node-churn.md) |
+| **Subject** | [Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md) |
 
 **Category:** Risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -132,4 +133,4 @@ old-side binding for the symbol is confined to an internal/private node.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Internal version node churn](by-rule/internal-version-node-churn.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Internal version node churn](by-rule/internal-version-node-churn.md) · [Subject: Symbol versioning and kABI](by-subject/symbol-versioning-and-kabi.md)._

@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog_rule_registry  # noqa: E402
+import catalog_subjects  # noqa: E402
 import example_catalog  # noqa: E402
 
 DOCS_EXAMPLES_DIR = ROOT / "docs" / "reference" / "examples"
@@ -297,6 +298,21 @@ def _slug_definition(slug: str) -> str:
     return entry.definition if entry else ""
 
 
+@lru_cache(maxsize=1)
+def _subjects() -> dict[str, catalog_subjects.Subject]:
+    """The hand-authored subject manifest (catalog/catalog_subjects.yaml),
+    loaded once -- "What is left" item 2 of the examples-catalog-split plan.
+    Unlike `_rule_registry()`, every case's `subjects` list is already
+    populated from this same manifest by `gen_catalog_taxonomy.py`, so this
+    is consulted only for a subject's own title/blurb/pattern_summary."""
+    return catalog_subjects.load_subjects()
+
+
+def _subject_title(slug: str) -> str:
+    entry = _subjects().get(slug)
+    return entry.title if entry else slug
+
+
 @dataclass
 class Case:
     name: str
@@ -340,6 +356,11 @@ class Case:
     library_assertions: dict[str, object] = field(default_factory=dict)
     languages: list[str] = field(default_factory=list)
     min_evidence: str = "none"
+    # Subjects (examples-catalog-split.md "What is left" item 2): a NEW,
+    # hand-authored reader-facing dimension distinct from `topics` -- see
+    # catalog/catalog_subjects.yaml's own docstring. A case may carry more
+    # than one subject slug.
+    subjects: list[str] = field(default_factory=list)
 
 
 def _read_case(name: str, meta: dict, taxonomy: dict) -> Case:
@@ -382,6 +403,7 @@ def _read_case(name: str, meta: dict, taxonomy: dict) -> Case:
         relation_type=taxonomy.get("relation_type"),
         relation_axis=taxonomy.get("relation_axis"),
         related_rules=list(taxonomy.get("related_rules") or []),
+        subjects=list(taxonomy.get("subjects") or []),
     )
 
 
@@ -457,6 +479,18 @@ def _related_rules_row(case: Case) -> str:
     return f"| **Related rules** | {links} |\n"
 
 
+def _subjects_row(case: Case) -> str:
+    """The subject(s) row (examples-catalog-split.md "What is left" item 2)
+    -- mirrors the Rule family/Ecosystem rows above's "link to the generated
+    group page" shape."""
+    if not case.subjects:
+        return ""
+    links = ", ".join(
+        f"[{_subject_title(s)}](by-subject/{s}.md)" for s in case.subjects
+    )
+    return f"| **Subject** | {links} |\n"
+
+
 def _meta_table(case: Case) -> str:
     vinfo = VERDICT_META[case.verdict]
     cinfo = CATEGORY_META[case.category]
@@ -492,6 +526,7 @@ def _meta_table(case: Case) -> str:
         rows += f"| **Ecosystem** | {eco_link} |\n"
     rows += _rule_family_row(case)
     rows += _related_rules_row(case)
+    rows += _subjects_row(case)
     # Fact vs. policy: only present when ground_truth.json's `expected` is a
     # policy escalation of a weaker underlying compatibility fact (case30,
     # case95, case109-style) — see policy_note in ground_truth.json.
@@ -593,6 +628,8 @@ def _render_case_page(case: Case) -> str:
             f"[Ecosystem: {ECOSYSTEM_LABEL.get(case.ecosystem, case.ecosystem)}]"
             f"(by-ecosystem/{case.ecosystem}.md)"
         )
+    for slug in case.subjects:
+        see_also.append(f"[Subject: {_subject_title(slug)}](by-subject/{slug}.md)")
     parts = [
         WARNING,
         f"# {case.title}\n\n",
@@ -703,6 +740,15 @@ def _render_index(cases: list[Case]) -> str:
         "See [Rule families](by-rule/index.md) for the complete grouping, and "
         "[Rule coverage](../../contribute/catalog-coverage.md) for the "
         "aggregate rule/variant/duplicate counts.\n\n"
+    )
+    lines.append("\n## Browse by subject\n\n")
+    lines.append(
+        "A **subject** is a reader-facing compatibility pattern a maintainer "
+        'would actually search for -- e.g. "leaked internal types" for '
+        "case74/75/76/77's four different embedding mechanisms -- rather "
+        "than a projection of which detector owns the underlying "
+        "`ChangeKind` the way `topics` is. See "
+        "[Subjects](by-subject/index.md) for the complete list.\n\n"
     )
     lines.append("\n## Browse by ecosystem\n\n")
     by_eco: dict[str, list[Case]] = defaultdict(list)
@@ -937,6 +983,69 @@ def _render_by_rule_index(families: dict[str, RuleFamily]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# "By Subject" navigation (examples-catalog-split.md "What is left" item 2):
+# one page per hand-authored subject slug (catalog/catalog_subjects.yaml),
+# grouping every case demonstrating that pattern regardless of which rule,
+# ecosystem, or ChangeKind produces it -- the one dimension `topics` (a
+# mechanical projection of the change-catalog's own detector-owner split)
+# cannot express. A case may appear on more than one subject page (see
+# case181, both an export-declaration-mismatch and an
+# internal-dependency-reachability case).
+# ---------------------------------------------------------------------------
+
+
+def _render_subject_page(subject: catalog_subjects.Subject, cases: list[Case]) -> str:
+    lines = [
+        WARNING,
+        f"# Subject: {subject.title}\n\n",
+        f"{subject.blurb}\n\n",
+        f"_{len(cases)} case(s)._ [← back to all subjects](index.md)\n\n",
+    ]
+    if subject.pattern_summary:
+        # Hand-authored narrative (catalog_subjects.yaml's own
+        # `pattern_summary` field) -- the "pattern page" plan item 2's own
+        # case74-77 worked example calls for: not just a case list, but a
+        # paragraph explaining *why* these cases share a mechanism.
+        lines.append("## The pattern\n\n")
+        lines.append(subject.pattern_summary.rstrip() + "\n\n")
+    lines.append("## Cases\n\n")
+    lines.append("| Case | Title | Verdict | Category |\n")
+    lines.append("|------|-------|---------|----------|\n")
+    for c in sorted(cases, key=lambda c: _case_sort_key(c.name)):
+        vinfo = VERDICT_META[c.verdict]
+        lines.append(
+            f"| [{c.name}](../{c.name}.md) "
+            f"| {_short_title(c.title)} "
+            f"| {vinfo['icon']} {vinfo['label']} "
+            f"| {CATEGORY_META[c.category]['label']} |\n"
+        )
+    return "".join(lines)
+
+
+def _render_by_subject_index(
+    subjects: dict[str, catalog_subjects.Subject],
+    cases_by_subject: dict[str, list[Case]],
+) -> str:
+    lines = [
+        WARNING,
+        "# Subjects\n\n",
+        "A **subject** is a reader-facing compatibility pattern -- what a "
+        "maintainer would actually search for -- rather than a projection "
+        "of which detector owns the underlying `ChangeKind` (see "
+        "`topics`, on each case's own meta table). A case may belong to "
+        "more than one subject when the pattern genuinely applies twice. "
+        "[← back to all examples](../index.md)\n\n",
+        "| Subject | Cases | What it is |\n",
+        "|---------|-------|------------|\n",
+    ]
+    for slug in sorted(subjects):
+        subject = subjects[slug]
+        n = len(cases_by_subject.get(slug, []))
+        lines.append(f"| [{subject.title}]({slug}.md) | {n} | {subject.blurb} |\n")
+    return "".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # catalog/README.md (the GitHub-facing calibration-catalog index, not the docs
 # site, and not examples/README.md -- that stays the curated workflows hub;
 # see the "Corrected Phase 4 target model" section of
@@ -1138,6 +1247,7 @@ def _write_tree(out_dir: Path, cases: list[Case]) -> None:
     (out_dir / "by-operation").mkdir()
     (out_dir / "by-evidence").mkdir()
     (out_dir / "by-language").mkdir()
+    (out_dir / "by-subject").mkdir()
 
     _write(out_dir / "index.md", _render_index(cases))
 
@@ -1229,6 +1339,21 @@ def _write_tree(out_dir: Path, cases: list[Case]) -> None:
     _write(out_dir / "by-rule" / "index.md", _render_by_rule_index(rule_families))
     for slug, fam in rule_families.items():
         _write(out_dir / "by-rule" / f"{slug}.md", _render_rule_family_page(fam))
+
+    subjects = _subjects()
+    cases_by_subject: dict[str, list[Case]] = defaultdict(list)
+    for c in cases:
+        for slug in c.subjects:
+            cases_by_subject[slug].append(c)
+    _write(
+        out_dir / "by-subject" / "index.md",
+        _render_by_subject_index(subjects, cases_by_subject),
+    )
+    for slug, subject in subjects.items():
+        _write(
+            out_dir / "by-subject" / f"{slug}.md",
+            _render_subject_page(subject, cases_by_subject.get(slug, [])),
+        )
 
     for c in cases:
         _write(out_dir / f"{c.name}.md", _render_case_page(c))

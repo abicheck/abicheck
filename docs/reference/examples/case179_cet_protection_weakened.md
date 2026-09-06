@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `cet_protection_weakened` |
 | **Source files** | `catalog/cases/case179_cet_protection_weakened/` |
 | **Rule family** | [`cet-protection-weakened`](by-rule/cet-protection-weakened.md) |
+| **Subject** | [ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md) |
 
 **Category:** Security Hardening (ELF/Loader) | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -117,4 +118,4 @@ hardening notes at all, so this class of finding is abicheck-specific.
 - `v1.c`
 - `v2.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: CET protection weakened](by-rule/cet-protection-weakened.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: CET protection weakened](by-rule/cet-protection-weakened.md) · [Subject: ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md)._

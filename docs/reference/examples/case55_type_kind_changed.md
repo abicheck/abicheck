@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_kind_changed` |
 | **Source files** | `catalog/cases/case55_type_kind_changed/` |
 | **Rule family** | [`type-kind-changed`](by-rule/type-kind-changed.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -132,4 +133,4 @@ abidiff v1.xml v2.xml
 - `good.c`
 - `good.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Type kind changed](by-rule/type-kind-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Type kind changed](by-rule/type-kind-changed.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

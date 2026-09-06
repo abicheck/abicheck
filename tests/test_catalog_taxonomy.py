@@ -256,3 +256,35 @@ def test_an_unclassified_case_fails_build_taxonomy_instead_of_defaulting():
     gt["verdicts"]["case999_unclassified"] = next(iter(gt["verdicts"].values()))
     with pytest.raises(ValueError, match="case999_unclassified"):
         gen.build_taxonomy(gt)
+
+
+def test_every_case_has_at_least_one_subject():
+    """"What is left" item 2: `subjects` is the one field this taxonomy
+    generates from a hand-authored manifest (catalog/catalog_subjects.yaml)
+    rather than deriving mechanically -- a case with no subject would be the
+    same silent-default gap catalog_classification.py's own docstring closes
+    for entity/ecosystem, so this pins that every case in the generated
+    taxonomy actually carries at least one."""
+    taxonomy = _load_taxonomy()
+    for case_name, entry in taxonomy.items():
+        assert entry["subjects"], f"{case_name}: no subjects assigned"
+        assert isinstance(entry["subjects"], list)
+        for subject in entry["subjects"]:
+            assert isinstance(subject, str) and subject
+
+
+def test_subjects_are_sourced_from_catalog_subjects_manifest():
+    """Cross-checks the taxonomy's own `subjects` field against a fresh read
+    of catalog/catalog_subjects.yaml via catalog_subjects.py, so a drift
+    between the manifest and the generated taxonomy (e.g. a stale case in
+    the manifest that a rename left dangling) fails here too, not only via
+    `gen_catalog_taxonomy.py --check`."""
+    if str(REPO_DIR / "scripts") not in sys.path:
+        sys.path.insert(0, str(REPO_DIR / "scripts"))
+    import catalog_subjects
+
+    subjects = catalog_subjects.load_subjects()
+    expected_by_case = catalog_subjects.case_subjects(subjects)
+    taxonomy = _load_taxonomy()
+    for case_name, entry in taxonomy.items():
+        assert entry["subjects"] == expected_by_case.get(case_name, []), case_name

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_return_changed` |
 | **Source files** | `catalog/cases/case10_return_type/` |
 | **Rule family** | [`return-type`](by-rule/return-type.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -123,4 +124,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Return type changed](by-rule/return-type.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Return type changed](by-rule/return-type.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

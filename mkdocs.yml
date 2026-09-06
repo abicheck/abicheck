@@ -261,6 +261,7 @@ nav:
       - No Change: reference/examples/by-category/no_change.md
       - Bundle (Multi-library): reference/examples/by-category/bundle.md
     - By Rule: reference/examples/by-rule/index.md
+    - By Subject: reference/examples/by-subject/index.md
     - By Scenario Kind:
       - Case study: reference/examples/by-scenario/case-study.md
       - Project topology: reference/examples/by-scenario/project-topology.md

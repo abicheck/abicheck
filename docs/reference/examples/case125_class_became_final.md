@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_became_final` |
 | **Source files** | `catalog/cases/case125_class_became_final/` |
 | **Rule family** | [`class-became-final`](by-rule/class-became-final.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** API Break | **Verdict:** 🟠 API_BREAK
 
@@ -121,4 +122,4 @@ abicheck's own object-only mode does. Only a header-aware comparison
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Class became final](by-rule/class-became-final.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Class became final](by-rule/class-became-final.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

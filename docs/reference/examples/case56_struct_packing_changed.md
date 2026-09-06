@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `struct_packing_changed` |
 | **Source files** | `catalog/cases/case56_struct_packing_changed/` |
 | **Rule family** | [`struct-packing-changed`](by-rule/struct-packing-changed.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -135,4 +136,4 @@ abidiff v1.xml v2.xml
 - `good.c`
 - `good.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Struct packing changed](by-rule/struct-packing-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Struct packing changed](by-rule/struct-packing-changed.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

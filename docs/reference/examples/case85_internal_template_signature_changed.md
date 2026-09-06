@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `internal_template_leaks_via_public_api`, `func_removed` |
 | **Source files** | `catalog/cases/case85_internal_template_signature_changed/` |
 | **Rule family** | [`internal-template-signature-changed`](by-rule/internal-template-signature-changed.md) |
+| **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
 **Category:** Template ABI | **Verdict:** 🔴 BREAKING
 
@@ -142,4 +143,4 @@ exit-code comparison.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal template signature leaks through the public API](by-rule/internal-template-signature-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Internal template signature leaks through the public API](by-rule/internal-template-signature-changed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

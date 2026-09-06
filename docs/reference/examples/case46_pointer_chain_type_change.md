@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_params_changed`, `func_return_changed` |
 | **Source files** | `catalog/cases/case46_pointer_chain_type_change/` |
 | **Rule family** | [`pointer-chain-type-change`](by-rule/pointer-chain-type-change.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -125,4 +126,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pointer chain target type changed](by-rule/pointer-chain-type-change.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pointer chain target type changed](by-rule/pointer-chain-type-change.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

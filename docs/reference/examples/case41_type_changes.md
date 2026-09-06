@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_removed`, `func_removed`, `enum_member_added`, `enum_last_member_value_changed` |
 | **Source files** | `catalog/cases/case41_type_changes/` |
 | **Rule family** | [`type-changes`](by-rule/type-changes.md) |
+| **Subject** | [Removed types and classes](by-subject/removed-types-and-classes.md) |
 
 **Category:** Type / Enum Changes | **Verdict:** 🔴 BREAKING
 
@@ -159,4 +160,4 @@ echo "exit: $?"   # → 12 (ABI change + breaking)
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Compound type surface change](by-rule/type-changes.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Compound type surface change](by-rule/type-changes.md) · [Subject: Removed types and classes](by-subject/removed-types-and-classes.md)._

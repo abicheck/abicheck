@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `bundle_intra_dep_signature_changed` |
 | **Source files** | `catalog/cases/case91_bundle_intra_signature_drift/` |
 | **Related rules** | [`param-type-change`](by-rule/param-type-change.md), [`return-type`](by-rule/return-type.md) |
+| **Subject** | [Multi-library bundle topology](by-subject/multi-library-bundle-topology.md) |
 
 **Category:** Bundle / cross-library | **Verdict:** 🔴 BREAKING
 (per-library: `libalgo.so` COMPATIBLE, `libcore.so` BREAKING)
@@ -153,4 +154,4 @@ The bundle-level verdict above is the cohort's. Each library in the cohort is se
 - `old/`
 - `CMakeLists.txt`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Bundle (Multi-library)](by-category/bundle.md) · [Subject: Multi-library bundle topology](by-subject/multi-library-bundle-topology.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_field_type_changed`, `type_size_changed` |
 | **Source files** | `catalog/cases/case45_multi_dim_array_change/` |
 | **Rule family** | [`multi-dim-array-change`](by-rule/multi-dim-array-change.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Struct Layout | **Verdict:** 🔴 BREAKING
 
@@ -126,4 +127,4 @@ echo "exit: $?"   # → 4
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Multidimensional array member changed](by-rule/multi-dim-array-change.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Multidimensional array member changed](by-rule/multi-dim-array-change.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

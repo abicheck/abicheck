@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `default_template_arg_changed` |
 | **Source files** | `catalog/cases/case87_default_template_arg_changed/` |
 | **Rule family** | [`default-template-arg-changed`](by-rule/default-template-arg-changed.md) |
+| **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
 **Category:** Template ABI | **Verdict:** 🔴 BREAKING
 
@@ -155,4 +156,4 @@ exit-code comparison.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Default template argument changed](by-rule/default-template-arg-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Default template argument changed](by-rule/default-template-arg-changed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `struct_field_type_changed`, `public_api_internal_dependency_added` |
 | **Source files** | `catalog/cases/case187_public_struct_private_field_type/` |
 | **Rule family** | [`public-struct-private-field-type`](by-rule/public-struct-private-field-type.md) |
+| **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 | **Known kind gap** | `public_api_internal_dependency_added` — verdict is correct; see note below |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
@@ -135,4 +136,4 @@ indirection instead of embedding the internal type directly.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public struct has a private field type](by-rule/public-struct-private-field-type.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Public struct has a private field type](by-rule/public-struct-private-field-type.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._

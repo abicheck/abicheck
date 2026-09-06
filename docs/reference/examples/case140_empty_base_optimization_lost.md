@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `base_class_offset_changed`, `type_size_changed`, `type_field_offset_changed` |
 | **Source files** | `catalog/cases/case140_empty_base_optimization_lost/` |
 | **Rule family** | [`empty-base-optimization-lost`](by-rule/empty-base-optimization-lost.md) |
+| **Subject** | [Inheritance layout and base subobjects](by-subject/inheritance-layout-and-base-subobjects.md) |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
@@ -162,4 +163,4 @@ immediately named than abicheck's `base_class_offset_changed`.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Empty base optimization lost](by-rule/empty-base-optimization-lost.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Empty base optimization lost](by-rule/empty-base-optimization-lost.md) · [Subject: Inheritance layout and base subobjects](by-subject/inheritance-layout-and-base-subobjects.md)._

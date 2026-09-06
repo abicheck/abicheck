@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `lto_mode_changed` |
 | **Source files** | `catalog/cases/case154_lto_mode_flip/` |
 | **Rule family** | [`lto-mode-flip`](by-rule/lto-mode-flip.md) |
+| **Subject** | [Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md) |
 
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -126,4 +127,4 @@ localizes the cause to the LTO flag flip.
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: LTO mode flipped](by-rule/lto-mode-flip.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: LTO mode flipped](by-rule/lto-mode-flip.md) · [Subject: Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md)._

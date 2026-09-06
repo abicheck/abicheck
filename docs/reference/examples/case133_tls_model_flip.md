@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `tls_model_changed` |
 | **Source files** | `catalog/cases/case133_tls_model_flip/` |
 | **Rule family** | [`tls-model-flip`](by-rule/tls-model-flip.md) |
+| **Subject** | [Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md) |
 
 **Category:** Build mode | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -112,4 +113,4 @@ layer.
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: TLS model changed](by-rule/tls-model-flip.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: TLS model changed](by-rule/tls-model-flip.md) · [Subject: Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `param_pointer_level_changed` |
 | **Source files** | `catalog/cases/case33_pointer_level/` |
 | **Rule family** | [`pointer-level`](by-rule/pointer-level.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Function Signature | **Verdict:** 🔴 BREAKING
 
@@ -139,4 +140,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pointer indirection level changed](by-rule/pointer-level.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Pointer indirection level changed](by-rule/pointer-level.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

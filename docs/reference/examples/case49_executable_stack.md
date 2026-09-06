@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `executable_stack_removed` |
 | **Source files** | `catalog/cases/case49_executable_stack/` |
 | **Rule family** | [`executable-stack-flag-changed`](by-rule/executable-stack-flag-changed.md) |
+| **Subject** | [ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md) |
 
 **Category:** ELF / Security | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -137,4 +138,4 @@ check.
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Executable-stack marking changed](by-rule/executable-stack-flag-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Executable-stack marking changed](by-rule/executable-stack-flag-changed.md) · [Subject: ELF security hardening and deployment risk](by-subject/elf-security-hardening-and-deployment-risk.md)._

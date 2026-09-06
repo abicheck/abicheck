@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `threadsafe_statics_mode_changed` |
 | **Source files** | `catalog/cases/case132_threadsafe_statics_flip/` |
 | **Rule family** | [`threadsafe-statics-flip`](by-rule/threadsafe-statics-flip.md) |
+| **Subject** | [Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md) |
 
 **Category:** Build mode | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -115,4 +116,4 @@ layer.
 - `v1.cpp`
 - `v2.cpp`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Thread-safe statics mode flipped](by-rule/threadsafe-statics-flip.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Thread-safe statics mode flipped](by-rule/threadsafe-statics-flip.md) · [Subject: Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md)._

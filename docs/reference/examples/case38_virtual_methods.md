@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_vtable_changed` |
 | **Source files** | `catalog/cases/case38_virtual_methods/` |
 | **Rule family** | [`virtual-methods`](by-rule/virtual-methods.md) |
+| **Subject** | [Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md) |
 
 **Category:** C++ Virtual / Deleted | **Verdict:** 🔴 BREAKING
 
@@ -170,4 +171,4 @@ echo "exit: $?"   # → 12 (ABI change + breaking)
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual function set changed](by-rule/virtual-methods.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Virtual function set changed](by-rule/virtual-methods.md) · [Subject: Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md)._

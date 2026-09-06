@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `catalog/cases/case186_c_api_pointee_const_abi_neutral/` |
 | **Rule family** | [`api-pointee-const-abi-neutral`](by-rule/api-pointee-const-abi-neutral.md) |
+| **Subject** | [Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md) |
 
 **Category:** No Change | **Verdict:** ✅ NO_CHANGE
 
@@ -129,4 +130,4 @@ for the non-suppressed baseline).
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Pointee constness added, ABI neutral](by-rule/api-pointee-const-abi-neutral.md)._
+_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Pointee constness added, ABI neutral](by-rule/api-pointee-const-abi-neutral.md) · [Subject: Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md)._

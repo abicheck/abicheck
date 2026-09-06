@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `target_dependency_added` |
 | **Source files** | `catalog/cases/case161_target_dependency_added/` |
 | **Rule family** | [`target-dependency-added`](by-rule/target-dependency-added.md) |
+| **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 
 **Category:** Build/Source Evidence (L5) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -137,4 +138,4 @@ finding reports from the build graph.
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Build target dependency added](by-rule/target-dependency-added.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Build target dependency added](by-rule/target-dependency-added.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._

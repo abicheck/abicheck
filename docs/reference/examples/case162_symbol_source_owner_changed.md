@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `exported_symbol_source_owner_changed` |
 | **Source files** | `catalog/cases/case162_symbol_source_owner_changed/` |
 | **Rule family** | [`symbol-source-owner-changed`](by-rule/symbol-source-owner-changed.md) |
+| **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
 
 **Category:** Build/Source Evidence (L5) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -143,4 +144,4 @@ comes from across releases.
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Exported symbol changed owning library](by-rule/symbol-source-owner-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Exported symbol changed owning library](by-rule/symbol-source-owner-changed.md) · [Subject: Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md)._

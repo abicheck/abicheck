@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `used_reserved_field` |
 | **Source files** | `catalog/cases/case54_used_reserved_field/` |
 | **Rule family** | [`used-reserved-field`](by-rule/used-reserved-field.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Quality | **Verdict:** 🟢 COMPATIBLE
 
@@ -119,4 +120,4 @@ reserves space for future extensions; Wayland protocol structs use
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Reserved field put to use](by-rule/used-reserved-field.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Reserved field put to use](by-rule/used-reserved-field.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

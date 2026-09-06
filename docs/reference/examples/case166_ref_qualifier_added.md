@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_ref_qual_changed` |
 | **Source files** | `catalog/cases/case166_ref_qualifier_added/` |
 | **Rule family** | [`ref-qualifier-added`](by-rule/ref-qualifier-added.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Function Signature / Mangling | **Verdict:** 🔴 BREAKING
 
@@ -134,4 +135,4 @@ accessors a recurring temptation in library changelogs.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Reference qualifier added](by-rule/ref-qualifier-added.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Reference qualifier added](by-rule/ref-qualifier-added.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

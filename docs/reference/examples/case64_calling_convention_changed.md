@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `calling_convention_changed` |
 | **Source files** | `catalog/cases/case64_calling_convention_changed/` |
 | **Rule family** | [`calling-convention-changed`](by-rule/calling-convention-changed.md) |
+| **Subject** | [Calling convention and integer-model changes](by-subject/calling-convention-and-integer-model-changes.md) |
 
 **Category:** Function ABI | **Verdict:** 🔴 BREAKING
 
@@ -150,4 +151,4 @@ abidiff v1.xml v2.xml
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Calling convention changed](by-rule/calling-convention-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Calling convention changed](by-rule/calling-convention-changed.md) · [Subject: Calling convention and integer-model changes](by-subject/calling-convention-and-integer-model-changes.md)._

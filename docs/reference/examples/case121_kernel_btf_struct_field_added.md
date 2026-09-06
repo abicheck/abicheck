@@ -12,6 +12,7 @@
 | **Source files** | `catalog/cases/case121_kernel_btf_struct_field_added/` |
 | **Ecosystem** | [Linux kernel](by-ecosystem/linux-kernel.md) |
 | **Related rules** | [`embedded-type-size-increased`](by-rule/embedded-type-size-increased.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Kernel BTF / Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -128,4 +129,4 @@ invocation is given here.
 - `v1.btf`
 - `v2.btf`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: Linux kernel](by-ecosystem/linux-kernel.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: Linux kernel](by-ecosystem/linux-kernel.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

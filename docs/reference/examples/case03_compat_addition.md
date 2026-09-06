@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `catalog/cases/case03_compat_addition/` |
 | **Rule family** | [`compat-addition`](by-rule/compat-addition.md) |
+| **Subject** | [Textbook symbol add/remove](by-subject/textbook-symbol-add-remove.md) |
 
 **Category:** Symbol API | **Verdict:** ✅ COMPATIBLE
 
@@ -118,4 +119,4 @@ echo "exit: $?"   # → 4 (abidiff's convention: any ABI change, including a
 - `CMakeLists.txt`
 - `app.c`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Compatible addition](by-rule/compat-addition.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Compatible addition](by-rule/compat-addition.md) · [Subject: Textbook symbol add/remove](by-subject/textbook-symbol-add-remove.md)._

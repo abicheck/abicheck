@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `header_build_context_mismatch` |
 | **Source files** | `catalog/cases/case148_xcheck_header_build_mismatch/` |
 | **Related rules** | [`header-build-context-mismatch`](by-rule/header-build-context-mismatch.md) |
+| **Subject** | [Export/declaration mismatches](by-subject/export-declaration-mismatches.md) |
 
 **Category:** API Break (Audit) | **Verdict:** 🟠 API_BREAK
 
@@ -115,4 +116,4 @@ parse against its own build config).
 
 - `snapshot.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Subject: Export/declaration mismatches](by-subject/export-declaration-mismatches.md)._

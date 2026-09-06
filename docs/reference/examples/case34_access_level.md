@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `method_access_changed` |
 | **Source files** | `catalog/cases/case34_access_level/` |
 | **Rule family** | [`access-level`](by-rule/access-level.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** C++ Access Control | **Verdict:** 🟠 API_BREAK
 
@@ -162,4 +163,4 @@ echo "exit: $?"
 - `v2.cpp`
 - `v2.hpp`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Member access level changed](by-rule/access-level.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Member access level changed](by-rule/access-level.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

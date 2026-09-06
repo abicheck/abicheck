@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `instantiation_missing_from_binary` |
 | **Source files** | `catalog/cases/case79_missing_template_instantiation/` |
 | **Rule family** | [`missing-template-instantiation`](by-rule/missing-template-instantiation.md) |
+| **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
 **Category:** Header-vs-Binary Parity | **Verdict:** 🔴 BREAKING
 
@@ -140,4 +141,4 @@ reproduces with a minimal two-instantiation example.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Explicit template instantiation missing](by-rule/missing-template-instantiation.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Explicit template instantiation missing](by-rule/missing-template-instantiation.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

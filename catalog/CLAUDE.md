@@ -133,8 +133,8 @@ below — a case can be `entity: rule` with `operation: audit` (case143-146,
 case181) or `entity: scenario` with `operation: audit` (case147-151)), `operation`
 (`compare` vs. `audit`), `ecosystem`, `topics`,
 `languages`, `scope`, `artifact_shape`, `validation_owner`,
-`related_rules`, and `rule_slug`/`variant_of`/`relation_type`/
-`relation_axis`.
+`related_rules`, `rule_slug`/`variant_of`/`relation_type`/
+`relation_axis`, and `subjects`.
 
 It was originally a `taxonomy` key inside `ground_truth.json`, sibling of
 `verdicts`; it moved out into its own `taxonomy.json` file
@@ -208,6 +208,39 @@ delete a case to "deduplicate" it without checking
 `variant_of`/`relation_type`/`related_rules` first and updating every
 consumer that counts cases.
 
+## Subjects (reader-facing patterns)
+
+`subjects` (examples-catalog-split.md "What is left" item 2) is the one
+taxonomy field that is NOT a projection of `topics`/`rule_slug`/`ecosystem`
+— those are all mechanical derivations from an existing field (the
+change-catalog's detector-owner split, a mechanically-derived case-name
+slug, a per-case classification entry). `subjects` is genuinely new,
+hand-authored, reader-facing classification: which compatibility *pattern*
+a maintainer would actually search for, independent of which detector or
+`ChangeKind` produces it — e.g. `leaked-internal-types` groups
+case74/75/76/77's four different C++ embedding mechanisms (inheritance,
+by-value member, shared vtable, class template) under one lesson, something
+no `topics` value could express (they'd scatter across `types`/`source`
+depending on evidence tier).
+
+[`catalog_subjects.yaml`](catalog_subjects.yaml) is the manifest — 25
+subjects, one entry per subject (not per case, since a case may genuinely
+belong to more than one — see `case181_xcheck_public_to_internal_dependency`,
+both an `export-declaration-mismatches` audit case and an
+`internal-dependency-reachability` case), each naming its member `cases`
+and carrying a `title`/`blurb`, plus an optional hand-authored
+`pattern_summary` for a subject with a rich enough shared mechanism to
+warrant real prose (currently `leaked-internal-types` and
+`internal-dependency-reachability`). `scripts/catalog_subjects.py` loads and
+validates it — every case must appear in at least one subject's `cases`
+list (a case with no subject is a hard error, the same anti-silent-default
+discipline `catalog_classification.py` established for `entity`/
+`ecosystem`), and a subject naming a stale/removed case is dead
+configuration. `scripts/gen_examples_docs.py` publishes one
+`docs/reference/examples/by-subject/<slug>.md` page per subject (rendering
+`pattern_summary` verbatim when set) plus an index, and every case page's
+meta table gains a **Subject** row linking to it.
+
 ## What NOT to do
 
 - Don't modify a case's source or expected verdict without understanding
@@ -233,6 +266,10 @@ consumer that counts cases.
    `python scripts/gen_catalog_taxonomy.py`. If it reports an unknown rule
    slug, add the rule to `catalog_rules.yaml` with a title and a
    one-sentence definition (or fix the spelling).
+   Also add the new case to at least one subject's `cases` list in
+   `catalog_subjects.yaml` — `gen_catalog_taxonomy.py` fails the same way on
+   a case with no subject assignment. Run
+   `python scripts/catalog_subjects.py` to validate the manifest alone.
 5. Run `python scripts/gen_examples_docs.py` and commit the regenerated
    `docs/reference/examples/caseNN_*.md` **and** the refreshed `catalog/README.md`
    (its headline/distribution/case-index regions are generated from

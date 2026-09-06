@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `private_header_leak` |
 | **Source files** | `catalog/cases/case144_audit_private_header_leak/` |
 | **Rule family** | [`audit-private-header-leak`](by-rule/audit-private-header-leak.md) |
+| **Subject** | [Export/declaration mismatches](by-subject/export-declaration-mismatches.md) |
 
 **Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
@@ -108,4 +109,4 @@ other, not a binary's public surface against its own header provenance).
 
 - `snapshot.abi.json`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Private header leaks into the public surface](by-rule/audit-private-header-leak.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Private header leaks into the public surface](by-rule/audit-private-header-leak.md) · [Subject: Export/declaration mismatches](by-subject/export-declaration-mismatches.md)._

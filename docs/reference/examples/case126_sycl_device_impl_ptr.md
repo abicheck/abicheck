@@ -12,6 +12,7 @@
 | **Source files** | `catalog/cases/case126_sycl_device_impl_ptr/` |
 | **Ecosystem** | [SYCL](by-ecosystem/sycl.md) |
 | **Related rules** | [`public-class-representation-changed`](by-rule/public-class-representation-changed.md), [`public-struct-private-field-type`](by-rule/public-struct-private-field-type.md) |
+| **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -145,4 +146,4 @@ trace at all, which `abidiff` cannot see regardless of flags.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: SYCL](by-ecosystem/sycl.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: SYCL](by-ecosystem/sycl.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `abi_relevant_build_flag_changed` |
 | **Source files** | `catalog/cases/case98_cxx_standard_floor_raised/` |
 | **Rule family** | [`cxx-standard-floor-raised`](by-rule/cxx-standard-floor-raised.md) |
+| **Subject** | [Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md) |
 
 **Category:** Build context risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
@@ -132,4 +133,4 @@ build-context layer is for.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: C++ standard floor raised](by-rule/cxx-standard-floor-raised.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: C++ standard floor raised](by-rule/cxx-standard-floor-raised.md) · [Subject: Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md)._

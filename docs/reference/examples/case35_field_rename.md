@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `field_renamed` |
 | **Source files** | `catalog/cases/case35_field_rename/` |
 | **Rule family** | [`field-rename`](by-rule/field-rename.md) |
+| **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
 **Category:** Struct API | **Verdict:** 🟡 API_BREAK (binary compatible)
 
@@ -150,4 +151,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Field renamed](by-rule/field-rename.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Field renamed](by-rule/field-rename.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `var_removed` |
 | **Source files** | `catalog/cases/case58_var_removed/` |
 | **Rule family** | [`var-removed`](by-rule/var-removed.md) |
+| **Subject** | [Exported variable and data-object changes](by-subject/exported-variable-and-data-object-changes.md) |
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
@@ -123,4 +124,4 @@ abidiff v1.xml v2.xml
 - `bad.c`
 - `good.c`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported variable removed](by-rule/var-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Exported variable removed](by-rule/var-removed.md) · [Subject: Exported variable and data-object changes](by-subject/exported-variable-and-data-object-changes.md)._

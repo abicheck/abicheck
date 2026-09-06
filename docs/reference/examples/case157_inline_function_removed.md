@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `inline_function_removed` |
 | **Source files** | `catalog/cases/case157_inline_function_removed/` |
 | **Rule family** | [`inline-function-removed`](by-rule/inline-function-removed.md) |
+| **Subject** | [Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md) |
 
 **Category:** Build/Source Evidence (L4) | **Verdict:** 🟠 API_BREAK
 
@@ -135,4 +136,4 @@ to hand either tool for this case.
 - `new.json`
 - `old.json`
 
-_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Inline function removed](by-rule/inline-function-removed.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Inline function removed](by-rule/inline-function-removed.md) · [Subject: Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md)._

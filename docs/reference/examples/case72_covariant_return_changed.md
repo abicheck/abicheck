@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `type_base_changed`, `type_vtable_changed`, `func_return_changed` |
 | **Source files** | `catalog/cases/case72_covariant_return_changed/` |
 | **Rule family** | [`covariant-return-changed`](by-rule/covariant-return-changed.md) |
+| **Subject** | [Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md) |
 
 **Category:** VTable / Inheritance | **Verdict:** 🔴 BREAKING
 
@@ -159,4 +160,4 @@ abidiff v1.xml v2.xml
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Covariant return type changed](by-rule/covariant-return-changed.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Covariant return type changed](by-rule/covariant-return-changed.md) · [Subject: Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md)._

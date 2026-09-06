@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `base_class_virtual_changed` |
 | **Source files** | `catalog/cases/case167_base_became_virtual/` |
 | **Rule family** | [`base-became-virtual`](by-rule/base-became-virtual.md) |
+| **Subject** | [Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md) |
 
 **Category:** Class Layout / Virtual Inheritance | **Verdict:** 🔴 BREAKING
 
@@ -152,4 +153,4 @@ reason.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Base class became virtual](by-rule/base-became-virtual.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Base class became virtual](by-rule/base-became-virtual.md) · [Subject: Vtable and virtual dispatch changes](by-subject/vtable-and-virtual-dispatch.md)._

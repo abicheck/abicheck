@@ -11,6 +11,7 @@
 | **Detected `ChangeKind`s** | `experimental_graduated`, `func_added` |
 | **Source files** | `catalog/cases/case99_experimental_graduated/` |
 | **Rule family** | [`experimental-graduated`](by-rule/experimental-graduated.md) |
+| **Subject** | [API design and hygiene anti-patterns](by-subject/api-design-and-hygiene-anti-patterns.md) |
 
 **Category:** Addition | **Verdict:** 🟢 COMPATIBLE
 
@@ -125,4 +126,4 @@ for years after standardization.
 - `CMakeLists.txt`
 - `app.cpp`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Experimental API graduated](by-rule/experimental-graduated.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md) · [Rule: Experimental API graduated](by-rule/experimental-graduated.md) · [Subject: API design and hygiene anti-patterns](by-subject/api-design-and-hygiene-anti-patterns.md)._
