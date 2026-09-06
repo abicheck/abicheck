@@ -149,6 +149,21 @@ class TestCompilerProbeFailureStatus:
         family = _compiler_family_from_toolchain(_ast_toolchain_for(_TOOLCHAIN_FAILED))
         assert family is None
 
+    def test_non_empty_toolchain_with_no_error_and_no_resolvable_family_is_none(
+        self,
+    ) -> None:
+        """A fourth, narrower shape distinct from the three catalog states:
+        an L2 frontend ran (``ast_toolchain`` is non-empty) and no probe
+        error was recorded, but neither ``compiler_selected`` nor
+        ``selected`` carries a nonempty path -- so
+        ``_compiler_family_from_toolchain`` itself returns ``None`` (nothing
+        to guess a family from) without that being a probe *failure*.
+        ``compiler_identity_status`` must still answer ``None`` here (no
+        assertion either way), not fabricate ``FAILED``."""
+        ast_toolchain = {"producer": "clang", "selected": ""}
+        assert _compiler_family_from_toolchain(ast_toolchain) is None
+        assert _compiler_identity_status(ast_toolchain) is None
+
 
 class TestComparabilityGateNeverSilentlyComparesOnFailure:
     """For every (toolchain-present, toolchain-failed, toolchain-absent) x
