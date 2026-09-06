@@ -49,8 +49,8 @@ def test_f3_call_graph_break_finding_set_parity() -> None:
     compare_findings = compare_finding_set(old, new, "--depth", "source")
 
     assert_no_capability_loss(
-        scan_kinds=kinds_of(scan_findings),
-        compare_kinds=kinds_of(compare_findings),
+        scan_findings=scan_findings,
+        compare_findings=compare_findings,
         context="case192 (--depth source, F-3)",
     )
     # Identity, not just kind: both tools must resolve the same symbol.
@@ -80,8 +80,8 @@ def test_f3_non_reachable_counterexample_finding_set_parity() -> None:
     compare_findings = compare_finding_set(old, new, "--depth", "source")
 
     assert_no_capability_loss(
-        scan_kinds=kinds_of(scan_findings),
-        compare_kinds=kinds_of(compare_findings),
+        scan_findings=scan_findings,
+        compare_findings=compare_findings,
         context="case193 (--depth source, F-3 counter-example)",
     )
     assert kinds_of(scan_findings) == kinds_of(compare_findings) == {"func_removed"}
@@ -143,8 +143,8 @@ def test_f4_source_only_change_classed_api_break_not_breaking(tmp_path: Path) ->
         == {"inline_function_removed"}
     )
     assert_no_capability_loss(
-        scan_kinds=kinds_of(scan_findings),
-        compare_kinds=kinds_of(compare_findings),
+        scan_findings=scan_findings,
+        compare_findings=compare_findings,
         context="inline_function_removed (F-4)",
     )
 

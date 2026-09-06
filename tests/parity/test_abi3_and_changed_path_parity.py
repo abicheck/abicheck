@@ -67,6 +67,39 @@ def test_scan_supports_changed_path_localization(tmp_path: Path) -> None:
     assert report["changed_paths"]["count"] == 1
 
 
+def test_changed_path_promotes_public_to_internal_dependency_confidence() -> None:
+    """The bookkeeping check above only proves scan *counted* the changed
+    path; this proves it actually reaches a real cross-source finding
+    (case181's public_to_internal_dependency) through `CrosscheckConfig`,
+    not merely a report-summary field. When the internal declaration's own
+    file is a changed path, the finding is promoted from MEDIUM to HIGH
+    confidence and gains that file as `source_location` (ADR-035 D4's
+    "L5 reachability <-> PR changed files" note in `crosscheck.py`)."""
+    from abicheck.buildsource.crosscheck import CrosscheckConfig, run_crosschecks
+    from abicheck.checker_policy import Confidence
+
+    from .test_crosscheck_parity import _g20_snapshot
+
+    snapshot = _g20_snapshot("case181_xcheck_public_to_internal_dependency")
+    internal_file = "src/json_internal.cc"
+
+    baseline = run_crosschecks(snapshot)
+    unscoped = next(
+        c for c in baseline.findings if c.kind.value == "public_to_internal_dependency"
+    )
+    assert unscoped.confidence == Confidence.MEDIUM
+    assert unscoped.source_location is None
+
+    scoped = run_crosschecks(
+        snapshot, CrosscheckConfig(changed_paths=frozenset({internal_file}))
+    )
+    promoted = next(
+        c for c in scoped.findings if c.kind.value == "public_to_internal_dependency"
+    )
+    assert promoted.confidence == Confidence.HIGH
+    assert promoted.source_location == internal_file
+
+
 @pytest.mark.parametrize("flag", ["--since", "--changed-path"])
 def test_compare_has_no_changed_path_option(flag: str, tmp_path: Path) -> None:
     from abicheck.model import AbiSnapshot

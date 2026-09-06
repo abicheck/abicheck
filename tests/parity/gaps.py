@@ -19,11 +19,17 @@ asserting a contradiction (``scan`` and ``compare`` now agree) and fails
 loudly until the entry below is deleted in that same PR — see
 ``test_gap_registry_contract.py``.
 
-Do not add an entry here for a loss that isn't one of the sixteen listed
-capabilities (eleven checks + pattern scan + preprocessor scan +
+Do not add an entry here for a loss that isn't one of the fifteen listed
+scan-only capabilities (eleven checks + pattern scan + preprocessor scan +
 changed-path localization + abi3 audit) — an *unexplained* loss anywhere
 else is a real regression the harness must fail on, not something to file
-away quietly.
+away quietly. ``EXPECTED_GAPS`` (this dict) is what ``runner.py``'s
+scan-vs-compare diff checks against; ``ALL_EXPECTED_GAPS`` below folds in
+the separate ``finding_evolution`` tracking entry too, purely for
+``test_gap_registry_contract.py``'s own completeness bookkeeping — it is
+never used to decide whether a scan finding's *absence* from `compare` is
+expected, since ``finding_evolution`` is not a real ``Finding.kind`` any
+scan-side result could ever carry.
 """
 
 from __future__ import annotations
@@ -123,10 +129,12 @@ NOT_YET_IMPLEMENTED_ANYWHERE: dict[str, ExpectedGap] = {
 }
 
 
-#: The complete red set (plan §6 Phase 0's own phrasing): every capability
-#: this harness must show `scan`-only today. `test_gap_registry_contract.py`
+#: The complete *tracked* set: every scan-only capability plus the
+#: separately-tracked F-8/F-9 evolution gap. `test_gap_registry_contract.py`
 #: pins this at exactly sixteen (11 checks + pattern_scan + preprocessor_scan
-#: + changed_path_localization + abi3_audit + the F-8/F-9 evolution gap).
+#: + changed_path_localization + abi3_audit + finding_evolution). Used only
+#: for that registry-completeness bookkeeping -- `runner.py`'s scan-vs-compare
+#: diff checks against `EXPECTED_GAPS` alone (see this module's docstring).
 ALL_EXPECTED_GAPS: dict[str, ExpectedGap] = {
     **EXPECTED_GAPS,
     **NOT_YET_IMPLEMENTED_ANYWHERE,

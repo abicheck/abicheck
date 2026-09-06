@@ -122,8 +122,8 @@ def test_crosscheck_is_scan_only(check_name: str, tmp_path: Path) -> None:
     factory, source = _SCENARIOS[check_name]
     snapshot = factory()
 
-    scan_kinds = kinds_of(crosscheck_finding_set(snapshot))
-    assert check_name in scan_kinds, (
+    scan_findings = crosscheck_finding_set(snapshot)
+    assert check_name in kinds_of(scan_findings), (
         f"fixture regression: {source} no longer makes run_crosschecks "
         f"produce {check_name!r} -- fix the fixture, not this assertion"
     )
@@ -132,11 +132,11 @@ def test_crosscheck_is_scan_only(check_name: str, tmp_path: Path) -> None:
     # Self-compared: the same evidence on both sides. Any OLD/NEW pairing
     # would do -- compare's pipeline never calls run_crosschecks at all
     # (ADR-068 §1), so this is not about diffing two releases.
-    compare_kinds = kinds_of(compare_finding_set(snap_path, snap_path))
+    compare_findings = compare_finding_set(snap_path, snap_path)
 
     assert_no_capability_loss(
-        scan_kinds=scan_kinds,
-        compare_kinds=compare_kinds,
+        scan_findings=scan_findings,
+        compare_findings=compare_findings,
         context=f"crosscheck {check_name!r} ({source})",
     )
 

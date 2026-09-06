@@ -83,17 +83,33 @@ def test_f9_scan_against_has_no_per_side_crosscheck_at_all() -> None:
     (scan_engine.py's single `run_crosschecks(new_snap, ...)` call) --
     there is no second, OLD-side crosscheck pass to diff against, so
     "resolved" cannot be expressed even in scan's own report today."""
+    import ast
     import inspect
 
     from abicheck import scan_engine
 
-    source = inspect.getsource(scan_engine)
-    # A crude but honest count: run_crosschecks is called exactly once
-    # per scan_engine.py's own pipeline (the candidate side), never twice
-    # (which a baseline-diffed crosscheck pass would require).
-    assert source.count("run_crosschecks(") == 1, (
-        "scan_engine.py now calls run_crosschecks() more than once -- "
+    tree = ast.parse(inspect.getsource(scan_engine))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "run_crosschecks"
+    ]
+    # A real AST match, not a textual count that a comment or docstring
+    # mentioning "run_crosschecks(" could inflate (Codex review): exactly
+    # one call expression, over the *candidate* snapshot (new_snap) --
+    # never a second, OLD-side pass, which a baseline-diffed crosscheck
+    # would require to express "resolved".
+    assert len(calls) == 1, (
+        f"scan_engine.py calls run_crosschecks() {len(calls)} time(s), not 1 -- "
         "if this is a baseline-side crosscheck pass landing, the F-9 gap "
         "may be closing; update this test and reconsider the "
         "'finding_evolution' entry in tests/parity/gaps.py accordingly."
+    )
+    (call,) = calls
+    assert call.args and isinstance(call.args[0], ast.Name)
+    assert call.args[0].id == "new_snap", (
+        f"run_crosschecks() is now called with {call.args[0].id!r}, not "
+        "new_snap -- re-examine whether it now runs over the baseline side too"
     )
