@@ -2259,8 +2259,16 @@ proves:**
   independent of this phase's CI-wiring question.
 
 **Why `bundle_variants_config.py`/`pair_variants`/`BundleVariantSpec`
-(Phase 13) stay unwired into `.abicheck.yml` — a deliberate design fact,
-not a lingering gap.** They solve a genuinely different problem than the
+(Phase 13) stayed unwired into `.abicheck.yml` — a deliberate design fact,
+not a lingering gap.** (**Historical note, 2026-09-06:** the module itself
+was deleted outright in ADR-065 S1 rather than given a consumer —
+`bundle_variants:`'s member-selection need was served instead by
+`model/release_selection.py`'s `ReleaseSelection`, a different axis than
+this module's variant-identity pairing; see `storage-format-v2.md`'s A1.6
+entry for the current status. The reasoning below for why *this specific
+mechanism* was never wired into `.abicheck.yml` remains accurate as a
+historical record, but the module it describes no longer exists to wire.)
+They solved a genuinely different problem than the
 one `check-project.yml`'s declarative pipeline has: pairing two
 already-*captured*, already-serialized `BundleFacts` documents for a
 caller with **no live access to the old binaries** — the Python-API/
