@@ -46,7 +46,14 @@ from .policy.gate_decision import gate_decision_for_result
 from .report.contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
 )
+from .report.dispatch_markdown import (
+    _to_markdown_leaf as _to_markdown_leaf,
+    _to_markdown_root_cause as _to_markdown_root_cause,
+    to_markdown as to_markdown,
+    to_review_digest as to_review_digest,
+)
 from .report.disposition_audit import add_disposition_audit as _add_disposition_audit
+from .report.scoped_gate import ScopedGateChangeHelpers
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
 from .reporter_contract_blocks import add_contract_context as _add_contract_context
@@ -83,15 +90,11 @@ from .reporter_markdown import (
     _root_cause_key_and_display as _root_cause_key_and_display,
     _section_severity_label as _section_severity_label,
     _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
-    _to_markdown_leaf as _to_markdown_leaf,
-    _to_markdown_root_cause as _to_markdown_root_cause,
     apply_show_only as apply_show_only,
     operation_for_kind as operation_for_kind,
     root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
     root_cause_for_change as root_cause_for_change,
     root_cause_lookup_for_changes as root_cause_lookup_for_changes,
-    to_markdown as to_markdown,
-    to_review_digest as to_review_digest,
     to_stat as to_stat,
 )
 from .root_cause_evidence import (
@@ -240,7 +243,7 @@ def to_stat_json(
     # summary. `compare` rejects `--stat --use-cases` outright rather than
     # dropping the manifest silently; this keeps the same promise for a
     # direct caller of the renderer (Codex review).
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, helpers=_SCOPED_GATE_HELPERS, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
@@ -576,7 +579,7 @@ def _to_json_leaf(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, helpers=_SCOPED_GATE_HELPERS, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 def _add_entries_to_root_causes(
@@ -785,7 +788,7 @@ def _to_json_root_cause(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, helpers=_SCOPED_GATE_HELPERS, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 def _metadata_dict(meta: object | None) -> dict[str, object] | None:
@@ -1254,7 +1257,7 @@ def to_json(
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
     _add_trailing_fields(d, result, show_impact, show_only)
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
+    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, helpers=_SCOPED_GATE_HELPERS, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
 
 
 _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {
@@ -1965,3 +1968,22 @@ def _appcompat_irrelevant_lines(
         lines.append("")
         return lines
     return []
+
+
+# ADR-063 T10: the bundle of per-change helpers report.scoped_gate.
+# apply_scoped_gate needs but may not import itself (see that module's own
+# docstring for the cycle a static/importlib back-reference would close).
+# Built once here, since every name is already defined or re-exported in
+# this module by this point, and threaded through render_json_with_side_
+# facts's four call sites above rather than re-resolved per call. Must stay
+# below _change_to_dict's/_add_entries_to_root_causes's own definitions
+# (both defined in this module) -- a module executes top to bottom, so a
+# forward reference here would raise NameError at import time.
+_SCOPED_GATE_HELPERS = ScopedGateChangeHelpers(
+    change_to_dict=_change_to_dict,
+    add_entries_to_root_causes=_add_entries_to_root_causes,
+    finding_id=_finding_id,
+    root_cause_key_and_display=_root_cause_key_and_display,
+    root_cause_for_change=root_cause_for_change,
+    resolve_scoped_gate_findings=_resolve_scoped_gate_findings,
+)

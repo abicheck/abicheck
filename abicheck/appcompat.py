@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from .macho_metadata import MachoMetadata
     from .model.source_graph import SourceGraphSummary
     from .pe_metadata import PeMetadata
+    from .policy.disposition_ledger import DispositionLedger
     from .policy_file import PolicyFile
     from .suppression import SuppressionList
 
@@ -912,6 +913,52 @@ def _promote_scoped_contract(
         )
 
 
+def _finalize_consumer_scope_diff(
+    diff: DiffResult,
+    overlay_ledger: DispositionLedger,
+    breaking_for_app: list[Change],
+    *,
+    policy: str | None,
+    policy_file: PolicyFile | None,
+) -> None:
+    """The one finalization boundary for :func:`scope_diff_to_app`'s
+    mutation of the already-returned, already-finalized *diff* it was
+    handed (ADR-063 T10).
+
+    ``scope_diff_to_app`` runs after ``checker.compare()`` already finalized
+    ``diff`` and handed it back to its caller. Attaching this run's
+    disposition ledger, promoting consumer-proven findings onto the
+    compatibility axis, and recomputing the verdict that promotion leaves
+    stale are all instances of the same thing: a second producer joining
+    ``diff`` after ``compare()``'s own close -- exactly what
+    :func:`~abicheck.policy.disposition_close.close_consumer_scope`'s own
+    docstring names for the *aggregate* union this function's caller later
+    assembles from every consumer's ``breaking_for_app``. This function
+    collects the *per-consumer* half of that same concern into one named,
+    called-once boundary, rather than a ``diff.disposition_ledger = ...``
+    assignment before the overlay loop and a bare ``_promote_scoped_
+    contract(...)`` call after it, as two free-standing statements with the
+    dependency between them left implicit.
+
+    Order is fixed here rather than left to the call site: the ledger must
+    be attached before promotion runs (a later reader of
+    ``diff.disposition_ledger`` must see the same object this consumer
+    recorded into), and promotion must run before the verdict recompute
+    (the recompute reads the very ``contract_relevance``/verdict-bucket
+    fields promotion just stamped). *overlay_ledger* is the exact object
+    every ``record_consumer_overlay`` call above already recorded into --
+    passed in rather than re-resolved via ``ledger_for(diff)`` here, since
+    ``diff.disposition_ledger`` may still be unset at this point and a
+    fresh resolve would build a second, disconnected ledger instead of
+    publishing the one this run actually populated.
+    """
+    if getattr(diff, "disposition_ledger", None) is None:
+        diff.disposition_ledger = overlay_ledger
+    _promote_scoped_contract(
+        breaking_for_app, policy=policy, policy_file=policy_file, diff=diff
+    )
+
+
 def _library_source_graph(
     lib: Path | AbiSnapshot, snapshot: AbiSnapshot | None = None
 ) -> SourceGraphSummary | None:
@@ -1449,15 +1496,17 @@ def scope_diff_to_app(
     coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
 
     # ADR-067 C-S1: the consumer overlay is the one recording call site that
-    # runs *after* `compare()` closed the ledger, so it resolves the diff's own
-    # ledger once here and attaches it when the diff carries none (a caller
-    # that built the DiffResult itself). `ledger_for` deliberately never
-    # attaches on its own -- a report projection must not mutate what it
-    # renders -- so this engine-side assignment is what makes the overlay's
-    # records reach the same object every projection reads.
+    # runs *after* `compare()` closed the ledger, so it resolves the diff's
+    # own ledger once here. `ledger_for` deliberately never attaches on its
+    # own -- a report projection must not mutate what it renders -- and this
+    # engine function's own attachment of it to *diff* is deferred to
+    # `_finalize_consumer_scope_diff` below (ADR-063 T10) rather than done
+    # here: nothing between this point and that call reads
+    # `diff.disposition_ledger` -- every record below goes through the local
+    # `overlay_ledger` reference -- so the attachment belongs with this
+    # function's other, later mutation of the shared *diff* it was handed,
+    # not split across two separate statements.
     overlay_ledger = ledger_for(diff)
-    if getattr(diff, "disposition_ledger", None) is None:
-        diff.disposition_ledger = overlay_ledger
 
     suppressed_missing: set[str] = set()
     uncovered = list(uncovered_missing_symbols(missing_symbols, breaking_for_app))
@@ -1575,8 +1624,8 @@ def scope_diff_to_app(
         missing_symbols, missing_versions, breaking_for_app,
         required_count, policy, policy_file,
     )
-    _promote_scoped_contract(
-        breaking_for_app, policy=policy, policy_file=policy_file, diff=diff
+    _finalize_consumer_scope_diff(
+        diff, overlay_ledger, breaking_for_app, policy=policy, policy_file=policy_file
     )
 
     # ADR-067: the ledger is *not* closed here, deliberately. This function

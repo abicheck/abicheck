@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from .checker_types import Change, DiffResult
+    from .report.scoped_gate import ScopedGateChangeHelpers
     from .severity import GateDecision, SeverityConfig
 
 
@@ -391,6 +392,7 @@ def render_json_with_side_facts(
     result: DiffResult,
     *,
     indent: int,
+    helpers: ScopedGateChangeHelpers,
     severity_config: SeverityConfig | None = None,
     gate: GateDecision | None = None,
     show_only: str | None = None,
@@ -441,6 +443,14 @@ def render_json_with_side_facts(
     no-op for every caller whose *result* carries no ``used_by``/
     ``required_symbols`` (i.e. every render that isn't a
     ``--used-by``/``--required-symbol`` compare).
+
+    *helpers* is forwarded verbatim to ``apply_scoped_gate`` -- the six
+    ``reporter``/``reporter_markdown`` per-change functions it needs
+    (ADR-063 T10: see ``report/scoped_gate.py``'s own docstring for why
+    they arrive as data rather than via an ``importlib`` back-reference).
+    Every caller of this function is itself inside ``reporter.py``, which
+    already holds all six names, so building the bundle costs nothing new
+    there (``reporter._SCOPED_GATE_HELPERS``).
     """
     from .report.run_outcome import run_outcome_dict_for_diff_result
     from .report.scoped_gate import apply_scoped_gate
@@ -451,6 +461,7 @@ def render_json_with_side_facts(
     apply_scoped_gate(
         d,
         result,
+        helpers=helpers,
         severity_config=severity_config,
         show_only=show_only,
         contract_evaluation=contract_evaluation,

@@ -45,13 +45,13 @@ a plain string at compute time), so its document fold is a direct
 document round trip requires (tuple -> list -> tuple).
 
 Reaches ``reporter_markdown.py`` (a ``layers.report.legacy_paths`` member,
-same layer as this file) via ``importlib`` (``_reporter_markdown()``,
-imported from ``render_markdown_document.py`` rather than duplicated), same
-as that module: ``reporter_markdown.py`` imports this module's entry points
-via function-local (not module-level) imports (``_to_markdown_leaf``/
-``_to_markdown_root_cause``), so a static, module-level import back here
-would close a real cycle ``check_ai_readiness.py``'s
-``import-cycle-growth`` gate flags.
+same layer as this file) via ``_reporter_markdown()``, imported from
+``render_markdown_document.py`` rather than duplicated -- ADR-063 T10 made
+that helper a plain static import there (``reporter_markdown.py`` no
+longer imports anything from this module or ``render_markdown_document.py``
+at all; ``_to_markdown_leaf``/``_to_markdown_root_cause`` moved to
+``report/dispatch_markdown.py``), so the ``importlib`` indirection this
+module used to inherit from that helper is gone.
 
 Every view's byte-for-byte output is unchanged by this split -- leaf mode
 has no dedicated golden suite but is covered by
@@ -96,6 +96,7 @@ from .render_markdown_document import (
     _render_change_row,
     _render_not_evaluated_lines,
     _reporter_markdown,
+    _resolve_displayed_changes,
     _suppression_note_from_mapping,
 )
 
@@ -148,22 +149,7 @@ def _view_preamble_mapping(
     :func:`_render_view_preamble` for the render half."""
     rm = _reporter_markdown()
 
-    changes = list(result.changes)
-    show_only_note: dict[str, Any] | None = None
-    if show_only:
-        changes = rm.apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-        show_only_note = {
-            "show_only": show_only,
-            "shown": len(changes),
-            "total": len(result.changes),
-        }
-        changes = rm._suppress_dangling_correlation_notes(changes)
+    changes, show_only_note = _resolve_displayed_changes(result, show_only)
 
     d: dict[str, Any] = {
         "library": result.library,

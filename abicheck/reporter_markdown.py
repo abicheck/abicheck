@@ -545,42 +545,6 @@ def _build_leaf_type_sections(type_changes: list[Change], policy: str) -> list[s
     )
 
 
-def _to_markdown_leaf(
-    result: DiffResult,
-    show_impact: bool = False,
-    show_only: str | None = None,
-    show_recommendation: bool = False,
-    *,
-    severity_config: SeverityConfig | None = None,
-) -> str:
-    """Leaf-change mode: root type changes with affected interface lists.
-
-    *severity_config*, when given, adds the same "Severity Configuration"
-    summary section the full-mode report has — without it, ``report_mode=
-    "leaf"`` returned before that section was ever built, so it silently had
-    no severity information even when a caller passed *severity_config*
-    through :func:`to_markdown`.
-
-    ADR-061 Phase 2 item 1: crosses the canonical ``ReportDocument`` boundary
-    via ``report/render_markdown_alternate.py``, the same fact/formatting
-    split JSON/SARIF/JUnit/``--stat``/HTML/full-mode markdown already use.
-    """
-    from .report.render_markdown_alternate import (
-        build_leaf_document,
-        render_leaf_document,
-    )
-
-    return render_leaf_document(
-        build_leaf_document(
-            result,
-            show_impact=show_impact,
-            show_only=show_only,
-            show_recommendation=show_recommendation,
-            severity_config=severity_config,
-        )
-    )
-
-
 #: The report's stable per-finding fingerprint. The implementation moved to
 #: the dependency-free ``finding_identity`` leaf module so ``checker.py`` can
 #: key ADR-049's decision receipt by the *same* id the report shows without
@@ -925,43 +889,6 @@ def compute_root_cause_section(
                 finding_lines=tuple(finding_lines_by_key[key]),
             )
             for key in order
-        )
-    )
-
-
-def _to_markdown_root_cause(
-    result: DiffResult,
-    show_only: str | None = None,
-    show_recommendation: bool = False,
-    show_impact: bool = False,
-    *,
-    severity_config: SeverityConfig | None = None,
-    contract_evaluation: bool = False,
-) -> str:
-    """``--report-mode root-cause`` markdown rendering (G29 Phase 3 slice 4, ADR-052).
-
-    Groups findings under one heading per root cause instead of full mode's
-    severity-bucketed sections -- root-cause mode's point is "what's the
-    minimal set of things that actually broke", not "what severity bucket
-    does each finding independently fall into".
-
-    ADR-061 Phase 2 item 1: crosses the canonical ``ReportDocument`` boundary
-    via ``report/render_markdown_alternate.py``, the same fact/formatting
-    split JSON/SARIF/JUnit/``--stat``/HTML/full-mode markdown already use.
-    """
-    from .report.render_markdown_alternate import (
-        build_root_cause_document,
-        render_root_cause_document,
-    )
-
-    return render_root_cause_document(
-        build_root_cause_document(
-            result,
-            show_only=show_only,
-            show_recommendation=show_recommendation,
-            show_impact=show_impact,
-            severity_config=severity_config,
-            contract_evaluation=contract_evaluation,
         )
     )
 
@@ -1498,34 +1425,6 @@ def compute_review_digest(
     )
 
 
-def to_review_digest(
-    result: DiffResult,
-    *,
-    severity_config: SeverityConfig | None = None,
-) -> str:
-    """Compact GitHub-facing review digest (Markdown).
-
-    A single, reviewer-oriented summary suitable for a job summary
-    ($GITHUB_STEP_SUMMARY) or a PR comment body: verdict + merge effect, a
-    counts table that separates breaking / API / risk / public additions /
-    filtered-internal, the release recommendation, a manual-review banner when
-    public-header scoping fell back (issue #235), and the top impacted symbols.
-    Distinct from to_markdown (the full report) — this is the "presentation"
-    layer over the same machine-readable decision contract. ADR-061 Phase 2
-    item 1: crosses the canonical ``ReportDocument`` boundary via
-    ``report/render_markdown_document.py`` — the same fact/formatting split
-    JSON/SARIF/JUnit/``--stat``/HTML already use.
-    """
-    from .report.render_markdown_document import (
-        build_review_digest_document,
-        render_review_digest_document,
-    )
-
-    return render_review_digest_document(
-        build_review_digest_document(result, severity_config=severity_config)
-    )
-
-
 def compute_rtti_note(breaking: list[Change]) -> _rmd.RttiNote | None:
     """The structured intermediate for :func:`_build_internal_rtti_note`."""
     bd = surface_breakdown(breaking)
@@ -1540,45 +1439,6 @@ def _build_internal_rtti_note(breaking: list[Change]) -> list[str]:
     """Build the up-front note when breaking findings are mostly RTTI/internal
     churn. Returns an empty list when there is nothing to note."""
     return _rmd.render_rtti_note(compute_rtti_note(breaking))
-
-
-def _markdown_alternate_rendering(
-    result: DiffResult,
-    *,
-    stat: bool,
-    report_mode: str,
-    show_impact: bool,
-    show_only: str | None,
-    show_recommendation: bool,
-    severity_config: Any,
-    contract_evaluation: bool,
-) -> str | None:
-    """Render one of the non-default markdown views, or ``None`` for the default.
-
-    ``--stat`` and the ``leaf`` / ``root-cause`` report modes each produce a
-    complete document of their own; the caller returns it as-is (after its own
-    demangling pass) rather than continuing into the full report.
-    """
-    if stat:
-        return to_stat(result, severity_config=severity_config)
-    if report_mode == "leaf":
-        return _to_markdown_leaf(
-            result,
-            show_impact=show_impact,
-            show_only=show_only,
-            show_recommendation=show_recommendation,
-            severity_config=severity_config,
-        )
-    if report_mode == "root-cause":
-        return _to_markdown_root_cause(
-            result,
-            show_only=show_only,
-            show_recommendation=show_recommendation,
-            show_impact=show_impact,
-            severity_config=severity_config,
-            contract_evaluation=contract_evaluation,
-        )
-    return None
 
 
 def compute_headline_table(
@@ -1604,62 +1464,6 @@ def compute_headline_table(
         risk=len(result.risk),
         compatible=len(result.compatible),
         not_evaluated=len(result.not_evaluated),
-    )
-
-
-def to_markdown(
-    result: DiffResult,
-    *,
-    show_only: str | None = None,
-    report_mode: str = "full",
-    show_impact: bool = False,
-    stat: bool = False,
-    severity_config: SeverityConfig | None = None,
-    show_recommendation: bool = False,
-    demangle: bool = False,
-    contract_evaluation: bool = False,
-) -> str:
-    # Human-facing only: optionally demangle Itanium C++ symbols in the rendered
-    # output. Machine formats (JSON/SARIF/JUnit) keep the raw mangled symbols.
-    def _out(text: str) -> str:
-        if not demangle:
-            return text
-        from .demangle import demangle_text
-
-        return demangle_text(text)
-
-    alternate = _markdown_alternate_rendering(
-        result,
-        stat=stat,
-        report_mode=report_mode,
-        show_impact=show_impact,
-        show_only=show_only,
-        show_recommendation=show_recommendation,
-        severity_config=severity_config,
-        contract_evaluation=contract_evaluation,
-    )
-    if alternate is not None:
-        return _out(alternate)
-
-    # ADR-061 Phase 2 item 1: the default (full-mode) view crosses the
-    # canonical ReportDocument boundary via report/render_markdown_document.py
-    # -- the same fact/formatting split JSON/SARIF/JUnit/--stat/HTML already
-    # use. `demangle` is applied inside the document renderer itself (the
-    # document's own "demangle" field), not by this function's `_out`.
-    from .report.render_markdown_document import (
-        build_markdown_document,
-        render_markdown_document,
-    )
-
-    return render_markdown_document(
-        build_markdown_document(
-            result,
-            show_only=show_only,
-            show_impact=show_impact,
-            severity_config=severity_config,
-            show_recommendation=show_recommendation,
-            demangle=demangle,
-        )
     )
 
 
@@ -1753,3 +1557,34 @@ def compute_recommendation_section(result: DiffResult) -> _rmd.RecommendationSec
 def _append_recommendation_section(lines: list[str], result: DiffResult) -> None:
     """Append the release-recommendation section (semver bump + soname action)."""
     lines += _rmd.render_recommendation_section(compute_recommendation_section(result))
+
+
+# ADR-063 T10: `to_markdown`/`to_review_digest`/`_to_markdown_leaf`/
+# `_to_markdown_root_cause`/`_markdown_alternate_rendering` moved to
+# `report/dispatch_markdown.py` (see that module's own docstring for why --
+# this module used to import them back function-locally, which is exactly
+# the cycle this move retires). This lazy `__getattr__` preserves every
+# existing `from abicheck.reporter_markdown import to_markdown`-shaped call
+# site (tests included) without reintroducing a module-level import back to
+# `report/` here -- the same shim shape `cli_buildsource.py`'s own tail uses
+# when a helper moves out from under a re-exporting module (root
+# `AGENTS.md`'s "Moving helpers out of a module that re-exports them?").
+_DISPATCH_MARKDOWN_NAMES = frozenset(
+    {
+        "to_markdown",
+        "to_review_digest",
+        "_to_markdown_leaf",
+        "_to_markdown_root_cause",
+        "_markdown_alternate_rendering",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _DISPATCH_MARKDOWN_NAMES:
+        import importlib
+
+        return getattr(
+            importlib.import_module(".report.dispatch_markdown", __package__), name
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
