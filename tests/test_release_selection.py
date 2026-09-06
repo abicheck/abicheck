@@ -201,3 +201,30 @@ class TestBuildDeclaredSelectionRecord:
         )
         (member,) = record.members
         assert member.state is AcquisitionState.AVAILABLE
+
+    def test_optional_but_failed_member_still_makes_scope_incomplete(self) -> None:
+        """Codex security review, #1094: an optional (``--select``, not
+        ``--select-required``) member whose acquisition was *attempted* and
+        failed (e.g. a NEW-side stored package marking it degraded, or a
+        crashed extraction) must stay incomplete -- ``required: false``
+        excuses absence, never a failure the run actually observed. Otherwise
+        an attacker-controlled NEW artifact could mark a declared-optional
+        member ``failed`` and have the scope read complete/clean anyway."""
+        sel = ReleaseSelection.from_lists(optional=["libbar.so"])
+        old_map = {"libbar.so": Path("/old/libbar.so")}
+        new_map = {"libbar.so": Path("/new/libbar.so")}
+        record = build_declared_selection_record(
+            old_map,
+            new_map,
+            ["libbar.so"],
+            [{"library": "libbar.so", "verdict": "ERROR", "error": "crashed"}],
+            self._evidence(),
+            sel,
+            old_failed=None,
+            new_failed=None,
+        )
+        (member,) = record.members
+        assert member.state is AcquisitionState.FAILED
+        assert not member.required
+        assert member in record.unchecked_members
+        assert record.is_incomplete

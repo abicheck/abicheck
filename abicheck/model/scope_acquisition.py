@@ -53,6 +53,7 @@ from typing import Any
 
 __all__ = [
     "SCOPE_ACQUISITION_SCHEMA_VERSION",
+    "OPTIONAL_EXCUSABLE_STATES",
     "UNCHECKED_STATES",
     "AcquisitionState",
     "InventoryCompleteness",
@@ -113,6 +114,19 @@ UNCHECKED_STATES: frozenset[AcquisitionState] = frozenset(
         AcquisitionState.NOT_SUPPLIED,
         AcquisitionState.UNSUPPORTED,
         AcquisitionState.AMBIGUOUS,
+    }
+)
+
+#: The subset of :data:`UNCHECKED_STATES` an explicit ``required: false``
+#: (ADR-065 S1) may excuse: pure *absence* -- the member was never produced.
+#: ``FAILED``/``UNSUPPORTED``/``AMBIGUOUS`` are never excusable this way,
+#: however a member was declared: they mean acquisition was *attempted* and
+#: did not succeed, which ``required: false`` never promised to paper over
+#: (see :attr:`ScopeAcquisitionRecord.unchecked_members`).
+OPTIONAL_EXCUSABLE_STATES: frozenset[AcquisitionState] = frozenset(
+    {
+        AcquisitionState.EXPECTED_NOT_PRODUCED,
+        AcquisitionState.NOT_SUPPLIED,
     }
 )
 
@@ -269,18 +283,30 @@ class ScopeAcquisitionRecord:
 
         A member an explicit :class:`~abicheck.model.release_selection.
         ReleaseSelection` declared *optional* (:attr:`MemberAcquisition.
-        required` ``False``, ADR-065 S1) is excluded too: its own declared
-        contract is that its absence is not a gap, so it must not still
-        make ``is_incomplete`` true just because nothing else changed about
-        it. Every other member (``required`` defaults ``True``) is
-        unaffected -- this is additive, not a relaxation of D6's default."""
+        required` ``False``, ADR-065 S1) is excluded too, but **only** for an
+        *absence* state (``NOT_SUPPLIED``/``EXPECTED_NOT_PRODUCED`` --
+        :data:`OPTIONAL_EXCUSABLE_STATES`): the declared contract of
+        ``required: false`` is "this member may not exist", never "this
+        member's comparison may fail". ``FAILED``/``UNSUPPORTED``/
+        ``AMBIGUOUS`` stay incomplete regardless of ``required`` -- an
+        optional member a stored NEW side marks degraded, or whose
+        extraction crashes, still reached acquisition and failed there; that
+        is exactly the operational-error signal D8 exists to keep visible,
+        not something a caller's own optimism about the member's existence
+        should silently excuse (Codex security review on #1094: an
+        attacker-controlled NEW artifact could otherwise mark a declared-
+        optional member ``failed`` and have the scope still read complete).
+        Every other member (``required`` defaults ``True``) is unaffected --
+        this is additive, not a relaxation of D6's default."""
         answered = {m.member for m in self.proven_removed_members} | {
             m.member for m in self.proven_added_members
         }
         return tuple(
             m
             for m in self.members
-            if m.state in UNCHECKED_STATES and m.member not in answered and m.required
+            if m.state in UNCHECKED_STATES
+            and m.member not in answered
+            and (m.required or m.state not in OPTIONAL_EXCUSABLE_STATES)
         )
 
     @property

@@ -1893,6 +1893,10 @@
               "reason": {
                 "type": "string",
                 "description": "The evidence behind the state; empty for a plain available member."
+              },
+              "required": {
+                "type": "boolean",
+                "description": "ADR-065 S1: whether this member's absence makes the scope incomplete. True for every member a run infers on its own; False only for a member an explicit ReleaseSelection (--select) declared optional. Absent on a schema-1.0 producer, which a reader backfills as True."
               }
             }
           },
