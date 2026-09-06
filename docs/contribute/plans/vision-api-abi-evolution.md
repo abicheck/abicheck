@@ -18,9 +18,13 @@ instead of replacing it), and **E**'s S1 (`FAILED` toolchain identity,
 no-DWARF layout-unverified rows) and S2's per-dimension comparability
 record. See each workstream's own section below for what landed and what
 remains — this line is a summary, not a second source of truth. Each
-workstream below records what *already exists* (verified
-against the tree at `2f5ef696` on 2026-09-05, file references included,
-**updated 2026-09-06** for the slices named above), what is missing, the
+workstream below records what *already exists* (originally verified
+against the tree at `2f5ef696` on 2026-09-05, file references included;
+`2f5ef696` is an ancestor of, and therefore older than, the slices named
+above — those were independently re-verified against a later tree and are
+called out with **updated 2026-09-06** wherever they change what the
+2026-09-05 sweep found; the two baselines mark two different sweeps of the
+same document, not a contradiction), what is missing, the
 ADR that owns the decision, the slices, and the
 acceptance tests. The product decisions themselves are in the repository
 root [`vision.md`](../vision.md); the technical decisions are
