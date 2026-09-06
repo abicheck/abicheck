@@ -110,7 +110,9 @@ tests before moving — see `tests/test_build_source_embed_errors.py`.
 Shared vocabulary those modules used to reach into the CLI layer for now
 lives in leaves any layer may depend on: `abicheck/evidence_depth.py` (the
 depth ladder) and `buildsource/pack_shape.py` + `buildsource/inputs_pack.py`
-(the pack-shape predicates). Prefer them over re-deriving.
+(the pack-shape predicates). Prefer them over re-deriving. `history.py`
+(ADR-066 S1) composes pairwise `checker.compare` into lifecycle events
+(`run_history_request`); CLI surface: `cli_project.py`'s `project history`.
 
 ## Tests
 
@@ -124,22 +126,20 @@ the implementation owner rather than a root facade.
 Do not declare Click commands, parse presentation-only flags, render output
 formats, implement binary/header parsers, define raw comparison detectors, or
 recompute policy decisions in this package. A workflow returns typed achieved
-facts and decisions; it does not print them.
-
-Dry-run and execution must consume the same resolved plan. Do not add a second
-configuration resolver or an estimator that independently predicts effective
-policy, backend, or evidence depth.
+facts and decisions; it does not print them. Dry-run and execution must
+consume the same resolved plan — do not add a second configuration resolver
+or an estimator that independently predicts effective policy, backend, or
+evidence depth.
 
 ## Change checklist
 
 Before adding workflow behavior, identify the request field that carries user
 intent, the resolved-plan field that records the effective value and
 provenance, and the result field that records what execution achieved. Keep
-resource acquisition inside the plan's explicit lifetime.
-
-When migrating a flat implementation, switch every internal caller in the
-same change, retain only documented compatibility exports, add a facade
-contract test, update `architecture/modules.yaml`, and reduce the corresponding
+resource acquisition inside the plan's lifetime. When migrating a flat
+implementation, switch every internal caller in the same change, retain only
+documented compatibility exports, add a facade contract test, update
+`architecture/modules.yaml`, and reduce the corresponding
 `architecture/debt.yaml` entry. Run `python scripts/check_architecture.py`
 before the canonical PR profile.
 
