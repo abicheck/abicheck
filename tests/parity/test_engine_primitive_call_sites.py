@@ -75,6 +75,12 @@ def _call_sites(function_name: str) -> dict[Path, int]:
     return hits
 
 
+def _posix(path: Path) -> str:
+    """POSIX-style repo-relative spelling, independent of host OS separator
+    (Windows CI reports ``abicheck\\scan_engine.py`` from ``str(path)``)."""
+    return path.as_posix()
+
+
 @pytest.mark.parametrize("function_name", sorted(_ENGINE_PRIMITIVES))
 def test_only_scan_engine_calls_it(function_name: str) -> None:
     defining_module, expected_caller, gap_key = _ENGINE_PRIMITIVES[function_name]
@@ -85,7 +91,7 @@ def test_only_scan_engine_calls_it(function_name: str) -> None:
     # internal dispatch don't count as an external caller).
     sites = {p: n for p, n in sites.items() if p != Path("abicheck") / defining_module}
 
-    callers = {str(p) for p in sites}
+    callers = {_posix(p) for p in sites}
     if callers - {f"abicheck/{expected_caller}"}:
         raise AssertionError(
             f"{function_name}() gained a caller outside {expected_caller!r}: "
