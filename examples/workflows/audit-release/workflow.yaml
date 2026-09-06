@@ -1,0 +1,46 @@
+# Executable contract for this workflow example (Phase 5 of the
+# examples/catalog split). `validation/scripts/run_workflow_examples.py`
+# copies the directory to a scratch tree, runs each `run:` line below as a
+# real shell command, and checks what it claims.
+#
+# Every `run:` line must appear verbatim in this directory's README.md
+# (whitespace-normalized) -- that is the whole point: without it this file
+# is a second copy of the walkthrough, free to keep passing while the
+# documented commands rot. `tests/test_workflow_examples.py` enforces it in
+# the fast lane, with no compiler needed.
+id: audit-release
+task: Did I accidentally ship an undocumented export consumers could start depending on?
+platforms:
+  - linux
+  - macos
+requires:
+  - gcc
+  # The audit step passes --header, which goes through the default CastXML
+  # AST backend to classify what's public. Declaring it here is what makes
+  # a host without CastXML report an honest skip instead of a failure that
+  # looks like a real audit finding -- and what lets a CI lane that just
+  # installed CastXML turn that skip back into a failure with
+  # `--require audit-release`.
+  - castxml
+  # The tool under test. Declaring it is not ceremony: without it a host
+  # without abicheck on PATH reports a launch failure per step instead of
+  # an honest skip.
+  - abicheck
+steps:
+  - name: build
+    run: gcc -shared -fPIC -g -Iinclude greet.c -o libgreet.so
+  - name: audit
+    run: abicheck scan libgreet.so --header include
+    expect:
+      exit_code: 0
+      stdout_contains:
+        - exported_not_public
+        - COMPATIBLE
+    # Re-run the identical command with a machine-readable format so the
+    # verdict can be asserted structurally rather than by grepping prose.
+    # The documented command above is still what runs first.
+    json_variant:
+      - --format
+      - json
+    expect_json:
+      verdict: COMPATIBLE

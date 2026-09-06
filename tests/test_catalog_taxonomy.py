@@ -228,3 +228,18 @@ def test_a_related_rules_key_naming_no_scenario_is_rejected():
                 gen.build_taxonomy(gt)
         finally:
             del gen.RELATED_RULES[stale]
+
+
+def test_an_unclassified_case_fails_build_taxonomy_instead_of_defaulting():
+    """The load-bearing property of the declarative classification manifest
+    (catalog/catalog_classification.yaml, scripts/catalog_classification.py):
+    a case with no entry there must fail generation outright, never silently
+    fall back to entity='rule'/ecosystem='generic' the way the old
+    hard-coded case-number-set implementation did."""
+    gen = _load_gen()
+    gt = _load_ground_truth()
+    gt = dict(gt)
+    gt["verdicts"] = dict(gt["verdicts"])
+    gt["verdicts"]["case999_unclassified"] = next(iter(gt["verdicts"].values()))
+    with pytest.raises(ValueError, match="case999_unclassified"):
+        gen.build_taxonomy(gt)

@@ -1,0 +1,218 @@
+# catalog/catalog_classification.yaml
+#
+# Declarative per-case semantic classification consumed by
+# scripts/gen_catalog_taxonomy.py -- see "Making the generator's semantic
+# classification declarative" in
+# docs/contribute/plans/examples-catalog-split.md's "What is left" section.
+#
+# Every case in catalog/ground_truth.json["verdicts"] must have exactly one
+# entry below, under either `scenarios` or `rules`. Unlike the previous
+# hard-coded case-number-set implementation, a case with no entry here fails
+# `gen_catalog_taxonomy.py` outright -- classification never silently defaults
+# to "entity: rule, ecosystem: generic" for a case nobody has classified yet.
+
+scenarios:
+  case107_task_scheduler_init_removed: {scenario_kind: case-study, ecosystem: onetbb}
+  case108_task_class_removed: {scenario_kind: case-study, ecosystem: onetbb}
+  case109_flow_graph_policy_renames: {scenario_kind: case-study, ecosystem: onetbb}
+  case110_concurrent_unordered_map_api_drift: {scenario_kind: case-study, ecosystem: onetbb}
+  case111_enumerable_thread_specific_lambda_ambiguity: {scenario_kind: case-study, ecosystem: onetbb}
+  case112_lp64_ilp64: {scenario_kind: case-study, ecosystem: onemkl}
+  case121_kernel_btf_struct_field_added: {scenario_kind: case-study, ecosystem: linux-kernel}
+  case126_sycl_device_impl_ptr: {scenario_kind: case-study, ecosystem: sycl}
+  case147_scan_depth_ladder: {scenario_kind: capability, ecosystem: generic}
+  case148_xcheck_header_build_mismatch: {scenario_kind: capability, ecosystem: generic}
+  case149_xcheck_odr_variant: {scenario_kind: capability, ecosystem: generic}
+  case150_xcheck_export_public_pair: {scenario_kind: capability, ecosystem: generic}
+  case151_xcheck_provider_matrix: {scenario_kind: capability, ecosystem: generic}
+  case175_kabi_crc_changed: {scenario_kind: case-study, ecosystem: linux-kernel}
+  case176_kabi_symbol_namespace_changed: {scenario_kind: case-study, ecosystem: linux-kernel}
+  case191_header_only_graph_field_type: {scenario_kind: capability, ecosystem: generic}
+  case192_call_graph_break_survives_suppression: {scenario_kind: capability, ecosystem: generic}
+  case193_ordinary_exported_fn_call_not_reachable: {scenario_kind: capability, ecosystem: generic}
+  case194_header_graph_rename_reconciled: {scenario_kind: capability, ecosystem: generic}
+  case195_header_graph_ambiguous_rename_not_reconciled: {scenario_kind: capability, ecosystem: generic}
+  case196_header_graph_move_reconciled: {scenario_kind: capability, ecosystem: generic}
+  case197_header_graph_identity_reconciled: {scenario_kind: capability, ecosystem: generic}
+  case78_task_arena_attach_tag: {scenario_kind: case-study, ecosystem: onetbb}
+  case82_sycl_overload_set_removed: {scenario_kind: case-study, ecosystem: sycl}
+  case84_bundle_soname_skew: {scenario_kind: project-topology, ecosystem: generic}
+  case90_bundle_intra_dep_removed: {scenario_kind: project-topology, ecosystem: generic}
+  case91_bundle_intra_signature_drift: {scenario_kind: project-topology, ecosystem: generic}
+  case92_bundle_provider_changed: {scenario_kind: project-topology, ecosystem: generic}
+  case93_bundle_manifest_drift: {scenario_kind: project-topology, ecosystem: generic}
+  case94_empty_tag_gained_state: {scenario_kind: case-study, ecosystem: onetbb}
+
+# Every rule-entity case (ecosystem is always "generic" for a rule case --
+# a rule case naming a real ecosystem is exactly what makes it a "scenario"
+# case-study instead). Listed explicitly, not "every case not classified
+# above", so a new case added to ground_truth.json without a corresponding
+# entry here fails loudly instead of silently becoming a generic rule.
+rules:
+  - case01_symbol_removal
+  - case02_param_type_change
+  - case03_compat_addition
+  - case04_no_change
+  - case05_soname
+  - case06_visibility
+  - case07_struct_layout
+  - case08_enum_value_change
+  - case09_cpp_vtable
+  - case100_experimental_removed_without_replacement
+  - case101_inline_namespace_version_bumped
+  - case102_frozen_runtime_signature_changed
+  - case103_toolchain_flag_drift
+  - case104_glibcxx_dual_abi_flip
+  - case105_concept_tightening
+  - case106_ctor_became_explicit
+  - case10_return_type
+  - case113_abi_tag_changed
+  - case114_char8t_migration
+  - case115_bit_int_width_changed
+  - case116_atomic_qualifier_changed
+  - case117_no_unique_address
+  - case118_internal_struct_field_added_scoped
+  - case119_internal_struct_field_removed_scoped
+  - case11_global_var_type
+  - case120_internal_struct_reordered_scoped
+  - case122_template_signature_uninstantiated
+  - case123_default_argument_removed
+  - case124_header_constant_value_changed
+  - case125_class_became_final
+  - case127_data_object_size_changed
+  - case128_symbol_binding_strengthened
+  - case129_struct_return_convention
+  - case12_function_removed
+  - case130_exceptions_mode_flip
+  - case131_rtti_mode_flip
+  - case132_threadsafe_statics_flip
+  - case133_tls_model_flip
+  - case134_relro_weakened
+  - case135_stack_canary_removed
+  - case136_executable_stack_removed
+  - case137_runpath_changed
+  - case138_needed_added
+  - case139_symbol_version_node_removed
+  - case13_symbol_versioning
+  - case140_empty_base_optimization_lost
+  - case141_versioned_symbol_scheme
+  - case142_vtable_slot_count_binary_only
+  - case143_audit_accidental_export
+  - case144_audit_private_header_leak
+  - case145_audit_unversioned_export
+  - case146_audit_rtti_for_internal
+  - case14_cpp_class_size
+  - case152_enum_size_flag_flip
+  - case153_struct_packing_flip
+  - case154_lto_mode_flip
+  - case155_char_signedness_flip
+  - case156_public_macro_removed
+  - case157_inline_function_removed
+  - case158_public_typedef_removed
+  - case15_noexcept_change
+  - case160_public_api_internal_dep_added
+  - case161_target_dependency_added
+  - case162_symbol_source_owner_changed
+  - case163_python_kwarg_renamed
+  - case164_preproc_conditional_field
+  - case165_polymorphic_nonvirtual_dtor
+  - case166_ref_qualifier_added
+  - case167_base_became_virtual
+  - case168_virtual_method_devirtualized
+  - case169_overload_added
+  - case16_inline_to_non_inline
+  - case170_env_runtime_floor_raised
+  - case171_static_tls_introduced
+  - case172_vtable_thunk_offset_changed
+  - case173_vtt_slot_count_changed
+  - case174_secondary_vtable_group_changed
+  - case177_long_double_abi_changed
+  - case178_unnamed_type_in_public_abi
+  - case179_cet_protection_weakened
+  - case17_template_abi
+  - case180_symbol_binding_lost_unique
+  - case181_xcheck_public_to_internal_dependency
+  - case182_accidental_export_removed_still_breaking
+  - case183_internal_version_node_churn
+  - case184_internal_enum_churn_scoped
+  - case185_inherited_override_reuses_slot
+  - case186_c_api_pointee_const_abi_neutral
+  - case187_public_struct_private_field_type
+  - case188_public_class_private_base_class
+  - case189_public_function_private_parameter_type
+  - case18_dependency_leak
+  - case190_public_inline_function_references_internal_constant
+  - case19_enum_member_removed
+  - case20_enum_member_value_changed
+  - case21_method_became_static
+  - case22_method_const_changed
+  - case23_pure_virtual_added
+  - case24_union_field_removed
+  - case25_enum_member_added
+  - case26_union_field_added
+  - case26b_union_field_added_compatible
+  - case27_symbol_binding_weakened
+  - case28_typedef_opaque
+  - case29_ifunc_transition
+  - case30_field_qualifiers
+  - case31_enum_rename
+  - case32_param_defaults
+  - case33_pointer_level
+  - case34_access_level
+  - case35_field_rename
+  - case36_anon_struct
+  - case37_base_class
+  - case38_virtual_methods
+  - case39_var_const
+  - case40_field_layout
+  - case41_type_changes
+  - case42_type_alignment_changed
+  - case43_base_class_member_added
+  - case44_cyclic_type_member_added
+  - case45_multi_dim_array_change
+  - case46_pointer_chain_type_change
+  - case47_inline_to_outlined
+  - case48_leaf_struct_through_pointer
+  - case49_executable_stack
+  - case50_soname_inconsistent
+  - case51_protected_visibility
+  - case52_rpath_leak
+  - case53_namespace_pollution
+  - case54_used_reserved_field
+  - case55_type_kind_changed
+  - case56_struct_packing_changed
+  - case57_enum_underlying_size_changed
+  - case58_var_removed
+  - case59_func_became_inline
+  - case60_base_class_position_changed
+  - case61_var_added
+  - case62_type_field_added_compatible
+  - case63_bitfield_changed
+  - case64_calling_convention_changed
+  - case65_symbol_version_removed
+  - case66_language_linkage_changed
+  - case67_tls_var_size_changed
+  - case68_virtual_method_added
+  - case69_trivial_to_nontrivial
+  - case70_flexible_array_member_changed
+  - case71_inline_namespace_moved
+  - case72_covariant_return_changed
+  - case73_typedef_underlying_changed
+  - case74_detail_base_class_changed
+  - case75_detail_embedded_by_value
+  - case76_detail_pimpl_vtable_changed
+  - case77_detail_templated_base_changed
+  - case79_missing_template_instantiation
+  - case80_pimpl_shared_to_unique
+  - case81_serialization_tag_reassigned
+  - case83_cpu_dispatch_isa_dropped
+  - case85_internal_template_signature_changed
+  - case86_tag_struct_renamed
+  - case87_default_template_arg_changed
+  - case88_cpo_kind_changed
+  - case89_inline_accessor_renamed_pimpl_member
+  - case95_allocator_nested_typedef_removed
+  - case96_hidden_friend_removed
+  - case97_api_depends_on_consumer_env
+  - case98_cxx_standard_floor_raised
+  - case99_experimental_graduated
