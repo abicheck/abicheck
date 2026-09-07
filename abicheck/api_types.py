@@ -762,6 +762,18 @@ class CompareRequest:
     #: or the other (removed in PR G2 along with the CLI flag, the
     #: ``.abicheck.yml`` key, and the pack field it used to mirror).
     severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
+    #: ADR-068 / plan §3 #12 (Phase 2c): the resolved changed-path seed
+    #: (``compare --changed-path``, or ``--since`` after its ``git diff``).
+    #: Scoping input only -- it produces no finding of its own; it narrows
+    #: the L4/L5 points of interest a ``--depth source`` run examines, per
+    #: ADR-043 D7 (changed-path scope when a seed exists, else the current
+    #: library target -- never a zero-TU no-op). Empty = no seed.
+    changed_paths: tuple[str, ...] = field(default=(), kw_only=True)
+    #: ADR-068 D3 / plan §3 #15 (Phase 2d): the target ``Py_LIMITED_API``
+    #: floor for the candidate-side stable-ABI audit (``compare --abi3``),
+    #: as ``(major, minor)``. ``None`` (the default) leaves the audit off,
+    #: so every pre-existing request is unchanged.
+    abi3_floor: tuple[int, int] | None = field(default=None, kw_only=True)
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).

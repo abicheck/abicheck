@@ -11,6 +11,12 @@ that is expected to close it (``docs/contribute/plans/one-comparison-product.md`
 §6) — never a bare ``xfail``, so a reader always has a name and a phase to
 check rather than a silent skip.
 
+Phases 2c and 2d are **closed**: ``compare`` now carries ``--since``/
+``--changed-path`` (changed-path localization, ADR-043 D7's POI scoping rule)
+and ``--abi3`` (the candidate-side stable-ABI audit, ADR-068 D3), so their two
+entries were deleted from this registry in the same PR that landed them --
+which is exactly what the registry is for.
+
 **This registry is the red set the migration must turn empty.** A test in
 this package asserts, for each registered key, that the capability is
 present under ``scan`` and absent under ``compare`` today. When a Phase 2
@@ -19,9 +25,9 @@ asserting a contradiction (``scan`` and ``compare`` now agree) and fails
 loudly until the entry below is deleted in that same PR — see
 ``test_gap_registry_contract.py``.
 
-Do not add an entry here for a loss that isn't one of the fifteen listed
-scan-only capabilities (eleven checks + pattern scan + preprocessor scan +
-changed-path localization + abi3 audit) — an *unexplained* loss anywhere
+Do not add an entry here for a loss that isn't one of the originally listed
+fifteen scan-only capabilities (eleven checks + pattern scan + preprocessor
+scan + changed-path localization + abi3 audit; the last two are closed) — an *unexplained* loss anywhere
 else is a real regression the harness must fail on, not something to file
 away quietly. ``EXPECTED_GAPS`` (this dict) is what ``runner.py``'s
 scan-vs-compare diff checks against; ``ALL_EXPECTED_GAPS`` below folds in
@@ -41,8 +47,6 @@ from dataclasses import dataclass
 #: §6 Phase 2a): "cross-source checks, per side, evolution-stated".
 _PHASE_2A = "Phase 2a — cross-source checks become a compare pipeline stage (plan §6)"
 _PHASE_2B = "Phase 2b — pattern + preprocessor scans move onto compare (plan §6)"
-_PHASE_2C = "Phase 2c — changed-path localization (--since/--changed-path) (plan §6)"
-_PHASE_2D = "Phase 2d — abi3 candidate-side enrichment (plan §6)"
 _PHASE_1 = "Phase 1 — FindingEvolution state on the canonical finding model (plan §6)"
 
 
@@ -95,19 +99,6 @@ EXPECTED_GAPS: dict[str, ExpectedGap] = {
         _PHASE_2B,
         "§3 #8",
     ),
-    "changed_path_localization": ExpectedGap(
-        "--since/--changed-path exist only on `scan` (cli_scan.py, "
-        "buildsource/poi.py); `compare` has no such option",
-        _PHASE_2C,
-        "§3 #12",
-    ),
-    "abi3_audit": ExpectedGap(
-        "--abi3 single-artifact stable-ABI audit exists only on `scan` "
-        "(scan_abi3_resolve.py, scan_engine._run_abi3_audit); `compare` has "
-        "no --abi3 option at all",
-        _PHASE_2D,
-        "§3 #15",
-    ),
 }
 
 #: F-8/F-9 (plan §7): the `not_evaluated`/`resolved` evolution axis for a
@@ -131,8 +122,9 @@ NOT_YET_IMPLEMENTED_ANYWHERE: dict[str, ExpectedGap] = {
 
 #: The complete *tracked* set: every scan-only capability plus the
 #: separately-tracked F-8/F-9 evolution gap. `test_gap_registry_contract.py`
-#: pins this at exactly sixteen (11 checks + pattern_scan + preprocessor_scan
-#: + changed_path_localization + abi3_audit + finding_evolution). Used only
+#: pins this at exactly fourteen (11 checks + pattern_scan + preprocessor_scan
+#: + finding_evolution) -- changed_path_localization and abi3_audit were
+#: deleted when Phase 2c/2d landed them on `compare`. Used only
 #: for that registry-completeness bookkeeping -- `runner.py`'s scan-vs-compare
 #: diff checks against `EXPECTED_GAPS` alone (see this module's docstring).
 ALL_EXPECTED_GAPS: dict[str, ExpectedGap] = {

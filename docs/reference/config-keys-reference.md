@@ -42,6 +42,12 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 | `dwarf_only` | bool |
 | `format` | str |
 
+### `python:`
+
+| Sub-key | Type |
+|---|---|
+| `abi3_floor` | str |
+
 ### `scope:`
 
 | Sub-key | Type |

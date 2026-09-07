@@ -29,12 +29,16 @@ from __future__ import annotations
 
 OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
+        # ADR-068 Phase 2c/2d: changed-path localization + the candidate-side
+        # abi3 audit, moved off `scan` (one-comparison-product.md §3 #12/#15).
+        "--abi3",
         "--allow-ast-frontend-fallback",
         "--allow-unsupported-castxml",
         "--ast-frontend",
         "--audit-suppressions",
         "--bundle-facts-library-manifest",
         "--bundle-facts-out",
+        "--changed-path",
         "--compiler",
         "--compiler-option",
         "--compiler-prefix",
@@ -105,6 +109,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--severity-preset",
         "--show-filtered",
         "--show-only",
+        "--since",
         "--sources",
         "--support-promise",
         "--suppress",

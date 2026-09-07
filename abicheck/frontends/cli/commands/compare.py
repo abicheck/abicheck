@@ -46,10 +46,12 @@ from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli
     _warn_ignored_flags as _warn_ignored_flags,
 )
 from ....cli_options import (
+    abi3_option,
     adr027_compare_options,
     app_usage_scope_options,
     apply_compare_profile,
     bundle_facts_manifest_options,
+    changed_path_options,
     compile_context_options,
     contract_options,
     debug_resolution_options,
@@ -256,6 +258,7 @@ def _embed_inline_source_side(
     include_labels: dict[Path, str] | None = None,
     include_dependencies: bool = False,
     build_config: Path | None = None,
+    changed_paths: tuple[str, ...] = (),
 ) -> tuple[Path, Path | None, Path | None]:
     """Resolve one side's ``--sources`` into the input ``compare`` should read.
 
@@ -317,6 +320,15 @@ def _embed_inline_source_side(
     `build.query` (ADR-032 D5); forwarding an auto-discovered path here would
     let an untrusted, PR-controlled ``.abicheck.yml`` in the sources tree
     authorize its own subprocess execution.
+
+    ``changed_paths`` (ADR-068 Phase 2c) is this run's resolved
+    ``--since``/``--changed-path`` seed, forwarded to the nested dump through
+    its private ``_resolved_changed_paths`` hook (the same shape
+    ``_resolved_compile_context``/``_resolved_collect_mode`` use). Without it
+    a localized ``compare`` would narrow its *collect mode* to
+    ``source-changed`` while the dump that actually collects had no seed to
+    narrow *by*, which ``collect_inline_pack`` correctly treats as "no seed"
+    and widens back to headers-only.
 
     ``depth`` is ``compare``'s own (unmodified) ``--depth`` string, used only
     to reproduce ``dump_cmd``'s ``--depth source`` + ``--ast-frontend hybrid``
@@ -470,6 +482,11 @@ def _embed_inline_source_side(
         # compare must not silently change this side's dependency scope
         # depending only on which evidence flags happened to be passed.
         include_dependencies=include_dependencies,
+        # ADR-068 Phase 2c: this run's changed-path seed, so the nested dump's
+        # own L4 replay / L5 call-graph pass narrows to the changed TUs the
+        # same way a `--depth source` scan's does (ADR-043 D7). Empty for
+        # every run without --since/--changed-path, i.e. bit-for-bit as before.
+        _resolved_changed_paths=changed_paths,
     )
     # The raw sources/build-info are now embedded in the snapshot; pack-shaped
     # inputs (kept_*) ride through to the later prepare_embedded_build_source so
@@ -614,6 +631,8 @@ def _embed_inline_source_side(
 # shared local-ELF debug-resolution family.
 @debug_resolution_options
 @evidence_options  # --depth, --sources, --build-info
+@changed_path_options  # ADR-068 Phase 2c: --since/--changed-path (scoping only)
+@abi3_option  # ADR-068 Phase 2d: --abi3 candidate-side stable-ABI audit
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
 @profile_option  # ADR-040 Lever 3: --profile (workflow-default bundles)

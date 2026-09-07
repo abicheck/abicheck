@@ -767,7 +767,18 @@ from typing import Any
 #:       first for workstream D-S1's ``used_by[]``/``consumer_impact_
 #:       summary`` fields (same "renumber, don't reuse" convention as the
 #:       2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2 entries above).
-REPORT_SCHEMA_VERSION = "3.4"
+#: 3.5 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2d
+#:       (ADR-068 D3): a ``changes[]`` entry may carry the additive, optional
+#:       boolean ``candidate_side_enrichment``, marking a finding produced by
+#:       a check that is meaningful only on the candidate (NEW) side -- today
+#:       ``compare --abi3``'s stable-ABI audit, which rides this same result
+#:       document rather than a second one. Omitted (never ``false``) for an
+#:       ordinary two-sided finding, so every existing report is unchanged.
+#:       The same phase makes 3.4's ``evidence_contract_error_contribution``
+#:       CLI-reachable for the first time: ``--abi3`` against a candidate
+#:       that is not a recognisable CPython extension module is an
+#:       evidence-contract abort (exit ``7``).
+REPORT_SCHEMA_VERSION = "3.5"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

@@ -2,10 +2,10 @@
 """Structural checks on the expected-gap registry itself.
 
 The registry (``tests/parity/gaps.py``) *is* the migration's definition of
-done (plan §6 Phase 0): it must name exactly the sixteen capabilities
-ADR-068 §1 and the plan's requirements enumerate, each with a real reason
-and a real plan-phase reference -- never an empty placeholder, and never
-silently missing an entry.
+done (plan §6 Phase 0): it must name exactly the capabilities ADR-068 §1 and
+the plan's requirements enumerate *that are still open*, each with a real
+reason and a real plan-phase reference -- never an empty placeholder, never
+silently missing an entry, and never still listing one a phase has closed.
 """
 
 from __future__ import annotations
@@ -13,8 +13,11 @@ from __future__ import annotations
 from .gaps import ALL_EXPECTED_GAPS, EXPECTED_GAPS, NOT_YET_IMPLEMENTED_ANYWHERE
 
 #: The eleven cross-source checks (crosscheck.ALL_CHECKS) + pattern_scan +
-#: preprocessor_scan + changed_path_localization + abi3_audit -- exactly
-#: the list this task's own requirements name as the red set.
+#: preprocessor_scan -- what is left of the red set. changed_path_localization
+#: and abi3_audit were deleted from the registry by the PR that landed Phase
+#: 2c/2d (`compare --since/--changed-path`, `compare --abi3`): a closed gap is
+#: removed, never left listed, which is what makes this registry the
+#: migration's own definition of done (plan §6 Phase 0/3).
 _REQUIRED_SCAN_ONLY_KEYS = {
     "exported_not_public",
     "public_not_exported",
@@ -29,8 +32,6 @@ _REQUIRED_SCAN_ONLY_KEYS = {
     "source_surface_dso_mismatch",
     "pattern_scan",
     "preprocessor_scan",
-    "changed_path_localization",
-    "abi3_audit",
 }
 
 
@@ -58,14 +59,6 @@ def test_crosscheck_keys_match_all_checks() -> None:
     from abicheck.buildsource.crosscheck import ALL_CHECKS
 
     crosscheck_keys = {
-        k
-        for k in EXPECTED_GAPS
-        if k
-        not in {
-            "pattern_scan",
-            "preprocessor_scan",
-            "changed_path_localization",
-            "abi3_audit",
-        }
+        k for k in EXPECTED_GAPS if k not in {"pattern_scan", "preprocessor_scan"}
     }
     assert crosscheck_keys == set(ALL_CHECKS)

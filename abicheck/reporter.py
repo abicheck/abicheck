@@ -1412,6 +1412,10 @@ def _change_annotation_fields(c: Any) -> dict[str, Any]:
         out["correlated_change_kind"] = correlated
     if getattr(c, "symbol_binding", None):
         out["symbol_binding"] = c.symbol_binding
+    # ADR-068 D3 — a candidate-only check's finding (the --abi3 audit) rides
+    # this comparison's own result document, marked rather than split out.
+    if getattr(c, "candidate_side_enrichment", False):
+        out["candidate_side_enrichment"] = True
     return out
 
 

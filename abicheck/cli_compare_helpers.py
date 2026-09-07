@@ -92,6 +92,7 @@ from .cli_resolve import (
 )
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
+from .frontends.cli import compare_enrichment as _enrichment
 from .frontends.cli.options import reject_incoherent_secondary_output
 from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.runtime import (
@@ -696,6 +697,7 @@ def _embed_inline_source_sides(
     collect_mode: str, depth: str | None,
     include_labels: dict[Path, str] | None,
     include_dependencies: bool, build_config: Path | None = None,
+    changed_paths: tuple[str, ...] = (),  # ADR-068 Phase 2c: ADR-043 D7 POI scoping
 ) -> tuple[Path, Path | None, Path | None, Path, Path | None, Path | None]:
     """Dump each raw source/build-dir side inline, returning the rewritten inputs.
 
@@ -787,7 +789,7 @@ def _embed_inline_source_sides(
         debug_roots=tuple(resolved_old_debug),
         debuginfod=debuginfod, debuginfod_url=debuginfod_url,
         collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
-        depth=depth, include_labels=include_labels,
+        depth=depth, include_labels=include_labels, changed_paths=changed_paths,
         include_dependencies=include_dependencies, build_config=build_config,
     )
     new_input, new_sources, new_build_info = _embed_inline_source_side(
@@ -806,7 +808,7 @@ def _embed_inline_source_sides(
         dwarf_only=dwarf_only, debug_format=effective_debug_format,
         pdb_path=new_pdb_path or pdb_path,
         collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
-        depth=depth, include_labels=include_labels,
+        depth=depth, include_labels=include_labels, changed_paths=changed_paths,
         include_dependencies=include_dependencies, build_config=build_config,
     )
     return (
@@ -1342,6 +1344,9 @@ def run_compare(
     new_dump_manifest: Path | None = None,
     frontend_context: str = "host",
     require_complete_analysis: bool = False,
+    since: str | None = None,  # ADR-068 Phase 2c: changed-path localization
+    changed_paths_opt: tuple[str, ...] = (),
+    abi3: str | None = None,  # ADR-068 Phase 2d: candidate-side abi3 audit
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1689,6 +1694,13 @@ def run_compare(
         old_sources=old_sources, new_sources=new_sources,
         old_build_info=old_build_info, new_build_info=new_build_info,
     )
+    # ADR-068 Phase 2c/2d (plan §3 #12/#15): the changed-path seed (scoping input
+    # only, narrowing the L4/L5 points of interest per ADR-043 D7) + abi3 floor.
+    _enrich = _enrichment.resolve_compare_enrichment_inputs(
+        since=since, changed_paths_opt=changed_paths_opt, abi3=abi3,
+        project_cfg=project_cfg, sources=new_sources or old_sources,
+    )
+    collect_mode = _enrich.localize_collect_mode(collect_mode)
 
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
     # shared resolver folds the project's .abicheck.yml compile: block into the CLI
@@ -1773,7 +1785,7 @@ def run_compare(
             resolved_new_debug=resolved_new_debug,
             debuginfod=debuginfod, debuginfod_url=debuginfod_url,
             collect_mode=collect_mode, depth=depth,
-            include_labels=include_labels,
+            include_labels=include_labels, changed_paths=_enrich.changed_paths,
             include_dependencies=include_dependencies, build_config=config,
         )
 
@@ -1824,7 +1836,7 @@ def run_compare(
         old_dump_manifest=old_manifest_obj,
         new_dump_manifest=new_manifest_obj,
         include_dependencies=include_dependencies,
-        lang_explicit=lang_explicit,
+        lang_explicit=lang_explicit, changed_paths=_enrich.changed_paths,
     )
 
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap (Codex review, PR
@@ -1957,6 +1969,7 @@ def run_compare(
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
         sys.exit(_EXIT_NOT_COMPARABLE)
+    _enrichment.apply_compare_abi3_audit(result, new, _enrich.abi3_floor, new_input.name)  # ADR-068 D3 (Phase 2d)
     _report_compare_result(
         ctx, result, old, new,
         old_input=old_input, new_input=new_input,

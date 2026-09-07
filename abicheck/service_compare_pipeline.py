@@ -66,6 +66,7 @@ from .policy.depth_projection import (
     project_pair_to_depth,
     project_snapshot_to_depth,
 )
+from .workflows.abi3_audit import apply_abi3_candidate_audit
 from .workflows.artifact.compile_context_gate import (
     SideCompileInput,
     resolved_pair_compile_contexts,
@@ -370,6 +371,7 @@ def resolve_compare_request(
             debug_format=debug_format,
             include_labels=dict(request.include_labels) or None,
             notify=notify,
+            changed_paths=request.changed_paths,  # ADR-043 D7 POI scoping
         )
 
     def _resolve_old_side() -> SideResolution:
@@ -445,7 +447,7 @@ def classify_compare_pair(
     build-source evidence the snapshots carry into ``extra_changes`` (without
     it a source-only change reads as artifact-only compatible), classifies
     through the Tier-2 ``compare_snapshots`` chokepoint, and attaches the
-    coverage/metrics the diff itself does not produce.
+    coverage/metrics the diff itself does not produce -- plus ADR-068 D3's candidate-only ``--abi3`` enrichment of this same result document (Phase 2d; a no-op unless ``CompareRequest.abi3_floor`` is set).
 
     A front end that must configure the run between the two phases (the native
     ``compare`` CLI's ADR-049 ``resolve_and_apply``, which can move the policy
@@ -538,6 +540,7 @@ def classify_compare_pair(
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
+    apply_abi3_candidate_audit(result, new, request.abi3_floor)
     # Hash through the full GNU ld linker-script chain to its final resolved
     # target -- resolve_side_snapshot() already followed the identical chain
     # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
@@ -591,10 +594,9 @@ def classify_compare_pair(
     # exit-code-scheme selector to pass any more -- the algorithm is purely
     # derived from whether `severity_preset` (or a resolved gate pack) put a
     # severity setting in effect.
-    from .policy.exit_decision import resolve_compare_exit_decision
-    from .workflows.gate import resolve_release_gate_options
+    from .workflows import gate as gate_workflow
 
-    gate = resolve_release_gate_options(
+    gate = gate_workflow.resolve_release_gate_options(
         None,
         severity_preset=request.severity_preset,
         severity_abi_breaking=None,
@@ -602,7 +604,8 @@ def classify_compare_pair(
         severity_quality_issues=None,
         severity_addition=None,
     )
-    exit_decision = resolve_compare_exit_decision(
+    # Abort-axes-aware (plan P3): a typed caller's own `exit_decision` reports an `--abi3` evidence-contract abort too.
+    exit_decision = gate_workflow.resolve_compare_exit_decision_with_abort_axes(
         result, gate.severity, gate.exit_code_scheme
     )
 
