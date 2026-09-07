@@ -790,26 +790,26 @@ from typing import Any
 #:       ``finding_evolution`` object (same "renumber, don't reuse"
 #:       convention as the 2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2/3.4
 #:       entries above).
-#: 3.7 -- ADR-068 D3 / plan P2, merged onto Phase 1 item 2's already-landed
-#:       3.5 and workstream E slice S3's 3.6 (renumbered from a conflicting
-#:       3.6 this branch had independently claimed, same "renumber, don't
-#:       reuse" convention as the 2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2/
-#:       3.4/3.6 entries above): ``compare(..., cross_source_checks=True)``
-#:       stamps a ``change``'s ``cross_source_evolution`` (introduced/
-#:       resolved/persistent/not_evaluated -- ``CrossSourceEvolution``,
-#:       deliberately distinct from the cross-comparison-chain
-#:       ``FindingEvolution``/``finding_evolution`` object 3.5 above) and an
-#:       additive top-level ``cross_source_evolution`` per-state count
-#:       object; off by default, never changes the finding's default
-#:       verdict. A later PR (same schema version -- no shape change) adds
-#:       a second check onto this exact mechanism, ``private_header_leak``
-#:       (plan §5 P2 / §3 #3-#4), generalizing
+#: 3.7 -- ADR-068 D3/D4/D5 / plan P2, merged onto Phase 1 item 2's already-
+#:       landed 3.5 and workstream E slice S3's 3.6 (renumbered from a
+#:       conflicting 3.6 this branch had independently claimed, same
+#:       "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/
+#:       2.49/2.51/2.53/3.2/3.4/3.6 entries above): ``compare()`` stamps a
+#:       ``change``'s ``cross_source_evolution`` (introduced/resolved/
+#:       persistent/not_evaluated -- ``CrossSourceEvolution``, distinct from
+#:       the cross-comparison-chain ``FindingEvolution``/
+#:       ``finding_evolution`` object 3.5 above) and an additive top-level
+#:       ``cross_source_evolution`` per-state count object; on by default,
+#:       automatic, no front end flag (D4/D5); never changes the finding's
+#:       default verdict. A companion PR (same schema version -- no shape
+#:       change) added a second check onto this exact mechanism,
+#:       ``private_header_leak`` (plan §5 P2 / §3 #3-#4), generalizing
 #:       ``workflows.cross_source_evolution``'s per-finding identity (a
 #:       check whose findings are not uniquely keyed by ``symbol`` alone --
 #:       e.g. one function leaking two distinct private types -- registers
 #:       its own identity function) in the process. The wire shape this
-#:       version already describes is unchanged; only the set of checks
-#:       populating it grows.
+#:       version describes is unchanged; only the set of checks populating
+#:       it grows, and how often it's populated (on by default, not opt-in).
 #: 3.8 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2d
 #:       (ADR-068 D3): a ``changes[]`` entry may carry the additive, optional
 #:       boolean ``candidate_side_enrichment``, marking a finding produced by

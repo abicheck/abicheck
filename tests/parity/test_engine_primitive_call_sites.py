@@ -26,20 +26,21 @@ corresponding tests/parity/gaps.py entry in that same PR, *once the whole
 group of checks a primitive backs has actually reached parity through
 compare's real, user-facing entry point*.
 
-**Documented partial exception (ADR-068 D3 / plan P2):**
+**Documented partial exception (ADR-068 D3/D4/D5 / plan P2):**
 ``abicheck/workflows/cross_source_evolution.py`` is a second, legitimate
-caller of ``run_crosschecks`` -- the first, minimal slice of the migration,
-which folds exactly one check (``unversioned_exported_symbol``) into an
-evolution-stated finding via ``compare(..., cross_source_checks=True)``, an
-opt-in Python-API parameter with no CLI flag yet. This does not close the
-``unversioned_exported_symbol`` (or any other) ``tests/parity/gaps.py``
-entry: the real, user-facing ``compare`` CLI this parity harness's own
-``compare_finding_set``/``compare_json`` helpers invoke still never passes
-``cross_source_checks=True``, so its default finding set is unaffected and
-every crosscheck-backed gap entry stays exactly as red as before. Only the
-raw structural claim this module checks -- "nothing but scan_engine.py
-calls the primitive at all" -- needed updating to admit the one caller this
-slice deliberately adds.
+caller of ``run_crosschecks`` -- the migration's slices so far fold two
+checks (``unversioned_exported_symbol``, ``private_header_leak``) into
+evolution-stated findings via ``compare()``'s own ``cross_source_checks``
+keyword. That keyword defaults to ``True`` and is reached automatically by
+every real front end (CLI, typed API, Action) with no opt-in flag of any
+kind (D5 rejects "a flag that merely enables useful analysis") -- which is
+exactly why neither check is registered in ``tests/parity/gaps.py`` any
+more; see ``test_crosscheck_parity.py``'s own positive coverage for both.
+The other nine checks this primitive backs remain scan-only, so every
+*other* crosscheck-backed gap entry stays exactly as red as before. Only
+the raw structural claim this module checks -- "nothing but scan_engine.py
+calls the primitive at all" -- needed updating to admit the one caller
+these slices deliberately add.
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ _ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str]] = {
     "run_crosschecks": (
         "buildsource/crosscheck.py",
         ("scan_engine.py", "workflows/cross_source_evolution.py"),
-        "private_header_leak",  # any of the 11 crosscheck gap keys will do
+        "odr_type_variant",  # any still-scan-only crosscheck gap key will do
     ),
     "scan_files": (
         "buildsource/pattern_scan.py",

@@ -5,12 +5,17 @@
 
 ADR-068 D3 / ``docs/contribute/plans/one-comparison-product.md`` P2 and §3
 row 3: :mod:`abicheck.buildsource.crosscheck` diffs one snapshot's evidence
-sources against each other -- it carries no baseline of its own, so today it
-only runs from ``scan_engine.py`` against the candidate binary alone. This
-module is the first, minimal slice of moving that class of check onto
-``compare()``'s own pipeline: it runs a check independently on OLD and NEW
-and folds the two one-sided results into a single, evolution-stated finding
-set (:class:`~abicheck.checker_policy.CrossSourceEvolution`).
+sources against each other -- it carries no baseline of its own. Before this
+module existed it ran only from ``scan_engine.py`` against the candidate
+binary alone, unreachable from ``compare()``; this module moves that class
+of check onto ``compare()``'s own pipeline: it runs a check independently on
+OLD and NEW and folds the two one-sided results into a single,
+evolution-stated finding set (:class:`~abicheck.checker_policy.
+CrossSourceEvolution`). ``checker.compare()`` runs it automatically, on
+every invocation -- see its own ``cross_source_checks`` keyword (default
+True) -- because ADR-068 D4/D5 classify "a flag that merely enables useful
+analysis" as REMOVE: the stage is evidence-gated per check, per side, not
+opt-in.
 
 **Scope so far**: two checks, ``unversioned_exported_symbol`` (``buildsource.
 crosscheck.CHECK_UNVERSIONED_EXPORTED_SYMBOL`` -- chosen first because it

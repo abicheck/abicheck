@@ -820,7 +820,7 @@ def compare(
     contract_mode: str | None = None,
     old_public_entity_ids: frozenset[EntityId] | None = None,
     new_public_entity_ids: frozenset[EntityId] | None = None,
-    cross_source_checks: bool = False,
+    cross_source_checks: bool = True,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -895,11 +895,11 @@ def compare(
         old_public_entity_ids: ADR-063 Phase 3 (D5) -- *old*'s resolved
             public-surface ``EntityId`` set; *new_public_entity_ids* is
             *new*'s (never swap). ``None`` (default) preserves prior behavior.
-        cross_source_checks: ADR-068 D3 / plan P2. Runs the migrated
-            cross-source hygiene check(s) (see ``workflows.
-            cross_source_evolution``) on *old*/*new* independently and
-            merges the evolution-stated result into ``changes``. Off by
-            default; never changes a finding's default verdict.
+        cross_source_checks: ADR-068 D3/D4/D5. Runs the migrated
+            cross-source check(s) (``workflows.cross_source_evolution``) on
+            *old*/*new*, merging the evolution-stated result into
+            ``changes``. **On by default**, evidence-gated per check/side;
+            never changes a finding's default verdict.
 
     Raises:
         ProfileMismatchError: *old* and *new* were extracted under

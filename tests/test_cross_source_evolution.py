@@ -202,23 +202,17 @@ def test_authority_unchanged_finding_stays_risk_regardless_of_evolution():
 
 
 # --------------------------------------------------------------------------- #
-# Wired into compare(): off by default, opt-in via cross_source_checks=True.
+# Wired into compare(): automatic (ADR-068 D3/D4/D5) -- no opt-in flag, on
+# by default, evidence-gated per side/check rather than a user-facing
+# switch. ``cross_source_checks=False`` survives only as an internal Tier-1
+# knob so a test can isolate the stage -- no front end ever sets it.
 # --------------------------------------------------------------------------- #
 
 
-def test_compare_off_by_default():
-    old = _snap(_versioned_elf(("_Z6leakyv",)), version="1.0")
-    new = _snap(_versioned_elf(("_Z6leakyv",)), version="1.1")
-    result = compare(old, new)
-    assert not any(
-        getattr(c, "cross_source_evolution", None) is not None for c in result.changes
-    )
-
-
-def test_compare_opt_in_merges_evolution_stated_finding():
+def test_compare_runs_the_stage_by_default():
     old = _snap(None, version="1.0")  # no ELF at all -> not evaluated
     new = _snap(_versioned_elf(("_Z6leakyv",)), version="1.1")
-    result = compare(old, new, cross_source_checks=True)
+    result = compare(old, new)
     evolved = [
         c
         for c in result.changes
@@ -227,6 +221,55 @@ def test_compare_opt_in_merges_evolution_stated_finding():
     assert len(evolved) == 1
     assert evolved[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED
     assert evolved[0].kind == ChangeKind.UNVERSIONED_EXPORTED_SYMBOL
+
+
+def test_compare_snapshots_runs_the_stage_by_default_too():
+    """The Tier-2 public wrapper (``workflows.compare_policy.
+    compare_snapshots``, re-exported as ``service.compare_snapshots``) does
+    not expose ``cross_source_checks`` at all -- unlike the Tier-1 core, it
+    is generated into ``docs/reference/python-api-reference.md`` as the
+    documented public Python API, so a caller here can never suppress the
+    automatic stage (ADR-068 D5). Same assertion as
+    ``test_compare_runs_the_stage_by_default`` above, through the public
+    wrapper instead of the core verb directly."""
+    from abicheck.workflows.compare_policy import compare_snapshots
+
+    old = _snap(None, version="1.0")  # no ELF at all -> not evaluated
+    new = _snap(_versioned_elf(("_Z6leakyv",)), version="1.1")
+    result = compare_snapshots(old, new)
+    evolved = [
+        c
+        for c in result.changes
+        if getattr(c, "cross_source_evolution", None) is not None
+    ]
+    assert len(evolved) == 1
+    assert evolved[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED
+    assert evolved[0].kind == ChangeKind.UNVERSIONED_EXPORTED_SYMBOL
+
+
+def test_compare_no_finding_is_a_true_no_op():
+    """When neither side's evidence flags anything, running the stage
+    unconditionally must not add so much as an empty marker -- the exact
+    invariant that keeps every pre-existing invocation exiting identically
+    (plan §7 F-19/F-20's output-invariance principle, applied here)."""
+    old = _snap(_no_evidence_elf(), version="1.0")
+    new = _snap(_no_evidence_elf(), version="1.1")
+    result = compare(old, new)
+    assert not any(
+        getattr(c, "cross_source_evolution", None) is not None for c in result.changes
+    )
+
+
+def test_compare_stage_can_still_be_disabled_internally():
+    """``cross_source_checks=False`` is kept as a real Tier-1 keyword purely
+    so a test can isolate the stage -- never exposed as a user-facing
+    opt-out (ADR-068 D5)."""
+    old = _snap(_versioned_elf(("_Z6leakyv",)), version="1.0")
+    new = _snap(_versioned_elf(("_Z6leakyv",)), version="1.1")
+    result = compare(old, new, cross_source_checks=False)
+    assert not any(
+        getattr(c, "cross_source_evolution", None) is not None for c in result.changes
+    )
 
 
 def test_compare_result_cross_source_evolution_default_none() -> None:
@@ -395,12 +438,14 @@ def test_private_header_leak_authority_unchanged() -> None:
             assert c.effective_verdict is None
 
 
-def test_private_header_leak_wired_into_compare_opt_in() -> None:
-    """``checker.compare(..., cross_source_checks=True)`` surfaces this
-    check's evolution-stated finding too, not just the workflows helper."""
+def test_private_header_leak_wired_into_compare_by_default() -> None:
+    """``checker.compare()`` surfaces this check's evolution-stated finding
+    too, automatically -- not just the workflows helper, and not only when
+    ``cross_source_checks`` is passed explicitly (ADR-068 D3/D4/D5, on by
+    default)."""
     old = _phl_snapshot(_PHL_NONE)
     new = _phl_snapshot(_PHL_LEAK)
-    result = compare(old, new, cross_source_checks=True, scope_to_public_surface=False)
+    result = compare(old, new, scope_to_public_surface=False)
     leaks = [c for c in result.changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
     assert len(leaks) == 1
     assert leaks[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED

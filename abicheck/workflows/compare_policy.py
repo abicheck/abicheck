@@ -190,6 +190,19 @@ def compare_snapshots(
     chokepoint is where it happens for every caller that reaches ``compare()``
     through here, ``service_compare_pipeline.classify_compare_pair`` included.
 
+    The migrated cross-source stage (ADR-068 D3/D4/D5, see
+    :func:`~abicheck.checker.compare`'s own ``cross_source_checks``
+    keyword) always runs here -- every front end reaching ``compare()``
+    through this Tier-2 chokepoint (CLI, typed API, Action) gets it
+    automatically, with no flag of any kind. Deliberately **not**
+    forwarded as a parameter of this public wrapper (unlike the Tier-1
+    core, which keeps it as an internal keyword purely so a test can
+    isolate the stage): this function is generated into
+    ``docs/reference/python-api-reference.md`` as the documented public
+    Python API, so exposing a way to disable it here would be exactly the
+    "flag that merely enables useful analysis" D5 rejects, reachable by
+    every real caller of this module.
+
     Raises:
         ValidationError: *contract_mode* is not one of ``public``/``exports``/
             ``all``, or is given without *contract_evaluation*. This is a

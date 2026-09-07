@@ -113,12 +113,12 @@
     },
     {
       "path": "abicheck/buildsource/crosscheck.py",
-      "baseline_lines": 1773,
+      "baseline_lines": 1783,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1773 -> 1783 (ADR-068 D3/D4/D5, cross-source-stage-automatic PR): `_check_unversioned_exported_symbol` now excludes an unattached `*PRIVATE*`-only version-script marker from its own real-scheme test, reusing `diff_versioning._is_unattached_private_version_node`'s definition -- a real correctness fix (a false positive this check's own findings could not previously avoid), found only once `checker.compare()` started running this check automatically on its ordinary path and a fixture with such a marker hit it. Ten lines: one import, one filter comprehension, two call-site renames, and a docstring sentence.",
       "review_by": "2026-11-30"
     },
     {
@@ -1653,12 +1653,12 @@
     },
     {
       "path": "tests/test_crosscheck.py",
-      "baseline_lines": 2666,
+      "baseline_lines": 2701,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 2666 -> 2701 (ADR-068 D3/D4/D5, cross-source-stage-automatic PR): two regression tests for the unattached-private-marker false-positive fix in `_check_unversioned_exported_symbol` (one proving the marker-only case stays silent, one proving a real scheme alongside such a marker still flags correctly).",
       "review_by": "2026-11-30"
     },
     {

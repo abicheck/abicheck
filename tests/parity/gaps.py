@@ -17,6 +17,13 @@ and ``--abi3`` (the candidate-side stable-ABI audit, ADR-068 D3), so their two
 entries were deleted from this registry in the same PR that landed them --
 which is exactly what the registry is for.
 
+Two rows of Phase 2a are closed too: ``unversioned_exported_symbol`` and
+``private_header_leak`` now run automatically inside ``checker.compare()``
+(``cross_source_checks``, default ``True`` -- see
+``workflows/cross_source_evolution.py``), reached by every front end
+through ``compare()``'s ordinary path with no opt-in flag (ADR-068 D4/D5).
+The other nine cross-source checks in this dict remain unmigrated.
+
 **This registry is the red set the migration must turn empty.** A test in
 this package asserts, for each registered key, that the capability is
 present under ``scan`` and absent under ``compare`` today. When a Phase 2
@@ -76,12 +83,10 @@ EXPECTED_GAPS: dict[str, ExpectedGap] = {
     "header_build_context_mismatch": ExpectedGap(
         _CROSSCHECK_REASON, _PHASE_2A, "§3 #3/#10"
     ),
-    "private_header_leak": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3/#4"),
     "odr_type_variant": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3"),
     "public_to_internal_dependency": ExpectedGap(
         _CROSSCHECK_REASON, _PHASE_2A, "§3 #3"
     ),
-    "unversioned_exported_symbol": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3"),
     "rtti_for_internal_type": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3"),
     "identity_collision_detected": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3"),
     "compile_context_conflict": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3/#10"),
