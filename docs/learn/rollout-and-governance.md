@@ -10,9 +10,11 @@ summarizes:
   - policies
   - suppressions
   - project-integration
+  - change-acknowledgment
 depends_on:
   - abicheck/suppression.py
   - abicheck/policy_file.py
+  - abicheck/policy_file_acknowledgment.py
   - action.yml
   - actions/check-target/action.yml
 lifecycle: active
@@ -211,6 +213,26 @@ on the typed `ReleaseRecommendation` as `policy_acceptance` — see
 and, for a longitudinal history over several stored snapshots
 (`abicheck project history`), whether each observed removal was preceded
 by enough deprecation to satisfy `deprecation_window`.
+
+### Change acknowledgment and the additions review gate
+
+A policy file may also declare an `acknowledgment:` block (ADR-067 D6),
+today with one control: `unacknowledged_additions` (`allow`, `warn`, or
+`block` — `allow` by default, so no existing run changes):
+
+```yaml
+acknowledgment:
+  unacknowledged_additions: block
+```
+
+This is a separate, orthogonal mechanism from suppression and from
+`versioning:` above — see [Change acknowledgment](../use/acknowledgments.md)
+for the full acknowledgment-record format and the additions-review gate's
+exit-code contract. In short: an acknowledgment record names one specific,
+already-detected finding and a reason it was intentionally accepted; the
+additions review gate reports (`warn`) or gates on (`block`) a public
+addition that carries no such record, without ever reclassifying the
+addition itself.
 
 ## 6. A minimal `.abicheck.yml`
 

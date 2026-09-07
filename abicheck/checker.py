@@ -143,6 +143,7 @@ from .policy_file import PolicyFile
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
     from .model.identity import EntityId
+    from .policy.acknowledgment import AcknowledgmentList
     from .post_processing import PipelineContext
     from .suppression import SuppressionList
 
@@ -821,6 +822,7 @@ def compare(
     old_public_entity_ids: frozenset[EntityId] | None = None,
     new_public_entity_ids: frozenset[EntityId] | None = None,
     cross_source_checks: bool = True,
+    acknowledgments: AcknowledgmentList | None = None,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -900,6 +902,7 @@ def compare(
             *old*/*new*, merging the evolution-stated result into
             ``changes``. **On by default**, evidence-gated per check/side;
             never changes a finding's default verdict.
+        acknowledgments: ADR-067 D5/C-S3 optional :class:`~abicheck.policy.acknowledgment.AcknowledgmentList`; ``None`` is a no-op.
 
     Raises:
         ProfileMismatchError: *old* and *new* were extracted under
@@ -1330,12 +1333,29 @@ def compare(
         comparability_assurance=comparability_assurance,
         contract_context=contract_context,
         contract_conflicts=contract_conflicts,
+        acknowledgments=acknowledgments,
     )
-    # ADR-067 C-S1/D3, see `finalize_ledger`: `verdict_scored` is the redundant
-    # subset the verdict was scored over, so the audit agrees with the gate.
+    # ADR-067 C-S1/D3 (also resolves `acknowledged_by`, D5): `verdict_scored`
+    # is the redundant subset the verdict was scored over.
     result.disposition_ledger = finalize_ledger(
-        ledger, result, verdict_scored=verdict_redundant
+        ledger,
+        result,
+        verdict_scored=verdict_redundant,
+        strict_acknowledgments=True,
     )
+    if acknowledgments is not None:  # ADR-067 D6 additions-review gate
+        from .policy.acknowledgment_gate import (
+            evaluate_unacknowledged_additions_for_result as _eval_uar,
+        )
+
+        result.unacknowledged_additions_review = _eval_uar(
+            result,
+            acknowledgments,
+            getattr(policy_file, "acknowledgment_policy", None),
+            component=old.library,
+            baseline=old.version,
+            release_label=new.version,
+        )
 
     # P0.4 — computed last, from data the pipeline above already produced
     # (evidence tiers, comparability outcome, contract context, whatever

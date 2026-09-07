@@ -81,10 +81,15 @@ from .checker_policy import (
     policy_kind_sets,
 )
 from .errors import PolicyError
+from .policy.acknowledgment_policy import (
+    AcknowledgmentPolicy,
+    built_in_default_acknowledgment_policy,
+)
 from .policy.versioning_policy import (
     VersioningPolicy,
     built_in_default_versioning_policy,
 )
+from .policy_file_acknowledgment import parse_acknowledgment_policy
 from .policy_file_versioning import parse_versioning_policy
 
 # NOTE: `.reclassify` is deliberately imported lazily (function-local) below,
@@ -627,6 +632,12 @@ class PolicyFile:
     # `kw_only=True` for the same reason `reclassify` above is (CodeRabbit review; see its comment).
     versioning: VersioningPolicy = field(default_factory=built_in_default_versioning_policy, kw_only=True)
     versioning_stated: bool = field(default=False, kw_only=True)
+    # ADR-067 D6/S3 -- the additions review gate policy; `acknowledgment_policy_stated`
+    # mirrors `versioning_stated`/`internal_namespaces_stated` above.
+    acknowledgment_policy: AcknowledgmentPolicy = field(
+        default_factory=built_in_default_acknowledgment_policy, kw_only=True
+    )
+    acknowledgment_policy_stated: bool = field(default=False, kw_only=True)
     # ADR-033 D7 — evidence-aware policy controls. ``None`` means "unset": the
     # finding keeps its default category (current behaviour). A set value maps
     # the whole category of build/source evidence findings to a verdict ceiling.
@@ -696,6 +707,12 @@ class PolicyFile:
             if versioning_stated
             else built_in_default_versioning_policy()
         )
+        acknowledgment_policy_stated = "acknowledgment" in raw
+        acknowledgment_policy = (
+            parse_acknowledgment_policy(raw["acknowledgment"], path)
+            if acknowledgment_policy_stated
+            else built_in_default_acknowledgment_policy()
+        )
 
         return cls(
             base_policy=base_policy,
@@ -708,6 +725,8 @@ class PolicyFile:
             internal_namespaces_stated="internal_namespaces" in raw,
             versioning=versioning,
             versioning_stated=versioning_stated,
+            acknowledgment_policy=acknowledgment_policy,
+            acknowledgment_policy_stated=acknowledgment_policy_stated,
             source_only_findings=source_only,
             build_context_drift=build_drift,
             graph_risk_findings=graph_risk,

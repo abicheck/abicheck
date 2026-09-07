@@ -829,7 +829,17 @@ from typing import Any
 #:       ``contract_conflicts`` entry claimed 3.6 the same way, and
 #:       again from 3.7 to 3.8 on the next, when ADR-068 D3 / plan P2's
 #:       ``cross_source_evolution`` claimed 3.7.
-REPORT_SCHEMA_VERSION = "3.10"  #: 3.10 -- ADR-068 D6's always-0 ``exit.loadability_contribution`` placeholder (deps-only; see policy/exit_decision.py). 3.9 -- Workstream G S1's additive ``surface_changes`` object (see report/surface_changes.py).
+#: 3.10 -- ADR-067 D5/D6 (plan workstream C-S3): the ``disposition_audit``
+#:       block gains additive ``acknowledged_total``/``acknowledgments`` (an
+#:       ``Acknowledgment`` record's own overlay, mirroring 2.51's
+#:       ``reclassified_total``/``reclassifications``) and
+#:       ``unacknowledged_additions_review`` (D6's review-gate result, or
+#:       ``null`` when a run never supplied an acknowledgment document).
+#:       Every pre-existing report gains three always-empty/``null`` keys and
+#:       nothing else changes -- no existing invocation's disposition,
+#:       verdict, or exit code moves (both are opt-in via
+#:       ``checker.compare(acknowledgments=...)``).
+REPORT_SCHEMA_VERSION = "3.11"  #: 3.11 -- ADR-068 D6's always-0 ``exit.loadability_contribution`` (deps-only); renumbered from a 3.10 clash with ADR-067 D5/D6 above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

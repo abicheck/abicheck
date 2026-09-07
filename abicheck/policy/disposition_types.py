@@ -72,6 +72,16 @@ class DispositionRecord:
     #: D2 overlay attribute, independent of ``disposition``: the policy
     #: reclassification rule that moved this finding's verdict, if any.
     reclassified_by: str | None = None
+    #: ADR-067 D5/C-S3: another D2 overlay attribute, independent of
+    #: ``disposition`` like ``reclassified_by`` above -- the acknowledgment
+    #: record's own :meth:`~abicheck.policy.acknowledgment.Acknowledgment.
+    #: record_id` when a loaded :class:`~abicheck.policy.acknowledgment.
+    #: AcknowledgmentList` matched this change, else ``None``. An
+    #: acknowledged change keeps whatever terminal disposition it already
+    #: had (D5: "keeps its verdict class, stays in the report... contributes
+    #: to the gate according to policy") -- this field records *that a human
+    #: reviewed and accepted it*, nothing more.
+    acknowledged_by: str | None = None
     #: ADR-067 C-S2: the contract-relevance reason code that decided this
     #: finding's scope exclusion, when one exists -- read verbatim off
     #: ``Change.contract_reason_code`` (``contract_relevance_types.py``'s
@@ -146,6 +156,8 @@ class DispositionRecord:
             entry["rule"] = self.rule.to_dict()
         if self.reclassified_by is not None:
             entry["reclassified_by"] = self.reclassified_by
+        if self.acknowledged_by is not None:
+            entry["acknowledged_by"] = self.acknowledged_by
         if self.reason_code is not None:
             entry["reason_code"] = self.reason_code
         return entry

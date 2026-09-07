@@ -9,6 +9,7 @@ canonical_for:
 summarizes:
   - suppressions
   - output-formats
+  - change-acknowledgment
 lifecycle: active
 generated: false
 ---
@@ -97,3 +98,13 @@ finding was wrong. Two consequences follow, both visible in the audit:
 
 Full rule syntax and the audit trail a rule leaves behind:
 [Suppressions](suppressions.md).
+
+## What it means for acknowledgment
+
+An acknowledgment records that a finding was *seen and intentionally
+accepted* — the opposite intent from suppression. An acknowledged finding
+keeps its own disposition from the six above (it is not a seventh state);
+the audit additionally names which acknowledgment record covered it
+(`acknowledged_by`), and a policy `acknowledgment:` block can separately
+flag a public addition that carries no such record. Full record format and
+the additions review gate: [Change acknowledgment](acknowledgments.md).
