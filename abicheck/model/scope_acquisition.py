@@ -102,6 +102,17 @@ class AcquisitionState(str, Enum):
     #: Could pair with more than one counterpart (D3) -- a diagnostic, not
     #: a guess (S1 emits it; S2's filename matching never produces one).
     AMBIGUOUS = "ambiguous"
+    #: ADR-068 D2 / plan P1: the OLD side of an ``abicheck compare
+    #: --no-baseline NEW`` run. The user *declared* there is no prior
+    #: surface -- this is explicitly not ``NOT_SUPPLIED`` (which means
+    #: "unmatched, unproven, treat as incomplete scope"): a declared-absent
+    #: OLD side never makes the run read as incomplete, is never a proven-
+    #: removal input (:attr:`ScopeAcquisitionRecord.proven_removed_members`
+    #: only ever reads ``NOT_SUPPLIED``), and never yields an addition --
+    #: those all require a real OLD side to compare against, which by
+    #: construction does not exist here. See
+    #: :mod:`abicheck.workflows.no_baseline_compare`.
+    DECLARED_ABSENT = "declared_absent"
 
 
 #: The states D6 counts as "a selected, expected member that did not reach
@@ -278,8 +289,19 @@ class ScopeAcquisitionRecord:
 
     @property
     def completed_members(self) -> tuple[MemberAcquisition, ...]:
-        """Members whose comparison completed (``available``)."""
-        return tuple(m for m in self.members if m.state is AcquisitionState.AVAILABLE)
+        """Members that reached a completed outcome this run: ``available``
+        (a real two-sided comparison ran) or ``declared_absent`` (ADR-068
+        D2: no two-sided comparison was ever intended, but the audit that
+        *did* run over the candidate side completed). D7's ``no_comparison_
+        completed`` reads this property, so a ``--no-baseline`` run --
+        which by design never runs a comparison -- must not read as "the
+        selected scope produced no valid comparison at all"; it produced
+        exactly the (different-shaped) result it declared it would."""
+        return tuple(
+            m
+            for m in self.members
+            if m.state in (AcquisitionState.AVAILABLE, AcquisitionState.DECLARED_ABSENT)
+        )
 
     @property
     def unchecked_members(self) -> tuple[MemberAcquisition, ...]:
