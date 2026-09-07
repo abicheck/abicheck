@@ -291,24 +291,24 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             "supported together with a stored-bundle-facts OLD_INPUT."
         )
     if (
-        kwargs.get("debug_format_opt") is not None
-        or kwargs.get("dwarf_only") is True
-        or kwargs.get("debuginfod") is True
-        or kwargs.get("debuginfod_url") is not None
-        or kwargs.get("debug_roots")
+        kwargs.get("debug_roots")
         or kwargs.get("debug_roots_old")
         or kwargs.get("debug_roots_new")
     ):
-        # Codex review: these control which NEW-side ELF/DWARF facts get
-        # extracted (--debug-format/--dwarf-only select the debug-info
-        # source; --debuginfod/--debuginfod-url and --debug-root locate
-        # separate debug files), but compare_release_against_bundle_facts()
-        # calls service.resolve_input() with none of them -- always its own
-        # defaults, regardless of what was requested here. Rejected rather
-        # than silently comparing a different ABI surface than asked for.
+        # Codex review: --debug-root locates separate debug files, but
+        # compare_release_against_bundle_facts() calls service.resolve_input()
+        # with none of them -- always its own defaults, regardless of what was
+        # requested here. Rejected rather than silently comparing a different
+        # ABI surface than asked for.
+        #
+        # ADR-068 D5 / Phase 7a: --debug-format/--dwarf-only/--debuginfod/
+        # --debuginfod-url were hidden CLI flags and are gone entirely now
+        # (config-only via debug.format/debug.dwarf_only/debug.debuginfod/
+        # debug.debuginfod_url) -- there is no longer a kwargs key for any of
+        # them to check here at all. The equivalent config-set case is
+        # rejected below, by the debug: config-block check.
         raise click.UsageError(
-            "--debug-format/--dwarf-only/--debuginfod/--debuginfod-url/"
-            "--debug-root are not supported together with a stored-bundle-facts OLD_INPUT."
+            "--debug-root is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     # ADR-068 D4/Phase 5: --pattern-verdicts is gone as a flag (it's
     # unconditional everywhere else on `compare` now) -- nothing left to

@@ -876,11 +876,15 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--require-complete-analysis" in out
 
-    def test_dwarf_only_is_rejected(self, tmp_path: Path) -> None:
-        # Codex review: --dwarf-only/--debug-format/--debuginfod/
-        # --debug-root select or locate NEW-side debug info, but
+    def test_debug_root_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: --debug-root locates NEW-side debug info, but
         # compare_release_against_bundle_facts()'s per-library
-        # service.resolve_input() call is never given any of them.
+        # service.resolve_input() call is never given it.
+        #
+        # ADR-068 D5 / Phase 7a: --dwarf-only/--debug-format/--debuginfod/
+        # --debuginfod-url were hidden CLI flags and are gone entirely now
+        # (config-only via the debug: block) -- see
+        # test_config_debug_block_is_rejected below for that equivalent case.
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
@@ -890,13 +894,14 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--dwarf-only",
+            "--debug-root",
+            str(tmp_path),
             "--format",
             "json",
         )
 
         assert code == 64
-        assert "--dwarf-only" in out
+        assert "--debug-root" in out
 
     def test_surface_metrics_is_rejected(self, tmp_path: Path) -> None:
         # ADR-068 D4/Phase 5: --pattern-verdicts is gone (unconditional

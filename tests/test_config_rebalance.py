@@ -340,6 +340,14 @@ class TestFlagBudget:
         "--strict-suppressions", "--require-justification",
         "--collapse-versioned-symbols", "--public-symbol",
         "--public-symbols-list", "--show-redundant", "--no-show-redundant",
+        # ADR-068 D5 / Phase 7a (one-comparison-product.md §6 Phase 7 item
+        # 7a): the debug-resolution knobs joined this list too -- previously
+        # the one family D5 exempted (hidden-but-kept, see the now-removed
+        # test_debug_resolution_family_stays_hidden), but "hidden but
+        # accepted still counts as public surface" (ADR-068 D5) applies to
+        # them exactly the same as every other entry above.
+        "--debug-format", "--debuginfod", "--debuginfod-url", "--dwarf-only",
+        "--no-debuginfod", "--no-dwarf-only",
     )
 
     @staticmethod
@@ -362,19 +370,32 @@ class TestFlagBudget:
                 "pins against."
             )
 
-    def test_debug_resolution_family_stays_hidden(self) -> None:
-        """The debug-resolution knobs are the ones that stayed: unlike the
-        families above they are per-run resolution inputs, not duplicates of a
-        setting a project pins once, so they keep their hidden CLI spelling
-        (ADR-040 Lever 2 Phase D) alongside the ``debug:`` config block."""
-        cmd = main.commands["compare"]
-        hidden = self._option_spellings(cmd, hidden_only=True)
-        for flag in (
-            "--debug-format", "--debuginfod", "--debuginfod-url", "--dwarf-only",
-            # Two-way, so a one-off run can force false over a config true.
-            "--no-debuginfod", "--no-dwarf-only",
-        ):
-            assert flag in hidden, f"{flag} should be hidden (demoted to config, D4)"
+    @pytest.mark.parametrize(
+        "flag",
+        ["--dwarf-only", "--no-dwarf-only", "--debuginfod", "--no-debuginfod",
+         "--debuginfod-url", "--debug-format"],
+    )
+    def test_removed_debug_flags_exit_usage_error_on_compare(
+        self, tmp_path: Path, flag: str
+    ) -> None:
+        """ADR-068 D5 / Phase 7a: each removed hidden flag exits 64 with
+        Click's standard 'No such option' on `compare` -- the old spelling
+        must not silently resolve to anything, hidden or otherwise."""
+        old = tmp_path / "old.so"
+        new = tmp_path / "new.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        new.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        # A value-taking flag (--debuginfod-url/--debug-format) needs an
+        # operand or Click's own "no such option" would be pre-empted by
+        # missing-argument handling for the *next* token; the boolean flags
+        # take none.
+        extra = ["x"] if flag in ("--debuginfod-url", "--debug-format") else []
+        result = CliRunner().invoke(
+            main, ["compare", str(old), str(new), flag, *extra],
+        )
+        assert result.exit_code == 64, result.output
+        assert "No such option" in result.output
+        assert flag in result.output
 
     def test_coarse_overrides_stay_visible(self) -> None:
         cmd = main.commands["compare"]
