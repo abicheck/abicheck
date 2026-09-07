@@ -1305,7 +1305,7 @@
     },
     "contract_conflicts": {
       "type": "array",
-      "description": "Workstream E slice S3 (schema 3.5): present only when the caller opts into `compare --contract`. A recorded disagreement between two (or more) evidence sources about the same entity \u2014 e.g. the binary's export table names a symbol the public-header evidence has no declaration for, or a --post-manifest/--public-symbol(s) overlay narrows this run's committed exports below what a baseline declared public. Per ADR-067 (\"record before disposing\"), a conflict is never resolved to one side: every source's own claim is kept. Advisory only \u2014 never affects verdict, severity, or any exit code. An empty array is a real value meaning conflict detection ran and found none.",
+      "description": "Workstream E slice S3 (schema 3.6): present only when the caller opts into `compare --contract`. A recorded disagreement between two (or more) evidence sources about the same entity \u2014 e.g. the binary's export table names a symbol the public-header evidence has no declaration for, or a --post-manifest/--public-symbol(s) overlay narrows this run's committed exports below what a baseline declared public. Per ADR-067 (\"record before disposing\"), a conflict is never resolved to one side: every source's own claim is kept. Advisory only \u2014 never affects verdict, severity, or any exit code. An empty array is a real value meaning conflict detection ran and found none.",
       "items": {
         "type": "object",
         "properties": {
