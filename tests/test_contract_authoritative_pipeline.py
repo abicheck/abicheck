@@ -704,20 +704,31 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
     def test_a_missing_label_carries_the_whole_canonical_shape(
         self, tmp_path: Path, extra_flags: tuple[str, ...]
     ) -> None:
-        """A missing required symbol has no backing `Change`, so its
-        synthesized entry got neither decision nor contribution — on what
-        was, under the pre-D-S1 design, frequently the response's only
-        blocking finding (Codex review). Runs under both the derived-legacy
-        (no severity setting) and severity (`--severity-preset`) schemes --
-        PR G2 removed the manual pin.
+        """A missing required symbol with no backing library-diff `Change`
+        used to reach the report only as a bespoke synthesized entry that
+        bypassed `_change_to_dict` entirely and got neither decision nor
+        contribution — on what was, under the pre-D-S1 design, frequently
+        the response's only blocking finding (Codex review). Runs under
+        both the derived-legacy (no severity setting) and severity
+        (`--severity-preset`) schemes -- PR G2 removed the manual pin.
 
-        Workstream D-S1 changes what "blocking" means here: this label's
+        ADR-067 C-S2 promotes it further still: `scope_diff_to_required_symbols`
+        now synthesizes the same first-class, ledger-recorded
+        `CONSUMER_REQUIRED_SYMBOL_REMOVED` overlay `--used-by` has carried
+        since ADR-044 P2, so this label is no longer the bespoke
+        `required_symbol_missing` synthetic kind at all -- it is a real
+        `Change` that routes through the ordinary `_change_to_dict` path,
+        which is a strictly more complete representation (impact_assessment,
+        evidence description, reachability) than the bespoke entry this test
+        used to assert completeness *despite*.
+
+        Workstream D-S1 changes what "blocking" means here: this finding's
         `gate_contribution` describes the *consumer's own* scope, which no
         longer determines the real exit code -- the real library-wide
         `pub_b` removal is itself `UNKNOWN_UNRESOLVED` under `--contract
         exports` (no export-table evidence for a JSON-only snapshot pair),
         so the actual exit code (1) comes from the orthogonal contract-
-        coverage floor, not from this label or from `pub_b`'s own
+        coverage floor, not from this finding or from `pub_b`'s own
         (zeroed, NOT_EVALUATED) gate_contribution.
         """
         old, new = _removal_pair()
@@ -748,10 +759,15 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         assert result.exit_code == 1, result.output
         report = json.loads(out.read_text(encoding="utf-8"))
         assert report["contract_coverage_exit_contribution"] == 1
-        missing = [
+        # No bespoke synthetic entry remains for this label (ADR-067 C-S2):
+        # it is now the real overlay Change below.
+        assert not [
             c
             for c in report["changes"]
             if c["kind"].endswith("required_symbol_missing")
+        ], [c["kind"] for c in report["changes"]]
+        missing = [
+            c for c in report["changes"] if c["kind"] == "consumer_required_symbol_removed"
         ]
         assert missing, [c["kind"] for c in report["changes"]]
         for entry in missing:
@@ -763,11 +779,15 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
             # no longer what the process actually exits with (1, the
             # orthogonal contract-coverage floor).
             assert entry["gate_contribution"] == 4
-            # Regression (Codex review, PR #753, fresh evidence): this
-            # synthetic entry bypasses _change_to_dict entirely, so it
-            # never picked up canonical_finding_id (schema 2.35) the way
-            # every other changes[] entry does -- exactly the entry most
-            # likely to be the response's only blocking finding.
+            # Regression (Codex review, PR #753, fresh evidence): the
+            # pre-C-S2 bespoke synthetic entry bypassed _change_to_dict
+            # entirely, so it never picked up canonical_finding_id
+            # (schema 2.35) the way every other changes[] entry does --
+            # exactly the entry most likely to be the response's only
+            # blocking finding. The overlay Change never had that gap
+            # (routes through _change_to_dict like any other finding), but
+            # the assertion stays as the executable statement of the
+            # property this test exists to pin.
             assert entry["canonical_finding_id"]
 
 

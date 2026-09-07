@@ -2395,7 +2395,7 @@ class TestHasImpactEvidence:
     no proof path and one it tags ``PROVEN_REACHABLE`` via a direct-symbol/
     public-source-ABI match with no walked path either. Treating either as
     "evidence of its own" would wrongly block
-    :func:`abicheck.appcompat._enrich_covered_changes` from attaching the
+    :func:`abicheck.appcompat_consumer_impact.enrich_covered_changes` from attaching the
     consumer-graph explanation for the ordinary, common case this join
     exists to serve."""
 
@@ -2408,14 +2408,14 @@ class TestHasImpactEvidence:
         )
 
     def test_no_evidence_at_all_is_false(self):
-        from abicheck.appcompat import _has_impact_evidence
+        from abicheck.appcompat_consumer_impact import _has_impact_evidence
 
         assert _has_impact_evidence(self._change()) is False
 
     def test_a_cached_assessment_with_no_proof_path_is_false(self):
         """The exact regression shape: MarkReachability's blanket cache on
         an UNKNOWN, unproven change must not read as evidence."""
-        from abicheck.appcompat import _has_impact_evidence
+        from abicheck.appcompat_consumer_impact import _has_impact_evidence
         from abicheck.impact.engine import assess_change
 
         change = self._change(reachability_state=ReachabilityState.UNKNOWN)
@@ -2427,7 +2427,7 @@ class TestHasImpactEvidence:
         """The direct-symbol/public-source-ABI-surface tag branches set
         ``public_reachable``/``reachability_state`` but no proof path —
         still not "evidence of its own" for this check's purpose."""
-        from abicheck.appcompat import _has_impact_evidence
+        from abicheck.appcompat_consumer_impact import _has_impact_evidence
         from abicheck.impact.engine import assess_change
 
         change = self._change(
@@ -2440,7 +2440,7 @@ class TestHasImpactEvidence:
         assert _has_impact_evidence(change) is False
 
     def test_a_cached_assessment_with_a_real_proof_path_is_true(self):
-        from abicheck.appcompat import _has_impact_evidence
+        from abicheck.appcompat_consumer_impact import _has_impact_evidence
         from abicheck.impact.engine import assess_change
 
         change = self._change(
@@ -2454,7 +2454,7 @@ class TestHasImpactEvidence:
         assert _has_impact_evidence(change) is True
 
     def test_a_flat_reachability_proof_path_with_no_cached_assessment_is_true(self):
-        from abicheck.appcompat import _has_impact_evidence
+        from abicheck.appcompat_consumer_impact import _has_impact_evidence
 
         change = self._change(reachability_proof_path="Foo -> Bar -> _Z9dispatchv")
         assert change.impact_assessment is None
@@ -2462,7 +2462,7 @@ class TestHasImpactEvidence:
 
 
 class TestEnrichCoveredChangesRefreshesCache:
-    """:func:`abicheck.appcompat._enrich_covered_changes` must refresh
+    """:func:`abicheck.appcompat_consumer_impact.enrich_covered_changes` must refresh
     ``change.impact_assessment`` after attaching consumer evidence, not just
     the flat proof-path fields (Codex review, fresh evidence): a change
     reaching this function with a cached-but-pathless ``ImpactAssessment``
@@ -2473,7 +2473,9 @@ class TestEnrichCoveredChangesRefreshesCache:
     ``proof_path=None`` and silently drop the newly attached explanation."""
 
     def test_stale_pathless_cache_is_refreshed_after_enrichment(self):
-        from abicheck.appcompat import _enrich_covered_changes
+        from abicheck.appcompat_consumer_impact import (
+            enrich_covered_changes as _enrich_covered_changes,
+        )
         from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
         from abicheck.impact.consumer_graph import ConsumerImpactPath
         from abicheck.impact.engine import assess_change
@@ -2514,7 +2516,7 @@ class TestEnrichCoveredChangesRefreshesCache:
 
 
 class TestAttachConsumerImpactStampsReachability:
-    """:func:`abicheck.appcompat._attach_consumer_impact` must stamp
+    """:func:`abicheck.appcompat_consumer_impact.attach_consumer_impact` must stamp
     ``public_reachable``/``reachability_kind``/``reachability_state`` on the
     change it enriches, not just the proof-path fields (Codex review, fresh
     evidence): a shared ``Change`` reaching ``_enrich_covered_changes`` with
@@ -2526,7 +2528,9 @@ class TestAttachConsumerImpactStampsReachability:
     status)."""
 
     def test_enrichment_marks_the_change_consumer_proven(self):
-        from abicheck.appcompat import _enrich_covered_changes
+        from abicheck.appcompat_consumer_impact import (
+            enrich_covered_changes as _enrich_covered_changes,
+        )
         from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
@@ -2564,7 +2568,7 @@ class TestAttachConsumerImpactStampsReachability:
 
 
 class TestMergeConsumerImpactPaths:
-    """:func:`abicheck.appcompat._merge_consumer_impact_paths` must combine
+    """:func:`abicheck.appcompat_consumer_impact._merge_consumer_impact_paths` must combine
     every matching symbol-level explanation for a shared Change, not keep
     only the first and silently discard the rest (Codex review, fresh
     evidence): a single Change can cover more than one missing export via
@@ -2579,7 +2583,7 @@ class TestMergeConsumerImpactPaths:
         early return, since a lone match can itself carry a
         differently-rooted alternative that needs the same filtering as
         the multi-match case (see the class below)."""
-        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
         only = ConsumerImpactPath(
@@ -2600,7 +2604,7 @@ class TestMergeConsumerImpactPaths:
         routing this through the same root filter, impact.engine's single
         affected_public_roots[0] would mislabel a differently-rooted
         alternative as though it started at the primary's own root."""
-        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
         from abicheck.buildsource.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
@@ -2620,7 +2624,7 @@ class TestMergeConsumerImpactPaths:
         assert [other_root_alt] not in merged.alternative_entry_paths
 
     def test_multiple_matches_union_public_entries_and_declarations(self):
-        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
         first = ConsumerImpactPath(
@@ -2658,7 +2662,7 @@ class TestMergeConsumerImpactPaths:
         to model "same root", which is exactly the label-vs-node-identity
         conflation _merge_consumer_impact_paths must not make, since
         distinct nodes commonly share a label for C++ overloads)."""
-        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
         from abicheck.buildsource.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
@@ -2688,7 +2692,7 @@ class TestMergeConsumerImpactPaths:
         including a differently-rooted path would serialize it in
         JSON/SARIF as though it started at the primary's own entry, when
         it actually starts at (and explains) an entirely different one."""
-        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
         from abicheck.buildsource.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
@@ -2723,7 +2727,7 @@ class TestMergeConsumerImpactPaths:
         assess_change()/GraphProofPath has no per-alternative root field
         and would serialize it as though it shared the primary's own
         start."""
-        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
         from abicheck.buildsource.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
@@ -2754,7 +2758,7 @@ class TestMergeConsumerImpactPaths:
         start at genuinely different node ids (entry_A vs entry_B); the
         non-primary match must NOT be folded in as a same-rooted
         alternative just because the labels collide."""
-        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
         from abicheck.buildsource.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
@@ -2787,7 +2791,7 @@ class TestMergeConsumerImpactPaths:
         the primary's root nor the non-primary match's own preferred
         entry -- and that third-rooted path must not be smuggled in as
         though it shared the primary's root."""
-        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
         from abicheck.buildsource.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
@@ -2832,7 +2836,7 @@ class TestMergeConsumerImpactPaths:
         path from a different one, which would read as 'A is reachable
         from entry A' followed by a chain that actually starts at and
         explains B."""
-        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
         from abicheck.buildsource.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
@@ -2862,7 +2866,9 @@ class TestMergeConsumerImpactPaths:
         single shared Change whose affected_symbols names two missing
         exports must report both public roots, not just the first
         explanation found."""
-        from abicheck.appcompat import _enrich_covered_changes
+        from abicheck.appcompat_consumer_impact import (
+            enrich_covered_changes as _enrich_covered_changes,
+        )
         from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 

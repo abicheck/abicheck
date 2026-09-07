@@ -983,7 +983,7 @@ class TestDirectRequirementAndFallthroughs:
 def test_library_source_graph_falls_through_a_snapshot_without_a_pack() -> None:
     """A caller may pass an `old_snapshot` that carries no build_source at all
     (headers-only dump); the operand's own graph must still be found."""
-    from abicheck.appcompat import _library_source_graph
+    from abicheck.appcompat_consumer_impact import _library_source_graph
 
     bare = AbiSnapshot(library="libtrain.so.1", version="1.0")
     # A pack with no graph in it at all -- the other fall-through shape, and

@@ -419,6 +419,155 @@ def test_the_plugin_host_entry_point_closes_its_own_scope() -> None:
             assert record.gate_excluded is True
 
 
+def test_a_missing_required_entrypoint_reaches_the_ledger() -> None:
+    """ADR-067 C-S2: ``--required-symbol(s)``'s own missing-entrypoint overlay.
+
+    Mirrors ``--used-by``'s ``CONSUMER_REQUIRED_SYMBOL_REMOVED`` overlay
+    (ADR-044 P2), closing the gap the C-S1/C-S2 rationale left open: a host
+    contract's entrypoint that is absent from *both* snapshots (so no diff
+    ``Change`` ever names it — the common case for a `dlsym`-style contract
+    the header/DWARF pass never modeled at all) previously reached only the
+    CLI's own bespoke ``missing_entrypoints`` string list, invisible to the
+    conserved ledger and unsuppressible by an exact rule.
+    """
+    from abicheck.appcompat import check_plugin_host_contract
+    from abicheck.policy.disposition_close import ledger_for
+    from abicheck.policy.disposition_ledger import Disposition
+
+    old, new = _snapshots(prefix="plug")  # no removed/added functions at all
+    required = "dlsym_only_entrypoint"  # never modeled as a Function on either side
+
+    scoped = check_plugin_host_contract(old, new, [required])
+    assert scoped.missing_entrypoints == [required]
+    assert len(scoped.breaking_for_host) == 1
+    overlay = scoped.breaking_for_host[0]
+    assert overlay.kind == ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
+    assert overlay.symbol == required
+
+    diff = scoped.full_diff
+    assert diff is not None
+    ledger = ledger_for(diff)
+    # The overlay is a real observation the diff itself never made (D1): the
+    # detected total grows to cover it, not just the effective one.
+    assert ledger.detected_total == 1
+    assert ledger.effective_total == 1
+    record = ledger.record_for(overlay)
+    assert record.disposition is Disposition.GATING
+    assert record.application_point == "required_symbol_overlay"
+
+
+def test_a_suppressed_required_entrypoint_stays_conserved() -> None:
+    """The overlay above, suppressed by an exact rule -- the finding moves to
+    ``suppressed`` (not vanishes), and the raw total is unchanged (D1/D2)."""
+    from abicheck.appcompat import check_plugin_host_contract
+    from abicheck.policy.disposition_close import ledger_for
+    from abicheck.policy.disposition_ledger import Disposition
+
+    old, new = _snapshots(prefix="plug")
+    required = "dlsym_only_entrypoint"
+    suppression = SuppressionList(
+        [Suppression(symbol=required, reason="known optional entrypoint")]
+    )
+
+    scoped = check_plugin_host_contract(
+        old, new, [required], suppression=suppression
+    )
+    # The suppressed overlay must not still gate the host contract, and its
+    # raw string representation is withdrawn from missing_entrypoints too
+    # (mirrors scope_diff_to_app's identical suppressed-missing handling).
+    assert scoped.missing_entrypoints == []
+    assert scoped.breaking_for_host == []
+
+    diff = scoped.full_diff
+    assert diff is not None
+    ledger = ledger_for(diff)
+    assert ledger.detected_total == 1, "the finding was observed, not erased"
+    assert ledger.effective_total == 0, "but it does not gate"
+    [record] = [
+        r for r in ledger.records if r.application_point == "required_symbol_overlay"
+    ]
+    assert record.disposition is Disposition.SUPPRESSED
+    assert record.rule is not None
+    assert record.rule.reason == "known optional entrypoint"
+
+
+def test_suppressed_required_entrypoint_does_not_inflate_coverage() -> None:
+    """A review finding on the PR that added the overlay above: coverage must
+    stay an objective fact about the export table, computed from the *raw*
+    (pre-suppression) missing count -- mirrors ``scope_diff_to_app``'s own
+    ``coverage = _compute_symbol_coverage(...)`` call, made *before* its
+    suppression loop runs, for the identical reason.
+
+    Before the fix, ``scope_diff_to_required_symbols`` filtered suppressed
+    symbols out of ``missing`` *before* computing coverage, so the one
+    required entrypoint here -- suppressed, still genuinely absent from the
+    new plugin -- reported 100% coverage instead of 0%. ``kept=1`` gives the
+    new plugin a real, non-empty export table (``_compute_symbol_coverage``
+    short-circuits to 0.0 whenever the export table is empty regardless of
+    the missing count, which would mask the bug this test targets).
+    """
+    from abicheck.appcompat import check_plugin_host_contract
+
+    old, new = _snapshots(kept=1, prefix="plug")
+    required = "dlsym_only_entrypoint"
+    suppression = SuppressionList(
+        [Suppression(symbol=required, reason="known optional entrypoint")]
+    )
+
+    scoped = check_plugin_host_contract(
+        old, new, [required], suppression=suppression
+    )
+    assert scoped.missing_entrypoints == [], "suppression still withdraws the gate"
+    assert scoped.coverage == 0.0, (
+        "the one required entrypoint is genuinely absent -- suppressing it "
+        "from the gate must not also lie about the export table"
+    )
+
+
+def test_required_symbol_overlay_ledger_persists_without_a_pre_attached_one() -> None:
+    """The ledger ``scope_diff_to_required_symbols`` records the overlay into
+    must survive a later, independent ``ledger_for(diff)`` call -- mirroring
+    ``scope_diff_to_app``'s own ``_finalize_consumer_scope_diff`` guard.
+
+    ``check_plugin_host_contract``'s normal path never hits this: ``compare()``
+    already attaches a ledger to ``diff`` before ``scope_diff_to_required_
+    symbols`` ever runs, so ``ledger_for(diff)`` always resolves to that same
+    object regardless of the fix. This test exercises the function directly
+    against a *detached* diff (``disposition_ledger`` cleared, as a bare
+    ``DiffResult`` from any other producer would start) -- the exact case
+    ``ledger_for``'s own docstring names ("otherwise finalizes a fresh ledger
+    over the result's own buckets"), which is what previously made the
+    overlay's recorded finding invisible to a second, independent resolve.
+    """
+    from abicheck.appcompat import scope_diff_to_required_symbols
+    from abicheck.policy.disposition_close import ledger_for
+    from abicheck.service import compare_snapshots
+
+    old, new = _snapshots(prefix="plug")
+    required = "dlsym_only_entrypoint"
+
+    diff = compare_snapshots(old, new)
+    diff.disposition_ledger = None  # simulate a diff with no ledger attached yet
+
+    scoped = scope_diff_to_required_symbols(diff, old, new, [required])
+    assert scoped.missing_entrypoints == [required]
+    assert diff.disposition_ledger is not None, (
+        "the overlay's ledger must publish itself onto diff, or a later "
+        "independent ledger_for(diff) call rebuilds a disconnected one"
+    )
+
+    # A second, independent resolve must see the same object -- and thus the
+    # same recorded overlay finding -- not a fresh one rebuilt from diff's
+    # own (overlay-free) change buckets.
+    later_ledger = ledger_for(diff)
+    assert later_ledger is diff.disposition_ledger
+    assert later_ledger.detected_total == 1
+    [record] = [
+        r for r in later_ledger.records if r.application_point == "required_symbol_overlay"
+    ]
+    assert record.symbol == required
+
+
 class TestSupportPredicateSemantics:
     """ADR-067 D3: `not_evaluated` means *the evidence was absent*.
 
