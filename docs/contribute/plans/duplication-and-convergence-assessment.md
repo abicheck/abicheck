@@ -20,14 +20,17 @@ contract), [ADR-049](../adr/049-contract-relevance-and-compatibility-configurati
 (root-surface admission), [ADR-055](../adr/055-typed-request-result-completeness-and-schema-registry.md)
 (typed request/result completeness), [ADR-056](../adr/056-multi-artifact-library-set-scan.md)
 (`scan --artifact-set`), [ADR-061](../adr/061-responsibility-package-architecture.md)
-Phase 2 (`ReportDocument` — this plan's `ReportEnvelope` in "Phase 4 —
-Introduce the canonical report model" below is the generalization of the
-same target; ADR-061 Phase 2's own "not met yet" gaps — the Markdown/HTML
-prose rewrite and the per-finding verdict consolidation — are this plan's
-Phase 4 items 3 and 1 respectively, and its item 5 (post-render mutation)
-is this plan's P1 "Reporting composes too late" finding below, almost
-word-for-word; the two documents converged on the same diagnosis
-independently and should be read together rather than as competing plans)
+(`ReportDocument` — this plan's `ReportEnvelope` in "Phase 4 — Introduce the
+canonical report model" below is the generalization of the same target. The
+three gaps that ADR's Phase 2 originally recorded as "not met yet" — the
+Markdown/HTML prose rewrite, the per-finding verdict consolidation, and
+post-render mutation — have all since closed there; what remains is its
+gap C, one document per completed *evaluation* rather than one per format,
+which is what this plan's Phase 4 now owns. The two documents converged on
+the same diagnosis independently and should be read together rather than as
+competing plans; ADR-061 also owns the ownership/dependency half of this
+plan's P0 configuration and P1 dependency-direction hotspots — see
+"Relationship to in-flight work" below)
 **Effort:** XL (six phases, each independently landable; Phase 1 alone spans
 several PRs, and Phase 6 decomposes into ten parallel tracks) · **Risk:**
 high for Phase 1 (touches every extraction call site — `dump`, both
@@ -1647,6 +1650,34 @@ performance duplication (redundant inferred build queries).
 4. Remove the "render → parse → patch → render" functions this obsoletes.
 5. Make release and aggregate consume or embed the same envelope.
 
+**Status against ADR-061 Phase 2 (2026-09-07 re-assessment).** Items 2, 3
+and 4 have effectively landed on ADR-061's side, and item 1 has landed for
+its two named halves — the gate decision
+(`policy/gate_decision.gate_decision_for_result`) and the per-finding
+verdict *plus* the `IssueCategory` this section's own review round demanded
+(`report/finding.py`'s `ReportFinding`, built once per `Change` with no
+identity-keyed cache, exactly as the paragraphs below specify). Every
+format now builds a `ReportDocument` and projects it purely, and the
+scoped-gate render→parse→patch→render fold is gone
+(`report/scoped_gate.apply_scoped_gate`).
+
+**What is left is precisely this phase's remaining reason to exist**, and it
+is now ADR-061's
+[gap C](../adr/061-responsibility-package-architecture.md#c-one-result-one-document-several-projections):
+each format builds *its own* document from the `DiffResult`, and
+`service_render.render_output()` still dispatches the result, snapshots,
+severity configuration and presentation options down six independent paths.
+Six separately-built projections wrapped in one immutable type do not prove
+they cannot disagree. `ReportEnvelope` is that missing single document —
+compatibility, assurance, scope, dispositions, consumer impact and the exit
+decision finalized *before* format selection, with format builders arranging
+presentation and deciding nothing. Build it on ADR-061's existing immutable
+containers and projection tests rather than as a second design, and treat
+its acceptance test as the ADR states it: render the same completed document
+repeatedly and in different format orders, and require identical semantic
+content with no renderer re-running extraction, policy evaluation, or gate
+resolution. This is closure package 3 of that ADR's own sequence.
+
 **Item 1's per-finding verdict is not a fresh design question — ADR-061
 Phase 2 already scoped it and flagged the one real hazard.** Today,
 `junit_report.py`/`html_report.py`/`reporter_markdown.py` each independently
@@ -2280,6 +2311,28 @@ where they converge and what remains once each is fully landed:
   the compatibility-configuration resolver Phase 2 makes the sole runtime
   contract; this plan does not change ADR-049's own D7/D8 precedence rules,
   only how uniformly the *result* of applying them reaches every operation.
+- **[ADR-061](../adr/061-responsibility-package-architecture.md)** owns
+  implementation ownership and dependency boundaries for everything this
+  plan converges. Its 2026-09-07 replan states six remaining acceptance
+  gaps and a bounded closure sequence; three of them are this plan's own
+  targets seen from the ownership side, and should be worked once, not
+  twice:
+  - its **gap C** (one completed evaluation → one document → every format)
+    is this plan's Phase 4 `ReportEnvelope`;
+  - its **gap D** (request/plan types carrying selection, inventory and
+    acquisition state; the release fan-out still folding onto a different
+    shape than `compare`) is this plan's P0 "Effective configuration and
+    pack application" and the `EffectiveGate`/`EffectiveEvaluationConfig`
+    target track T6 deferred to P0;
+  - its **gap A** (dynamic first-party imports hiding forbidden edges,
+    including the `workflows -> frontends` rendering back-edge) is the
+    enforcement half of this plan's P1 "Dependency direction and CLI
+    leakage" — `ENGINE_CLI_BOUNDARY_ALLOWLIST` shrinking does not measure
+    an edge the checker cannot see.
+- **[One comparison product](one-comparison-product.md)** (ADR-068) decides
+  which command owns which analysis. Where this plan says "and `scan`", read
+  it as the capability, not the command: nothing here justifies building a
+  permanent typed contract around a command scheduled for retirement.
 
 ## Out of scope
 
