@@ -1104,18 +1104,30 @@ orchestration conflation of the shape Phase 5 already solved for
 `*_metadata.py`:
 
 - `serialization.py` has taken real decomposition (platform blocks, several
-  `storage/` codecs), but `snapshot_from_dict`'s legacy backfill still calls
+  `storage/` codecs). **Closed (closure package 5, slice 1):**
+  `snapshot_from_dict`'s legacy backfill call to
   `python_ext.detect_python_extension()` — evidence derivation inside the
-  loader, which `storage`'s `may_import: [model]` cannot admit.
+  loader, which `storage`'s `may_import: [model]` could not admit — now runs
+  as an explicit post-load step in `workflows/snapshot_load.py`, reached
+  through `serialization.snapshot_from_dict`'s unchanged public signature.
+  The sibling `snapshot_platform_blocks.py`'s own `storage -> extract` edge
+  (its `_xxx_from_dict` helpers importing dataclasses from the flat parser
+  modules) closed the same slice by switching those ~10 imports to each
+  dataclass's canonical `model/*_facts.py` home; `snapshot_platform_blocks.py`
+  is now classified `storage`. `serialization.py` itself stays unclassified
+  (the `public_root_surfaces` compatibility-facade treatment) — its own
+  ~1500 remaining lines of codec logic are a separate, not-yet-attempted
+  classification.
 - `bundle_facts.py` and its serialization/store siblings are classified
   `workflows`, conflating the `BundleFacts` value, its persistence, and
-  capture/comparison orchestration.
+  capture/comparison orchestration. **Not yet started.**
 - `probe_harness.py` (`compare`) needs `snapshot_to_dict`/
   `snapshot_from_dict` to serialize its own probe matrix. Comparison logic
   must not become the owner of persistence because a probe workflow needs
   serialized inputs; `compare`'s `may_import: [model]` offers no facade
   route, so this needs its own answer. Re-measure its scope with the slice —
   the counts in `architecture/debt.yaml`'s entry predate later splits.
+  **Not yet started** — unaffected by slice 1 above.
 
 The owners to establish are: `model` for snapshot/bundle value types and
 their invariants; `storage` for codecs, schemas, persistence, and schema

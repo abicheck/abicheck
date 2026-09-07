@@ -23,16 +23,17 @@ functions is fully self-contained (only lazy imports of the owning
 platform/language module, no dependency on ``serialization.py``'s own
 module-level state) — mechanical extraction, unchanged function bodies.
 
-Deliberately **not** placed under ``storage/`` (ADR-061): every parser
-dataclass here (``ElfMetadata``, ``PeMetadata``, ``DwarfMetadata``, ...)
-lives in a flat, unclassified parser module (``elf_metadata.py``,
-``pe_metadata.py``, ``dwarf_metadata.py``, ...), and `storage`'s own
-``may_import: [model]`` forbids a `storage -> extract` edge — the same
-"genuine behavioral edge" `architecture/debt.yaml`'s own
-``abicheck/serialization.py`` entry already documents for exactly this
-reason. This module stays a flat root module, registered in
-``architecture/modules.yaml``'s ``legacy_root_modules``, the same way
-``serialization.py`` itself is exempted via ``public_root_surfaces``.
+Classified ``storage`` in ``architecture/modules.yaml`` (ADR-061 gap E,
+closure package 5): every dataclass built here (``ElfMetadata``,
+``PeMetadata``, ``DwarfMetadata``, ...) is now imported from its canonical
+``model/*_facts.py`` home rather than the flat, `extract`-classified parser
+module (``elf_metadata.py``, ``pe_metadata.py``, ``dwarf_metadata.py``,
+...) that re-exports it — closing the `storage -> extract` edge
+`architecture/debt.yaml`'s ``abicheck/serialization.py`` entry used to
+record for this same set of call sites. This module stays a flat root file
+(registered in `storage`'s ``legacy_paths``, not physically moved under
+``storage/``), the same partial-migration shape ``snapshot_io.py`` and
+several other `storage`-classified legacy files already use.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ from typing import Any
 def elf_from_dict(elf: dict[str, Any], schema_version: int) -> Any:
     from dataclasses import replace
 
-    from .elf_metadata import (
+    from .model.elf_facts import (
         ElfImport,
         ElfMetadata,
         ElfSymbol,
@@ -147,7 +148,7 @@ def elf_from_dict(elf: dict[str, Any], schema_version: int) -> Any:
 
 
 def pe_from_dict(pe: dict[str, Any], schema_version: int) -> Any:
-    from .pe_metadata import PeExport, PeMetadata, PeSymbolType
+    from .model.pe_facts import PeExport, PeMetadata, PeSymbolType
     from .storage.fact_codec import decode_fact
 
     exports = [
@@ -179,7 +180,7 @@ def pe_from_dict(pe: dict[str, Any], schema_version: int) -> Any:
 
 
 def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
-    from .macho_metadata import MachoExport, MachoMetadata, MachoSymbolType
+    from .model.macho_facts import MachoExport, MachoMetadata, MachoSymbolType
     from .storage.fact_codec import decode_fact
 
     exports = [
@@ -214,7 +215,7 @@ def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
 
 
 def dwarf_from_dict(d: dict[str, Any]) -> Any:
-    from .dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
+    from .model.dwarf_facts import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
 
     structs = {
         name: StructLayout(
@@ -255,7 +256,7 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
 
 
 def dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
-    from .dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
+    from .model.dwarf_facts import AdvancedDwarfMetadata, ToolchainInfo
 
     tc = d.get("toolchain", {})
     toolchain = ToolchainInfo(
@@ -283,7 +284,7 @@ def dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
 
 
 def sycl_from_dict(d: dict[str, Any]) -> Any:
-    from .sycl_metadata import SyclMetadata, SyclPluginInfo
+    from .model.sycl_facts import SyclMetadata, SyclPluginInfo
 
     plugins = [
         SyclPluginInfo(
@@ -307,7 +308,7 @@ def sycl_from_dict(d: dict[str, Any]) -> Any:
 
 
 def kabi_from_dict(d: dict[str, Any]) -> Any:
-    from .symvers_metadata import KabiEntry, KabiMetadata
+    from .model.kabi_facts import KabiEntry, KabiMetadata
 
     entries = {
         sym: KabiEntry(
@@ -323,7 +324,7 @@ def kabi_from_dict(d: dict[str, Any]) -> Any:
 
 
 def numpy_capi_from_dict(d: dict[str, Any]) -> Any:
-    from .numpy_capi import NumPyCapiSurface
+    from .model.python_facts import NumPyCapiSurface
 
     return NumPyCapiSurface(
         consumes_array_api=d.get("consumes_array_api", False),
@@ -333,7 +334,7 @@ def numpy_capi_from_dict(d: dict[str, Any]) -> Any:
 
 
 def python_ext_from_dict(d: dict[str, Any]) -> Any:
-    from .python_ext import PythonExtMetadata
+    from .model.python_facts import PythonExtMetadata
 
     declared = d.get("declared_abi3")
     # JSON has no tuples: a persisted (major, minor) floor round-trips as a list.
@@ -356,7 +357,7 @@ def python_ext_from_dict(d: dict[str, Any]) -> Any:
 
 
 def python_api_from_dict(d: dict[str, Any]) -> Any:
-    from .python_api import PyClass, PyFunction, PyParameter, PythonApiSurface
+    from .model.python_facts import PyClass, PyFunction, PyParameter, PythonApiSurface
 
     def _param(p: dict[str, Any]) -> PyParameter:
         return PyParameter(

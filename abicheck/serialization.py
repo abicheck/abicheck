@@ -89,6 +89,7 @@ from .storage.snapshot_load_normalization import (
     normalize_anonymous_type_spellings_on_load,
 )
 from .storage.surface_graph_codec import decode_surface_graph, encode_surface_graph
+from .workflows.snapshot_load import backfill_python_ext_from_evidence
 
 # Current schema version for snapshot serialization.
 # Increment this whenever the snapshot format changes in a backward-incompatible way.
@@ -769,14 +770,6 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     numpy_capi = _sub_block(_numpy_capi_from_dict, numpy_capi_data)
     python_ext_data = d.get("python_ext")
     python_ext = _sub_block(_python_ext_from_dict, python_ext_data)
-    # A snapshot dumped without the G14 key (older abicheck, or a `dump` writer
-    # path that didn't attach it) has no serialized ``python_ext``. Derive it on
-    # load from the already-parsed binary metadata so `dump` → `compare` never
-    # silently disables the extension detector — the same recognition the dumper
-    # runs, applied at read time. ``_derive_python_ext_key_absent`` records that
-    # the key was missing (vs. an explicit ``null`` meaning "checked, not an
-    # extension") so we only re-derive when there is no recorded answer.
-    _python_ext_key_absent = "python_ext" not in d
 
     python_api_data = d.get("python_api")
     python_api = _sub_block(_python_api_from_dict, python_api_data)
@@ -1262,32 +1255,11 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # never ran at all without this second, explicit call (Codex review).
     assert_snapshot_semantic_ir_consistent(snap)
 
-    # G14: derive the CPython extension surface for snapshots that predate the
-    # key (or a `dump` path that didn't attach it), so a saved abi3 baseline is
-    # still checked at compare time. Skip when the key was present (the dumper
-    # already answered, including an explicit "not an extension" null).
-    #
-    # Mach-O caveat: the ``imported_symbols`` table is itself new in G14. A
-    # legacy Mach-O ``.abi.json`` written before it existed has no import data;
-    # ``_macho_from_dict`` defaults the absent key to ``[]``. Deriving an
-    # extension from that empty set would be actively misleading: `scan --abi3`
-    # would audit *zero* CPython imports and certify the module clean, and
-    # `compare` would treat every import re-captured from the new binary as
-    # newly gained. So when a Mach-O snapshot never recorded its imports, leave
-    # ``python_ext`` as ``None`` (unknown) — `--abi3` then honestly reports the
-    # artifact must be re-dumped rather than silently passing.
-    _macho_imports_uncaptured = (
-        isinstance(macho_data, dict) and "imported_symbols" not in macho_data
-    )
-    if (
-        snap.python_ext is None
-        and _python_ext_key_absent
-        and not _macho_imports_uncaptured
-    ):
-        if snap.elf is not None or snap.pe is not None or snap.macho is not None:
-            from .python_ext import detect_python_extension
-
-            snap.python_ext = detect_python_extension(snap)
+    # ADR-061 gap E: evidence-derived backfill (real extraction logic, not a
+    # fact lookup) cannot live in a `storage`-classified decode step, so it
+    # runs here as an explicit post-load step from `workflows` — see
+    # workflows/snapshot_load.py's own docstring.
+    backfill_python_ext_from_evidence(snap, d)
 
     # A degraded *_facts_reliable flag used to load with no signal at all --
     # the flag itself was computed correctly, but nothing ever told the
