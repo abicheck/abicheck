@@ -361,6 +361,35 @@ Two of these (P1, P5) are ADR-065 work this plan consumes rather than owns;
 starting them here would fork the model workstream A is building. P2 and P3
 are this plan's own Phase 1.
 
+**Where the implementation lands is ADR-061's question, not this plan's.**
+[ADR-061](../adr/061-responsibility-package-architecture.md) owns
+responsibility ownership and dependency boundaries; this plan owns
+capability topology. Three of its remaining acceptance gaps meet this plan
+directly, and each has one owner rather than two:
+
+- **No `workflows/scan` package, ever.** ADR-061's own `Request ->
+  ResolvedPlan -> Result` examples were written around `ScanRequest`/
+  `ResolvedScanPlan`/`ScanResult`; they now name the compare shapes instead,
+  precisely because migrating a command scheduled for retirement into a
+  permanent typed contract is work this plan's Phase 6 would then have to
+  undo. `scan`'s surviving capabilities route to the compare workflow.
+- **The canonical report replaces the scan schema** (§3, Phase 5) only once
+  ADR-061's [gap C](../adr/061-responsibility-package-architecture.md#c-one-result-one-document-several-projections)
+  closes — one completed evaluation producing one document that every format
+  projects. "One analysis, several artifacts" is not deliverable while six
+  formats each build their own document from a `DiffResult`.
+- **One operand driver** (Phase 7d, re-homed from `cli-cleanup-phase-two.md`
+  as PR I) is the frontend half of ADR-061's
+  [gap D](../adr/061-responsibility-package-architecture.md#d-typed-requestplan-and-operand-convergence):
+  selection, inventory and acquisition state belong on the shared
+  request/plan, not in command-level orchestration. Do it once, in the
+  shared contract.
+
+The sequencing constraint runs the other way too: ADR-061's own closure
+package 6 (facade and legacy retirement) may not delete a `scan`-related
+surface ahead of this plan's Phase 6. A shorter facade is never a reason to
+lose a capability.
+
 ## 6. PR sequence
 
 Nine phases, each independently reviewable. The ordering is the mechanism
