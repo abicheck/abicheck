@@ -50,6 +50,7 @@ from .buildsource.scan_levels import (
     level_to_collect_mode,
 )
 from .compile_context import CompileContext
+from .workflows.changed_paths import localized_collect_mode
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -63,6 +64,7 @@ __all__ = [
     "dump_collect_mode_for",
     "L4_SOURCE_EXTRACTORS",
     "effective_frontend",
+    "localized_collect_mode",
     "effective_frontend_for_context",
     "explicit_source_extractor",
     "requested_frontend_override",
@@ -500,7 +502,14 @@ def resolve_compare_request_evidence(
     (``service_scan.pair_wide_cxx20_std_override``); each side's own
     ``InputSpec.compile`` takes precedence over it.
     """
-    collect_mode = collect_mode_for(request.depth, request.old, request.new)
+    # ADR-043 D7 (plan §3 #12): a changed-path seed narrows the L4/L5 replay
+    # to the changed TUs; with no seed the resolved mode stands unchanged, so
+    # a source-depth run still covers the current library target rather than
+    # collapsing to zero TUs. One owner for the rule, shared with the CLI.
+    collect_mode = localized_collect_mode(
+        collect_mode_for(request.depth, request.old, request.new),
+        request.changed_paths,
+    )
     # Codex review: validate() accepts frontend_context case-insensitively,
     # but every real consumer compares against the lowercase "host"/"device"
     # literals -- normalize once here so an accepted "DEVICE" doesn't

@@ -125,7 +125,7 @@ an unknown-key error.
 ## Top-level keys
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
-`compile:`, `debug:`, `bundle:`, `version:`, `risk_rules:`,
+`compile:`, `debug:`, `bundle:`, `python:`, `version:`, `risk_rules:`,
 `crosschecks:`, `targets:`, `bundles:`, `profiles:`, and `baseline:` are the
 recognized top-level keys. See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
@@ -266,6 +266,27 @@ pair to detect a skew between, so it has no effect there. Distinct from the
 plural `bundles:` block below, which serves a different, unrelated purpose
 (the `project` command family's target declarations). See
 [Multi-binary § The bundle-analysis flags](../use/multi-binary.md#the-bundle-analysis-flags).
+
+---
+
+### `python:`
+
+CPython extension-module properties. One key today: `abi3_floor:` — the
+`Py_LIMITED_API` (stable ABI) version this project promises, e.g.
+`abi3_floor: "3.9"`. Quote it: a bare `3.9` is a YAML float and is rejected
+rather than coerced.
+
+Which floor a project targets is a stable, reviewed-in-a-PR property, not a
+per-run decision (ADR-068 D5), so it lives here — and `compare --abi3
+VERSION` is the per-run override on top of it. With either in effect,
+`compare` audits the **candidate** (NEW) side's imported CPython C-API
+against that floor and reports `python_stable_abi_violation` findings, marked
+as candidate-side enrichment, in the same report as the comparison itself.
+The findings are advisory (`RISK`): gate them through `--policy` /
+`policy.overrides`. A candidate that is not a recognisable CPython extension
+module is an evidence-contract error (exit `7`), since the audit that was
+asked for cannot be performed at all. `scan --abi3` accepts the identical
+version spelling.
 
 ---
 

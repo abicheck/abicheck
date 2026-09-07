@@ -802,7 +802,26 @@ from typing import Any
 #:       additive top-level ``cross_source_evolution`` per-state count
 #:       object; off by default, never changes the finding's default
 #:       verdict.
-REPORT_SCHEMA_VERSION = "3.7"
+#: 3.8 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2d
+#:       (ADR-068 D3): a ``changes[]`` entry may carry the additive, optional
+#:       boolean ``candidate_side_enrichment``, marking a finding produced by
+#:       a check that is meaningful only on the candidate (NEW) side -- today
+#:       ``compare --abi3``'s stable-ABI audit, which rides this same result
+#:       document rather than a second one. Omitted (never ``false``) for an
+#:       ordinary two-sided finding, so every existing report is unchanged.
+#:       The same phase makes 3.4's ``evidence_contract_error_contribution``
+#:       CLI-reachable for the first time: ``--abi3`` against a candidate
+#:       that is not a recognisable CPython extension module is an
+#:       evidence-contract abort (exit ``7``). Renumbered from a
+#:       conflicting 3.5 when the origin/main merge claimed that version
+#:       first for ADR-068 Phase 1's ``finding_evolution`` block (same
+#:       "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/
+#:       2.49/2.51/2.53/3.2/3.4 entries above), then from 3.6 to 3.7 on
+#:       the next merge, when workstream E slice S3's
+#:       ``contract_conflicts`` entry claimed 3.6 the same way, and
+#:       again from 3.7 to 3.8 on the next, when ADR-068 D3 / plan P2's
+#:       ``cross_source_evolution`` claimed 3.7.
+REPORT_SCHEMA_VERSION = "3.8"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

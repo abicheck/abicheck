@@ -55,6 +55,8 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `pack_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 | `severity_preset` | `str \| None` | `None` |
+| `changed_paths` | `tuple[str, ...]` | `()` |
+| `abi3_floor` | `tuple[int, int] \| None` | `None` |
 
 ## `CompareResult`
 

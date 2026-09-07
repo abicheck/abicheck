@@ -530,6 +530,7 @@ def _resolve_compare_snapshots(
     new_dump_manifest: DumpManifest | None = None,
     include_dependencies: bool = False,
     lang_explicit: bool = False,
+    changed_paths: tuple[str, ...] = (),  # ADR-068 Phase 2c: ADR-043 D7 POI scoping
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -646,6 +647,7 @@ def _resolve_compare_snapshots(
         ld_library_path=ld_library_path,
         enable_debuginfod=enable_debuginfod,
         debuginfod_url=debuginfod_url,
+        changed_paths=changed_paths,
     )
     from . import service
 
@@ -710,7 +712,12 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> str | None:
     since the fan-out never calls a graph-attaching single-pair path
     (unchanged); see ``docs/contribute/plans/g31-header-graph-default-on-followup.md``.
     """
-    from .cli_compare_options import _reject_depth_for_set_inputs
+    from .cli_compare_options import (
+        _reject_depth_for_set_inputs,
+        _reject_single_pair_flags_for_set_inputs,
+    )
+
+    _reject_single_pair_flags_for_set_inputs(ctx)  # ADR-068 Phase 2c/2d
 
     used = [
         flag

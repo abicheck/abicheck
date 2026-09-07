@@ -46,10 +46,12 @@ from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli
     _warn_ignored_flags as _warn_ignored_flags,
 )
 from ....cli_options import (
+    abi3_option,
     adr027_compare_options,
     app_usage_scope_options,
     apply_compare_profile,
     bundle_facts_manifest_options,
+    changed_path_options,
     compile_context_options,
     contract_options,
     debug_resolution_options,
@@ -75,6 +77,10 @@ from ....cli_resolve import (
     _normalize_binary_input,
 )
 from ....frontends.cli import help as cli_help
+from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-exported: cli_compare_helpers and frontends/cli/moved.py both resolve these names here
+    _reject_application_operand as _reject_application_operand,
+    _warn_unused_set_flags as _warn_unused_set_flags,
+)
 from ..options.params import (
     SIDED_EXISTING_PATH_PARAM,
     SIDED_PATH_PARAM,
@@ -92,49 +98,6 @@ from ..runtime import (
 from .dump import dump_cmd
 
 _RELEASE_FORMATS = frozenset({"json", "markdown", "junit"})
-
-
-def _reject_application_operand(
-    old_input: Path, new_input: Path, old_kind: str, new_kind: str
-) -> None:
-    """Error when a `compare` operand is an application/executable, not a library."""
-    which = old_input if old_kind == "app" else new_input
-    raise click.UsageError(
-        f"'{which}' looks like an application/executable, not a shared library, "
-        "so `compare` cannot pair it as a library ABI. To check whether an "
-        "application is still satisfied by a library, use "
-        "`abicheck compare <old-lib> <new-lib> --used-by <app>`. If this file "
-        "really is a shared library with an unusual ET_DYN/PIE layout, dump it "
-        "first with `abicheck dump` and compare the resulting snapshots."
-    )
-
-
-def _warn_unused_set_flags(
-    *,
-    jobs_explicit: bool,
-    dso_only: bool,
-    output_dir: Path | None,
-    select: tuple[str, ...] = (),
-    select_required: tuple[str, ...] = (),
-) -> None:
-    """Warn that the set-input fan-out flags do not apply to single-file inputs."""
-    used = []
-    if jobs_explicit:
-        used.append("-j/--jobs")
-    if dso_only:
-        used.append("--dso-only")
-    if output_dir is not None:
-        used.append("--output-dir")
-    if select:
-        used.append("--select")
-    if select_required:
-        used.append("--select-required")
-    if used:
-        click.echo(
-            "Warning: " + ", ".join(used) + " only apply to directory/package "
-            "(set) inputs; ignoring them for this single-file comparison.",
-            err=True,
-        )
 
 
 def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
@@ -256,6 +219,7 @@ def _embed_inline_source_side(
     include_labels: dict[Path, str] | None = None,
     include_dependencies: bool = False,
     build_config: Path | None = None,
+    changed_paths: tuple[str, ...] = (),
 ) -> tuple[Path, Path | None, Path | None]:
     """Resolve one side's ``--sources`` into the input ``compare`` should read.
 
@@ -317,6 +281,15 @@ def _embed_inline_source_side(
     `build.query` (ADR-032 D5); forwarding an auto-discovered path here would
     let an untrusted, PR-controlled ``.abicheck.yml`` in the sources tree
     authorize its own subprocess execution.
+
+    ``changed_paths`` (ADR-068 Phase 2c) is this run's resolved
+    ``--since``/``--changed-path`` seed, forwarded to the nested dump through
+    its private ``_resolved_changed_paths`` hook (the same shape
+    ``_resolved_compile_context``/``_resolved_collect_mode`` use). Without it
+    a localized ``compare`` would narrow its *collect mode* to
+    ``source-changed`` while the dump that actually collects had no seed to
+    narrow *by*, which ``collect_inline_pack`` correctly treats as "no seed"
+    and widens back to headers-only.
 
     ``depth`` is ``compare``'s own (unmodified) ``--depth`` string, used only
     to reproduce ``dump_cmd``'s ``--depth source`` + ``--ast-frontend hybrid``
@@ -470,6 +443,11 @@ def _embed_inline_source_side(
         # compare must not silently change this side's dependency scope
         # depending only on which evidence flags happened to be passed.
         include_dependencies=include_dependencies,
+        # ADR-068 Phase 2c: this run's changed-path seed, so the nested dump's
+        # own L4 replay / L5 call-graph pass narrows to the changed TUs the
+        # same way a `--depth source` scan's does (ADR-043 D7). Empty for
+        # every run without --since/--changed-path, i.e. bit-for-bit as before.
+        _resolved_changed_paths=changed_paths,
     )
     # The raw sources/build-info are now embedded in the snapshot; pack-shaped
     # inputs (kept_*) ride through to the later prepare_embedded_build_source so
@@ -626,6 +604,8 @@ def _embed_inline_source_side(
 # shared local-ELF debug-resolution family.
 @debug_resolution_options
 @evidence_options  # --depth, --sources, --build-info
+@changed_path_options  # ADR-068 Phase 2c: --since/--changed-path (scoping only)
+@abi3_option  # ADR-068 Phase 2d: --abi3 candidate-side stable-ABI audit
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
 @profile_option  # ADR-040 Lever 3: --profile (workflow-default bundles)
