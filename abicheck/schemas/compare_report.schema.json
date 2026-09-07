@@ -1926,7 +1926,8 @@
             "not_supplied",
             "unsupported",
             "out_of_scope",
-            "ambiguous"
+            "ambiguous",
+            "declared_absent"
           ],
           "additionalProperties": false,
           "properties": {
@@ -1955,6 +1956,10 @@
               "minimum": 0
             },
             "ambiguous": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "declared_absent": {
               "type": "integer",
               "minimum": 0
             }
@@ -1991,9 +1996,10 @@
                   "not_supplied",
                   "unsupported",
                   "out_of_scope",
-                  "ambiguous"
+                  "ambiguous",
+                  "declared_absent"
                 ],
-                "description": "ADR-065 D1 acquisition state: available (a completed comparison), expected_not_produced, failed (extraction/classification failed, or a stored capture marked degraded), not_supplied (no counterpart on the other side; a removal/addition only when that side's inventory is proven), unsupported (this build cannot analyze the artifact), out_of_scope (deliberately unselected, D9), ambiguous."
+                "description": "ADR-065 D1 acquisition state: available (a completed comparison), expected_not_produced, failed (extraction/classification failed, or a stored capture marked degraded), not_supplied (no counterpart on the other side; a removal/addition only when that side's inventory is proven), unsupported (this build cannot analyze the artifact), out_of_scope (deliberately unselected, D9), ambiguous, declared_absent (ADR-068 D2: the OLD side of a `compare --no-baseline` run -- explicitly declared absent, never counted as unchecked/incomplete and never a proven removal/addition input)."
               },
               "old_present": {
                 "type": "boolean"
