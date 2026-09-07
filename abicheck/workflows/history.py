@@ -84,7 +84,7 @@ trade-off discussion.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -93,6 +93,7 @@ from ..checker_policy import ChangeKind, Confidence
 from ..checker_types import Change, DiffResult
 from ..model.identity import EntityId
 from ..model.snapshot import AbiSnapshot
+from ..policy.versioning_policy import VersioningPolicy
 from ..serialization import load_snapshot
 
 #: The five D2 lifecycle-event kinds this module can emit. ``changed`` (D2's
@@ -243,6 +244,22 @@ class LongitudinalHistoryResult:
     events: tuple[LifecycleEvent, ...]
     gaps: tuple[CoverageGap, ...]
     pairwise: tuple[PairwiseSummary, ...]
+    #: ADR-066 S2: the versioning policy's ``deprecation_window`` control,
+    #: evaluated over ``events`` (see
+    #: :func:`abicheck.policy.versioning_policy.evaluate_deprecation_compliance`).
+    #: Empty whenever :func:`build_longitudinal_history`/
+    #: :func:`run_history_request` were called with no ``versioning_policy``
+    #: (the default) -- a history-report-only, orthogonal fact that never
+    #: feeds back into ``events``, ``gaps``, or any pairwise ``compare()``
+    #: verdict (ADR-066's "orthogonal axis" requirement).
+    deprecation_compliance: tuple[DeprecationComplianceFinding, ...] = ()
+    #: Every ``*_DEPRECATED_REMOVED`` transition observed while building
+    #: ``events``, as ``(entity_key, index)`` -- plumbing for
+    #: :func:`evaluate_deprecation_compliance`, not a sixth D2 lifecycle-
+    #: event kind (see :func:`_events_from_pair`'s own comment). Not part
+    #: of ``to_dict()``'s published shape: it is an internal correctness
+    #: signal for this module's own evaluator, not a new report fact.
+    deprecation_resets: tuple[tuple[str, int], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -254,6 +271,9 @@ class LongitudinalHistoryResult:
                 "gaps": [g.to_dict() for g in self.gaps],
             },
             "pairwise": [p.to_dict() for p in self.pairwise],
+            "deprecation_compliance": [
+                f.to_dict() for f in self.deprecation_compliance
+            ],
         }
 
 
@@ -350,6 +370,7 @@ def _events_from_pair(
     ever_seen: set[str],
     removed: set[str],
     deprecated: set[str],
+    deprecation_resets: list[tuple[str, int]],
     display_names: dict[str, str],
     is_initial: bool,
 ) -> list[LifecycleEvent]:
@@ -440,8 +461,15 @@ def _events_from_pair(
         if entity_kind is not None:
             # No "un-deprecated" event in D2's vocabulary -- just clear the
             # running flag so a later re-deprecation is reported again.
+            # The transition is still recorded (not as a LifecycleEvent, to
+            # keep D2's five-word vocabulary intact) so
+            # evaluate_deprecation_compliance can tell a plain -> deprecated
+            # -> plain -> removed entity apart from one still deprecated at
+            # removal, rather than attributing stale deprecation evidence to
+            # a later removal (CodeRabbit review).
             key = _correspondence_key(entity_kind, change)
             deprecated.discard(key)
+            deprecation_resets.append((key, to_entry.index))
 
     return events
 
@@ -450,6 +478,7 @@ def build_longitudinal_history(
     entries: list[HistoryEntry],
     *,
     policy: str = "strict_abi",
+    versioning_policy: VersioningPolicy | None = None,
 ) -> LongitudinalHistoryResult:
     """Compose ``checker.compare()`` pairwise across an already-ordered,
     already-loaded chain of snapshots and derive lifecycle events + coverage.
@@ -457,6 +486,13 @@ def build_longitudinal_history(
     ``entries`` must already be in the caller's intended release order (D1:
     S1 never infers or reorders — see :func:`run_history_request` for the
     common "load N snapshot files" entry point built on this).
+
+    ``versioning_policy`` (ADR-066 S2) is optional and orthogonal: when
+    given, ``deprecation_compliance`` is populated by evaluating the
+    policy's ``deprecation_window`` control over the computed ``events`` --
+    it never changes ``events``, ``gaps``, ``pairwise``, or which
+    comparisons run. Omitted (the default), this function's behavior is
+    identical to a build with no versioning-policy support at all.
     """
     if not entries:
         raise HistoryError("a longitudinal history needs at least one snapshot")
@@ -469,6 +505,7 @@ def build_longitudinal_history(
     ever_seen: set[str] = set()
     removed: set[str] = set()
     deprecated: set[str] = set()
+    deprecation_resets: list[tuple[str, int]] = []
     display_names: dict[str, str] = {}
 
     # Seed entry 0 via a synthetic empty predecessor, reusing the identical
@@ -488,6 +525,7 @@ def build_longitudinal_history(
             ever_seen=ever_seen,
             removed=removed,
             deprecated=deprecated,
+            deprecation_resets=deprecation_resets,
             display_names=display_names,
             is_initial=True,
         )
@@ -514,6 +552,7 @@ def build_longitudinal_history(
                 ever_seen=ever_seen,
                 removed=removed,
                 deprecated=deprecated,
+                deprecation_resets=deprecation_resets,
                 display_names=display_names,
                 is_initial=False,
             )
@@ -522,13 +561,22 @@ def build_longitudinal_history(
         if gap is not None:
             gaps.append(gap)
 
-    return LongitudinalHistoryResult(
+    history_result = LongitudinalHistoryResult(
         library=library,
         entries=tuple(entries),
         events=tuple(events),
         gaps=tuple(gaps),
         pairwise=tuple(pairwise),
+        deprecation_resets=tuple(deprecation_resets),
     )
+    if versioning_policy is not None:
+        history_result = replace(
+            history_result,
+            deprecation_compliance=evaluate_deprecation_compliance(
+                history_result, versioning_policy
+            ),
+        )
+    return history_result
 
 
 def run_history_request(
@@ -536,6 +584,7 @@ def run_history_request(
     *,
     versions: list[str] | None = None,
     policy: str = "strict_abi",
+    versioning_policy: VersioningPolicy | None = None,
 ) -> LongitudinalHistoryResult:
     """The typed entry point: N stored-snapshot paths in, one
     :class:`LongitudinalHistoryResult` out.
@@ -545,7 +594,8 @@ def run_history_request(
     storage envelope: plain/gzip/zstd all resolve). ``versions`` optionally
     overrides the release label recorded for each entry (positional,
     same length as ``snapshot_paths``); when omitted, each entry's own
-    ``AbiSnapshot.version`` is used.
+    ``AbiSnapshot.version`` is used. ``versioning_policy`` is forwarded
+    verbatim to :func:`build_longitudinal_history` (ADR-066 S2).
     """
     if not snapshot_paths:
         raise HistoryError("a longitudinal history needs at least one snapshot")
@@ -567,4 +617,168 @@ def run_history_request(
             )
         )
 
-    return build_longitudinal_history(entries, policy=policy)
+    return build_longitudinal_history(
+        entries, policy=policy, versioning_policy=versioning_policy
+    )
+
+
+# ---------------------------------------------------------------------------
+# D2/D4: deprecation-window compliance over a longitudinal history (S2).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DeprecationComplianceFinding:
+    """One ``removed`` lifecycle event's deprecation-window conformance.
+
+    ``status`` is one of:
+
+    * ``"conforming"`` -- a ``deprecated`` event was observed at least
+      ``deprecation_window.min_releases`` release-steps before the removal
+      (or no window is required at all).
+    * ``"non_conforming"`` -- a ``deprecated`` event was observed, but too
+      close to the removal to satisfy the declared window.
+    * ``"unknown"`` -- no ``deprecated`` event was observed for this entity
+      at all, yet the policy requires one. Per ADR-066 D2's terminology,
+      this is *not* asserted as a violation: an unobserved deprecation is
+      ``unknown``, not a proven absence of one (the entity could have been
+      deprecated before the history's first supplied snapshot).
+    """
+
+    entity_kind: str
+    entity_key: str
+    display_name: str
+    removed_at_version: str
+    removed_at_index: int
+    deprecated_at_version: str | None
+    deprecated_at_index: int | None
+    observed_releases: int | None
+    status: str
+    detail: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "entity_kind": self.entity_kind,
+            "entity_key": self.entity_key,
+            "display_name": self.display_name,
+            "removed_at_version": self.removed_at_version,
+            "removed_at_index": self.removed_at_index,
+            "deprecated_at_version": self.deprecated_at_version,
+            "deprecated_at_index": self.deprecated_at_index,
+            "observed_releases": self.observed_releases,
+            "status": self.status,
+            "detail": self.detail,
+        }
+
+
+#: Lifecycle events that discard a previously-tracked deprecation record for
+#: the same entity key -- a fresh presence cycle (introduced/reintroduced/
+#: first_observed) means any earlier deprecation belongs to a *prior* cycle
+#: and must not be attributed to a later removal.
+_RESTART_EVENTS = frozenset({"introduced", "reintroduced", "first_observed"})
+
+
+def evaluate_deprecation_compliance(
+    history: LongitudinalHistoryResult, policy: VersioningPolicy
+) -> tuple[DeprecationComplianceFinding, ...]:
+    """D4's ``deprecation_window`` evaluated over *history*'s lifecycle events.
+
+    Walks ``history.events`` in their already-chronological order (S1's
+    :func:`~abicheck.workflows.history.build_longitudinal_history` appends
+    strictly in release-chain order), tracking the most recent ``deprecated``
+    event per entity key and closing a finding on each ``removed`` event.
+    ``history.deprecation_resets`` -- a plain -> deprecated -> plain
+    transition, which carries no ``LifecycleEvent`` of its own (see
+    ``_events_from_pair``'s comment) -- is also consulted, so a removal that
+    follows such a reset with no subsequent re-``deprecated`` event is not
+    attributed stale deprecation evidence from before the reset
+    (CodeRabbit review).
+
+    This is a pure, read-only projection over already-computed lifecycle
+    facts -- it adds a new finding list, never mutates ``history.events``,
+    and is never consulted by :func:`abicheck.checker.compare`'s own verdict
+    (ADR-066's "orthogonal axis" requirement).
+    """
+    min_releases = policy.deprecation_window.min_releases
+    deprecated_at: dict[str, tuple[int, str]] = {}
+    findings: list[DeprecationComplianceFinding] = []
+
+    resets_by_key: dict[str, list[int]] = {}
+    for key, index in history.deprecation_resets:
+        resets_by_key.setdefault(key, []).append(index)
+
+    for ev in history.events:
+        if ev.event == "deprecated":
+            deprecated_at[ev.entity_key] = (ev.index, ev.version)
+        elif ev.event in _RESTART_EVENTS:
+            deprecated_at.pop(ev.entity_key, None)
+        elif ev.event == "removed":
+            dep = deprecated_at.pop(ev.entity_key, None)
+            if dep is not None and any(
+                dep[0] < reset_index <= ev.index
+                for reset_index in resets_by_key.get(ev.entity_key, ())
+            ):
+                # A reset strictly between the tracked deprecation and this
+                # removal, with no later "deprecated" event overwriting
+                # `deprecated_at` in between (dict assignment above already
+                # happens in chronological order, so a later re-deprecation
+                # would have replaced `dep` before we get here) -- the
+                # deprecation in force at removal time is unobserved, not
+                # the one recorded before the reset.
+                dep = None
+            if dep is None:
+                if min_releases <= 0:
+                    status, observed = "conforming", None
+                    detail = (
+                        "removed with no observed deprecation event and no "
+                        "deprecation window is required (deprecation_window."
+                        "min_releases=0)."
+                    )
+                else:
+                    status, observed = "unknown", None
+                    detail = (
+                        "removed with no deprecation event observed in this "
+                        "history, but the policy requires at least "
+                        f"{min_releases} release(s) of deprecation -- the "
+                        "entity may have been deprecated before this "
+                        "history's earliest supplied snapshot (ADR-066 D2: "
+                        "an unobserved deprecation is 'unknown', not a "
+                        "proven violation)."
+                    )
+                dep_index: int | None = None
+                dep_version: str | None = None
+            else:
+                dep_index, dep_version = dep
+                observed = ev.index - dep_index
+                if observed >= min_releases:
+                    status = "conforming"
+                    detail = (
+                        f"deprecated at {dep_version} (release #{dep_index}), "
+                        f"removed at {ev.version} (release #{ev.index}): "
+                        f"{observed} release(s) of deprecation observed, "
+                        f"meeting the required {min_releases}."
+                    )
+                else:
+                    status = "non_conforming"
+                    detail = (
+                        f"deprecated at {dep_version} (release #{dep_index}), "
+                        f"removed at {ev.version} (release #{ev.index}): only "
+                        f"{observed} release(s) of deprecation observed, "
+                        f"short of the required {min_releases}."
+                    )
+            findings.append(
+                DeprecationComplianceFinding(
+                    entity_kind=ev.entity_kind,
+                    entity_key=ev.entity_key,
+                    display_name=ev.display_name,
+                    removed_at_version=ev.version,
+                    removed_at_index=ev.index,
+                    deprecated_at_version=dep_version,
+                    deprecated_at_index=dep_index,
+                    observed_releases=observed,
+                    status=status,
+                    detail=detail,
+                )
+            )
+
+    return tuple(findings)

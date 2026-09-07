@@ -257,7 +257,8 @@ class TestPerSideHeaderBackend:
         ``dumper.dump``, past that resolution) pin the effective backend each
         side is really parsed with; this pins the transport.
         """
-        from abicheck import cli_resolve, service
+        import abicheck.workflows.input_resolution as _input_resolution
+        from abicheck import cli_resolve
 
         seen: list[tuple[str, str | None]] = []
 
@@ -271,7 +272,7 @@ class TestPerSideHeaderBackend:
             )
             return AbiSnapshot(library="libfoo.so", version=_ver)
 
-        monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+        monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
         old, new = cli_resolve._resolve_compare_snapshots(
             Path("old.json"), Path("new.json"), None, None,
             [], [], [], [], "1.0", "2.0", "c++",

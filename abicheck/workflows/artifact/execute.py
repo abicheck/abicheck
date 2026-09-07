@@ -41,9 +41,14 @@ claims about it:
   caller asked for actually reached" from the produced snapshot rather than
   from the flags that requested it. A frontend does not guess.
 
-Same mechanical note as :mod:`~abicheck.workflows.artifact.resolve`: ``service``
-is reached through the module object at call time so ``monkeypatch.setattr``
-keeps working and this module stays out of ``service``'s import cycle.
+:func:`resolve_side_snapshot` calls :func:`abicheck.workflows.input_resolution.
+resolve_input`/:func:`~abicheck.workflows.input_resolution.sniff_text_format`
+directly (their real owner), not through the flat ``abicheck.service`` facade
+those names are also re-exported from (ADR-061 D6: a migrated implementation
+must never import back through its old facade). A test patches
+``abicheck.workflows.input_resolution.resolve_input``, not
+``abicheck.service.resolve_input`` -- monkeypatching one never rebinds the
+other.
 """
 
 from __future__ import annotations
@@ -294,9 +299,11 @@ def _resolve_side_snapshot_impl(
     settings too -- see :func:`_gated_build_query_inputs`'s own docstring for
     the full reasoning and the pre-migration behavior this restores.
     """
-    import abicheck.service as service
-
+    # Real owner (`..input_resolution`), not the flat `abicheck.service`
+    # facade this used to route through -- D6, never import back through
+    # the old facade.
     from ...api_types import required_path
+    from ..input_resolution import resolve_input, sniff_text_format
 
     # `InputSpec.path` is `Path | None` since PR 3A blocker 5 (so a source-only
     # dump is expressible), but this function resolves a *native artifact* --
@@ -390,7 +397,7 @@ def _resolve_side_snapshot_impl(
         # early call and the outer `finally`'s backstop call below never
         # double-run the same cleanup.
         try:
-            snap = service.resolve_input(
+            snap = resolve_input(
                 side_path,
                 evidence.headers,
                 includes,
@@ -491,7 +498,7 @@ def _resolve_side_snapshot_impl(
             evidence.headers,
             build_info=side.build_info,
             live_elf_parse=(
-                snap.elf is not None and service.sniff_text_format(side_path) != "json"
+                snap.elf is not None and sniff_text_format(side_path) != "json"
             ),
             user_gcc_option_tokens=(
                 side.compile.gcc_option_tokens if side.compile else ()

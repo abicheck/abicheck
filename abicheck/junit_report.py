@@ -56,6 +56,7 @@ from .reporter_markdown import _root_cause_key_and_display
 if TYPE_CHECKING:
     from .model import AbiSnapshot
     from .policy.severity import IssueCategory
+    from .report.document import ReportDocument
     from .report.finding import ReportFinding
     from .severity import KindSets, SeverityConfig
 
@@ -491,16 +492,16 @@ def _build_testsuite(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
-    report_mode: str = "full",
+    report_mode: str = "full", report_document: ReportDocument | None = None,
 ) -> ET.Element:
     """Build a ``<testsuite>`` element from a single DiffResult.
 
     Each changed symbol becomes a ``<testcase>``.  If *old_snapshot* is
     provided and *show_only* is **not** active, unchanged symbols are also
     emitted as passing test cases so that the pass-rate is meaningful.
-
     When *show_only* is active, only the filtered changes are emitted
     (no unchanged snapshot symbols) so the test count matches the filter.
+    *report_document* is forwarded to :func:`_add_disposition_audit_properties` (see its docstring).
     """
     kind_sets = result._effective_kind_sets()
 
@@ -592,7 +593,7 @@ def _build_testsuite(
     # ADR-067 audit rows are appended into the same element rather than a
     # second one beside it.
     props = ET.SubElement(ts, "properties")
-    _add_disposition_audit_properties(props, result, severity_config)
+    _add_disposition_audit_properties(props, result, severity_config, report_document=report_document)
     _add_scoped_properties(props, result)
 
     # G29 Phase 3 (ADR-052 follow-up): --report-mode root-cause adds
@@ -672,7 +673,7 @@ def _emit_missing_contract_testcases(
 
 
 def _add_disposition_audit_properties(
-    props: ET.Element, result: DiffResult, severity_config: object | None = None
+    props: ET.Element, result: DiffResult, severity_config: object | None = None, report_document: ReportDocument | None = None
 ) -> None:
     """Append ADR-067 D3's raw-versus-effective counts as testsuite properties.
 
@@ -686,10 +687,11 @@ def _add_disposition_audit_properties(
     Unconditional, unlike the sibling scoped block, which is emitted only
     under ``--used-by``/``--required-symbol(s)``: a raw-versus-effective
     count a view can drop is not the invariant D3 states.
+    *report_document* (ADR-061 gap C), when given, is reused via ``disposition_audit_dict_reusing_document`` instead of a second ``compute_disposition_audit`` call -- mirrors ``sarif.to_sarif``.
     """
-    from .report.disposition_audit import compute_disposition_audit
+    from .report import disposition_audit as _da
 
-    audit = compute_disposition_audit(result, severity_config)
+    audit = _da.DispositionAudit.from_dict(_da.disposition_audit_dict_reusing_document(result, severity_config, report_document))
 
     def _prop(name: str, value: str) -> None:
         p = ET.SubElement(props, "property")
@@ -992,7 +994,7 @@ def to_junit_xml(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
-    report_mode: str = "full",
+    report_mode: str = "full", report_document: ReportDocument | None = None,
 ) -> str:
     """Convert a single DiffResult to a JUnit XML string.
 
@@ -1019,6 +1021,8 @@ def to_junit_xml(
         root-cause mode regroups findings. Any other value (e.g.
         ``"leaf"``/``"impact"``) renders identically to ``"full"``, same as
         before this parameter existed.
+    report_document:
+        ADR-061 gap C shared build; forwarded to :func:`_build_testsuite`.
 
     Returns
     -------
@@ -1029,11 +1033,8 @@ def to_junit_xml(
     root.set("name", "abicheck")
 
     ts = _build_testsuite(
-        result,
-        old_snapshot,
-        show_only=show_only,
-        severity_config=severity_config,
-        report_mode=report_mode,
+        result, old_snapshot, show_only=show_only, severity_config=severity_config,
+        report_mode=report_mode, report_document=report_document,
     )
     root.append(ts)
 

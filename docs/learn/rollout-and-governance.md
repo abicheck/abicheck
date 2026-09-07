@@ -180,6 +180,38 @@ projects, which never outranks a value stated explicitly. Profile contents,
 the custom file format, and packs are owned by
 [Policy Profiles](../use/policies.md).
 
+### Versioning policy
+
+A policy file may also declare a `versioning:` block (ADR-066 D4) naming
+five independent controls: `scheme` (how version labels order — strict
+SemVer by default), `promise` (what compatibility the project claims
+between two ordered versions — `none` by default, e.g. a pre-1.0 project
+that makes no compatibility guarantee at all), `support_window` and
+`deprecation_window` (declared support/deprecation obligations), and
+`enforcement` (`warn` or `block`). The built-in default is today's
+behavior — strict SemVer advice, no windows, advisory only — so a policy
+file that never states `versioning:` changes nothing:
+
+```yaml
+versioning:
+  promise: abi_within_major
+  deprecation_window:
+    min_releases: 1
+  enforcement: block
+```
+
+This never changes what abicheck *observed*: the finding set, the verdict,
+and the SemVer/SONAME recommendation stay exactly what they would be
+without the block (ADR-066 D5 — "policy changes acceptance; it never
+changes facts"). What it adds is orthogonal: whether *this* release is
+acceptable under the declared promise
+(`abicheck.policy.versioning_policy.evaluate_release_acceptance`, exposed
+on the typed `ReleaseRecommendation` as `policy_acceptance` — see
+[Output Formats § Release recommendation](../use/output-formats.md#release-recommendation)),
+and, for a longitudinal history over several stored snapshots
+(`abicheck project history`), whether each observed removal was preceded
+by enough deprecation to satisfy `deprecation_window`.
+
 ## 6. A minimal `.abicheck.yml`
 
 Everything this page has discussed that lives in the config file:

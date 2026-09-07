@@ -53,6 +53,11 @@ from enum import Enum
 from .checker_policy import ADDITION_KINDS, ChangeKind, Verdict, has_binary_evidence
 from .checker_types import Change, DiffResult
 from .contract_relevance_types import ContractRelevance
+from .policy.versioning_policy import (
+    PolicyAcceptance,
+    VersioningPolicy,
+    integrate_policy_acceptance,
+)
 
 
 class SemverBump(str, Enum):
@@ -153,8 +158,17 @@ class ReleaseRecommendation:
     soname: SonameAction
     rationale: str
     state: ReleaseRecommendationState = ReleaseRecommendationState.ACTIONABLE
+    #: ADR-066 D5's orthogonal *unmet release policy* axis -- ``None`` when no
+    #: :class:`~abicheck.policy.versioning_policy.VersioningPolicy` was passed
+    #: to :func:`recommend_release`, in which case every field above is
+    #: identical to a build with no versioning-policy support at all. Never
+    #: set from anything other than
+    #: :func:`~abicheck.policy.versioning_policy.evaluate_release_acceptance`
+    #: -- see that function's docstring for D5's "policy changes acceptance,
+    #: never facts" invariant.
+    policy_acceptance: PolicyAcceptance | None = None
 
-    def to_dict(self) -> dict[str, str | None]:
+    def to_dict(self) -> dict[str, str | dict[str, object] | None]:
         """Serialise for JSON reports (additive ``release_recommendation`` key).
 
         ``version_bump`` is ``null`` when :attr:`state` is ``UNAVAILABLE`` —
@@ -190,6 +204,11 @@ class ReleaseRecommendation:
             "soname_action": self.soname.value,
             "rationale": self.rationale,
             "state": self.state.value,
+            "policy_acceptance": (
+                self.policy_acceptance.to_dict()
+                if self.policy_acceptance is not None
+                else None
+            ),
         }
 
     def headline(self) -> str:
@@ -298,7 +317,9 @@ def _suppressed_major_class_recommendation(
     )
 
 
-def recommend_release(result: DiffResult) -> ReleaseRecommendation:
+def recommend_release(
+    result: DiffResult, *, versioning_policy: VersioningPolicy | None = None
+) -> ReleaseRecommendation:
     """Derive a :class:`ReleaseRecommendation` from a comparison result.
 
     The recommendation is driven by the *policy-aware* verdict already computed
@@ -310,7 +331,27 @@ def recommend_release(result: DiffResult) -> ReleaseRecommendation:
     change set (ADR-067). A suppressed major-class break is reported as such
     rather than as "no bump needed" -- see
     :func:`_suppressed_major_class_recommendation`.
+
+    *versioning_policy* is ADR-066 D4/D5's orthogonal acceptance axis: when
+    given, the returned recommendation's ``policy_acceptance`` field records
+    whether this release is acceptable under the project's own versioning
+    policy (:func:`~abicheck.policy.versioning_policy.evaluate_release_acceptance`).
+    This can never change ``bump``, ``soname``, ``state``, or ``rationale`` --
+    D5's "policy changes acceptance; it never changes facts" is an executable
+    invariant, not only a docstring claim: every early ``return`` above this
+    parameter's use is unaffected, and the one composing helper
+    (:func:`~abicheck.policy.versioning_policy.integrate_policy_acceptance`)
+    only ever sets the additive field via ``dataclasses.replace``. Omitted
+    (the default), this function's behavior is bit-for-bit identical to a
+    build with no versioning-policy support at all.
     """
+    return integrate_policy_acceptance(
+        _recommend_release_observed(result), result, versioning_policy
+    )
+
+
+def _recommend_release_observed(result: DiffResult) -> ReleaseRecommendation:
+    """The pre-existing, policy-unaware recommendation logic (unchanged)."""
     suppressed_major = _suppressed_major_class_recommendation(result)
     if suppressed_major is not None:
         return suppressed_major

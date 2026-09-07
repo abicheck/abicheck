@@ -198,9 +198,7 @@ def legacy_contract_mode_candidate(
             sha256=sha256,
             path=path,
             selected_by=(
-                SelectedByEntry(
-                    layer=layer, option=selector, path=path, sha256=sha256
-                ),
+                SelectedByEntry(layer=layer, option=selector, path=path, sha256=sha256),
             ),
         ),
         value=LEGACY_SCOPE_FLAG_CONTRACT_MODE[flag],

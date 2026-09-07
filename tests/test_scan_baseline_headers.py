@@ -146,7 +146,9 @@ def _patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
             captured["public_header_dirs"] = list(kw.get("public_header_dirs") or [])
         return _FakeSnap()
 
-    monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+    import abicheck.workflows.input_resolution as _input_resolution
+
+    monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
     monkeypatch.setattr(service, "compare_snapshots", lambda *a, **k: _FakeDiff())
     monkeypatch.setattr(
         cbs,
@@ -294,7 +296,9 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
         captured["contract_mode"] = contract_mode
         return _FakeDiff()
 
-    monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+    import abicheck.workflows.input_resolution as _input_resolution
+
+    monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
     monkeypatch.setattr(service, "compare_snapshots", fake_compare_snapshots)
     monkeypatch.setattr(
         cbs,
@@ -353,7 +357,9 @@ def test_run_baseline_compare_forwards_policy_file_to_embedded_build_source(
         captured["policy_file"] = kw.get("policy_file")
         return list(extra), [], {}, None
 
-    monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+    import abicheck.workflows.input_resolution as _input_resolution
+
+    monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
     monkeypatch.setattr(service, "compare_snapshots", lambda *a, **k: _FakeDiff())
     monkeypatch.setattr(
         cbs, "prepare_embedded_build_source", fake_prepare_embedded_build_source

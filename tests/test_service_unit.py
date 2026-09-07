@@ -1986,6 +1986,7 @@ class TestRunCompare:
         headers through as its public-header set for provenance tagging —
         same rule as the single-pair CLI's compare --header fix. Regression:
         this was silently dropped, unlike the single-pair path."""
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import service as service_mod
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -2000,7 +2001,7 @@ class TestRunCompare:
             calls.append({"path": path, "version": version, **kwargs})
             return original_resolve(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service_mod, "resolve_input", _spy)
+        monkeypatch.setattr(_input_resolution, "resolve_input", _spy)
 
         run_compare(
             old_p,
@@ -2050,6 +2051,7 @@ class TestCompareRequestAdr055Evidence:
         return p
 
     def _spy_resolve_input(self, monkeypatch):
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import service as service_mod
 
         calls: list[dict] = []
@@ -2059,7 +2061,7 @@ class TestCompareRequestAdr055Evidence:
             calls.append({"path": path, "headers": headers, **kwargs})
             return original_resolve(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service_mod, "resolve_input", _spy)
+        monkeypatch.setattr(_input_resolution, "resolve_input", _spy)
         return calls
 
     def test_depth_binary_clears_headers(self, tmp_path, monkeypatch):
@@ -3313,6 +3315,7 @@ class TestParallelOldNewExtraction:
     def test_both_sides_extracted_concurrently(self, tmp_path, monkeypatch):
         import threading
 
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import service as service_mod
 
         old_p, new_p = self._snap_files(tmp_path)
@@ -3329,12 +3332,13 @@ class TestParallelOldNewExtraction:
             barrier.wait()
             return original_resolve(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service_mod, "resolve_input", _synced_resolve)
+        monkeypatch.setattr(_input_resolution, "resolve_input", _synced_resolve)
 
         result, old, new = run_compare(old_p, new_p).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_exception_from_one_side_propagates(self, tmp_path, monkeypatch):
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import service as service_mod
 
         old_p, new_p = self._snap_files(tmp_path)
@@ -3345,7 +3349,7 @@ class TestParallelOldNewExtraction:
                 raise SnapshotError("boom - old side failed")
             return original_resolve(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service_mod, "resolve_input", _boom)
+        monkeypatch.setattr(_input_resolution, "resolve_input", _boom)
 
         with pytest.raises(SnapshotError, match="boom - old side failed"):
             run_compare(old_p, new_p)
@@ -3353,6 +3357,7 @@ class TestParallelOldNewExtraction:
     def test_env_var_disables_parallel_extraction(self, tmp_path, monkeypatch):
         import threading
 
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import service as service_mod
 
         old_p, new_p = self._snap_files(tmp_path)
@@ -3363,7 +3368,7 @@ class TestParallelOldNewExtraction:
             threads_seen.add(threading.get_ident())
             return original_resolve(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service_mod, "resolve_input", _spy)
+        monkeypatch.setattr(_input_resolution, "resolve_input", _spy)
         monkeypatch.setenv("ABICHECK_PARALLEL_EXTRACTION", "0")
 
         run_compare(old_p, new_p)
@@ -5252,6 +5257,7 @@ class TestRunCompareRequestTypedResult:
         tools must not, because they size-check only the caller-supplied path.
         """
         import abicheck.service as service_mod
+        import abicheck.workflows.input_resolution as _input_resolution
 
         captured: dict[str, object] = {}
         original = service_mod.resolve_input
@@ -5260,7 +5266,7 @@ class TestRunCompareRequestTypedResult:
             captured[version] = kwargs.get("follow_linker_scripts")
             return original(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service_mod, "resolve_input", _spy)
+        monkeypatch.setattr(_input_resolution, "resolve_input", _spy)
         import dataclasses
 
         base = self._pair(tmp_path)

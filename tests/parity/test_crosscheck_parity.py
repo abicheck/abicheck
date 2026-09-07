@@ -70,11 +70,11 @@ _SCENARIOS: dict[str, tuple[object, str]] = {
         lambda: _g20_snapshot("case148_xcheck_header_build_mismatch"),
         "case148_xcheck_header_build_mismatch",
     ),
-    # F-5: private header leak.
-    "private_header_leak": (
-        lambda: _g20_snapshot("case144_audit_private_header_leak"),
-        "case144_audit_private_header_leak",
-    ),
+    # NOTE: private_header_leak is deliberately absent from this table too
+    # (F-5) -- it migrated onto `compare()`'s automatic pipeline alongside
+    # unversioned_exported_symbol (ADR-068 §3 row 3/4). See
+    # test_private_header_leak_reaches_compare below for its own (positive)
+    # parity coverage.
     "odr_type_variant": (
         lambda: _g20_snapshot("case149_xcheck_odr_variant"),
         "case149_xcheck_odr_variant",
@@ -113,15 +113,18 @@ _SCENARIOS: dict[str, tuple[object, str]] = {
 def test_scenarios_cover_every_crosscheck() -> None:
     """Guard against silently dropping a check from the corpus above.
 
-    ``unversioned_exported_symbol`` is deliberately excluded: it is
-    ``crosscheck.ALL_CHECKS``'s one entry that has already reached
-    ``compare()`` (ADR-068 §3 row 3's first slice) and so has no place in
-    this "scan-only" table -- see
-    ``test_unversioned_exported_symbol_reaches_compare`` instead.
+    ``unversioned_exported_symbol`` and ``private_header_leak`` are
+    deliberately excluded: both have already reached ``compare()``
+    (ADR-068 §3 rows 3-4) and so have no place in this "scan-only" table --
+    see ``test_unversioned_exported_symbol_reaches_compare`` and
+    ``test_private_header_leak_reaches_compare`` instead.
     """
     from abicheck.buildsource.crosscheck import ALL_CHECKS
 
-    assert set(_SCENARIOS) == set(ALL_CHECKS) - {"unversioned_exported_symbol"}
+    assert set(_SCENARIOS) == set(ALL_CHECKS) - {
+        "unversioned_exported_symbol",
+        "private_header_leak",
+    }
     # Every one of these must also be a registered, phase-owned gap --
     # otherwise a real loss here would (correctly) fail as "unexplained".
     assert set(_SCENARIOS) <= set(EXPECTED_GAPS)
@@ -169,6 +172,28 @@ def test_unversioned_exported_symbol_reaches_compare(tmp_path: Path) -> None:
     assert "unversioned_exported_symbol" in kinds_of(compare_findings), (
         "capability regression: compare() no longer reaches "
         "unversioned_exported_symbol automatically (ADR-068 D3/D4/D5, "
+        "checker.compare's cross_source_checks)"
+    )
+
+
+def test_private_header_leak_reaches_compare(tmp_path: Path) -> None:
+    """ADR-068 §3 row 4: like ``unversioned_exported_symbol``, this check is
+    no longer scan-only -- ``compare`` must find it too, self-compared, the
+    same way ``run_crosschecks`` does.
+    """
+    snapshot = _g20_snapshot("case144_audit_private_header_leak")
+    scan_findings = crosscheck_finding_set(snapshot)
+    assert "private_header_leak" in kinds_of(scan_findings), (
+        "fixture regression: case144_audit_private_header_leak no longer "
+        "makes run_crosschecks produce private_header_leak -- fix the "
+        "fixture, not this assertion"
+    )
+
+    snap_path = write_snapshot(snapshot, tmp_path / "snap.abi.json")
+    compare_findings = compare_finding_set(snap_path, snap_path)
+    assert "private_header_leak" in kinds_of(compare_findings), (
+        "capability regression: compare() no longer reaches "
+        "private_header_leak automatically (ADR-068 D3/D4/D5, "
         "checker.compare's cross_source_checks)"
     )
 

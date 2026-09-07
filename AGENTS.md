@@ -405,7 +405,21 @@ Core pipeline (in order of data flow):
 5. **Policy & Suppression**
    - `policy_file.py` — YAML policy profiles. An unknown `ChangeKind` slug in
      an `overrides:` block is a hard load error (`PolicyError`), not a
-     warning-and-skip (ADR-049 D8)
+     warning-and-skip (ADR-049 D8). Also parses the `versioning:` namespace
+     (ADR-066 D4/S2) into `PolicyFile.versioning`/`versioning_stated`
+   - `policy/versioning_policy.py` — ADR-066 D4/D5/S2: the typed
+     `VersioningPolicy` model (`scheme`/`promise`/`support_window`/
+     `deprecation_window`/`enforcement`; built-in default equals today's
+     strict-SemVer, advisory-only behavior) resolved through the ADR-049 D7
+     resolver (`compatibility_evaluation_wiring.resolve_versioning_policy`,
+     `CompatibilityEvaluationConfig.versioning`); `evaluate_release_acceptance`
+     (an orthogonal *acceptance* fact `abicheck/semver.py`'s
+     `recommend_release(..., versioning_policy=...)` attaches as
+     `ReleaseRecommendation.policy_acceptance` — never changes `bump`/
+     `soname`/`state`); `evaluate_deprecation_compliance` (a
+     history-report-only fact over `workflows/history.py`'s
+     `LongitudinalHistoryResult.deprecation_compliance`, never read by any
+     pairwise `compare()` verdict)
    - `suppression.py` — suppression rules (YAML + ABICC formats)
    - `severity.py` — severity configuration
    - `contract_relevance_types.py` — ADR-049 Phase 0 (accepted): reserved

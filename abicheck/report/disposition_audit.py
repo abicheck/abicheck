@@ -43,7 +43,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..policy.disposition_close import (
     ledger_for,
@@ -55,6 +55,7 @@ from ..policy.disposition_ledger import (
     Disposition,
     RuleProvenance,
 )
+from .document import ReportDocument
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import DiffResult
@@ -307,6 +308,23 @@ def add_disposition_audit(
     d["disposition_audit"] = compute_disposition_audit(
         result, severity_config
     ).to_dict()
+
+
+def disposition_audit_dict_reusing_document(
+    result: DiffResult,
+    severity_config: object | None,
+    report_document: ReportDocument | None,
+) -> dict[str, object]:
+    """A format's ``disposition_audit`` dict, reused verbatim from a shared
+    ``ReportDocument`` when given (ADR-061 Phase 2 gap C) instead of a
+    second independent ``compute_disposition_audit`` call -- same ledger,
+    same inputs, so the two can never disagree.
+    """
+    if report_document is None:
+        return compute_disposition_audit(result, severity_config).to_dict()
+    return cast(
+        "dict[str, object]", report_document.to_mapping()["disposition_audit"]
+    )
 
 
 def render_disposition_audit_note(audit: DispositionAudit) -> str:

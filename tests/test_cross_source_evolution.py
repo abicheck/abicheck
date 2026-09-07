@@ -2,13 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for ADR-068 D3 / plan P2's ``CrossSourceEvolution`` state and the
-first cross-source check (``unversioned_exported_symbol``) migrated onto it.
+two cross-source checks migrated onto it so far:
+``unversioned_exported_symbol`` and ``private_header_leak``.
 
 The crux (plan §7 F-8/F-9): a pre-existing problem must never read as
 ``introduced`` merely because one side's evidence couldn't confirm it. This
 is exercised as a property over several evidence combinations
-(``TestNotEvaluatedCrux``), not a single fixed fixture — see root
-``AGENTS.md``'s bug-class regression-testing guidance.
+(``TestNotEvaluatedCrux``, and ``test_private_header_leak_evolution_matrix``'s
+own 3x3 evidence/finding matrix), not a single fixed fixture — see root
+``AGENTS.md``'s bug-class regression-testing guidance. The
+``private_header_leak`` tests additionally exercise the per-check identity
+generalization ``workflows.cross_source_evolution`` needed to support it --
+see that module's own docstring.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution
 from abicheck.checker_types import Change
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
-from abicheck.model import AbiSnapshot
+from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin
 from abicheck.workflows.cross_source_evolution import compute_cross_source_evolution
 
 
@@ -248,3 +253,175 @@ def test_compare_result_cross_source_evolution_default_none() -> None:
     every pre-existing producer's output unchanged."""
     c = Change(kind=ChangeKind.FUNC_ADDED, symbol="foo", description="added")
     assert c.cross_source_evolution is None
+
+
+# --------------------------------------------------------------------------- #
+# private_header_leak -- the second migrated check (plan §3 #3-#4). Exercises
+# the per-check identity generalization: unlike unversioned_exported_symbol,
+# a single symbol can carry more than one finding here (one function leaking
+# two distinct private types), distinguished only by ``new_value``.
+# --------------------------------------------------------------------------- #
+
+_PHL_NONE = "no_evidence"
+_PHL_CLEAN = "evidence_clean"
+_PHL_LEAK = "evidence_leaked"
+
+
+def _phl_snapshot(state: str) -> AbiSnapshot:
+    """A minimal, compiler-free ``AbiSnapshot`` for one evidence/finding
+    state of ``private_header_leak`` (mirrors ``tests/test_crosscheck.py``'s
+    own ``test_private_header_leak_flags_public_api_exposing_private_type``
+    fixture shape)."""
+    if state == _PHL_NONE:
+        # No header evidence at all -- crosscheck._origin_resolvable is
+        # False regardless of any decl present (a stripped/no-headers dump).
+        return AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=False,
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3usev")]),
+        )
+    has_leak = state == _PHL_LEAK
+    if state not in (_PHL_CLEAN, _PHL_LEAK):
+        raise ValueError(state)
+    return AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        functions=[
+            Function(
+                name="use",
+                mangled="_Z3usev",
+                return_type="Impl *" if has_leak else "int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )
+        ],
+        types=(
+            [RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)]
+            if has_leak
+            else []
+        ),
+        elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3usev")]),
+    )
+
+
+#: The full 3x3 (OLD state, NEW state) evidence/finding matrix, independently
+#: restated from ADR-068 D3's table -- `None` means "no private_header_leak
+#: finding at all".
+_PHL_MATRIX: dict[tuple[str, str], CrossSourceEvolution | None] = {
+    (_PHL_NONE, _PHL_NONE): None,
+    (_PHL_NONE, _PHL_CLEAN): None,
+    # F-8: pre-existing leak, baseline lacking evidence -- not_evaluated.
+    (_PHL_NONE, _PHL_LEAK): CrossSourceEvolution.NOT_EVALUATED,
+    (_PHL_CLEAN, _PHL_NONE): None,
+    (_PHL_CLEAN, _PHL_CLEAN): None,
+    (_PHL_CLEAN, _PHL_LEAK): CrossSourceEvolution.INTRODUCED,
+    # Sibling of F-9: candidate lacks evidence -- can't confirm "resolved".
+    (_PHL_LEAK, _PHL_NONE): CrossSourceEvolution.NOT_EVALUATED,
+    # F-9: leak present in OLD, fixed in NEW.
+    (_PHL_LEAK, _PHL_CLEAN): CrossSourceEvolution.RESOLVED,
+    (_PHL_LEAK, _PHL_LEAK): CrossSourceEvolution.PERSISTENT,
+}
+
+
+@pytest.mark.parametrize("old_state, new_state", sorted(_PHL_MATRIX))
+def test_private_header_leak_evolution_matrix(old_state: str, new_state: str) -> None:
+    old = _phl_snapshot(old_state)
+    new = _phl_snapshot(new_state)
+    changes = compute_cross_source_evolution(old, new)
+    leaks = [c for c in changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
+    expected = _PHL_MATRIX[(old_state, new_state)]
+    if expected is None:
+        assert leaks == [], f"unexpected finding for ({old_state}, {new_state})"
+    else:
+        assert len(leaks) == 1, (
+            f"expected exactly one finding for {old_state, new_state}"
+        )
+        assert leaks[0].cross_source_evolution == expected
+
+
+def test_private_header_leak_f8_pre_existing_on_evidenceless_baseline() -> None:
+    """F-8, named directly: the leak exists on BOTH sides, but OLD's
+    snapshot has no header evidence at all (a stripped baseline). It must
+    read as `not_evaluated` -- never `introduced`."""
+    old = _phl_snapshot(_PHL_NONE)
+    new = _phl_snapshot(_PHL_LEAK)
+    changes = compute_cross_source_evolution(old, new)
+    leaks = [c for c in changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
+    assert len(leaks) == 1
+    assert leaks[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED
+    assert leaks[0].cross_source_evolution != CrossSourceEvolution.INTRODUCED
+
+
+def test_private_header_leak_f9_fixed_reads_as_resolved() -> None:
+    """F-9, named directly: leak present in OLD, fixed in NEW, both sides
+    with sufficient evidence -- must read as `resolved`."""
+    old = _phl_snapshot(_PHL_LEAK)
+    new = _phl_snapshot(_PHL_CLEAN)
+    changes = compute_cross_source_evolution(old, new)
+    leaks = [c for c in changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
+    assert len(leaks) == 1
+    assert leaks[0].cross_source_evolution == CrossSourceEvolution.RESOLVED
+
+
+def test_private_header_leak_identity_distinguishes_two_leaks_on_one_symbol() -> None:
+    """The generalization this check specifically motivated: one function
+    (``use``) referencing TWO distinct private types across OLD/NEW must
+    resolve as two independent findings, not collapse onto one because they
+    share a ``symbol`` -- a bare symbol-keyed identity would silently drop
+    one of the two (the bug this module's per-check identity fixes)."""
+
+    def _snap_with_leak(leaked_type: str) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[
+                Function(
+                    name="use",
+                    mangled="_Z3usev",
+                    return_type=f"{leaked_type} *",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            types=[
+                RecordType(
+                    name=leaked_type, kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
+                )
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3usev")]),
+        )
+
+    old = _snap_with_leak("OldImpl")
+    new = _snap_with_leak("NewImpl")
+    changes = compute_cross_source_evolution(old, new)
+    leaks = [c for c in changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
+    by_value = {c.new_value: c.cross_source_evolution for c in leaks}
+    assert by_value == {
+        "OldImpl": CrossSourceEvolution.RESOLVED,
+        "NewImpl": CrossSourceEvolution.INTRODUCED,
+    }
+
+
+def test_private_header_leak_authority_unchanged() -> None:
+    from abicheck.checker_policy import RISK_KINDS
+
+    assert ChangeKind.PRIVATE_HEADER_LEAK in RISK_KINDS
+    old = _phl_snapshot(_PHL_NONE)
+    new = _phl_snapshot(_PHL_LEAK)
+    for c in compute_cross_source_evolution(old, new):
+        if c.kind == ChangeKind.PRIVATE_HEADER_LEAK:
+            assert c.effective_verdict is None
+
+
+def test_private_header_leak_wired_into_compare_by_default() -> None:
+    """``checker.compare()`` surfaces this check's evolution-stated finding
+    too, automatically -- not just the workflows helper, and not only when
+    ``cross_source_checks`` is passed explicitly (ADR-068 D3/D4/D5, on by
+    default)."""
+    old = _phl_snapshot(_PHL_NONE)
+    new = _phl_snapshot(_PHL_LEAK)
+    result = compare(old, new, scope_to_public_surface=False)
+    leaks = [c for c in result.changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
+    assert len(leaks) == 1
+    assert leaks[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED

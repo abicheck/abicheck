@@ -731,6 +731,251 @@ completed semantic report document → every format* — is gap C below, and is
 [`duplication-and-convergence-assessment.md`](../plans/duplication-and-convergence-assessment.md)
 Phase 4's `ReportEnvelope` target rather than a second design.
 
+**Gap C status (2026-09-07, updated through the JUnit slice — all five
+named formats now converged): JSON, Markdown-full/review, HTML's default
+view, SARIF's default view, and JUnit's default view all converge onto the
+shared choke point (HTML, SARIF, and JUnit only partially — see their own
+progress updates below, and the JUnit slice's overall closure summary
+further down this section); Markdown-leaf/root-cause stays its own
+separate, legitimate document by design (see the scope decision below).**
+`report/build.py`'s
+`build_report_document(result, ...)` is now the
+single function that performs the full `report_mode="full"` build
+(`_build_json_base`, `_add_abi_surface_breakdown`, `_add_changes_block`, the
+gate decision, the side-facts fold, etc.) — moved out of `reporter.to_json`'s
+own inline body (now a thin `build -> render_json` wrapper) and out of
+`service_render._render_json_output` (which calls it directly for
+`report_mode="full"`, bypassing `to_json` entirely). Verified against the
+pre-refactor path via `tests/unit/report/test_build_report_document.py`
+(byte-identical JSON for both the default and `show_only`-filtered cases,
+plus a mock-based assertion that `render_output("json", ...)` calls the
+shared build exactly once and never falls back to the legacy `to_json`
+pipeline for full-mode JSON). `to_json`'s `--stat`/`leaf`/`root-cause`
+report modes are **not** routed through this choke point yet — they remain
+each their own independent build, same as before this change; only
+`report_mode="full"` (the default) was covered by that first slice.
+
+**Progress update (2026-09-07, later same day): full-mode Markdown and
+`review` (unconditional-recommendation markdown) now also route through the
+one shared build.** `service_render.render_output()`'s markdown branch
+(only for `report_mode == "full"` — `--stat` and the Markdown
+`leaf`/`root-cause` alternate views deliberately do not, see the scope
+decision below) and its `review` branch each now call
+`build_report_document(result, ...)` exactly once and thread the resulting
+`ReportDocument` down through `to_markdown`/`to_review_digest` into
+`report/render_markdown_document.py`'s `build_markdown_document`/
+`build_review_digest_document` (both gained an optional `report_document`
+parameter; a direct caller passing none keeps the prior, independent-build
+behaviour, so this is additive, not a signature break). Those two functions
+now reuse the shared document's `disposition_audit` field instead of a
+second, independently-resolved call to `compute_disposition_audit`.
+Everything else full-mode Markdown/`review` render (the headline table,
+policy section, severity groupings, confidence section, and so on) stays
+computed the way it already was, reading `DiffResult` directly through
+`reporter_markdown.py`'s existing `compute_*` functions — deliberately, not
+an oversight: on inspection, none of it was actually a second, independently
+*decided* value at risk of drifting from JSON's own decision. Every
+classification these Markdown sections rely on (`categorize_changes`,
+`gate_eligible_changes`, `apply_show_only`, `_suppress_dangling_correlation_
+notes`, `impact_for`) was already the identical shared pure function JSON's
+own build calls, not a parallel reimplementation — two calls to the same
+deterministic function of `(result, ...)` cannot disagree, so the
+byte-for-byte-safe, real convergence available here was structural (route
+through one call, reuse what the shared document already carries in a
+matching shape) rather than a rewrite of every Markdown section to read
+JSON-shaped fields it doesn't have a matching presentation for
+(`disposition_audit` is the one field whose shape matches exactly;
+`headline`/`policy`/`severity_groups`/etc. have no JSON-document counterpart
+at all, since JSON never renders them in that shape). Verified via
+`tests/` markdown/review suites plus the full golden suite, all byte-
+identical to pre-change output (see this ADR's own PR history / the
+`duplication-and-convergence-assessment.md` plan for the exact commit).
+
+**Progress update (2026-09-07, later still the same day): HTML's default
+view now also routes through the one shared build, to the same depth as the
+Markdown/review slice.** `service_render.render_output()`'s `html` branch
+now calls `build_report_document(result, show_only=show_only,
+show_impact=show_impact, severity_config=severity_config)` once and forwards
+the resulting `ReportDocument` into `html_report.generate_html_report` /
+`build_html_document` (both gained an optional `report_document` parameter,
+additive — a direct caller passing none keeps the prior, independent-build
+behaviour). `build_html_document` reuses the shared document's
+`disposition_audit` field (reconstructed via `DispositionAudit.from_dict`,
+the same round-trip Markdown's own `report_document` handling already uses)
+at both of its two call sites — the `compat_html` ABICC-clone layout's own
+disposition-audit block, and `compute_summary_table`'s audit argument —
+instead of two independent calls to `compute_disposition_audit` over the
+same ledger. HTML's remaining facts (bucketing changes into removed/changed/
+added, the per-section `ChangeRow` tables, `compat_html`'s ABICC severity-band
+bucketing, the gate/scoped-verdict cards) were read in full while doing this
+work and confirmed to be exactly the gap the prior assessment already
+recorded: JSON's flat `changes[]` array plus summary `severity` block has no
+matching shape for any of them today, so converging them would mean adding
+new fields to the shared document first (the "genuinely new shared-document
+design" the assessment below already named for HTML) — deliberately not
+attempted in this slice, same reasoning as `severity_groups` staying
+Markdown-side. Also closed in this slice: the ABICC-clone `compat_html=True`
+layout previously had no golden test at all (a gap C acceptance-criteria
+item this slice was asked to close alongside the wiring above); it now
+has one (`tests/golden/html_template/main_report_compat.html`,
+`tests/test_html_template_golden.py`), verified byte-identical on every
+pre-existing case and passing on the new one. Verified via the HTML test
+suite, the full golden suite (including the new `compat_html` case), and the
+usual ruff/mypy/ai-readiness/architecture gates, all clean.
+
+**Progress update (2026-09-07, SARIF slice): SARIF now also routes through
+the one shared build, same structural depth as the Markdown/review and HTML
+slices.** `service_render.render_output()`'s `sarif` branch now calls
+`build_report_document(result, show_only=show_only,
+severity_config=severity_config)` once (unconditionally, independent of
+`report_mode` — SARIF's own `report_mode="root-cause"` only adds extra
+per-result properties on top of the same shape, unlike Markdown's genuinely
+separate leaf/root-cause documents, so there is no reason to gate the shared
+build on it) and forwards the resulting `ReportDocument` into `sarif.
+to_sarif`/`to_sarif_str` (both gained an optional `report_document`
+parameter, additive only — a direct caller with none keeps the prior,
+independent-build behaviour). `to_sarif` reuses the shared document's
+`disposition_audit` field (read directly off `report_document.to_mapping()`,
+already JSON-shaped so no reconstruction step is needed — unlike HTML's/
+Markdown's own `DispositionAudit.from_dict` round-trip) instead of an
+independent `compute_disposition_audit` call for its `properties.
+dispositionAudit` block. SARIF's own shape — the rule catalog (`rules_seen`),
+per-result `level`/`location` derivation, root-cause grouping, and the
+`scopedGate`/`severityGate`/coverage-notification blocks — was re-read in
+full during this slice and confirmed to still be exactly the gap the prior
+assessment already recorded: none of it has a matching field in
+`build_report_document`'s JSON-shaped structure today, so genuinely
+converging it means adding new shared-document fields first, deliberately
+not attempted here — same reasoning as HTML's and Markdown's own remaining
+facts. `sarif.py` already had SARIF's own compute/render split in substance
+(`to_sarif` computes the SARIF dict; `to_sarif_str` composes it with
+`report.render_json.render_mapping_as_json`, the same generic JSON-freeze-
+and-render step SARIF's own `report/AGENTS.md` entry already names) — this
+slice's job was wiring the shared build into the existing split's compute
+half, not inventing a new one. Verified via the SARIF test suite (220
+passed), a new `TestSarifReusesSharedDocument` class in
+`tests/unit/report/test_build_report_document.py` (byte-identical
+`to_sarif_str` output with and without a supplied `report_document`, equal
+`dispositionAudit` values, and a `render_output("sarif", ...)`-calls-the-
+shared-build-exactly-once assertion for both `report_mode="full"` and
+`"root-cause"`), the full golden suite, the HTML template golden (shared-
+code regression tripwire), and the usual ruff/mypy/ai-readiness/architecture
+gates, all clean.
+
+**Progress update (2026-09-07, JUnit slice — the last of the five named
+formats): JUnit now also routes through the one shared build, same
+structural depth as HTML's/SARIF's own slices.**
+`service_render.render_output()`'s `junit` branch now calls
+`build_report_document(result, show_only=show_only,
+severity_config=severity_config)` once, unconditionally (independent of
+`report_mode`, matching SARIF's own reasoning: JUnit's own `"root-cause"`
+mode only adds `rootCauseId`/`rootCause` attributes to each `<failure>` on
+top of the same shape, it does not restructure the per-symbol `<testcase>`
+tree), and forwards the resulting `ReportDocument` into `junit_report.
+to_junit_xml`/`_build_testsuite` (both gained an optional `report_document`
+parameter, additive only — a direct caller with none keeps the prior,
+independent-build behaviour). `_add_disposition_audit_properties` reuses
+the shared document's `disposition_audit` field via the same
+`disposition_audit_dict_reusing_document` helper SARIF's slice introduced,
+instead of an independent `compute_disposition_audit` call for its
+`abicheck.detected_total`/`abicheck.effective_total`/
+`abicheck.disposition.*` testsuite properties.
+
+JUnit's own remaining facts were re-read in full during this slice and
+confirmed to be exactly the gap the prior assessment recorded, with one
+addition the prior assessment did not have available to check yet: JUnit's
+per-finding verdict/category resolution (`_is_failure`/`_failure_type`) was
+*already* routed through `report.finding`'s `ReportFinding`/
+`build_report_findings` primitive by an earlier slice (ADR-061 Phase 2 item
+4b) — the same canonical primitive a full convergence would want — but as a
+*separate* call from what `build_report_document` computes, not a value
+read off the shared document, because `build_report_document`'s own
+`_add_changes_block` does not itself build a `ReportFinding` set at all
+(JSON's `changes[]` entries resolve each change's verdict inline via
+`effective_verdict_for_change`, with no per-finding `IssueCategory` in the
+JSON shape at all today). Threading that through would mean either (a)
+rewriting JSON's own `_change_to_dict` to compute and carry `IssueCategory`
+too — a change to a format whose output this slice must leave
+byte-identical — or (b) inventing a second, JSON-object-external field on
+`ReportDocument` keyed by `finding_id` for a fact only JUnit needs; neither
+is the safely-mechanical, already-shaped substitution this slice's own
+scope is (see "What remains open" below). JUnit's symbol/testcase tree and
+its root-cause grouping are, as before, its own SARIF/JUnit-shaped
+computation with no shared-document counterpart.
+
+Verified via the JUnit test suite (156 passed), a new
+`TestJunitReusesSharedDocument` class in `tests/unit/report/
+test_build_report_document.py` (byte-identical `to_junit_xml` output with
+and without a supplied `report_document`, equal disposition-audit testsuite
+properties, and build-called-exactly-once assertions for both
+`report_mode="full"` and `"root-cause"`), the full golden suite, the HTML
+template golden (shared-code regression tripwire), and the usual
+ruff/mypy/ai-readiness/architecture gates, all clean.
+
+Two acceptance tests from the original gap-C task were added in this
+slice, now that all five formats cross the shared-document boundary: a
+`TestRendererOrderIndependence` class rendering the same completed
+`DiffResult` through json/html/sarif/junit/markdown in two different
+orders and asserting each format's own output is byte-identical regardless
+of order, with `build_report_document` (mock-spied, `wraps=` the real
+function) called exactly once per format render in either order; and a
+`TestSarifAndJunitDecisionBoundary` class, the honest, narrower sibling of
+`test_render_html.test_render_html_imports_no_decision_making_module` for
+these two formats — see that class's own docstring for why an import-based
+"no decision module reached at all" guard would be false for `sarif.py`/
+`junit_report.py` as currently structured (neither has HTML's real
+compute/render module split yet), and what the real, current boundary it
+asserts instead is (the disposition-audit reuse path specifically, checked
+both by call-count and by an AST scan of the actual call site).
+
+**What remains open.** Markdown's `leaf`/`root-cause` alternate views (see
+the scope decision immediately below — these are separate, legitimate
+documents, same reasoning as JSON's own `leaf`/`root-cause`/`--stat`, not an
+oversight left out of any slice), HTML's own bucketing/section/compat-mode
+computation, SARIF's own rule-catalog/level-derivation/root-cause/
+scoped-gate computation, and JUnit's own per-finding verdict/category
+resolution, symbol/testcase tree, and root-cause grouping (see the
+respective progress updates above — every format's shared build call itself
+has now landed; only `disposition_audit` reuse was safely available beyond
+that for any of the three non-JSON/Markdown formats). None of this is an
+oversight: each is genuinely format-specific presentation, or would require
+a genuinely new shared-document field this initiative deliberately declined
+to invent mid-slice — see each progress update's own reasoning.
+
+**Gap C overall closure state, across all five named formats (JSON,
+Markdown-full/`review`, HTML, SARIF, JUnit) — 2026-09-07, JUnit slice, the
+last of the five.** What is genuinely converged: the *decision* layer —
+per-finding verdict/category (`report/finding.py`'s `ReportFinding`, used
+directly by JSON's severity JSON and by JUnit, wherever it is used, computed
+via the one canonical primitive), the gate decision
+(`policy/gate_decision.gate_decision_for_result`), and the disposition audit
+(`report/disposition_audit.py`'s `compute_disposition_audit`) — is resolved
+exactly once per render via `build_report_document` and *reused*, never
+re-derived, by JSON, Markdown/`review`, HTML, SARIF, and JUnit alike, for
+every fact each format actually reuses today. What remains legitimately
+format-specific presentation, precisely stated per format (not overclaimed):
+Markdown's `severity_groups` headed-section grouping and its `leaf`/
+`root-cause` alternate views; HTML's `removed`/`added`/`changed` bucketing,
+per-section `ChangeRow` tables, `compat_html`'s ABICC severity-band
+bucketing, and its `nav_bar`/`summary_table`/`gate_card`/`scoped_verdict`
+dataclasses; SARIF's rule catalog, per-result `level`/location derivation,
+root-cause grouping, and `scopedGate`/`severityGate`/coverage-notification
+blocks; and JUnit's per-finding verdict/category resolution (itself already
+routed through the canonical `ReportFinding` primitive, just not read off
+the shared document — see the JUnit progress update above for exactly why),
+symbol/testcase tree, and root-cause grouping. As the HTML and Markdown
+slices' own reports already found and this slice reconfirms for SARIF and
+JUnit: most of each format's own section/layout logic was never actually a
+second, independently-*decided* value at risk of drifting from another
+format's — it is presentation-only computation over already-agreed facts,
+which is what "converged" means in this ADR's sense (*cannot disagree on a
+decision*), not "byte-identical internal implementation" across formats.
+Closing any of the items in the paragraph above for real would mean adding
+a new field to `ReportDocument` for that format's own shape first (as each
+format's own progress update says), which is deliberately out of scope for
+this initiative's five slices — a further, separately-scoped piece of work
+if a future session judges it worth doing.
+
 **Durable lessons.**
 
 - A renderer that performs a registry lookup (`report_classifications`,
@@ -981,40 +1226,131 @@ shorter.
 
 ### A. Real dependency violations, not their visibility to the checker
 
-`service.py` (`workflows`) calls `workflows/render.py` (`workflows`), which
-resolves `service_render.py` (`frontends`) through
-`importlib.import_module` inside each function body — explicitly, because a
-static import would expose the forbidden `workflows -> frontends` edge and,
-with the allowed `frontends -> report -> workflows` edges, a cycle. The
-checker walks `ast.Import`/`ast.ImportFrom` and does not see it. Deferring
-an import changes when a dependency resolves, not which layer depends on
-which; D6 says imports expose ownership, and a bridge introduced to evade
-that is unresolved debt, not a completed migration.
+**Closure package 2 re-measured this gap rather than trusting the list
+above** (this ADR's own repeatedly-learned lesson): a real, repo-wide AST
+scan for every first-party `importlib.import_module("...")` call found 21
+call sites, not the 6 this section used to name — ADR-063 track T10 had
+already closed `report/render_markdown_document.py`'s and
+`report/scoped_gate.py`'s bridges before this package started, and the
+remaining 21 sort into three groups, not one:
 
-The same audit covers the other first-party dynamic bridges introduced for
-this reason: `service.py`'s `service_header_scoped` binding,
-`workflows/input_resolution.py`'s `service_dump_native` binding, and
-`report/render_markdown_document.py`'s and `report/scoped_gate.py`'s edges
-back into the flat `reporter`/`reporter_markdown` modules. Not every dynamic
-import is wrong — a genuinely dynamic or plugin-style load is a legitimate,
-documented exception — but a literal `import_module("...")` of a known
-first-party module counts as an edge. These four are recorded *here*, not as
-`architecture/debt.yaml` entries: that ledger's schema is keyed to
-file-size/no-growth baselines, and an architectural exception tracked by
-line count is exactly the mismatch gap F names. Closure package 2 either
-removes each edge or gives the ledger a shape that can hold it.
+- **A real, forbidden-direction evasion** (`workflows -> frontends`,
+  workflows may not import frontends): `workflows/render.py` resolving
+  `service_render.py` through `importlib.import_module("..service_render",
+  __package__)` inside each function body — the exact shape this section
+  used to describe. **Closed**: `workflows/render.py` retired; `service.py`
+  (a flat, `workflows`-legacy-classified module, the one real caller) now
+  imports `service_render` directly and statically. The edge itself is
+  real and still crosses `workflows -> frontends` — retiring the bridge
+  module made it visible, it did not make the direction legal — so it is
+  recorded as a reviewed `dependency-direction` exception in
+  `architecture/debt.yaml`'s new `dependency_direction_exceptions` (see
+  below), not silently passing.
+- **A second real, forbidden-direction evasion this re-measurement
+  found that the original gap A text never named**:
+  `cli_dump_helpers.py` (`frontends`) resolving `header_conditionals.py`
+  (`extract`) the same way — frontends may only reach extract through
+  workflows. **Closed the same way**: now a plain static re-export,
+  recorded as a second `dependency_direction_exceptions` entry.
+- **Legitimate same-layer or already-legal-direction bridges** — the
+  other 19 call sites, all of the shape D6 already carves out
+  ("genuinely dynamic or plugin-style loading is the narrow, documented
+  exception") or the same-layer back-compat re-export shim
+  `AGENTS.md`'s own "Moving helpers out of a module that re-exports
+  them?" guidance recommends: `service.py`'s `service_header_scoped`
+  binding, `workflows/input_resolution.py`'s `service_dump_native`
+  binding, `comparability.py` <-> `comparability_profile.py`,
+  `type_reachability.py` <-> `type_reachability_stdlib_spellings.py`,
+  `serialization.py` <-> `bundle_facts_serialization.py`,
+  `model/snapshot.py`'s `semantic_ir_legacy_adapter` assertion,
+  `policy/public_surface.py`'s two split-module re-exports,
+  `buildsource/source_graph.py`/`inline.py`/`template_graph.py`'s own
+  split-module shims, `reporter_markdown.py` -> `report/
+  dispatch_markdown.py`, `annotations.py` -> `annotations_step_summary.py`,
+  `cli_buildsource.py` -> `cli_graph.py`/`cli_buildsource_helpers.py`,
+  `cli.py`'s `MOVED`-table facade `__getattr__`, and
+  `frontends/cli/commands/compare_bundle_facts.py`'s two bindings into
+  `workflows`. Each one either stays inside one layer (so no direction is
+  even at stake — the bridge exists purely to avoid growing the
+  pre-existing, already-baselined `cli_buildsource`/`scan_engine` import
+  cycle, or a same-layer back-compat split-module cycle) or crosses an
+  *already-legal* direction (`frontends -> workflows`). None evades
+  `check_architecture.py`'s direction check in the sense this gap is
+  about; each evades only `check_ai_readiness.py`'s `import-cycle-growth`
+  scan, which is deliberately a *different*, broader question (see the
+  completion test below for why that scan is not widened here).
+  `detector_registry.py`'s plugin-discovery loop and
+  `policy/public_surface.py`'s dict-keyed target (a `Name`, not a string
+  literal) are D6's own named "genuinely dynamic" exception outright — no
+  literal target to resolve at all.
 
-**The fix is composition at the outer boundary, not a better bridge.** A
-supported `service.render_output()` can stay available: `workflows` returns
-completed results and a `frontends`/API adapter invokes reporting, so the
-public path survives while the dependency direction becomes legal with the
-import *visible*. `workflows/render.py` retires with it.
+**The fix is composition at the outer boundary, not a better bridge** —
+for the `service.py -> service_render` edge specifically, this remains the
+correct target, not yet fully reachable in one pass. `workflows/render.py`
+has retired, and the import is real, static, and visible; what has *not*
+yet happened is `service.py` itself ceasing to be `workflows`-classified
+for this one responsibility, since `service.py` is also imported, directly
+off the flat facade, by three other `workflows`-classified modules
+(`abicheck/l0_export_delta.py`, `abicheck/appcompat.py`,
+`abicheck/service_scan.py`) that would need their own D6 migration onto
+the real workflow owner first — reclassifying `service.py` today would
+just move today's invisible-bridge problem into three *new*, real
+`workflows -> frontends` edges at those call sites instead of closing it.
+That migration is recorded as the accepted exception's own stated
+follow-up, not attempted in this pass. The `cli_dump_helpers.py ->
+header_conditionals.py` edge has the same shape: closing it for real needs
+a `workflows`-owned wrapper `cli.py`'s and `frontends/cli/commands/
+dump.py`'s call sites route through instead of naming the `extract`-owned
+functions directly.
 
-**Completion test:** `scripts/check_architecture.py` and
-`import-cycle-growth` resolve literal `importlib.import_module` calls (and
-simple module-level aliases of them) as import edges; the tree passes with
-those edges visible; every remaining dynamic first-party load is either
-allowed by direction or carries an explicit, reviewed exception.
+**Completion test — met for the direction check, deliberately not
+extended to `import-cycle-growth`:** `scripts/check_architecture.py`'s
+`_imports()` now resolves a literal `importlib.import_module("...")` call
+(including a module-level alias such as `_importlib = importlib`, and the
+`__import__("importlib").import_module(...)` chained form) as a real
+import edge for the `dependency-direction` check, with focused unit tests
+over miniature trees proving both directions: an evasion of a forbidden
+direction fails, a same-layer or already-legal-direction bridge does not,
+and a genuinely dynamic (non-literal) target is left alone rather than
+guessed at. Every one of the 21 real call sites was re-checked against the
+strengthened tool; the only two that turned into `dependency-direction`
+findings are the two named above, both now resolved via the reviewed
+`dependency_direction_exceptions` mechanism below rather than left dynamic
+and unlisted.
+
+`check_ai_readiness.py`'s `import-cycle-growth` scan is **deliberately not
+widened** the same way, on reconsideration of the task as originally
+framed: that scan's own docstring already documents the identical
+`cli_buildsource -> cli_graph` shim as its intended, narrow escape hatch
+("If you switch a shim like that to a static import, expect this gate to
+flag the cycle... Fix the direction... instead"), and `AGENTS.md`'s own
+"Moving helpers out of a module that re-exports them?" guidance
+prescribes exactly this `importlib.import_module` pattern as the
+*correct* way to preserve a back-compat re-export path without
+recreating a real two-way file-level import cycle. Making that scan see
+these edges would not surface a new architectural problem — every one of
+the 19 legitimate bridges above is a deliberate, reviewed answer to a
+real two-file cycle a split-for-file-size already created — it would
+instead flag ~19 already-accepted, already-documented patterns across the
+codebase as new cycle growth, which `AGENTS.md`'s own "Don't extend
+`IMPORT_CYCLE_ALLOWLIST`... as a routine step" rule and this closure
+package's "no new `IMPORT_CYCLE_ALLOWLIST` entries" constraint together
+rule out fixing by allowlisting. Widening that scan is not this gap's
+target (gap A is about *layer-direction* violations hidden from
+`check_architecture.py`, D6's own framing); doing so anyway would trade a
+closed gap for a large, unrelated wave of allowlist churn against a
+policy this repository has already, deliberately, decided the other way.
+
+**`architecture/debt.yaml`'s new shape**: `dependency_direction_exceptions`
+is the ledger shape this section previously said closure package 2 owed —
+distinct from the `files`/`no_growth` schema (`rule: "dependency-direction"`,
+keyed by `(path, target)`, not a line-count baseline), holding exactly the
+two edges above, each with an owner, a dated review, and a rationale
+naming the follow-up migration that would close it for real.
+`scripts/check_architecture.py` validates the new list's own schema (a
+malformed entry suppresses nothing) and consults it only for the exact
+`(path, target)` pair it names — every other`dependency-direction` finding
+still fails the gate.
 
 ### B. Public compatibility surfaces separated from ownership exemptions
 
@@ -1169,7 +1505,7 @@ failure that plan's phase ordering exists to prevent.
 | Order | Work package | Completion condition |
 |---|---|---|
 | 1 | Reconcile ADR scope and tracking | Status, acceptance gaps, and the links to ADR-062/063/068 agree; `scan` no longer appears as a future architecture example |
-| 2 | Close enforcement escapes and the rendering back-edge (gap A) | Dynamic first-party dependencies are visible to the checks; `workflows` no longer reaches frontend rendering; the public path stays, composed at an outer adapter |
+| 2 | Close enforcement escapes and the rendering back-edge (gap A) | A literal `importlib.import_module` call naming a first-party module is visible to `check_architecture.py`'s direction check as a real edge; `workflows/render.py` retires; the remaining `workflows -> frontends`/`frontends -> extract` edges this re-measurement found are real, static, visible, and recorded as reviewed `dependency_direction_exceptions` (not silently dynamic) pending the further migration each names; the public path stays, composed at an outer adapter |
 | 3 | Converge completed results and report projections (gap C) | One evaluated result supplies every format; no renderer derives a competing gate, disposition, or assurance decision |
 | 4 | Finish typed request/plan and operand convergence (gap D) | Equivalent CLI/API inputs produce equivalent resolved scope, configuration, acquisition records, and outcomes; coordinated with ADR-068's shared-driver work |
 | 5 | Close the storage/model splits (gap E) | Bundle values, persistence, evidence backfill, and orchestration have explicit owners; legacy-reader behavior is tested |

@@ -466,6 +466,38 @@ def render_json_with_side_facts(
     already holds all six names, so building the bundle costs nothing new
     there (``reporter._SCOPED_GATE_HELPERS``).
     """
+    doc = build_report_document_with_side_facts(
+        d,
+        result,
+        helpers=helpers,
+        severity_config=severity_config,
+        gate=gate,
+        show_only=show_only,
+        contract_evaluation=contract_evaluation,
+    )
+    return render_json(doc, indent=indent)
+
+
+def build_report_document_with_side_facts(
+    d: dict[str, Any],
+    result: DiffResult,
+    *,
+    helpers: ScopedGateChangeHelpers,
+    severity_config: SeverityConfig | None = None,
+    gate: GateDecision | None = None,
+    show_only: str | None = None,
+    contract_evaluation: bool = False,
+) -> ReportDocument:
+    """Fold in the shared side facts and freeze *d* as a :class:`ReportDocument`.
+
+    This is :func:`render_json_with_side_facts` split into its build half
+    (ADR-061 Phase 2 gap C): the fold logic that used to run immediately
+    before serialization now stops at the frozen document, so a caller that
+    wants the *document* -- to project it into a non-JSON format, or to build
+    it once and render it several times -- does not have to render to a JSON
+    string and parse it back. ``render_json_with_side_facts`` itself is now a
+    thin ``build -> render`` wrapper kept for its existing callers.
+    """
     from .report.cross_source_evolution import (
         compute_cross_source_evolution_summary,
         render_cross_source_evolution_json,
@@ -491,7 +523,7 @@ def render_json_with_side_facts(
         show_only=show_only,
         contract_evaluation=contract_evaluation,
     )
-    return render_json(ReportDocument.from_mapping(d), indent=indent)
+    return ReportDocument.from_mapping(d)
 
 
 def add_annotations(

@@ -418,6 +418,7 @@ def test_run_baseline_compare_forwards_collapse_versioned_symbols(
     # its own, config-only same as require_justification above).
     import abicheck.cli_buildsource as cbs
     import abicheck.service as service
+    import abicheck.workflows.input_resolution as _input_resolution
     from abicheck.cli_scan_baseline import _run_baseline_compare
 
     captured: dict[str, object] = {}
@@ -443,7 +444,7 @@ def test_run_baseline_compare_forwards_collapse_versioned_symbols(
         captured["collapse_versioned_symbols"] = kw.get("collapse_versioned_symbols")
         return _FakeDiff()
 
-    monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+    monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
     monkeypatch.setattr(service, "compare_snapshots", fake_compare_snapshots)
     monkeypatch.setattr(
         cbs,
