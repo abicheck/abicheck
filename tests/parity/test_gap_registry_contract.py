@@ -2,10 +2,14 @@
 """Structural checks on the expected-gap registry itself.
 
 The registry (``tests/parity/gaps.py``) *is* the migration's definition of
-done (plan §6 Phase 0): it must name exactly the sixteen capabilities
-ADR-068 §1 and the plan's requirements enumerate, each with a real reason
-and a real plan-phase reference -- never an empty placeholder, and never
-silently missing an entry.
+done (plan §6 Phase 0): it must name exactly the fifteen scan-only
+capabilities ADR-068 §1 and the plan's requirements enumerate, each with a
+real reason and a real plan-phase reference -- never an empty placeholder,
+and never silently missing an entry. A sixteenth, differently-shaped entry
+(``finding_evolution``, F-8/F-9's "neither tool has this vocabulary at all"
+gap) used to live in ``NOT_YET_IMPLEMENTED_ANYWHERE`` alongside this set;
+ADR-068 Phase 1 item 2 closed it (see ``test_evolution_state_gap.py``), so
+that registry is empty today.
 """
 
 from __future__ import annotations
@@ -45,13 +49,16 @@ def test_every_gap_has_a_non_empty_reason_and_phase() -> None:
         assert "Phase" in gap.plan_phase, f"{key}: plan_phase must name a phase"
 
 
-def test_evolution_gap_tracked_separately_from_scan_only_gaps() -> None:
-    """finding_evolution is a "not implemented anywhere" gap, not a
-    "scan has it, compare doesn't" one -- it must never leak into the set
-    the crosscheck/pattern/preprocessor tests treat as scan-only losses."""
+def test_finding_evolution_gap_has_closed() -> None:
+    """ADR-068 Phase 1 item 2 landed the generic `FindingEvolution`
+    primitive (`checker_policy.FindingEvolution`, `policy.finding_evolution`),
+    so `finding_evolution` is no longer tracked anywhere in this registry --
+    see `test_evolution_state_gap.py` for the real demonstration that
+    replaced the old absence-of-the-vocabulary test."""
     assert "finding_evolution" not in EXPECTED_GAPS
-    assert "finding_evolution" in NOT_YET_IMPLEMENTED_ANYWHERE
-    assert ALL_EXPECTED_GAPS == {**EXPECTED_GAPS, **NOT_YET_IMPLEMENTED_ANYWHERE}
+    assert "finding_evolution" not in NOT_YET_IMPLEMENTED_ANYWHERE
+    assert NOT_YET_IMPLEMENTED_ANYWHERE == {}
+    assert ALL_EXPECTED_GAPS == EXPECTED_GAPS
 
 
 def test_crosscheck_keys_match_all_checks() -> None:

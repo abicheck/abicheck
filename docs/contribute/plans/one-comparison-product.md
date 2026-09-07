@@ -8,9 +8,10 @@ generated: false
 # One comparison product — retiring `scan`, consolidating the CLI
 
 **Owner ADR:** [ADR-068](../adr/068-one-comparison-product-and-scan-retirement.md).
-**Status:** Proposed — planning document, nothing implemented. Verified
+**Status:** Proposed — planning document, largely unimplemented. Verified
 against `main` at `309c8a82` on 2026-09-06 by Click introspection and
-call-site inspection, not by help text or status prose.
+call-site inspection, not by help text or status prose. Phase 1 item 2
+(`FindingEvolution`) has since landed; see that item below.
 **Effort:** XL · **Risk:** high — this deletes a public command and moves
 capabilities between analysis paths. Phase ordering is the safety mechanism.
 
@@ -381,7 +382,16 @@ refs) while both commands still exist. It starts red on every check in
    its completeness/outcome consequences (never a removal, never a pass).
 2. **`FindingEvolution`** (`introduced`/`resolved`/`persistent`/
    `not_evaluated`) on the canonical finding model, with `report/`
-   compute/render support.
+   compute/render support. **Done** — `checker_policy.FindingEvolution`,
+   `Change.evolution`/`DiffResult.resolved_findings`, the correspondence
+   primitive (`policy/finding_evolution.py`:
+   `compute_finding_evolution`/`compute_resolved_findings`/
+   `apply_finding_evolution`), and the JSON projection
+   (`report/finding_evolution.py`, `report_schema_version` 3.5). Not yet
+   wired into any CLI command or into `workflows/history.py` (that consumer
+   wiring, and Markdown/HTML rendering, are follow-up work, matching this
+   phase's own "No CLI change" scope) — the primitive itself is what this
+   item asked for.
 3. **Evidence-contract abort (exit `7`)** and **budget overflow (exit `5`)**
    become `compare` `ExitDecision` axes (ADR-064's precedence already models
    them; `compare` does not emit them yet).
