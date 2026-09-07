@@ -16,6 +16,13 @@ have Phase 2c, 2d and 2e; see those items below.
 **Effort:** XL · **Risk:** high — this deletes a public command and moves
 capabilities between analysis paths. Phase ordering is the safety mechanism.
 
+**Audit cross-reference:** [`product-gaps-2026-09-audit.md`](product-gaps-2026-09-audit.md)
+§§4-5 re-verified this plan's status against `main` on 2026-09-07 (open PR
+#1125 continues Phase 1/2 work — see that doc for what it adds) and found
+no contradiction with what's recorded here; it adds no new phases, only a
+dated confirmation and a pointer for anyone auditing product-gap coverage
+end to end.
+
 **Subordinate to** [`vision-api-abi-evolution.md`](vision-api-abi-evolution.md)
 for anything about what a *result means*. Where the two disagree, that plan
 wins. This plan owns the **interface and its capability topology**: which

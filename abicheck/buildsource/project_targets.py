@@ -95,6 +95,7 @@ from pathlib import Path
 from typing import Any
 
 from ..api_types import HEADER_AST_FRONTENDS
+from .analysis_assurance_gate import analysis_assurance_issues
 from .build_config import KNOWN_TOP_LEVEL_KEYS
 from .scan_levels import USER_DEPTHS, EvidenceDepth
 
@@ -317,9 +318,8 @@ class CheckSpec:
     #: is the identity slot it's selected through, not a second mechanism.
     #: Empty means "not declared".
     analysis_policy: str = ""
-    #: G42 "Explicit check identifiers": which assurance requirement this
-    #: check's analysis must meet (G41 Phase 3's assurance mechanism).
-    #: Empty means "not declared".
+    #: Which assurance requirement this check must meet; "" = not declared.
+    #: Validated against ``analysis_assurance_gate``'s supported set.
     analysis_assurance: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -1623,8 +1623,7 @@ def _check_issues(
             f"{where}: gate_mode must be one of {sorted(GATE_MODES)}, got {check.gate_mode!r}."
         )
     # G42 "Explicit check identifiers": id/analysis.* charset validation,
-    # deferred here (not in CheckSpec.from_dict) same as every other
-    # identifier this module validates -- see _identifier_issues.
+    # deferred here (not in from_dict) like every other identifier here.
     if check.id and not _IDENTIFIER_RE.match(check.id):
         issues.append(
             f"{where}: id {check.id!r} is not a valid identifier -- must match "
@@ -1640,6 +1639,7 @@ def _check_issues(
                 f"{where}: {field_name} {value!r} is not a valid identifier -- "
                 f"must match {_IDENTIFIER_RE.pattern!r}."
             )
+    issues.extend(analysis_assurance_issues(check.analysis_assurance, where=where))
     for profile_id in check.profiles:
         profile = config.profiles.get(profile_id)
         if profile is None:

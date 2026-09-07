@@ -306,6 +306,41 @@ competing, silently-diverging sources of truth for the same fact.
 
 ### Phase 3 — declarative assurance requirement
 
+**Audit update (2026-09-07, `docs/contribute/plans/product-gaps-2026-09-audit.md`
+§3):** `CheckSpec.analysis_assurance` (`abicheck/buildsource/project_targets.py`)
+already exists as a declared free-form identifier string, and was accepted,
+round-tripped through `RunPlanCheck`, and emitted into the generated run
+plan **with zero enforcement of any kind** — not even the minimal boolean
+slice this phase calls for. A project could declare `analysis: {assurance:
+partial}` (or any other syntactically-valid identifier) and get a
+structurally-valid config that silently did nothing, ever; only the literal
+string `"complete"` has ever mapped onto a real mechanism anywhere in this
+codebase (the existing `compare`/`scan --against --require-complete-analysis`
+boolean gate this phase's own first paragraph names). That PR's own vertical
+slice (see the audit doc) closes the *truthfulness* half only:
+`abicheck/buildsource/analysis_assurance_gate.py`'s `analysis_assurance_
+issues()` now makes `project validate`/`project plan` hard-reject any
+`analysis.assurance` value other than `"complete"` before a run plan is even
+generated, so an unsupported declaration is a typed usage error instead of a
+silent no-op. That same PR also closes the *execution* half for the one
+supported value: `check-project.yml`'s "Run check-target" step now forwards
+`require-complete-analysis: ${{ matrix.analysis_assurance == 'complete' }}`,
+and `actions/check-target/action.yml` gained a matching input (gated on
+`kind != 'bundle'`, since the root Action rejects the flag outright for a
+directory/package compare) that reaches the already-existing
+`--require-complete-analysis` gate on the nested root-Action analysis step
+— both `check-project.yml` and `actions/check-target` live in this
+repository, so no cross-repository dependency blocked this (an earlier
+draft of this note wrongly assumed the consuming workflow lived in
+`abicheck/integration-lab`; verified otherwise by reading `.github/
+workflows/check-project.yml` directly). **Still open:** the aggregate
+still cannot distinguish a compatibility failure from an assurance failure
+from an operational failure from a missing-report coverage failure, per
+this phase's own acceptance criteria above — this PR's slice makes the
+existing boolean floor real, it does not add the structured
+`assurance:`/failure-class-distinction work the rest of this phase
+describes.
+
 The assurance *engine* already exists (`analysis_assurance`, the assurance
 exit contribution, an effective-configuration digest in the native report —
 see `abicheck/contract_coverage_exit.py`, `abicheck/contract_context.py` and
