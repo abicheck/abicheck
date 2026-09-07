@@ -96,6 +96,10 @@ from .compatibility_evaluation_config import (
 )
 from .compatibility_evaluation_packs import PackKind
 from .compatibility_evaluation_resolver import FieldCandidate, resolve_field
+from .compatibility_evaluation_versioning_wiring import (
+    VERSIONING_POLICY_FIELD,
+    versioning_policy_candidate,
+)
 from .compatibility_evaluation_wiring import (
     BUILT_IN_DEFAULT_CONTRACT_MODE,
     CONTRACT_MODE_FIELD,
@@ -111,6 +115,10 @@ from .compatibility_evaluation_wiring import (
 )
 from .contract_relevance_types import ContractMode, SelectorLayer, coerce_contract_mode
 from .policy.gate_pack_fold import gate_exit_code_scheme
+from .policy.versioning_policy import (
+    VersioningPolicy,
+    built_in_default_versioning_policy,
+)
 from .severity import SEVERITY_PRESETS, SeverityConfig, SeverityLevel
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -1504,6 +1512,19 @@ def resolve_compatibility_evaluation_config(
     else:
         prov[SUPPRESSIONS_FIELD] = ValueProvenance(layer=SelectorLayer.BUILT_IN_DEFAULT)
 
+    # ── versioning (ADR-066 D4) ─────────────────────────────────────────────
+    versioning_candidate = versioning_policy_candidate(
+        policy_file=explicit.policy_file,
+        layer=layer,
+        sha256=policy_source.sha256,
+        option=spell("--policy", "policy_file_path"),
+    )
+    versioning, prov[VERSIONING_POLICY_FIELD] = _resolve(
+        VERSIONING_POLICY_FIELD,
+        [] if versioning_candidate is None else [versioning_candidate],
+        default=_default(built_in_default_versioning_policy()),
+    )
+
     return CompatibilityEvaluationConfig(
         contract=contract,
         # No front end selects evidence providers or a variant set today --
@@ -1514,6 +1535,7 @@ def resolve_compatibility_evaluation_config(
         policy=policy,
         gate=gate,
         suppressions=suppressions,
+        versioning=cast("VersioningPolicy", versioning),
         provenance=prov,
     )
 
@@ -1795,7 +1817,7 @@ def compatibility_config_from_compare_request(
 # Phase 1's gate, as an executable comparison.
 # --------------------------------------------------------------------------
 
-_SECTIONS = ("contract", "evidence", "surface", "assurance", "policy", "gate")
+_SECTIONS = ("contract", "evidence", "surface", "assurance", "policy", "gate", "versioning")
 
 
 def _normalized_provenance(prov: ValueProvenance) -> tuple[Any, ...]:

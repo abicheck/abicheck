@@ -108,7 +108,8 @@ class TestDefaults:
         # No `gate.exit_code_scheme` receipt entry any more (CLI cleanup
         # phase two PR G2): it is purely derived from `severity_active`,
         # with no candidates/D7 resolution of its own to record.
-        assert len(cfg.provenance) == 17
+        # +1 for `versioning.policy` (ADR-066 D4/S2).
+        assert len(cfg.provenance) == 18
 
 
 class TestContractModePrecedence:
@@ -511,9 +512,7 @@ class TestPackComposition:
         )
         assert cfg.gate.severity.addition is SeverityLevel.ERROR
 
-    def test_a_stated_preset_exempts_its_categories_from_pack_conflicts(
-        self, tmp_path
-    ):
+    def test_a_stated_preset_exempts_its_categories_from_pack_conflicts(self, tmp_path):
         # Two packs disagreeing about a category the preset owns is not a
         # usage error: the resolution takes neither pack's value, so raising
         # would report a conflict that decides nothing.
@@ -536,9 +535,7 @@ class TestPackComposition:
         )
         assert cfg.gate.severity.addition is SeverityLevel.ERROR
         project_cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(
-                pack_paths=(str(first), str(second))
-            ),
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(first), str(second))),
             project=ProjectCompatibilityInputs(severity_preset="strict"),
         )
         assert project_cfg.gate.severity.addition is SeverityLevel.ERROR
@@ -620,9 +617,10 @@ class TestPackComposition:
         assert forward == reverse
         assert [p.id for p in forward.gate.packs] == ["security"]
         # One identity, but both files really did select it.
-        assert [
-            e.path for e in forward.provenance[GATE_PACKS_FIELD].selected_by
-        ] == [str(first), str(second)]
+        assert [e.path for e in forward.provenance[GATE_PACKS_FIELD].selected_by] == [
+            str(first),
+            str(second),
+        ]
 
     def test_naming_one_pack_twice_resolves_as_naming_it_once(self, tmp_path):
         # A repeated path selects one pack, so the receipt must not list it
@@ -679,9 +677,7 @@ class TestPackComposition:
             assignments="contract.overlays: [ffi]\n",
         )
         cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(
-                pack_paths=(str(scalar), str(listed))
-            )
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(scalar), str(listed)))
         )
         assert cfg.contract.overlays == ("ffi",)
 
@@ -1058,9 +1054,7 @@ class TestMalformedInput:
         cfg = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
         assert cfg.contract.overlays == ("ffi",)
 
-    def test_every_selected_assignment_is_validated_not_only_the_winner(
-        self, tmp_path
-    ):
+    def test_every_selected_assignment_is_validated_not_only_the_winner(self, tmp_path):
         # A pinned field is exempt from conflict detection, so two packs may
         # assign it differing values and only the first is ever routed. The
         # shadowed one is still a selected manifest, and a malformed value in
@@ -1175,6 +1169,31 @@ class TestDifferenceReporting:
     def test_equivalence_helper_agrees_with_the_difference_list(self):
         assert cross_front_end_equivalent(_resolve(), _resolve())
 
+    def test_a_differing_versioning_policy_is_reported(self):
+        # ADR-066 D4/S2 -- `_SECTIONS` must include "versioning" or two
+        # configs with different declared versioning policies would compare
+        # as front-end-equivalent (CodeRabbit review).
+        from dataclasses import replace
+
+        from abicheck.policy.versioning_policy import (
+            CompatibilityPromise,
+            VersioningEnforcement,
+            VersioningPolicy,
+        )
+
+        cfg = _resolve()
+        strict = replace(
+            cfg,
+            versioning=VersioningPolicy(
+                promise=CompatibilityPromise.ABI_WITHIN_MAJOR,
+                enforcement=VersioningEnforcement.BLOCK,
+            ),
+        )
+        assert cfg.versioning != strict.versioning
+        differences = cross_front_end_differences(cfg, strict)
+        assert any(d.startswith("versioning:") for d in differences)
+        assert not cross_front_end_equivalent(cfg, strict)
+
 
 class TestPackSuppliedSeverityActivatesAuto:
     def test_a_gate_pack_severity_counts_as_a_severity_setting_in_effect(
@@ -1275,7 +1294,9 @@ class TestUnstatableSelectors:
                 SelectedByEntry(layer=SelectorLayer.API_REQUEST, option="--policy"),
             ),
         )
-        config = replace(config, provenance={**config.provenance, "policy.base": broken})
+        config = replace(
+            config, provenance={**config.provenance, "policy.base": broken}
+        )
         offenders = unstatable_selectors(config)
         assert len(offenders) == 1
         assert "policy.base" in offenders[0]
@@ -1308,7 +1329,7 @@ class TestUnstatableSelectors:
 
 
 class TestUnstatableSelectorsAgainstARequestType:
-    """"Not a CLI flag" was not enough on its own.
+    """ "Not a CLI flag" was not enough on its own.
 
     Routing the scan through `FrontEnd.API` replaced `--scope-public-headers`
     with `CompareRequest`'s `scope_public` -- not a flag, and not a field of
