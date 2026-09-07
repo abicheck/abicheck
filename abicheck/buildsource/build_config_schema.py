@@ -57,7 +57,7 @@ STR_SUBKEYS: dict[str, frozenset[str]] = {
 LIST_SUBKEYS: dict[str, frozenset[str]] = {
     "build": frozenset({"targets"}),  # P0.2: root target(s) scoping L3 collection
     "sources": frozenset({"public_headers", "exclude"}),
-    "scope": frozenset({"public_symbols"}),
+    "scope": frozenset({"public_symbols", "public_header_dirs"}),
     "compile": frozenset({"include_dirs", "defines"}),
     # CLI cleanup phase two, PR J: release/scan bundle topology, demoted off
     # the CLI from --bundle-system-providers/--bundle-cohort.

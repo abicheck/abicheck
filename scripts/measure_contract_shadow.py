@@ -427,6 +427,18 @@ def measure_case(case: Case, mode: ContractMode) -> ModeMeasurement:
         scope_to_public_surface=True,
         contract_evaluation=True,
         contract_mode=mode.value,
+        # ADR-068 D3: this measurement is specifically about contract-
+        # relevance resolution for RECOGNIZED ABI changes (the corpus's own
+        # labelled additions/removals/modifications), not about the
+        # cross-source hygiene checks that now run automatically inside
+        # `compare()`. Those checks can legitimately produce an `unresolved`
+        # contract-relevance decision of their own (e.g. an RTTI/template-
+        # instantiation finding the `exports` domain's type-closure walk
+        # cannot place) that has nothing to do with this corpus's own
+        # export-table-shape coverage question and would otherwise inflate
+        # `unresolved_by_lane` for a reason unrelated to what this script
+        # measures.
+        cross_source_checks=False,
     )
     ctx = result.contract_context
     receipt_keys = (

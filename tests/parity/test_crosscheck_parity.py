@@ -54,45 +54,21 @@ def _g20_snapshot(case_name: str, filename: str = "snapshot.abi.json") -> AbiSna
 #: crosscheck.ALL_CHECKS entries. "source" documents where the fixture
 #: comes from, for a reader diffing this against ADR-068 §1's own list.
 _SCENARIOS: dict[str, tuple[object, str]] = {
-    # F-7: exported symbol not publicly declared.
-    "exported_not_public": (
-        lambda: _g20_snapshot("case143_audit_accidental_export"),
-        "case143_audit_accidental_export",
-    ),
-    # F-6: public declaration not exported (case150 exercises both halves
-    # of the bidirectional pair -- see test_both_halves_of_case150 below).
-    "public_not_exported": (
-        lambda: _g20_snapshot("case150_xcheck_export_public_pair"),
-        "case150_xcheck_export_public_pair",
-    ),
     # F-10: preprocessing/build-context inconsistency.
     "header_build_context_mismatch": (
         lambda: _g20_snapshot("case148_xcheck_header_build_mismatch"),
         "case148_xcheck_header_build_mismatch",
     ),
-    # NOTE: private_header_leak is deliberately absent from this table too
-    # (F-5) -- it migrated onto `compare()`'s automatic pipeline alongside
-    # unversioned_exported_symbol (ADR-068 §3 row 3/4). See
-    # test_private_header_leak_reaches_compare below for its own (positive)
-    # parity coverage.
+    # NOTE: private_header_leak, exported_not_public, public_not_exported,
+    # rtti_for_internal_type, and public_to_internal_dependency are all
+    # deliberately absent from this table now (F-5/F-6/F-7) -- they migrated
+    # onto `compare()`'s automatic pipeline alongside
+    # unversioned_exported_symbol (ADR-068 §3 rows 3-5). See
+    # test_private_header_leak_reaches_compare and its four siblings below
+    # for their own (positive) parity coverage.
     "odr_type_variant": (
         lambda: _g20_snapshot("case149_xcheck_odr_variant"),
         "case149_xcheck_odr_variant",
-    ),
-    "public_to_internal_dependency": (
-        lambda: _g20_snapshot("case181_xcheck_public_to_internal_dependency"),
-        "case181_xcheck_public_to_internal_dependency",
-    ),
-    # NOTE: unversioned_exported_symbol is deliberately absent from this
-    # table -- ADR-068 §3 row 3's first slice landed it onto `compare()`'s
-    # own pipeline (`workflows/cross_source_evolution.py`,
-    # `checker.compare`'s `cross_source_checks`, on by default). It is no
-    # longer scan-only, so it has no place in a "scan has it, compare
-    # doesn't" table; see test_unversioned_exported_symbol_reaches_compare
-    # below for its own (positive) parity coverage.
-    "rtti_for_internal_type": (
-        lambda: _g20_snapshot("case146_audit_rtti_for_internal"),
-        "case146_audit_rtti_for_internal",
     ),
     # F-10's sibling: also a preprocessing/build-context class of check.
     "compile_context_conflict": (
@@ -113,17 +89,24 @@ _SCENARIOS: dict[str, tuple[object, str]] = {
 def test_scenarios_cover_every_crosscheck() -> None:
     """Guard against silently dropping a check from the corpus above.
 
-    ``unversioned_exported_symbol`` and ``private_header_leak`` are
-    deliberately excluded: both have already reached ``compare()``
-    (ADR-068 §3 rows 3-4) and so have no place in this "scan-only" table --
-    see ``test_unversioned_exported_symbol_reaches_compare`` and
-    ``test_private_header_leak_reaches_compare`` instead.
+    Six checks are deliberately excluded: ``unversioned_exported_symbol``
+    and ``private_header_leak`` landed first, and ``exported_not_public``,
+    ``public_not_exported``, ``rtti_for_internal_type``, and
+    ``public_to_internal_dependency`` land in this PR (ADR-068 §3 rows
+    3-5). All six have already reached ``compare()`` and so have no place
+    in this "scan-only" table -- see
+    ``test_unversioned_exported_symbol_reaches_compare`` and its five
+    siblings below instead.
     """
     from abicheck.buildsource.crosscheck import ALL_CHECKS
 
     assert set(_SCENARIOS) == set(ALL_CHECKS) - {
         "unversioned_exported_symbol",
         "private_header_leak",
+        "exported_not_public",
+        "public_not_exported",
+        "rtti_for_internal_type",
+        "public_to_internal_dependency",
     }
     # Every one of these must also be a registered, phase-owned gap --
     # otherwise a real loss here would (correctly) fail as "unexplained".
@@ -194,6 +177,88 @@ def test_private_header_leak_reaches_compare(tmp_path: Path) -> None:
     assert "private_header_leak" in kinds_of(compare_findings), (
         "capability regression: compare() no longer reaches "
         "private_header_leak automatically (ADR-068 D3/D4/D5, "
+        "checker.compare's cross_source_checks)"
+    )
+
+
+def test_exported_not_public_reaches_compare(tmp_path: Path) -> None:
+    """ADR-068 §3 row 5 (this PR): like ``private_header_leak``, this check
+    is no longer scan-only -- ``compare`` must find it too, self-compared,
+    the same way ``run_crosschecks`` does."""
+    snapshot = _g20_snapshot("case143_audit_accidental_export")
+    scan_findings = crosscheck_finding_set(snapshot)
+    assert "exported_not_public" in kinds_of(scan_findings), (
+        "fixture regression: case143_audit_accidental_export no longer "
+        "makes run_crosschecks produce exported_not_public -- fix the "
+        "fixture, not this assertion"
+    )
+
+    snap_path = write_snapshot(snapshot, tmp_path / "snap.abi.json")
+    compare_findings = compare_finding_set(snap_path, snap_path)
+    assert "exported_not_public" in kinds_of(compare_findings), (
+        "capability regression: compare() no longer reaches "
+        "exported_not_public automatically (ADR-068 D3/D4/D5, "
+        "checker.compare's cross_source_checks)"
+    )
+
+
+def test_public_not_exported_reaches_compare(tmp_path: Path) -> None:
+    """ADR-068 §3 row 5 (this PR): see
+    ``test_exported_not_public_reaches_compare`` above -- same shape, the
+    check's bidirectional sibling."""
+    snapshot = _g20_snapshot("case150_xcheck_export_public_pair")
+    scan_findings = crosscheck_finding_set(snapshot)
+    assert "public_not_exported" in kinds_of(scan_findings), (
+        "fixture regression: case150_xcheck_export_public_pair no longer "
+        "makes run_crosschecks produce public_not_exported -- fix the "
+        "fixture, not this assertion"
+    )
+
+    snap_path = write_snapshot(snapshot, tmp_path / "snap.abi.json")
+    compare_findings = compare_finding_set(snap_path, snap_path)
+    assert "public_not_exported" in kinds_of(compare_findings), (
+        "capability regression: compare() no longer reaches "
+        "public_not_exported automatically (ADR-068 D3/D4/D5, "
+        "checker.compare's cross_source_checks)"
+    )
+
+
+def test_rtti_for_internal_type_reaches_compare(tmp_path: Path) -> None:
+    """ADR-068 §3 row 4 (this PR): see
+    ``test_exported_not_public_reaches_compare`` above -- same shape."""
+    snapshot = _g20_snapshot("case146_audit_rtti_for_internal")
+    scan_findings = crosscheck_finding_set(snapshot)
+    assert "rtti_for_internal_type" in kinds_of(scan_findings), (
+        "fixture regression: case146_audit_rtti_for_internal no longer "
+        "makes run_crosschecks produce rtti_for_internal_type -- fix the "
+        "fixture, not this assertion"
+    )
+
+    snap_path = write_snapshot(snapshot, tmp_path / "snap.abi.json")
+    compare_findings = compare_finding_set(snap_path, snap_path)
+    assert "rtti_for_internal_type" in kinds_of(compare_findings), (
+        "capability regression: compare() no longer reaches "
+        "rtti_for_internal_type automatically (ADR-068 D3/D4/D5, "
+        "checker.compare's cross_source_checks)"
+    )
+
+
+def test_public_to_internal_dependency_reaches_compare(tmp_path: Path) -> None:
+    """ADR-068 §3 row 3 (this PR): see
+    ``test_exported_not_public_reaches_compare`` above -- same shape."""
+    snapshot = _g20_snapshot("case181_xcheck_public_to_internal_dependency")
+    scan_findings = crosscheck_finding_set(snapshot)
+    assert "public_to_internal_dependency" in kinds_of(scan_findings), (
+        "fixture regression: case181_xcheck_public_to_internal_dependency no "
+        "longer makes run_crosschecks produce public_to_internal_dependency "
+        "-- fix the fixture, not this assertion"
+    )
+
+    snap_path = write_snapshot(snapshot, tmp_path / "snap.abi.json")
+    compare_findings = compare_finding_set(snap_path, snap_path)
+    assert "public_to_internal_dependency" in kinds_of(compare_findings), (
+        "capability regression: compare() no longer reaches "
+        "public_to_internal_dependency automatically (ADR-068 D3/D4/D5, "
         "checker.compare's cross_source_checks)"
     )
 

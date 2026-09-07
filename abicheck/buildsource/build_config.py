@@ -186,6 +186,32 @@ class BuildConfig:
     scope_public: bool | None = None
     collapse_versioned_symbols: bool | None = None
     public_symbols: list[str] = field(default_factory=list)
+    #: ``scope.public_header_dirs`` (ADR-068 plan §5 P4): directory paths
+    #: (relative to the project root, or absolute) whose headers are treated
+    #: as this project's public/internal boundary for the four
+    #: boundary-dependent cross-source checks migrated onto ``compare()``'s
+    #: pipeline in ``workflows/cross_source_evolution.py``
+    #: (``exported_not_public``/``public_not_exported``/
+    #: ``rtti_for_internal_type``/``public_to_internal_dependency``). This is
+    #: deliberately a *new* key, not a repurposing of the pre-existing
+    #: ``scope.public`` boolean above (which toggles ``--scope-public-headers``
+    #: FP-filtering behavior and has nothing to do with declaration
+    #: provenance) -- naming collision aside, the two config values answer
+    #: unrelated questions. Folded additively alongside any ``-H``/``--header``
+    #: *directory* argument (never a file -- see ``workflows.scan_config.
+    #: public_provenance_set``'s file-vs-directory asymmetry, preserved
+    #: verbatim here since this field only ever contributes directories) via
+    #: ``cli_compare_helpers.run_compare`` -> ``cli_resolve.
+    #: _resolve_compare_snapshots``'s ``config_public_header_dirs`` parameter,
+    #: which feeds the same ``InputSpec.public_header_dirs`` /
+    #: ``provenance.apply_provenance`` machinery a ``-H`` directory already
+    #: does -- one shared boundary primitive, two input sources. Empty by
+    #: default: a project with no such config, and no ``-H`` directory
+    #: either, tags every declaration ``ScopeOrigin.UNKNOWN`` exactly as
+    #: before, which is what makes the four checks above evidence-gate to
+    #: ``NOT_EVALUATED`` (never a fabricated finding) when neither source is
+    #: present.
+    public_header_dirs: list[str] = field(default_factory=list)
     #: ``scope.show_redundant`` — a reporting/FP-tuning toggle demoted off the CLI
     #: (ADR-040 Lever 2). ``None`` = unset. The ``--show-filtered`` debugging view
     #: stays a visible CLI flag.
@@ -282,7 +308,13 @@ class BuildConfig:
             }
         ),
         "scope": frozenset(
-            {"public", "collapse_versioned_symbols", "public_symbols", "show_redundant"}
+            {
+                "public",
+                "collapse_versioned_symbols",
+                "public_symbols",
+                "show_redundant",
+                "public_header_dirs",
+            }
         ),
         "suppression": frozenset({"strict", "require_justification"}),
         "source": frozenset({"method"}),
@@ -449,6 +481,7 @@ class BuildConfig:
             collapse_versioned_symbols=_opt_bool(scope, "collapse_versioned_symbols"),
             public_symbols=_strs(scope, "public_symbols"),
             scope_show_redundant=_opt_bool(scope, "show_redundant"),
+            public_header_dirs=_strs(scope, "public_header_dirs"),
             suppression_strict=_opt_bool(suppression, "strict"),
             suppression_require_justification=_opt_bool(
                 suppression, "require_justification"
@@ -544,6 +577,8 @@ class BuildConfig:
             scope["public_symbols"] = list(self.public_symbols)
         if self.scope_show_redundant is not None:
             scope["show_redundant"] = self.scope_show_redundant
+        if self.public_header_dirs:
+            scope["public_header_dirs"] = list(self.public_header_dirs)
         return scope
 
     def _suppression_block(self) -> dict[str, Any]:

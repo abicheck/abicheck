@@ -54,6 +54,7 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 |---|---|
 | `collapse_versioned_symbols` | bool |
 | `public` | bool |
+| `public_header_dirs` | list[str] (or a single str) |
 | `public_symbols` | list[str] (or a single str) |
 | `show_redundant` | bool |
 
