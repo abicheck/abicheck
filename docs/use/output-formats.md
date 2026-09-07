@@ -976,7 +976,7 @@ report emission): when a caller passes a versioning policy explicitly, it
 carries `accepted`/`enforcement`/`promise`/`detail` describing whether the
 release is acceptable under the project's own versioning policy — entirely
 separate from, and never changing, `version_bump`/`soname_action`/`state`.
-[Rollout and Governance § Versioning policy](rollout-and-governance.md)
+[Rollout and Governance § Versioning policy](../learn/rollout-and-governance.md)
 owns the policy model itself.
 
 ---
