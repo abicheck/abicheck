@@ -133,6 +133,7 @@ def test_to_dict_keys() -> None:
         "soname_action": "bump_required",
         "rationale": "because",
         "state": "actionable",
+        "policy_acceptance": None,
     }
 
 

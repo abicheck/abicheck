@@ -468,6 +468,9 @@ topics:
       # and its legacy-report backfill).
       - abicheck/policy/outcome.py
       - abicheck/report/run_outcome.py
+      # ADR-066 D5: `release_recommendation.policy_acceptance`.
+      - abicheck/semver.py
+      - abicheck/policy/versioning_policy.py
       - abicheck/report/not_comparable.py
       - abicheck/buildsource/check_report_run_outcome.py
       - abicheck/workflows/aggregate/gate.py
@@ -619,6 +622,7 @@ topics:
       - abicheck/surface_graph.py
       - abicheck/policy/severity.py
       - abicheck/semver.py
+      - abicheck/policy/versioning_policy.py
     task_pages:
       - use/api-surface-intelligence.md
       - use/annotations.md
@@ -631,8 +635,13 @@ topics:
     fact_sources:
       - abicheck/suppression.py
       - abicheck/policy_file.py
+      # ADR-066 D4/S2: the `versioning:` namespace's typed model and its
+      # two evaluators (release acceptance, deprecation-window compliance).
+      - abicheck/policy/versioning_policy.py
+      - abicheck/workflows/history.py
     allowed_summaries:
       - learn/abi-api-handling.md
+      - use/output-formats.md
 
   finding-triage:
     canonical_page: learn/triage-a-finding.md

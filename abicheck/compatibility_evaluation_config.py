@@ -52,6 +52,10 @@ from typing import Any, TypeVar
 from .change_registry_types import Verdict
 from .checker_policy import ChangeKind
 from .contract_relevance_types import ContractMode, SelectorLayer
+from .policy.versioning_policy import (
+    VersioningPolicy,
+    built_in_default_versioning_policy,
+)
 from .severity import SeverityConfig
 
 _T = TypeVar("_T")
@@ -955,6 +959,8 @@ class CompatibilityEvaluationConfig:
     #: ``None`` means no suppression source was selected at all; a
     #: ``SuppressionConfig`` (empty ``rules`` or not) means one was.
     suppressions: SuppressionConfig | None = None
+    #: ADR-066 D4: the project's versioning policy.
+    versioning: VersioningPolicy = field(default_factory=built_in_default_versioning_policy)
     provenance: Mapping[str, ValueProvenance] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -972,6 +978,7 @@ class CompatibilityEvaluationConfig:
             ("assurance", AssuranceConfig),
             ("policy", CompatibilityPolicyConfig),
             ("gate", GateConfig),
+            ("versioning", VersioningPolicy),  # ADR-066 D4
         ):
             value = getattr(self, section_name)
             if not isinstance(value, section_type):

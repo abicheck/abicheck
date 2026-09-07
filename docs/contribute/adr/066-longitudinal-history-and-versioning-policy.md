@@ -1,14 +1,16 @@
 # ADR-066: Longitudinal Compatibility History and Project-Defined Versioning Policy
 
 **Date:** 2026-09-05
-**Status:** Proposed — not implemented. Design record for the vision's
-"history and versioning" decisions (`vision.md`); no code, schema, config
-key, or default changes with this document. Implementation is sequenced in
+**Status:** Proposed — S1 and S2 implemented. Design record for the
+vision's "history and versioning" decisions (`vision.md`); this document
+itself introduced no code, schema, config key, or default change, but
+S1/S2's dated amendments below record real, landed implementation
+(`abicheck/workflows/history.py`, the `versioning:` `--policy` namespace,
+`abicheck/policy/versioning_policy.py`) sequenced by
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
-(workstream "Longitudinal history and versioning policy"), starting with
-offline history over user-supplied snapshots. This ADR does not
-reauthorize the baseline registry ADR-043 D4 retired, and it does not
-introduce a hosted service.
+(workstream "Longitudinal history and versioning policy"). S3/S4 remain
+unimplemented. This ADR does not reauthorize the baseline registry ADR-043
+D4 retired, and it does not introduce a hosted service.
 **Decision maker:** maintainer (product decision recorded in `vision.md`);
 technical sign-off pending review of this document.
 
@@ -365,3 +367,84 @@ from measured fixtures in S1, not promised here.
 > ADR-054's admission bar — a `project` subcommand, not a new root command.
 > No `versioning:` config key, no CI publication, and no report/timeline
 > projection exist yet; S2-S4 remain as scoped above.
+>
+> **Amendment (2026-09-07, S2 landed): the versioning policy model,
+> support/deprecation evaluation, and SemVer/SONAME integration.**
+>
+> - **D4's model landed as `abicheck/policy/versioning_policy.py`.**
+>   `VersioningPolicy` composes the five independent controls verbatim
+>   (`scheme`, `promise`, `support_window`, `deprecation_window`,
+>   `enforcement`); `built_in_default_versioning_policy()` is exactly
+>   today's behavior (strict SemVer, no windows, advisory-only), so a run
+>   that never states `versioning:` is bit-for-bit unchanged. Resolved
+>   through the *existing* ADR-049 D7 precedence resolver
+>   (`compatibility_evaluation_resolver.resolve_field`) as one whole-object
+>   field (`versioning.policy`) — see the scope note below for why this is
+>   one field rather than five independently-resolvable ones in this slice.
+>   Registered on `CompatibilityEvaluationConfig.versioning` and wired end
+>   to end through `compatibility_evaluation_wiring.
+>   resolve_versioning_policy`/`versioning_policy_candidate` and
+>   `compatibility_evaluation_frontend.resolve_compatibility_evaluation_config`,
+>   the same pattern `surface.internal_namespaces` already established.
+>   `policy_file.py`'s `--policy` YAML documents gained a `versioning:`
+>   namespace (`PolicyFile.versioning`/`versioning_stated`) — the one real
+>   front end this resolves against today, per D4's "resolved by the
+>   existing configuration owner."
+> - **D5's *release acceptance* axis landed as an orthogonal, additive
+>   fact.** `evaluate_release_acceptance` reads only a `DiffResult`'s
+>   verdict (never its finding set) and a `VersioningPolicy`, and answers
+>   whether *this* release is acceptable under the declared `promise`/
+>   `enforcement` — `promise: none` (the default) always accepts a break
+>   (no promise to violate); a stated promise plus `enforcement: warn`
+>   still accepts, with the deviation noted; `enforcement: block` does not.
+>   `abicheck.semver.recommend_release` gained an optional
+>   `versioning_policy` parameter and an additive
+>   `ReleaseRecommendation.policy_acceptance` field
+>   (`PolicyAcceptance | None`) — proven, as an executable Hypothesis
+>   property test over the whole `(Verdict, promise, enforcement)` input
+>   space (`tests/test_versioning_policy.py::
+>   test_policy_never_changes_observed_recommendation`), to never change
+>   `bump`/`soname`/`state`/`rationale`: D5's "policy changes acceptance;
+>   it never changes facts" is checked by property, not only asserted in
+>   prose. Omitted (the default), `recommend_release`'s behavior is
+>   bit-for-bit identical to a build with no versioning-policy support.
+> - **D4's `deprecation_window` evaluated over an S1 history, as a
+>   history-report-only fact.** `evaluate_deprecation_compliance` walks a
+>   `LongitudinalHistoryResult`'s already-computed `events` and, for each
+>   `removed` event, finds the most recent `deprecated` event for the same
+>   entity key and classifies the observed release-count distance against
+>   `deprecation_window.min_releases` as `conforming`/`non_conforming`/
+>   `unknown` (an unobserved deprecation is `unknown`, never asserted as a
+>   violation, per D2's terminology). `build_longitudinal_history`/
+>   `run_history_request` gained an optional `versioning_policy` parameter
+>   that populates the new `LongitudinalHistoryResult.deprecation_compliance`
+>   field — never mutating `events`/`gaps`/`pairwise`, and never read by any
+>   pairwise `compare()` verdict, per ADR-066's own orthogonal-axis
+>   requirement. A lifecycle restart (`introduced`/`reintroduced`/
+>   `first_observed`) discards a stale deprecation record from a prior
+>   presence cycle, so a reintroduced-then-removed entity is not scored
+>   against a deprecation that belonged to a different cycle.
+> - **Deliberate S2 narrowing, following the S0/S1 precedent of bounding
+>   D2's full algorithm rather than reinventing it:** `support_window` is
+>   declared and type-validated but **not evaluated** for conformance —
+>   doing so requires resolving which real prior baselines a named window
+>   refers to (D3), which depends on S3's CI publication/resolution channel
+>   existing at all. `deprecation_window` is evaluated only in the
+>   release-count terms S1's history already provides
+>   (`LifecycleEvent.index`), not D4's real version scheme. A single
+>   `VersioningPolicy` object resolves as one D7 field
+>   (`versioning.policy`) rather than five independently-precedenced
+>   fields: no concrete CLI/run-recipe input mechanism exists yet for any
+>   individual control (only `--policy-file`'s whole `versioning:` block
+>   does), so per-field D7 granularity is deferred until such an input
+>   exists — see `abicheck/policy/versioning_policy.py`'s own module
+>   docstring for the full account. D2's full correspondence algorithm
+>   remains untouched, exactly as S1 left it.
+> - Tests: `tests/test_versioning_policy.py` (the model, both evaluators,
+>   the mandated "strict vs. relaxed policy, identical delta, different
+>   acceptance" property, and the history compliance fact — including
+>   reintroduction/restart edge cases) and
+>   `tests/test_versioning_policy_wiring.py` (the `policy_file.py` YAML
+>   parser, the D7 resolver wiring, and the whole-object frontend
+>   resolver). S3 (CI publication/resolution) and S4 (report/timeline
+>   projection, retention, cached-comparison reuse) remain unimplemented.

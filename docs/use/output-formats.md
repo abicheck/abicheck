@@ -969,6 +969,16 @@ would still recommend even when `state` isn't `actionable`. See the
 compare-report [JSON Schema](../reference/schemas/v1/compare_report.schema.json)'s
 `release_recommendation` object for the full field contract.
 
+`policy_acceptance` is `null` for every `abicheck compare` run today (ADR-066
+D5's *unmet release policy* axis is an additive field on the Python API's
+`ReleaseRecommendation` object, not yet wired into the CLI/Action's own
+report emission): when a caller passes a versioning policy explicitly, it
+carries `accepted`/`enforcement`/`promise`/`detail` describing whether the
+release is acceptable under the project's own versioning policy — entirely
+separate from, and never changing, `version_bump`/`soname_action`/`state`.
+[Rollout and Governance § Versioning policy](rollout-and-governance.md)
+owns the policy model itself.
+
 ---
 
 ## SARIF Output
