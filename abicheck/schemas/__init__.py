@@ -821,20 +821,7 @@ from typing import Any
 #:       ``contract_conflicts`` entry claimed 3.6 the same way, and
 #:       again from 3.7 to 3.8 on the next, when ADR-068 D3 / plan P2's
 #:       ``cross_source_evolution`` claimed 3.7.
-#: 3.9 -- Workstream G slice S1 (``docs/contribute/plans/
-#:       vision-api-abi-evolution.md`` "G. Surface-first reports"): a new
-#:       additive top-level ``surface_changes`` object -- ``total`` plus
-#:       ``additions``/``removals``/``modifications`` arrays, one entry per
-#:       already-detected finding (``report.finding.report_findings_for``,
-#:       no new detection) grouped by review action, each entry carrying its
-#:       ``old_declaration``/``new_declaration``/``source_location`` so a
-#:       reviewer can act on it without opening the raw ``changes`` array.
-#:       Unconditional, like ``disposition_audit`` -- the executable form of
-#:       this workstream's "compatible additions are visible changes"
-#:       invariant: a fully-compatible run still gets a non-empty
-#:       ``additions`` list. Additive only: no existing key changes shape or
-#:       meaning, and no verdict, gate, or exit code moves.
-REPORT_SCHEMA_VERSION = "3.9"
+REPORT_SCHEMA_VERSION = "3.9"  #: 3.9 -- Workstream G S1's additive ``surface_changes`` object (see report/surface_changes.py).
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

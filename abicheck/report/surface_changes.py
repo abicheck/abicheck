@@ -272,17 +272,3 @@ def render_surface_changes_section(section: SurfaceChangeSection | None) -> list
     if section is None or section.total == 0:
         return []
     return ["", "## Surface changes", "", *render_surface_changes_lines(section)]
-
-
-def render_surface_changes_note(section: SurfaceChangeSection) -> str:
-    """The compact one-line form: counts only, appended to ``--stat``-shaped
-    output the same way ``disposition_audit.render_disposition_audit_note``
-    is -- collapsing detail is fine, dropping the per-group counts is not."""
-    if section.total == 0:
-        return ""
-    return (
-        " [surface: "
-        f"{len(section.additions)} additions, "
-        f"{len(section.removals)} removals, "
-        f"{len(section.modifications)} modifications]"
-    )

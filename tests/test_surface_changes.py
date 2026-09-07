@@ -35,6 +35,8 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.report.surface_changes import (
     SurfaceChangeSection,
     compute_surface_changes,
+    render_surface_changes_lines,
+    render_surface_changes_section,
 )
 
 
@@ -214,6 +216,59 @@ def test_surface_changes_honors_show_only_like_every_other_section() -> None:
     for render in (to_markdown, _to_markdown_leaf, _to_markdown_root_cause):
         text = render(result, show_only="breaking")
         assert "_ZN3foo9brand_newEv" not in text, render.__name__
+
+
+def test_review_digest_document_round_trips_without_a_surface_changes_key() -> None:
+    """A document built before this field existed (schema < 3.9) has no
+    ``surface_changes`` key at all -- the round trip must still project
+    cleanly, per ``_review_digest_from_mapping``'s own docstring."""
+    from abicheck.report.document import ReportDocument
+    from abicheck.report.render_markdown_document import (
+        render_review_digest_document,
+    )
+
+    old, new = _snapshots()
+    result = compare(old, new)
+
+    from abicheck.report.render_markdown_document import build_review_digest_document
+
+    doc = build_review_digest_document(result)
+    mapping = doc.to_mapping()
+    del mapping["surface_changes"]
+    pre_39_doc = ReportDocument.from_mapping(mapping)
+
+    text = render_review_digest_document(pre_39_doc)
+    assert "ABI review" in text
+    assert "Additions" not in text  # nothing to itemize without the field
+
+
+def test_leaf_document_round_trips_without_a_surface_changes_key() -> None:
+    """Same backward-compatibility guarantee as the review digest, for the
+    shared leaf/root-cause preamble (``_render_view_preamble``)."""
+    from abicheck.report.document import ReportDocument
+    from abicheck.report.render_markdown_alternate import (
+        build_leaf_document,
+        render_leaf_document,
+    )
+
+    old, new = _snapshots()
+    result = compare(old, new)
+
+    doc = build_leaf_document(result)
+    mapping = doc.to_mapping()
+    del mapping["surface_changes"]
+    pre_39_doc = ReportDocument.from_mapping(mapping)
+
+    text = render_leaf_document(pre_39_doc)
+    assert "ABI Report" in text
+    assert "## Surface changes" not in text
+
+
+def test_render_lines_and_section_are_both_empty_for_an_empty_section() -> None:
+    empty = SurfaceChangeSection(additions=(), removals=(), modifications=())
+    assert render_surface_changes_lines(empty) == []
+    assert render_surface_changes_section(empty) == []
+    assert render_surface_changes_section(None) == []
 
 
 def test_a_run_with_no_changes_renders_no_surface_changes_section() -> None:
