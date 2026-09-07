@@ -731,10 +731,11 @@ completed semantic report document → every format* — is gap C below, and is
 [`duplication-and-convergence-assessment.md`](../plans/duplication-and-convergence-assessment.md)
 Phase 4's `ReportEnvelope` target rather than a second design.
 
-**Gap C status (2026-09-07): JSON, Markdown-full/review, and HTML's default
-view converged onto the shared choke point (HTML only partially — see the
-HTML progress update below); Markdown-leaf/root-cause, SARIF, JUnit not
-yet.** `report/build.py`'s `build_report_document(result, ...)` is now the
+**Gap C status (2026-09-07): JSON, Markdown-full/review, HTML's default
+view, and SARIF's default view converged onto the shared choke point (HTML
+and SARIF only partially — see their own progress updates below);
+Markdown-leaf/root-cause and JUnit not yet.** `report/build.py`'s
+`build_report_document(result, ...)` is now the
 single function that performs the full `report_mode="full"` build
 (`_build_json_base`, `_add_abi_surface_breakdown`, `_add_changes_block`, the
 gate decision, the side-facts fold, etc.) — moved out of `reporter.to_json`'s
@@ -818,17 +819,57 @@ pre-existing case and passing on the new one. Verified via the HTML test
 suite, the full golden suite (including the new `compat_html` case), and the
 usual ruff/mypy/ai-readiness/architecture gates, all clean.
 
+**Progress update (2026-09-07, SARIF slice): SARIF now also routes through
+the one shared build, same structural depth as the Markdown/review and HTML
+slices.** `service_render.render_output()`'s `sarif` branch now calls
+`build_report_document(result, show_only=show_only,
+severity_config=severity_config)` once (unconditionally, independent of
+`report_mode` — SARIF's own `report_mode="root-cause"` only adds extra
+per-result properties on top of the same shape, unlike Markdown's genuinely
+separate leaf/root-cause documents, so there is no reason to gate the shared
+build on it) and forwards the resulting `ReportDocument` into `sarif.
+to_sarif`/`to_sarif_str` (both gained an optional `report_document`
+parameter, additive only — a direct caller with none keeps the prior,
+independent-build behaviour). `to_sarif` reuses the shared document's
+`disposition_audit` field (read directly off `report_document.to_mapping()`,
+already JSON-shaped so no reconstruction step is needed — unlike HTML's/
+Markdown's own `DispositionAudit.from_dict` round-trip) instead of an
+independent `compute_disposition_audit` call for its `properties.
+dispositionAudit` block. SARIF's own shape — the rule catalog (`rules_seen`),
+per-result `level`/`location` derivation, root-cause grouping, and the
+`scopedGate`/`severityGate`/coverage-notification blocks — was re-read in
+full during this slice and confirmed to still be exactly the gap the prior
+assessment already recorded: none of it has a matching field in
+`build_report_document`'s JSON-shaped structure today, so genuinely
+converging it means adding new shared-document fields first, deliberately
+not attempted here — same reasoning as HTML's and Markdown's own remaining
+facts. `sarif.py` already had SARIF's own compute/render split in substance
+(`to_sarif` computes the SARIF dict; `to_sarif_str` composes it with
+`report.render_json.render_mapping_as_json`, the same generic JSON-freeze-
+and-render step SARIF's own `report/AGENTS.md` entry already names) — this
+slice's job was wiring the shared build into the existing split's compute
+half, not inventing a new one. Verified via the SARIF test suite (220
+passed), a new `TestSarifReusesSharedDocument` class in
+`tests/unit/report/test_build_report_document.py` (byte-identical
+`to_sarif_str` output with and without a supplied `report_document`, equal
+`dispositionAudit` values, and a `render_output("sarif", ...)`-calls-the-
+shared-build-exactly-once assertion for both `report_mode="full"` and
+`"root-cause"`), the full golden suite, the HTML template golden (shared-
+code regression tripwire), and the usual ruff/mypy/ai-readiness/architecture
+gates, all clean.
+
 **What remains open.** Markdown's `leaf`/`root-cause` alternate views (see
 the scope decision immediately below — these are separate, legitimate
 documents, same reasoning as JSON's own `leaf`/`root-cause`/`--stat`, not an
 oversight left out of this slice), HTML's own bucketing/section/compat-mode
-computation (see the HTML progress update immediately above — the shared
-build call itself has landed, only `disposition_audit` reuse was safely
-available beyond that), and SARIF and JUnit in full still build and freeze
-their own document independently — that part of gap C remains open; closing
-it for SARIF/JUnit means giving each format's own `compute_*`/build step a
-first `ReportDocument` build of its own (neither has one today, unlike JSON,
-HTML, and Markdown).
+computation and SARIF's own rule-catalog/level-derivation/root-cause/
+scoped-gate computation (see the respective progress updates above — each
+format's shared build call itself has landed, only `disposition_audit` reuse
+was safely available beyond that), and JUnit in full still builds no
+`ReportDocument` at all — that part of gap C remains open; closing it for
+JUnit means giving its own `compute_*`/build step a first `ReportDocument`
+build of its own (unlike JSON, HTML, Markdown, and now SARIF, none exists
+today).
 
 **Scope decision: JSON's own `leaf`/`root-cause`/`--stat` report modes stay
 out of gap C.** Gap C, as this ADR states it, is one full-mode evaluation
@@ -848,10 +889,11 @@ separateness was already named by the duplication-and-convergence-
 assessment plan's `EvaluationSummary`-vs-full-document distinction;
 `leaf`/`root-cause` earn the same treatment by the same reasoning. What
 remains gap C is the default/full view specifically, across formats:
-JSON-full, Markdown-full/`review`, and HTML's default view now converge
-through `build_report_document` (see the progress updates above; HTML only
-partially — its shared-document reuse is `disposition_audit` alone, not
-every fact the view needs); SARIF and JUnit's own default views do not yet.
+JSON-full, Markdown-full/`review`, HTML's default view, and SARIF's default
+view now converge through `build_report_document` (see the progress updates
+above; HTML and SARIF only partially — their shared-document reuse is
+`disposition_audit` alone, not every fact the view needs); JUnit's own
+default view does not yet.
 
 **Durable lessons.**
 

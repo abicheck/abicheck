@@ -49,7 +49,8 @@ from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
 from abicheck.policy.gate_decision import gate_decision_for_result
-from abicheck.report.disposition_audit import compute_disposition_audit
+from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
+from abicheck.report.document import ReportDocument
 from abicheck.report.render_json import render_mapping_as_json
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import (
@@ -682,9 +683,10 @@ def to_sarif(
     show_only: str | None = None,
     report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
+    report_document: ReportDocument | None = None,
 ) -> dict[str, Any]:
     """Convert a DiffResult to a SARIF 2.1.0 document (dict).
-
+    *report_document*, when given, is the shared build whose ``disposition_audit`` is reused verbatim (ADR-061 Phase 2 gap C) -- everything else here stays SARIF-specific.
     *severity_config*, when given, drives the invocation's ``exitCode`` from
     the actual severity-aware gate instead of inferring it purely from
     ``result.verdict`` — compatibility and "blocks CI" are independent
@@ -712,7 +714,7 @@ def to_sarif(
     parameter existed.
     """
     tool_version = _tool_version()
-
+    disposition_audit_dict = disposition_audit_dict_reusing_document(result, severity_config, report_document)  # ADR-061 Phase 2 gap C
     # Codex review: filtered so an expired rule -- which ReclassifyRule.
     # matches() would already refuse to apply -- isn't disclosed in
     # policyReclassify below as though it were still in effect.
@@ -1064,9 +1066,7 @@ def to_sarif(
                     # property of the comparison, and SARIF's own per-result
                     # `suppressions` array above already carries the
                     # per-finding half.
-                    "dispositionAudit": compute_disposition_audit(
-                        result, severity_config
-                    ).to_dict(),
+                    "dispositionAudit": disposition_audit_dict,
                     **(
                         {"severityGate": severity_gate}
                         if severity_gate is not None
@@ -1272,14 +1272,16 @@ def to_sarif_str(
     show_only: str | None = None,
     report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
+    report_document: ReportDocument | None = None,
 ) -> str:
-    """Serialize DiffResult to a SARIF JSON string (via ``report.render_json``)."""
+    """Serialize DiffResult to a SARIF JSON string; *report_document* is forwarded unchanged to :func:`to_sarif` (ADR-061 Phase 2 gap C)."""
     return render_mapping_as_json(
         to_sarif(
             result,
             show_only=show_only,
             report_mode=report_mode,
             severity_config=severity_config,
+            report_document=report_document,
         ),
         indent=indent,
     )

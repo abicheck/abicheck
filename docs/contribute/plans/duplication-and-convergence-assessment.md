@@ -1882,6 +1882,40 @@ pre-existing HTML golden staying byte-identical. Verified via the HTML test
 suite, the full golden suite, and the usual ruff/mypy/ai-readiness/
 architecture gates.
 
+**Progress update (2026-09-07, SARIF slice): SARIF's default view now also
+routes through the one shared build, same structural depth as the HTML/
+Markdown slices above -- and, unlike JUnit, `sarif.py` already had SARIF's
+own compute/render split in substance before this slice.**
+`service_render.render_output()`'s `sarif` branch now calls
+`build_report_document(result, show_only=show_only,
+severity_config=severity_config)` once, unconditionally (independent of
+`report_mode` -- SARIF's own `"root-cause"` mode only adds extra per-result
+properties on top of the same shape, unlike Markdown's genuinely separate
+leaf/root-cause documents, so gating the shared build on `report_mode`
+would have bought nothing), and forwards the resulting `ReportDocument`
+into `sarif.to_sarif`/`to_sarif_str` (both gained an optional
+`report_document` parameter, additive only). `to_sarif` reuses the shared
+document's `disposition_audit` field -- read directly off
+`report_document.to_mapping()`, no reconstruction step needed since it is
+already JSON-shaped, unlike HTML's/Markdown's own `DispositionAudit.
+from_dict` round-trip -- instead of an independent `compute_disposition_
+audit` call for its `properties.dispositionAudit` block. This assessment's
+own SARIF bullet above (`rules_seen`, per-result `level`/location
+derivation, root-cause grouping, `scopedGate`/`severityGate`/coverage-
+notification blocks) was re-read in full during this slice and confirmed to
+still be exactly the gap already recorded: none of it has a matching field
+in `build_report_document`'s JSON-shaped structure today, so genuinely
+converging it means adding new shared-document fields first, deliberately
+not attempted here -- same reasoning as HTML's own remaining facts.
+Verified via the SARIF test suite (220 tests), a new
+`TestSarifReusesSharedDocument` class in `tests/unit/report/
+test_build_report_document.py` (byte-identical `to_sarif_str` output with
+and without a supplied `report_document`, equal `dispositionAudit` values,
+and a build-called-exactly-once assertion for both `report_mode="full"` and
+`"root-cause"`), the full golden suite, the HTML template golden (shared-
+code regression tripwire), and the usual ruff/mypy/ai-readiness/
+architecture gates, all clean.
+
 ### Phase 5 — Migrate compatibility and multi-artifact operations
 
 1. Make ABICC descriptors adapters into typed requests.
