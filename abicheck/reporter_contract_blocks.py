@@ -157,6 +157,15 @@ def add_contract_context(
     if not isinstance(ctx, PersistedContractContext):
         return
     d["contract_context"] = persisted_context_to_dict(ctx)
+    # E-S3 (vision-api-abi-evolution.md § E) -- multi-source contract
+    # conflicts, each already serialized to a dict by `checker.compare`
+    # (`ContractSourceConflict.to_dict()`). Emitted as `[]` rather than
+    # omitted, same reasoning as `contract_coverage_failures` below: an
+    # empty list is the real, checkable "conflict detection ran and found
+    # none", distinct from "did not run" (which keeps this whole function
+    # returning early above, before this line is ever reached).
+    if isinstance(result.contract_conflicts, list):
+        d["contract_conflicts"] = result.contract_conflicts
     # ADR-049 Phase 5's *sibling* ledger (plan Section 6.1). It sits beside
     # the findings, not among them, because that is what makes it
     # unsuppressible: a coverage failure is not a `Change`, so

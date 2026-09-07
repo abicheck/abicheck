@@ -58,6 +58,12 @@ from .report.render_release_markdown import (  # re-exported, moved (ADR-065 S2)
     _release_md_libraries_table as _release_md_libraries_table,
     _release_md_matrix_findings as _release_md_matrix_findings,
 )
+from .workflows.contract_conflicts import (
+    # E-S3 case 3: does a package's declared contract match its own
+    # contained binary. Needs `elf_metadata` (`extract`, forbidden directly
+    # from `frontends`), so the real logic lives in `workflows`.
+    debian_symbols_release_conflict_lines as debian_symbols_release_conflict_lines,  # re-exported, E-S3
+)
 from .workflows.gate import (
     GateOptions as GateOptions,  # re-exported, ADR-064
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
@@ -542,6 +548,8 @@ def _debian_symbols_warning(
     if not (diff.removed or diff.added or diff.version_changed):
         return None
     return "Debian symbols contract changed:\n" + format_diff_report(diff)
+
+
 
 
 def reject_bundle_facts_out_collision(
