@@ -148,7 +148,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Build-config matrix & idioms",
             "options": [
                 "--probe-matrix",
-                "--pattern-verdicts",
                 "--explain-patterns",
                 "--surface-metrics",
             ],

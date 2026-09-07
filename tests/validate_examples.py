@@ -648,11 +648,10 @@ def _build_compare_cmd(
     # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
     # are authored unscoped unless the case opts in, so be explicit either way.
     cmd.append("--scope-public-headers" if scope_public_headers else "--no-scope-public-headers")
-    # ADR-027 pattern-aware verdicts are an opt-in analysis mode; cases whose
-    # expected verdict depends on it (e.g. anti-pattern RISK findings) set
-    # "pattern_analysis": true in ground_truth.json.
-    if pattern_verdicts:
-        cmd.append("--pattern-verdicts")
+    # ADR-068 D4/Phase 5: pattern verdicts are unconditional now, not a CLI
+    # flag; *pattern_verdicts* is kept only for call-site documentation of
+    # which ground_truth.json cases need the idiom evidence -- inert here.
+    del pattern_verdicts
     return cmd
 
 
@@ -701,8 +700,8 @@ def _build_compare_direct_cmd(
     # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
     # are authored unscoped unless the case opts in, so be explicit either way.
     cmd.append("--scope-public-headers" if scope_public_headers else "--no-scope-public-headers")
-    if pattern_verdicts:
-        cmd.append("--pattern-verdicts")
+    # ADR-068 D4/Phase 5: see _build_compare_cmd's identical note.
+    del pattern_verdicts
     return cmd
 
 

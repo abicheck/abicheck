@@ -144,7 +144,24 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     # runs) and _format_release_summary's fallback branch would silently
     # render markdown to the requested sarif/html/review path instead of
     # erroring.
-    secondary_fmt = kwargs.get("secondary_fmt")
+    #
+    # ADR-068 D4/Phase 5: --write is repeatable on `compare` now, but the
+    # per-library release engine was never generalized to multiple secondary
+    # artifacts -- reject a second --write rather than silently rendering
+    # only the first; unpack a single one back to the singular secondary_fmt/
+    # secondary_output pair compare_release_cmd's own decorator still declares.
+    secondary_writes = kwargs.pop("secondary_writes", ())
+    if len(secondary_writes) > 1:
+        raise click.UsageError(
+            "Only one --write is supported when comparing directories or "
+            "packages (the per-library release engine does not yet "
+            "support multiple secondary artifacts) -- compare one library "
+            "at a time (a single old/new .so pair) to use more than one "
+            "--write."
+        )
+    secondary_fmt, secondary_output = secondary_writes[0] if secondary_writes else (None, None)
+    kwargs["secondary_fmt"] = secondary_fmt
+    kwargs["secondary_output"] = secondary_output
     if secondary_fmt is not None and secondary_fmt not in _RELEASE_FORMATS:
         raise click.UsageError(
             f"--write {secondary_fmt}=... is not available when comparing "
@@ -516,13 +533,15 @@ def _embed_inline_source_side(
 )
 @secondary_output_options(
     ["json", "markdown", "sarif", "html", "junit", "review"],
+    multiple=True,
     format_help="Emit a second output format from this same comparison run, to "
                 "its own file, without re-running the comparison (e.g. "
                 "--format markdown for a human alongside --write json=abi.json "
                 "for tooling). FORMAT is one of {formats}; PATH must differ from "
                 "--output/-o. Always renders the full, unfiltered report "
                 "(ignores --show-only). For a directory/package (release) "
-                "comparison, only json/markdown/junit are available.",
+                "comparison, only json/markdown/junit are available, and only "
+                "one --write is supported there.",
 )
 @click.option("--demangle/--no-demangle", default=None,
               help="Demangle C++ symbol names in markdown/review/html output "
@@ -606,7 +625,7 @@ def _embed_inline_source_side(
 @evidence_options  # --depth, --sources, --build-info
 @changed_path_options  # ADR-068 Phase 2c: --since/--changed-path (scoping only)
 @abi3_option  # ADR-068 Phase 2d: --abi3 candidate-side stable-ABI audit
-@adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
+@adr027_compare_options  # ADR-027: --explain-patterns (rendering only, modulation is automatic, ADR-068 D4) / --surface-metrics (still opt-in)
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
 @profile_option  # ADR-040 Lever 3: --profile (workflow-default bundles)
 @click.option("--reconcile-build-context", is_flag=True, default=False,

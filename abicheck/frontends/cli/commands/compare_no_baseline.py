@@ -142,7 +142,10 @@ def _run_no_baseline_compare_cmd(
         policy=kwargs.get("policy") or "strict_abi",
         policy_file=policy_file_obj,
         scope_to_public_surface=bool(kwargs.get("scope_public_headers", True)),
-        pattern_verdicts=bool(kwargs.get("pattern_verdicts", False)),
+        # ADR-068 D4/Phase 5: pattern-verdict modulation is unconditional on
+        # every `compare` path now (no `--pattern-verdicts` flag exists any
+        # more) -- this audit-only path gets the identical treatment.
+        pattern_verdicts=True,
         collapse_versioned_symbols=bool(
             kwargs.get("collapse_versioned_symbols", False)
         ),

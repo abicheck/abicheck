@@ -51,12 +51,57 @@ def _lib_suffix() -> str:
     return ".so"
 
 
+def _disable_aslr_preexec() -> object | None:
+    """Return a Linux ``preexec_fn`` that clears ASLR for the child, or None.
+
+    Several runtime-smoke apps intentionally exercise real undefined
+    behaviour (a caller compiled against an old signature calling into a
+    library built for a changed one, reading whatever register/stack slot
+    the calling convention leaves behind for a missing argument). That
+    residue is frequently address-derived, so with ASLR enabled the exact
+    "garbage" value -- and therefore whether the observable output happens
+    to coincide with the pre-change baseline -- varies from run to run,
+    making the classification flaky independent of any real code change
+    (see case199_public_function_parameter_added, whose README documents
+    the ambiguity directly: "chan_open -> 3 or -1, depending on register
+    residue"). Pinning the child's address-space layout removes that
+    external source of nondeterminism for every case relying on this kind
+    of demonstration, not just one -- the general fix for the bug class
+    rather than a per-case patch.
+    """
+    if sys.platform != "linux":
+        return None
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        personality = libc.personality
+    except (OSError, AttributeError):
+        return None
+
+    ADDR_NO_RANDOMIZE = 0x0040000
+
+    def _preexec() -> None:
+        # Best-effort: an unprivileged personality() call should always
+        # succeed, but never let this hook itself break the run.
+        try:
+            personality(ADDR_NO_RANDOMIZE)
+        except Exception:
+            pass
+
+    return _preexec
+
+
+_ASLR_PREEXEC = _disable_aslr_preexec()
+
+
 def _run(
     cmd: list[str],
     *,
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
     timeout: int = 30,
+    deterministic: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
@@ -65,6 +110,7 @@ def _run(
         capture_output=True,
         text=True,
         timeout=timeout,
+        preexec_fn=_ASLR_PREEXEC if deterministic else None,
     )
 
 
@@ -164,6 +210,7 @@ def _run_app(app: Path, run_dir: Path) -> dict[str, object]:
             cwd=run_dir,
             env=_runtime_env(run_dir),
             timeout=10,
+            deterministic=True,
         )
         return {
             "returncode": result.returncode,

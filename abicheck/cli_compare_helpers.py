@@ -40,7 +40,6 @@ from .cli_compare_fold import (
     _fold_scoped_compat_into_text as _fold_scoped_compat_into_text,
     _fold_suppression_audit_into_text as _fold_suppression_audit_into_text,
     _fold_use_case_impact_into_text,
-    format_carries_use_case_impact,
 )
 from .cli_compare_options import (
     _cli_flag,
@@ -93,7 +92,8 @@ from .cli_resolve import (
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 from .frontends.cli import compare_enrichment as _enrichment
-from .frontends.cli.options import reject_incoherent_secondary_output
+from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
+from .frontends.cli.options import reject_incoherent_secondary_writes
 from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.runtime import (
     _EXIT_NOT_COMPARABLE,
@@ -492,20 +492,19 @@ def _reject_incoherent_compare_flags(
     *,
     dry_run: bool,
     output: Path | None,
-    secondary_output: Path | None,
-    secondary_fmt: str | None,
+    secondary_writes: tuple[tuple[str, Path], ...],
 ) -> None:
     """Reject flag combinations that cannot mean anything, before any work.
 
     Every one of these would otherwise either do nothing silently or
-    destroy its own output: a ``--secondary-*`` half-pair, two reports
-    aimed at one file, a dry run asked to write a report. Raised as
-    ``UsageError`` (exit 64) up front, so none of them is discovered after
-    an expensive compare.
+    destroy its own output: two reports aimed at one file, a dry run asked
+    to write a report. Raised as ``UsageError`` (exit 64) up front, so none
+    of them is discovered after an expensive compare.
 
-    The four ``--secondary-*`` coherence checks are shared with ``scan``
-    (Codex review) -- see ``cli_options.reject_incoherent_secondary_output``,
-    which this delegates to rather than duplicating them here.
+    ADR-068 D4/Phase 5: ``--write`` is repeatable on ``compare`` now
+    (``secondary_writes``), unlike ``scan``'s still-singular ``--write`` --
+    delegates to :func:`reject_incoherent_secondary_writes` (per-write PATH
+    uniqueness already checked inside the ``--write`` parsing callback).
 
     A ``--contract`` domain given without ``--contract`` used to
     be rejected here too (it would otherwise silently do nothing); CLI audit
@@ -514,11 +513,10 @@ def _reject_incoherent_compare_flags(
     function's caller before ``contract_evaluation`` is used for anything
     else, so there is no longer an incoherent state to reject here.
     """
-    reject_incoherent_secondary_output(
+    reject_incoherent_secondary_writes(
         dry_run=dry_run,
         output=output,
-        secondary_fmt=secondary_fmt,
-        secondary_output=secondary_output,
+        secondary_writes=secondary_writes,
     )
 
 
@@ -897,6 +895,7 @@ def _render_compare_report(
     show_impact: bool, severity_config: Any,
     demangle: bool, contract_evaluation: bool,
     require_complete_analysis: bool = False,
+    audit_suppressions: bool = False,
 ) -> str:
     """Render one compare report and fold every post-render section into it.
 
@@ -934,8 +933,15 @@ def _render_compare_report(
         contract_evaluation=contract_evaluation,
         demangle=demangle,
     )
+    # ADR-068 D4/Phase 5: result.suppression_audit is now always attached
+    # when suppression was given; --audit-suppressions only gates whether
+    # this markdown/text/review fold renders it (pass None when not given).
+    # JSON/SARIF/JUnit/HTML read the field off `result` unconditionally.
     text = _fold_suppression_audit_into_text(
-        text, fmt, result.suppression_audit, demangle=demangle
+        text,
+        fmt,
+        result.suppression_audit if audit_suppressions else None,
+        demangle=demangle,
     )
     return _fold_use_case_impact_into_text(
         text, fmt, result, show_only, demangle=demangle
@@ -1051,9 +1057,10 @@ def _reject_flags_unsupported_for_set_inputs(
     combination the real run would then reject.
 
     ``--pack`` is not rejected here: the caller resolves it separately right
-    after this call. ``--write`` (``secondary_fmt``/``secondary_output``) is
-    not rejected either -- the release engine supports it directly, so it is
-    simply forwarded to ``_dispatch_release_compare``.
+    after this call. ``--write`` (``secondary_writes``, repeatable per
+    ADR-068 D4/Phase 5) is not rejected either -- the release engine
+    supports it directly (at most one write; see ``_dispatch_release_
+    compare``'s own rejection of a second one), so it is simply forwarded.
 
     Returns the ``--depth`` value the caller should forward to the fan-out
     (D1: currently always ``"binary"`` or ``None`` --
@@ -1089,7 +1096,7 @@ def _report_compare_result(
     fmt: str, output: Path | None, show_only: str | None, report_mode: str,
     show_impact: bool,
     demangle: bool, demangle_explicit: bool | None, follow_deps: bool,
-    secondary_fmt: str | None, secondary_output: Path | None,
+    secondary_writes: tuple[tuple[str, Path], ...],
     require_complete_analysis: bool = False,
     depth: str | None = None,
     use_cases_manifest: Path | None = None,
@@ -1198,7 +1205,12 @@ def _report_compare_result(
     # per-consumer scope; both fold only against the global exit code
     # `_exit_with_severity_or_verdict` computes below.
 
-    if audit_suppressions:
+    # ADR-068 D4/Phase 5: computed unconditionally whenever a suppression
+    # file is in play -- "forgot --audit-suppressions" must never withhold a
+    # fact from the canonical result. The flag survives only as a rendering
+    # choice (the markdown "## Suppression Audit" section, gated below in
+    # _render_compare_report); JSON/SARIF/JUnit/HTML carry the field either way.
+    if suppression is not None:
         _attach_suppression_audit(result, suppression)
 
     _attach_use_case_impact(result, old, new, use_cases_manifest)
@@ -1229,22 +1241,14 @@ def _report_compare_result(
             demangle=demangle,
             contract_evaluation=contract_evaluation,
             require_complete_analysis=require_complete_analysis,
+            audit_suppressions=audit_suppressions,
         ),
     )
 
-    if secondary_fmt is not None:
-        # Always the full, unfiltered report — ignores --show-only
-        # (which describes the *primary* format's display) and forces
-        # report_mode="full" (not the primary's --report-mode leaf) so a
-        # --secondary-* consumer (e.g. a CI action rendering a PR-comment
-        # JSON from a markdown-format primary run) sees the complete change
-        # set the gate actually acted on, not whatever the primary format
-        # chose to filter or group down to. Reuses the same already-computed
-        # `result` — no second comparison run.
-        # Resolve demangle against secondary_fmt, not the primary-resolved
-        # value above — otherwise a machine primary format (e.g. json) paired
-        # with a markdown/review secondary format would wrongly inherit
-        # demangle=False into the secondary render (Codex review, PR #557).
+    # ADR-068 D4/Phase 5: --write is repeatable (§4.1) -- every write renders
+    # the same already-computed `result` (no second comparison), full and
+    # unfiltered, demangled per its own format (Codex review, PR #557).
+    for secondary_fmt, secondary_output in secondary_writes:
         _write_or_echo(
             secondary_output,
             _render_compare_report(
@@ -1255,6 +1259,7 @@ def _report_compare_result(
                 demangle=_resolve_demangle(secondary_fmt, demangle_explicit),
                 contract_evaluation=contract_evaluation,
                 require_complete_analysis=require_complete_analysis,
+                audit_suppressions=audit_suppressions,
             ),
         )
 
@@ -1266,7 +1271,8 @@ def _report_compare_result(
     # narrowed or replaced by that consumer's own result.
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt)
     _exit_with_severity_or_verdict(
-        result, sev_config, resolved_cfg.exit_code_scheme, fmt, secondary_fmt,
+        result, sev_config, resolved_cfg.exit_code_scheme, fmt,
+        [f for f, _ in secondary_writes],
         require_complete_analysis=require_complete_analysis,
     )
 
@@ -1316,7 +1322,11 @@ def run_compare(
     debug_roots_new: tuple[Path, ...],
     debuginfod: bool,
     debuginfod_url: str | None,
-    pattern_verdicts: bool,
+    # ADR-068 D4/Phase 5: --pattern-verdicts is gone -- it runs
+    # unconditionally now (see compare_snapshots() call site below).
+    # explain_patterns survives, now pure rendering of the always-on ledger.
+    # --surface-metrics stays an opt-in flag (see adr027_compare_options'
+    # own docstring for why it wasn't folded into AUTO this phase).
     explain_patterns: bool,
     surface_metrics: bool,
     reconcile_build_context: bool,
@@ -1328,8 +1338,9 @@ def run_compare(
     depth: str | None = None,
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
-    secondary_fmt: str | None = None,
-    secondary_output: Path | None = None,
+    # ADR-068 D4/Phase 5: --write is repeatable (§4.1). Each entry is an
+    # already-parsed, already PATH-uniqueness-checked (FORMAT, PATH) pair.
+    secondary_writes: tuple[tuple[str, Path], ...] = (),
     dry_run: bool = False,
     used_by_apps: tuple[ConsumerAppInput, ...] = (),
     used_by_manifests: tuple[Path, ...] = (),
@@ -1356,8 +1367,7 @@ def run_compare(
     _reject_incoherent_compare_flags(
         dry_run=dry_run,
         output=output,
-        secondary_output=secondary_output,
-        secondary_fmt=secondary_fmt,
+        secondary_writes=secondary_writes,
     )
     # --contract is the only way to ask for the ADR-049 evaluator on the CLI
     # (abicheck.cli_options.resolve_contract_evaluation) -- resolved here,
@@ -1458,58 +1468,15 @@ def run_compare(
     # single-pair one would (ADR-037 D4).
     old_kind, new_kind = _classify_and_reject_operands(old_input, new_input)
 
-    # A manifest that is resolved and then has its result dropped is the same
-    # failure --use-cases is rejected for set inputs to avoid: an apparently
-    # successful report with the requested data silently missing. Two ways to
-    # land there -- sarif/junit/html render from `result` but never read
-    # `DiffResult.use_case_impact`, and the internal one-line format (reached
-    # only via the built-in `quick` --profile) promises one shape and one
-    # only that the block would break for every CI consumer parsing it.
-    #
-    # Asked across *every* rendered output rather than the primary alone: the
-    # secondary --write render reuses this same attributed result at
-    # report_mode="full", so `--format html --write json=PATH` does deliver
-    # the attribution and rejecting it was arbitrary (Codex review); the
-    # primary-only message below had in fact been proposing that exact
-    # arrangement as the fix. One output carrying the block is enough; only
-    # when none does is the manifest genuinely resolved for nothing.
-    if use_cases_manifest is not None and not (
-        format_carries_use_case_impact(fmt)
-        or format_carries_use_case_impact(secondary_fmt)
-    ):
-        if fmt == ONELINE_FORMAT:
-            # `fmt` here is the internal-only "oneline" value (reachable only
-            # via --profile quick's injected default) -- never a spelling
-            # the user typed as --format, so the generic `rendered = f"
-            # --format {fmt}"` branch below would name a flag value that
-            # doesn't exist on the command line. Name --profile quick
-            # instead, and still mention the secondary format when one is
-            # ALSO ledgerless (--profile quick --write sarif=...), rather
-            # than silently dropping that half of the picture (Codex
-            # review, fresh evidence).
-            also = (
-                f" The --write {secondary_fmt}=... output does not carry it "
-                "either." if secondary_fmt else ""
-            )
-            detail = (
-                "--profile quick emits only a one-line summary, which the "
-                "attribution block would not fit. Use a different profile "
-                "or --format to get the use-case section, add --write "
-                "json=PATH to carry it alongside the summary, or drop "
-                "--use-cases." + also
-            )
-        else:
-            rendered = f"--format {fmt}" + (
-                f" and --write {secondary_fmt}=..." if secondary_fmt else ""
-            )
-            detail = (
-                f"no output this run renders ({rendered}) carries use-case "
-                "attribution, so the manifest would be resolved and its result "
-                "dropped. Use --format json/markdown/review, or add --write "
-                "json=PATH to get one output that carries it alongside the "
-                f"{fmt} report."
-            )
-        raise click.UsageError(f"--use-cases is not supported here: {detail}")
+    # ADR-068 D4/Phase 5: split out to _helpers_compare.reject_use_cases_
+    # without_carrying_output (keeps this module under the 2000-line hard
+    # cap) -- with --write repeatable, "one output carrying it" is now the
+    # primary render OR any secondary write, not just one --write.
+    reject_use_cases_without_carrying_output(
+        fmt=fmt,
+        secondary_fmts=[f for f, _ in secondary_writes],
+        use_cases_manifest=use_cases_manifest,
+    )
 
     # CLI cleanup phase two, PR B slice 1: None for a single-pair compare or a
     # release/directory one with no --pack; resolved just below (ahead of the
@@ -1661,7 +1628,7 @@ def run_compare(
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
             pack_application=release_pack_application,
-            secondary_fmt=secondary_fmt, secondary_output=secondary_output,
+            secondary_writes=secondary_writes,
             compile_context=directory_compile_context,
             config_includes=directory_config_includes,
             depth=release_depth,
@@ -1933,7 +1900,13 @@ def run_compare(
         post_manifest_path, old, new
     )
 
-    apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
+    # ADR-068 D4 (the correctness fix this phase exists for): pattern-verdict
+    # modulation is unconditional now, not a flag (removed; see
+    # adr027_compare_options). It is independently evidence-gated
+    # (idiom-only demotion), so this never manufactures a false negative --
+    # it only fixes the bug where asking *why* (--explain-patterns) used to
+    # also decide *whether* modulation happened, which could change the
+    # verdict and exit code. --surface-metrics stays a real opt-in flag.
     # Reporting reads the severity config only under the severity exit scheme;
     # resolved once here rather than re-spelled at each of the five consumers.
     report_severity = sev_config if resolved_cfg.exit_code_scheme == "severity" else None
@@ -1957,7 +1930,7 @@ def run_compare(
             scope_to_public_surface=scope_public_headers,
             force_public_symbols=force_public,
             extra_changes=extra_changes,
-            pattern_verdicts=apply_patterns,
+            pattern_verdicts=True,
             surface_metrics=surface_metrics,
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=post_manifest_allowlist,
@@ -1989,7 +1962,7 @@ def run_compare(
         show_impact=show_impact,
         demangle=demangle, demangle_explicit=demangle_explicit,
         follow_deps=follow_deps,
-        secondary_fmt=secondary_fmt, secondary_output=secondary_output,
+        secondary_writes=secondary_writes,
         require_complete_analysis=require_complete_analysis,
         depth=depth,
         use_cases_manifest=use_cases_manifest,

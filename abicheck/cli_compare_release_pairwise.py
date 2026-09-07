@@ -140,7 +140,13 @@ def _run_compare_pair(
     old_pdb_path: Path | None,
     new_pdb_path: Path | None,
     scope_to_public_surface: bool = True,
-    pattern_verdicts: bool = False,
+    # ADR-068 D3 #7/D4: pattern-verdict modulation is unconditional on every
+    # `compare` path now, directory/package release fan-out included -- "one
+    # model, any cardinality" means a library compared here must get the
+    # identical treatment it would from a single-pair `compare` of the same
+    # library (no caller of this function ever passed a non-default value,
+    # so this was previously a silent capability gap between the two paths).
+    pattern_verdicts: bool = True,
     include_dependencies: bool = True,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,

@@ -898,11 +898,12 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--dwarf-only" in out
 
-    def test_pattern_verdicts_is_rejected(self, tmp_path: Path) -> None:
-        # Codex review: pattern-verdict modulation and surface-metric
-        # findings are both computed inside service.compare_snapshots(),
-        # but the per-library call here never passes pattern_verdicts/
-        # surface_metrics -- always False regardless of the flag.
+    def test_surface_metrics_is_rejected(self, tmp_path: Path) -> None:
+        # ADR-068 D4/Phase 5: --pattern-verdicts is gone (unconditional
+        # everywhere now), but --surface-metrics stays a real opt-in flag
+        # this dispatcher still never wires into
+        # compare_release_against_bundle_facts() -- reject it loudly rather
+        # than silently producing no metric-drift finding.
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
@@ -912,13 +913,13 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--pattern-verdicts",
+            "--surface-metrics",
             "--format",
             "json",
         )
 
         assert code == 64
-        assert "--pattern-verdicts" in out
+        assert "--surface-metrics" in out
 
     def test_config_debug_block_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"

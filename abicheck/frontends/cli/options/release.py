@@ -238,9 +238,40 @@ def debug_resolution_options(func: F) -> F:
 def adr027_compare_options(func: F) -> F:
     """Add the ADR-027 API-surface-intelligence options to ``compare``.
 
-    ``--pattern-verdicts`` / ``--explain-patterns`` (A4 modulation) and
-    ``--surface-metrics`` (A1/D1.2 metric drift). Decorators apply bottom-up, so
-    they are listed here in reverse of their displayed order.
+    ``--explain-patterns`` (A4 modulation explanation) and
+    ``--surface-metrics`` (A1/D1.2 metric drift). Decorators apply
+    bottom-up, so they are listed here in reverse of their displayed order.
+
+    ADR-068 D4/Phase 5 (one-comparison-product.md §6): pattern-verdict
+    modulation (``--pattern-verdicts``) is no longer a flag at all -- it is
+    an unconditional, evidence-gated analysis stage of every ``compare`` run
+    now (AUTOMATIC per §3 #7: "on where evidence exists"). It never fires
+    without genuine evidence (an opaque-pointer/PIMPL idiom) and never turns
+    a break into a pass on its own -- it only ever demotes at
+    header-aware-or-better evidence tiers or raises a lost-invariant break --
+    so making it unconditional never manufactures a false negative, only
+    removes an opt-in a user could forget. ``--explain-patterns`` no longer
+    implies it: it is now pure rendering over whatever modulation the
+    (always-on) stage already recorded on ``result.pattern_modulations`` --
+    it can change what is *shown*, never what was *decided* (the bug this
+    decoupling fixes: asking "why" used to also flip "whether", which could
+    change the verdict and exit code).
+
+    ``--surface-metrics`` is deliberately **not** folded into the same
+    AUTOMATIC treatment in this phase, despite §4.1's table also marking it
+    AUTO: unlike modulation (which only ever adjusts an *existing* finding's
+    effective verdict) or the suppression-audit/disposition-ledger fixes
+    this phase does make unconditional (an additive, independently-gated
+    JSON key), a surface-metric finding is a brand-new ``Change`` record
+    merged directly into ``result.changes`` with no separate suppressible-
+    but-hideable channel -- making it unconditional would add a new,
+    always-visible COMPATIBLE finding to *any* comparison whose public
+    symbol count changes at all (i.e. most real comparisons), which is a
+    much larger, harder-to-contain analysis-output change than this phase's
+    scope (a targeted correctness fix plus additive accounting) was set up
+    to absorb safely. Left as the pre-existing opt-in flag; folding it into
+    AUTO is deferred to a follow-up slice that can budget for updating every
+    exact-finding-count test it would touch.
     """
     func = click.option(
         "--surface-metrics",
@@ -256,17 +287,11 @@ def adr027_compare_options(func: F) -> F:
         "explain_patterns",
         is_flag=True,
         default=False,
-        help="Print idiom evidence behind each modulation (implies "
-        "--pattern-verdicts).",
-    )(func)
-    func = click.option(
-        "--pattern-verdicts/--no-pattern-verdicts",
-        "pattern_verdicts",
-        default=False,
-        help="Modulate verdicts with idiom/anti-pattern evidence (ADR-027): "
-        "demote opaque-pointer/PIMPL-hidden layout changes (header-aware only) "
-        "and raise breaks when an opacity/handle guarantee is lost. Disclosed in "
-        "the pattern_modulations ledger; reversible.",
+        help="Print the idiom evidence behind each pattern-verdict "
+        "modulation (ADR-027). Pattern-verdict modulation itself runs "
+        "automatically wherever idiom evidence exists -- this flag only "
+        "controls whether that evidence is explained; it never changes "
+        "the verdict or exit code.",
     )(func)
     return func
 

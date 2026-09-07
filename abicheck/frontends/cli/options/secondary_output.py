@@ -98,6 +98,7 @@ def _parse_write_operand(
 def secondary_output_options(
     formats: Sequence[str],
     *,
+    multiple: bool = False,
     format_help: str = "Emit a second output format from this same run, to "
     "its own file, without re-running the analysis. FORMAT is one of "
     "{formats}; PATH must differ from --output/-o.",
@@ -111,11 +112,63 @@ def secondary_output_options(
     ``scan --against`` only ever produces ``text``/``json``) -- but the
     option's structure, flag spelling, and help text live here once.
 
-    The parsed operand is published as the ``secondary_fmt`` /
-    ``secondary_output`` pair the whole rendering path already threads, so
-    only the user-facing spelling changed.
+    *multiple* (ADR-068 D4/Phase 5: "one analysis, several artifacts" --
+    ``one-comparison-product.md`` §4.1) makes ``--write`` repeatable
+    (``--write json=a.json --write markdown=b.md``), publishing the parsed
+    operand as one ``secondary_writes: tuple[tuple[str, Path], ...]``
+    parameter instead of the single ``secondary_fmt``/``secondary_output``
+    pair the non-repeatable form still publishes. Callers that don't pass
+    *multiple* (``scan``) are completely unaffected -- this is an additive
+    parameter, not a behavior change to the existing single-value path.
     """
     allowed = list(formats)
+
+    if multiple:
+
+        def _callback_multi(
+            ctx: click.Context, param: click.Parameter, value: tuple[str, ...]
+        ) -> tuple[tuple[str, Path], ...]:
+            parsed: list[tuple[str, Path]] = []
+            seen: set[Path] = set()
+            for raw in value:
+                fmt, path = _parse_write_operand(raw, allowed, param)
+                resolved = path.resolve()
+                if resolved in seen:
+                    raise click.BadParameter(
+                        f"{raw!r}: --write's PATH must be unique across "
+                        "repeated --write options -- writing two formats to "
+                        "the same file would silently overwrite one with "
+                        "the other.",
+                        param=param,
+                    )
+                seen.add(resolved)
+                parsed.append((fmt, path))
+            return tuple(parsed)
+
+        def deco_multi(func: F) -> F:
+            return click.option(
+                "--write",
+                "secondary_writes",
+                metavar="FORMAT=PATH",
+                multiple=True,
+                # No explicit `default=` here (Click's own `multiple=True`
+                # default of `()` applies) -- deliberately, not an oversight:
+                # `scripts/check_ai_readiness.py`'s `_check_one_default_per_flag`
+                # (ADR-037 D10.4) statically flags two literal `default=`
+                # values for the same flag name across shared decorators,
+                # which this factory's own `multiple` branch would otherwise
+                # trip on the singular form's `default=None` -- the two really
+                # are one flag with two intentionally different shapes
+                # (repeatable vs. singular), not an accidental typo-divergence
+                # that check exists to catch.
+                callback=_callback_multi,
+                help=format_help.format(formats="/".join(allowed))
+                + " Repeatable: pass --write more than once to emit "
+                "several artifacts from the same analysis "
+                "(e.g. --write json=a.json --write markdown=b.md).",
+            )(func)
+
+        return deco_multi
 
     def _callback(
         ctx: click.Context, param: click.Parameter, value: str | None
@@ -180,3 +233,34 @@ def reject_incoherent_secondary_output(
             "formats to the same file would silently overwrite the primary "
             "report with the secondary one."
         )
+
+
+def reject_incoherent_secondary_writes(
+    *,
+    dry_run: bool,
+    output: Path | None,
+    secondary_writes: tuple[tuple[str, Path], ...],
+) -> None:
+    """:func:`reject_incoherent_secondary_output`'s counterpart for the
+    repeatable ``--write`` form (``multiple=True`` above).
+
+    Per-write PATH uniqueness across *secondary_writes* is already enforced
+    by the parsing callback itself (each ``--write`` occurrence is checked
+    against every earlier one as it is parsed); this covers the two checks
+    that need the *other* options (``--dry-run``, ``--output``) instead.
+    """
+    if dry_run and secondary_writes:
+        raise click.UsageError(
+            "--dry-run cannot be combined with --write: a dry run performs "
+            "no analysis and writes nothing, so there is no secondary "
+            "report to produce."
+        )
+    if output is not None:
+        out_resolved = output.resolve()
+        for _fmt, path in secondary_writes:
+            if path.resolve() == out_resolved:
+                raise click.UsageError(
+                    "--write's PATH must differ from --output/-o: writing "
+                    "both formats to the same file would silently "
+                    "overwrite the primary report with the secondary one."
+                )
