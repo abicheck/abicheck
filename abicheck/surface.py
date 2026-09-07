@@ -105,6 +105,20 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         "constant_changed",
         "constant_removed",
         "constant_added",
+        # ADR-068 plan §3 row 4 (cross-source check migration): the finding's
+        # own ``symbol`` is the exported *RTTI* symbol itself (e.g.
+        # ``_ZTI12InternalNode``), not a function/variable declaration the
+        # symbol-level classifier can resolve -- an RTTI mangled name is
+        # never itself present in ``all_symbols``/``public_symbols``
+        # (those only ever index ``Function``/``Variable`` mangled names).
+        # ``_classify_symbol_level`` therefore always falls through to
+        # ``_classify_type_level`` on ``caused_by_type`` (the private type
+        # whose RTTI leaked), which demotes it as "private-header" --
+        # defeating the one thing this check exists to report (its whole
+        # purpose is that a private type's RTTI is on the export surface).
+        # Same leak-carve-out shape as the three kinds at the top of this
+        # set.
+        "rtti_for_internal_type",
     }
 )
 

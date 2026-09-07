@@ -168,6 +168,7 @@ class TestBuildConfigFromDictRejects:
                     "collapse_versioned_symbols": False,
                     "public_symbols": ["_Z3foov"],
                     "show_redundant": False,
+                    "public_header_dirs": ["include/public"],
                 },
                 "suppression": {"strict": True, "require_justification": False},
                 "source": {"method": "s4"},
@@ -198,6 +199,55 @@ class TestBuildConfigFromDictRejects:
         assert cfg.compile_frontend == "clang"
         assert cfg.bundle_system_providers == ["libvendor.so.1"]
         assert cfg.bundle_cohorts == ["libfoo_"]
+        assert cfg.public_header_dirs == ["include/public"]
+
+
+class TestBuildConfigPublicHeaderDirs:
+    """``scope.public_header_dirs`` (ADR-068 plan §5 P4): the config-sourced
+    public/internal boundary for the four cross-source checks migrated onto
+    ``compare()`` in this PR. Deliberately a *different* key from the
+    pre-existing ``scope.public`` boolean (public-surface FP-scoping
+    toggle) -- the two answer unrelated questions despite the naming
+    collision the plan doc's own shorthand ("`.abicheck.yml` `scope.public`")
+    might suggest."""
+
+    def test_absent_by_default(self) -> None:
+        cfg = BuildConfig.from_dict({})
+        assert cfg.public_header_dirs == []
+
+    def test_parses_a_list(self) -> None:
+        cfg = BuildConfig.from_dict(
+            {"scope": {"public_header_dirs": ["include", "public"]}}
+        )
+        assert cfg.public_header_dirs == ["include", "public"]
+
+    def test_accepts_a_single_bare_string(self) -> None:
+        """``_strs()``'s documented convention: a single bare string folds to
+        a one-element list, same as every other list-shaped ``scope:``
+        subkey (``LIST_SUBKEYS`` in ``build_config_schema.py``)."""
+        cfg = BuildConfig.from_dict({"scope": {"public_header_dirs": "include"}})
+        assert cfg.public_header_dirs == ["include"]
+
+    def test_wrong_type_raises(self) -> None:
+        with pytest.raises(ValueError):
+            BuildConfig.from_dict({"scope": {"public_header_dirs": 42}})
+
+    def test_independent_of_the_scope_public_boolean(self) -> None:
+        """The two ``scope.public``/``scope.public_header_dirs`` keys are
+        unrelated: setting one never implies or clears the other."""
+        cfg = BuildConfig.from_dict(
+            {"scope": {"public": False, "public_header_dirs": ["include"]}}
+        )
+        assert cfg.scope_public is False
+        assert cfg.public_header_dirs == ["include"]
+
+    def test_round_trips_through_to_dict(self) -> None:
+        cfg = BuildConfig.from_dict({"scope": {"public_header_dirs": ["include"]}})
+        assert BuildConfig.from_dict(cfg.to_dict()).public_header_dirs == ["include"]
+
+    def test_omitted_from_to_dict_when_empty(self) -> None:
+        cfg = BuildConfig.from_dict({})
+        assert "public_header_dirs" not in cfg.to_dict().get("scope", {})
 
 
 class TestBuildConfigBundleBlock:

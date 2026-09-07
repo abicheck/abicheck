@@ -17,15 +17,48 @@ True) -- because ADR-068 D4/D5 classify "a flag that merely enables useful
 analysis" as REMOVE: the stage is evidence-gated per check, per side, not
 opt-in.
 
-**Scope so far**: two checks, ``unversioned_exported_symbol`` (``buildsource.
+**Scope so far**: six checks. ``unversioned_exported_symbol`` (``buildsource.
 crosscheck.CHECK_UNVERSIONED_EXPORTED_SYMBOL`` -- chosen first because it
-needs no public/internal boundary evidence, ADR-068 plan P4, still open;
-only the ELF export table + version-definition section already present in
-every ELF ``AbiSnapshot``) and ``private_header_leak``
-(``CHECK_PRIVATE_HEADER_LEAK``). The other checks §3 lists (row 5, 15)
-migrate in later slices, reusing this same evolution-folding shape -- see
+needs no public/internal boundary evidence; only the ELF export table +
+version-definition section already present in every ELF ``AbiSnapshot``) and
+``private_header_leak`` (``CHECK_PRIVATE_HEADER_LEAK``) landed first. This
+slice adds the four checks plan §5 P4 named as blocked on a public/internal
+boundary: ``exported_not_public``, ``public_not_exported``,
+``rtti_for_internal_type``, and ``public_to_internal_dependency`` (plan §3
+rows 3-5). P4 itself -- deriving that boundary for `compare()` with no new
+CLI flag -- is solved *upstream* of this module, not here: every check below
+still gates on the check-local evidence signal already baked onto each
+snapshot (``crosscheck._origin_resolvable``/an attached L5 graph), unchanged.
+What is new is *how a `compare()`-produced snapshot gets a resolvable origin
+at all* without ``scan --public-header-dir``: a ``-H``/``--header``
+*directory* argument already fed ``provenance.apply_provenance`` before this
+PR (unchanged -- ``service_compare_pipeline._public_header_sets`` already
+splits ``-H`` into files/directories via ``header_utils.
+split_public_header_inputs`` and folds any directory into the provenance
+set; note this is a pre-existing, narrower rule than ``scan
+--public-header-dir``'s own ``workflows.scan_config.public_provenance_set``
+-- a lone ``-H`` *file* with no directory still opts ``compare`` into
+classification today, unlike ``scan``, and this PR leaves that
+`compare`-specific behavior exactly as it found it rather than
+retroactively tightening it). This PR adds a second source, a project's
+``.abicheck.yml`` ``scope.public_header_dirs`` list (``buildsource.
+build_config.BuildConfig.public_header_dirs``), threaded through
+``cli_compare_helpers.run_compare`` -> ``cli_resolve.
+_resolve_compare_snapshots``'s ``config_public_header_dirs`` parameter into
+the same ``InputSpec.public_header_dirs`` / ``apply_provenance`` machinery a
+``-H`` directory already reaches -- one shared boundary primitive, fed from
+two input sources; a config entry is always a directory, so it can never
+weaken the directory-vs-file asymmetry ``scan --public-header-dir`` itself
+still implements verbatim via ``cli_scan_baseline._public_provenance_set``
+(``workflows.scan_config.public_provenance_set``). With neither source
+present, every declaration stays ``ScopeOrigin.UNKNOWN`` exactly as before,
+and each of the four checks below evidence-gates to ``NOT_EVALUATED`` per
+side rather than fabricating a finding -- the checks themselves needed no
+change for this, since they already gated on the same per-snapshot signal
+``private_header_leak`` does.
+No other §3 row migrates in this slice; see
 :func:`compute_cross_source_evolution`'s own docstring for exactly how to
-extend it.
+extend it further.
 
 **Per-check identity, not a bare ``Change.symbol`` key.** A first version of
 this module keyed every check's OLD/NEW pairing on ``symbol`` alone, on the
@@ -36,18 +69,41 @@ long as the check's own findings carry a stable per-side identity in
 the same ``symbol`` -- one public function referencing two distinct
 private-header types produces two ``Change`` objects sharing one ``symbol``
 but differing ``new_value`` (the leaked type name) -- so a bare
-symbol-keyed dict silently collapsed one of the two onto the other. Identity
-is therefore a **per-check** function (:data:`_IDENTITY_FUNCS`, keyed by
-check name), defaulting to plain ``symbol`` for a check that genuinely never
-emits more than one finding per symbol (``unversioned_exported_symbol``: a
-given exported symbol either has a version or it doesn't -- one finding,
-one symbol, always). A check whose own identity needs more than ``symbol``
-registers its own identity function here rather than inventing a second
-folding algorithm.
+symbol-keyed dict silently collapsed one of the two onto the other.
+``public_to_internal_dependency`` has the identical shape: one public
+declaration (``Change.symbol``) can depend on more than one distinct
+internal entity (``Change.new_value``), each its own finding. Identity is
+therefore a **per-check** function (:data:`_IDENTITY_FUNCS`, keyed by check
+name), defaulting to plain ``symbol`` for a check that genuinely never emits
+more than one finding per symbol:
+
+- ``unversioned_exported_symbol`` -- a given exported symbol either has a
+  version or it doesn't, one finding.
+- ``exported_not_public`` -- one finding per undocumented *exported symbol
+  name* (``Change.symbol`` is the export itself, iterated once per name).
+- ``public_not_exported`` -- one finding per *declaration* lacking its
+  export (``Change.symbol`` is that declaration's own mangled name/symbol,
+  which cannot repeat).
+
+``rtti_for_internal_type`` also emits at most one finding per RTTI symbol
+(``Change.symbol``, e.g. ``_ZTI6Widget``) within a single run -- the check's
+own ``seen``/``next(...)`` short-circuit keeps exactly one canonical private
+type per symbol -- so a bare-``symbol`` identity never collapses two
+same-run findings the way ``private_header_leak``'s does. It still registers
+its own ``(symbol, new_value)`` identity below rather than relying on the
+default, though: unlike the three checks above, the same RTTI symbol name
+can plausibly resolve to a *different* private type across OLD and NEW (a
+type moved/renamed under an unchanged mangled RTTI name), and a bare-symbol
+identity would silently read that as one continuous ``PERSISTENT`` finding
+instead of the true resolved-old-type/introduced-new-type pair --
+mirroring ``private_header_leak``'s own reasoning even though the
+within-one-run collision it specifically guards against cannot happen here.
+A check whose own identity needs more than ``symbol`` registers its own
+identity function here rather than inventing a second folding algorithm.
 
 Authority is unchanged (ADR-028 D3 / ADR-035 D1): every ``Change`` this
 module returns keeps whatever ``ChangeKind`` default verdict already
-governs it (``RISK``, for both migrated checks) -- this module never sets
+governs it (``RISK``, for all six migrated checks) -- this module never sets
 ``effective_verdict`` and never invents a new verdict for the
 ``not_evaluated``/``introduced``/``resolved``/``persistent`` axis. That axis
 is purely descriptive.
@@ -58,7 +114,11 @@ from __future__ import annotations
 from collections.abc import Callable, Hashable
 
 from ..buildsource.crosscheck import (
+    CHECK_EXPORTED_NOT_PUBLIC,
     CHECK_PRIVATE_HEADER_LEAK,
+    CHECK_PUBLIC_NOT_EXPORTED,
+    CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
+    CHECK_RTTI_FOR_INTERNAL_TYPE,
     CHECK_UNVERSIONED_EXPORTED_SYMBOL,
     CrosscheckConfig,
     run_crosschecks,
@@ -87,17 +147,26 @@ def _default_identity(change: Change) -> Hashable:
 #: the module docstring's "Per-check identity" note.
 _IDENTITY_FUNCS: dict[str, Callable[[Change], Hashable]] = {
     CHECK_PRIVATE_HEADER_LEAK: lambda c: (c.symbol, c.new_value),
+    CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY: lambda c: (c.symbol, c.new_value),
+    CHECK_RTTI_FOR_INTERNAL_TYPE: lambda c: (c.symbol, c.new_value),
 }
 
 #: Checks this module knows how to fold into an evolution-stated finding
-#: set. Extending this set to migrate another §3 check (row 5, 15) means:
-#: register the check here, and register its own identity function in
+#: set. Extending this set to migrate another §3 row means: register the
+#: check here, and register its own identity function in
 #: :data:`_IDENTITY_FUNCS` above *unless* it shares
 #: ``unversioned_exported_symbol``'s "at most one finding per symbol"
 #: guarantee (see the module docstring's "Per-check identity" note) --
 #: nothing else in this module's folding logic changes.
 CROSS_SOURCE_EVOLUTION_CHECKS: frozenset[str] = frozenset(
-    {CHECK_UNVERSIONED_EXPORTED_SYMBOL, CHECK_PRIVATE_HEADER_LEAK}
+    {
+        CHECK_UNVERSIONED_EXPORTED_SYMBOL,
+        CHECK_PRIVATE_HEADER_LEAK,
+        CHECK_EXPORTED_NOT_PUBLIC,
+        CHECK_PUBLIC_NOT_EXPORTED,
+        CHECK_RTTI_FOR_INTERNAL_TYPE,
+        CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
+    }
 )
 
 

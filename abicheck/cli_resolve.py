@@ -531,6 +531,7 @@ def _resolve_compare_snapshots(
     include_dependencies: bool = False,
     lang_explicit: bool = False,
     changed_paths: tuple[str, ...] = (),  # ADR-068 Phase 2c: ADR-043 D7 POI scoping
+    config_public_header_dirs: list[Path] | None = None,
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -594,6 +595,13 @@ def _resolve_compare_snapshots(
     ``click`` exceptions (the contract ``_resolve_input`` documented), and
     ``allow_parallel=False`` to keep both sides resolving sequentially the way
     this path always has.
+
+    ``config_public_header_dirs`` (ADR-068 plan §5 P4, ``workflows.
+    public_header_boundary.project_config_public_header_dirs``): a
+    project's ``.abicheck.yml`` ``scope.public_header_dirs``, folded into
+    *both* sides' ``InputSpec.public_header_dirs`` unchanged -- a single,
+    both-sides-shared config statement, unlike ``-H`` (already per-side by
+    the time it reaches ``old_h``/``new_h``). ``None``/empty is a no-op.
     """
     from .api_types import CompareRequest, InputSpec
     from .errors import PlanningError, SnapshotError, ValidationError
@@ -613,6 +621,12 @@ def _resolve_compare_snapshots(
         base = compile_context if compile_context is not None else _CompileContext()
         return dataclasses.replace(base, frontend=backend_override)
 
+    # A dump_manifest side rejects `public_header_dirs` outright (it declares
+    # its own `public_header_dirs` field instead -- api_types._side_errors);
+    # folding the config value in for that side would turn an unrelated
+    # config key into a usage error for a `--dump-manifest` compare that
+    # never asked for it. Only a manifest-less side gets it.
+    _config_header_dirs = tuple(config_public_header_dirs or ())
     request = CompareRequest(
         old=InputSpec(
             path=old_input,
@@ -624,6 +638,9 @@ def _resolve_compare_snapshots(
             include_dependencies=include_dependencies,
             dump_manifest=old_dump_manifest,
             compile=_side_compile(old_header_backend),
+            public_header_dirs=(
+                () if old_dump_manifest is not None else _config_header_dirs
+            ),
         ),
         new=InputSpec(
             path=new_input,
@@ -635,6 +652,9 @@ def _resolve_compare_snapshots(
             include_dependencies=include_dependencies,
             dump_manifest=new_dump_manifest,
             compile=_side_compile(new_header_backend),
+            public_header_dirs=(
+                () if new_dump_manifest is not None else _config_header_dirs
+            ),
         ),
         lang=lang,
         lang_explicit=lang_explicit,

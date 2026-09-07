@@ -17,12 +17,17 @@ and ``--abi3`` (the candidate-side stable-ABI audit, ADR-068 D3), so their two
 entries were deleted from this registry in the same PR that landed them --
 which is exactly what the registry is for.
 
-Two rows of Phase 2a are closed too: ``unversioned_exported_symbol`` and
-``private_header_leak`` now run automatically inside ``checker.compare()``
-(``cross_source_checks``, default ``True`` -- see
-``workflows/cross_source_evolution.py``), reached by every front end
-through ``compare()``'s ordinary path with no opt-in flag (ADR-068 D4/D5).
-The other nine cross-source checks in this dict remain unmigrated.
+Six of the eleven cross-source checks are closed now: ``unversioned_exported_symbol``
+and ``private_header_leak`` landed first, and this PR adds four more --
+``exported_not_public``, ``public_not_exported``, ``rtti_for_internal_type``,
+and ``public_to_internal_dependency`` (plan §3 rows 3-5) -- all now running
+automatically inside ``checker.compare()`` (``cross_source_checks``, default
+``True`` -- see ``workflows/cross_source_evolution.py``), reached by every
+front end through ``compare()``'s ordinary path with no opt-in flag
+(ADR-068 D4/D5). The other five cross-source checks in this dict remain
+unmigrated: ``header_build_context_mismatch``, ``odr_type_variant``,
+``identity_collision_detected``, ``compile_context_conflict``, and
+``source_surface_dso_mismatch``.
 
 **This registry is the red set the migration must turn empty.** A test in
 this package asserts, for each registered key, that the capability is
@@ -78,16 +83,10 @@ _CROSSCHECK_REASON = (
 )
 
 EXPECTED_GAPS: dict[str, ExpectedGap] = {
-    "exported_not_public": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3/#5"),
-    "public_not_exported": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3/#5"),
     "header_build_context_mismatch": ExpectedGap(
         _CROSSCHECK_REASON, _PHASE_2A, "§3 #3/#10"
     ),
     "odr_type_variant": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3"),
-    "public_to_internal_dependency": ExpectedGap(
-        _CROSSCHECK_REASON, _PHASE_2A, "§3 #3"
-    ),
-    "rtti_for_internal_type": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3"),
     "identity_collision_detected": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3"),
     "compile_context_conflict": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3/#10"),
     "source_surface_dso_mismatch": ExpectedGap(_CROSSCHECK_REASON, _PHASE_2A, "§3 #3"),
@@ -123,11 +122,13 @@ NOT_YET_IMPLEMENTED_ANYWHERE: dict[str, ExpectedGap] = {}
 #: The complete *tracked* set: every scan-only capability, plus whatever
 #: NOT_YET_IMPLEMENTED_ANYWHERE holds (currently nothing -- see its own
 #: comment). `test_gap_registry_contract.py` pins this against `EXPECTED_GAPS`
-#: alone while it's empty; `EXPECTED_GAPS` itself is down to thirteen (11
-#: checks + pattern_scan + preprocessor_scan) since Phase 2c/2d deleted
-#: changed_path_localization and abi3_audit on landing them. Used only for
-#: registry-completeness bookkeeping -- `runner.py`'s scan-vs-compare diff
-#: checks against `EXPECTED_GAPS` alone (see this module's docstring).
+#: alone while it's empty; `EXPECTED_GAPS` itself is down to seven (5
+#: remaining crosscheck checks + pattern_scan + preprocessor_scan) since
+#: Phase 2c/2d deleted changed_path_localization and abi3_audit on landing
+#: them, and this PR's four-check slice shrank the crosscheck count from
+#: nine to five. Used only for registry-completeness bookkeeping --
+#: `runner.py`'s scan-vs-compare diff checks against `EXPECTED_GAPS` alone
+#: (see this module's docstring).
 ALL_EXPECTED_GAPS: dict[str, ExpectedGap] = {
     **EXPECTED_GAPS,
     **NOT_YET_IMPLEMENTED_ANYWHERE,

@@ -107,6 +107,9 @@ from .frontends.cli.runtime import (
     _write_or_echo,
 )
 from .service_render import ONELINE_FORMAT
+from .workflows.public_header_boundary import (
+    project_config_public_header_dirs,
+)
 
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
@@ -1801,6 +1804,7 @@ def run_compare(
         new_dump_manifest=new_manifest_obj,
         include_dependencies=include_dependencies,
         lang_explicit=lang_explicit, changed_paths=_enrich.changed_paths,
+        config_public_header_dirs=project_config_public_header_dirs(project_cfg),
     )
 
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap (Codex review, PR

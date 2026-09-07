@@ -60,7 +60,20 @@ NO_CHANGE oracle below.
 
 Oracle: for every transformation, comparing the base library against the
 transformed one must produce ``Verdict.NO_CHANGE`` with zero emitted
-findings -- the two are, semantically, the exact same library.
+findings -- the two are, semantically, the exact same library. Every
+``compare()`` call below passes ``cross_source_checks=False``: this class
+is specifically about *identity stability under non-semantic source
+changes*, orthogonal to ADR-068's cross-source hygiene checks (now
+on-by-default in ``compare()``'s pipeline) -- this fixture's own
+lambda/template instantiations are exactly the shape
+``exported_not_public`` legitimately flags (an instantiation the binary
+exports with no matching named public declaration), and that finding is
+identical, and therefore ``PERSISTENT``, across every transformation this
+file exercises. That is a *correct* signal from an unrelated check family,
+not a taint bug this class's own oracle is about -- isolating it here
+keeps this file's NO_CHANGE oracle testing exactly the property it names,
+the same way ``checker.compare``'s own ``cross_source_checks`` keyword
+docstring says it is kept as a real parameter for.
 
 Negative control (do not over-merge): reusing the exact counterexamples
 AGENTS.md's "using-declaration" known-gap entry names as the control that
@@ -236,7 +249,7 @@ class TestRelocatingTheCheckoutRootIsANoOp:
 
         _assert_exercises_closure_taint(snap_a)
         _assert_exercises_closure_taint(snap_b)
-        result = compare(snap_a, snap_b)
+        result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
@@ -270,7 +283,7 @@ class TestRelocatingTheCheckoutRootIsANoOp:
 
         _assert_exercises_closure_taint(snap_a)
         _assert_exercises_closure_taint(snap_b)
-        result = compare(snap_a, snap_b)
+        result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
@@ -321,7 +334,7 @@ class TestSymlinkedCheckoutRootIsANoOp:
         assert str(real_root) in (add_direct.source_header or "")
         assert str(symlink_root) not in (add_direct.source_header or "")
 
-        result = compare(snap_direct, snap_via_symlink)
+        result = compare(snap_direct, snap_via_symlink, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
@@ -386,7 +399,7 @@ inline int uses_guard() { Guard g([]() { return 13; }); return g.run(); }
 
         _assert_exercises_closure_taint(snap_a)
         _assert_exercises_closure_taint(snap_b)
-        result = compare(snap_a, snap_b)
+        result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
@@ -440,7 +453,7 @@ struct Point { int x; int y; };
 
         _assert_exercises_closure_taint(snap_a)
         _assert_exercises_closure_taint(snap_b)
-        result = compare(snap_a, snap_b)
+        result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
@@ -517,7 +530,7 @@ namespace lib { int touch() { return run_one() + run_two(); } }
         relocated_lambda_spellings = _lambda_param_spellings(snap2.functions)
         assert len(relocated_lambda_spellings) >= 2
 
-        result = compare(snap, snap2)
+        result = compare(snap, snap2, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
@@ -572,7 +585,7 @@ long touch_detail(detail::Outer::Inner x) { return x.c; }
         qualified2 = {t.qualified_name for t in inner_types2 if t.qualified_name}
         assert len(qualified2) >= 2
 
-        result = compare(snap, snap2)
+        result = compare(snap, snap2, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
@@ -636,7 +649,7 @@ namespace lib { int touch() { return run_one() + run_two(); } }
         assert len(_lambda_param_spellings(snap_a.functions)) >= 2
         assert len(_lambda_param_spellings(snap_b.functions)) >= 2
 
-        result = compare(snap_a, snap_b)
+        result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
@@ -708,7 +721,7 @@ namespace lib { int touch() { return run_one() + run_two(); } }
         # The documented, accepted limitation: reordering swaps which
         # closure gets which ordinal, so the two sides' matched-by-mangled-
         # symbol pair genuinely differs -- a real finding, not NO_CHANGE.
-        result = compare(snap_a, snap_b)
+        result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is not Verdict.NO_CHANGE
         assert result.changes != []
 
@@ -771,7 +784,7 @@ int touch() { return run_one() + run_two(); }
         assert len(_lambda_param_spellings(snap_a.functions)) >= 2
         assert len(_lambda_param_spellings(snap_b.functions)) >= 2
 
-        result = compare(snap_a, snap_b)
+        result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
@@ -819,7 +832,7 @@ long touch_detail(detail::Outer::Inner x) { return x.c; }
         assert len(_inner_qualified(snap_a.types)) >= 2
         assert len(_inner_qualified(snap_b.types)) >= 2
 
-        result = compare(snap_a, snap_b)
+        result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
@@ -864,7 +877,7 @@ long touch_detail(detail::Outer::Inner x) { return x.c; }
         assert len(_inner_qualified(snap_a.types)) >= 2
         assert len(_inner_qualified(snap_b.types)) >= 2
 
-        result = compare(snap_a, snap_b)
+        result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
         assert result.changes == []
 
@@ -910,8 +923,8 @@ class TestFindingIdentityIsCheckoutPathInvariant:
         old_a, new_a = _old_new_snapshots(tmp_path / "checkout_a")
         old_b, new_b = _old_new_snapshots(tmp_path / "an/unrelated/deeper/checkout_b")
 
-        result_a = compare(old_a, new_a)
-        result_b = compare(old_b, new_b)
+        result_a = compare(old_a, new_a, cross_source_checks=False)
+        result_b = compare(old_b, new_b, cross_source_checks=False)
 
         from abicheck.finding_identity import report_canonical_finding_id
 

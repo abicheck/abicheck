@@ -403,12 +403,12 @@
     },
     {
       "path": "abicheck/cli_compare_helpers.py",
-      "baseline_lines": 1996,
+      "baseline_lines": 2000,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1996 -> 2000 (ADR-068 plan §5 P4, four-check cross-source migration PR): `run_compare` gains one call threading the project config's new `scope.public_header_dirs` list into `_resolve_compare_snapshots`, plus the import of `workflows.public_header_boundary.project_config_public_header_dirs` -- the projection logic itself lives in that new sibling `workflows` module (not here), the same 'logic elsewhere, only the call site here' pattern this file's other raised entries already follow.",
       "review_by": "2026-11-30"
     },
     {
@@ -493,12 +493,12 @@
     },
     {
       "path": "abicheck/cli_resolve.py",
-      "baseline_lines": 813,
+      "baseline_lines": 833,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 806 -> 808 (one-comparison-product.md Phase 2c, ADR-068): `_resolve_compare_snapshots` gains a `changed_paths` parameter and forwards it onto the `CompareRequest` it already builds, so the native `compare` CLI's `--since`/`--changed-path` seed reaches the same shared per-side resolution the typed API uses (`_resolve_side_snapshot_impl(changed_paths=...)`) instead of a second scoping path. Two lines: the parameter and the request field -- this function's whole job is translating the CLI's loose arguments into that one request object. Raised again 808 -> 813 in the same PR (review of its own first round): `_reject_evidence_flags_for_set_inputs` -- this file's one set-input rejection chokepoint -- now also calls `_reject_single_pair_flags_for_set_inputs`, so `--since`/`--changed-path`/`--abi3` on a directory/package operand is a loud usage error instead of a silently-ignored flag (the release fan-out implements none of the three). The rejection *logic* and its message live in `cli_compare_options.py`, following the precedent `_reject_depth_for_set_inputs` set for exactly this budget reason; only the import and the one call site are here, because this is the function every set-input operand already routes through.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 806 -> 808 (one-comparison-product.md Phase 2c, ADR-068): `_resolve_compare_snapshots` gains a `changed_paths` parameter and forwards it onto the `CompareRequest` it already builds, so the native `compare` CLI's `--since`/`--changed-path` seed reaches the same shared per-side resolution the typed API uses (`_resolve_side_snapshot_impl(changed_paths=...)`) instead of a second scoping path. Two lines: the parameter and the request field -- this function's whole job is translating the CLI's loose arguments into that one request object. Raised again 808 -> 813 in the same PR (review of its own first round): `_reject_evidence_flags_for_set_inputs` -- this file's one set-input rejection chokepoint -- now also calls `_reject_single_pair_flags_for_set_inputs`, so `--since`/`--changed-path`/`--abi3` on a directory/package operand is a loud usage error instead of a silently-ignored flag (the release fan-out implements none of the three). The rejection *logic* and its message live in `cli_compare_options.py`, following the precedent `_reject_depth_for_set_inputs` set for exactly this budget reason; only the import and the one call site are here, because this is the function every set-input operand already routes through. Raised 813 -> 833 (ADR-068 plan §5 P4, four-check cross-source migration PR): `_resolve_compare_snapshots` gains a `config_public_header_dirs` parameter, folded into both sides' `InputSpec.public_header_dirs` (skipped for a `dump_manifest` side, which rejects that field outright) -- this function is the one place both sides' `InputSpec` objects are assembled from the CLI's loose arguments, so the fold has no smaller home; the projection from a loaded config to a directory list itself lives in the new `workflows.public_header_boundary` module, not here.",
       "review_by": "2026-11-30"
     },
     {

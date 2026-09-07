@@ -28,19 +28,21 @@ compare's real, user-facing entry point*.
 
 **Documented partial exception (ADR-068 D3/D4/D5 / plan P2):**
 ``abicheck/workflows/cross_source_evolution.py`` is a second, legitimate
-caller of ``run_crosschecks`` -- the migration's slices so far fold two
-checks (``unversioned_exported_symbol``, ``private_header_leak``) into
-evolution-stated findings via ``compare()``'s own ``cross_source_checks``
-keyword. That keyword defaults to ``True`` and is reached automatically by
-every real front end (CLI, typed API, Action) with no opt-in flag of any
-kind (D5 rejects "a flag that merely enables useful analysis") -- which is
-exactly why neither check is registered in ``tests/parity/gaps.py`` any
-more; see ``test_crosscheck_parity.py``'s own positive coverage for both.
-The other nine checks this primitive backs remain scan-only, so every
-*other* crosscheck-backed gap entry stays exactly as red as before. Only
-the raw structural claim this module checks -- "nothing but scan_engine.py
-calls the primitive at all" -- needed updating to admit the one caller
-these slices deliberately add.
+caller of ``run_crosschecks`` -- the migration's slices so far fold six
+checks (``unversioned_exported_symbol``, ``private_header_leak``,
+``exported_not_public``, ``public_not_exported``, ``rtti_for_internal_type``,
+``public_to_internal_dependency``) into evolution-stated findings via
+``compare()``'s own ``cross_source_checks`` keyword. That keyword defaults
+to ``True`` and is reached automatically by every real front end (CLI,
+typed API, Action) with no opt-in flag of any kind (D5 rejects "a flag that
+merely enables useful analysis") -- which is exactly why none of the six
+checks is registered in ``tests/parity/gaps.py`` any more; see
+``test_crosscheck_parity.py``'s own positive coverage for all six. The
+other five checks this primitive backs remain scan-only, so every *other*
+crosscheck-backed gap entry stays exactly as red as before. Only the raw
+structural claim this module checks -- "nothing but scan_engine.py calls
+the primitive at all" -- needed updating to admit the one caller these
+slices deliberately add.
 """
 
 from __future__ import annotations

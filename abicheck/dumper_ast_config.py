@@ -202,6 +202,46 @@ def _detect_cpp_headers(
     return False
 
 
+def _exported_symbols_indicate_cpp(exported_symbols: frozenset[str]) -> bool:
+    """True if *exported_symbols* contains a real C++/MSVC mangled name.
+
+    A header with no structural C++ syntax at all (a plain top-level function
+    declaration, no ``class``/``namespace``/``template``/``extern "C"`` — the
+    common shape of a small, focused public header) gives
+    :func:`_detect_cpp_headers` nothing to key on and auto-detection silently
+    settles on C, even when the header is unambiguously part of a C++
+    library and was compiled as such. Unlike header *syntax*, the binary's
+    own already-computed export table is direct, unambiguous evidence: a
+    real Itanium (``_Z...``), Mach-O Itanium (``__Z...``), or MSVC (``?...``)
+    mangled name can only come from a C++ (or C++-linkage) compile — plain C
+    has no name mangling at all, so a C compile can never produce one. This
+    generalizes the identical, narrower per-declaration reasoning
+    :func:`abicheck.extract.headers.castxml.functions.parse_function_element`
+    already applies (its "case141" override, which corrects one already-
+    mis-parsed declaration's *symbol* after the fact) to the *whole-TU
+    language-mode decision* itself — the earlier, root-cause point where a
+    C-mode parse also produces wrong ``is_extern_c``/visibility for every
+    declaration in the header, not merely a wrong mangled name for one
+    function (the actual defect behind ``exported_not_public``/
+    ``public_not_exported`` firing as a contradictory pair for a perfectly
+    ordinary, unnamespaced C++ function with no C++-specific syntax in its
+    own declaration).
+
+    Deliberately checked against the *whole* export table (dynamic and
+    static symbols alike, exactly like the per-declaration override's own
+    ``exported_dynamic | exported_static`` union) rather than restricted to
+    symbols the header's own declarations resolve to -- at this point in the
+    pipeline the header hasn't been parsed yet, so there is no declaration
+    set to intersect against; any real C++ mangled export in the binary is
+    sufficient proof the *compile* (not necessarily every single
+    declaration) used C++ linkage.
+    """
+    return any(
+        sym.startswith("_Z") or sym.startswith("__Z") or sym.startswith("?")
+        for sym in exported_symbols
+    )
+
+
 def _resolve_compiler_binary(
     compiler: str,
     gcc_path: str | None,
