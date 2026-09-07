@@ -166,8 +166,23 @@ def render_output(
         )
 
     if fmt == "html":
+        # ADR-061 Phase 2 gap C: the default HTML view is built through the
+        # one shared document choke point (report.build.build_report_document),
+        # the same as JSON's report_mode="full" build and the markdown/review
+        # branches below -- see report/build.py's module docstring. HTML's
+        # own compute step (html_report.build_html_document) reuses only the
+        # shared document's disposition_audit field today; its bucketing,
+        # per-section rows, and compat_html ABICC-clone layout remain its own
+        # computation (see that function's own docstring for why).
         from .html_report import generate_html_report
+        from .report.build import build_report_document
 
+        html_doc = build_report_document(
+            result,
+            show_only=show_only,
+            show_impact=show_impact,
+            severity_config=severity_config,
+        )
         return generate_html_report(
             result,
             lib_name=old.library,
@@ -178,6 +193,7 @@ def render_output(
             show_impact=show_impact,
             severity_config=severity_config,
             demangle=demangle,
+            report_document=html_doc,
         )
 
     if fmt == "junit":

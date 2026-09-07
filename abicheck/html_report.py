@@ -30,7 +30,7 @@ No external CSS/JS dependencies — fully self-contained single HTML file.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -55,7 +55,7 @@ from .policy.gate_decision import gate_decision_for_result
 # than leaving them here, is what avoids a same-layer import cycle) -- every
 # existing caller and its direct test coverage resolves through these
 # aliases unchanged.
-from .report.disposition_audit import compute_disposition_audit
+from .report.disposition_audit import DispositionAudit, compute_disposition_audit
 from .report.document import ReportDocument
 from .report.render_html import (
     ChangeRow,
@@ -505,6 +505,7 @@ def build_html_document(
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
     demangle: bool = True,
+    report_document: ReportDocument | None = None,
 ) -> ReportDocument:
     """Resolve every fact the HTML report needs into one JSON-shaped
     :class:`~abicheck.report.document.ReportDocument` -- the compute half of
@@ -515,7 +516,36 @@ def build_html_document(
     this module makes (show_only filtering, bucketing, compatibility
     metrics, which sections exist, ABICC severity-band classification for
     the ``compat_html`` layout) lives here, never in the renderer.
+
+    *report_document* (ADR-061 Phase 2 gap C), when given, is the one shared
+    ``report_mode="full"`` document ``report.build.build_report_document``
+    already built for this render -- ``service_render.render_output``'s
+    ``html`` branch builds it once and forwards it here. Its
+    ``disposition_audit`` field is reused verbatim (reconstructed into a
+    :class:`~abicheck.report.disposition_audit.DispositionAudit` via
+    ``DispositionAudit.from_dict``) instead of a second, independently-
+    resolved call to :func:`~abicheck.report.disposition_audit.
+    compute_disposition_audit` over the same ledger -- the same convergence
+    Markdown's own ``report_document`` parameter already applies. HTML's
+    remaining facts (bucketing into removed/changed/added, per-section rows,
+    the ``compat_html`` ABICC-clone layout's severity-band tables, gate/
+    scoped-verdict cards) are not yet shared-document fields -- see
+    ``docs/contribute/adr/061-responsibility-package-architecture.md``'s Gap
+    C status note for why those remain HTML-specific computation for now. A
+    direct caller with no such document (an existing Tier-2/test call site)
+    keeps the prior, independent-build behaviour.
     """
+    shared_disposition_audit = (
+        DispositionAudit.from_dict(
+            cast(
+                "Mapping[str, Any]",
+                report_document.to_mapping()["disposition_audit"],
+            )
+        )
+        if report_document is not None
+        else compute_disposition_audit(result, severity_config)
+    )
+
     verdict = (
         result.verdict.value
         if hasattr(result.verdict, "value")
@@ -652,9 +682,7 @@ def build_html_document(
                 # (Codex review). Carried as its own document field rather
                 # than folded into the compat problem tables, so the required
                 # ABICC element ids are untouched.
-                "disposition_audit": compute_disposition_audit(
-                    result, severity_config
-                ).to_dict(),
+                "disposition_audit": shared_disposition_audit.to_dict(),
             }
         )
 
@@ -710,7 +738,7 @@ def build_html_document(
                     changed,
                     added,
                     suppressed_count,
-                    compute_disposition_audit(result, severity_config),
+                    shared_disposition_audit,
                 )
             ),
             "confidence": (
@@ -745,6 +773,7 @@ def generate_html_report(
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
     demangle: bool = True,
+    report_document: ReportDocument | None = None,
 ) -> str:
     """Generate a standalone ABICC-compatible HTML ABI report.
 
@@ -765,6 +794,8 @@ def generate_html_report(
             alongside "Compatibility" so a configured severity gate (e.g. an
             addition promoted to ``error``) is visible even when the
             Compatibility verdict itself reads COMPATIBLE.
+        report_document: See :func:`build_html_document`'s own docstring
+            (ADR-061 Phase 2 gap C) -- forwarded unchanged.
 
     Returns:
         Complete self-contained HTML document as a string.
@@ -782,6 +813,7 @@ def generate_html_report(
         show_impact=show_impact,
         severity_config=severity_config,
         demangle=demangle,
+        report_document=report_document,
     )
     return render_html_document(document)
 

@@ -731,8 +731,9 @@ completed semantic report document → every format* — is gap C below, and is
 [`duplication-and-convergence-assessment.md`](../plans/duplication-and-convergence-assessment.md)
 Phase 4's `ReportEnvelope` target rather than a second design.
 
-**Gap C status (2026-09-07): JSON and Markdown-full/review converged onto
-the shared choke point; Markdown-leaf/root-cause, HTML, SARIF, JUnit not
+**Gap C status (2026-09-07): JSON, Markdown-full/review, and HTML's default
+view converged onto the shared choke point (HTML only partially — see the
+HTML progress update below); Markdown-leaf/root-cause, SARIF, JUnit not
 yet.** `report/build.py`'s `build_report_document(result, ...)` is now the
 single function that performs the full `report_mode="full"` build
 (`_build_json_base`, `_add_abi_surface_breakdown`, `_add_changes_block`, the
@@ -785,15 +786,49 @@ at all, since JSON never renders them in that shape). Verified via
 identical to pre-change output (see this ADR's own PR history / the
 `duplication-and-convergence-assessment.md` plan for the exact commit).
 
+**Progress update (2026-09-07, later still the same day): HTML's default
+view now also routes through the one shared build, to the same depth as the
+Markdown/review slice.** `service_render.render_output()`'s `html` branch
+now calls `build_report_document(result, show_only=show_only,
+show_impact=show_impact, severity_config=severity_config)` once and forwards
+the resulting `ReportDocument` into `html_report.generate_html_report` /
+`build_html_document` (both gained an optional `report_document` parameter,
+additive — a direct caller passing none keeps the prior, independent-build
+behaviour). `build_html_document` reuses the shared document's
+`disposition_audit` field (reconstructed via `DispositionAudit.from_dict`,
+the same round-trip Markdown's own `report_document` handling already uses)
+at both of its two call sites — the `compat_html` ABICC-clone layout's own
+disposition-audit block, and `compute_summary_table`'s audit argument —
+instead of two independent calls to `compute_disposition_audit` over the
+same ledger. HTML's remaining facts (bucketing changes into removed/changed/
+added, the per-section `ChangeRow` tables, `compat_html`'s ABICC severity-band
+bucketing, the gate/scoped-verdict cards) were read in full while doing this
+work and confirmed to be exactly the gap the prior assessment already
+recorded: JSON's flat `changes[]` array plus summary `severity` block has no
+matching shape for any of them today, so converging them would mean adding
+new fields to the shared document first (the "genuinely new shared-document
+design" the assessment below already named for HTML) — deliberately not
+attempted in this slice, same reasoning as `severity_groups` staying
+Markdown-side. Also closed in this slice: the ABICC-clone `compat_html=True`
+layout previously had no golden test at all (a gap C acceptance-criteria
+item this slice was asked to close alongside the wiring above); it now
+has one (`tests/golden/html_template/main_report_compat.html`,
+`tests/test_html_template_golden.py`), verified byte-identical on every
+pre-existing case and passing on the new one. Verified via the HTML test
+suite, the full golden suite (including the new `compat_html` case), and the
+usual ruff/mypy/ai-readiness/architecture gates, all clean.
+
 **What remains open.** Markdown's `leaf`/`root-cause` alternate views (see
 the scope decision immediately below — these are separate, legitimate
 documents, same reasoning as JSON's own `leaf`/`root-cause`/`--stat`, not an
-oversight left out of this slice), HTML, SARIF, and JUnit still each build
-and freeze their own document independently — that part of gap C remains
-open; closing it for HTML/SARIF/JUnit means giving each format's own
-`compute_*`/build step a first `ReportDocument` build of its own (SARIF and
-JUnit have none today, only JSON, HTML, and Markdown do) before it can even
-begin reading from the shared one.
+oversight left out of this slice), HTML's own bucketing/section/compat-mode
+computation (see the HTML progress update immediately above — the shared
+build call itself has landed, only `disposition_audit` reuse was safely
+available beyond that), and SARIF and JUnit in full still build and freeze
+their own document independently — that part of gap C remains open; closing
+it for SARIF/JUnit means giving each format's own `compute_*`/build step a
+first `ReportDocument` build of its own (neither has one today, unlike JSON,
+HTML, and Markdown).
 
 **Scope decision: JSON's own `leaf`/`root-cause`/`--stat` report modes stay
 out of gap C.** Gap C, as this ADR states it, is one full-mode evaluation
@@ -813,9 +848,10 @@ separateness was already named by the duplication-and-convergence-
 assessment plan's `EvaluationSummary`-vs-full-document distinction;
 `leaf`/`root-cause` earn the same treatment by the same reasoning. What
 remains gap C is the default/full view specifically, across formats:
-JSON-full and Markdown-full/`review` now converge through
-`build_report_document` (see the progress update above); HTML, SARIF, and
-JUnit's own default views do not yet.
+JSON-full, Markdown-full/`review`, and HTML's default view now converge
+through `build_report_document` (see the progress updates above; HTML only
+partially — its shared-document reuse is `disposition_audit` alone, not
+every fact the view needs); SARIF and JUnit's own default views do not yet.
 
 **Durable lessons.**
 

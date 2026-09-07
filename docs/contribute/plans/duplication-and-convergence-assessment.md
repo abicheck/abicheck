@@ -1844,7 +1844,43 @@ session per format, in the order this codebase's own machinery makes least
 risky: Markdown-full first (already had the closest-shaped `compute_*`/
 `render_*` split and shares `ReportFinding` with JSON already) -- **done for
 its structural half, later the same day, see the progress update above** --
-then HTML, then SARIF, then JUnit (still open).
+then HTML -- **done for its own structural half, in a following slice, see
+the progress update immediately below** -- then SARIF, then JUnit (still
+open).
+
+**Progress update (2026-09-07, HTML slice): HTML's default view now also
+routes through the one shared build, same structural depth as the
+Markdown/review slice, not the full field-by-field convergence this
+assessment described above as "real, separate engineering work."**
+`service_render.render_output()`'s `html` branch now calls
+`build_report_document(result, show_only=..., show_impact=...,
+severity_config=...)` once and threads the resulting `ReportDocument` into
+`html_report.generate_html_report`/`build_html_document` (both gained an
+optional `report_document` parameter, additive only). `build_html_document`
+reuses the shared document's `disposition_audit` field (via
+`DispositionAudit.from_dict`, the identical round-trip Markdown's own
+`report_document` handling already established) at both of its two
+independent `compute_disposition_audit` call sites — the `compat_html`
+layout's own audit block, and `compute_summary_table`'s audit argument.
+Every other HTML fact this assessment's own bullet above named --
+`removed`/`added`/`changed` bucketing, `_build_sections_data` rows,
+`compat_html`'s ABICC 2-way verdict bucketing and severity-band tables, and
+the `nav_bar`/`summary_table`/`gate_card`/`scoped_verdict` dataclasses -- was
+re-read in full during this slice and confirmed to still be exactly the gap
+this assessment already recorded: none of it has a matching shape in
+`build_report_document`'s JSON-shaped fields today (JSON's flat `changes[]`
+plus summary `severity` block does not carry HTML's own bucketing or
+severity-band grouping), so genuinely converging it means adding new fields
+to the shared document first, deliberately not attempted here -- same
+reasoning, and same "not actually a second, independently decided value"
+finding for `disposition_audit` specifically, as the Markdown slice already
+established. Also closed in this slice: the ABICC-clone `compat_html=True`
+layout had no golden test at all before it (an acceptance-criteria gap this
+plan and ADR-061 both name); `tests/golden/html_template/
+main_report_compat.html` now pins it byte-exact, alongside every
+pre-existing HTML golden staying byte-identical. Verified via the HTML test
+suite, the full golden suite, and the usual ruff/mypy/ai-readiness/
+architecture gates.
 
 ### Phase 5 — Migrate compatibility and multi-artifact operations
 
