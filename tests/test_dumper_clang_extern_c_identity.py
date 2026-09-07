@@ -148,6 +148,12 @@ def test_parse_functions_extern_c_via_macho_leading_underscore() -> None:
     assert fn.is_extern_c is True
     assert fn.entity_id is not None
     assert fn.entity_id.extra == ("extern_c",)
+    # Real macOS CI review, fresh evidence: once `is_extern_c` is
+    # confirmed True, the raw Darwin-decorated `mangled` field itself
+    # must also normalize to the bare name -- disagreeing with the
+    # binary's own already-stripped export table otherwise (see
+    # `context.strip_darwin_itanium_decoration`'s docstring).
+    assert fn.mangled == "c_api"
 
 
 def test_parse_variables_extern_c_via_macho_leading_underscore() -> None:
@@ -166,6 +172,7 @@ def test_parse_variables_extern_c_via_macho_leading_underscore() -> None:
     ).parse_variables()
     assert var.entity_id is not None
     assert var.entity_id.extra == ("extern_c",)
+    assert var.mangled == "g_count"
 
 
 def test_parse_functions_leading_underscore_not_extern_c_off_darwin() -> None:
@@ -192,6 +199,7 @@ def test_parse_functions_leading_underscore_not_extern_c_off_darwin() -> None:
     assert fn.is_extern_c is False
     assert fn.entity_id is not None
     assert fn.entity_id.extra == ("mangled", "_c_api")
+    assert fn.mangled == "_c_api"
 
 
 def test_parse_variables_leading_underscore_not_extern_c_off_darwin() -> None:
@@ -210,6 +218,7 @@ def test_parse_variables_leading_underscore_not_extern_c_off_darwin() -> None:
     ).parse_variables()
     assert var.entity_id is not None
     assert var.entity_id.extra == ("mangled", "_g_count")
+    assert var.mangled == "_g_count"
 
 
 def test_parse_functions_leading_underscore_not_extern_c_without_target() -> None:
@@ -230,6 +239,7 @@ def test_parse_functions_leading_underscore_not_extern_c_without_target() -> Non
     assert fn.is_extern_c is False
     assert fn.entity_id is not None
     assert fn.entity_id.extra == ("mangled", "_c_api")
+    assert fn.mangled == "_c_api"
 
 
 def test_parse_functions_leading_underscore_not_extern_c_when_namespaced() -> None:
@@ -264,6 +274,7 @@ def test_parse_functions_leading_underscore_not_extern_c_when_namespaced() -> No
     assert fn.is_extern_c is False
     assert fn.entity_id is not None
     assert fn.entity_id.extra == ("mangled", "_foo")
+    assert fn.mangled == "_foo"
 
 
 def test_parse_variables_leading_underscore_not_extern_c_when_namespaced() -> None:
@@ -289,6 +300,7 @@ def test_parse_variables_leading_underscore_not_extern_c_when_namespaced() -> No
     ).parse_variables()
     assert var.entity_id is not None
     assert var.entity_id.extra == ("mangled", "_g_count")
+    assert var.mangled == "_g_count"
 
 
 # ── Function.mangled/Variable.mangled field normalization (macOS CI review,
