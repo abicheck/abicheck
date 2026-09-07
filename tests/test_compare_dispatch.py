@@ -54,7 +54,8 @@ class TestCompareHeaderMarksProvenance:
     def test_resolve_compare_snapshots_passes_header_as_public_header(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from abicheck import cli_resolve, service
+        import abicheck.workflows.input_resolution as _input_resolution
+        from abicheck import cli_resolve
 
         calls: list[dict] = []
 
@@ -66,7 +67,7 @@ class TestCompareHeaderMarksProvenance:
         # itself -- it builds a CompareRequest and delegates to the shared
         # `service.resolve_compare_request`, so the spy belongs on the service
         # function that shared pipeline actually calls.
-        monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+        monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
 
         old_h = [tmp_path / "old.h"]
         new_h = [tmp_path / "new.h"]
@@ -95,7 +96,8 @@ class TestResolveCompareSnapshotsDependencyScope:
     def test_defaults_to_filtered_on_both_sides(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from abicheck import cli_resolve, service
+        import abicheck.workflows.input_resolution as _input_resolution
+        from abicheck import cli_resolve
 
         calls: list[dict] = []
 
@@ -103,7 +105,7 @@ class TestResolveCompareSnapshotsDependencyScope:
             calls.append(kwargs)
             return _snap(version=version)
 
-        monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+        monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
 
         cli_resolve._resolve_compare_snapshots(
             tmp_path / "old.so", tmp_path / "new.so",
@@ -121,7 +123,8 @@ class TestResolveCompareSnapshotsDependencyScope:
     def test_include_dependencies_true_reaches_both_sides(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from abicheck import cli_resolve, service
+        import abicheck.workflows.input_resolution as _input_resolution
+        from abicheck import cli_resolve
 
         calls: list[dict] = []
 
@@ -129,7 +132,7 @@ class TestResolveCompareSnapshotsDependencyScope:
             calls.append(kwargs)
             return _snap(version=version)
 
-        monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+        monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
 
         cli_resolve._resolve_compare_snapshots(
             tmp_path / "old.so", tmp_path / "new.so",
@@ -171,7 +174,8 @@ def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
     """
     import time
 
-    from abicheck import cli_resolve, service
+    import abicheck.workflows.input_resolution as _input_resolution
+    from abicheck import cli_resolve
 
     calls: list[tuple[str, float, float]] = []
 
@@ -182,7 +186,7 @@ def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
         calls.append((version, start, end))
         return _snap(version=version)
 
-    monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+    monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
 
     old_h = [tmp_path / "old.h"]
     new_h = [tmp_path / "new.h"]

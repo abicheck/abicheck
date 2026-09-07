@@ -839,6 +839,185 @@ def test_selector_leaf_purity_covers_the_namespace_glob_sibling_too(
 
     assert selector_findings
     assert any(
-        "selectors_namespace_glob.py" in f.message and "abicheck.reclassify" in f.message
+        "selectors_namespace_glob.py" in f.message
+        and "abicheck.reclassify" in f.message
         for f in selector_findings
     )
+
+
+def test_dynamic_import_module_evasion_of_forbidden_direction_is_enforced(
+    tmp_path: Path,
+) -> None:
+    """ADR-061 D6/gap A: a literal ``importlib.import_module("...")`` call
+    naming a known first-party module is still an import edge. Reproduces
+    the pre-fix silence first (the docstring records it, since the old
+    ``_imports`` never inspected ``ast.Call`` nodes at all): a `workflows`
+    module reaching a `frontends` sibling through
+    ``importlib.import_module("..frontends.frontends_leaf", __package__)``
+    used to be
+    completely invisible to ``dependency-direction`` -- the exact shape
+    ``workflows/render.py`` used for ``service_render.py`` before it
+    retired. Post-fix it must be caught exactly like a static import would
+    be.
+    """
+    root = _tree(tmp_path)
+    _add_package(root, "workflows", "import importlib\n")
+    _write(
+        root / "abicheck/workflows/bridge.py",
+        "import importlib\n\n\n"
+        "def _frontends_leaf():\n"
+        "    return importlib.import_module('..frontends.frontends_leaf', __package__)\n",
+    )
+    _add_package(root, "frontends")
+    _write(root / "abicheck/frontends/frontends_leaf.py", "VALUE = 1\n")
+
+    findings = check_repository(root)
+    direction_findings = [f for f in findings if f.rule == "dependency-direction"]
+
+    assert direction_findings
+    assert any(
+        "bridge.py" in f.message and "workflows -> frontends" in f.message
+        for f in direction_findings
+    )
+
+
+def test_dynamic_import_module_alias_variant_is_enforced(tmp_path: Path) -> None:
+    """The task's own worked example: a module-level ``_importlib =
+    importlib`` re-alias, then ``_importlib.import_module("...")`` --
+    exactly the shape ``service.py``/``comparability.py``/
+    ``type_reachability.py``/``workflows/input_resolution.py`` all use in
+    the real codebase. Must resolve identically to the bare
+    ``importlib.import_module`` form above."""
+    root = _tree(tmp_path)
+    _add_package(root, "workflows")
+    _write(
+        root / "abicheck/workflows/bridge.py",
+        "import importlib\n"
+        "_importlib = importlib\n\n\n"
+        "def _frontends_leaf():\n"
+        "    return _importlib.import_module('..frontends.frontends_leaf', __package__)\n",
+    )
+    _add_package(root, "frontends")
+    _write(root / "abicheck/frontends/frontends_leaf.py", "VALUE = 1\n")
+
+    assert "dependency-direction" in _rules(root)
+
+
+def test_dynamic_import_module_within_allowed_direction_is_not_flagged(
+    tmp_path: Path,
+) -> None:
+    """A dynamic bridge that stays within an *already-legal* direction (or
+    the same layer) must not become a spurious finding just because it is
+    now visible -- most of the real bridges this closure package audited
+    (e.g. ``service.py``'s own ``service_header_scoped`` binding,
+    ``workflows/input_resolution.py``'s ``service_dump_native`` binding)
+    are exactly this shape: legitimate same-layer cycle avoidance, not a
+    forbidden-direction evasion."""
+    root = _tree(tmp_path)
+    _add_package(root, "frontends")
+    _write(
+        root / "abicheck/frontends/bridge.py",
+        "import importlib\n\n\n"
+        "def _workflows_leaf():\n"
+        "    return importlib.import_module('.workflows_leaf', 'abicheck.workflows')\n",
+    )
+    _add_package(root, "workflows")
+    _write(root / "abicheck/workflows/workflows_leaf.py", "VALUE = 1\n")
+
+    assert check_repository(root) == []
+
+
+def test_dynamic_import_module_with_non_literal_target_is_not_resolved(
+    tmp_path: Path,
+) -> None:
+    """A genuinely dynamic target (a variable, not a string literal) is D6's
+    own narrow, documented exception -- ``detector_registry.py``'s plugin
+    discovery and ``policy/public_surface.py``'s dict-keyed re-export shim
+    are the real examples. The checker must not guess at it, and must not
+    crash trying."""
+    root = _tree(tmp_path)
+    _add_package(root, "workflows")
+    _write(
+        root / "abicheck/workflows/bridge.py",
+        "import importlib\n\n\n"
+        "def _dynamic(name):\n"
+        "    return importlib.import_module(name)\n",
+    )
+    _add_package(root, "frontends")
+
+    assert check_repository(root) == []
+
+
+def test_dependency_direction_exception_suppresses_a_recorded_edge(
+    tmp_path: Path,
+) -> None:
+    """``architecture/debt.yaml``'s ``dependency_direction_exceptions`` --
+    the shape ADR-061 gap A asks for when an edge is made visible but
+    genuinely cannot be removed in the same pass -- accepts one exact
+    ``(path, target)`` static edge without silencing the direction check
+    everywhere else, and without letting the excepted edge join the
+    responsibility-cycle graph."""
+    root = _tree(tmp_path)
+    _add_package(root, "workflows")
+    _write(
+        root / "abicheck/workflows/bridge.py",
+        "from abicheck.frontends import frontends_leaf\n",
+    )
+    _add_package(root, "frontends")
+    _write(root / "abicheck/frontends/frontends_leaf.py", "VALUE = 1\n")
+
+    # Not yet excepted: the real, visible edge is still reported.
+    assert "dependency-direction" in _rules(root)
+
+    debt = json.loads((root / "architecture/debt.yaml").read_text())
+    debt["dependency_direction_exceptions"] = [
+        {
+            "path": "abicheck/workflows/bridge.py",
+            "target": "abicheck.frontends",
+            "source_layer": "workflows",
+            "target_layer": "frontends",
+            "rule": "dependency-direction",
+            "owner": "test",
+            "rationale": "exercise the exception mechanism",
+            "review_by": "2099-01-01",
+        }
+    ]
+    _write(root / "architecture/debt.yaml", json.dumps(debt))
+
+    assert "dependency-direction" not in _rules(root)
+    assert "dependency-cycle" not in _rules(root)
+
+
+def test_malformed_dependency_direction_exception_fails_schema_and_still_reports(
+    tmp_path: Path,
+) -> None:
+    """A malformed exception entry must not silently suppress the real
+    finding it was trying to except -- it fails its own schema check
+    instead."""
+    root = _tree(tmp_path)
+    _add_package(root, "workflows")
+    _write(
+        root / "abicheck/workflows/bridge.py",
+        "from abicheck.frontends import frontends_leaf\n",
+    )
+    _add_package(root, "frontends")
+    _write(root / "abicheck/frontends/frontends_leaf.py", "VALUE = 1\n")
+
+    debt = json.loads((root / "architecture/debt.yaml").read_text())
+    debt["dependency_direction_exceptions"] = [
+        {
+            "path": "abicheck/workflows/bridge.py",
+            "target": "abicheck.frontends",
+            "source_layer": "workflows",
+            "target_layer": "frontends",
+            "rule": "dependency-direction",
+            "owner": "",
+            "rationale": "missing owner",
+            "review_by": "2099-01-01",
+        }
+    ]
+    _write(root / "architecture/debt.yaml", json.dumps(debt))
+
+    findings = _rules(root)
+    assert "schema" in findings
+    assert "dependency-direction" in findings

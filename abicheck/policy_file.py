@@ -81,6 +81,11 @@ from .checker_policy import (
     policy_kind_sets,
 )
 from .errors import PolicyError
+from .policy.versioning_policy import (
+    VersioningPolicy,
+    built_in_default_versioning_policy,
+)
+from .policy_file_versioning import parse_versioning_policy
 
 # NOTE: `.reclassify` is deliberately imported lazily (function-local) below,
 # never at module top level. `reclassify.py` imports `.suppression`, which
@@ -618,6 +623,10 @@ class PolicyFile:
     # False, so nothing that builds one in code starts claiming a statement it
     # never made.
     internal_namespaces_stated: bool = False
+    # ADR-066 D4/S2 -- versioning policy; `versioning_stated` mirrors `internal_namespaces_stated`.
+    # `kw_only=True` for the same reason `reclassify` above is (CodeRabbit review; see its comment).
+    versioning: VersioningPolicy = field(default_factory=built_in_default_versioning_policy, kw_only=True)
+    versioning_stated: bool = field(default=False, kw_only=True)
     # ADR-033 D7 — evidence-aware policy controls. ``None`` means "unset": the
     # finding keeps its default category (current behaviour). A set value maps
     # the whole category of build/source evidence findings to a verdict ceiling.
@@ -681,6 +690,12 @@ class PolicyFile:
         source_only, build_drift, graph_risk, require_evidence = _parse_evidence_policy(
             raw.get("evidence_policy", {}), path
         )
+        versioning_stated = "versioning" in raw
+        versioning = (
+            parse_versioning_policy(raw["versioning"], path)
+            if versioning_stated
+            else built_in_default_versioning_policy()
+        )
 
         return cls(
             base_policy=base_policy,
@@ -691,6 +706,8 @@ class PolicyFile:
             frozen_namespaces=frozen_namespaces,
             internal_namespaces=internal_namespaces,
             internal_namespaces_stated="internal_namespaces" in raw,
+            versioning=versioning,
+            versioning_stated=versioning_stated,
             source_only_findings=source_only,
             build_context_drift=build_drift,
             graph_risk_findings=graph_risk,

@@ -801,7 +801,15 @@ from typing import Any
 #:       ``FindingEvolution``/``finding_evolution`` object 3.5 above) and an
 #:       additive top-level ``cross_source_evolution`` per-state count
 #:       object; off by default, never changes the finding's default
-#:       verdict.
+#:       verdict. A later PR (same schema version -- no shape change) adds
+#:       a second check onto this exact mechanism, ``private_header_leak``
+#:       (plan §5 P2 / §3 #3-#4), generalizing
+#:       ``workflows.cross_source_evolution``'s per-finding identity (a
+#:       check whose findings are not uniquely keyed by ``symbol`` alone --
+#:       e.g. one function leaking two distinct private types -- registers
+#:       its own identity function) in the process. The wire shape this
+#:       version already describes is unchanged; only the set of checks
+#:       populating it grows.
 #: 3.8 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2d
 #:       (ADR-068 D3): a ``changes[]`` entry may carry the additive, optional
 #:       boolean ``candidate_side_enrichment``, marking a finding produced by

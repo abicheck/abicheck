@@ -181,6 +181,27 @@ from .service_metadata_attach import (  # noqa: E402,F401
     _try_attach_sycl_metadata,
 )
 
+# ── Output rendering: service_render.py is `frontends`-classified (ADR-061)
+# but `service.py` is `workflows`-legacy-classified (a real, checked edge:
+# `service.py` is named in `workflows`'s own `legacy_paths`, so
+# `check_architecture.py`'s dependency-direction check inspects it), so this
+# is a real, checked `workflows -> frontends` edge -- static and visible now,
+# not hidden behind `importlib.import_module` the way the retired
+# `workflows/render.py` bridged it. It is recorded as a reviewed exception in
+# `architecture/debt.yaml`'s `dependency_direction_exceptions` (ADR-061 gap
+# A) rather than left as an unresolved-but-invisible bridge: closing it for
+# real means `service.py` itself stopping being `workflows`-classified for
+# this one responsibility (this ADR's own "composition at the outer
+# boundary" language), a separate migration slice -- see that debt.yaml
+# entry's own rationale for why it doesn't fit in this pass.
+# `service_render.py` is a leaf: it does not import `abicheck.service` (see
+# its own docstring), so this introduces no real circular import either.
+from .service_render import (  # noqa: E402,F401
+    _render_deps_section_md,
+    _render_json_output,
+    render_output,
+)
+
 # ── Scan service (ADR-035 D10 typed engine: ScanRequest → ScanResult /
 # [CostEstimate]) extracted to leaf module service_scan, same size-cap/re-
 # export/non-circular-import rationale as service_render above. ────────────
@@ -232,14 +253,6 @@ from .workflows.compare_policy import (  # noqa: E402,F401
     compare_snapshots,
     dedup_policy_override_warnings,
     load_suppression_and_policy,
-)
-
-# ── Output rendering: service_render.py is `frontends`-classified (ADR-061),
-# re-exported via workflows/render.py's typed wrappers -- see its docstring.
-from .workflows.render import (  # noqa: E402,F401
-    _render_deps_section_md,
-    _render_json_output,
-    render_output,
 )
 
 # Explicit re-export (mypy strict / no_implicit_reexport): the scan engine moved

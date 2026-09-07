@@ -279,10 +279,11 @@ class TestSharedPrimitiveAcceptsTheHint:
 
     def _resolution(self, monkeypatch, tmp_path: Path, hint):
         # ADR-061 Phase 3: patch the implementation owner
-        # (`workflows.artifact.execute`), not the `service_input_resolution`
-        # facade -- `_resolve_side_snapshot_impl` reads the owner's own module
-        # global, so a patch on the facade would leave the real seed running.
-        from abicheck import service
+        # (`workflows.artifact.execute`/`workflows.input_resolution`), not
+        # the `service`/`service_input_resolution` facades --
+        # `_resolve_side_snapshot_impl` reads the owner's own module global,
+        # so a patch on either facade would leave the real seed running.
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck.api_types import InputSpec
         from abicheck.model import AbiSnapshot
         from abicheck.service_compare_evidence import SideEvidence
@@ -297,7 +298,7 @@ class TestSharedPrimitiveAcceptsTheHint:
             lambda *_a, **_k: ([Path("build/include")], FOLDED, True, []),
         )
         monkeypatch.setattr(
-            service,
+            _input_resolution,
             "resolve_input",
             lambda *_a, **_k: AbiSnapshot(
                 library="lib", version="1", from_headers=True

@@ -85,7 +85,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Any
+from typing import Any, cast
 
 # ADR-063 T10: static now that `reporter_markdown.py` no longer imports
 # anything from this module (see this module's own docstring) -- the
@@ -193,16 +193,40 @@ def _resolve_displayed_changes(
 
 
 def build_review_digest_document(
-    result: Any, *, severity_config: Any = None
+    result: Any,
+    *,
+    severity_config: Any = None,
+    report_document: ReportDocument | None = None,
 ) -> ReportDocument:
     """The ``--format review`` digest as a ``ReportDocument``.
 
     *severity_config* is forwarded to :func:`~abicheck.reporter_markdown.
     compute_review_digest` unchanged -- see that function's own docstring
     for what it drives (the merge-effect phrase).
+
+    *report_document* (ADR-061 gap C), when given, is the one canonical
+    ``report_mode="full"`` document ``report.build.build_report_document``
+    already built for this render -- ``service_render.render_output``'s
+    ``review`` branch builds it once and threads it down through
+    ``to_review_digest``. Its ``disposition_audit`` field is reused verbatim
+    here instead of a second, independently-resolved call to
+    ``compute_disposition_audit`` (the same ledger, the same arguments --
+    calling it twice cannot disagree, but building through the one shared
+    choke point is the point of this closure, not just its safety). A direct
+    caller with no such document (an existing Tier-2/test call site) keeps
+    the prior behaviour by passing nothing.
     """
+    shared_disposition_audit = (
+        DispositionAudit.from_dict(
+            cast("Mapping[str, Any]", report_document.to_mapping()["disposition_audit"])
+        )
+        if report_document is not None
+        else None
+    )
     digest = _reporter_markdown().compute_review_digest(
-        result, severity_config=severity_config
+        result,
+        severity_config=severity_config,
+        disposition_audit=shared_disposition_audit,
     )
     d: dict[str, object] = {
         "library": digest.library,
@@ -420,10 +444,29 @@ def build_markdown_document(
     severity_config: Any = None,
     show_recommendation: bool = False,
     demangle: bool = False,
+    report_document: ReportDocument | None = None,
 ) -> ReportDocument:
     """The full-mode (``to_markdown`` default view) report as a
-    ``ReportDocument``. See this module's own docstring for scope."""
+    ``ReportDocument``. See this module's own docstring for scope.
+
+    *report_document* (ADR-061 gap C), when given, is the one canonical
+    ``report_mode="full"`` document ``report.build.build_report_document``
+    already built for this render -- ``service_render.render_output``'s
+    markdown branch builds it once (for ``report_mode="full"`` only; ``--stat``
+    and the ``leaf``/``root-cause`` alternate views stay their own separate,
+    legitimate documents per this ADR's own scoping, see this module's
+    docstring) and threads it down through ``to_markdown``. Its
+    ``disposition_audit`` field is reused verbatim here instead of a second,
+    independently-resolved call to ``compute_disposition_audit`` over the
+    same ledger. A direct caller with no such document (an existing
+    Tier-2/test call site) keeps the prior behaviour by passing nothing.
+    """
     rm = _reporter_markdown()
+    shared_disposition_audit = (
+        report_document.to_mapping()["disposition_audit"]
+        if report_document is not None
+        else None
+    )
     verdict = result.verdict
     emoji = rm._VERDICT_EMOJI[verdict]
     label = rm._VERDICT_LABEL[verdict]
@@ -506,9 +549,14 @@ def build_markdown_document(
         # ADR-067 D3: the counts belong in every projection, and the three
         # Markdown modes reach their renderer through this document, so the
         # block is a document field rather than something a renderer derives.
-        "disposition_audit": compute_disposition_audit(
-            result, severity_config
-        ).to_dict(),
+        # ADR-061 gap C: reused from the shared `report_document` when the
+        # caller passed one (see this function's own docstring) rather than
+        # independently resolved here.
+        "disposition_audit": (
+            shared_disposition_audit
+            if shared_disposition_audit is not None
+            else compute_disposition_audit(result, severity_config).to_dict()
+        ),
         # Workstream G S1's "what changed / review actions" section: same
         # already-resolved findings the severity groups above use, projected
         # as additions/removals/modifications so a compatible run still

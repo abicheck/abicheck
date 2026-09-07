@@ -77,38 +77,29 @@ if TYPE_CHECKING:
     from .service_scan import CompileContext
 
 
-# ── Back-compat re-export shim (lazy, per AGENTS.md's moved-helper
-#    convention) ────────────────────────────────────────────────────────────
-# All four of these live in `header_conditionals.py` (see that module for the
+# ── Back-compat re-export shim ───────────────────────────────────────────────
+# All five of these live in `header_conditionals.py` (see that module for the
 # ADR-039 collection logic and why it moved -- PR C, CLI cleanup phase two) and
-# nothing in this module calls any of them itself. `attach_build_context`/
-# `user_define_flags` joined this shim in PR 3A: `perform_elf_dump` used to
-# call both directly (a structurally required static edge), but now reaches
-# them only through `attach_build_context_for_parsed_headers` -- the one shared
-# ADR-039 gate this call site, the typed pipeline's
-# `_resolve_side_snapshot_impl`, and `scan_engine._build_new_snapshot` all use.
-# They stay reachable under their original private names purely so
-# `from .cli_dump_helpers import ...` (cli.py) and existing tests keep working
-# unchanged. A static re-export would be an eager dependency edge this module
-# has no other reason to carry for these names, so this module-level
-# `__getattr__` (PEP 562) resolves them lazily via `importlib.import_module`
-# instead -- mirroring the identical shim at the tail of `cli_buildsource.py`
-# (Codex review, PR #809).
-_HEADER_CONDITIONALS_REEXPORTS: dict[str, str] = {
-    "compile_db_from_build_info": "compile_db_from_build_info",
-    "compile_db_for_filter_scope_check": "compile_db_for_filter_scope_check",
-    "compile_db_filter_scope_error": "compile_db_filter_scope_error",
-    "_attach_build_context": "attach_build_context",
-    "_user_define_flags": "user_define_flags",
-}
-
-
-def __getattr__(name: str) -> Any:
-    if (target := _HEADER_CONDITIONALS_REEXPORTS.get(name)) is not None:
-        import importlib
-
-        return getattr(importlib.import_module("abicheck.header_conditionals"), target)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+# nothing in this module calls any of them itself; they stay reachable under
+# their original names purely so `from .cli_dump_helpers import ...` (cli.py,
+# `frontends/cli/commands/dump.py`) and existing tests keep working unchanged.
+#
+# `header_conditionals.py` is `extract`-classified (ADR-061) and this module
+# is `frontends`-classified, which may not import `extract` at all (only
+# through `workflows`) -- a real, reviewed `dependency-direction` exception,
+# not the no-growth/line-count debt `architecture/debt.yaml`'s `files` list
+# otherwise holds (see that file's `dependency_direction_exceptions`, and
+# ADR-061 gap A's own discussion of why this shim previously used
+# `importlib.import_module` to keep the edge invisible to
+# `check_architecture.py` instead of recording it as accepted debt). Static
+# now, so the edge is visible rather than merely legal-looking.
+from .header_conditionals import (  # noqa: F401
+    attach_build_context as _attach_build_context,
+    compile_db_filter_scope_error as compile_db_filter_scope_error,
+    compile_db_for_filter_scope_check as compile_db_for_filter_scope_check,
+    compile_db_from_build_info as compile_db_from_build_info,
+    user_define_flags as _user_define_flags,
+)
 
 
 def resolve_dump_debug_format(
@@ -162,7 +153,9 @@ def evidence_depth_label(
     single-artifact ``dump -o`` case wants; the leaf itself deliberately takes
     the pack explicitly so no other caller can acquire the default by accident.
     """
-    return depth_label_for(snap, snap.build_source if build_source is None else build_source)
+    return depth_label_for(
+        snap, snap.build_source if build_source is None else build_source
+    )
 
 
 #: Compatibility alias. The ladder is owned by ``evidence_depth.DEPTH_RANK``,
