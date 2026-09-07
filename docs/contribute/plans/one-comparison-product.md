@@ -8,9 +8,11 @@ generated: false
 # One comparison product — retiring `scan`, consolidating the CLI
 
 **Owner ADR:** [ADR-068](../adr/068-one-comparison-product-and-scan-retirement.md).
-**Status:** Proposed — planning document, nothing implemented. Verified
+**Status:** Proposed — planning document, largely unimplemented. Verified
 against `main` at `309c8a82` on 2026-09-06 by Click introspection and
-call-site inspection, not by help text or status prose.
+call-site inspection, not by help text or status prose. Phase 1 item 2
+(`FindingEvolution`) and Phase 1 item 3's exit axes have since landed, as
+have Phase 2c, 2d and 2e; see those items below.
 **Effort:** XL · **Risk:** high — this deletes a public command and moves
 capabilities between analysis paths. Phase ordering is the safety mechanism.
 
@@ -361,6 +363,35 @@ Two of these (P1, P5) are ADR-065 work this plan consumes rather than owns;
 starting them here would fork the model workstream A is building. P2 and P3
 are this plan's own Phase 1.
 
+**Where the implementation lands is ADR-061's question, not this plan's.**
+[ADR-061](../adr/061-responsibility-package-architecture.md) owns
+responsibility ownership and dependency boundaries; this plan owns
+capability topology. Three of its remaining acceptance gaps meet this plan
+directly, and each has one owner rather than two:
+
+- **No `workflows/scan` package, ever.** ADR-061's own `Request ->
+  ResolvedPlan -> Result` examples were written around `ScanRequest`/
+  `ResolvedScanPlan`/`ScanResult`; they now name the compare shapes instead,
+  precisely because migrating a command scheduled for retirement into a
+  permanent typed contract is work this plan's Phase 6 would then have to
+  undo. `scan`'s surviving capabilities route to the compare workflow.
+- **The canonical report replaces the scan schema** (§3, Phase 5) only once
+  ADR-061's [gap C](../adr/061-responsibility-package-architecture.md#c-one-result-one-document-several-projections)
+  closes — one completed evaluation producing one document that every format
+  projects. "One analysis, several artifacts" is not deliverable while six
+  formats each build their own document from a `DiffResult`.
+- **One operand driver** (Phase 7d, re-homed from `cli-cleanup-phase-two.md`
+  as PR I) is the frontend half of ADR-061's
+  [gap D](../adr/061-responsibility-package-architecture.md#d-typed-requestplan-and-operand-convergence):
+  selection, inventory and acquisition state belong on the shared
+  request/plan, not in command-level orchestration. Do it once, in the
+  shared contract.
+
+The sequencing constraint runs the other way too: ADR-061's own closure
+package 6 (facade and legacy retirement) may not delete a `scan`-related
+surface ahead of this plan's Phase 6. A shorter facade is never a reason to
+lose a capability.
+
 ## 6. PR sequence
 
 Nine phases, each independently reviewable. The ordering is the mechanism
@@ -381,7 +412,16 @@ refs) while both commands still exist. It starts red on every check in
    its completeness/outcome consequences (never a removal, never a pass).
 2. **`FindingEvolution`** (`introduced`/`resolved`/`persistent`/
    `not_evaluated`) on the canonical finding model, with `report/`
-   compute/render support.
+   compute/render support. **Done** — `checker_policy.FindingEvolution`,
+   `Change.evolution`/`DiffResult.resolved_findings`, the correspondence
+   primitive (`policy/finding_evolution.py`:
+   `compute_finding_evolution`/`compute_resolved_findings`/
+   `apply_finding_evolution`), and the JSON projection
+   (`report/finding_evolution.py`, `report_schema_version` 3.5). Not yet
+   wired into any CLI command or into `workflows/history.py` (that consumer
+   wiring, and Markdown/HTML rendering, are follow-up work, matching this
+   phase's own "No CLI change" scope) — the primitive itself is what this
+   item asked for.
 3. **Evidence-contract abort (exit `7`)** and **budget overflow (exit `5`)**
    become `compare` `ExitDecision` axes (ADR-064's precedence already models
    them; `compare` does not emit them yet).
@@ -394,8 +434,17 @@ One PR per capability group, each landing with parity tests going green:
 - **2a** cross-source checks (§3 #3–#5), per side, evolution-stated;
 - **2b** pattern + preprocessor scans (#6, #8);
 - **2c** changed-path localization `--since`/`--changed-path` (#12) and POI
-  scoping parity for `--depth source` (#10, #11);
-- **2d** `abi3` candidate-side enrichment (#15);
+  scoping parity for `--depth source` (#10, #11) — **landed**: the seed and
+  ADR-043 D7's scoping rule now have one owner (`workflows/changed_paths.py`)
+  that both commands resolve through, and the `changed_path_localization`
+  gap entry is gone from `tests/parity/gaps.py`;
+- **2d** `abi3` candidate-side enrichment (#15) — **landed**: `compare
+  --abi3` folds the audit's findings into the same result document, marked
+  `candidate_side_enrichment`, through the pre-classification
+  `extra_changes` channel so policy/suppression/verdict score them; its
+  precondition failure reuses Phase 1's evidence-contract exit axis (`7`).
+  The floor is `.abicheck.yml`'s `python.abi3_floor` with the flag as the
+  per-run override (ADR-068 D5). `abi3_audit` is gone from the gap registry;
 - **2e** `--no-baseline` (#2) — the audit-only comparison, on top of Phase 1.1;
 - **2f** dry-run/cost preview parity (#35).
 

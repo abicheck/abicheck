@@ -27,15 +27,15 @@ loudly until the entry below is deleted in that same PR — see
 
 Do not add an entry here for a loss that isn't one of the originally listed
 fifteen scan-only capabilities (eleven checks + pattern scan + preprocessor
-scan + changed-path localization + abi3 audit; the last two are closed) — an *unexplained* loss anywhere
-else is a real regression the harness must fail on, not something to file
-away quietly. ``EXPECTED_GAPS`` (this dict) is what ``runner.py``'s
-scan-vs-compare diff checks against; ``ALL_EXPECTED_GAPS`` below folds in
-the separate ``finding_evolution`` tracking entry too, purely for
-``test_gap_registry_contract.py``'s own completeness bookkeeping — it is
-never used to decide whether a scan finding's *absence* from `compare` is
-expected, since ``finding_evolution`` is not a real ``Finding.kind`` any
-scan-side result could ever carry.
+scan + changed-path localization + abi3 audit; the last two are closed) —
+an *unexplained* loss anywhere else is a real regression the harness must
+fail on, not something to file away quietly. ``EXPECTED_GAPS`` (this dict)
+is what ``runner.py``'s scan-vs-compare diff checks against;
+``ALL_EXPECTED_GAPS`` below folds in ``NOT_YET_IMPLEMENTED_ANYWHERE`` too
+(currently empty — ADR-068 Phase 1 item 2 landed the ``finding_evolution``
+vocabulary it used to hold), purely for ``test_gap_registry_contract.py``'s
+own completeness bookkeeping — never to decide whether a scan finding's
+*absence* from `compare` is expected.
 """
 
 from __future__ import annotations
@@ -47,7 +47,6 @@ from dataclasses import dataclass
 #: §6 Phase 2a): "cross-source checks, per side, evolution-stated".
 _PHASE_2A = "Phase 2a — cross-source checks become a compare pipeline stage (plan §6)"
 _PHASE_2B = "Phase 2b — pattern + preprocessor scans move onto compare (plan §6)"
-_PHASE_1 = "Phase 1 — FindingEvolution state on the canonical finding model (plan §6)"
 
 
 @dataclass(frozen=True)
@@ -101,32 +100,29 @@ EXPECTED_GAPS: dict[str, ExpectedGap] = {
     ),
 }
 
-#: F-8/F-9 (plan §7): the `not_evaluated`/`resolved` evolution axis for a
-#: one-sided check re-run across a baseline. This is not a scan-vs-compare
-#: gap at all — neither tool has this vocabulary today (`FindingEvolution`
-#: is *new* Phase-1 work, not a migrated capability) — so it is tracked
-#: separately from EXPECTED_GAPS, which is specifically "scan has it,
-#: compare doesn't".
-NOT_YET_IMPLEMENTED_ANYWHERE: dict[str, ExpectedGap] = {
-    "finding_evolution": ExpectedGap(
-        "no FindingEvolution state (introduced/resolved/persistent/"
-        "not_evaluated) exists on the canonical finding model under either "
-        "`scan` or `compare` today; scan's own crosscheck pass is single-"
-        "sided even with --against and does not distinguish a pre-existing "
-        "issue from a newly introduced one",
-        _PHASE_1,
-        "§5 P2 / D3",
-    ),
-}
+#: F-8/F-9 (plan §7) used to be tracked here as `finding_evolution`: the
+#: `not_evaluated`/`resolved` evolution axis existed under neither tool.
+#: ADR-068 Phase 1 item 2 landed the generic vocabulary (`checker_policy.
+#: FindingEvolution`, `Change.evolution`/`DiffResult.resolved_findings`,
+#: `policy.finding_evolution`'s correspondence primitive) -- see
+#: `test_evolution_state_gap.py` for the now-real F-8/F-9 demonstration --
+#: so this registry is empty until a genuinely new "neither tool has this at
+#: all" gap appears. Kept as its own dict (rather than deleted outright)
+#: because it is a structurally different kind of gap from EXPECTED_GAPS
+#: (which is specifically "scan has it, compare doesn't") and a future gap
+#: of this second kind should have an obvious place to register, per this
+#: module's own docstring.
+NOT_YET_IMPLEMENTED_ANYWHERE: dict[str, ExpectedGap] = {}
 
 
-#: The complete *tracked* set: every scan-only capability plus the
-#: separately-tracked F-8/F-9 evolution gap. `test_gap_registry_contract.py`
-#: pins this at exactly fourteen (11 checks + pattern_scan + preprocessor_scan
-#: + finding_evolution) -- changed_path_localization and abi3_audit were
-#: deleted when Phase 2c/2d landed them on `compare`. Used only
-#: for that registry-completeness bookkeeping -- `runner.py`'s scan-vs-compare
-#: diff checks against `EXPECTED_GAPS` alone (see this module's docstring).
+#: The complete *tracked* set: every scan-only capability, plus whatever
+#: NOT_YET_IMPLEMENTED_ANYWHERE holds (currently nothing -- see its own
+#: comment). `test_gap_registry_contract.py` pins this against `EXPECTED_GAPS`
+#: alone while it's empty; `EXPECTED_GAPS` itself is down to thirteen (11
+#: checks + pattern_scan + preprocessor_scan) since Phase 2c/2d deleted
+#: changed_path_localization and abi3_audit on landing them. Used only for
+#: registry-completeness bookkeeping -- `runner.py`'s scan-vs-compare diff
+#: checks against `EXPECTED_GAPS` alone (see this module's docstring).
 ALL_EXPECTED_GAPS: dict[str, ExpectedGap] = {
     **EXPECTED_GAPS,
     **NOT_YET_IMPLEMENTED_ANYWHERE,

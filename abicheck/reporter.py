@@ -43,6 +43,9 @@ from .impact import assess_change
 from .policy.disposition_close import ledger_for
 from .policy.disposition_ledger import RuleProvenance
 from .policy.gate_decision import gate_decision_for_result
+from .report.change_annotations import (
+    change_annotation_fields as _change_annotation_fields,
+)
 from .report.contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
 )
@@ -53,6 +56,7 @@ from .report.dispatch_markdown import (
     to_review_digest as to_review_digest,
 )
 from .report.disposition_audit import add_disposition_audit as _add_disposition_audit
+from .report.finding_evolution import add_finding_evolution as _add_finding_evolution
 from .report.scoped_gate import ScopedGateChangeHelpers
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
@@ -203,6 +207,7 @@ def to_stat_json(
     # ADR-067 D3: a compact view may collapse detail; it may not omit the
     # raw-versus-effective counts.
     _add_disposition_audit(d, result, severity_config)
+    _add_finding_evolution(d, result)
     _add_check_identity(d, result)
     gate = gate_decision_for_result(result, severity_config)
     if gate is not None:
@@ -542,6 +547,7 @@ def _to_json_leaf(
     # ADR-067 D3: a compact view may collapse detail; it may not omit the
     # raw-versus-effective counts.
     _add_disposition_audit(d, result, severity_config)
+    _add_finding_evolution(d, result)
     _add_check_identity(d, result)
     gate = gate_decision_for_result(result, severity_config)
     if gate is not None:
@@ -772,6 +778,7 @@ def _to_json_root_cause(
         d["pattern_modulations"] = result.pattern_modulations
     _add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config)
+    _add_finding_evolution(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(
@@ -1253,6 +1260,7 @@ def to_json(
     )
     _add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config)
+    _add_finding_evolution(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(
@@ -1370,53 +1378,6 @@ def _reviewer_action_for_change(
     kind = getattr(c, "kind", None)
     kind_val = kind.value if kind else ""
     return _ADDITION_REVIEWER_ACTION.get(kind_val, _DEFAULT_ADDITION_REVIEWER_ACTION)
-
-
-def _change_annotation_fields(c: Any) -> dict[str, Any]:
-    """Optional per-change attribution/annotation fields for the JSON report.
-
-    Each is omitted rather than emitted as ``null`` when it carries nothing, so
-    a consumer can tell "not applicable" from "empty". The reasoning behind the
-    individual entries is kept with them below.
-    """
-    out: dict[str, Any] = {}
-    # Source location
-    loc = getattr(c, "source_location", None)
-    if loc:
-        out["source_location"] = loc
-    # Affected symbols
-    affected = getattr(c, "affected_symbols", None)
-    if affected:
-        out["affected_symbols"] = affected
-    # Redundancy annotation
-    caused_by = getattr(c, "caused_by_type", None)
-    if caused_by:
-        out["caused_by_type"] = caused_by
-    caused_count = getattr(c, "caused_count", 0)
-    if caused_count > 0:
-        out["caused_count"] = caused_count
-    # ADR-027 A4 — disclose a pattern-aware modulation on the finding itself.
-    mod_reason = getattr(c, "modulation_reason", None)
-    if mod_reason:
-        out["modulation_reason"] = mod_reason
-        out["modulation_rule"] = getattr(c, "modulation_rule", None)
-        eff = getattr(c, "effective_verdict", None)
-        if isinstance(eff, Verdict):
-            out["effective_verdict"] = eff.value
-    # ADR-041 P0 roadmap item 2 — this finding correlates with another
-    # finding (currently: PUBLIC_API_INTERNAL_DEPENDENCY_ADDED correlating
-    # with the same entry's own body/type-hash change), named by ChangeKind
-    # value so a machine consumer can act on it without parsing description.
-    correlated = getattr(c, "correlated_change_kind", None)
-    if correlated:
-        out["correlated_change_kind"] = correlated
-    if getattr(c, "symbol_binding", None):
-        out["symbol_binding"] = c.symbol_binding
-    # ADR-068 D3 — a candidate-only check's finding (the --abi3 audit) rides
-    # this comparison's own result document, marked rather than split out.
-    if getattr(c, "candidate_side_enrichment", False):
-        out["candidate_side_enrichment"] = True
-    return out
 
 
 def _change_reachability_fields(c: Any) -> dict[str, Any]:

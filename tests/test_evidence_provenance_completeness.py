@@ -125,9 +125,10 @@ class TestFieldDefaultsToNone:
         `contract_evidence_refs` and `compatibility_evaluation_status`,
         which would have silently shifted every later field's position for
         such a caller). `entity_id` (ADR-063 Phase 2) is appended immediately
-        after this one, and `disambiguator` (ADR-063 Track T3) is the newest
-        field, appended immediately after `entity_id` -- all three must stay
-        keyword-only, and `disambiguator` must stay last until some
+        after this one, `disambiguator` (ADR-063 Track T3) immediately after
+        `entity_id`, and `evolution` (ADR-068 Phase 1 item 2) is the newest
+        field, appended immediately after `disambiguator` -- all four must
+        stay keyword-only, and `evolution` must stay last until some
         still-newer field is appended after it in turn."""
         import dataclasses
 
@@ -135,6 +136,7 @@ class TestFieldDefaultsToNone:
         assert by_name["evidence_provenance"].kw_only is True
         assert by_name["entity_id"].kw_only is True
         assert by_name["disambiguator"].kw_only is True
+        assert by_name["evolution"].kw_only is True
         assert by_name["candidate_side_enrichment"].kw_only is True
         all_names = [f.name for f in dataclasses.fields(Change)]
         assert all_names[-1] == "candidate_side_enrichment", (
@@ -146,10 +148,13 @@ class TestFieldDefaultsToNone:
         assert all_names.index("disambiguator") == all_names.index("entity_id") + 1, (
             "disambiguator must be appended immediately after entity_id"
         )
+        assert all_names.index("evolution") == all_names.index("disambiguator") + 1, (
+            "evolution must be appended immediately after disambiguator"
+        )
         assert (
             all_names.index("candidate_side_enrichment")
-            == all_names.index("disambiguator") + 1
-        ), "candidate_side_enrichment must be appended immediately after disambiguator"
+            == all_names.index("evolution") + 1
+        ), "candidate_side_enrichment must be appended immediately after evolution"
 
 
 class TestVerifiedBucketsHaveProducerCoverage:

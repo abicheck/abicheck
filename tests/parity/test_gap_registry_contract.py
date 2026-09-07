@@ -6,6 +6,12 @@ done (plan §6 Phase 0): it must name exactly the capabilities ADR-068 §1 and
 the plan's requirements enumerate *that are still open*, each with a real
 reason and a real plan-phase reference -- never an empty placeholder, never
 silently missing an entry, and never still listing one a phase has closed.
+Two of the original fifteen scan-only capabilities are already closed
+(changed-path localization and the abi3 audit, Phase 2c/2d), and so is the
+sixteenth, differently-shaped ``finding_evolution`` entry that used to live
+in ``NOT_YET_IMPLEMENTED_ANYWHERE`` -- ADR-068 Phase 1 item 2 landed the
+vocabulary (see ``test_evolution_state_gap.py``), so that registry is empty
+today.
 """
 
 from __future__ import annotations
@@ -46,13 +52,16 @@ def test_every_gap_has_a_non_empty_reason_and_phase() -> None:
         assert "Phase" in gap.plan_phase, f"{key}: plan_phase must name a phase"
 
 
-def test_evolution_gap_tracked_separately_from_scan_only_gaps() -> None:
-    """finding_evolution is a "not implemented anywhere" gap, not a
-    "scan has it, compare doesn't" one -- it must never leak into the set
-    the crosscheck/pattern/preprocessor tests treat as scan-only losses."""
+def test_finding_evolution_gap_has_closed() -> None:
+    """ADR-068 Phase 1 item 2 landed the generic `FindingEvolution`
+    primitive (`checker_policy.FindingEvolution`, `policy.finding_evolution`),
+    so `finding_evolution` is no longer tracked anywhere in this registry --
+    see `test_evolution_state_gap.py` for the real demonstration that
+    replaced the old absence-of-the-vocabulary test."""
     assert "finding_evolution" not in EXPECTED_GAPS
-    assert "finding_evolution" in NOT_YET_IMPLEMENTED_ANYWHERE
-    assert ALL_EXPECTED_GAPS == {**EXPECTED_GAPS, **NOT_YET_IMPLEMENTED_ANYWHERE}
+    assert "finding_evolution" not in NOT_YET_IMPLEMENTED_ANYWHERE
+    assert NOT_YET_IMPLEMENTED_ANYWHERE == {}
+    assert ALL_EXPECTED_GAPS == EXPECTED_GAPS
 
 
 def test_crosscheck_keys_match_all_checks() -> None:

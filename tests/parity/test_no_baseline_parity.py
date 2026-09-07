@@ -4,17 +4,17 @@
 ``compare --no-baseline NEW`` (plan §3 #2/#16, ADR-068 D2) is the intended
 replacement for ``scan ARTIFACT`` without ``--against`` (a single-artifact
 audit) and for ``scan --artifact-set`` (an N-library audit, over a
-directory). Neither exists on ``compare`` yet — Phase 1 (``declared_absent``
-acquisition state) and Phase 2e haven't landed — so both scenarios are
-expected-gap today. This module pins the exact usage-error shape so its own
-tests start failing the moment ``--no-baseline`` is accepted at all,
-prompting the ``tests/parity/gaps.py`` entries to be reconsidered (a
-usage-error test failing "for the right reason" is exactly this harness's
-job, per plan §6 Phase 0).
+directory). Prerequisite P1 (the ``declared_absent`` acquisition state) and
+Phase 2e have now landed for the **single-artifact** shape (plan §3 #2). The
+**directory** shape (plan §3 #16, the eventual replacement for
+``scan --artifact-set``) still depends on ADR-065 S3's package component
+inventories (plan §5 P5, "not started"), so it stays a declared, tested gap
+below rather than a silent one.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .runner import invoke_cli, scan_json, write_snapshot
@@ -35,12 +35,21 @@ def test_scan_supports_single_artifact_audit_without_against(tmp_path: Path) -> 
     assert "diff" not in report or report.get("diff") is None
 
 
-def test_compare_has_no_no_baseline_option(tmp_path: Path) -> None:
-    """F-22: `compare` cannot express "declare OLD absent" at all today."""
+def test_compare_no_baseline_single_artifact_audit(tmp_path: Path) -> None:
+    """F-22, closed: `compare --no-baseline NEW` reports candidate-side
+    facts with no addition, no removal, and no compatibility verdict --
+    ADR-068 D2, over ADR-065's `declared_absent` acquisition state (plan
+    §5 P1)."""
     path = write_snapshot(_empty_snapshot(), tmp_path / "libfoo.so.abi.json")
-    result = invoke_cli("compare", "--no-baseline", str(path))
-    assert result.exit_code == 64, result.output
-    assert "No such option" in result.output and "--no-baseline" in result.output
+    result = invoke_cli("compare", "--no-baseline", str(path), "--format", "json")
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.stdout)
+    assert report["changes"] == []
+    assert report["verdict"] is None
+    assert report["run_outcome"]["compatibility"] is None
+    assert report["run_outcome"]["scope"] == "complete"
+    member = report["comparison_scope"]["members"][0]
+    assert member["state"] == "declared_absent"
 
 
 def test_compare_single_operand_is_a_usage_error_not_an_audit(tmp_path: Path) -> None:
@@ -52,6 +61,16 @@ def test_compare_single_operand_is_a_usage_error_not_an_audit(tmp_path: Path) ->
     result = invoke_cli("compare", str(path))
     assert result.exit_code == 64, result.output
     assert "Missing argument" in result.output
+
+
+def test_compare_no_baseline_rejects_two_operands(tmp_path: Path) -> None:
+    """ADR-068 D2: `compare --no-baseline OLD NEW` is a usage error too --
+    `--no-baseline` and a real OLD operand are mutually exclusive, never
+    "OLD is ignored"."""
+    old_path = write_snapshot(_empty_snapshot("old.so"), tmp_path / "old.so.abi.json")
+    new_path = write_snapshot(_empty_snapshot("new.so"), tmp_path / "new.so.abi.json")
+    result = invoke_cli("compare", "--no-baseline", str(old_path), str(new_path))
+    assert result.exit_code == 64, result.output
 
 
 def test_scan_supports_directory_audit_without_against() -> None:
@@ -73,12 +92,15 @@ def test_scan_supports_directory_audit_without_against() -> None:
 
 def test_compare_directory_no_baseline_is_unreachable(tmp_path: Path) -> None:
     """F-23: the directory form of --no-baseline (plan §3 #16's "compare
-    --no-baseline DIR" replacement for --artifact-set) is unreachable for
-    the same reason the single-artifact form is -- the flag doesn't exist."""
+    --no-baseline DIR" replacement for --artifact-set) stays an explicit,
+    declared gap -- ADR-065 S3's package component inventories (plan §5 P5)
+    haven't landed, so `--no-baseline` itself now exists (Phase 2e) but
+    refuses a directory operand with a real usage error rather than
+    silently mis-auditing it."""
     lib_dir = tmp_path / "release"
     lib_dir.mkdir()
     write_snapshot(_empty_snapshot(), lib_dir / "libfoo.so.abi.json")
 
     result = invoke_cli("compare", "--no-baseline", str(lib_dir))
     assert result.exit_code == 64, result.output
-    assert "No such option" in result.output and "--no-baseline" in result.output
+    assert "directory" in result.output

@@ -118,6 +118,16 @@ carries a selection or expected inventory as a typed field -- the release
 fan-out's selection and inventory reach the engine as CLI parameters, which
 is why scalar-versus-bundle operand convergence stays with
 `cli-cleanup-phase-two.md`'s PR I rather than being solved twice here.
+That PR is now re-homed as
+[`one-comparison-product.md`](one-comparison-product.md)'s Phase 7d, and its
+engine-side half is
+[ADR-061](../adr/061-responsibility-package-architecture.md)'s
+[gap D](../adr/061-responsibility-package-architecture.md#d-typed-requestplan-and-operand-convergence)
+— "the shared request/plan carries selection, inventory and acquisition
+state" is that ADR's closure package 4, and its `Request -> ResolvedPlan ->
+Result` example now shows those fields rather than two bare operands. This
+workstream keeps deciding what those states *mean*; where the fields live is
+settled there.
 
 **Slices.** S0 executable scenario table (`tests/scenarios/`, existing
 catalogue). S1 selection by identity/coordinates with a `--dry-run` plan

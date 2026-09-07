@@ -77,6 +77,10 @@ from ....cli_resolve import (
     _normalize_binary_input,
 )
 from ....frontends.cli import help as cli_help
+from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-exported: cli_compare_helpers and frontends/cli/moved.py both resolve these names here
+    _reject_application_operand as _reject_application_operand,
+    _warn_unused_set_flags as _warn_unused_set_flags,
+)
 from ..options.params import (
     SIDED_EXISTING_PATH_PARAM,
     SIDED_PATH_PARAM,
@@ -94,49 +98,6 @@ from ..runtime import (
 from .dump import dump_cmd
 
 _RELEASE_FORMATS = frozenset({"json", "markdown", "junit"})
-
-
-def _reject_application_operand(
-    old_input: Path, new_input: Path, old_kind: str, new_kind: str
-) -> None:
-    """Error when a `compare` operand is an application/executable, not a library."""
-    which = old_input if old_kind == "app" else new_input
-    raise click.UsageError(
-        f"'{which}' looks like an application/executable, not a shared library, "
-        "so `compare` cannot pair it as a library ABI. To check whether an "
-        "application is still satisfied by a library, use "
-        "`abicheck compare <old-lib> <new-lib> --used-by <app>`. If this file "
-        "really is a shared library with an unusual ET_DYN/PIE layout, dump it "
-        "first with `abicheck dump` and compare the resulting snapshots."
-    )
-
-
-def _warn_unused_set_flags(
-    *,
-    jobs_explicit: bool,
-    dso_only: bool,
-    output_dir: Path | None,
-    select: tuple[str, ...] = (),
-    select_required: tuple[str, ...] = (),
-) -> None:
-    """Warn that the set-input fan-out flags do not apply to single-file inputs."""
-    used = []
-    if jobs_explicit:
-        used.append("-j/--jobs")
-    if dso_only:
-        used.append("--dso-only")
-    if output_dir is not None:
-        used.append("--output-dir")
-    if select:
-        used.append("--select")
-    if select_required:
-        used.append("--select-required")
-    if used:
-        click.echo(
-            "Warning: " + ", ".join(used) + " only apply to directory/package "
-            "(set) inputs; ignoring them for this single-file comparison.",
-            err=True,
-        )
 
 
 def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
@@ -497,7 +458,19 @@ def _embed_inline_source_side(
 @main.command("compare")
 @cli_help.compare_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("old_input", type=click.Path(exists=True, path_type=Path))
-@click.argument("new_input", type=click.Path(exists=True, path_type=Path))
+@click.argument("new_input", type=click.Path(exists=True, path_type=Path), required=False)
+@click.option(
+    "--no-baseline",
+    "no_baseline",
+    is_flag=True,
+    default=False,
+    help="Declare that no prior surface exists for this candidate -- an "
+    "audit, not a comparison (ADR-068 D2). Takes exactly one operand (the "
+    "candidate build) instead of OLD NEW; the OLD side is recorded with "
+    "ADR-065's 'declared_absent' acquisition state. Replaces `scan`'s "
+    "audit-only mode (no --against): reports candidate-side facts only -- "
+    "never an addition, a removal, or a compatibility verdict.",
+)
 # Set-input fan-out (ADR-037 D7): -j/--jobs, --dso-only, --output-dir only bite
 # when the operands are directories/packages; a no-op-with-warning otherwise.
 @set_input_options
@@ -766,6 +739,14 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # forwarded options (explicit flags always win) and drop the CLI-only
     # ``profile`` key before delegating to the typed run_compare signature.
     apply_compare_profile(ctx, kwargs)
+
+    # ADR-068 D2 / plan §6 Phase 2e: `--no-baseline` is an explicit
+    # declaration, never inferred from arity -- branch before the two-sided
+    # machinery below, which a plain `compare OLD NEW` never reaches.
+    from .compare_no_baseline import maybe_dispatch_no_baseline_compare
+
+    if maybe_dispatch_no_baseline_compare(ctx, kwargs):
+        return
 
     # CLI cleanup phase two, PR I: OLD_INPUT/NEW_INPUT are classified
     # automatically for bundle-facts routing, replacing the removed

@@ -767,7 +767,21 @@ from typing import Any
 #:       first for workstream D-S1's ``used_by[]``/``consumer_impact_
 #:       summary`` fields (same "renumber, don't reuse" convention as the
 #:       2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2 entries above).
-#: 3.5 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2d
+#: 3.5 -- ADR-068 Phase 1 item 2 (``docs/contribute/plans/
+#:       one-comparison-product.md`` "Phase 1"): a new additive top-level
+#:       ``finding_evolution`` object -- ``counts`` (one entry per
+#:       ``FindingEvolution`` state: ``introduced``/``resolved``/
+#:       ``persistent``/``not_evaluated``) and ``resolved`` (findings from an
+#:       earlier comparison in a chain that no longer appear in this one).
+#:       Unconditional, the same "never omitted, only stated" rule
+#:       ``disposition_audit`` follows -- a plain, single ``compare()`` run
+#:       reports every finding ``not_evaluated`` and an empty ``resolved``
+#:       list, since evolution across a comparison chain is only computed by
+#:       a dedicated N>1-comparison caller (``policy.finding_evolution``,
+#:       not yet wired into any CLI command in this phase). Additive only:
+#:       no existing key changes shape or meaning, and no verdict, gate, or
+#:       exit code moves.
+#: 3.6 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2d
 #:       (ADR-068 D3): a ``changes[]`` entry may carry the additive, optional
 #:       boolean ``candidate_side_enrichment``, marking a finding produced by
 #:       a check that is meaningful only on the candidate (NEW) side -- today
@@ -777,8 +791,12 @@ from typing import Any
 #:       The same phase makes 3.4's ``evidence_contract_error_contribution``
 #:       CLI-reachable for the first time: ``--abi3`` against a candidate
 #:       that is not a recognisable CPython extension module is an
-#:       evidence-contract abort (exit ``7``).
-REPORT_SCHEMA_VERSION = "3.5"
+#:       evidence-contract abort (exit ``7``). Renumbered from a
+#:       conflicting 3.5 when the origin/main merge claimed that version
+#:       first for ADR-068 Phase 1's ``finding_evolution`` block (same
+#:       "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/
+#:       2.49/2.51/2.53/3.2/3.4 entries above).
+REPORT_SCHEMA_VERSION = "3.6"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

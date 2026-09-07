@@ -1382,7 +1382,7 @@
     },
     "exit": {
       "type": "object",
-      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42; ADR-064 stage 1b added the five operational_error_contribution..removed_required_library_contribution keys at schema 2.47): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution, operational_error_contribution) for a native compare report whose DiffResult carries no evidence_contract_error/budget_overflow (every existing report), since those two are early-return dominant axes, not fold participants — see ExitDecision's own docstring. This is the identical value cli._exit_with_severity_or_verdict computes for the real process exit. reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. compare's own code still never covers not_comparable/release-removed-library exits (raised through different code paths today, always 0 here) — evidence_contract_error_contribution/budget_overflow_contribution (schema 3.3, one-comparison-product.md P3) are the two ADR-064 axes compare *can* now emit, reusing scan --against's own precedence rule, with `compare --abi3` the first CLI-reachable trigger for evidence_contract_error_contribution (schema 3.5: a candidate that is not a recognisable CPython extension module cannot be audited at all) and no CLI-reachable trigger for budget_overflow_contribution yet; the remaining three (operational_error/not_comparable/removed_required_library) stay always-0 placeholders, meaningful only for scan/release reports.",
+      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42; ADR-064 stage 1b added the five operational_error_contribution..removed_required_library_contribution keys at schema 2.47): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution, operational_error_contribution) for a native compare report whose DiffResult carries no evidence_contract_error/budget_overflow (every existing report), since those two are early-return dominant axes, not fold participants — see ExitDecision's own docstring. This is the identical value cli._exit_with_severity_or_verdict computes for the real process exit. reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. compare's own code still never covers not_comparable/release-removed-library exits (raised through different code paths today, always 0 here) — evidence_contract_error_contribution/budget_overflow_contribution (schema 3.3, one-comparison-product.md P3) are the two ADR-064 axes compare *can* now emit, reusing scan --against's own precedence rule, with `compare --abi3` the first CLI-reachable trigger for evidence_contract_error_contribution (schema 3.6: a candidate that is not a recognisable CPython extension module cannot be audited at all) and no CLI-reachable trigger for budget_overflow_contribution yet; the remaining three (operational_error/not_comparable/removed_required_library) stay always-0 placeholders, meaningful only for scan/release reports.",
       "required": [
         "code",
         "reasons",
@@ -1926,7 +1926,8 @@
             "not_supplied",
             "unsupported",
             "out_of_scope",
-            "ambiguous"
+            "ambiguous",
+            "declared_absent"
           ],
           "additionalProperties": false,
           "properties": {
@@ -1955,6 +1956,10 @@
               "minimum": 0
             },
             "ambiguous": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "declared_absent": {
               "type": "integer",
               "minimum": 0
             }
@@ -1991,9 +1996,10 @@
                   "not_supplied",
                   "unsupported",
                   "out_of_scope",
-                  "ambiguous"
+                  "ambiguous",
+                  "declared_absent"
                 ],
-                "description": "ADR-065 D1 acquisition state: available (a completed comparison), expected_not_produced, failed (extraction/classification failed, or a stored capture marked degraded), not_supplied (no counterpart on the other side; a removal/addition only when that side's inventory is proven), unsupported (this build cannot analyze the artifact), out_of_scope (deliberately unselected, D9), ambiguous."
+                "description": "ADR-065 D1 acquisition state: available (a completed comparison), expected_not_produced, failed (extraction/classification failed, or a stored capture marked degraded), not_supplied (no counterpart on the other side; a removal/addition only when that side's inventory is proven), unsupported (this build cannot analyze the artifact), out_of_scope (deliberately unselected, D9), ambiguous, declared_absent (ADR-068 D2: the OLD side of a `compare --no-baseline` run -- explicitly declared absent, never counted as unchecked/incomplete and never a proven removal/addition input)."
               },
               "old_present": {
                 "type": "boolean"
@@ -2180,7 +2186,7 @@
         },
         "candidate_side_enrichment": {
           "type": "boolean",
-          "description": "Schema 3.5 (ADR-068 D3): true when this finding comes from a check that is meaningful only on the candidate (NEW) side \u2014 today `compare --abi3`'s stable-ABI audit \u2014 rather than from comparing the two sides. Such a finding rides this same result document, marked, instead of a second result; it is advisory (RISK-class) and is gated only through policy. Omitted entirely for an ordinary two-sided finding.",
+          "description": "Schema 3.6 (ADR-068 D3): true when this finding comes from a check that is meaningful only on the candidate (NEW) side \u2014 today `compare --abi3`'s stable-ABI audit \u2014 rather than from comparing the two sides. Such a finding rides this same result document, marked, instead of a second result; it is advisory (RISK-class) and is gated only through policy. Omitted entirely for an ordinary two-sided finding.",
           "const": true
         },
         "symbol_binding": {
