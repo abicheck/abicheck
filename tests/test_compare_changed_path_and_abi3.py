@@ -133,6 +133,74 @@ class TestResolveChangedSeed:
         assert seed.paths == () and seed.seeded is False
         assert "seed failed" in seed.source
 
+    def test_a_ref_that_does_not_resolve_is_reported_not_seeded(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A non-zero `git diff` exit (a ref that does not exist) is the
+        *failed* seed, not an empty one: the run keeps its broad scope and
+        says why. The distinction is load-bearing -- treating it as an empty
+        seed would narrow a `--depth source` run to zero TUs (ADR-043 D7)."""
+        import subprocess
+
+        from abicheck.workflows.changed_paths import git_changed_paths
+
+        class _Proc:
+            returncode = 128
+            stdout = ""
+            stderr = "fatal: bad revision 'nope...HEAD'"
+
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc())
+        messages: list[str] = []
+        assert git_changed_paths("nope", tmp_path, notify=messages.append) is None
+        assert "git diff failed" in messages[0] and "bad revision" in messages[0]
+        # ... and a seed built on it stays unseeded, so nothing narrows.
+        seed = resolve_changed_seed((), "nope", tmp_path, notify=messages.append)
+        assert seed.seeded is False and seed.paths == ()
+        assert localized_collect_mode("source-target", seed.paths) == "source-target"
+
+    def test_a_silent_git_failure_still_reports_a_reason(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """git can exit non-zero with empty stderr; the warning must still
+        say something rather than trail off after "(" -- that message is the
+        caller's only signal that its --since was ignored."""
+        import subprocess
+
+        from abicheck.workflows.changed_paths import git_changed_paths
+
+        class _Silent:
+            returncode = 1
+            stdout = ""
+            stderr = "   "
+
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Silent())
+        messages: list[str] = []
+        assert git_changed_paths("main", tmp_path, notify=messages.append) is None
+        assert "non-zero exit" in messages[0], messages
+
+    @pytest.mark.parametrize("failure", ["nonzero", "raises"])
+    def test_no_notifier_is_accepted_for_either_failure(
+        self, failure: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`notify` is optional (the typed API passes none), so neither
+        failure path may depend on having somewhere to warn."""
+        import subprocess
+
+        from abicheck.workflows.changed_paths import git_changed_paths
+
+        class _Proc:
+            returncode = 1
+            stdout = ""
+            stderr = "boom"
+
+        def _run(*a: object, **k: object) -> _Proc:
+            if failure == "raises":
+                raise OSError("no git here")
+            return _Proc()
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        assert git_changed_paths("main", tmp_path) is None
+
     def test_no_input_is_no_seed(self) -> None:
         assert resolve_changed_seed((), None, None) == ChangedPathSeed()
 
@@ -249,6 +317,68 @@ class TestReleaseOperandRejection:
             )
         result = CliRunner().invoke(main, ["compare", str(old), str(new)])
         assert result.exit_code == 0, result.output
+
+
+class TestSetOnlyFlagWarnings:
+    """`_warn_unused_set_flags` -- the mirror of `TestReleaseOperandRejection`
+    above: a *set-only* flag reaching a single-pair compare. It warns rather
+    than refusing (these are inert conveniences, not promises like
+    `--bundle-facts-out`), which only helps if the warning actually names the
+    flag the user typed. Moved to `frontends/cli/operand_diagnostics.py` when
+    `commands/compare.py` hit its size cap; these cases pin the whole
+    selector set, including the two (`--select`/`--select-required`) that no
+    existing test named.
+    """
+
+    def _warn(self, capsys: pytest.CaptureFixture[str], **kwargs: object) -> str:
+        """Call the warner and return what it wrote to stderr (where it must
+        write, so `--format json` on stdout stays machine-readable)."""
+        from abicheck.frontends.cli.operand_diagnostics import _warn_unused_set_flags
+
+        _warn_unused_set_flags(  # type: ignore[arg-type]
+            jobs_explicit=kwargs.get("jobs_explicit", False),
+            dso_only=kwargs.get("dso_only", False),
+            output_dir=kwargs.get("output_dir"),
+            select=kwargs.get("select", ()),
+            select_required=kwargs.get("select_required", ()),
+        )
+        captured = capsys.readouterr()
+        assert captured.out == "", "the warning must not reach stdout"
+        return captured.err
+
+    @pytest.mark.parametrize(
+        ("kwargs", "flag"),
+        [
+            ({"jobs_explicit": True}, "-j/--jobs"),
+            ({"dso_only": True}, "--dso-only"),
+            ({"output_dir": Path("out")}, "--output-dir"),
+            ({"select": ("libfoo.so",)}, "--select"),
+            ({"select_required": ("libfoo.so",)}, "--select-required"),
+        ],
+    )
+    def test_each_set_only_flag_is_named_on_its_own(
+        self, kwargs: dict[str, object], flag: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        out = self._warn(capsys, **kwargs)
+        assert flag in out
+        assert "only apply to directory/package" in out
+
+    def test_several_flags_are_listed_together_in_one_warning(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        out = self._warn(
+            capsys, dso_only=True, select=("a.so",), select_required=("b.so",)
+        )
+        assert out.count("Warning:") == 1, out
+        for flag in ("--dso-only", "--select", "--select-required"):
+            assert flag in out
+
+    def test_nothing_is_emitted_when_no_set_flag_was_given(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The negative control: this runs on every single-pair compare, so a
+        warning here would fire on every ordinary invocation."""
+        assert self._warn(capsys) == ""
 
 
 class TestTypedRequestParity:

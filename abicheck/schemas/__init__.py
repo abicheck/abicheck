@@ -781,7 +781,16 @@ from typing import Any
 #:       not yet wired into any CLI command in this phase). Additive only:
 #:       no existing key changes shape or meaning, and no verdict, gate, or
 #:       exit code moves.
-#: 3.6 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2d
+#: 3.6 -- Workstream E slice S3: optional ``contract_conflicts`` array
+#:       alongside ``contract_context`` -- multi-source contract conflicts,
+#:       both disagreeing sources' claims kept (ADR-067). Same opt-in gate
+#:       as ``contract_context``; omitted otherwise, so no existing report
+#:       changes. Renumbered from a conflicting 3.5 when the origin/main
+#:       merge claimed that version first for ADR-068 Phase 1's
+#:       ``finding_evolution`` object (same "renumber, don't reuse"
+#:       convention as the 2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2/3.4
+#:       entries above).
+#: 3.7 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2d
 #:       (ADR-068 D3): a ``changes[]`` entry may carry the additive, optional
 #:       boolean ``candidate_side_enrichment``, marking a finding produced by
 #:       a check that is meaningful only on the candidate (NEW) side -- today
@@ -795,8 +804,10 @@ from typing import Any
 #:       conflicting 3.5 when the origin/main merge claimed that version
 #:       first for ADR-068 Phase 1's ``finding_evolution`` block (same
 #:       "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/
-#:       2.49/2.51/2.53/3.2/3.4 entries above).
-REPORT_SCHEMA_VERSION = "3.6"
+#:       2.49/2.51/2.53/3.2/3.4 entries above), then from 3.6 to 3.7 on
+#:       the next merge, when workstream E slice S3's
+#:       ``contract_conflicts`` entry claimed 3.6 the same way.
+REPORT_SCHEMA_VERSION = "3.7"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

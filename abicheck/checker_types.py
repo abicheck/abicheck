@@ -578,6 +578,12 @@ class DiffResult(ReportSideFacts):
     # fold_coverage_exit`` derives the orthogonal coverage contribution from
     # it, so a run carrying one can exit ``1`` on that axis (ADR-049 §7).
     contract_context: object | None = None
+    # E-S3 — multi-source contract conflicts (exported-but-undeclared,
+    # manifest narrowing since baseline), each a serialized
+    # ``model.contract_conflicts.ContractSourceConflict``. Same gate/``None``/
+    # omission/``object``-typing rules as ``contract_context`` above.
+    # Advisory only — never changes a verdict, severity, or exit code.
+    contract_conflicts: object | None = None
     # P0.4 — the orthogonal "how complete/trustworthy was the evidence"
     # answer (analysis_assurance.py), sitting beside `verdict` (what changed)
     # and the severity/gate exit code (whether to fail the build) as the

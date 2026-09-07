@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from .contract_evidence import ContractEvidenceBlock, PersistedContractContext
     from .export_surface import ExportSurface
     from .model import AbiSnapshot
+    from .model.contract_conflicts import ContractSourceConflict
     from .policy_file import PolicyFile
     from .post_processing import PipelineContext
     from .severity import KindSets
@@ -123,6 +124,14 @@ class ContractEvaluationStage:
     #: docstring for the full reasoning.
     directly_referenced_stdlib_old: frozenset[str]
     directly_referenced_stdlib_new: frozenset[str]
+    #: Workstream E slice S3 -- multi-source contract conflicts collected
+    #: alongside the rest of this stage's evidence (exported-but-undeclared
+    #: per side, manifest narrowing since baseline). Always populated when
+    #: the stage is built (empty when nothing conflicts), independent of
+    #: which ``ContractMode`` was selected -- like ``evidence`` above, a
+    #: conflict is a fact about the sources themselves, not about the mode's
+    #: own closure. See ``policy/contract_conflicts.py``.
+    conflicts: tuple[ContractSourceConflict, ...] = ()
     changes: list[Change] = field(default_factory=list)
     #: ``id()`` of every already-classified finding. Identity, not equality:
     #: two findings can compare equal (``Change`` is a plain dataclass) while
@@ -440,6 +449,31 @@ def build_contract_stage(
         force_public_symbols=force_public_symbols,
     )
 
+    # Workstream E slice S3 -- multi-source contract conflicts, collected
+    # from the same evidence this function just resolved so a conflict can
+    # never disagree with what the rest of the stage saw.
+    from .policy.contract_conflicts import (
+        detect_exported_but_undeclared,
+        detect_manifest_narrowing_since_baseline,
+    )
+
+    conflicts = [
+        *detect_exported_but_undeclared(exports_old, side="old"),
+        *detect_exported_but_undeclared(exports_new, side="new"),
+        # Baseline = the "old" side's own declared-public symbols, computed
+        # with no manifest overlay (``surf_old``/``surf_new`` above are the
+        # raw header-derived surfaces regardless of any POST manifest --
+        # narrowing is applied later, in post-processing, never to these).
+        # `committed_exports` is the resolved allowlist (`None` when no
+        # manifest/forced-public overlay is in effect at all).
+        *detect_manifest_narrowing_since_baseline(
+            surf_old.public_symbols,
+            surf_new.public_symbols,
+            committed_roots,
+            side="new",
+        ),
+    ]
+
     return ContractEvaluationStage(
         mode=mode,
         mode_provenance=mode_provenance,
@@ -449,6 +483,7 @@ def build_contract_stage(
         exports_new=exports_new,
         directly_referenced_stdlib_old=directly_referenced_stdlib_old,
         directly_referenced_stdlib_new=directly_referenced_stdlib_new,
+        conflicts=tuple(conflicts),
         evidence=evidence,
         forced_public=(
             frozenset(force_public_symbols) if force_public_symbols else None
