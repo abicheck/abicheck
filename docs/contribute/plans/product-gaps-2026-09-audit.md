@@ -386,6 +386,22 @@ In priority order for whoever picks this up next:
    headers, a GCC-built artifact checked in both GCC-client and
    Clang-client contexts) depends on Phase 1/2 landing, not on anything
    this pass's slice touches.
+   **Update (2026-09-07, follow-up session):** Phase 2's `RunPlanCheck`
+   projection half is now landed for `public_header_roots`/
+   `generated_header_roots` (see that phase's own "Progress update" note) —
+   real per-target/per-profile fields sourced from validated
+   `build-output.json`, distinct from the pre-existing config-declared
+   `header` field, covered by `tests/test_run_plan_build_output_header_roots.py`.
+   Deliberately not attempted in the same pass: `include_dirs`/
+   `compile_context` (no real consumer exists yet for either — adding them
+   now would repeat the exact "accepted field nothing downstream honors"
+   defect this document's own §3 fixed for `analysis.assurance`, not close
+   it), and forwarding the two landed fields through `check-project.yml`/
+   `actions/check-target` in place of the workflow-global `header` input
+   (needs a script-based artifact-root path resolution step this pass did
+   not attempt without a way to exercise the real composite-action YAML).
+   Phase 1 (baseline consumer-context-aware publication) remains fully
+   open. The full §3 acceptance scenario still depends on both.
 3. **G39** — per-finding evidence-provider model, the real consumer
    `analysis.evidence` needs before it can mean anything beyond a label.
 4. **G42 "Named environments"** — `environment_id`/multi-environment fan-out,

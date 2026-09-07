@@ -185,3 +185,24 @@ def _scheduling_fields_for_profile(
     if label is None:
         raise ValueError(unroutable_os_message("profiles", profile_id, profile.os))
     return label, profile.dependency_source
+
+
+def _newline_join_headers(headers: list[str]) -> str:
+    """Newline-join *headers* for ``action/run.sh``'s ``add_flag()`` multi-
+    value convention (``RunPlanCheck.header``'s own docstring).
+
+    A single-element list needs special handling (Codex review, fresh
+    evidence): ``"\\n".join([x])`` is just ``x`` with no internal separator,
+    so ``add_flag()``'s ``[[ "$value" == *$'\\n'* ]]`` newline check reads
+    false and it falls through to the legacy branch that splits on IFS
+    whitespace -- exactly the whitespace-mis-splitting bug the newline-join
+    fix was meant to close, for the one-element case specifically. A
+    trailing newline forces the multi-line branch without changing what any
+    *multi*-element join already produces (no existing caller reads a
+    trailing newline off a 2+-element ``header`` value)."""
+    if not headers:
+        return ""
+    joined = "\n".join(headers)
+    if len(headers) == 1:
+        joined += "\n"
+    return joined
