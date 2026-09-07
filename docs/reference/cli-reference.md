@@ -42,7 +42,7 @@ Compare two ABI surfaces and report changes.
 | Name | Required | Description |
 |---|:--:|---|
 | `old_input` | yes |  |
-| `new_input` | yes |  |
+| `new_input` | no |  |
 
 **Options**
 
@@ -50,6 +50,7 @@ Compare two ABI surfaces and report changes.
 |---|:--:|---|---|
 | `--help` | no | `False` | Show common options and exit. Use --help-all to see the remaining advanced options. |
 | `--help-all` | no | `False` | Show every option, including advanced/less-common ones. |
+| `--no-baseline` | no | `False` | Declare that no prior surface exists for this candidate -- an audit, not a comparison (ADR-068 D2). Takes exactly one operand (the candidate build) instead of OLD NEW; the OLD side is recorded with ADR-065's 'declared\_absent' acquisition state. Replaces `scan`'s audit-only mode (no --against): reports candidate-side facts only -- never an addition, a removal, or a compatibility verdict. |
 | `--jobs`, `-j` | no | `0` | Parallel library comparisons for directory/package inputs (0 = auto-detect CPU count, clamped to fit available memory -- see ABICHECK\_RELEASE\_JOB\_MEM\_GIB -- the default). An explicit positive value is never memory-clamped. |
 | `--dso-only` | no | `False` | Only compare shared objects, skip executables (directory/package inputs only). |
 | `--output-dir` | no | — | Directory to write per-library reports (directory/package inputs only). |
