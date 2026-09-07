@@ -96,18 +96,16 @@
     "calling-contract.parameter-count-change": {
       "learn_pages": ["learn/abi-series/02-symbol-contracts.md"],
       "topics": [],
-      "catalog_cases": [],
+      "catalog_cases": ["case199_public_function_parameter_added", "case200_new_entry_point_instead_of_parameter_added"],
       "detector_kinds": ["func_params_changed", "mandatory_template_param_added"],
-      "status": "MISSING_CASE",
-      "reason": "`func_params_changed` covers an arity change, but every signature case in the catalog changes a parameter's *type* -- none adds or drops a parameter, so the arity path is demonstrated nowhere."
+      "status": "COVERED"
     },
     "calling-contract.parameter-order-change": {
       "learn_pages": ["learn/abi-series/02-symbol-contracts.md"],
       "topics": [],
-      "catalog_cases": [],
+      "catalog_cases": ["case201_public_function_parameters_reordered", "case202_public_header_declaration_order_changed"],
       "detector_kinds": ["func_params_changed"],
-      "status": "MISSING_CASE",
-      "reason": "A reorder of two differently-typed parameters reaches `func_params_changed`, but no case demonstrates it -- and the same-type reorder (the silent, ABI-identical-signature variant) has no case either."
+      "status": "COVERED"
     },
     "calling-contract.return-type-change": {
       "learn_pages": ["learn/abi-series/02-symbol-contracts.md"],
@@ -185,11 +183,9 @@
     "data-layout.field-reorder": {
       "learn_pages": ["learn/abi-series/03-type-layout.md"],
       "topics": [],
-      "catalog_cases": ["case120_internal_struct_reordered_scoped"],
-      "cases_demonstrate": false,
+      "catalog_cases": ["case120_internal_struct_reordered_scoped", "case198_public_struct_field_reorder"],
       "detector_kinds": ["type_field_offset_changed", "field_renamed", "struct_field_type_changed"],
-      "status": "MISSING_CASE",
-      "reason": "The only reorder case is the internal/scoped *negative* control (case120, which must stay NO_CHANGE). No case reorders the fields of a public struct, which is exactly the positive control Phase 4 pairs with case120."
+      "status": "COVERED"
     },
     "data-layout.padding-change": {
       "learn_pages": ["learn/abi-series/03-type-layout.md", "learn/class-layout-abi.md"],
@@ -301,10 +297,9 @@
     "cpp-object-model.vptr-presence-change": {
       "learn_pages": ["learn/abi-series/03-type-layout.md", "learn/class-layout-abi.md"],
       "topics": ["class-layout"],
-      "catalog_cases": [],
+      "catalog_cases": ["case203_class_gained_vtable_pointer", "case204_class_gained_non_virtual_method"],
       "detector_kinds": ["vptr_introduced", "type_size_changed", "type_field_offset_changed"],
-      "status": "MISSING_CASE",
-      "reason": "`vptr_introduced` claims exactly this mechanism, and both learn pages explain it, but no catalog case gives a plain class its first virtual function -- the vtable cases all start from an already-polymorphic class."
+      "status": "COVERED"
     },
 
     "source-abi.inline-function-body-change": {
@@ -559,10 +554,9 @@
     "source-api.deprecation-attribute-addition": {
       "learn_pages": ["learn/abi-series/02-symbol-contracts.md", "learn/rollout-and-governance.md"],
       "topics": ["compatibility-governance"],
-      "catalog_cases": [],
+      "catalog_cases": ["case205_public_function_marked_deprecated", "case206_deprecation_documented_without_attribute"],
       "detector_kinds": ["func_deprecated_added", "func_deprecated_removed", "type_deprecated_added", "var_deprecated_added", "field_deprecated_added", "enum_deprecated_added"],
-      "status": "MISSING_CASE",
-      "reason": "Six detectors cover deprecation attributes across every declaration kind, and the deprecation *workflow* is documented, but no case adds `[[deprecated]]` to a previously plain declaration."
+      "status": "COVERED"
     },
     "source-api.default-argument-value-change": {
       "learn_pages": ["learn/abi-series/06-transitive-breaks.md", "learn/abi-cheat-sheet.md"],
@@ -616,10 +610,9 @@
     "ecosystem-specific.c-restrict-qualifier-change": {
       "learn_pages": ["learn/impact-analysis.md"],
       "topics": [],
-      "catalog_cases": [],
+      "catalog_cases": ["case207_pointer_parameter_gained_restrict", "case208_restrict_added_to_definition_only"],
       "detector_kinds": ["param_restrict_changed"],
-      "status": "MISSING_CASE",
-      "reason": "`param_restrict_changed` claims the mechanism, but no case adds or drops `restrict` on a pointer parameter, and no learn page explains what the aliasing-contract change costs a caller."
+      "status": "COVERED"
     },
     "ecosystem-specific.cpp-stdlib-abi-variant": {
       "learn_pages": ["learn/system-library-discipline.md", "learn/modern-cpp-toolchain-hazards.md", "learn/build-profile-comparability.md"],

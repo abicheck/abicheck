@@ -2,16 +2,16 @@
 
 # Catalog coverage by dimension
 
-Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the calibration catalog under `examples/` is 197 `caseNN_*` fixtures, but not 197 independent ABI/API concepts -- several are variants of the same rule, or scenarios composing rules already counted elsewhere. This page reports the catalog along five independent dimensions instead of one flat case count, so "three demonstrations of one rule" reads as "1 rule, 3 cases (1 canonical + 2 variants)" rather than "3 ABI concepts". Regenerate with `python scripts/gen_catalog_coverage_report.py` after any `ground_truth.json`, `catalog/taxonomy.json`, or `catalog/catalog_classification.yaml` change.
+Phase 6 of the [examples/catalog split](plans/examples-catalog-split.md): the calibration catalog under `examples/` is 208 `caseNN_*` fixtures, but not 208 independent ABI/API concepts -- several are variants of the same rule, or scenarios composing rules already counted elsewhere. This page reports the catalog along five independent dimensions instead of one flat case count, so "three demonstrations of one rule" reads as "1 rule, 3 cases (1 canonical + 2 variants)" rather than "3 ABI concepts". Regenerate with `python scripts/gen_catalog_coverage_report.py` after any `ground_truth.json`, `catalog/taxonomy.json`, or `catalog/catalog_classification.yaml` change.
 
 ## Rule coverage
 
 Every rule named below is defined in `catalog/catalog_rules.yaml`, the canonical rule registry (a repository file, not a published page). A slug used by a case but missing from that file (or defined there but used by no case) fails `scripts/gen_catalog_taxonomy.py` and `tests/test_catalog_taxonomy.py` -- which is what stops a typo, a synonym, or an accidental rename from silently becoming one more "distinct compatibility rule" in the headline below.
 
-- **177 distinct compatibility rules** in total -- **160** demonstrated by at least one rule-entity case (across **167 rule-entity cases**), plus **17** named only in a scenario's own `related_rules` (a generic mechanism no single-library case demonstrates alone yet). The two are **not** equivalent coverage: a referenced-only rule has a definition and a scenario that composes it, but no case that isolates it.
+- **188 distinct compatibility rules** in total -- **171** demonstrated by at least one rule-entity case (across **178 rule-entity cases**), plus **17** named only in a scenario's own `related_rules` (a generic mechanism no single-library case demonstrates alone yet). The two are **not** equivalent coverage: a referenced-only rule has a definition and a scenario that composes it, but no case that isolates it.
 - **5 of the demonstrated rules** have a *variant* beyond their canonical case -- a genuine robustness demonstration under a different condition (5 variant cases total -- see the per-family breakdown below); these are robustness demonstrations of an already-counted rule, not additional rules.
 - **2 of the demonstrated rules** also have a *duplicate* -- the same demonstration restated with no distinguishing condition (2 duplicate cases total); these don't add robustness coverage and are candidates for eventual removal, not a variant to keep. (A family can appear in both this count and the variant count above if it has one of each.)
-- **153 demonstrated rules** have exactly one case so far, with no variant or duplicate yet.
+- **164 demonstrated rules** have exactly one case so far, with no variant or duplicate yet.
 
 | Rule | Canonical case | Variant case(s) | Duplicate case(s) |
 |---|---|---|---|
@@ -63,7 +63,7 @@ Every case, rule or scenario, tagged with the real-world ecosystem it models (`g
 
 | Ecosystem | Cases |
 |---|---|
-| `generic` | 184 |
+| `generic` | 195 |
 | `linux-kernel` | 3 |
 | `onemkl` | 1 |
 | `onetbb` | 7 |

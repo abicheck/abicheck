@@ -963,7 +963,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "func_added",
-      "examples": "case03_compat_addition,case111_enumerable_thread_specific_lambda_ambiguity,case141_versioned_symbol_scheme,case16_inline_to_non_inline,case185_inherited_override_reuses_slot,case47_inline_to_outlined,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
+      "examples": "case03_compat_addition,case111_enumerable_thread_specific_lambda_ambiguity,case141_versioned_symbol_scheme,case16_inline_to_non_inline,case185_inherited_override_reuses_slot,case200_new_entry_point_instead_of_parameter_added,case204_class_gained_non_virtual_method,case47_inline_to_outlined,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
     },
     {
       "kind": "func_became_inline",
@@ -1035,7 +1035,7 @@
       "severity": "warning",
       "min_evidence": "L2",
       "doc_slug": "func_deprecated_added",
-      "examples": ""
+      "examples": "case205_public_function_marked_deprecated"
     },
     {
       "kind": "func_deprecated_removed",
@@ -1125,7 +1125,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "func_params_changed",
-      "examples": "case02_param_type_change,case102_frozen_runtime_signature_changed,case46_pointer_chain_type_change"
+      "examples": "case02_param_type_change,case102_frozen_runtime_signature_changed,case199_public_function_parameter_added,case201_public_function_parameters_reordered,case46_pointer_chain_type_change"
     },
     {
       "kind": "func_pure_virtual_added",
@@ -1861,9 +1861,9 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L2",
       "doc_slug": "param_restrict_changed",
-      "examples": ""
+      "examples": "case207_pointer_parameter_gained_restrict"
     },
     {
       "kind": "pe_forwarder_changed",
@@ -3141,7 +3141,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_field_offset_changed",
-      "examples": "case117_no_unique_address,case140_empty_base_optimization_lost,case43_base_class_member_added,case77_detail_templated_base_changed"
+      "examples": "case117_no_unique_address,case140_empty_base_optimization_lost,case198_public_struct_field_reorder,case203_class_gained_vtable_pointer,case43_base_class_member_added,case77_detail_templated_base_changed"
     },
     {
       "kind": "type_field_removed",
@@ -3204,7 +3204,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_size_changed",
-      "examples": "case07_struct_layout,case117_no_unique_address,case140_empty_base_optimization_lost,case14_cpp_class_size,case17_template_abi,case18_dependency_leak,case26_union_field_added,case36_anon_struct,case40_field_layout,case43_base_class_member_added,case44_cyclic_type_member_added,case45_multi_dim_array_change,case48_leaf_struct_through_pointer,case77_detail_templated_base_changed,case94_empty_tag_gained_state"
+      "examples": "case07_struct_layout,case117_no_unique_address,case140_empty_base_optimization_lost,case14_cpp_class_size,case17_template_abi,case18_dependency_leak,case203_class_gained_vtable_pointer,case26_union_field_added,case36_anon_struct,case40_field_layout,case43_base_class_member_added,case44_cyclic_type_member_added,case45_multi_dim_array_change,case48_leaf_struct_through_pointer,case77_detail_templated_base_changed,case94_empty_tag_gained_state"
     },
     {
       "kind": "type_visibility_changed",
@@ -3499,9 +3499,9 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "vptr_introduced",
-      "examples": ""
+      "examples": "case203_class_gained_vtable_pointer"
     },
     {
       "kind": "vtable_slot_count_changed",

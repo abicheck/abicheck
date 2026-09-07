@@ -3,7 +3,7 @@
 
 Cases whose committed fixtures include C++ sources.
 
-_87 case(s)._ [← back to all examples](../index.md)
+_89 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -94,3 +94,5 @@ _87 case(s)._ [← back to all examples](../index.md)
 | [case188_public_class_private_base_class](../case188_public_class_private_base_class.md) | Public Class Gains a Private Base Class | 🔴 BREAKING | Breaking |
 | [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type.md) | Public Function Parameter Retyped to an Internal Type | 🔴 BREAKING | Breaking |
 | [case191_header_only_graph_field_type](../case191_header_only_graph_field_type.md) | Public Struct Gains a Field of a Private Type (Header-Only Graph) | 🔴 BREAKING | Breaking |
+| [case203_class_gained_vtable_pointer](../case203_class_gained_vtable_pointer.md) | Class Gained a Vtable Pointer | 🔴 BREAKING | Breaking |
+| [case204_class_gained_non_virtual_method](../case204_class_gained_non_virtual_method.md) | Class Gained a Non-Virtual Method | 🟢 COMPATIBLE | Addition (Compatible) |

@@ -3,7 +3,7 @@
 
 Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks.
 
-_21 case(s)._ [← back to all examples](../index.md)
+_23 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -28,3 +28,5 @@ _21 case(s)._ [← back to all examples](../index.md)
 | [case150_xcheck_export_public_pair](../case150_xcheck_export_public_pair.md) | Bidirectional Export ↔ Declaration Pair | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case151_xcheck_provider_matrix](../case151_xcheck_provider_matrix.md) | Provider-Agreement Matrix (Corroboration Grows With Evidence) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case181_xcheck_public_to_internal_dependency](../case181_xcheck_public_to_internal_dependency.md) | Public API Reaches an Internal Declaration | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case205_public_function_marked_deprecated](../case205_public_function_marked_deprecated.md) | Public Function Marked Deprecated | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟢 COMPATIBLE | Quality (Compatible) |

@@ -3,7 +3,7 @@
 
 Cases whose committed fixtures include C sources.
 
-_79 case(s)._ [← back to all examples](../index.md)
+_88 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -86,3 +86,12 @@ _79 case(s)._ [← back to all examples](../index.md)
 | [case183_internal_version_node_churn](../case183_internal_version_node_churn.md) | Internal ELF symbol-version node churn | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case184_internal_enum_churn_scoped](../case184_internal_enum_churn_scoped.md) | Internal Enum Churn, Scoped Out by Private-Header Origin | ✅ NO_CHANGE | No Change |
 | [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API Pointee const-Qualification Is ABI-Neutral | ✅ NO_CHANGE | No Change |
+| [case198_public_struct_field_reorder](../case198_public_struct_field_reorder.md) | Public Struct Field Reorder | 🔴 BREAKING | Breaking |
+| [case199_public_function_parameter_added](../case199_public_function_parameter_added.md) | Parameter Added to an Exported Function | 🔴 BREAKING | Breaking |
+| [case200_new_entry_point_instead_of_parameter_added](../case200_new_entry_point_instead_of_parameter_added.md) | New Entry Point Instead of a Changed Arity | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case201_public_function_parameters_reordered](../case201_public_function_parameters_reordered.md) | Public Function Parameters Reordered | 🔴 BREAKING | Breaking |
+| [case202_public_header_declaration_order_changed](../case202_public_header_declaration_order_changed.md) | Public Header Declaration Order Changed | ✅ NO_CHANGE | No Change |
+| [case205_public_function_marked_deprecated](../case205_public_function_marked_deprecated.md) | Public Function Marked Deprecated | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case206_deprecation_documented_without_attribute](../case206_deprecation_documented_without_attribute.md) | Deprecation Documented Without the Attribute | ✅ NO_CHANGE | No Change |
+| [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case208_restrict_added_to_definition_only](../case208_restrict_added_to_definition_only.md) | `restrict` Added to the Definition Only | ✅ NO_CHANGE | No Change |

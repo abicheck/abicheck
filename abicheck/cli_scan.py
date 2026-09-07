@@ -47,7 +47,6 @@ side-effect at the bottom of :mod:`abicheck.cli` so ``@main.command`` runs.
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -83,6 +82,7 @@ from .cli_options import (
     lang_option,
     merge_compile_config,
     pack_option,
+    parse_abi3_floor,
     policy_options,
     resolve_compile_context,
     resolve_contract_domain,
@@ -147,6 +147,7 @@ from .scan_engine import (  # noqa: F401 - several re-exported for tests/service
     _load_exports_for_poi,
     run_scan_core,
 )
+from .workflows.changed_paths import git_changed_paths, resolve_changed_seed
 from .workflows.extraction import (  # noqa: F401 - re-exported for tests
     build_points_of_interest,
     resolve_symbol_tus,
@@ -226,34 +227,13 @@ def _parse_budget(value: str | None) -> float | None:
 
 
 def _git_changed_paths(since: str, cwd: Path | None) -> list[str] | None:
-    """Paths changed vs. a git ref via ``git diff --name-only`` (no shell).
-
-    Returns the changed-path list on success (possibly **empty** for a no-op
-    diff), or ``None`` when the seed could not be produced (missing git / non-repo
-    / bad ref). The caller distinguishes the two: a successful empty diff is a
-    valid "nothing changed" seed (auto → s0), whereas ``None`` means no seed and
-    auto falls back to the mode preset (ADR-035 D7 / Codex review).
-    """
-    try:
-        proc = subprocess.run(
-            ["git", "diff", "--name-only", f"{since}...HEAD"],
-            cwd=str(cwd) if cwd is not None else None,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        click.echo(f"warning: --since: could not run git diff: {exc}", err=True)
-        return None
-    if proc.returncode != 0:
-        click.echo(
-            f"warning: --since {since!r}: git diff failed "
-            f"({proc.stderr.strip() or 'non-zero exit'}); scanning broadly.",
-            err=True,
-        )
-        return None
-    return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    """Paths changed vs. a git ref -- ADR-068 Phase 2c moved the implementation
+    to :func:`abicheck.workflows.changed_paths.git_changed_paths` so ``compare``
+    resolves the identical seed; this wrapper keeps ``scan``'s own spelling
+    (and its stderr warnings) unchanged."""
+    return git_changed_paths(
+        since, cwd, notify=lambda message: click.echo(message, err=True)
+    )
 
 
 def _parse_crosschecks(
@@ -325,38 +305,32 @@ def _resolve_changed_seed(
     since: str | None,
     sources: Path | None,
 ) -> tuple[list[str], str, bool]:
-    """Resolve the changed-path seed → ``(changed, changed_src, seeded)``.
+    """Resolve the changed-path seed -> ``(changed, changed_src, seeded)``.
 
-    ``--changed-path`` wins; else ``--since`` via git; else none. ``seeded`` tracks
-    whether a *valid* seed was produced — a successful empty diff (seeded, no
-    paths) is distinct from a missing/failed seed (not seeded): the former lets
-    auto pick s0 (no-op PR), the latter falls back to the broad mode preset
-    (ADR-035 D7 / Codex review).
+    ADR-068 Phase 2c moved the rule itself to
+    :func:`abicheck.workflows.changed_paths.resolve_changed_seed` (``compare``
+    resolves the same seed the same way, and ``seeded`` still distinguishes a
+    successful *empty* diff from a missing/failed one); this wrapper keeps
+    ``scan``'s own three-tuple shape unchanged.
     """
-    if changed_paths_opt:
-        return list(changed_paths_opt), "--changed-path", True
-    if since:
-        git_changed = _git_changed_paths(since, sources)
-        if git_changed is None:
-            return [], f"--since {since} (seed failed; broad scope)", False
-        return git_changed, f"--since {since}", True
-    return [], "none (no diff seed; broad scope)", False
+    seed = resolve_changed_seed(
+        changed_paths_opt,
+        since,
+        sources,
+        notify=lambda message: click.echo(message, err=True),
+    )
+    return list(seed.paths), seed.source, seed.seeded
 
 
 def _parse_abi3_floor(abi3: str | None) -> tuple[int, int] | None:
     """Parse the --abi3 target ``Py_LIMITED_API`` floor, or ``None`` when off.
 
-    An invalid floor (non-3 major, implausible minor, trailing junk) is a usage
-    error.
+    ADR-068 Phase 2d moved the spelling to the shared
+    :func:`abicheck.cli_options.parse_abi3_floor`, so ``compare --abi3`` and
+    ``scan --abi3`` accept (and reject) exactly the same versions -- an invalid
+    floor stays the same ``click.BadParameter`` usage error it always was.
     """
-    if abi3 is None:
-        return None
-    from . import stable_abi
-
-    floor = stable_abi.parse_abi3_version(abi3)
-    if floor is None:
-        raise click.BadParameter(f"invalid --abi3 version: {abi3!r}")
-    return floor
+    return parse_abi3_floor(abi3)
 
 
 def _resolve_auto_source_method(

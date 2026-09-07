@@ -224,6 +224,16 @@ class BuildConfig:
     #: declared cohorts.
     bundle_system_providers: list[str] = field(default_factory=list)
     bundle_cohorts: list[str] = field(default_factory=list)
+    #: ``python:`` — the project's CPython stable-ABI (``abi3``) floor, e.g.
+    #: ``"3.9"`` (ADR-068 D5, plan §3 #15): which ``Py_LIMITED_API`` version
+    #: this project promises is a stable property of the project, reviewed in
+    #: a PR, not a per-run decision — so it lives here, with ``compare
+    #: --abi3`` acting as the per-run override on top of it. ``None`` = unset
+    #: (no audit unless the flag asks for one). Kept as the raw spelling the
+    #: flag accepts, validated at the same place the flag is
+    #: (``cli_options.parse_abi3_floor``), so config and CLI cannot accept
+    #: different version syntaxes.
+    python_abi3_floor: str | None = None
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
@@ -248,6 +258,7 @@ class BuildConfig:
             "compile",
             "debug",
             "bundle",
+            "python",
             "version",
             "risk_rules",
             "crosschecks",
@@ -293,6 +304,8 @@ class BuildConfig:
         # `compare`'s directory/package fan-out and `scan --artifact-set`,
         # with no dependency on any `targets:`/`bundles:` declaration.
         "bundle": frozenset({"system_providers", "cohorts"}),
+        # ADR-068 D5: the stable half of the `--abi3` audit (its floor).
+        "python": frozenset({"abi3_floor"}),
     }
 
     @classmethod
@@ -403,6 +416,7 @@ class BuildConfig:
         compile_blk = _block(top, "compile")
         debug = _block(top, "debug")
         bundle = _block(top, "bundle")
+        python_blk = _block(top, "python")
 
         def _safe_compile_atoms(key: str) -> list[str]:
             return [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
@@ -475,9 +489,8 @@ class BuildConfig:
             bundle_system_providers=[
                 s.strip() for s in _strs(bundle, "system_providers") if s.strip()
             ],
-            bundle_cohorts=[
-                s.strip() for s in _strs(bundle, "cohorts") if s.strip()
-            ],
+            bundle_cohorts=[s.strip() for s in _strs(bundle, "cohorts") if s.strip()],
+            python_abi3_floor=_opt_str(python_blk, "abi3_floor"),
             version=(
                 version_raw
                 if isinstance(version_raw, int) and not isinstance(version_raw, bool)
@@ -590,6 +603,12 @@ class BuildConfig:
             bundle["cohorts"] = list(self.bundle_cohorts)
         return bundle
 
+    def _python_block(self) -> dict[str, Any]:
+        """Non-default ``python:`` keys (the project's ``abi3`` floor)."""
+        if self.python_abi3_floor is not None:
+            return {"abi3_floor": self.python_abi3_floor}
+        return {}
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
 
@@ -610,6 +629,7 @@ class BuildConfig:
             ("compile", self._compile_block()),
             ("debug", self._debug_block()),
             ("bundle", self._bundle_block()),
+            ("python", self._python_block()),
         ):
             if block:
                 out[key] = block

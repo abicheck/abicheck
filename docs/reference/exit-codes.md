@@ -276,13 +276,14 @@ folds `DiffResult.evidence_contract_error`/`.budget_overflow` through the
 identical precedence rule `scan` uses
 (`exit_decision_precedence.resolve_scan_exit_decision`), reused rather than
 re-derived, so the two commands can never disagree on which axis wins when
-both apply. **No `compare` invocation sets either field yet** — `compare`
-has no `--budget` flag, and ADR-037 D5's auto-strict `--depth`/
-`--source-method` enforcement remains `scan`-only — so both contributions
-stay `0` and neither reason is ever named in a `compare` report today; this
-is prerequisite plumbing for the plan's own Phase 2/7, which will give a
-future `compare` flag a real trigger without a second precedence rule to
-keep in sync.
+both apply. Phase 2d gave the evidence-contract axis its first
+CLI-reachable trigger on `compare`: **`compare --abi3 VERSION` against a
+candidate that is not a recognisable CPython extension module exits `7`**,
+exactly as `scan --abi3` does, since the stable-ABI audit the flag asks for
+cannot be performed at all (the comparison's own findings are left as they
+were and still reported). `budget_overflow_contribution` has no `compare`
+trigger yet — there is still no `--budget` flag — so it stays `0` on every
+`compare` report, prerequisite plumbing for the plan's Phase 7.
 
 ## Commands removed in the ADR-043 CLI reset
 

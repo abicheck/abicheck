@@ -139,9 +139,10 @@ class TestFieldDefaultsToNone:
         assert by_name["disambiguator"].kw_only is True
         assert by_name["evolution"].kw_only is True
         assert by_name["cross_source_evolution"].kw_only is True
+        assert by_name["candidate_side_enrichment"].kw_only is True
         all_names = [f.name for f in dataclasses.fields(Change)]
-        assert all_names[-1] == "cross_source_evolution", (
-            "cross_source_evolution must be the last-declared field on Change"
+        assert all_names[-1] == "candidate_side_enrichment", (
+            "candidate_side_enrichment must be the last-declared field on Change"
         )
         assert (
             all_names.index("entity_id") == all_names.index("evidence_provenance") + 1
@@ -156,6 +157,10 @@ class TestFieldDefaultsToNone:
             all_names.index("cross_source_evolution")
             == all_names.index("evolution") + 1
         ), "cross_source_evolution must be appended immediately after evolution"
+        assert (
+            all_names.index("candidate_side_enrichment")
+            == all_names.index("cross_source_evolution") + 1
+        ), "candidate_side_enrichment must be appended immediately after cross_source_evolution"
 
 
 class TestVerifiedBucketsHaveProducerCoverage:
