@@ -820,6 +820,7 @@ def compare(
     contract_mode: str | None = None,
     old_public_entity_ids: frozenset[EntityId] | None = None,
     new_public_entity_ids: frozenset[EntityId] | None = None,
+    cross_source_checks: bool = False,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -894,6 +895,11 @@ def compare(
         old_public_entity_ids: ADR-063 Phase 3 (D5) -- *old*'s resolved
             public-surface ``EntityId`` set; *new_public_entity_ids* is
             *new*'s (never swap). ``None`` (default) preserves prior behavior.
+        cross_source_checks: ADR-068 D3 / plan P2. Runs the migrated
+            cross-source hygiene check(s) (see ``workflows.
+            cross_source_evolution``) on *old*/*new* independently and
+            merges the evolution-stated result into ``changes``. Off by
+            default; never changes a finding's default verdict.
 
     Raises:
         ProfileMismatchError: *old* and *new* were extracted under
@@ -946,6 +952,12 @@ def compare(
     # verdict composition treat them uniformly (G2: probe → compare).
     if extra_changes:
         changes.extend(extra_changes)
+
+    # ADR-068 D3 / plan P2 -- first cross-source check migrated onto compare().
+    if cross_source_checks:
+        from .workflows.cross_source_evolution import compute_cross_source_evolution
+
+        changes.extend(compute_cross_source_evolution(old, new))
 
     # ADR-067 C-S1: one conserved policy-disposition ledger per comparison,
     # built before the first disposition can be applied and threaded into every

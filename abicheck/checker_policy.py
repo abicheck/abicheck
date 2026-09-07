@@ -178,6 +178,47 @@ class FindingEvolution(str, Enum):
     NOT_EVALUATED = "not_evaluated"
 
 
+class CrossSourceEvolution(str, Enum):
+    """How a one-sided (candidate-side) finding behaves across OLD → NEW
+    *within a single* :func:`~abicheck.checker.compare` **call**
+    (ADR-068 D3; ``docs/contribute/plans/one-comparison-product.md`` P2).
+
+    Not to be confused with :class:`FindingEvolution` above, which tracks a
+    finding's identity across a *chain* of separate ``compare()`` calls over
+    time — this enum instead states how a cross-source hygiene check
+    (``buildsource.crosscheck.run_crosschecks`` and siblings), which
+    evaluates one snapshot's evidence sources against each other and
+    carries no baseline of its own, behaves when that check is run
+    independently on OLD and NEW *inside the same* ``compare()`` call. Same
+    four state names, deliberately narrower scope; `compare()` itself DOES
+    set this field (opt-in, see ``cross_source_checks=True``), unlike
+    ``FindingEvolution``.
+
+    - ``INTRODUCED``: absent on OLD (with OLD evidence sufficient to say
+      so), present on NEW.
+    - ``RESOLVED``: present on OLD, absent on NEW.
+    - ``PERSISTENT``: present on both.
+    - ``NOT_EVALUATED``: the check could not be run against at least one
+      side's evidence (e.g. a stripped/ELF-only snapshot with no header
+      provenance) with the other side flagging the finding, so neither
+      "introduced" nor "resolved" nor "persistent" can be asserted. **This
+      state is mandatory, not a convenience**: reporting a pre-existing
+      hygiene problem as ``INTRODUCED`` merely because the baseline lacked
+      the evidence to evaluate it would be a manufactured finding, which
+      ``vision.md`` forbids outright.
+
+    Authority is unchanged (ADR-028 D3 / ADR-035 D1): a finding carrying
+    this field stays whatever ``RISK``/``API_BREAK`` severity its
+    ``ChangeKind`` already defaults to — this axis is purely descriptive
+    and never promotes a finding toward ``BREAKING`` on its own.
+    """
+
+    INTRODUCED = "introduced"
+    RESOLVED = "resolved"
+    PERSISTENT = "persistent"
+    NOT_EVALUATED = "not_evaluated"
+
+
 class EvidenceStatus(str, Enum):
     """The epistemic status of a single finding — *how* it was proven, not just
     *what* it is (its ``Verdict``/severity already say that).

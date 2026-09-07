@@ -1103,7 +1103,16 @@ def _gather(
         else:
             print("mutation-score: running `mutmut run` (this is slow)…")
         run_out, run_rc = _run_mutmut(run_cmd)
-        tail = "\n".join(run_out.splitlines()[-5:])
+        # 5 lines was enough to see mutmut's own progress-bar summary on a
+        # clean run, but on a real pytest failure it only ever showed the
+        # tail of an assertion diff (e.g. two lines of a multi-line list/dict
+        # comparison) -- useless for root-causing which test failed or why.
+        # Widened once real CI failures under this exact "diff-scoped refuse
+        # to scope, fall back to a full run" path (see the pyproject.toml
+        # `pytest_add_cli_args` ignore-list entries' own history) repeatedly
+        # could not be diagnosed from the printed tail alone.
+        tail_line_count = 5 if run_rc == 0 else 80
+        tail = "\n".join(run_out.splitlines()[-tail_line_count:])
         print(f"mutation-score: mutmut run tail:\n{tail}")
         if run_rc != 0:
             # Fail here rather than reading results: with a restored cache the

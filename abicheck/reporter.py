@@ -25,11 +25,7 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from .severity import GateDecision, KindSets, SeverityConfig
 from . import reporter_contract_blocks as _reporter_contract_blocks
-from .checker import (
-    Change,
-    DiffResult,
-    Verdict,
-)
+from .checker import Change, DiffResult, Verdict
 from .checker_policy import (
     ChangeKind,
     EvidenceStatus,

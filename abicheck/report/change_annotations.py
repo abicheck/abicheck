@@ -29,6 +29,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..checker_policy import Verdict
+from .cross_source_evolution import change_cross_source_evolution_field as _cse
 
 
 def change_annotation_fields(c: Any) -> dict[str, Any]:
@@ -71,6 +72,11 @@ def change_annotation_fields(c: Any) -> dict[str, Any]:
         out["correlated_change_kind"] = correlated
     if getattr(c, "symbol_binding", None):
         out["symbol_binding"] = c.symbol_binding
+    # ADR-068 D3 / plan P2 — this finding's OLD->NEW evolution *within this
+    # one comparison* (a one-sided cross-source check re-run against the
+    # baseline), distinct from the cross-comparison-chain `evolution` field.
+    if (cse := _cse(c)) is not None:
+        out["cross_source_evolution"] = cse
     # ADR-068 D3 — a candidate-only check's finding (the --abi3 audit) rides
     # this comparison's own result document, marked rather than split out.
     if getattr(c, "candidate_side_enrichment", False):
