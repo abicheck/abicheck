@@ -112,6 +112,7 @@ _STATE_LABEL = {
     AcquisitionState.UNSUPPORTED.value: "unsupported",
     AcquisitionState.OUT_OF_SCOPE.value: "out of scope",
     AcquisitionState.AMBIGUOUS.value: "ambiguous",
+    AcquisitionState.DECLARED_ABSENT.value: "declared absent (no baseline)",
 }
 
 

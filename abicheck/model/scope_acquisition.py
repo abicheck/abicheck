@@ -39,6 +39,33 @@ whose extraction failed, keeps its own state and flows into D6's
 incompleteness outcome instead -- never demoted to out-of-scope, never
 promoted to a removal.
 
+``DECLARED_ABSENT`` (ADR-068 D2/D3, Phase 1) is a fourth kind of gap, not a
+variant of ``NOT_SUPPLIED``: the run itself has *declared* that no OLD side
+exists at all (``compare --no-baseline``, ADR-068's replacement for `scan`'s
+audit-only mode) -- there is no "other side" this member could ever pair
+with, so treating it as an unmatched-pending-proof member would be wrong in
+the other direction from ``NOT_SUPPLIED``'s own mistake. Two consequences,
+both structural rather than case-by-case:
+
+* **Never a removal.** :attr:`ScopeAcquisitionRecord.proven_removed_members`
+  /:attr:`~ScopeAcquisitionRecord.proven_added_members` key off
+  ``NOT_SUPPLIED`` alone, so a ``DECLARED_ABSENT`` member can never surface
+  there regardless of how complete either side's inventory is -- there is no
+  prior release for it to have been removed *from*.
+* **Never a pass.** Only ``AVAILABLE`` counts toward
+  :attr:`~ScopeAcquisitionRecord.completed_members`, so a record whose
+  members are all ``DECLARED_ABSENT`` never has a completed comparison and
+  therefore reads as :attr:`~ScopeAcquisitionRecord.no_comparison_completed`
+  -- the vision's "a run that completed zero comparisons never reads as a
+  clean pass" rule applies to an audit run exactly as it does to any other
+  scope that compared nothing.
+
+``DECLARED_ABSENT`` is deliberately excluded from :data:`UNCHECKED_STATES`:
+D6's incompleteness signal means "expected a counterpart and did not get
+one", and an audit run never expected one in the first place, so reporting
+every one of its members as an unchecked gap would misname a declared
+scope as an accidental one.
+
 A leaf ``model`` module: no imports beyond the standard library, so
 ``policy`` (the completeness axis), ``workflows`` (the release builder), and
 ``report`` (the rendered section) can all depend on it without a cycle.
@@ -70,7 +97,14 @@ __all__ = [
 #: member, and :meth:`MemberAcquisition.from_dict` defaults it to ``True`` --
 #: the value every pre-S1 member implicitly had, since S1 is what first lets
 #: a member be declared optional at all.
-SCOPE_ACQUISITION_SCHEMA_VERSION = "1.1"
+#: ``1.2`` (ADR-068 Phase 1, `one-comparison-product.md` P1) adds the
+#: ``declared_absent`` :class:`AcquisitionState` value -- additive: a ``1.1``
+#: reader that has never produced one still parses every existing document
+#: unchanged, and a ``1.1``-or-earlier reader given a ``1.2`` document with a
+#: ``declared_absent`` member raises on the unknown enum value rather than
+#: silently misreading it as some other state (:meth:`MemberAcquisition.
+#: from_dict`'s ``AcquisitionState(data["state"])`` call).
+SCOPE_ACQUISITION_SCHEMA_VERSION = "1.2"
 
 
 class AcquisitionState(str, Enum):
@@ -102,6 +136,15 @@ class AcquisitionState(str, Enum):
     #: Could pair with more than one counterpart (D3) -- a diagnostic, not
     #: a guess (S1 emits it; S2's filename matching never produces one).
     AMBIGUOUS = "ambiguous"
+    #: ADR-068 D2/D3 (Phase 1): the run itself declared that no OLD side
+    #: exists (``compare --no-baseline``) -- ``old_present`` is ``False`` by
+    #: construction, never by a supply gap. Distinct from ``NOT_SUPPLIED``:
+    #: there is no counterpart this member could ever be unmatched *from*,
+    #: so it is never a candidate removal/addition and never counts as a
+    #: completed two-sided comparison, however complete either side's
+    #: inventory is (see the module docstring's "never a removal, never a
+    #: pass" account).
+    DECLARED_ABSENT = "declared_absent"
 
 
 #: The states D6 counts as "a selected, expected member that did not reach
@@ -323,6 +366,17 @@ class ScopeAcquisitionRecord:
         """Members deliberately unselected by this run (``out_of_scope``)."""
         return tuple(
             m for m in self.members if m.state is AcquisitionState.OUT_OF_SCOPE
+        )
+
+    @property
+    def declared_absent_members(self) -> tuple[MemberAcquisition, ...]:
+        """Members whose OLD side the run declared absent outright
+        (``declared_absent``, ADR-068 D2/D3) -- an audit scope, not a supply
+        gap: excluded from :attr:`unchecked_members`,
+        :attr:`proven_removed_members` and :attr:`proven_added_members`
+        alike."""
+        return tuple(
+            m for m in self.members if m.state is AcquisitionState.DECLARED_ABSENT
         )
 
     def members_in(self, state: AcquisitionState) -> tuple[MemberAcquisition, ...]:

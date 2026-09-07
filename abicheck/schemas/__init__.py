@@ -767,7 +767,15 @@ from typing import Any
 #:       first for workstream D-S1's ``used_by[]``/``consumer_impact_
 #:       summary`` fields (same "renumber, don't reuse" convention as the
 #:       2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2 entries above).
-REPORT_SCHEMA_VERSION = "3.4"
+#: 3.5 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 1 item 1
+#:       (ADR-068 D2/D3): the ``comparison_scope`` section's per-member
+#:       ``state`` enum and ``counts`` object gain the additive
+#:       ``declared_absent`` value -- ADR-065's acquisition vocabulary's
+#:       fourth kind of gap, meaning the run itself declared no OLD side
+#:       exists (`compare --no-baseline`'s future replacement for `scan`'s
+#:       audit-only mode). No existing producer emits it yet -- this is the
+#:       model-level primitive only, wired into a real CLI path in Phase 2.
+REPORT_SCHEMA_VERSION = "3.5"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

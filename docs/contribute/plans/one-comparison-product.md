@@ -350,7 +350,7 @@ per-row prerequisites in §3 and §4 are the detail beneath these.
 
 | # | Prerequisite | Gates | State today |
 |---|---|---|---|
-| P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2), and therefore the whole audit half of the retirement | Not started; ADR-065 S2's record exists to extend |
+| P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2), and therefore the whole audit half of the retirement | **Done** (Phase 1 item 1: `AcquisitionState.DECLARED_ABSENT`) |
 | P2 | A `FindingEvolution` state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | Not started. **The correctness crux** — without it, a pre-existing problem reads as newly introduced |
 | P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion (they are `scan`-only today; `cli_stack.py`'s own `5` is unrelated) | ADR-064 already models the precedence; `compare` does not emit them |
 | P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public` | The leakage and public-vs-exported checks (§3 #4, #5, #22) | `scan --public-header-dir` has the rule; it must survive the move verbatim, file-vs-directory asymmetry included |
@@ -377,8 +377,20 @@ refs) while both commands still exist. It starts red on every check in
 
 ### Phase 1 — Canonical primitives where `scan` owns unique behavior
 
-1. **`declared_absent`** joins ADR-065's `MemberAcquisition` vocabulary, with
-   its completeness/outcome consequences (never a removal, never a pass).
+1. **Done.** `declared_absent` joins ADR-065's `MemberAcquisition`
+   vocabulary (`model/scope_acquisition.py`'s `AcquisitionState`), with its
+   completeness/outcome consequences (never a removal, never a pass):
+   excluded from `UNCHECKED_STATES` (a declared audit scope is not an
+   accidental gap), excluded from `proven_removed_members`/
+   `proven_added_members` by construction (both key off `NOT_SUPPLIED`
+   alone), and excluded from `completed_members` (only `AVAILABLE` counts),
+   so an all-`declared_absent` record always reads `no_comparison_completed`
+   -- never a clean pass. `report/comparison_scope.py`'s state-label table
+   and the `compare_report.schema.json` `comparison_scope` section
+   (`REPORT_SCHEMA_VERSION` 3.4 -> 3.5, additive) carry the new value.
+   `tests/parity/` (Phase 0's harness) stays green. No producer emits this
+   state yet, and no CLI/`scan` code changed -- Phase 2 item 2e
+   (`--no-baseline`) builds the real audit path on top of it.
 2. **`FindingEvolution`** (`introduced`/`resolved`/`persistent`/
    `not_evaluated`) on the canonical finding model, with `report/`
    compute/render support.
