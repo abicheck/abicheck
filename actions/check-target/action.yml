@@ -290,6 +290,26 @@ inputs:
       channel: none), which always carries its own top-level exit_code.
     required: false
     default: 'default'
+  require-complete-analysis:
+    description: >
+      Forwarded to the internal analysis step's own require-complete-
+      analysis input (product-gaps audit §3): a truthful projection of this
+      cell's declared checks[].analysis.assurance, which check-project.yml
+      sets to 'true' only when that value is 'complete' (the one value
+      project_targets.py's analysis_assurance_gate.py accepts -- any other
+      declared value is rejected before a run plan is even generated, so
+      this input is never asked to honor an unsupported one). Unconditionally
+      dropped to 'false' for kind: bundle, mirroring every other per-cell
+      compile/frontend override this Action already gates on kind !=
+      'bundle': a bundle check's old-library is a directory (the resolved
+      binaries-dir), and the root Action's own require-complete-analysis
+      input rejects a directory/package compare outright (no single
+      analysis_assurance result to gate a release fan-out on) -- forwarding
+      it unconditionally would turn a working bundle check into a hard
+      operational error the moment a project declared assurance: complete
+      anywhere in its checks:.
+    required: false
+    default: 'false'
   extra-args:
     description: 'Additional CLI arguments passed directly to the internal abicheck invocation.'
     required: false
@@ -648,6 +668,10 @@ runs:
         policy-file: ${{ inputs.policy-file }}
         suppress: ${{ inputs.suppress }}
         severity-preset: ${{ inputs.severity-preset }}
+        # Gated on kind != 'bundle' -- see this input's own docstring above
+        # for why forwarding it unconditionally would turn a working bundle
+        # check into a hard operational error.
+        require-complete-analysis: ${{ inputs.kind != 'bundle' && inputs.require-complete-analysis == 'true' }}
         extra-args: ${{ inputs.extra-args }}
         format: 'json'
         output-file: 'check-target-analysis.json'

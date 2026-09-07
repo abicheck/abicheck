@@ -32,13 +32,17 @@ g42-check-identity-environments-and-provider-resolution.md``.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from click.testing import CliRunner
 
 from abicheck.buildsource.project_targets import (
     CheckSpec,
     ProjectTargetsConfig,
     validate_project_targets,
 )
+from abicheck.cli import main
 
 
 def test_check_id_and_analysis_round_trip() -> None:
@@ -210,3 +214,131 @@ def test_check_id_empty_string_is_rejected_structurally() -> None:
             {"channel": "none", "depth": "headers", "id": ""},
             where="targets.libfoo.checks[0]",
         )
+
+
+class TestAnalysisAssuranceTruthfulness:
+    """Product-gaps audit, "First vertical slice": ``analysis.assurance``
+    accepted a free-form string with only ``"complete"`` ever mapping to a
+    real, wired enforcement mechanism (``compare``/``scan --against``'s
+    ``--require-complete-analysis`` gate) -- everything else was structurally
+    valid (a plain identifier), carried all the way into the generated run
+    plan, and honored by nothing. ``_check_issues`` now rejects any other
+    value before a run plan is generated, rather than accepting and silently
+    ignoring it. See ``SUPPORTED_ANALYSIS_ASSURANCE_VALUES``'s own docstring.
+    """
+
+    @staticmethod
+    def _config(assurance: str) -> ProjectTargetsConfig:
+        return ProjectTargetsConfig.from_dict(
+            {
+                "targets": {
+                    "libfoo": {
+                        "kind": "library",
+                        "binary_pattern": "lib/libfoo.so",
+                        "checks": [
+                            {
+                                "channel": "none",
+                                "depth": "headers",
+                                "analysis": {"assurance": assurance},
+                            }
+                        ],
+                    }
+                }
+            }
+        )
+
+    @pytest.mark.parametrize(
+        "assurance",
+        ["partial", "best-effort", "high", "strict", "COMPLETE", "complete-ish"],
+    )
+    def test_unsupported_assurance_value_is_rejected(self, assurance: str) -> None:
+        """Structurally valid (matches the identifier charset) but not a
+        value any gate in this codebase enforces -- must fail validation,
+        not pass through silently. Covers several distinct sibling values,
+        not just one reported string (bug-class regression-testing
+        convention), including a value differing from the supported one only
+        by case."""
+        report = validate_project_targets(self._config(assurance))
+        assert not report.ok
+        assert any(
+            f"analysis.assurance {assurance!r} is not a supported assurance level" in e
+            for e in report.errors
+        )
+
+    def test_supported_assurance_value_passes(self) -> None:
+        """Negative control: the one value with a real gate is accepted."""
+        report = validate_project_targets(self._config("complete"))
+        assert report.ok
+
+    def test_absent_assurance_is_unaffected(self) -> None:
+        """No analysis: block at all -- this new rule must never fire for
+        the overwhelming majority of checks that declare no assurance
+        requirement."""
+        config = ProjectTargetsConfig.from_dict(
+            {
+                "targets": {
+                    "libfoo": {
+                        "kind": "library",
+                        "binary_pattern": "lib/libfoo.so",
+                        "checks": [{"channel": "none", "depth": "headers"}],
+                    }
+                }
+            }
+        )
+        report = validate_project_targets(config)
+        assert report.ok
+
+
+class TestAnalysisAssuranceTruthfulnessCli:
+    """Same rule, exercised through the real public entry point
+    (``abicheck project validate``/``abicheck project plan``), not just the
+    internal ``validate_project_targets`` function -- per this repo's own
+    "validate the user-facing result" product-decision rule (root
+    ``AGENTS.md``)."""
+
+    @staticmethod
+    def _write_config(tmp_path: Path, assurance: str) -> Path:
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text(
+            "targets:\n"
+            "  libfoo:\n"
+            "    kind: library\n"
+            "    binary_pattern: lib/libfoo.so\n"
+            "    checks:\n"
+            "      - channel: none\n"
+            "        depth: headers\n"
+            "        analysis:\n"
+            f"          assurance: {assurance}\n"
+        )
+        return config_path
+
+    def test_project_validate_rejects_unsupported_assurance(
+        self, tmp_path: Path
+    ) -> None:
+        config_path = self._write_config(tmp_path, "partial")
+        result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
+        assert result.exit_code == 1, result.output
+        assert "analysis.assurance 'partial' is not a supported assurance level" in (
+            result.output
+        )
+
+    def test_project_plan_refuses_to_generate_for_unsupported_assurance(
+        self, tmp_path: Path
+    ) -> None:
+        """The unsupported value is caught before any run-plan is
+        generated: ``project plan`` fails with a usage error (64) rather
+        than emitting a run-plan carrying a directive nothing will honor."""
+        config_path = self._write_config(tmp_path, "partial")
+        result = CliRunner().invoke(main, ["project", "plan", str(config_path)])
+        assert result.exit_code == 64, result.output
+        assert "analysis.assurance 'partial' is not a supported assurance level" in (
+            result.output
+        )
+
+    def test_project_validate_accepts_supported_assurance(self, tmp_path: Path) -> None:
+        """Negative control: the real end-to-end CLI path still accepts the
+        one value with a wired gate."""
+        config_path = self._write_config(tmp_path, "complete")
+        result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
+        assert result.exit_code == 0, result.output
+        assert "OK" in result.output
