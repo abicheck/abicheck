@@ -12,14 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Stack report formatting — JSON and Markdown output for stack-level results."""
+"""Stack report formatting — JSON and Markdown output for stack-level results.
+
+The JSON half is now a canonical :class:`~abicheck.report.document.
+ReportDocument` projection (ADR-068 D6, `one-comparison-product.md`
+Phase 8): :func:`stack_to_json` is a thin
+`render_json(compute_stack_report_document(result))` wrapper, and the
+dict-building logic itself lives in :mod:`abicheck.report.stack`
+(`report/` is the ADR-061 owner for report shapes; this module keeps
+Markdown formatting only). See that module's own docstring.
+"""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from .binder import SymbolBinding
 from .checker_types import Change
+from .report.render_json import render_json
+from .report.stack import (
+    bindings_summary as _bindings_summary,
+    compute_stack_report_document,
+)
 from .resolver import DependencyGraph
 from .stack_checker import StackChange, StackCheckResult, StackVerdict
 
@@ -29,155 +42,10 @@ _VERDICT_EMOJI = {
     StackVerdict.FAIL: "❌",
 }
 
-# Cap on embedded per-library findings in stack JSON — mirrors
-# `cli_scan_baseline._MAX_BASELINE_FINDINGS`'s rationale: a large diff must
-# not blow up the always-on stack-check output, but a bare count
-# (`abi_breaking: 3`) leaves no way to tell *which* symbols broke without a
-# separate `compare` run.
-_MAX_STACK_FINDINGS_PER_LIBRARY = 10
-
-
-def _stack_finding_dicts(diff: object) -> list[dict[str, object]]:
-    """Project a library's gating findings (breaking/api_break/risk) into
-    small, capped dicts — same shape as `cli_scan_baseline._baseline_finding_dicts`.
-
-    Counts (not already-built dicts) decide the cap so a large diff never
-    builds more dicts than the cap can ever keep.
-    """
-    findings: list[dict[str, object]] = []
-    for bucket_name, bucket_changes in (
-        ("breaking", getattr(diff, "breaking", [])),
-        ("api_break", getattr(diff, "source_breaks", [])),
-        ("risk", getattr(diff, "risk", [])),
-    ):
-        remaining = _MAX_STACK_FINDINGS_PER_LIBRARY - len(findings)
-        if remaining <= 0:
-            break
-        for c in bucket_changes[:remaining]:
-            kind = getattr(c, "kind", None)
-            findings.append(
-                {
-                    "bucket": bucket_name,
-                    "kind": getattr(kind, "value", str(kind)),
-                    "symbol": getattr(c, "symbol", None),
-                    "description": getattr(c, "description", None),
-                    "source_location": getattr(c, "source_location", None),
-                }
-            )
-    return findings
-
 
 def stack_to_json(result: StackCheckResult, indent: int = 2) -> str:
-    """Render a StackCheckResult as JSON."""
-    d: dict[str, object] = {
-        "root_binary": result.root_binary,
-        "baseline_env": result.baseline_env,
-        "candidate_env": result.candidate_env,
-        "verdict": {
-            "loadability": result.loadability.value,
-            "abi_risk": result.abi_risk.value,
-            "risk_score": result.risk_score,
-        },
-    }
-
-    # Dependency graph nodes.
-    d["baseline_graph"] = _graph_to_dict(result.baseline_graph)
-    if result.baseline_graph is not result.candidate_graph:
-        d["candidate_graph"] = _graph_to_dict(result.candidate_graph)
-
-    # Binding summary.
-    d["bindings_summary"] = _bindings_summary(result.bindings_candidate)
-
-    # Missing symbols.
-    if result.missing_symbols:
-        d["missing_symbols"] = [
-            {
-                "consumer": b.consumer,
-                "symbol": b.symbol,
-                "version": b.version,
-                "explanation": b.explanation,
-            }
-            for b in result.missing_symbols
-        ]
-
-    # Unresolved DSOs.
-    if result.candidate_graph.unresolved:
-        d["unresolved_libraries"] = [
-            {"consumer": consumer, "soname": soname}
-            for consumer, soname in result.candidate_graph.unresolved
-        ]
-
-    # Stack changes (two-env mode).
-    if result.stack_changes:
-        sc_list = []
-        for sc in result.stack_changes:
-            sc_dict: dict[str, object] = {
-                "library": sc.library,
-                "change_type": sc.change_type,
-                "abi_verdict": sc.abi_diff.verdict.value if sc.abi_diff else None,
-                "abi_breaking": len(sc.abi_diff.breaking) if sc.abi_diff else 0,
-                "abi_changes": len(sc.abi_diff.changes) if sc.abi_diff else 0,
-            }
-            # ADR-050 D2 — distinguishes "the gate rejected this pair" from
-            # every other abi_diff=None cause (unreadable file, diff error).
-            if sc.not_comparable_reason:
-                sc_dict["not_comparable_reason"] = sc.not_comparable_reason
-            # Per-library confidence and evidence tiers
-            if sc.abi_diff:
-                diff = sc.abi_diff
-                # Preserve the actual findings (kind/symbol/description/
-                # location), not just their counts — a stack check used to
-                # report e.g. "abi_breaking: 3" for a library with no way to
-                # tell which symbols broke without a separate `compare` run.
-                total_gating = (
-                    len(diff.breaking) + len(diff.source_breaks) + len(diff.risk)
-                )
-                stack_findings = _stack_finding_dicts(diff)
-                if stack_findings:
-                    sc_dict["findings"] = stack_findings
-                    if total_gating > _MAX_STACK_FINDINGS_PER_LIBRARY:
-                        sc_dict["findings_truncated"] = True
-                conf = getattr(diff, "confidence", None)
-                if conf is not None:
-                    sc_dict["confidence"] = conf.value if hasattr(conf, "value") else str(conf)
-                tiers = getattr(diff, "evidence_tiers", []) or []
-                if tiers:
-                    sc_dict["evidence_tiers"] = list(tiers)
-                cov_warns = getattr(diff, "coverage_warnings", []) or []
-                if cov_warns:
-                    sc_dict["coverage_warnings"] = list(cov_warns)
-                # File metadata for traceability
-                old_meta = getattr(diff, "old_metadata", None)
-                new_meta = getattr(diff, "new_metadata", None)
-                if old_meta:
-                    sc_dict["old_file"] = {
-                        "path": getattr(old_meta, "path", ""),
-                        "sha256": getattr(old_meta, "sha256", ""),
-                        "size_bytes": getattr(old_meta, "size_bytes", 0),
-                    }
-                if new_meta:
-                    sc_dict["new_file"] = {
-                        "path": getattr(new_meta, "path", ""),
-                        "sha256": getattr(new_meta, "sha256", ""),
-                        "size_bytes": getattr(new_meta, "size_bytes", 0),
-                    }
-            sc_list.append(sc_dict)
-        d["stack_changes"] = sc_list
-
-    # Runtime binding-provider changes (cross-environment rebound).
-    if result.binding_changes:
-        d["binding_changes"] = [
-            {
-                "kind": bc.kind.value,
-                "symbol": bc.symbol,
-                "description": bc.description,
-                "old_value": bc.old_value,
-                "new_value": bc.new_value,
-            }
-            for bc in result.binding_changes
-        ]
-
-    return json.dumps(d, indent=indent, default=str)
+    """Render a StackCheckResult as JSON — a pure ReportDocument projection."""
+    return render_json(compute_stack_report_document(result), indent=indent)
 
 
 def _render_unresolved_section(lines: list[str], graph: DependencyGraph) -> None:
@@ -307,41 +175,6 @@ def stack_to_markdown(result: StackCheckResult) -> str:
         "_Generated by [abicheck](https://github.com/abicheck/abicheck)_",
     ]
     return "\n".join(lines)
-
-
-def _graph_to_dict(graph: DependencyGraph) -> dict[str, object]:
-    """Convert a DependencyGraph to a JSON-serializable dict."""
-    return {
-        "root": graph.root,
-        "node_count": graph.node_count,
-        "nodes": [
-            {
-                "path": str(node.path),
-                "soname": node.soname,
-                "needed": node.needed,
-                "depth": node.depth,
-                "resolution_reason": node.resolution_reason,
-            }
-            for node in sorted(graph.nodes.values(), key=lambda n: (n.depth, n.soname))
-        ],
-        "edges": [
-            {"consumer": consumer, "provider": provider}
-            for consumer, provider in graph.edges
-        ],
-        "unresolved": [
-            {"consumer": consumer, "soname": soname}
-            for consumer, soname in graph.unresolved
-        ],
-    }
-
-
-def _bindings_summary(bindings: list[SymbolBinding]) -> dict[str, int]:
-    """Count bindings by status."""
-    summary: dict[str, int] = {}
-    for b in bindings:
-        key = b.status.value
-        summary[key] = summary.get(key, 0) + 1
-    return summary
 
 
 def _render_tree(lines: list[str], graph: DependencyGraph) -> None:

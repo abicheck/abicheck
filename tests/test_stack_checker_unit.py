@@ -11,6 +11,7 @@ from abicheck.binder import BindingStatus, SymbolBinding
 from abicheck.checker import DiffResult
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change
+from abicheck.policy.exit_decision import ExitReason
 from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import (
     StackChange,
@@ -23,6 +24,8 @@ from abicheck.stack_checker import (
     _file_hash,
     check_single_env,
     check_stack,
+    exit_decision_for_stack_compare,
+    exit_decision_for_stack_tree,
     under_sysroot,
 )
 
@@ -447,6 +450,56 @@ class TestRunAbiDiff:
 
         assert _run_abi_diff(old_lib, new_lib, "libfoo.so") is None
 
+    def test_success_path_routes_through_the_canonical_service_module(
+        self, monkeypatch, tmp_path
+    ):
+        """ADR-068 D6 / `one-comparison-product.md` Phase 8 item 4: `deps
+        compare`'s per-library ABI diff must keep going through the
+        canonical Tier-2 `service.run_dump`/`service.compare_snapshots`
+        engine, not `dumper.dump()`/`checker.compare()` directly (that
+        routing already exists -- ADR-037 D10.1's T5 migration -- this pins
+        it so Phase 8's convergence work cannot silently regress it). Unlike
+        the failure-path tests above, this exercises the success path and
+        asserts both real calls happen (with the two library paths/formats
+        `_run_abi_diff` resolved) and that its return value is exactly
+        `service.compare_snapshots`'s own result, not a re-derived one.
+        """
+        from abicheck.stack_checker import _run_abi_diff
+
+        old_lib = tmp_path / "old.so"
+        new_lib = tmp_path / "new.so"
+        old_lib.write_bytes(b"old")
+        new_lib.write_bytes(b"new")
+
+        old_snapshot = MagicMock(name="old_snapshot")
+        new_snapshot = MagicMock(name="new_snapshot")
+        sentinel_diff = MagicMock(name="diff_result")
+
+        run_dump_calls: list[tuple[object, ...]] = []
+        compare_calls: list[tuple[object, object]] = []
+
+        def _fake_run_dump(path, fmt, *args, **kwargs):
+            run_dump_calls.append((path, fmt))
+            return old_snapshot if path == old_lib else new_snapshot
+
+        def _fake_compare_snapshots(old_snap, new_snap):
+            compare_calls.append((old_snap, new_snap))
+            return sentinel_diff
+
+        monkeypatch.setattr(
+            "abicheck.service.detect_binary_format", lambda _path: "elf"
+        )
+        monkeypatch.setattr("abicheck.service.run_dump", _fake_run_dump)
+        monkeypatch.setattr(
+            "abicheck.service.compare_snapshots", _fake_compare_snapshots
+        )
+
+        result = _run_abi_diff(old_lib, new_lib, "libfoo.so")
+
+        assert result is sentinel_diff
+        assert run_dump_calls == [(old_lib, "elf"), (new_lib, "elf")]
+        assert compare_calls == [(old_snapshot, new_snapshot)]
+
 
 # ---------------------------------------------------------------------------
 # under_sysroot
@@ -600,3 +653,122 @@ class TestCheckSingleEnv:
         assert result.loadability == StackVerdict.PASS
         assert result.abi_risk == StackVerdict.PASS
         assert result.risk_score == "low"
+
+
+# ---------------------------------------------------------------------------
+# exit_decision_for_stack_compare / exit_decision_for_stack_tree
+# (ADR-068 D6, one-comparison-product.md Phase 8)
+# ---------------------------------------------------------------------------
+
+
+def _make_check_result(
+    *,
+    loadability: StackVerdict = StackVerdict.PASS,
+    abi_risk: StackVerdict = StackVerdict.PASS,
+    stack_changes: list[StackChange] | None = None,
+) -> StackCheckResult:
+    graph = _make_graph()
+    return StackCheckResult(
+        root_binary="usr/bin/myapp",
+        baseline_env="/old-root",
+        candidate_env="/new-root",
+        loadability=loadability,
+        abi_risk=abi_risk,
+        baseline_graph=graph,
+        candidate_graph=graph,
+        bindings_baseline=[],
+        bindings_candidate=[],
+        missing_symbols=[],
+        stack_changes=stack_changes if stack_changes is not None else [],
+        risk_score="low",
+    )
+
+
+class TestExitDecisionForStackCompare:
+    """Pins `deps compare`'s documented 0/1/4/5 exit codes through the
+    canonical ExitDecision fold -- exactly the pre-convergence hand-rolled
+    `sys.exit` chain's behaviour, per docs/reference/exit-codes.md."""
+
+    def test_pass_pass_is_clean(self):
+        result = _make_check_result()
+        decision = exit_decision_for_stack_compare(result)
+        assert decision.code == 0
+        assert decision.reasons == (ExitReason.CLEAN,)
+
+    def test_abi_risk_warn_contributes_1(self):
+        result = _make_check_result(abi_risk=StackVerdict.WARN)
+        decision = exit_decision_for_stack_compare(result)
+        assert decision.code == 1
+        assert ExitReason.COMPATIBILITY_GATE in decision.reasons
+
+    def test_loadability_warn_contributes_1(self):
+        result = _make_check_result(loadability=StackVerdict.WARN)
+        decision = exit_decision_for_stack_compare(result)
+        assert decision.code == 1
+        assert ExitReason.LOADABILITY in decision.reasons
+
+    def test_abi_risk_fail_contributes_4(self):
+        result = _make_check_result(abi_risk=StackVerdict.FAIL)
+        decision = exit_decision_for_stack_compare(result)
+        assert decision.code == 4
+        assert ExitReason.COMPATIBILITY_GATE in decision.reasons
+
+    def test_loadability_fail_contributes_4(self):
+        result = _make_check_result(loadability=StackVerdict.FAIL)
+        decision = exit_decision_for_stack_compare(result)
+        assert decision.code == 4
+        assert ExitReason.LOADABILITY in decision.reasons
+
+    def test_both_axes_failing_names_both_reasons_on_tie(self):
+        # A loadability failure and an independent ABI-risk failure can
+        # genuinely tie at code 4 -- both must be named, not just one.
+        result = _make_check_result(
+            loadability=StackVerdict.FAIL, abi_risk=StackVerdict.FAIL
+        )
+        decision = exit_decision_for_stack_compare(result)
+        assert decision.code == 4
+        assert ExitReason.LOADABILITY in decision.reasons
+        assert ExitReason.COMPATIBILITY_GATE in decision.reasons
+
+    def test_not_comparable_dominates_even_a_fail(self):
+        # ADR-050 D2: dominates regardless of the other two axes' own value
+        # -- matches the pre-convergence code's unconditional early
+        # sys.exit(5).
+        result = _make_check_result(
+            loadability=StackVerdict.FAIL,
+            abi_risk=StackVerdict.FAIL,
+            stack_changes=[
+                StackChange(
+                    library="libbar.so",
+                    change_type="content_changed",
+                    not_comparable_reason="scope drift",
+                )
+            ],
+        )
+        decision = exit_decision_for_stack_compare(result)
+        assert decision.code == 5
+        assert decision.reasons == (ExitReason.NOT_COMPARABLE,)
+
+
+class TestExitDecisionForStackTree:
+    """Pins `deps tree`'s documented 0/1 exit codes."""
+
+    def test_pass_is_clean(self):
+        result = _make_check_result(loadability=StackVerdict.PASS)
+        decision = exit_decision_for_stack_tree(result)
+        assert decision.code == 0
+        assert decision.reasons == (ExitReason.CLEAN,)
+
+    def test_warn_does_not_raise(self):
+        # The pre-convergence cli_stack.py code only ever checked
+        # loadability == FAIL for `deps tree` -- WARN (a version mismatch)
+        # never raised.
+        result = _make_check_result(loadability=StackVerdict.WARN)
+        decision = exit_decision_for_stack_tree(result)
+        assert decision.code == 0
+
+    def test_fail_contributes_1(self):
+        result = _make_check_result(loadability=StackVerdict.FAIL)
+        decision = exit_decision_for_stack_tree(result)
+        assert decision.code == 1
+        assert decision.reasons == (ExitReason.LOADABILITY,)
