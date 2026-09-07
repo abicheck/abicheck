@@ -280,6 +280,23 @@ def _main_report_scoped_html() -> str:
     )
 
 
+def _main_report_compat_html() -> str:
+    """The ABICC-clone ``compat_html=True`` layout -- no golden existed for
+    this layout before the ADR-061 gap C HTML convergence slice that added
+    this case. Reuses ``_rich_result`` so the compat-mode bucketing (verdict
+    2-way compatible/incompatible collapse, type/symbol/other severity-band
+    tables, the disposition-audit block) exercises the same rich fixture the
+    native rich case above does."""
+    return generate_html_report(
+        _rich_result(),
+        lib_name="libfoo.so",
+        old_version="1.0",
+        new_version="2.0",
+        old_symbol_count=120,
+        compat_html=True,
+    )
+
+
 def _stack_html() -> str:
     def _node(soname: str, depth: int, path: str, reason: str) -> object:
         return SimpleNamespace(
@@ -341,6 +358,7 @@ _CASES = {
     "main_report.html": _main_report_html,
     "main_report_rich.html": _main_report_rich_html,
     "main_report_scoped.html": _main_report_scoped_html,
+    "main_report_compat.html": _main_report_compat_html,
     "appcompat.html": _appcompat_html,
     "stack.html": _stack_html,
 }

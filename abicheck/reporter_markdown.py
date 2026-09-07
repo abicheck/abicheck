@@ -44,6 +44,7 @@ from .contract_gating import is_evaluated
 from .finding_identity import missing_contract_kind, report_finding_id
 from .report import contract_conflicts_markdown as _ccm, render_markdown as _rmd
 from .report.disposition_audit import (
+    DispositionAudit,
     compute_disposition_audit,
     render_disposition_audit_note,
 )
@@ -1347,6 +1348,7 @@ def compute_review_digest(
     result: DiffResult,
     *,
     severity_config: SeverityConfig | None = None,
+    disposition_audit: DispositionAudit | None = None,
 ) -> _rmd.ReviewDigest:
     """The structured intermediate for :func:`to_review_digest`.
 
@@ -1354,6 +1356,13 @@ def compute_review_digest(
     actual severity-aware CI gate instead of the raw compatibility verdict —
     compatibility and "blocks CI" are independent decisions once severity
     configuration is in play (see :func:`_severity_merge_effect`).
+
+    *disposition_audit*, when given, is used verbatim instead of resolving a
+    fresh one from *result*/*severity_config* -- the ADR-061 gap C caller
+    (``report/render_markdown_document.build_review_digest_document``) passes
+    the one already computed by ``report/build.build_report_document``'s
+    single shared call, rather than this function re-deriving an identical
+    value from the same ledger a second time.
     """
     summary = build_summary(result)
     v = result.verdict
@@ -1427,7 +1436,11 @@ def compute_review_digest(
             _rmd.ImpactedSymbol(symbol=c.symbol or "?", kind=c.kind.value)
             for c in impacted
         ),
-        disposition_audit=compute_disposition_audit(result, severity_config),
+        disposition_audit=(
+            disposition_audit
+            if disposition_audit is not None
+            else compute_disposition_audit(result, severity_config)
+        ),
     )
 
 
