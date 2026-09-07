@@ -75,7 +75,7 @@ def test_scan_baseline_compare_preserves_hard_l0_elf_removal(monkeypatch) -> Non
             verdict=_Verdict("BREAKING" if extra_changes else "NO_CHANGE"),
         )
 
-    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve_input)
+    monkeypatch.setattr("abicheck.workflows.input_resolution.resolve_input", fake_resolve_input)
     monkeypatch.setattr("abicheck.service.compare_snapshots", fake_compare_snapshots)
     monkeypatch.setattr(
         "abicheck.cli_buildsource.prepare_embedded_build_source",
@@ -178,7 +178,7 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(
             verdict=_Verdict("NO_CHANGE"),
         )
 
-    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve_input)
+    monkeypatch.setattr("abicheck.workflows.input_resolution.resolve_input", fake_resolve_input)
     monkeypatch.setattr("abicheck.service.compare_snapshots", fake_compare_snapshots)
     monkeypatch.setattr(
         "abicheck.cli_buildsource.prepare_embedded_build_source",
@@ -291,7 +291,7 @@ def test_scan_baseline_compare_truncates_large_finding_lists(monkeypatch) -> Non
             verdict=_Verdict("BREAKING"),
         )
 
-    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve_input)
+    monkeypatch.setattr("abicheck.workflows.input_resolution.resolve_input", fake_resolve_input)
     monkeypatch.setattr("abicheck.service.compare_snapshots", fake_compare_snapshots)
     monkeypatch.setattr(
         "abicheck.cli_buildsource.prepare_embedded_build_source",
@@ -371,7 +371,7 @@ def test_scan_baseline_compare_truncates_large_suppressed_lists(monkeypatch) -> 
             verdict=_Verdict("NO_CHANGE"),
         )
 
-    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve_input)
+    monkeypatch.setattr("abicheck.workflows.input_resolution.resolve_input", fake_resolve_input)
     monkeypatch.setattr("abicheck.service.compare_snapshots", fake_compare_snapshots)
     monkeypatch.setattr(
         "abicheck.cli_buildsource.prepare_embedded_build_source",
@@ -451,7 +451,7 @@ def test_scan_baseline_compare_filters_dependency_scope_by_default(monkeypatch) 
             verdict=_Verdict("NO_CHANGE"),
         )
 
-    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve_input)
+    monkeypatch.setattr("abicheck.workflows.input_resolution.resolve_input", fake_resolve_input)
     monkeypatch.setattr("abicheck.service.compare_snapshots", fake_compare_snapshots)
     monkeypatch.setattr(
         "abicheck.cli_buildsource.prepare_embedded_build_source",

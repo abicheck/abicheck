@@ -66,7 +66,7 @@ def _project(tmp_path: Path, *, db_flags: str = "-DKEEP") -> tuple[Path, Path]:
 
 
 def _stub_resolve(monkeypatch, snap: AbiSnapshot) -> None:
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **k: snap)
+    monkeypatch.setattr("abicheck.workflows.input_resolution.resolve_input", lambda *a, **k: snap)
     monkeypatch.setattr(
         "abicheck.cli_buildsource.embed_build_source", lambda *a, **k: None
     )

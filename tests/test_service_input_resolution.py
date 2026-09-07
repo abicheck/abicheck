@@ -58,9 +58,9 @@ def test_resolve_side_snapshot_folds_compiler_option_include_dirs(
         captured.update(kwargs)
         return AbiSnapshot(library="lib", version="1.0", from_headers=False)
 
-    import abicheck.service as service_mod
+    import abicheck.workflows.input_resolution as input_resolution_mod
 
-    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+    monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
 
     cc = CompileContext(gcc_option_tokens=("-I", str(compiler_option_dir)))
     side = InputSpec(path=so, version="1.0", includes=(explicit_dir,), compile=cc)
@@ -106,9 +106,9 @@ def test_resolve_side_snapshot_suppresses_public_include_search_dirs_for_manifes
         captured.update(kwargs)
         return AbiSnapshot(library="lib", version="1.0", from_headers=False)
 
-    import abicheck.service as service_mod
+    import abicheck.workflows.input_resolution as input_resolution_mod
 
-    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+    monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
 
     cc = CompileContext(gcc_option_tokens=("-I", str(compiler_option_dir)))
     side = InputSpec(path=so, version="1.0", compile=cc)
