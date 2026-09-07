@@ -468,8 +468,12 @@ no per-detector `FAILED`; ~~a compiler-probe failure feeds an *absent*
 toolchain identity rather than `FAILED`~~ — **closed by S1**:
 `extract/toolchain_identity.py` now yields `FactStatus.FAILED` on a probe
 failure, and `comparability_profile.py` refuses comparison whenever either
-side is `FAILED`; no reverse declared/observed
-detector (exported but undeclared) and no manifest-narrowing detector;
+side is `FAILED`; ~~no reverse declared/observed
+detector (exported but undeclared) and no manifest-narrowing detector~~ —
+**closed by S3**: `policy.contract_conflicts.detect_exported_but_undeclared`/
+`detect_manifest_narrowing_since_baseline` (see the S3 slice entry below for
+the full account, including package-claim-vs-binary, the third case S3
+covers that this original assessment did not separately call out here);
 `configuration_coverage` always `NOT_STARTED`; a GCC/Clang pair with a
 missing fingerprint on either side is compared silently; ~~comparability
 yields one `kind`, not a per-dimension record~~ — **partially closed by S2**:
@@ -491,10 +495,39 @@ comparability record — implemented ([#1098](https://github.com/abicheck/abiche
 `dimensions` field, reaches JSON (schema 3.1), Markdown, and HTML, and is
 proven to preserve an earlier-proven change through a later incomplete
 stage; profile-delta explanation beyond the per-dimension record itself
-remains open. S3 multi-source contract conflicts with
-provenance (exported-but-undeclared, manifest narrowing since baseline,
-package-claim vs. contained-binary) — not started. S4 parity through scan/project/
-bundle/API/Action/report; retire conflicting legacy decisions — not started.
+remains open. **S3's multi-source contract conflicts with provenance —
+implemented (PR TBD):** `model/contract_conflicts.py` (shape:
+`ContractSourceConflict`/`ConflictSourceClaim`, never fewer than two
+sources per conflict, ADR-067 "record before disposing"),
+`policy/contract_conflicts.py` (cases 1-2), and
+`workflows/contract_conflicts.py` (case 3 -- split from cases 1-2 by
+ADR-061 layering: it needs `debian_symbols`/`elf_metadata`, both above
+`policy` in the dependency direction) cover exported-but-undeclared
+(reusing `ExportSurface.unmatched_exports`, wired into
+`contract_pipeline.build_contract_stage` alongside the rest of that
+stage's evidence, so it runs for both sides of every `compare(...,
+contract_evaluation=True)`/`--contract` comparison), manifest narrowing
+since baseline (the "old" side's declared-public symbols vs. the resolved
+`--post-manifest`/forced-public allowlist, same stage), and package-claim
+vs. contained-binary (a Debian `.symbols` file vs. the SONAME/exports of
+the binary actually inside the same package, reusing
+`debian_symbols.validate_symbols`; wired into the directory/package release
+fan-out's existing `_debian_symbols_warning` call site via
+`workflows.contract_conflicts.debian_symbols_release_conflict_lines`,
+checking each side's OWN package against its OWN contained binary rather
+than only diffing two packages' declared contracts against each other).
+Surfaced via `DiffResult.contract_conflicts` (opt-in, `None` unless
+`--contract`/`contract_evaluation=True`) in JSON (schema 3.5,
+`contract_conflicts` array alongside `contract_context`) and Markdown (a
+new "Contract Source Conflicts" section, `report/
+contract_conflicts_markdown.py`); never a `ChangeKind`/`Change` and never
+affects verdict, severity, or exit code — deliberately orthogonal to
+compatibility policy, the same way `contract_coverage_failures` is
+unsuppressible by being outside `Change` entirely. See
+`abicheck/model/contract_conflicts.py`'s own module docstring and
+`tests/test_contract_conflicts.py`. S4 parity through
+scan/project/bundle/API/Action/report; retire conflicting legacy decisions
+— not started.
 
 ### F. Header-only comparison; bounded static-archive investigation — revise G4, extend G45
 

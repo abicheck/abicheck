@@ -767,7 +767,12 @@ from typing import Any
 #:       first for workstream D-S1's ``used_by[]``/``consumer_impact_
 #:       summary`` fields (same "renumber, don't reuse" convention as the
 #:       2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2 entries above).
-REPORT_SCHEMA_VERSION = "3.4"
+#: 3.5 -- Workstream E slice S3: optional ``contract_conflicts`` array
+#:       alongside ``contract_context`` -- multi-source contract conflicts,
+#:       both disagreeing sources' claims kept (ADR-067). Same opt-in gate
+#:       as ``contract_context``; omitted otherwise, so no existing report
+#:       changes.
+REPORT_SCHEMA_VERSION = "3.5"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

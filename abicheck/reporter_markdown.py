@@ -42,7 +42,7 @@ from .checker_policy import (
 )
 from .contract_gating import is_evaluated
 from .finding_identity import missing_contract_kind, report_finding_id
-from .report import render_markdown as _rmd
+from .report import contract_conflicts_markdown as _ccm, render_markdown as _rmd
 from .report.disposition_audit import (
     compute_disposition_audit,
     render_disposition_audit_note,
@@ -1502,6 +1502,46 @@ def compute_confidence_section(result: DiffResult) -> _rmd.ConfidenceSection | N
 def _append_confidence_section(lines: list[str], result: DiffResult) -> None:
     """Append confidence/evidence metadata section to markdown lines."""
     lines += _rmd.render_confidence_section(compute_confidence_section(result))
+
+
+def compute_contract_conflicts_section(
+    result: DiffResult,
+) -> _ccm.ContractConflictsSection | None:
+    """The structured intermediate for Workstream E slice S3's Markdown
+    section (:func:`_append_contract_conflicts_section`).
+
+    ``None`` when ``contract_conflicts`` is not a list (contract evaluation
+    never ran, or ran against a hand-built ``DiffResult`` that never set the
+    field) — the same "typed field, defensive narrowing" pattern
+    ``reporter_contract_blocks.add_contract_context`` already uses for
+    ``contract_context``.
+    """
+    conflicts = getattr(result, "contract_conflicts", None)
+    if not isinstance(conflicts, list):
+        return None
+    rows = tuple(
+        _ccm.ContractConflictRow(
+            conflict_kind=str(c.get("conflict_kind", "")),
+            entity=str(c.get("entity", "")),
+            side=(c.get("side") if isinstance(c.get("side"), str) else None),
+            reason_code=str(c.get("reason_code", "")),
+            source_lines=tuple(
+                f"{s.get('source_kind', '?')}: {s.get('claim', '')}"
+                for s in c.get("sources", ())
+                if isinstance(s, dict)
+            ),
+        )
+        for c in conflicts
+        if isinstance(c, dict)
+    )
+    return _ccm.ContractConflictsSection(rows=rows)
+
+
+def _append_contract_conflicts_section(lines: list[str], result: DiffResult) -> None:
+    """Append Workstream E slice S3's contract-conflicts section, if any."""
+    lines += _ccm.render_contract_conflicts_section(
+        compute_contract_conflicts_section(result)
+    )
 
 
 def compute_policy_section(result: DiffResult) -> _rmd.PolicySection:
