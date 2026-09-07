@@ -228,6 +228,43 @@ def _fold_evolution(
     return result
 
 
+def _pattern_scan_fully_covered(result: PatternScanResult) -> bool:
+    """True only when *result* scanned at least one file and skipped none.
+
+    ``files_scanned > 0`` alone (the pre-CodeRabbit-review check) also holds
+    when some files were skipped as unreadable -- a real, if partial, scan
+    ran, but a pattern kind absent from that partial result could simply be
+    hiding in the unscanned files, not genuinely absent. Folding that as
+    evaluated let ``pattern_escalation_evolution`` report ``introduced``/
+    ``resolved`` from incomplete evidence; requiring zero skips makes an
+    incomplete side fold as ``not_evaluated`` instead, per
+    :func:`_fold_evolution`'s own completeness contract.
+    """
+    return result.files_scanned > 0 and result.files_skipped == 0
+
+
+def _preprocessor_scan_fully_covered(result: PreprocessorScanResult) -> bool:
+    """True only when *result* ran with every probe attempted, succeeding,
+    and none truncated by the probe-count cap.
+
+    ``ran and not all_failed`` alone (the pre-CodeRabbit-review check) also
+    holds when some -- but not all -- clang invocations failed, or when the
+    probe cap (``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES``) truncated the unit
+    set: real coverage gaps a divergence/leak could simply be missing from,
+    not genuinely absent on that side. Requiring full success with no
+    truncation makes a partially-covered side fold as ``not_evaluated``
+    instead of ``introduced``/``resolved``, matching
+    :func:`_pattern_scan_fully_covered`'s same completeness contract for the
+    sibling primitive.
+    """
+    return (
+        result.ran
+        and not result.all_failed
+        and result.succeeded == result.attempted
+        and result.probes_truncated == 0
+    )
+
+
 def compute_pattern_preprocessor_scan(
     old: AbiSnapshot, new: AbiSnapshot
 ) -> PatternPreprocessorScanResult:
@@ -235,8 +272,8 @@ def compute_pattern_preprocessor_scan(
     and fold each into an evolution-stated summary (see module docstring)."""
     old_pattern = _run_pattern_scan(old)
     new_pattern = _run_pattern_scan(new)
-    pattern_evaluated_old = old_pattern.files_scanned > 0
-    pattern_evaluated_new = new_pattern.files_scanned > 0
+    pattern_evaluated_old = _pattern_scan_fully_covered(old_pattern)
+    pattern_evaluated_new = _pattern_scan_fully_covered(new_pattern)
     pattern_evolution = _fold_evolution(
         old_evaluated=pattern_evaluated_old,
         new_evaluated=pattern_evaluated_new,
@@ -246,8 +283,8 @@ def compute_pattern_preprocessor_scan(
 
     old_preproc = _run_preprocessor_scan_for(old)
     new_preproc = _run_preprocessor_scan_for(new)
-    preproc_evaluated_old = old_preproc.ran and not old_preproc.all_failed
-    preproc_evaluated_new = new_preproc.ran and not new_preproc.all_failed
+    preproc_evaluated_old = _preprocessor_scan_fully_covered(old_preproc)
+    preproc_evaluated_new = _preprocessor_scan_fully_covered(new_preproc)
     macro_evolution = _fold_evolution(
         old_evaluated=preproc_evaluated_old,
         new_evaluated=preproc_evaluated_new,
