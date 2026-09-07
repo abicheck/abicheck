@@ -46,6 +46,12 @@ severity, or a CLI flag is in the wrong layer.
   (Codex review, PR #1033) — that function's own evidence-reliability gate
   (a snapshot-level question, not a raw change) stays in
   `diff_param_qualifiers.py` as a thin facade.
+- `finding_evolution.py` — `evolve_check_findings()` (ADR-068 D3, plan §5
+  P2): the generic OLD-vs-NEW matcher for a one-sided check (e.g.
+  `buildsource.crosscheck`'s `private_header_leak`), pairing each side's
+  findings by identity into `introduced`/`resolved`/`persistent`/
+  `not_evaluated` `Change`s. Check-agnostic — the per-check glue that runs a
+  check twice and calls this is `workflows.crosscheck_evolution`.
 
 ## Conventions
 

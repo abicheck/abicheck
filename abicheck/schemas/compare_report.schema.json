@@ -2183,6 +2183,11 @@
           "description": "The removed symbol's ELF linkage (schema 2.32), present only on func_removed/func_removed_elf_only/var_removed/func_deleted_elf_fallback findings whose binding was captured (non-ELF platforms, older snapshots, and an unmatched .dynsym entry all omit this key). A WEAK/COMDAT symbol usually \u2014 but not always \u2014 means every consumer already carries its own copy (see the binding: suppression selector's documentation for the extern-template counterexample); this is provider-side evidence about the library's own build, not proof a removal is safe.",
           "enum": ["global", "weak", "local", "unique", "other"]
         },
+        "evolution": {
+          "type": "string",
+          "description": "ADR-068 D3 / plan \u00a75 P2 (report_schema_version 3.5): this finding's status across OLD vs NEW, for a check migrated onto the FindingEvolution model (private_header_leak, the first and so-far only one). 'introduced' = absent on OLD (with OLD evidence sufficient to say so), present on NEW; 'resolved' = present on OLD, absent on NEW (with NEW evidence sufficient to say so); 'persistent' = present on both; 'not_evaluated' = the side needed to answer could not (insufficient evidence, never conflate with clean). Absent entirely (not present, never null) for every finding kind produced by a check not yet migrated onto this model \u2014 which is every existing detector, unchanged. Never changes this finding's own severity/category: authority is unchanged (ADR-028 D3 / ADR-035 D1).",
+          "enum": ["introduced", "resolved", "persistent", "not_evaluated"]
+        },
         "reviewer_action": {
           "type": "string",
           "description": "Finer-grained reviewer guidance, present only when recommended_action is 'no_action_required' (a COMPATIBLE addition). recommended_action alone only answers whether the old binary consumer needs to do anything (no); this answers whether a human reviewing the change has anything to check.",

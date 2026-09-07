@@ -8,9 +8,23 @@ generated: false
 # One comparison product — retiring `scan`, consolidating the CLI
 
 **Owner ADR:** [ADR-068](../adr/068-one-comparison-product-and-scan-retirement.md).
-**Status:** Proposed — planning document, nothing implemented. Verified
-against `main` at `309c8a82` on 2026-09-06 by Click introspection and
-call-site inspection, not by help text or status prose.
+**Status:** In progress. Phase 0 (the parity harness, `tests/parity/`, #1114)
+and Phase 1's exit-axes prerequisite (P3 — `compare` emitting the
+budget-overflow/evidence-contract `ExitDecision` axes, #1116) have landed.
+This PR closes Phase 1's other prerequisite, P2: `FindingEvolution`
+(`introduced`/`resolved`/`persistent`/`not_evaluated`, ADR-068 D3) exists on
+the canonical `Change` model, with `report/`'s compute/render pair, and the
+first cross-source check (`private_header_leak`, §3 rows 3-4) is migrated
+onto it end to end as Phase 2a's opening slice — its `tests/parity/gaps.py`
+row is deleted, and `tests/parity/test_evolution_state_gap.py` carries the
+F-8/F-9 acceptance tests plus the `not_evaluated` correctness-crux property
+test. The other ten cross-source checks, the pattern/preprocessor scans,
+changed-path localization, and the `abi3` audit remain scan-only (§3's
+`EXPECTED_GAPS` red set) — `scan` itself is untouched and not yet retired.
+Originally verified against `main` at `309c8a82` on 2026-09-06 by Click
+introspection and call-site inspection, not by help text or status prose;
+re-verify against current `main` (`git log -1 --format=%H origin/main`)
+before trusting any capability-loss table row above as still accurate.
 **Effort:** XL · **Risk:** high — this deletes a public command and moves
 capabilities between analysis paths. Phase ordering is the safety mechanism.
 

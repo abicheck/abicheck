@@ -275,6 +275,7 @@
         "abicheck/appcompat_consumer_impact.py",
         "abicheck/binder.py",
         "abicheck/buildsource/baseline_publish.py",
+        "abicheck/buildsource/crosscheck.py",
         "abicheck/bundle.py",
         "abicheck/bundle_analysis.py",
         "abicheck/bundle_detector_heuristics.py",

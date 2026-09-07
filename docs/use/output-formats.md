@@ -700,7 +700,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "3.4",
+  "report_schema_version": "3.5",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
@@ -759,6 +759,21 @@ symbol linkage was captured also carries `symbol_binding`
 `compare --format json`/SARIF emit (see `binding:` under
 [Suppressions](suppressions.md)), so a `binding:`-scoped suppression's
 match/no-match is auditable from `scan --against` too.
+
+Since schema 3.5, a `private_header_leak` finding also carries `evolution`
+(`introduced`/`resolved`/`persistent`/`not_evaluated`) — its status across
+OLD vs NEW: `introduced` (absent on OLD with sufficient evidence, present on
+NEW), `resolved` (present on OLD, absent on NEW with sufficient evidence),
+`persistent` (present on both), or `not_evaluated` when the side needed to
+answer lacked the evidence to do so (never conflate this with "clean" — a
+pre-existing leak whose baseline had no header evidence reads as
+`not_evaluated`, never as `introduced`). This is the first cross-source
+check (`abicheck/buildsource/crosscheck.py`) run per side inside `compare`'s
+own pipeline rather than only under the now-retiring `scan --against`
+(`docs/contribute/adr/068-one-comparison-product-and-scan-retirement.md`
+D3); the field is absent for every other finding kind. Authority is
+unchanged — a `private_header_leak` finding stays `RISK` regardless of its
+`evolution` value; evolution never promotes a finding to `BREAKING`.
 
 Since schema 1.13, the block also carries an always-on `additions` array —
 the addition-shaped subset of the `compatible` bucket (new public-API

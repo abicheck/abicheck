@@ -767,7 +767,20 @@ from typing import Any
 #:       first for workstream D-S1's ``used_by[]``/``consumer_impact_
 #:       summary`` fields (same "renumber, don't reuse" convention as the
 #:       2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2 entries above).
-REPORT_SCHEMA_VERSION = "3.4"
+#: 3.5 -- ``docs/contribute/plans/one-comparison-product.md`` P2 (ADR-068
+#:       D3): the FindingEvolution prerequisite. Each ``changes[]`` entry
+#:       gains an additive, optional ``evolution`` string
+#:       (``introduced``/``resolved``/``persistent``/``not_evaluated``) --
+#:       present only for a finding produced by a check migrated onto this
+#:       model (``private_header_leak``, the first and so-far only one; see
+#:       ``abicheck.workflows.crosscheck_evolution.MIGRATED_CROSSCHECKS``).
+#:       Absent (not present at all, never ``null``) for every other
+#:       finding kind, which is every existing report unchanged. Additive
+#:       only: no existing key changes shape or meaning, and no verdict,
+#:       gate, or exit code moves -- authority is unchanged (ADR-028 D3 /
+#:       ADR-035 D1), a migrated check's findings stay exactly the
+#:       ``RISK``/``API_BREAK`` category they always were.
+REPORT_SCHEMA_VERSION = "3.5"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

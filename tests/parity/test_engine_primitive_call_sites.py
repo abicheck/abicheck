@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Call-site proof that the three scan-only analysis engines have exactly
-one production caller: ``scan_engine.py``.
+"""Call-site proof that each scan-only analysis engine has exactly its
+expected production caller set.
 
-ADR-068 §1 states the capability-loss defect by call site, not by import:
+ADR-068 §1 originally stated this as "exactly one caller, `scan_engine.py`,
+for all three":
 
     Verified by call site, not by import: the only production callers of
     ``buildsource.crosscheck.run_crosschecks``, ``buildsource.pattern_scan.
@@ -13,16 +14,17 @@ ADR-068 §1 states the capability-loss defect by call site, not by import:
 
 This module makes that claim executable instead of only a prose citation --
 a real AST scan over every ``abicheck/**/*.py`` module, not a grep that a
-comment or an unrelated identifier could fool. It is the parity harness's
-proof, for ``pattern_scan``/``preprocessor_scan`` (and a second angle on
-``crosscheck``, alongside ``test_crosscheck_parity.py``'s behavioral one),
-that ``compare``'s pipeline *cannot* reach them today -- not merely that it
-happens not to in the fixtures exercised elsewhere.
+comment or an unrelated identifier could fool. **`run_crosschecks` now has a
+second, expected caller**: ``abicheck/workflows/crosscheck_evolution.py``,
+the one check (`private_header_leak`) migrated onto `compare`'s pipeline so
+far (plan §5 P2 / §6 Phase 2a). The other ten crosscheck checks, and the
+other two engines (`pattern_scan`/`preprocessor_scan`), are still reachable
+only from `scan_engine.py` -- this module is still their parity proof.
 
-Once Phase 2a/2b (docs/contribute/plans/one-comparison-product.md §6) gives
-one of these functions a second caller reachable from `compare`, this test
-starts failing -- which is the point: it is the signal to delete the
-corresponding tests/parity/gaps.py entry in that same PR.
+Once Phase 2a/2b gives one of the still-scan-only functions an *unexpected*
+caller reachable from `compare`, this test starts failing -- the signal to
+delete the corresponding `tests/parity/gaps.py` entry (and add the new
+caller to `_ENGINE_PRIMITIVES` here) in that same PR.
 """
 
 from __future__ import annotations
@@ -36,17 +38,23 @@ from .gaps import EXPECTED_GAPS
 
 _ABICHECK_ROOT = Path(__file__).resolve().parent.parent.parent / "abicheck"
 
-#: function name -> (defining module, expected sole-caller module, gap key)
-_ENGINE_PRIMITIVES: dict[str, tuple[str, str, str]] = {
+#: function name -> (defining module, expected caller module(s), gap key)
+_ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str]] = {
     "run_crosschecks": (
         "buildsource/crosscheck.py",
-        "scan_engine.py",
-        "private_header_leak",  # any of the 11 crosscheck gap keys will do
+        # scan_engine.py (all 11 checks, under `scan`) + the one migrated
+        # check's own workflows-layer glue (plan §5 P2 / §6 Phase 2a).
+        ("scan_engine.py", "workflows/crosscheck_evolution.py"),
+        "odr_type_variant",  # any of the ten still-scan-only gap keys will do
     ),
-    "scan_files": ("buildsource/pattern_scan.py", "scan_engine.py", "pattern_scan"),
+    "scan_files": (
+        "buildsource/pattern_scan.py",
+        ("scan_engine.py",),
+        "pattern_scan",
+    ),
     "run_preprocessor_scan": (
         "buildsource/preprocessor_scan.py",
-        "scan_engine.py",
+        ("scan_engine.py",),
         "preprocessor_scan",
     ),
 }
@@ -154,8 +162,8 @@ def _call_sites(function_name: str, defining_module: str) -> dict[Path, int]:
 
 
 @pytest.mark.parametrize("function_name", sorted(_ENGINE_PRIMITIVES))
-def test_only_scan_engine_calls_it(function_name: str) -> None:
-    defining_module, expected_caller, gap_key = _ENGINE_PRIMITIVES[function_name]
+def test_call_sites_match_expected_callers(function_name: str) -> None:
+    defining_module, expected_callers, gap_key = _ENGINE_PRIMITIVES[function_name]
     assert gap_key in EXPECTED_GAPS, f"{gap_key!r} must be a registered parity gap"
 
     sites = _call_sites(function_name, defining_module)
@@ -164,17 +172,19 @@ def test_only_scan_engine_calls_it(function_name: str) -> None:
     sites = {p: n for p, n in sites.items() if p != Path("abicheck") / defining_module}
 
     callers = {_posix(p) for p in sites}
-    if callers - {f"abicheck/{expected_caller}"}:
+    expected = {f"abicheck/{c}" for c in expected_callers}
+    if callers - expected:
         raise AssertionError(
-            f"{function_name}() gained a caller outside {expected_caller!r}: "
+            f"{function_name}() gained a caller outside {sorted(expected)}: "
             f"{sorted(callers)}. If this is Phase 2a/2b landing "
-            f"({EXPECTED_GAPS[gap_key].plan_phase}), delete the "
-            f"{gap_key!r} entry from tests/parity/gaps.py in the same PR "
-            "instead of leaving this assertion to rot."
+            f"({EXPECTED_GAPS[gap_key].plan_phase}), delete the corresponding "
+            "tests/parity/gaps.py entry AND add the new caller to "
+            "_ENGINE_PRIMITIVES here in the same PR, instead of leaving "
+            "this assertion to rot."
         )
-    assert callers == {f"abicheck/{expected_caller}"}, (
+    assert callers == expected, (
         f"{function_name}() has no production caller at all under abicheck/ "
-        f"-- expected exactly {expected_caller!r} (ADR-068 §1)"
+        f"-- expected exactly {sorted(expected)} (ADR-068 §1)"
     )
 
 

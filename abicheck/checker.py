@@ -139,6 +139,9 @@ from .policy.disposition_ledger import (
     record_suppressed_change,
 )
 from .policy_file import PolicyFile
+from .workflows.crosscheck_evolution import (
+    compute_crosscheck_evolution as _compute_crosscheck_evolution,
+)
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -939,6 +942,15 @@ def compare(
     # registration order); it only catches newly-added modules.
     _detector_registry.ensure_loaded()
     changes, detector_results = _detector_registry.run_all(old, new)
+
+    # ADR-068 §3 rows 3-4 / plan §6 Phase 2a: the (so-far one-check)
+    # cross-source-check migration onto compare's OLD-vs-NEW pipeline,
+    # evolution-stated per abicheck.model.finding_evolution.FindingEvolution.
+    # A COMPARE-STAGE, not an opt-in -- no flag gates it, matching every
+    # other detector. Genuinely a no-op ([]) whenever neither side has
+    # header/origin evidence, so no existing comparison's finding set
+    # changes just because this stage now runs.
+    changes.extend(_compute_crosscheck_evolution(old, new))
 
     # Merge externally-computed findings (e.g. build-configuration / probe-matrix
     # findings from diff_matrix(), which need multi-config inputs compare() does

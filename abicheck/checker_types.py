@@ -42,6 +42,7 @@ from .contract_relevance_types import (
 from .detectors import DetectorResult
 from .impact.model import ImpactAssessment
 from .model import AbiSnapshot
+from .model.finding_evolution import FindingEvolution
 from .model.identity import EntityId
 from .model.policy_file_protocol import PolicyFileProtocol
 from .report_side_facts import ReportSideFacts
@@ -399,6 +400,13 @@ class Change:
     # Same field(kw_only=True)-appended-last convention as evidence_provenance.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
     disambiguator: str | None = field(default=None, kw_only=True, compare=False)
+    # ADR-068 D3 / plan §5 P2: a one-sided check migrated onto compare's
+    # OLD-vs-NEW pipeline (e.g. private_header_leak) stamps this via
+    # compare.finding_evolution.evolve_check_findings. None for every
+    # unmigrated finding kind. See model.finding_evolution.FindingEvolution.
+    evolution: FindingEvolution | None = field(
+        default=None, kw_only=True, compare=False
+    )
 
 
 @dataclass

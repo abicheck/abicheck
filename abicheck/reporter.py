@@ -53,6 +53,7 @@ from .report.dispatch_markdown import (
     to_review_digest as to_review_digest,
 )
 from .report.disposition_audit import add_disposition_audit as _add_disposition_audit
+from .report.finding_evolution import compute_change_evolution, render_change_evolution
 from .report.scoped_gate import ScopedGateChangeHelpers
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
@@ -1412,6 +1413,7 @@ def _change_annotation_fields(c: Any) -> dict[str, Any]:
         out["correlated_change_kind"] = correlated
     if getattr(c, "symbol_binding", None):
         out["symbol_binding"] = c.symbol_binding
+    render_change_evolution(out, compute_change_evolution(c))  # ADR-068 D3
     return out
 
 
