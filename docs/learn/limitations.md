@@ -331,6 +331,42 @@ from the same sources so abicheck has a real artifact to compare) — see
 
 ---
 
+## Indirect-function (`ifunc`) resolver selection
+
+A GNU indirect function exports one name whose concrete implementation is
+chosen at load time by a resolver function running on the target machine.
+abicheck reports the *adoption or removal* of that mechanism
+(`ifunc_introduced` / `ifunc_removed`, demonstrated by
+`case29_ifunc_transition`), because that much is visible in the symbol table
+and the relocation kind.
+
+What it cannot report is a change **inside** the resolver — the same exported
+name, the same relocation, but different selection logic, so a different
+implementation binds on the same host. Two artifacts that differ only in
+resolver logic are indistinguishable to any static comparison: the decision
+that changed is taken at run time from CPU-feature probes, and neither
+artifact records which branch it would take. Verifying that class of change
+needs the runtime methods described in [Assurance
+Methods](assurance-methods.md), not an artifact comparison.
+
+---
+
+## Include-guard / configuration-macro collisions
+
+A header-only library's include guard or configuration macro can collide with
+an identically-named macro from an unrelated library, silently suppressing one
+of the two definitions in a consumer's translation unit.
+
+A collision exists only *relative to some other library's* macro namespace in a
+particular consumer's include closure. abicheck compares two versions of one
+library; nothing in either snapshot, at any evidence tier, establishes what a
+third party defines, and the symptom — one definition never compiled — leaves
+no trace in the artifacts being compared. Defend against it by prefixing every
+public macro (guards included) with a project-unique token; see [Static &
+Header-Only Contracts](static-and-header-only.md).
+
+---
+
 ## ELF-Only Mode and Symbol Filtering
 
 Run without header files — i.e. directly against `.so` binaries — abicheck
