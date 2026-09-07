@@ -582,6 +582,29 @@ pytest_add_cli_args = [
     # stdlib, `jsonschema`, `pytest`, and `agent-evals/run_task.py` loaded
     # by path, none of which is mutated.
     "--ignore=tests/test_agent_evals.py",
+    # Same "reads the real repository" class as `test_fact_field_readers.py`/
+    # `test_fact_detector_misuse.py` above, a fifth independent trigger site
+    # (this PR's own diff -- discovered the same way as the `test_action_
+    # check_target*`/`test_agent_evals.py` entries above: this PR's diff
+    # touches enough `tests/` paths, this file among them, to trip
+    # `--scope-run-to-diff`'s "refuse to scope" fallback to a full, unscoped
+    # run, exercising a pre-existing gap the file's own addition -- by an
+    # earlier, independently-merged PR -- created but never exercised under
+    # mutmut before). `_call_sites()` does an unconditional
+    # `_ABICHECK_ROOT.rglob("*.py")` + `ast.parse(...)` walk over every file
+    # in `abicheck/`, parametrized three times (once per `_ENGINE_PRIMITIVES`
+    # entry) -- exactly the same shape as the two entries above, and a
+    # `mutants/` tree is, by the same `test_ai_readiness.py` comment those
+    # two entries cite, "by construction full of 1M-line generated files":
+    # parsing that many, that large, three times over is what plausibly
+    # blows past pytest-timeout's 600s ceiling here, aborting the whole `-x`
+    # lane before a single mutant is measured (matching PR #1036's identical
+    # failure shape for `test_fact_detector_misuse.py`, not a fixed-content
+    # traceback this repo's own truncated 5-line `mutmut run` tail can ever
+    # show). No mutation-kill cost: this file imports no `only_mutate`
+    # module (confirmed by grep) -- only stdlib `ast`/`pathlib` and this
+    # module's own sibling `tests/parity/gaps.py`.
+    "--ignore=tests/parity/test_engine_primitive_call_sites.py",
 ]
 
 # ---------------------------------------------------------------------------
