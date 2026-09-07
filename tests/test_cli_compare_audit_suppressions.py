@@ -465,7 +465,13 @@ class TestJsonReport:
         assert audit["stale_rules"] == []
         assert audit["high_risk_matches"] == []
 
-    def test_omitted_by_default(self, tmp_path):
+    def test_present_in_json_even_without_the_flag(self, tmp_path):
+        # ADR-068 D4/Phase 5: the suppression-rule audit is now computed
+        # unconditionally whenever --suppress is given -- "did I forget
+        # --audit-suppressions" must never silently withhold this fact from
+        # the canonical (JSON) result. --audit-suppressions survives only as
+        # the choice of whether markdown/text additionally *renders* a
+        # human-readable section (see the sibling class below).
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(
             tmp_path,
@@ -483,7 +489,7 @@ class TestJsonReport:
         )
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)
-        assert "suppression_audit" not in payload
+        assert "suppression_audit" in payload
 
     @pytest.mark.parametrize("report_mode", ["leaf", "root-cause"])
     def test_present_under_every_report_mode(self, tmp_path, report_mode):

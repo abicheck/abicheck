@@ -855,14 +855,7 @@ def _release_summary_effective_config_block(
 
         pf = policy_file_with_packs(pf, pack_application, base_policy=policy)
     suppression_config = suppression_config_for(suppression)
-    # `pf.base_policy`, not the raw `policy` argument, when a `--policy-file`
-    # resolved one (Codex review, PR #1016): `checker.compare`'s own
-    # `effective_policy = policy_file.base_policy if policy_file is not None
-    # else policy` is what a real per-library report's `policy.base` field
-    # reflects, so a policy document naming a non-default `base_policy:`
-    # (e.g. `sdk_vendor`) produced a release-summary digest still reading
-    # the CLI default (`strict_abi`) while every per-library report agreed
-    # on the real base -- this stand-in must resolve the identical way.
+    # `pf.base_policy`, not the raw `policy` argument, when a `--policy-file` resolved one (Codex review, PR #1016): `checker.compare`'s own `effective_policy = policy_file.base_policy if policy_file is not None else policy` is what a real per-library report's `policy.base` field reflects, so a policy document naming a non-default `base_policy:` (e.g. `sdk_vendor`) produced a release-summary digest still reading the CLI default (`strict_abi`) while every per-library report agreed on the real base -- this stand-in must resolve the identical way.
     effective_policy = pf.base_policy if pf is not None else policy
     ec_result = SimpleNamespace(
         policy=effective_policy,
@@ -873,6 +866,10 @@ def _release_summary_effective_config_block(
         scope_to_public_surface=scope_public_headers,
         scope_to_public_surface_requested=scope_public_headers,
         on_incomplete_scope=on_incomplete_scope,  # ADR-065 D6: warn/block exit differently
+        # ADR-068 D4/Phase 5: modulation is unconditional on every `compare`-
+        # family run now (`_run_compare_pair`'s own default agrees) -- this
+        # stand-in must too, rather than default to the pre-Phase-5 "off".
+        pattern_verdicts_enabled=True,
     )
     ec_scheme = gate_exit_code_scheme(severity_config is not None)
     ec_fields = effective_config_fields(

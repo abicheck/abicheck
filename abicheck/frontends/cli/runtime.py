@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -424,7 +425,7 @@ def _announce_exit_scheme(
 
 def _exit_with_severity_or_verdict(
     result: DiffResult, sev_config: SeverityConfig | None, scheme: str,
-    fmt: str | None = None, secondary_fmt: str | None = None,
+    fmt: str | None = None, secondary_fmts: Sequence[str] = (),
     *, require_complete_analysis: bool = False,
 ) -> None:
     """Exit with the appropriate code for the resolved exit-code scheme.
@@ -461,7 +462,7 @@ def _exit_with_severity_or_verdict(
     )
     announce_coverage_floor(
         result, base_exit=decision.compatibility_contribution,
-        fmt=fmt, secondary_fmt=secondary_fmt,
+        fmt=fmt, secondary_fmts=secondary_fmts,
     )
     # The pre-assurance exit is what the diagnostic's own wording describes
     # ("floored to"/"contributes, below the compatibility axis's own exit"),

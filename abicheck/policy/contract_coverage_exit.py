@@ -46,6 +46,7 @@ call it without acquiring a dependency the import-cycle gate would flag.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from ..contract_coverage_ledger import (
@@ -222,7 +223,7 @@ _ONELINE_FORMAT = "oneline"
 
 
 def report_carries_the_ledger(
-    fmt: str | None, *, secondary_fmt: str | None = None
+    fmt: str | None, *, secondary_fmts: Sequence[str] = ()
 ) -> bool:
     """Does *every* output this invocation renders already state the ledger?
 
@@ -231,13 +232,16 @@ def report_carries_the_ledger(
     carries none of the ledger, so answering from the primary alone let the
     markdown say the change is safe while the process exited 1 (Codex
     review). Getting this wrong in the permissive direction is exactly what
-    makes a run fail with no explanation anywhere.
+    makes a run fail with no explanation anywhere. ``secondary_fmts`` (ADR-068
+    D4/Phase 5: ``--write`` is repeatable now) covers every secondary
+    artifact, not just one -- one non-ledger-bearing ``--write`` among
+    several is exactly the same gap a single one used to be.
 
     The internal one-line format is the same problem one level in: it is a
     summary that omits both ledger keys, so a run rendering it is ledgerless
     whatever its other ``--format`` says.
     """
-    rendered = [fmt] + ([secondary_fmt] if secondary_fmt is not None else [])
+    rendered = [fmt] + list(secondary_fmts)
     if _ONELINE_FORMAT in rendered:
         return False
     return all(f == _LEDGER_BEARING_FORMAT for f in rendered)
@@ -248,7 +252,7 @@ def announce_coverage_floor(
     *,
     base_exit: int,
     fmt: str | None = None,
-    secondary_fmt: str | None = None,
+    secondary_fmts: Sequence[str] = (),
 ) -> None:
     """Print the coverage notice to stderr, unless the report already says it.
 
@@ -260,7 +264,7 @@ def announce_coverage_floor(
 
     stderr, not stdout: the report a caller pipes onward stays intact.
     """
-    if report_carries_the_ledger(fmt, secondary_fmt=secondary_fmt):
+    if report_carries_the_ledger(fmt, secondary_fmts=secondary_fmts):
         return
     diagnostic = coverage_failure_diagnostic(result, base_exit=base_exit)
     if diagnostic is None:

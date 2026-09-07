@@ -68,32 +68,35 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             "json/markdown are supported for a stored-bundle-facts "
             "comparison. Choose one of: json, markdown."
         )
-    secondary_fmt = kwargs.get("secondary_fmt")
-    secondary_output: Path | None = kwargs.get("secondary_output")
+    # ADR-068 D4/Phase 5: `compare`'s own --write is repeatable now
+    # (secondary_writes: tuple[tuple[str, Path], ...]); this dispatcher
+    # supports the identical repeatable form, so every requested write is
+    # honored (never silently dropped).
+    secondary_writes: tuple[tuple[str, Path], ...] = kwargs.get("secondary_writes", ())
     # dry_run=False: --dry-run is rejected outright for this mode below,
-    # regardless of --write, so only the output/secondary-output collision
+    # regardless of --write, so only the output/secondary-writes collision
     # half of this shared check is relevant here.
-    from ....frontends.cli.options import reject_incoherent_secondary_output
+    from ....frontends.cli.options import reject_incoherent_secondary_writes
 
-    reject_incoherent_secondary_output(
+    reject_incoherent_secondary_writes(
         dry_run=False,
         output=kwargs.get("output"),
-        secondary_fmt=secondary_fmt,
-        secondary_output=secondary_output,
+        secondary_writes=secondary_writes,
     )
-    if secondary_output is not None and secondary_fmt not in ("json", "markdown"):
-        # Codex review: --write FORMAT=PATH was accepted (Click's own
-        # --write validation allows every format the ordinary compare/
-        # compare-release paths render: sarif/html/junit/review too) but
-        # this dispatcher only ever renders json/markdown -- a secondary
-        # format outside that pair exited successfully without ever writing
-        # the promised second artifact. Rejected the same way an
-        # unsupported primary --format is, rather than silently skipped.
-        raise click.UsageError(
-            f"--write {secondary_fmt}=... is not available with "
-            "a stored-bundle-facts OLD_INPUT: only json/markdown are supported for a "
-            "stored-bundle-facts comparison."
-        )
+    for secondary_fmt, _secondary_path in secondary_writes:
+        if secondary_fmt not in ("json", "markdown"):
+            # Codex review: --write FORMAT=PATH was accepted (Click's own
+            # --write validation allows every format the ordinary compare/
+            # compare-release paths render: sarif/html/junit/review too) but
+            # this dispatcher only ever renders json/markdown -- a secondary
+            # format outside that pair exited successfully without ever writing
+            # the promised second artifact. Rejected the same way an
+            # unsupported primary --format is, rather than silently skipped.
+            raise click.UsageError(
+                f"--write {secondary_fmt}=... is not available with "
+                "a stored-bundle-facts OLD_INPUT: only json/markdown are supported for a "
+                "stored-bundle-facts comparison."
+            )
     if kwargs.get("fail_on_removed"):
         raise click.UsageError(
             "--fail-on-removed-library is not supported together with "
@@ -307,20 +310,18 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             "--debug-format/--dwarf-only/--debuginfod/--debuginfod-url/"
             "--debug-root are not supported together with a stored-bundle-facts OLD_INPUT."
         )
-    if (
-        kwargs.get("pattern_verdicts")
-        or kwargs.get("explain_patterns")
-        or kwargs.get("surface_metrics")
-    ):
-        # Codex review: pattern-verdict modulation and surface-metric
-        # findings are both computed inside service.compare_snapshots()
-        # (ADR-027), but compare_release_against_bundle_facts()'s
-        # per-library call never passes pattern_verdicts/surface_metrics --
-        # always False, so a requested modulation or metric-drift finding
-        # silently never happens even though the CLI accepted the flag.
+    # ADR-068 D4/Phase 5: --pattern-verdicts is gone as a flag (it's
+    # unconditional everywhere else on `compare` now) -- nothing left to
+    # reject a user for asking for; --explain-patterns is likewise harmless
+    # here (it only echoes result.pattern_modulations, empty on this path).
+    # --surface-metrics is still a real flag, though, and this dispatcher
+    # still never wires it into compare_release_against_bundle_facts() (a
+    # pre-existing internal limitation of that engine call) -- so a
+    # requested metric-drift finding would still silently never happen.
+    if kwargs.get("surface_metrics"):
         raise click.UsageError(
-            "--pattern-verdicts/--explain-patterns/--surface-metrics are "
-            "not supported together with a stored-bundle-facts OLD_INPUT."
+            "--surface-metrics is not supported together with a "
+            "stored-bundle-facts OLD_INPUT."
         )
     depth = kwargs.get("depth")
     if depth in ("build", "source"):

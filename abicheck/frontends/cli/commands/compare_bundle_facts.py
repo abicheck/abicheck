@@ -298,8 +298,10 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
     old_facts_path: Path = kwargs["old_input"]
     new_dir: Path = kwargs["new_input"]
     fmt = kwargs.get("fmt", "json")
-    secondary_fmt = kwargs.get("secondary_fmt")
-    secondary_output: Path | None = kwargs.get("secondary_output")
+    # ADR-068 D4/Phase 5: --write is repeatable on `compare` now; this
+    # dispatcher honors every requested write (see the loop near the bottom
+    # of this function), not just the first.
+    secondary_writes: tuple[tuple[str, Path], ...] = kwargs.get("secondary_writes", ())
     depth = kwargs.get("depth")
     headers, includes = _resolve_new_side_headers_includes(kwargs)
     if depth == "binary":
@@ -594,7 +596,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
             p.resolve()
             for p in (
                 Path(output) if output is not None else None,
-                Path(secondary_output) if secondary_output is not None else None,
+                *(Path(w_path) for _w_fmt, w_path in secondary_writes),
             )
             if p is not None
         }
@@ -657,12 +659,11 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         _safe_write_output(Path(output), text)
     else:
         click.echo(text)
-    if secondary_output is not None:
-        # Codex review: render and write the promised second artifact
-        # (validated to be json/markdown above) rather than silently
-        # dropping it -- re-rendering rather than reusing `text` since a
+    for secondary_fmt, secondary_output in secondary_writes:
+        # Codex review: render and write every promised secondary artifact
+        # (each already validated to be json/markdown) rather than silently
+        # dropping any -- re-rendering rather than reusing `text` since a
         # secondary format can legitimately differ from the primary one.
-        assert secondary_fmt is not None
         secondary_text = _render(
             result,
             secondary_fmt,

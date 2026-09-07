@@ -187,8 +187,8 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
     ),
     "--reconcile-build-context": (
         "ADR-039: clears context-free header-parse false positives using the "
-        "build's active preprocessor defines. An invocation-time analysis toggle "
-        "like --pattern-verdicts, not a project setting demotable to .abicheck.yml."
+        "build's active preprocessor defines. An invocation-time analysis toggle, "
+        "not a project setting demotable to .abicheck.yml."
     ),
     "--env-matrix": (
         "ADR-020b runtime_floors: declared deployment constraints that turn "
@@ -275,7 +275,7 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "exports/all). What a given run is asking varies with it -- 'what "
         "does my declared header surface promise' vs. 'what does this binary "
         "actually export' -- so it is a per-invocation choice, not a stable "
-        "project default, like --pattern-verdicts/--surface-metrics."
+        "project default."
     ),
     "--pack": (
         "ADR-049 D8: selects a reusable configuration pack (policy/contract/"

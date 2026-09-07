@@ -655,13 +655,15 @@ def _scan_rows(diff: dict) -> dict[str, dict]:
 
 
 def _both(
-    runner: CliRunner, old: Path, new: Path, extra: list[str], tmp_path: Path
+    runner: CliRunner, old: Path, new: Path, extra: list[str], tmp_path: Path,
+    *, scan_extra: list[str] | None = None,
 ) -> tuple[dict, dict]:
     """Run both commands on the same inputs/flags; return their JSON payloads.
 
     Always passes ``--contract`` so the contract fields are
     actually populated -- an all-``None`` comparison of those four keys
-    would pass vacuously.
+    would pass vacuously. *scan_extra*, when given, is used for ``scan``
+    instead of *extra* (ADR-068 D4/Phase 5: pattern-verdicts diverges now).
     """
     import json
 
@@ -696,7 +698,7 @@ def _both(
             "public",
             "-o",
             str(scan_path),
-            *extra,
+            *(scan_extra if scan_extra is not None else extra),
         ],
     )
     assert scan_res.exit_code in (0, 1, 2, 4), scan_res.output
@@ -799,28 +801,25 @@ class TestFieldForFieldParity:
     """§6.4's Gate as an executable check, over its own input/config matrix."""
 
     @pytest.mark.parametrize(
-        "label,extra",
+        "label,extra,scan_extra",
         [
-            ("defaults", []),
-            ("policy", ["--policy", "sdk_vendor"]),
-            ("scope-off", ["--no-scope-public-headers"]),
-            ("explicit-scope", ["--scope-public-headers"]),
-            ("contract-public", ["--contract", "public"]),
-            ("contract-exports", ["--contract", "exports"]),
-            ("contract-all", ["--contract", "all"]),
-            ("pattern-verdicts", ["--pattern-verdicts"]),
+            ("defaults", [], None),
+            ("policy", ["--policy", "sdk_vendor"], None),
+            ("scope-off", ["--no-scope-public-headers"], None),
+            ("explicit-scope", ["--scope-public-headers"], None),
+            ("contract-public", ["--contract", "public"], None),
+            ("contract-exports", ["--contract", "exports"], None),
+            ("contract-all", ["--contract", "all"], None),
+            # compare: unconditional now; scan: still needs its own flag.
+            ("pattern-verdicts", [], ["--pattern-verdicts"]),
         ],
     )
     def test_shared_findings_are_identical_records(
-        self,
-        runner: CliRunner,
-        mixed_pair: tuple[Path, Path],
-        tmp_path: Path,
-        label: str,
-        extra: list[str],
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path,
+        label: str, extra: list[str], scan_extra: list[str] | None,
     ) -> None:
         old, new = mixed_pair
-        report, scan = _both(runner, old, new, extra, tmp_path)
+        report, scan = _both(runner, old, new, extra, tmp_path, scan_extra=scan_extra)
 
         rows_c = _compare_rows(report)
         rows_s = _scan_rows(scan["diff"])

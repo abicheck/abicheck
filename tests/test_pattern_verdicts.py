@@ -736,13 +736,15 @@ def test_cli_explain_patterns(tmp_path) -> None:
     out = tmp_path / "report.json"
     _save(old, op)
     _save(new, np)
+    # ADR-068 D4/Phase 5: --pattern-verdicts is gone -- modulation is
+    # unconditional now (evidence-gated), so --explain-patterns alone is
+    # enough to exercise this path.
     res = CliRunner().invoke(
         main,
         [
             "compare",
             str(op),
             str(np),
-            "--pattern-verdicts",
             "--explain-patterns",
             "--format",
             "json",

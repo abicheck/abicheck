@@ -2,10 +2,12 @@
 
 from .secondary_output import (
     reject_incoherent_secondary_output,
+    reject_incoherent_secondary_writes,
     secondary_output_options,
 )
 
 __all__ = [
     "reject_incoherent_secondary_output",
+    "reject_incoherent_secondary_writes",
     "secondary_output_options",
 ]

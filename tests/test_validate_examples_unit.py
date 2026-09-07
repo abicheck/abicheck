@@ -878,12 +878,15 @@ class TestBuildCompareDirectCmd:
         assert h_values == [f"old={v1_hdr}"]
         assert "--no-scope-public-headers" in cmd
 
-    def test_pattern_verdicts_appends_flag(self, tmp_path: Path) -> None:
+    def test_pattern_verdicts_no_longer_appends_a_flag(self, tmp_path: Path) -> None:
+        # ADR-068 D4/Phase 5: --pattern-verdicts was removed from `compare`
+        # (modulation is unconditional/evidence-gated now), so this
+        # parameter is a documentation-only no-op on argv construction.
         v1_so, v2_so = tmp_path / "v1.so", tmp_path / "v2.so"
 
         cmd = _build_compare_direct_cmd(
             v1_so, v2_so, None, None, scope_public_headers=False, pattern_verdicts=True
         )
 
-        assert "--pattern-verdicts" in cmd
+        assert "--pattern-verdicts" not in cmd
         assert "-H" not in cmd
