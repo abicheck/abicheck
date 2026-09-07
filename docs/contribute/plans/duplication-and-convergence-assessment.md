@@ -1738,8 +1738,73 @@ using the existing `ReportDocument` container rather than a new envelope
 type, per this ADR's own preference to build on existing immutable
 containers first. **Not yet done:** Markdown, HTML, SARIF, and JUnit still
 build their own documents independently; `to_json`'s `--stat`/`leaf`/
-`root-cause` modes are still their own separate builds too. See ADR-061's
-own gap C status note (same date) for the precise scope.
+`root-cause` modes are still their own separate builds too (a deliberate,
+documented scope exclusion, not an oversight — see ADR-061's own gap C
+status note, same date, for why). See that same note for the precise
+JSON-full scope.
+
+**Assessment of the remaining four formats (2026-09-07, same session): each
+needs its own real, per-field convergence work, not a mechanical swap.**
+Before stopping this slice of work, each remaining format's own build
+function was read in full to judge whether reading from
+`build_report_document`'s JSON-shaped mapping would be a safe, close-to-
+mechanical substitution or genuinely new engineering. All four are the
+latter:
+
+- **Markdown-full** (`report/render_markdown_document.py`'s
+  `build_markdown_document`) groups changes into `severity_groups` --
+  headed sections ("💥 Breaking Changes", etc.) with per-group `oneline`/
+  `note_lines` -- that JSON's flat `changes[]` array plus summary `severity`
+  block does not carry. The underlying *decision* (each change's verdict/
+  category) already comes from the same shared primitive JSON's document
+  uses (`ReportFinding`/`report_findings_for`, called via
+  `ReportModel.from_result`) — so this is not a case of a *competing*
+  decision, but the display grouping itself is a fact `build_report_document`
+  would need to gain (once, as a shared field) before Markdown could read
+  it instead of deriving it; that is genuinely new shared-document design,
+  not a substitution in the existing build.
+- **HTML** (`html_report.build_html_document`) has the same shape of gap,
+  one level further: `removed`/`added`/`changed` buckets, per-section
+  `_build_sections_data` rows, `compat_html`'s ABICC 2-way verdict
+  bucketing, and its own `nav_bar`/`summary_table`/`gate_card`/
+  `scoped_verdict` dataclasses are all HTML-specific arrangements of the
+  same underlying findings, not present in JSON's document today.
+- **SARIF** (`sarif.to_sarif`) computes one `sarif_results[]` entry per
+  finding through `_result_for` (~150 lines) with SARIF-specific shape --
+  `ruleId`/`level`/`location`/`fixes`/`properties` -- plus rule-catalog
+  dedup (`rules_seen`) and its own root-cause/scoped-gate result
+  properties. Several individual facts overlap with JSON's `_change_to_dict`
+  (evidence status, contract fields, impact assessment), but the SARIF
+  *shape* (level derivation, rule catalog, location parsing) does not exist
+  in JSON's document and would need to be added there first.
+- **JUnit** (`junit_report.to_junit_xml`) has no `ReportDocument`
+  involvement at all today (unlike the other three) and derives pass/fail
+  per test case from `ReportFinding`/`SeverityConfig` directly -- the
+  least-converged of the four, and also the one needing the most net-new
+  design (a JUnit whole-document build/render split has no existing
+  precedent in this codebase to extend, unlike SARIF and HTML which at
+  least already have `render_xml.py`/`render_html_document.py` structure to
+  build from for other purposes).
+
+None of the four is a same-shape drop-in read of `build_report_document`'s
+current fields — each would need (a) new fields added to the shared
+document (never derived independently downstream, per this plan's own
+rule), (b) that format's own build function rewritten to read those fields
+instead of recomputing them from `DiffResult`, and (c) byte-exact golden
+verification against its own pre-existing pinned output (per ADR-061 Phase
+2's own durable lesson: "Every closure here was verified by capturing a
+byte-exact golden against the pre-refactor path first"). That is real,
+separate engineering work of comparable size to JSON's own slice, per
+format -- not a mechanical follow-on once JSON's plumbing exists. It was
+deliberately not attempted in this session beyond JSON: the risk of an
+unverified, rushed rewrite of any of these four (1200+ line files, in
+SARIF's/JUnit's case, with no golden-checked intermediate shape yet) regressing
+already-pinned output was judged higher than the value of a partial,
+unverified attempt. Left for a following, similarly-scoped session per
+format, in the order this codebase's own machinery makes least risky:
+Markdown-full first (already has the closest-shaped `compute_*`/`render_*`
+split and shares `ReportFinding` with JSON already), then HTML, then SARIF,
+then JUnit.
 
 ### Phase 5 — Migrate compatibility and multi-artifact operations
 
