@@ -517,7 +517,14 @@ One PR per capability group, each landing with parity tests going green:
   The floor is `.abicheck.yml`'s `python.abi3_floor` with the flag as the
   per-run override (ADR-068 D5). `abi3_audit` is gone from the gap registry;
 - **2e** `--no-baseline` (#2) — the audit-only comparison, on top of Phase 1.1;
-- **2f** dry-run/cost preview parity (#35).
+- **2f** dry-run/cost preview parity (#35) — **landed**: `compare --dry-run`
+  now shows a "Cost preview" section, reusing `service_scan.estimate_scan`
+  directly (summed across both operands via
+  `workflows/compare_cost_preview.py`) rather than a second cost model —
+  the same L0-L5 per-layer projection `scan --dry-run` already shows. Pure
+  UX parity, not a `tests/parity/gaps.py` entry (no finding is gained or
+  lost): the projection is advisory only and does not touch `--budget`'s
+  runtime enforcement (still `scan`-only).
 
 ### Phase 3 — Parity is the gate
 

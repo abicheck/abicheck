@@ -377,6 +377,20 @@ def _render_compare_dry_run(
         if collect_mode in ("source-target", "source-changed", "graph-full")
         else None,
     )
+    from .frontends.cli.compare_dry_run import add_compare_cost_preview_section
+    from .workflows.compare_cost_preview import estimate_compare_dry_run_cost
+
+    add_compare_cost_preview_section(
+        result,
+        *estimate_compare_dry_run_cost(
+            old_input=old_input, new_input=new_input,
+            depth=depth, source_method=source_method,
+            headers=headers, includes=includes,
+            old_headers_only=old_headers_only, new_headers_only=new_headers_only,
+            old_sources=old_sources, new_sources=new_sources,
+            old_build_info=old_build_info, new_build_info=new_build_info,
+        ),
+    )
     all_headers = list(headers) + list(old_headers_only) + list(new_headers_only)
     result.add(
         "Headers and compile context",
