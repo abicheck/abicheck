@@ -18,6 +18,13 @@ that a specific, already-detected change was seen and intentionally
 accepted, as opposed to a [suppression](suppressions.md), which claims the
 finding is a false positive or out of scope.
 
+**Engine-level only today: no native CLI flag yet.** Records are loaded with
+`AcknowledgmentList.load(path)` and passed to `checker.compare(acknowledgments=...)`
+through the typed Python API. `abicheck compare`/`abicheck scan` do not yet have
+a `--acknowledgments PATH` flag to load a document from a run's CLI invocation —
+until that front-end wiring lands, this mechanism is reachable only from code
+calling the Python API directly.
+
 > Acknowledgment is **not** suppression. A suppressed finding disappears
 > from the report and the gate before the verdict is computed. An
 > acknowledged finding keeps its verdict class, stays in the report, and
