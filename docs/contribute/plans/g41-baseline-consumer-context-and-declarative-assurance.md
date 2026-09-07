@@ -304,6 +304,40 @@ for this build). If both specify headers for the same target,
 disagreement — never silently prefer one, which would create two
 competing, silently-diverging sources of truth for the same fact.
 
+**Progress update (2026-09-07, `docs/contribute/plans/
+product-gaps-2026-09-audit.md`'s "Remaining backlog" item 2).** The
+`RunPlanCheck` projection half of this phase's first sentence is landed for
+`public_header_roots`/`generated_header_roots`: both are now real fields on
+`RunPlanCheck`, populated per-target/per-profile in `_generate_target_checks`
+from that profile's own validated `build-output.json` entry (following the
+same `app-consumer`/`plugin-contract` `library:` redirect `header` already
+uses), newline-joined the same way `header` is, and covered by
+`tests/test_run_plan_build_output_header_roots.py` (including the phase's
+own acceptance shape: two targets in one profile with distinct header/
+generated-header roots resolve to distinct, non-colliding fields). **Still
+open, explicitly:** `include_dirs`/`compile_context` were deliberately
+*not* added alongside them — `build-output.json`'s `compile_context` is a
+free-form, undocumented-shape dict with no existing consumer anywhere in
+this codebase (no CLI flag/Action input reads extra include dirs or defines
+from it today), so projecting it into `RunPlanCheck` now would repeat
+exactly the defect this same plan's Phase 3 progress note already
+diagnosed and fixed for `analysis.assurance`: an accepted field nothing
+downstream honors. That needs its own consumer designed first, not a
+same-shaped inert field. Separately, and also still open: `check-project.yml`/
+`actions/check-target` do not yet forward the two landed fields to the
+analysis step in place of the single workflow-global `header` input — the
+run plan now *carries* the concrete per-target roots, but the reusable
+workflow does not yet *read* them. Closing that needs a script-based
+resolution step (prefixing each declared root with the downloaded
+`build-output/` artifact directory and re-validating containment, the same
+way `evidence.path` is already resolved in `check-project.yml`'s existing
+inline Python step) that this pass did not attempt without a way to
+exercise the real composite-action YAML end to end. The full Phase 2
+acceptance test (two targets, different header roots, a default-argument/
+macro change detected only in the affected target, entirely through
+`check-project.yml`) therefore still depends on that forwarding step
+landing, not on anything left in this phase's own design section above.
+
 ### Phase 3 — declarative assurance requirement
 
 **Audit update (2026-09-07, `docs/contribute/plans/product-gaps-2026-09-audit.md`

@@ -162,6 +162,7 @@ from .run_plan_profile_fields import (  # noqa: F401
     _consumer_compile_active_for_profile,
     _consumer_compile_ast_frontend_for_profile,
     _consumer_compile_fields_for_profile,
+    _newline_join_headers,
     _scheduling_fields_for_profile,
 )
 
@@ -336,6 +337,14 @@ class RunPlanCheck:
     #: ``BUNDLE_CHECK_DEPTHS``'s own docstring in ``project_targets.py`` for
     #: why per-bundle-member header staging doesn't exist yet.
     header: str = ""
+    #: G41 Phase 2: this profile's validated ``build-output.json`` entry's
+    #: ``public_header_roots`` (concrete/per-profile, unlike :attr:`header`'s
+    #: declared/config-level value), newline-joined; prefer over
+    #: :attr:`header` when non-empty. Never set for ``kind: bundle``.
+    public_header_roots: str = ""
+    #: G41 Phase 2: same entry's ``generated_header_roots`` (codegen root,
+    #: S10-validated), newline-joined; no ``.abicheck.yml`` counterpart.
+    generated_header_roots: str = ""
     #: ``target_kind: app-consumer`` only.
     consumer_binary_pattern: str = ""
     #: ``target_kind: plugin-contract`` only.
@@ -444,6 +453,10 @@ class RunPlanCheck:
                 d["binary_pattern"] = self.binary_pattern
             if self.header:
                 d["header"] = self.header
+            if self.public_header_roots:
+                d["public_header_roots"] = self.public_header_roots
+            if self.generated_header_roots:
+                d["generated_header_roots"] = self.generated_header_roots
             if self.consumer_binary_pattern:
                 d["consumer_binary_pattern"] = self.consumer_binary_pattern
             if self.contract_file:
@@ -500,6 +513,8 @@ class RunPlanCheck:
             baseline_target=_opt_str(d.get("baseline_target")),
             binary_pattern=_opt_str(d.get("binary_pattern")),
             header=_opt_str(d.get("header")),
+            public_header_roots=_opt_str(d.get("public_header_roots")),
+            generated_header_roots=_opt_str(d.get("generated_header_roots")),
             consumer_binary_pattern=_opt_str(d.get("consumer_binary_pattern")),
             contract_file=_opt_str(d.get("contract_file")),
             bundle_members=[
@@ -684,27 +699,6 @@ def _resolve_profile_ids(
     return [p.id for p in config.profiles.values() if p.contract], False
 
 
-def _newline_join_headers(headers: list[str]) -> str:
-    """Newline-join *headers* for ``action/run.sh``'s ``add_flag()`` multi-
-    value convention (``RunPlanCheck.header``'s own docstring).
-
-    A single-element list needs special handling (Codex review, fresh
-    evidence): ``"\\n".join([x])`` is just ``x`` with no internal separator,
-    so ``add_flag()``'s ``[[ "$value" == *$'\\n'* ]]`` newline check reads
-    false and it falls through to the legacy branch that splits on IFS
-    whitespace -- exactly the whitespace-mis-splitting bug the newline-join
-    fix was meant to close, for the one-element case specifically. A
-    trailing newline forces the multi-line branch without changing what any
-    *multi*-element join already produces (no existing caller reads a
-    trailing newline off a 2+-element ``header`` value)."""
-    if not headers:
-        return ""
-    joined = "\n".join(headers)
-    if len(headers) == 1:
-        joined += "\n"
-    return joined
-
-
 def _library_lookup_and_pattern(
     config: ProjectTargetsConfig, target: TargetSpec
 ) -> tuple[str, str, str]:
@@ -816,6 +810,12 @@ def _generate_target_checks(
                     baseline_target=baseline_target,
                     binary_pattern=binary_pattern,
                     header=header,
+                    public_header_roots=_newline_join_headers(
+                        bo_target.public_header_roots
+                    ),
+                    generated_header_roots=_newline_join_headers(
+                        bo_target.generated_header_roots
+                    ),
                     consumer_binary_pattern=(
                         target.consumer_binary_pattern
                         if target.kind != TARGET_KIND_LIBRARY
