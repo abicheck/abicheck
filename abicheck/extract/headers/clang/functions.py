@@ -84,6 +84,7 @@ from .context import (
     is_darwin_target as _is_darwin_target,
     qualtype as _qualtype,
     source_location as _source_location,
+    strip_darwin_itanium_decoration as _strip_darwin_itanium_decoration,
     symbol_candidates as _symbol_candidates,
     visibility as _visibility,
 )
@@ -495,7 +496,9 @@ def parse_functions(
         # bare name, so the old check wrongly read that fallback collision
         # as C linkage and collapsed both to one `EntityId`).
         raw_mangled = node.get("mangledName")
-        mangled = raw_mangled or name
+        mangled = _strip_darwin_itanium_decoration(
+            raw_mangled, raw_mangled or name, target_triple
+        )
         quals = _function_qualifiers(qualtype)
         ret_type = _return_type(qualtype) or "void"
         params = [
@@ -759,8 +762,8 @@ def parse_functions(
                         else entry.scope_path
                     ),
                     leaf_name,
-                    mangled_name=(
-                        raw_mangled
+                    mangled_name=(  # `mangled`: match Darwin stripping.
+                        mangled
                         if (raw_mangled is not None and not is_extern_c)
                         else None
                     ),

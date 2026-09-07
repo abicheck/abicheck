@@ -323,6 +323,42 @@ def is_darwin_target(target_triple: str | None) -> bool:
     )
 
 
+def strip_darwin_itanium_decoration(
+    raw_mangled: str | None, mangled: str, target_triple: str | None
+) -> str:
+    """Strip a still-present Darwin linker-decoration underscore from a
+    real Itanium mangled name (``"__Z..."`` -> ``"_Z..."``).
+
+    Darwin decorates every global symbol with one leading underscore; for
+    a real Itanium name (always starting ``"_Z"``) that produces
+    ``"__Z..."``. clang's ``mangledName``/``self._target_triple`` reports
+    that decorated linker symbol, while castxml's own ``mangled`` is
+    always the pure spelling -- stripped here so the model's own
+    ``mangled`` field matches on every platform (shared by
+    ``extract.headers.clang.functions.parse_functions`` and
+    ``dumper_clang.parse_variables`` so a bare ``--ast-frontend clang``
+    dump on Darwin gets it too, not only a castxml+clang hybrid merge --
+    macOS CI review, fresh evidence).
+
+    Gated on the doubly-underscore-decorated shape (``"__Z..."``)
+    specifically, not "any leading underscore": that shape is unambiguous
+    (a real Itanium name always starts with a single ``"_Z"``), whereas a
+    bare, single-underscore-prefixed name (``"_foo"``) is left untouched --
+    it is indistinguishable from a real, explicit ``asm("_foo")`` label
+    naming a distinct identity (see
+    ``tests/test_dumper_clang_extern_c_identity.py``; an earlier, ungated
+    version of this strip broke that established, deliberately
+    conservative distinction).
+    """
+    if (
+        raw_mangled is not None
+        and mangled.startswith("__Z")
+        and is_darwin_target(target_triple)
+    ):
+        return mangled[1:]
+    return mangled
+
+
 def visibility(
     exported_dynamic: set[str],
     exported_static: set[str],

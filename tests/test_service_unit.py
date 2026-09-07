@@ -3236,16 +3236,13 @@ class TestContractEvaluationThreading:
         # context for the release fan-out), then depth (D1, CLI-audit), then
         # severity_preset (ADR-064/PR G2). Its sibling `exit_code_scheme` was
         # appended at the same time but later deleted outright (PR G2's
-        # manual-override removal), so severity_preset is now the last one.
-        assert params[-1] == "severity_preset"
-        assert params[-2] == "depth"
-        assert params[-3] == "compile_context"
-        assert params[-4] == "pack_internal_namespaces"
-        assert params[-5] == "pack_policy_overrides"
-        assert params[-6] == "contract_mode"
-        assert params[-7] == "include_dependencies"
-        assert params[-8] == "contract_evaluation"
-        assert params[-9] == "diagnostic_comparison"
+        # manual-override removal). public_header_dirs (PR #1138) is next.
+        assert params[-10:] == [
+            "diagnostic_comparison", "contract_evaluation",
+            "include_dependencies", "contract_mode", "pack_policy_overrides",
+            "pack_internal_namespaces", "compile_context", "depth",
+            "severity_preset", "public_header_dirs",
+        ]
 
     def test_new_gate_params_are_keyword_only_without_breaking_older_ones(self):
         """CodeRabbit review, fresh evidence, PR #1032, then corrected by a

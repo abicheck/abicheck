@@ -46,11 +46,26 @@ def _cache_key(
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_identity: str = "",
     compiler_identity: str = "",
+    force_cpp: bool | None = None,
     force_cpp20: bool = False,
     frontend_context: str = "host",
 ) -> str:
     h = hashlib.sha256()
     h.update(f"backend={backend}".encode())
+    # `force_cpp` is `None` only for a handful of call sites (e.g.
+    # `_ast_compile_provenance`'s own probing helpers) that never resolve a
+    # real language-mode decision at all; every real dump-producing call site
+    # passes the bool it actually resolved. Folded in explicitly rather than
+    # relying on `compiler_identity`/`system_includes` to differ incidentally
+    # when it flips (they usually do -- castxml's gcc/g++ remap, clang's C-vs-
+    # C++ system-include probe -- but not when an explicit `--gcc-path`/
+    # `--gcc-prefix` cross-compiler pins one binary for both modes, and not
+    # in every future caller of this cache key). Without this, a header
+    # previously dumped in C mode and later re-resolved to C++ (e.g. by
+    # `_exported_symbols_indicate_cpp`'s export-evidence fallback, once a
+    # real binary is dumped after a header-only probe) could otherwise reuse
+    # the stale C-mode AST under a pinned cross-compiler (CodeRabbit review).
+    h.update(f"force_cpp={force_cpp}".encode())
     # A "host" vs "device" request against the identical inputs resolves to
     # a genuinely different AST (ADR-050 D5, G32 Phase D) -- must not share
     # a cache entry. Harmless for castxml/plain-clang callers, which only
@@ -202,8 +217,65 @@ def _detect_cpp_headers(
     return False
 
 
-def _exported_symbols_indicate_cpp(exported_symbols: frozenset[str]) -> bool:
-    """True if *exported_symbols* contains a real C++/MSVC mangled name.
+#: C/C++ keywords excluded from the identifier candidate set
+#: :func:`_header_declared_identifiers` collects -- a keyword can never
+#: itself be a mangled function/variable's own source-level name, so
+#: including it would only add correlation-check noise (and, in principle,
+#: risk on odd coincidental substring matches) for no benefit. Not
+#: exhaustive -- just the common ones plausible in a public header -- since
+#: an omitted keyword is merely a slightly wider (still correct, since a
+#: keyword is never itself a declared name) candidate, not a correctness bug.
+_C_CXX_KEYWORDS = frozenset(
+    {
+        "int", "char", "void", "float", "double", "long", "short", "signed",
+        "unsigned", "const", "volatile", "static", "extern", "struct",
+        "union", "enum", "class", "namespace", "typedef", "sizeof", "return",
+        "if", "else", "for", "while", "do", "switch", "case", "default",
+        "break", "continue", "goto", "define", "include", "ifndef", "ifdef",
+        "endif", "pragma", "undef", "elif", "template", "typename", "public",
+        "private", "protected", "virtual", "inline", "friend", "operator",
+        "new", "delete", "this", "true", "false", "nullptr", "bool",
+        "using", "explicit", "constexpr", "noexcept", "override", "final",
+    }
+)  # fmt: skip
+
+_IDENTIFIER_RE = re.compile(rb"\b[A-Za-z_]\w*\b")
+
+
+def _header_declared_identifiers(headers: Sequence[Path]) -> frozenset[str]:
+    """Every plausible declared-name token appearing in *headers*' own text.
+
+    A cheap, pre-parse (regex) substitute for "what does this header
+    declare" -- at the point :func:`_resolve_force_cpp` runs, the header
+    hasn't been parsed yet (that's what this function's language-mode
+    decision feeds into), so there is no real declaration list to check
+    against. Deliberately broad (every identifier-shaped token, keywords
+    excluded) rather than trying to regex-parse real declaration syntax:
+    the caller only ever uses this to *correlate* a candidate export
+    against something this header's own text actually mentions, so a wider
+    candidate set only widens what can be confirmed, never what can be
+    wrongly promoted -- correctness comes from the correlation step
+    requiring an exact Itanium length-prefixed substring match, not from
+    this set being minimal.
+    """
+    names: set[str] = set()
+    for p in headers:
+        try:
+            content = p.read_bytes()
+        except OSError:
+            continue
+        for m in _IDENTIFIER_RE.finditer(content):
+            name = m.group().decode("ascii", errors="ignore")
+            if name and name not in _C_CXX_KEYWORDS:
+                names.add(name)
+    return frozenset(names)
+
+
+def _exported_symbols_indicate_cpp(
+    exported_symbols: frozenset[str], declared_identifiers: frozenset[str]
+) -> bool:
+    """True if *exported_symbols* contains a real C++/MSVC mangled name that
+    correlates with one of *this header's own* ``declared_identifiers``.
 
     A header with no structural C++ syntax at all (a plain top-level function
     declaration, no ``class``/``namespace``/``template``/``extern "C"`` — the
@@ -227,19 +299,44 @@ def _exported_symbols_indicate_cpp(exported_symbols: frozenset[str]) -> bool:
     ordinary, unnamespaced C++ function with no C++-specific syntax in its
     own declaration).
 
-    Deliberately checked against the *whole* export table (dynamic and
-    static symbols alike, exactly like the per-declaration override's own
-    ``exported_dynamic | exported_static`` union) rather than restricted to
-    symbols the header's own declarations resolve to -- at this point in the
-    pipeline the header hasn't been parsed yet, so there is no declaration
-    set to intersect against; any real C++ mangled export in the binary is
-    sufficient proof the *compile* (not necessarily every single
-    declaration) used C++ linkage.
+    Checked against the *whole* export table (dynamic and static symbols
+    alike, exactly like the per-declaration override's own
+    ``exported_dynamic | exported_static`` union) -- a multi-TU binary's
+    export table is not partitioned by which header declared which symbol,
+    so there is no narrower *table* to check against -- but **correlated**
+    against *declared_identifiers* (this header's own text, see
+    :func:`_header_declared_identifiers`) before counting as evidence: an
+    Itanium mangled name embeds its own source-level identifier(s) as
+    length-prefixed substrings (``plain_func`` in ``_Z10plain_funci`` as the
+    literal substring ``"10plain_func"``), and an MSVC mangled name embeds
+    its own leaf identifier immediately after the leading ``?`` (``main_op``
+    in ``?main_op@@YAHH@Z`` as the literal substring ``"?main_op@"``), so
+    requiring that embedding confirms the *export* actually names something
+    *this header* plausibly declares, not merely some unrelated C++ symbol
+    compiled from a completely different TU into the same binary (CodeRabbit
+    review, fresh evidence: a genuinely plain-C header declaring
+    ``struct options { int new; };`` -- valid C, ``new`` a reserved word
+    only in C++ -- must not be forced into C++ mode merely because some
+    *other* header in the same library happens to export real C++ symbols;
+    the whole-binary-export check the fix originally used had exactly that
+    failure mode). No demangling is performed -- the length-prefixed/``?``-
+    anchored substring tests are specific/false-positive-resistant enough on
+    their own (matching a real mangled name's own internal encoding, not
+    just the bare name), and avoid adding a ``c++filt``/demangler dependency
+    to a hot, whole-TU decision path.
     """
-    return any(
-        sym.startswith("_Z") or sym.startswith("__Z") or sym.startswith("?")
-        for sym in exported_symbols
-    )
+    if not declared_identifiers:
+        return False
+    itanium_candidates = tuple(f"{len(name)}{name}" for name in declared_identifiers)
+    msvc_candidates = tuple(f"?{name}@" for name in declared_identifiers)
+    for sym in exported_symbols:
+        if sym.startswith("_Z") or sym.startswith("__Z"):
+            if any(token in sym for token in itanium_candidates):
+                return True
+        elif sym.startswith("?"):
+            if any(token in sym for token in msvc_candidates):
+                return True
+    return False
 
 
 def _resolve_compiler_binary(

@@ -103,3 +103,58 @@ class TestResolveForceCppExportedSymbolEvidence:
         h = tmp_path / "h.h"
         h.write_text("namespace ns { int f(); }\n", encoding="utf-8")
         assert _resolve_force_cpp(None, [h], None, (), frozenset({"f"})) is True
+
+    def test_unrelated_cxx_export_elsewhere_in_binary_does_not_force_cpp(
+        self, tmp_path
+    ):
+        """CodeRabbit review, fresh evidence: a genuinely plain-C header
+        must not be forced into C++ mode merely because some *unrelated*
+        header/TU in the same multi-header binary happens to export real
+        C++ symbols. Concrete failure case: ``struct options { int new; };``
+        is valid C -- ``new`` is a C++ reserved word, so forcing C++ mode
+        on it breaks parsing outright. The export table here names a
+        function (``other_cxx_func``) this header's own text never
+        mentions at all -- correlation must reject it as evidence."""
+        h = tmp_path / "options.h"
+        h.write_text("struct options { int new; };\n", encoding="utf-8")
+        assert (
+            _resolve_force_cpp(
+                None, [h], None, (), frozenset({"_Z14other_cxx_funcv"})
+            )
+            is False
+        )
+
+    def test_export_matching_this_headers_own_identifier_still_forces_cpp(
+        self, tmp_path
+    ):
+        """Companion to the unrelated-export test above: when the export
+        DOES correlate with a name this header's own text declares, C++
+        mode is still (correctly) forced -- the fix narrows the evidence
+        to per-header correlation, it does not disable the fallback."""
+        h = tmp_path / "h.h"
+        h.write_text("int compute(int x);\n", encoding="utf-8")
+        assert (
+            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"}))
+            is True
+        )
+
+    def test_coincidental_substring_without_length_prefix_does_not_correlate(
+        self, tmp_path
+    ):
+        """A bare textual substring match is not enough -- the correlation
+        requires the real Itanium length-prefix encoding of the declared
+        identifier, not just the name appearing anywhere in the mangled
+        string. ``compute`` appears inside ``_Z14recomputeStuff`` as a
+        plain substring but not as the length-prefixed token ``"7compute"``
+        (the export is a 14-character *different* identifier,
+        ``recomputeStuff``, that merely happens to contain ``compute``), so
+        this header's own ``compute`` declaration must not be matched to
+        that unrelated export."""
+        h = tmp_path / "h.h"
+        h.write_text("int compute(int x);\n", encoding="utf-8")
+        assert (
+            _resolve_force_cpp(
+                None, [h], None, (), frozenset({"_Z14recomputeStuffi"})
+            )
+            is False
+        )

@@ -193,25 +193,25 @@ def _split_top_level_commas(s: str) -> list[str]:
 
 
 def _macho_normalize_mangled(mangled: str) -> str:
-    """Strip the single Darwin linker-symbol leading underscore clang's
-    Mach-O ``mangledName`` carries, matching castxml's prefix-free
-    convention on the same platform.
+    """Strip a still-present Darwin linker-symbol leading underscore,
+    matching castxml's prefix-free convention on the same platform.
 
-    Darwin prepends exactly one underscore to every global symbol's
-    compiler-computed name (a C function ``foo`` -> ``_foo``; a C++ Itanium
-    name, which itself starts with ``_Z``, -> ``__ZN...``). clang's
-    ``-ast-dump=json`` ``mangledName`` field reports the real, platform-
-    accurate linker symbol (WITH that extra underscore), while castxml's own
-    ``mangled`` XML attribute is the "pure" Itanium name (WITHOUT it) — see
-    ``dumper_clang._ClangAstParser._visibility``'s docstring, which already
-    handles this same mismatch for export-table matching via
-    ``_symbol_candidates``. Without normalizing it here too, EVERY Mach-O
-    C++ function/variable's clang-side mangled key differs from its
-    castxml-side key, so the hybrid merge's ``cf.mangled not in
-    merged_mangled`` dedup check is always true — treating every function
-    castxml already emitted as "clang-only" and duplicating the entire
-    function list (Codex review).
+    Darwin prepends one underscore to every global symbol (C ``foo`` ->
+    ``_foo``; Itanium ``_Z...`` -> ``__Z...``); see
+    ``dumper_clang._ClangAstParser._visibility``'s docstring for the same
+    mismatch in export-table matching. ``extract.headers.clang.functions.
+    parse_function_element``/``dumper_clang.parse_variables`` now normalize
+    this at the point of origin too (a bare ``--ast-frontend clang`` dump
+    with no castxml side needed the identical fix), so *mangled* reaching
+    here is ordinarily **already** undecorated on Darwin. Blindly stripping
+    one leading underscore regardless (the original behavior) would corrupt
+    an already-pure Itanium name (``"_Z10fi"`` -> ``"Z10fi"``); that shape
+    is recognizable unambiguously (a still-decorated name is always
+    ``"__Z..."``, never plain ``"_Z..."``), so gating the no-op on that
+    prefix leaves every other shape (``"_foo"`` -> ``"foo"``) unchanged.
     """
+    if mangled.startswith("_Z"):
+        return mangled
     return mangled[1:] if mangled.startswith("_") else mangled
 
 

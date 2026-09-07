@@ -121,6 +121,7 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     "CompileContext | None",
     "str | None",
+    "list[Path] | None",
 ]
 
 
@@ -153,6 +154,7 @@ def _run_compare_pair(
     pack_application: PackApplication | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -198,6 +200,13 @@ def _run_compare_pair(
     actually honour end to end -- ``"binary"`` -- forwarded unchanged to
     ``service.run_compare`` so this pair clears header/build/source evidence
     the same way a single-pair ``compare --depth binary`` would.
+
+    *public_header_dirs* (CodeRabbit review, PR #1138): a project's
+    ``.abicheck.yml`` ``scope.public_header_dirs``, resolved once for the
+    whole release the same way *pack_application*/*compile_context* are --
+    forwarded unchanged to ``service.run_compare``'s own identically-named
+    parameter, closing the gap where this fan-out never threaded the config
+    key a single-pair ``compare`` already honors.
     """
     from . import service
 
@@ -234,6 +243,7 @@ def _run_compare_pair(
         ),
         compile_context=compile_context,
         depth=depth,
+        public_header_dirs=public_header_dirs,
     )
     record_release_resolved_config(
         result.diff, getattr(pack_application, "resolved_config", None)
@@ -269,6 +279,7 @@ def _compare_one_library(
     need_full_snapshots: bool = False,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch. Any
     exception yields an ERROR entry rather than aborting the release.
@@ -313,6 +324,7 @@ def _compare_one_library(
             pack_application=pack_application,
             compile_context=compile_context,
             depth=depth,
+            public_header_dirs=public_header_dirs,
         )
         result = compare_result.diff
         v = result.verdict.value
@@ -541,6 +553,7 @@ def _compare_release_libraries(
     pack_application: PackApplication | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -611,6 +624,7 @@ def _compare_release_libraries(
         need_full_snapshots,
         compile_context,
         depth,
+        public_header_dirs,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:

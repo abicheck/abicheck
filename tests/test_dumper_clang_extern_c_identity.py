@@ -289,3 +289,142 @@ def test_parse_variables_leading_underscore_not_extern_c_when_namespaced() -> No
     ).parse_variables()
     assert var.entity_id is not None
     assert var.entity_id.extra == ("mangled", "_g_count")
+
+
+# ── Function.mangled/Variable.mangled field normalization (macOS CI review,
+# fresh evidence): the extern-"C" identity tests above cover the bare-name
+# case (raw_mangled == "_" + name), where the fix's job is entirely about
+# WHICH IDENTITY a declaration gets tagged with. This section covers the
+# separate, previously-unfixed case -- a genuine, non-extern-"C" C++
+# function/variable's own STORED `mangled` field value, which on Darwin
+# clang's `mangledName` reports WITH the platform's extra leading
+# underscore baked in on top of the real Itanium mangling (`"__ZN..."`),
+# while castxml's own convention (and every documented "already
+# normalized" contract this field has elsewhere -- macho_metadata.py,
+# crosscheck_base._exported_symbol_names) never carries it. Verified here
+# via synthetic AST nodes (this environment has no real macOS/clang-Darwin
+# toolchain to compile against) -- see
+# tests/test_crosscheck_language_mode_export_evidence.py for the real-
+# compiler, real-binary Linux/ELF-Itanium coverage of the sibling
+# language-mode-detection bug this same review round also fixed.
+
+
+def test_parse_functions_mangled_field_strips_darwin_underscore_for_real_cxx_name() -> (
+    None
+):
+    """A genuine (non-extern-"C") namespaced C++ function's own ``mangled``
+    field must carry the pure Itanium spelling on Darwin, not clang's own
+    Darwin-linker-decorated one -- otherwise it disagrees with castxml's
+    identical declaration (breaking cross-backend/hybrid reconciliation)
+    and with the binary's own already-normalized export table (breaking
+    ``crosscheck.py``'s ``exported_not_public``/``public_not_exported``
+    symbol correlation, the originally reported macOS CI failure)."""
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "n",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "foo",
+                    "loc": {"line": 2},
+                    "mangledName": "__ZN1n3fooEv",  # Darwin-decorated real Itanium
+                    "type": {"qualType": "void ()"},
+                },
+            ],
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_functions()
+    assert fn.is_extern_c is False
+    assert fn.mangled == "_ZN1n3fooEv"
+    assert fn.entity_id is not None
+    assert fn.entity_id.extra == ("mangled", "_ZN1n3fooEv")
+
+
+def test_parse_variables_mangled_field_strips_darwin_underscore_for_real_cxx_name() -> (
+    None
+):
+    """The variable-level sibling of the function case above."""
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "n",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "g",
+                    "loc": {"line": 2},
+                    "type": {"qualType": "int"},
+                    "mangledName": "__ZN1n1gE",  # Darwin-decorated real Itanium
+                },
+            ],
+        }
+    )
+    (var,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_variables()
+    assert var.mangled == "_ZN1n1gE"
+    assert var.entity_id is not None
+    assert var.entity_id.extra == ("mangled", "_ZN1n1gE")
+
+
+def test_parse_functions_mangled_field_unaffected_off_darwin() -> None:
+    """Control for the two tests above: the SAME doubly-underscored input
+    is never stripped off Darwin -- there is no such linker convention to
+    correct for there, so a literal ``"__ZN...``-shaped mangled name (an
+    unusual but syntactically legal spelling on a non-Darwin target) must
+    be preserved exactly as clang reported it."""
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "n",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "foo",
+                    "loc": {"line": 2},
+                    "mangledName": "__ZN1n3fooEv",
+                    "type": {"qualType": "void ()"},
+                },
+            ],
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_LINUX_TRIPLE
+    ).parse_functions()
+    assert fn.mangled == "__ZN1n3fooEv"
+    assert fn.entity_id is not None
+    assert fn.entity_id.extra == ("mangled", "__ZN1n3fooEv")
+
+
+def test_parse_functions_mangled_field_unaffected_when_no_mangled_name_at_all() -> (
+    None
+):
+    """The strip is gated on ``raw_mangled is not None`` -- a declaration
+    that fell back to its bare source ``name`` (e.g. an uninstantiated
+    function template, which carries no ``mangledName`` key at all) must
+    never have a leading underscore stripped from ITS OWN identifier, even
+    on Darwin: that underscore, if present, is part of the real source
+    spelling, not linker decoration clang ever reported."""
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "_leading_underscore_name",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "void ()"},
+            # Deliberately no "mangledName" key at all -- clang omits it
+            # for e.g. an uninstantiated function template's own
+            # FunctionDecl (see this file's module docstring); a plain
+            # FunctionDecl missing the key exercises the identical
+            # raw_mangled-is-None fallback path.
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_functions()
+    assert fn.mangled == "_leading_underscore_name"

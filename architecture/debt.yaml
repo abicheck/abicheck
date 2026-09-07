@@ -1102,6 +1102,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "abicheck/service_compare_pipeline.py",
+      "baseline_lines": 811,
+      "target": "workflows-or-frontends (already home for the compare-pipeline shim; the new parameter is one keyword forwarded onto two pre-existing InputSpec constructions, not extractable further)",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "Not legacy debt: 799 -> 811 to close a CodeRabbit review finding on PR #1138 -- run_compare's keyword-argument shim had no way to forward a project's scope.public_header_dirs to the release/package fan-out's per-library compare (cli_compare_release_pairwise._run_compare_pair calls this shim directly, not cli_resolve._resolve_compare_snapshots, which already threaded that config key for a single-pair compare), so a directory/package compare silently dropped the project's declared header-boundary scoping even though the identical library compared alone already honored it. The added public_header_dirs keyword-only parameter is folded into both sides' InputSpec.public_header_dirs identically to the existing compile_context/include_dependencies both-sides-only parameters already in this same shim -- there is no smaller diff that both documents the parameter (one docstring paragraph, matching every sibling parameter's own paragraph in this docstring) and threads it through the two pre-existing InputSpec(...) call sites.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "abicheck/service_scan.py",
       "baseline_lines": 1954,
       "target": "workflows-or-frontends",
@@ -1209,6 +1219,16 @@
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
       "rationale": "Newly crossed the 800-line production cap (ADR-067 C-S2): `_LoadedReport` gained one `disposition_audit` field, read verbatim off each of its five real (non-early-failure) construction sites via the new sibling leaf `disposition_axis.disposition_audit_block` -- the same ADR-065 S2 `scope_axis.py` pattern this module already follows for `scope_completeness_exit`. The read logic itself lives in that new leaf, not here; what is added here is the field declaration, one import, and one line per construction site.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/regressions/manifest.py",
+      "baseline_lines": 1243,
+      "target": "tests/regressions (already home; a BugClass entry's prose is not further extractable)",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "Not legacy debt: PR #1138's own root AGENTS.md 'bug fix's regression test targets the bug class' rule requires a new BugClass registry entry for a genuinely new bug class, not prose alone -- this file was already one line under its own 1200-line test-file cap when the Mach-O leading-underscore identity-normalization bug (a second, distinct root cause from the sibling extraction.language_mode_export_evidence entry just above, caught by CI's macOS integration-tests lane) needed its own entry plus a small extension to that sibling entry's own invariant text (the CodeRabbit per-header correlation fix narrowed what counts as evidence). No smaller diff exists that both states the new class's invariant and points at its seed tests without restating the class in prose only, which the file's own module docstring explicitly rejects as the failure mode this registry exists to prevent.",
       "review_by": "2026-11-30"
     },
     {

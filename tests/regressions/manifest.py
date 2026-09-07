@@ -1159,11 +1159,14 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "Whole-TU C/C++ language-mode auto-detection must not rely on "
             "header syntax alone: a header with no structural C++ syntax "
             "gives that heuristic nothing to key on. A real Itanium/Mach-O/"
-            "MSVC mangled name in the binary's export table is direct proof "
-            "of C++ linkage and must resolve the WHOLE TU to C++, not patch "
-            "one symbol after the fact -- a wrong mode corrupts `mangled`/"
-            "`is_extern_c`/`visibility` together. An explicit `--lang` or "
-            "real C++ syntax still wins; a bare-name export is not evidence."
+            "MSVC mangled export that CORRELATES with an identifier this "
+            "header declares is direct proof of C++ linkage and must "
+            "resolve the WHOLE TU to C++, not patch one symbol after the "
+            "fact -- a wrong mode corrupts `mangled`/`is_extern_c`/"
+            "`visibility` together. An explicit `--lang`, real C++ syntax, "
+            "a bare-name export, or an UNRELATED header's own export "
+            "elsewhere in the same multi-header binary are all not "
+            "evidence for THIS header."
         ),
         fixed_by=(1138,),
         seed_tests=(
@@ -1176,6 +1179,47 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "declaration_shape": ("function", "ns_function", "extern_c", "variable"),
             "export_mangling": ("itanium", "macho_itanium", "msvc", "bare_c"),
         },
+    ),
+    BugClass(
+        id="extraction.macho_mangled_identity_normalization",
+        invariant=(
+            "On Darwin, a real Itanium name's linker-decorated spelling "
+            "(`__Z...`) must be stripped to the pure spelling (`_Z...`) at "
+            "the POINT OF ORIGIN in every header-AST backend's own parse "
+            "step, not only inside the castxml+clang hybrid-merge path -- "
+            "`Function.mangled`/`Variable.mangled` must match on every "
+            "platform/frontend combination, including a bare "
+            "`--ast-frontend clang` dump with no castxml side. Gated on "
+            "the unambiguous `__Z...` shape only: a bare `_foo` stays "
+            'untouched (indistinguishable from a real `asm("_foo")` '
+            "label). A name already pure must not be stripped again."
+        ),
+        fixed_by=(1138,),
+        seed_tests=(
+            "tests/test_dumper_clang_extern_c_identity.py",
+            "tests/test_dumper_hybrid_macho_idempotence.py",
+        ),
+        public_surfaces=(),
+        axes={
+            "frontend": ("clang",),
+            "declaration_shape": ("function", "variable"),
+            "mangled_shape": ("macho_decorated", "already_pure", "bare_asm_label"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "No Mach-O toolchain in this dev environment to verify "
+                    "end to end -- verified via code inspection + synthetic "
+                    "AST-JSON unit tests only; macOS CI is the only real-"
+                    "binary signal."
+                ),
+                reference=(
+                    "PR #1138 follow-up: CI's integration-tests "
+                    "(macos-latest) job reported 4 failures from this exact "
+                    "mismatch for a bare --ast-frontend clang dump"
+                ),
+            ),
+        ),
     ),
 )
 

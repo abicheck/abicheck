@@ -1184,7 +1184,10 @@ class _ClangAstParser:
             # un-gated `mangled == name` heuristic below wrongly read that
             # fallback collision as C linkage.
             raw_mangled = node.get("mangledName")
-            mangled = raw_mangled or name
+            # See `context.strip_darwin_itanium_decoration`'s docstring.
+            mangled = _clang_context.strip_darwin_itanium_decoration(
+                raw_mangled, raw_mangled or name, self._target_triple
+            )
             if not mangled:
                 continue
             type_name = _qualtype(node)
@@ -1288,8 +1291,8 @@ class _ClangAstParser:
                     entity_id=entity_id_for_variable(
                         entry.scope_path,
                         name,
-                        mangled_name=(
-                            raw_mangled
+                        mangled_name=(  # `mangled`: match Darwin stripping.
+                            mangled
                             if (raw_mangled is not None and not is_extern_c)
                             else None
                         ),
