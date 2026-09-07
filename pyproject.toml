@@ -464,6 +464,24 @@ pytest_add_cli_args = [
     # ignored, so the rest of that file still runs.
     "--deselect=tests/test_ai_readiness.py::test_no_hard_file_size_violations",
     "--deselect=tests/test_ai_readiness.py::test_main_returns_zero_on_clean_tree",
+    # Same "validates the tree it runs in" class as the two entries directly
+    # above (PR #1115's own diff -- discovered the same way as the
+    # `test_action_check_target*`/`test_agent_evals.py`/`test_engine_
+    # primitive_call_sites.py` entries elsewhere in this list: touching
+    # enough `tests/` paths trips `--scope-run-to-diff`'s "refuse to scope"
+    # fallback to a full, unscoped run, exercising a pre-existing gap this
+    # PR's own diff did not create). `test_docs_contract_has_no_ownership_
+    # errors_on_real_repo` walks `docs/_meta/topics.yaml`'s `fact_sources`
+    # entries and asserts each resolves under the repo root -- one entry is
+    # `vision.md`, a repo-root file outside `abicheck/` (this file's own
+    # `only_mutate`/`also_copy` lists) that a `mutants/` copy therefore never
+    # contains, so the assertion legitimately (and correctly, for a
+    # `mutants/` tree) fails there. Deselected rather than ignored, so the
+    # rest of the file still runs. No mutation-kill cost: this test imports
+    # no `only_mutate` module (confirmed by grep) -- it dynamically loads
+    # `scripts/check_docs_contract.py` via `importlib`, itself PyYAML/stdlib
+    # only.
+    "--deselect=tests/test_docs_contract.py::test_docs_contract_has_no_ownership_errors_on_real_repo",
     "--ignore=tests/test_action_check_target.py",
     # Split out of the file directly above for a `no_growth` file-size
     # reason (its own docstring), inheriting the identical re-entrant-
