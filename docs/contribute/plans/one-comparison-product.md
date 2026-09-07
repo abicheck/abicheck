@@ -177,7 +177,7 @@ identity; **DELETE** — leaves the product.
 |---|---|---|---|---|---|
 | 1 | Baseline comparison (`--against`) | `cli_scan_baseline.py`, `scan_engine.run_scan_core` | `compare OLD NEW` | DELETE (it *is* `compare`) | Parity suite (Phase 3) |
 | 2 | Audit-only mode (no `--against`) | `scan_engine._audit_exit_code` | `compare --no-baseline` | COMPARE-STAGE | ADR-065 `declared_absent` acquisition state (Phase 1) |
-| 3 | Cross-source checks (11) | `buildsource/crosscheck.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | Evolution-state model (Phase 1); `not_evaluated` correctness (F-7). **6 of 11 landed**: `unversioned_exported_symbol` and `private_header_leak` landed first, then `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, and `public_to_internal_dependency` (this PR) — all six run automatically inside `compare()` (`cross_source_checks`, default `True`, no flag — ADR-068 D4/D5); the other 5 (`header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, `source_surface_dso_mismatch`) remain scan-only |
+| 3 | Cross-source checks (11) | `buildsource/crosscheck.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | Evolution-state model (Phase 1); `not_evaluated` correctness (F-7). **11 of 11 landed**: `unversioned_exported_symbol` and `private_header_leak` landed first, then `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, and `public_to_internal_dependency`, and finally `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` (this PR) — all eleven run automatically inside `compare()` (`cross_source_checks`, default `True`, no flag — ADR-068 D4/D5). `scan --against`'s own baseline-compare path strips the automatically-produced findings back out of its diff (`cli_scan_baseline._strip_automatic_cross_source_findings`), preserving its pre-existing, documented invariant that a single-version hygiene finding stays advisory unless explicitly promoted via `--crosscheck KEY=error` |
 | 4 | Private-header leakage | `crosscheck.private_header_leak` | as #3 | COMPARE-STAGE | **Landed.** Public/internal boundary from `-H` provenance + `.abicheck.yml` `scope.public_header_dirs` (#22, now solved for both sources) |
 | 5 | public-vs-exported (`public_not_exported`, `exported_not_public`) | `crosscheck` | as #3 | COMPARE-STAGE | **Landed.** As #4 |
 | 6 | Pattern checks (lexical pre-scan) | `buildsource/pattern_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | Phase 2 |
@@ -397,7 +397,7 @@ per-row prerequisites in §3 and §4 are the detail beneath these.
 | # | Prerequisite | Gates | State today |
 |---|---|---|---|
 | P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2), and therefore the whole audit half of the retirement | Not started; ADR-065 S2's record exists to extend |
-| P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Partially landed**: a second, deliberately distinct enum from Phase 1 item 2's cross-comparison-chain `FindingEvolution` above — `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution` state how a cross-source check behaves across OLD/NEW *within one* `compare()` call, with `workflows.cross_source_evolution.compute_cross_source_evolution` as the model's first real producer and `report.cross_source_evolution`'s compute/render pair as its first real JSON projection (schema 3.7) — now covering **six** checks: `unversioned_exported_symbol` and `private_header_leak` landed first (the latter generalized the matching primitive's per-finding identity — a symbol-only key silently collapsed two distinct leaked types flagged on the same function; identity is now a per-check function, defaulting to `symbol` for a check without that ambiguity), and `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, `public_to_internal_dependency` join them in this PR (two more, `rtti_for_internal_type` and `public_to_internal_dependency`, also needed the per-check identity generalization). All six checks are now reachable by every front end: `compare()` runs the whole stage automatically (`cross_source_checks` defaults to `True`), no opt-in flag anywhere (ADR-068 D4/D5). **The correctness crux** — a pre-existing problem must never read as newly introduced when a side's evidence can't confirm it — is exercised as a property test for all six checks. The other cross-source checks (§3 #15) remain unmigrated |
+| P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Landed**: a second, deliberately distinct enum from Phase 1 item 2's cross-comparison-chain `FindingEvolution` above — `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution` state how a cross-source check behaves across OLD/NEW *within one* `compare()` call, with `workflows.cross_source_evolution.compute_cross_source_evolution` as the model's first real producer and `report.cross_source_evolution`'s compute/render pair as its first real JSON projection (schema 3.7) — now covering all **eleven** checks: `unversioned_exported_symbol` and `private_header_leak` landed first (the latter generalized the matching primitive's per-finding identity — a symbol-only key silently collapsed two distinct leaked types flagged on the same function; identity is now a per-check function, defaulting to `symbol` for a check without that ambiguity), `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, `public_to_internal_dependency` joined next (two more, `rtti_for_internal_type` and `public_to_internal_dependency`, also needed the per-check identity generalization), and `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` close out the row in this PR (`odr_type_variant`, `identity_collision_detected`, and `compile_context_conflict` also needed their own composite identity). All eleven checks are now reachable by every front end: `compare()` runs the whole stage automatically (`cross_source_checks` defaults to `True`), no opt-in flag anywhere (ADR-068 D4/D5). **The correctness crux** — a pre-existing problem must never read as newly introduced when a side's evidence can't confirm it — is exercised as a property test for all eleven checks. `scan --against`'s own separate, pre-existing advisory mechanism for these checks (the dedicated `crosscheck` report block + `--crosscheck KEY=error` promotion) is preserved by stripping the automatic stage's findings back out of its own baseline diff before scoring it (`cli_scan_baseline._strip_automatic_cross_source_findings`) — the one place this migration needed a production-code change outside `workflows/cross_source_evolution.py` itself, since an `API_BREAK`-severity check folding into that diff by default would otherwise turn a clean, unpromoted baseline into a false-positive exit |
 | P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion (they are `scan`-only today; `cli_stack.py`'s own `5` is unrelated) | ADR-064 already models the precedence; `compare` does not emit them |
 | P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public_header_dirs` | The leakage and public-vs-exported checks (§3 #4, #5, #22) | **Solved** for both named sources: `-H` directory provenance already fed `provenance.apply_provenance` (unchanged, file-vs-directory asymmetry preserved verbatim — a lone `-H` *file* still does not, on its own, establish a boundary the same way `scan --public-header-dir` requires a directory; note `compare`'s own pre-existing `-H` handling was already slightly looser than that rule before this PR and is left as it was found, see `workflows/cross_source_evolution.py`'s module docstring); this PR adds `.abicheck.yml`'s `scope.public_header_dirs` (a new key, distinct from the pre-existing `scope.public` boolean the plan's own shorthand risked conflating it with) as a second, additive source, threaded through `cli_compare_helpers.run_compare` → `cli_resolve._resolve_compare_snapshots`'s `config_public_header_dirs` parameter into the same `InputSpec.public_header_dirs`/`apply_provenance` machinery. No new CLI flag. `scan --public-header-dir` itself is untouched |
 | P5 | ADR-065 S3's package component inventories | Folding `--artifact-set`'s members into the one selection model (§3 #16, #17) | Not started — workstream A's next slice |
@@ -476,10 +476,13 @@ refs) while both commands still exist. It starts red on every check in
 One PR per capability group, each landing with parity tests going green:
 
 - **2a** cross-source checks (§3 #3–#5), per side, evolution-stated —
-  **6 of 11 landed**: `unversioned_exported_symbol` and
-  `private_header_leak` landed first (§3 #3-#4), and `exported_not_public`,
+  **11 of 11 landed**: `unversioned_exported_symbol` and
+  `private_header_leak` landed first (§3 #3-#4), `exported_not_public`,
   `public_not_exported`, `rtti_for_internal_type`, and
-  `public_to_internal_dependency` (§3 #3-#5) join them in this PR — all six
+  `public_to_internal_dependency` (§3 #3-#5) joined them next, and
+  `header_build_context_mismatch`, `odr_type_variant`,
+  `identity_collision_detected`, `compile_context_conflict`, and
+  `source_surface_dso_mismatch` close out the row in this PR — all eleven
   run automatically inside `compare()`'s pipeline (`checker.compare`'s
   `cross_source_checks`, default `True`, no CLI/API/Action opt-in flag —
   ADR-068 D4/D5), via `workflows/cross_source_evolution.py`'s
@@ -493,16 +496,35 @@ One PR per capability group, each landing with parity tests going green:
   types; `public_to_internal_dependency`, where one public declaration can
   reach two distinct internal targets; `rtti_for_internal_type`, whose own
   RTTI symbol could in principle resolve to a different private type
-  across OLD/NEW) registers its own. This PR also solves P4 for its two
-  named sources (`-H` directory provenance, already wired before this PR,
-  plus a new `.abicheck.yml` `scope.public_header_dirs` config key) — see
-  P4's own row above and `workflows/cross_source_evolution.py`'s module
-  docstring for the exact wiring. All six checks' `tests/parity/gaps.py`
-  rows are deleted — the scan-vs-compare parity harness confirms `compare`
-  finds them under its ordinary, default invocation. The other five checks
-  (`header_build_context_mismatch`, `odr_type_variant`,
-  `identity_collision_detected`, `compile_context_conflict`,
-  `source_surface_dso_mismatch`) remain scan-only;
+  across OLD/NEW; `odr_type_variant`, whose same type name can carry a
+  conflict recorded under more than one header; `identity_collision_
+  detected`, whose same qualified name can collide onto more than one
+  distinct identity key; `compile_context_conflict`, whose same build
+  target can carry both a flag-family conflict and a `#define`-value
+  conflict at once) registers its own. The second slice (four checks)
+  also solved P4 for its two named sources (`-H` directory provenance,
+  already wired before that PR, plus a new `.abicheck.yml`
+  `scope.public_header_dirs` config key) — see P4's own row above and
+  `workflows/cross_source_evolution.py`'s module docstring for the exact
+  wiring; the five closing this row needed no further boundary work, since
+  each already gated on an L3/L4 fact a `compare()`-produced snapshot can
+  carry today. All eleven checks' `tests/parity/gaps.py` rows are deleted
+  — the scan-vs-compare parity harness confirms `compare` finds them
+  under its ordinary, default invocation. This slice also found and fixed
+  a latent regression the automatic stage exposed in `scan --against`'s
+  own, older, separate advisory mechanism for these checks: `_run_baseline_
+  compare`'s own docstring already documented that single-version
+  cross-source findings must stay advisory unless explicitly promoted
+  (`--crosscheck KEY=error`), but its internal `compare_snapshots()` call
+  started silently re-adding a migrated check's finding into the old/new
+  diff a second time as each one landed on the automatic stage — invisible
+  for six `RISK`-severity checks (which never raise the legacy exit code
+  on their own), and a real, user-visible false-positive exit the moment
+  an `API_BREAK`-severity check (`header_build_context_mismatch`) joined
+  them. `cli_scan_baseline._strip_automatic_cross_source_findings` now
+  strips the automatic stage's findings back out of that one diff and
+  recomputes its verdict, for every migrated check, restoring the
+  documented invariant;
 - **2b** pattern + preprocessor scans (#6, #8);
 - **2c** changed-path localization `--since`/`--changed-path` (#12) and POI
   scoping parity for `--depth source` (#10, #11) — **landed**: the seed and
