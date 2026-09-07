@@ -150,7 +150,6 @@ class TestCompareHelpAllDisclosure:
         for advanced_flag in (
             "--compiler",
             "--ast-frontend",
-            "--jobs",
             "--write",
             "--report-mode",
             "--pdb-path",
@@ -229,7 +228,6 @@ class TestCompareHelpAllDisclosure:
         for advanced_flag in (
             "--sysroot",
             "--ast-frontend",
-            "--jobs",
             "--write",
             "--report-mode",
             "--pdb-path",

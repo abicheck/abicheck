@@ -78,7 +78,7 @@ meaningful when `kind: target` (never `kind: bundle`):
 |---|---|---|
 | `library` (default) | A plain `compare`. | — |
 | `app-consumer` | `compare --used-by` (S22, application compatibility). | `consumer-binary` |
-| `plugin-contract` | `compare --required-symbols` (S23, plugin/dlopen contract). | `contract-file` — a `.syms` file, one required linker symbol per line, `#` comments allowed; **not** YAML |
+| `plugin-contract` | `compare --required-symbol @FILE` (S23, plugin/dlopen contract). | `contract-file` — a `.syms` file, one required linker symbol per line, `#` comments allowed; **not** YAML |
 
 **The "library redirect" (ADR-047 §3):** `app-consumer`/`plugin-contract`
 targets have no binary/baseline of their own — they resolve *through* the
@@ -127,7 +127,7 @@ caller-provided directory of the candidate build's own member binaries.
 | `evidence-pack-path` | no | `abicheck_inputs` | Must match an earlier `collect-facts phase: prepare` step's own output path (`wrapper`/`clang-plugin` only). |
 | `new-library` | yes | — | Candidate binary (`kind: target`) or directory of candidate member binaries (`kind: bundle`). |
 | `consumer-binary` | when `target-kind: app-consumer` | — | Forwarded as `--used-by`. |
-| `contract-file` | when `target-kind: plugin-contract` | — | Forwarded as `--required-symbols`. |
+| `contract-file` | when `target-kind: plugin-contract` | — | Forwarded as the root Action's `required-symbols` input (translated to the CLI's `--required-symbol @FILE`). |
 | `require-complete-analysis` | no | `false` | Forwarded to the internal analysis step's own `require-complete-analysis` input, gated on `kind != 'bundle'` (a bundle check's operand is a directory, and the root Action rejects the flag outright for a directory/package compare) — `false` for `kind: bundle` regardless of this input's value. `check-project.yml` sets this per cell from `checks[].analysis.assurance == 'complete'` (product-gaps audit §3); any other declared `analysis.assurance` value fails `project plan` before a run plan is generated, so this input's whole domain is `'true'`/`'false'`. |
 | `header`, `old-header`, `new-header`, `include`, `old-include`, `new-include`, `lang`, `ast-frontend`, `gcc-path`, `gcc-prefix`, `gcc-options`, `sysroot`, `sources`, `build-info`, `compile-db`, `build-config`, `policy`, `policy-file`, `suppress`, `severity-preset`, `severity-addition`, `extra-args`, `python-version`, `install-deps`, `dependency-source` | no | (mirror the root Action) | Forwarded straight through to the internal analysis step. `dependency-source` (G34 Phase C) is what `check-project.yml` sets per cell from the profile's own `dependency_source:`; the root Action owns its accepted-value list and its fallback to `install-deps`. |
 

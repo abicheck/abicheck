@@ -19,9 +19,8 @@
 was handed, so it can honestly claim no more than ``API_REQUEST`` for any of
 them (see :mod:`abicheck.contract_context`). This module is where the
 ``compare`` command hands over what it -- and only it -- knows: which flags
-the user really typed, which ``.abicheck.yml`` supplied a value, which
-``--profile`` filled one in, and the exit-code scheme and severity levels the
-run was actually scored with.
+the user really typed, which ``.abicheck.yml`` supplied a value, and the
+exit-code scheme and severity levels the run was actually scored with.
 
 Those inputs go through Phase 1's canonical resolver
 (:func:`~abicheck.compatibility_evaluation_frontend.resolve_compatibility_evaluation_config`),
@@ -129,30 +128,6 @@ def _suppression_source(suppression: Any, path: Any) -> Any:
     )
 
 
-def _profile_inputs(run_profile: Mapping[str, Any] | None) -> Any:
-    """A ``--profile``'s injected values, as a resolver input.
-
-    *run_profile* is what ``cli_options.apply_compare_profile`` recorded:
-    ``{"name": ..., "injected": {dest: value}}``. Only the keys the
-    configuration actually has a field for are read; the rest of a profile
-    (depth, format, ``--recommend``, ``--stat``) is execution/report surface
-    with nothing to resolve here.
-    """
-    from .compatibility_evaluation_frontend import RunProfileInputs
-
-    if not run_profile:
-        return None
-    injected = run_profile.get("injected") or {}
-    # CLI cleanup phase two PR G2: `ci-gate` now injects `severity_preset`
-    # (not the deleted `exit_code_scheme`) to get the identical severity-
-    # aware behavior -- see `RunProfileInputs`'s own docstring.
-    preset = injected.get("severity_preset")
-    return RunProfileInputs(
-        name=run_profile.get("name"),
-        severity_preset=str(preset) if preset is not None else None,
-    )
-
-
 def resolve_cli_config(
     params: Mapping[str, Any],
     *,
@@ -162,7 +137,6 @@ def resolve_cli_config(
     policy_file: Any = None,
     suppression: Any = None,
     suppress_path: Path | None = None,
-    run_profile: Mapping[str, Any] | None = None,
     policy_option: str | None = None,
     policy_path: Path | None = None,
     policy_sha256: str | None = None,
@@ -172,10 +146,11 @@ def resolve_cli_config(
     """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
 
     *policy_option* names the flag that selected ``policy`` when it was not
-    ``--policy`` -- ``--required-symbol``/``--required-symbols``, whose
+    ``--policy`` -- ``--required-symbol``, whose
     contract switches an untouched ``--policy`` to ``plugin_abi``, with
-    *policy_path*/*policy_sha256* identifying the list file when that is the
-    form used. *project_sha256* is the digest of the ``.abicheck.yml`` bytes
+    *policy_path*/*policy_sha256* identifying the ``@FILE`` form's list file
+    when that is the form used. *project_sha256* is the digest of the
+    ``.abicheck.yml`` bytes
     *project_cfg* was parsed from, so a project-supplied value names a
     revision rather than only a path.
 
@@ -202,15 +177,6 @@ def resolve_cli_config(
             "resolves as unstated rather than failing"
         )
 
-    # A profile injects its values *into the command's kwargs*, so by the time
-    # they reach here they are indistinguishable from typed ones -- and read
-    # as `EXPLICIT_CLI`, the one layer a profile must never claim. Blanked
-    # here and re-contributed at the `run_profile` tier below, which is both
-    # the honest source and the precedence D7 gives it.
-    injected = (run_profile or {}).get("injected") or {}
-    params = {
-        name: (None if name in injected else value) for name, value in params.items()
-    }
     return resolve_compatibility_evaluation_config(
         front_end=FrontEnd.CLI,
         explicit=compare_cli_inputs(
@@ -226,7 +192,6 @@ def resolve_cli_config(
         project=ProjectCompatibilityInputs.from_build_config(
             project_cfg, path=project_path, sha256=project_sha256
         ),
-        profile=_profile_inputs(run_profile),
     )
 
 
@@ -531,7 +496,6 @@ def resolve_release_pack_application_from_ctx(
     policy_option: str | None,
     policy_path: Path | None,
     policy_sha256: str | None,
-    run_profile: Mapping[str, Any] | None = None,
 ) -> Any:
     """``resolve_release_pack_application``, but reading "was this typed?"
     (and a best-effort ``--policy-file`` pre-read) off the real Click
@@ -539,13 +503,6 @@ def resolve_release_pack_application_from_ctx(
     single-pair path -- split out so the caller (``cli_compare_helpers.
     run_compare``, already at the AI-readiness file-size cap) stays a single
     call rather than this whole resolution inlined at the call site.
-
-    *run_profile* is ``ctx.meta.get(cli_options.RUN_PROFILE_META_KEY)`` --
-    read by the caller, not here: importing ``cli_options`` from this module
-    would close a real cycle back to this file (``cli_options ->
-    service_scan -> scan_engine -> cli_scan_baseline ->
-    cli_compare_helpers -> cli_compare_receipt``), the exact ``import-cycle-
-    growth`` regression this module's own "leaf" design avoids elsewhere.
 
     ``None`` when *pack_paths* is empty -- no Click/file access at all in
     that case, matching ``resolve_release_pack_application``'s own contract.
@@ -599,7 +556,6 @@ def resolve_release_pack_application_from_ctx(
             project_path=project_path,
             policy_file=loaded_policy_file,
             suppress_path=suppress,
-            run_profile=run_profile,
             policy_option=policy_option,
             policy_path=policy_path,
             policy_sha256=policy_sha256,

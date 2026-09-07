@@ -69,21 +69,22 @@ scenarios:
     test: test_sc_ci_severity_gate
 
   - id: SC-CI-STAT
-    title: One-line summary for CI logs (--profile quick)
+    title: One-line summary for CI logs (--format oneline)
     persona: CI engineer
     narrative: >
       A pipeline wants a compact, greppable one-line result in the job log
       instead of a full report. CLI cleanup phase two, PR 1 removed the
-      boolean --stat flag; --profile quick is its sole surviving one-line
-      output.
+      boolean --stat flag; --format oneline is its sole surviving one-line
+      output (originally reached only via the built-in `quick` --profile,
+      removed outright by plan Phase 7e).
     flow:
-      - abicheck compare old.json new.json --profile quick
+      - abicheck compare old.json new.json --format oneline
     expected:
       exit_code: 4
       output_contains: total
     validates: UC-WF-compare
     automated: true
-    test: test_sc_ci_quick_profile
+    test: test_sc_ci_oneline_format
 
   - id: SC-MALFORMED-INPUT
     title: Corrupt snapshot fails the run cleanly (degraded-mode contract)

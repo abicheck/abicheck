@@ -380,22 +380,24 @@ def test_sc_ci_severity_gate(tmp_path: Path) -> None:
     assert _compare(tmp_path, old, new, "--config", str(cfg)).exit_code == 0
 
 
-def test_sc_ci_quick_profile(tmp_path: Path) -> None:
-    # CLI cleanup phase two, PR 1: --stat removed, --profile quick is its
-    # sole surviving one-line-summary use.
+def test_sc_ci_oneline_format(tmp_path: Path) -> None:
+    # CLI cleanup phase two, PR 1: --stat removed, --format oneline is its
+    # sole surviving one-line-summary use (originally reached only via the
+    # built-in `quick` --profile, removed outright by plan Phase 7e and
+    # promoted to a first-class --format choice instead of losing the
+    # capability).
     res = _compare(
         tmp_path,
         _lib("1", [_fn("a"), _fn("b")]),
         _lib("2", [_fn("a")]),
-        "--profile",
-        "quick",
+        "--format",
+        "oneline",
     )
     assert res.exit_code == 4
-    # stdout, not the stderr-mixed `res.output`: `quick`'s `depth=binary`
-    # (ADR-063 Phase 8's ceiling fix) means this unscoped-headers fixture no
-    # longer resolves a public-header surface at that depth either, and that
-    # scope-fallback warning is by design routed to stderr so it never
-    # corrupts this one-line stdout contract.
+    # stdout, not the stderr-mixed `res.output`: this fixture gives no `-H`
+    # headers, so no public-header surface resolves regardless of depth,
+    # and that scope-fallback warning is by design routed to stderr so it
+    # never corrupts this one-line stdout contract.
     assert "total" in res.stdout
     assert res.stdout.count("\n") <= 1  # one-line summary
 

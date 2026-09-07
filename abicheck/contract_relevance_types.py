@@ -230,17 +230,19 @@ class SelectorLayer(str, Enum):
 
     Precedence (ADR-049 D7, highest first): ``EXPLICIT_CLI``/``API_REQUEST``
     > ``LEGACY_ALIAS`` (for the field it aliases) > ``RUN_RECIPE`` >
-    ``RUN_PROFILE`` (execution fields only) > ``PROJECT_CONFIG`` >
-    ``BUILT_IN_DEFAULT``. This set is explicitly extensible -- a new adapter
-    may need a new layer -- so it is not asserted to be exhaustive by tests,
-    only that these seven required members exist.
+    ``PROJECT_CONFIG`` > ``BUILT_IN_DEFAULT``. This set is explicitly
+    extensible -- a new adapter may need a new layer -- so it is not
+    asserted to be exhaustive by tests, only that these six required
+    members exist. (A ``RUN_PROFILE`` tier existed here until 2026-09-07:
+    ADR-068 D5 / plan Phase 7e removed its only producer, ``--profile``
+    [ADR-040 Lever 3], outright rather than replacing it, so the tier was
+    removed too -- see ADR-049's own D7 amendment note.)
     """
 
     EXPLICIT_CLI = "explicit_cli"
     API_REQUEST = "api_request"
     LEGACY_ALIAS = "legacy_alias"
     RUN_RECIPE = "run_recipe"
-    RUN_PROFILE = "run_profile"
     PROJECT_CONFIG = "project_config"
     BUILT_IN_DEFAULT = "built_in_default"
 

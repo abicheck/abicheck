@@ -69,8 +69,9 @@ real precedence bug, not just an inaccurate receipt: Codex review on #801
 reproduced the explicit-CLI case (a removed export with ``--severity-
 preset strict`` and a ``gate.severity.abi_breaking: warning`` pack wrongly
 exited 0), and the identical mechanism applies to a project-config-sourced
-value). Both tiers are safe to include for ``scan`` specifically: unlike
-``compare``, ``scan`` has no ``--profile`` option, so nothing sits between
+value). Both tiers are safe to include for ``scan`` specifically: neither
+``scan`` nor ``compare`` has a ``--profile`` option any more (ADR-068 D5 /
+plan Phase 7e removed it outright), so nothing sits between
 "explicit CLI" and "project config" here that this resolver's simpler
 precedence chain could miss, and both `ProjectCompatibilityInputs.
 from_build_config` and `resolve_compare_config` read the identical six
@@ -121,7 +122,8 @@ def resolve_scan_config(*args: Any, **kwargs: Any) -> Any:
 #: from_build_config` and `resolve_compare_config` read the identical six
 #: fields off the identical `project_cfg`/`cfg` object with the identical
 #: `explicit CLI > project config > built-in default` precedence, and
-#: `scan` has no `--profile` option (unlike `compare`) to introduce a tier
+#: neither `scan` nor `compare` has a `--profile` option any more
+#: (ADR-068 D5 / plan Phase 7e removed it outright) to introduce a tier
 #: the other resolver doesn't know about -- so, for `scan` specifically,
 #: the two resolutions cannot actually disagree on a project-config-sourced
 #: value, and blanking it left a real precedence bug: a selected gate pack

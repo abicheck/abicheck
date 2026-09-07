@@ -257,17 +257,6 @@ if TYPE_CHECKING:
 )
 @verbose_option
 @click.option(
-    "-j",
-    "--jobs",
-    "jobs",
-    type=int,
-    default=0,
-    show_default=True,
-    help="Number of parallel library comparisons (0 = auto-detect CPU count, "
-    "clamped to fit available memory -- see ABICHECK_RELEASE_JOB_MEM_GIB -- "
-    "the default). An explicit positive value is never memory-clamped.",
-)
-@click.option(
     "--instantiation-manifest",
     "manifest_path",
     type=click.Path(exists=True, path_type=Path),
@@ -374,7 +363,6 @@ def compare_release_cmd(
     include_private_dso: bool,
     keep_extracted: bool,
     verbose: bool,
-    jobs: int,
     manifest_path: Path | None,
     bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...],
@@ -554,7 +542,7 @@ def compare_release_cmd(
     # dedup_validate_overrides_warnings(): this whole release run reloads
     # the same --policy-file several times over -- the early strict-
     # suppression validation just below, the per-library fan-out (including
-    # its default `--jobs 0` ThreadPoolExecutor parallel path -- see
+    # its auto-detected (`jobs=0`) ThreadPoolExecutor parallel path -- see
     # _compare_release_parallel's own docstring for how the dedup scope
     # reaches those worker threads), and (when a probe matrix is given) the
     # matrix-result path all load it independently, so without this a
@@ -755,7 +743,10 @@ def compare_release_cmd(
                     or secondary_fmt == "junit"
                     or bundle_facts_out is not None
                 ),
-                jobs=jobs,
+                # ADR-068 D5 / plan Phase 7h: -j/--jobs removed outright --
+                # always auto-detect (and memory-clamp), never a manual
+                # override.
+                jobs=0,
                 scope_to_public_surface=scope_public_headers,
                 include_dependencies=include_dependencies,
                 severity_config=severity_config,

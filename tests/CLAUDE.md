@@ -145,9 +145,9 @@ Invariants worth stating as properties over that matrix:
   cannot change a selected comparison; input order cannot change pairing.
 - **Front-end and format parity:** equivalent *resolved* requests decide
   identically across the CLI, typed API, and Action (test at the resolved
-  request, since the CLI and Action fold in `.abicheck.yml`, `--profile`,
-  and `--pack` that a bare API call does not); JSON, Markdown, HTML, SARIF,
-  and JUnit agree on every semantic field they carry.
+  request, since the CLI and Action fold in `.abicheck.yml` and `--pack`
+  that a bare API call does not); JSON, Markdown, HTML, SARIF, and JUnit
+  agree on every semantic field they carry.
 - **No manufactured findings:** swapping *unavailable* evidence for *empty*
   evidence must fail a test; an unmatched member without inventory evidence
   is never a removal; a run with zero comparisons never asserts success.

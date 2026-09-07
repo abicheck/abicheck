@@ -1324,17 +1324,6 @@ class TestCompareDispatch:
         assert result.exit_code == 4
         assert "only apply to directory/package" in (result.stderr or "")
 
-    def test_explicit_jobs_zero_still_warns_on_single_file(self, tmp_path: Path) -> None:
-        # `--jobs 0` is the default value, but passing it explicitly is still a
-        # set-input flag the single-file path can't use, so it must warn.
-        old, new = _breaking_pair()
-        old_f = _write_snap(tmp_path / "old.json", old)
-        new_f = _write_snap(tmp_path / "new.json", new)
-        result = CliRunner().invoke(
-            main, ["compare", str(old_f), str(new_f), "--jobs", "0"]
-        )
-        assert "-j/--jobs" in (result.stderr or "")
-
 
 # ── parity: compare <dir> <dir> == compare-release <dir> <dir> (summary) ────────
 

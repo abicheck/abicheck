@@ -16,7 +16,7 @@ unresolved. Give exactly one such block.
 `"verdict"` is always the library-wide compatibility result — exactly what an
 unscoped comparison of the same pair would report, even when you also scoped
 a comparison to a named consumer or plugin host. If you did that scoping
-(e.g. with `--used-by` or `--required-symbol`/`--required-symbols`), also add
+(e.g. with `--used-by` or `--required-symbol`), also add
 `"consumer_verdict"` with that consumer's own scoped result (the same
 vocabulary as `verdict`) — the two answer different questions and can
 legitimately differ. Omit `consumer_verdict` entirely for an unscoped

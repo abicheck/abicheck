@@ -191,15 +191,20 @@ output.
 **JUnit XML**: The `show_only` parameter filters which test cases appear in the
 output. Filtered-out changes are omitted entirely.
 
-## One-line summary (`--profile quick`)
+## One-line summary (`--format oneline`)
 
 `--stat` was removed (CLI cleanup phase two, PR 1). For a compact one-line
-summary in a CI log, use the built-in `quick` profile instead:
+summary in a CI log, use `--format oneline`:
 
 ```bash
-$ abicheck compare old.json new.json --profile quick
+$ abicheck compare old.json new.json --format oneline
 BREAKING: 3 breaking, 1 risk (42 total) [12 redundant hidden]
 ```
+
+(This used to be reachable only via the built-in `quick` `--profile`;
+`--profile` was removed outright — ADR-068 D5 / plan Phase 7e — and
+`oneline` promoted to a first-class `--format` choice instead of losing the
+capability.)
 
 For a machine-readable summary, use plain `--format json` and read the
 `summary` object — it is already present in the full JSON report alongside
@@ -209,11 +214,6 @@ For a machine-readable summary, use plain `--format json` and read the
 $ abicheck compare old.json new.json --format json
 {"library": "libfoo", "verdict": "BREAKING", "summary": {...}, "changes": [...]}
 ```
-
-An explicit `--format` on the command line always overrides `--profile
-quick`'s own one-line default (`--profile quick --format json` returns the
-full JSON report above, not the one-line text) — the profile only supplies a
-default when nothing else asked for a specific format.
 
 ## `--report-mode leaf`
 

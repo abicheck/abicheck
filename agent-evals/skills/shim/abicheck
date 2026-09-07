@@ -151,7 +151,7 @@ def _is_short(option: str) -> bool:
 #: interpreter its shebang resolves to — and pinned against the real Click tree
 #: by `tests/test_skill_eval_harness.py`, so a new short option fails loudly
 #: instead of silently going unrecognized here.
-SHORT_VALUE_OPTIONS = ("-H", "-I", "-j", "-o")
+SHORT_VALUE_OPTIONS = ("-H", "-I", "-o")
 
 
 def _cluster_output(token: str) -> str | None:

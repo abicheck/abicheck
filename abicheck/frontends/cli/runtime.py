@@ -313,8 +313,8 @@ def _render_output(
 
     No ``stat``/``show_recommendation`` parameters (CLI cleanup phase two,
     PR 1): the one-line summary is reached only via ``fmt ==
-    service_render.ONELINE_FORMAT`` (the built-in ``quick`` --profile's own
-    injection). The release recommendation is unconditional for every CLI
+    service_render.ONELINE_FORMAT`` (``--format oneline``). The release
+    recommendation is unconditional for every CLI
     invocation -- achieved by explicitly passing ``show_recommendation=True``
     below, not by changing :func:`service.render_output`'s own default
     (which stays ``False``, the pre-removal Tier-2 Python API default, per
@@ -396,9 +396,9 @@ def _announce_exit_scheme(
     setting is in effect from any source, ``legacy`` otherwise, resolved
     once by the time we get here. Kept on stderr so it never pollutes the
     report on stdout, and only for the human-readable formats — machine formats
-    (json/sarif/junit) and the internal one-line format (``service_render.
-    ONELINE_FORMAT``, the built-in ``quick`` --profile's sole surviving use of
-    ``--stat``'s old one-line output) are consumed by tooling that treats the
+    (json/sarif/junit) and the one-line format (``service_render.
+    ONELINE_FORMAT``, ``--format oneline``, ``--stat``'s sole surviving
+    replacement) are consumed by tooling that treats the
     whole captured stream as data, so the banner is suppressed for those too;
     the ``fmt not in {...}`` check below already covers it without a separate
     boolean, since it isn't one of the three human-readable format names.
