@@ -67,6 +67,22 @@
 
 **Not evaluated:** 10 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `dwarf`, `python_ext`, … and 4 more
 
+
+## Surface changes
+
+**Additions** (0)
+
+- none
+
+**Removals** (0)
+
+- none
+
+**Modifications** (2)
+
+- **GLIBC_2.34** — `libc.so.6:GLIBC_2.34`
+- **libc.so.6:GLIBC** — `GLIBC_2.5` → `GLIBC_2.34`
+
 ---
 ## Legend
 

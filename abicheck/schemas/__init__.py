@@ -829,7 +829,7 @@ from typing import Any
 #:       ``contract_conflicts`` entry claimed 3.6 the same way, and
 #:       again from 3.7 to 3.8 on the next, when ADR-068 D3 / plan P2's
 #:       ``cross_source_evolution`` claimed 3.7.
-REPORT_SCHEMA_VERSION = "3.8"
+REPORT_SCHEMA_VERSION = "3.9"  #: 3.9 -- Workstream G S1's additive ``surface_changes`` object (see report/surface_changes.py).
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

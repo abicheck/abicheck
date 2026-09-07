@@ -102,6 +102,7 @@ def build_report_document(
     )
     from .disposition_audit import add_disposition_audit as _add_disposition_audit
     from .finding_evolution import add_finding_evolution as _add_finding_evolution
+    from .surface_changes import add_surface_changes as _add_surface_changes
 
     changes = list(result.changes)
     if show_only:
@@ -148,6 +149,7 @@ def build_report_document(
     )
     _add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config)
+    _add_surface_changes(d, result, changes)
     _add_finding_evolution(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)

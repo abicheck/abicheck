@@ -139,6 +139,11 @@ from .render_markdown import (
     render_severity_summary,
     render_suppression_note,
 )
+from .surface_changes import (
+    SurfaceChangeSection,
+    compute_surface_changes,
+    render_surface_changes_section,
+)
 
 
 def _reporter_markdown() -> Any:
@@ -247,6 +252,11 @@ def build_review_digest_document(
             if digest.disposition_audit is None
             else digest.disposition_audit.to_dict()
         ),
+        "surface_changes": (
+            None
+            if digest.surface_changes is None
+            else digest.surface_changes.to_dict()
+        ),
     }
     return ReportDocument.from_mapping(d)
 
@@ -276,6 +286,11 @@ def _review_digest_from_mapping(d: Mapping[str, Any]) -> ReviewDigest:
             None
             if d.get("disposition_audit") is None
             else DispositionAudit.from_dict(d["disposition_audit"])
+        ),
+        surface_changes=(
+            None
+            if d.get("surface_changes") is None
+            else SurfaceChangeSection.from_dict(d["surface_changes"])
         ),
     )
 
@@ -542,6 +557,11 @@ def build_markdown_document(
             if shared_disposition_audit is not None
             else compute_disposition_audit(result, severity_config).to_dict()
         ),
+        # Workstream G S1's "what changed / review actions" section: same
+        # already-resolved findings the severity groups above use, projected
+        # as additions/removals/modifications so a compatible run still
+        # itemizes what it added.
+        "surface_changes": compute_surface_changes(result, changes=changes).to_dict(),
         "redundancy_note": _opt_asdict(rm.compute_redundancy_note(result)),
         "suppression_note": _opt_asdict(rm.compute_suppression_note(result)),
         "out_of_surface_note": _opt_asdict(rm.compute_out_of_surface_note(result)),
@@ -574,6 +594,17 @@ def _render_disposition_audit_from_mapping(d: Any) -> list[str]:
     if not isinstance(d, Mapping):
         return []
     return render_disposition_audit_section(DispositionAudit.from_dict(d))
+
+
+def _render_surface_changes_from_mapping(d: Any) -> list[str]:
+    """Rebuild and render the surface-changes section from a document
+    mapping. Shared by all three Markdown modes, mirroring
+    :func:`_render_disposition_audit_from_mapping`; ``None``/absent renders
+    nothing, so a document built before this field existed still projects
+    cleanly."""
+    if not isinstance(d, Mapping):
+        return []
+    return render_surface_changes_section(SurfaceChangeSection.from_dict(d))
 
 
 def _suppression_note_from_mapping(
@@ -654,6 +685,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
     if d["empty_message"] is not None:
         lines.append(d["empty_message"])
     lines += _render_disposition_audit_from_mapping(d.get("disposition_audit"))
+    lines += _render_surface_changes_from_mapping(d.get("surface_changes"))
     lines += render_redundancy_note(
         None if d["redundancy_note"] is None else RedundancyNote(**d["redundancy_note"])
     )

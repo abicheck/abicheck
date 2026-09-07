@@ -42,6 +42,21 @@
 
 **Not evaluated:** 19 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 13 more
 
+
+## Surface changes
+
+**Additions** (1)
+
+- **Point** — Field added: Point::z
+
+**Removals** (0)
+
+- none
+
+**Modifications** (1)
+
+- **Point** — `64` → `96`
+
 ## Root Causes (2)
 
 ### `Point` (1 finding)

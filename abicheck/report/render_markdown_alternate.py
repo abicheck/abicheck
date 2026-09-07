@@ -99,6 +99,11 @@ from .render_markdown_document import (
     _resolve_displayed_changes,
     _suppression_note_from_mapping,
 )
+from .surface_changes import (
+    SurfaceChangeSection,
+    compute_surface_changes,
+    render_surface_changes_section,
+)
 
 
 def _render_leaf_type_change_row(row: Mapping[str, Any]) -> list[str]:
@@ -173,6 +178,10 @@ def _view_preamble_mapping(
         "disposition_audit": compute_disposition_audit(
             result, severity_config
         ).to_dict(),
+        # Same "what changed / review actions" section the full view and
+        # the digest carry (workstream G S1) -- one preamble, both alternate
+        # modes.
+        "surface_changes": compute_surface_changes(result, changes=changes).to_dict(),
     }
     return d, changes
 
@@ -207,6 +216,9 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
     audit = d.get("disposition_audit")
     if isinstance(audit, Mapping):
         lines += render_disposition_audit_section(DispositionAudit.from_dict(audit))
+    surface = d.get("surface_changes")
+    if isinstance(surface, Mapping):
+        lines += render_surface_changes_section(SurfaceChangeSection.from_dict(surface))
     return lines
 
 

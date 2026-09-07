@@ -193,6 +193,14 @@ class TestHundredSuppressedRemovals:
             assert block["detected_total"] == 100
             assert block["effective_total"] == 0
 
+        # Workstream G S1's "what changed" section reads the post-disposition
+        # (visible) findings, not the ledger -- a fully-suppressed run has
+        # nothing left to itemize there, which is a different, complementary
+        # fact from the audit's own raw 100/effective 0 above, not a
+        # contradiction of it.
+        full_report = json.loads(reporter.to_json(result))
+        assert full_report["surface_changes"]["total"] == 0
+
         comment = render_comment(build_model(json.loads(reporter.to_json(result))))
         assert "100 detected" in comment
         assert "0 gating" in comment

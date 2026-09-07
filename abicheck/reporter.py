@@ -55,6 +55,7 @@ from .report.disposition_audit import add_disposition_audit as _add_disposition_
 from .report.finding_evolution import add_finding_evolution as _add_finding_evolution
 from .report.render_json import render_json
 from .report.scoped_gate import ScopedGateChangeHelpers
+from .report.surface_changes import add_surface_changes as _add_surface_changes
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
 from .reporter_contract_blocks import add_contract_context as _add_contract_context
@@ -544,6 +545,7 @@ def _to_json_leaf(
     # ADR-067 D3: a compact view may collapse detail; it may not omit the
     # raw-versus-effective counts.
     _add_disposition_audit(d, result, severity_config)
+    _add_surface_changes(d, result, changes)
     _add_finding_evolution(d, result)
     _add_check_identity(d, result)
     gate = gate_decision_for_result(result, severity_config)
@@ -775,6 +777,7 @@ def _to_json_root_cause(
         d["pattern_modulations"] = result.pattern_modulations
     _add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config)
+    _add_surface_changes(d, result, changes)
     _add_finding_evolution(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)

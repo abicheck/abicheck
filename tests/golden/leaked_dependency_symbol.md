@@ -53,6 +53,21 @@
 
 **Not evaluated:** 10 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `dwarf`, `python_ext`, … and 4 more
 
+
+## Surface changes
+
+**Additions** (0)
+
+- none
+
+**Removals** (0)
+
+- none
+
+**Modifications** (1)
+
+- **_ZNSt6thread8_M_startEv** — `libstdc++.so.6`
+
 ---
 ## Legend
 
