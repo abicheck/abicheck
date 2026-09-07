@@ -37,6 +37,7 @@ points one way only — closing reads recording, never the reverse.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from .disposition_ledger import (
@@ -98,6 +99,39 @@ _POLICY_OVERLAY_KINDS = frozenset(
         "suppression_reachability_unknown",
     }
 )
+
+
+def _resolve_acknowledgments(
+    ledger: DispositionLedger,
+    acknowledgments: object | None,
+    *,
+    component: str | None = None,
+    release_label: str | None = None,
+) -> None:
+    """Fill in ``acknowledged_by`` (ADR-067 D5/C-S3) -- the acknowledgment
+    counterpart of ``DispositionLedger.resolve_reclassifications``, living
+    here rather than there purely for that leaf's own 800-line production
+    cap (same reason :func:`conservation_holds` lives here). Reaches
+    ``ledger``'s private record/anchor lists directly, the same private
+    access this module's other helpers already use (``_GateContext``/
+    ``_kept_disposition``). Duck-typed (only ``.evaluate`` is called) so no
+    new import is needed; a no-op when *acknowledgments* is ``None``/empty
+    (every pre-existing caller).
+    """
+    evaluate = getattr(acknowledgments, "evaluate", None)
+    if not callable(evaluate):
+        return
+    for index, (record, change) in enumerate(
+        zip(ledger._records, ledger._anchors)  # noqa: SLF001
+    ):
+        if record.acknowledged_by is not None:
+            continue  # already resolved (e.g. a re-closed scoped record)
+        ack = evaluate(change, component=component, release_label=release_label)
+        if ack is None:
+            continue
+        record_id_fn = getattr(ack, "record_id", None)
+        acknowledged_by = record_id_fn() if callable(record_id_fn) else str(ack)
+        ledger._records[index] = replace(record, acknowledged_by=acknowledged_by)  # noqa: SLF001
 
 
 def _is_policy_overlay(change: object) -> bool:
@@ -363,6 +397,21 @@ def finalize_ledger(
         )
     ledger.resolve_verdict_classes(result)
     ledger.resolve_reclassifications(result)
+    # ADR-067 D5/D6/C-S3: read generically off `result` -- a run that never
+    # supplied `acknowledgments` (every pre-existing caller) is a no-op.
+    acks = getattr(result, "acknowledgments", None)
+    _resolve_acknowledgments(
+        ledger, acks,
+        component=getattr(result, "library", None),
+        release_label=getattr(result, "new_version", None),
+    )
+    if acks is not None:
+        from .acknowledgment_gate import evaluate_unacknowledged_additions_for_result
+
+        result.unacknowledged_additions_review = evaluate_unacknowledged_additions_for_result(
+            result, acks, getattr(result.policy_file, "acknowledgment_policy", None),
+            component=result.library, release_label=result.new_version,
+        )
     return ledger
 
 
@@ -451,6 +500,12 @@ def close_consumer_scope(
     ledger.apply_scope(result, gating)
     ledger.resolve_verdict_classes(result)
     ledger.resolve_reclassifications(result)
+    _resolve_acknowledgments(
+        ledger,
+        getattr(result, "acknowledgments", None),
+        component=getattr(result, "library", None),
+        release_label=getattr(result, "new_version", None),
+    )
 
 
 def ledger_for(
@@ -530,6 +585,40 @@ def reclassified_total(ledger: DispositionLedger) -> int:
     is still ``suppressed``.
     """
     return sum(1 for r in ledger.records if r.reclassified_by is not None)
+
+
+def acknowledgments(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:
+    """ADR-067 D5/C-S3: distinct acknowledgment record ids with the number of
+    findings each covered, ordered by first appearance -- the acknowledgment
+    counterpart of :func:`reclassifications` (and :meth:`DispositionLedger.
+    rules`'s rule tally for suppression), for the overlay attribute a finding
+    carries independently of its terminal disposition (an acknowledged
+    finding keeps its own disposition and verdict class; only the
+    acknowledgment overlay is new).
+    """
+    ordered: list[str] = []
+    tally: dict[str, int] = {}
+    for record in ledger.records:
+        if record.acknowledged_by is None:
+            continue
+        if record.acknowledged_by not in tally:
+            ordered.append(record.acknowledged_by)
+            tally[record.acknowledged_by] = 0
+        tally[record.acknowledged_by] += 1
+    return tuple((record_id, tally[record_id]) for record_id in ordered)
+
+
+def acknowledged_total(ledger: DispositionLedger) -> int:
+    """Findings an :class:`~abicheck.policy.acknowledgment.Acknowledgment`
+    record matched.
+
+    Not part of :meth:`DispositionLedger.counts` or
+    :attr:`DispositionLedger.detected_total`: like ``acknowledged_by``
+    itself, this is an overlay fact about a finding that still carries its
+    own terminal disposition (D2) -- an acknowledged-and-suppressed finding
+    is still ``suppressed``.
+    """
+    return sum(1 for r in ledger.records if r.acknowledged_by is not None)
 
 
 #: The two dispositions a contract/scope decision -- as opposed to

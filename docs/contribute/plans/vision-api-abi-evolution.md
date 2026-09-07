@@ -357,9 +357,28 @@ never selected) is carried by each member's own scalar `disposition_audit`
 block folding in its own `not_evaluated` detector rows (S1's mechanism,
 unchanged) — the fold above sums those rows across members rather than
 re-deriving disabled-detector state at the bundle/aggregate level.
-S3: acknowledgment records (YAML, same
-loader), the additions review gate (`allow` default), shared record ids
-with B. S4: policy-delta and suppression-growth warnings.
+**S3 landed:** acknowledgment records
+(`abicheck/policy/acknowledgment.py`'s `Acknowledgment`/`AcknowledgmentList`
+— same YAML envelope and `SelectorSet` grammar as suppression, but bounded
+to `finding_id`/exact `symbol` plus a `component`/`baseline`/`candidate`
+release scope; every broad suppression-only selector is a hard load error,
+and an ambiguous match is a hard error rather than a nearest-match
+resolution — both enforce D5 and vision.md's "a baseline refresh or a broad
+ignore rule is not an acknowledgment" invariant); the additions review gate
+(`abicheck/policy/acknowledgment_gate.py`, `allow` default, wired as a
+fourth orthogonal exit axis via `fold_additions_review_exit`); acknowledgment
+recorded through the same ledger primitive suppression/reclassification
+already use (`DispositionLedger.resolve_acknowledgments`,
+`DispositionRecord.acknowledged_by`); shared record ids with B
+(`Acknowledgment.record_id`'s `component`/`baseline`/`candidate` scheme
+matches `workflows.history.HistoryEntry.version`'s own labels, without
+waiting on B-S2). Report schema 3.9 -> 3.10 (additive: `disposition_audit`
+gains `acknowledged_total`/`acknowledgments`/
+`unacknowledged_additions_review`). Engine-level wiring only
+(`checker.compare(acknowledgments=...)`, the CLI exit-code fold) — no
+native `compare`/`scan` CLI flag to load an acknowledgment document from a
+path yet; that front-end surface is a follow-up. S4: policy-delta and
+suppression-growth warnings.
 
 ### D. Optional prebuilt-consumer lifecycle — amend ADR-005/047/052/057, extend G29/G30
 

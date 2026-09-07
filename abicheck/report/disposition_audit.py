@@ -46,6 +46,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from ..policy.disposition_close import (
+    acknowledged_total as _acknowledged_total,
+    acknowledgments as _acknowledgments,
     ledger_for,
     reclassifications as _reclassifications,
     reclassified_total as _reclassified_total,
@@ -117,6 +119,20 @@ class DispositionAudit:
     #: ``out_of_contract``/``unresolved_relevance`` record -- :attr:`rules`'s
     #: counterpart for a scope/contract exclusion.
     scope_reasons: tuple[tuple[str, int], ...] = ()
+    #: ADR-067 D5/C-S3: findings an :class:`~abicheck.policy.acknowledgment.
+    #: Acknowledgment` record matched -- an overlay fact independent of
+    #: `counts`, like :attr:`reclassified_total` (an acknowledged finding
+    #: keeps its own terminal disposition).
+    acknowledged_total: int = 0
+    #: ``(acknowledgment record id, matched count)`` -- :attr:`rules`'s
+    #: counterpart for acknowledgment.
+    acknowledgments: tuple[tuple[str, int], ...] = ()
+    #: ADR-067 D6/C-S3: the additions-review gate's own evaluated result
+    #: (``AdditionsReviewResult.to_dict()``), or ``None`` when this run never
+    #: supplied an acknowledgment document to evaluate against -- the
+    #: "capability that was never exercised" convention this module already
+    #: applies to `not_evaluated_detectors`.
+    unacknowledged_additions_review: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -139,6 +155,12 @@ class DispositionAudit:
                 {"reason_code": reason, "matched_count": count}
                 for reason, count in self.scope_reasons
             ],
+            "acknowledged_total": self.acknowledged_total,
+            "acknowledgments": [
+                {"record_id": record_id, "matched_count": count}
+                for record_id, count in self.acknowledgments
+            ],
+            "unacknowledged_additions_review": self.unacknowledged_additions_review,
         }
 
     @classmethod
@@ -179,7 +201,27 @@ class DispositionAudit:
                 (str(row["reason_code"]), int(row.get("matched_count", 0)))
                 for row in d.get("scope_reasons") or ()
             ),
+            acknowledged_total=int(d.get("acknowledged_total") or 0),
+            acknowledgments=tuple(
+                (str(row["record_id"]), int(row.get("matched_count", 0)))
+                for row in d.get("acknowledgments") or ()
+            ),
+            unacknowledged_additions_review=cast(
+                "dict[str, object] | None", d.get("unacknowledged_additions_review")
+            ),
         )
+
+
+def _additions_review_dict(result: DiffResult) -> dict[str, object] | None:
+    """*result*'s own persisted additions-review, read duck-typed.
+
+    ``None`` for every run that never supplied ``acknowledgments=...`` to
+    ``checker.compare()`` -- the same "capability never exercised" convention
+    the ``not_evaluated_detectors`` field already applies.
+    """
+    review = getattr(result, "unacknowledged_additions_review", None)
+    to_dict = getattr(review, "to_dict", None)
+    return to_dict() if callable(to_dict) else None
 
 
 def compute_disposition_audit(
@@ -212,6 +254,9 @@ def compute_disposition_audit(
         reclassified_total=_reclassified_total(ledger),
         reclassifications=_reclassifications(ledger),
         scope_reasons=_scope_reasons(ledger),
+        acknowledged_total=_acknowledged_total(ledger),
+        acknowledgments=_acknowledgments(ledger),
+        unacknowledged_additions_review=_additions_review_dict(result),
     )
 
 
@@ -245,6 +290,7 @@ def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAu
     effective_total = 0
     policy_overlays = 0
     reclassified_total = 0
+    acknowledged_total = 0
     counts: dict[str, int] = {d.value: 0 for d in Disposition}
     rule_order: list[RuleProvenance] = []
     rule_tally: dict[RuleProvenance, int] = {}
@@ -252,13 +298,18 @@ def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAu
     reclass_tally: dict[str, int] = {}
     reason_order: list[str] = []
     reason_tally: dict[str, int] = {}
+    ack_order: list[str] = []
+    ack_tally: dict[str, int] = {}
     detector_order: list[str] = []
     detectors: dict[str, NotEvaluatedDetector] = {}
+    unacknowledged_gate_contribution = 0
+    any_additions_review = False
     for audit in audits:
         detected_total += audit.detected_total
         effective_total += audit.effective_total
         policy_overlays += audit.policy_overlays
         reclassified_total += audit.reclassified_total
+        acknowledged_total += audit.acknowledged_total
         for name, count in audit.counts:
             counts[name] = counts.get(name, 0) + count
         for rule, count in audit.rules:
@@ -276,6 +327,23 @@ def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAu
                 reason_order.append(reason)
                 reason_tally[reason] = 0
             reason_tally[reason] += count
+        for record_id, count in audit.acknowledgments:
+            if record_id not in ack_tally:
+                ack_order.append(record_id)
+                ack_tally[record_id] = 0
+            ack_tally[record_id] += count
+        if audit.unacknowledged_additions_review is not None:
+            any_additions_review = True
+            unacknowledged_gate_contribution = max(
+                unacknowledged_gate_contribution,
+                int(
+                    cast(
+                        "int",
+                        audit.unacknowledged_additions_review.get("gate_contribution")
+                        or 0,
+                    )
+                ),
+            )
         for det in audit.not_evaluated_detectors:
             if det.name not in detectors:
                 detector_order.append(det.name)
@@ -292,6 +360,19 @@ def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAu
             (rule_id, reclass_tally[rule_id]) for rule_id in reclass_order
         ),
         scope_reasons=tuple((reason, reason_tally[reason]) for reason in reason_order),
+        acknowledged_total=acknowledged_total,
+        acknowledgments=tuple((rid, ack_tally[rid]) for rid in ack_order),
+        # A folded, orthogonal ``0``/``1`` -- matching how every other axis
+        # here (counts, totals) is a plain sum-or-max fold of a conserved
+        # per-member fact, per `fold_disposition_audits`'s own docstring.
+        # `None` (never a synthetic zero dict) when no member carried a
+        # review at all, so "no member ever evaluated this" stays
+        # distinguishable from "every member evaluated it and found nothing".
+        unacknowledged_additions_review=(
+            {"gate_contribution": unacknowledged_gate_contribution}
+            if any_additions_review
+            else None
+        ),
     )
 
 
@@ -358,6 +439,15 @@ def render_disposition_audit_note(audit: DispositionAudit) -> str:
         parts.append(f"{audit.policy_overlays} policy overlay(s)")
     if audit.reclassified_total:
         parts.append(f"{audit.reclassified_total} reclassified")
+    if audit.acknowledged_total:
+        parts.append(f"{audit.acknowledged_total} acknowledged")
+    if audit.unacknowledged_additions_review:
+        unacked = cast(
+            "list[object]",
+            audit.unacknowledged_additions_review.get("unacknowledged") or [],
+        )
+        if unacked:
+            parts.append(f"{len(unacked)} unacknowledged addition(s)")
     if audit.not_evaluated_detectors:
         parts.append(f"{len(audit.not_evaluated_detectors)} detector(s) not evaluated")
     if (
@@ -365,6 +455,7 @@ def render_disposition_audit_note(audit: DispositionAudit) -> str:
         and not audit.not_evaluated_detectors
         and not audit.policy_overlays
         and not audit.reclassified_total
+        and not audit.acknowledged_total
     ):
         # Nothing detected and every detector ran: the counts are true but say
         # nothing the line beside them ("no changes (0 total)") does not
@@ -421,6 +512,30 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
         for reason, count in audit.scope_reasons:
             lines.append(f"- `{reason}` — {count} finding(s)")
         lines.append("")
+    if audit.acknowledgments:
+        lines.append(
+            f"**Acknowledged:** {audit.acknowledged_total} "
+            "(keeps its verdict class and gate contribution; ADR-067 D5)"
+        )
+        lines.append("")
+        for record_id, count in audit.acknowledgments:
+            lines.append(f"- `{record_id}` — {count} finding(s)")
+        lines.append("")
+    if audit.unacknowledged_additions_review:
+        review = audit.unacknowledged_additions_review
+        policy = review.get("policy", "allow")
+        unacked = cast("list[dict[str, object]]", review.get("unacknowledged") or [])
+        if unacked:
+            lines.append(
+                f"**Unacknowledged public additions ({policy}):** {len(unacked)} "
+                "(ADR-067 D6 — an orthogonal review gate; never reclassifies "
+                "the addition)"
+            )
+            lines.append("")
+            for entry in unacked:
+                symbol = entry.get("symbol") or "?"
+                lines.append(f"- `{entry.get('kind')}`: `{symbol}`")
+            lines.append("")
     if audit.not_evaluated_detectors:
         # Collapsed to one line on purpose: D3 requires the *state* and its
         # count in every view, and each detector's own reason is already the

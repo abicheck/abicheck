@@ -595,6 +595,25 @@
             "type": "object",
             "additionalProperties": true
           }
+        },
+        "acknowledged_total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Schema 3.10 (ADR-067 D5/C-S3): findings an Acknowledgment record matched. An overlay fact independent of `counts`/`detected_total`, like `reclassified_total` -- an acknowledged finding keeps its own terminal disposition and verdict class.",
+          "default": 0
+        },
+        "acknowledgments": {
+          "type": "array",
+          "description": "Schema 3.10: distinct acknowledgment record ids with the number of findings each covered -- `reclassifications`'s counterpart for the acknowledgment overlay.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "unacknowledged_additions_review": {
+          "type": ["object", "null"],
+          "description": "Schema 3.10 (ADR-067 D6): the additions-review gate's own evaluated result (policy allow/warn/block, the unacknowledged public additions found, and the orthogonal 0/1 gate_contribution), or null when this run never supplied an acknowledgment document to evaluate against.",
+          "additionalProperties": true
         }
       }
     },
