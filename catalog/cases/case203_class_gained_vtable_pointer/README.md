@@ -1,0 +1,94 @@
+# Case 203: Class Gained a Vtable Pointer
+
+**Category:** Breaking | **Verdict:** ❌ BREAKING
+
+## Verdict and consumer impact
+
+`Handle::close()` becomes `virtual` — the class's *first* virtual member.
+The compiler responds by giving `Handle` a vtable pointer at offset 0, so
+`sizeof(Handle)` grows from 4 to 16 bytes, its alignment rises from 4 to 8,
+and `id_` moves from offset 0 to offset 8. Every consumer that embeds a
+`Handle` by value, derives from it, or allocates one on its own stack was
+compiled for the old, smaller, vptr-less layout.
+
+The existing vtable cases in the catalog all start from an
+*already-polymorphic* class and change its slot set; this one crosses the
+non-polymorphic → polymorphic boundary, which is the mechanism
+`vptr_introduced` names. Its negative control is
+[`case204_class_gained_non_virtual_method`](../case204_class_gained_non_virtual_method/README.md),
+where the same class gains a method that is *not* virtual and therefore adds
+no vptr. The pair proves two things about these two fixtures: the first
+virtual function is flagged, and an ordinary method addition is not.
+
+## Old/new diff
+
+| v1.h | v2.h |
+|------|------|
+| `void close();` | `virtual void close();` |
+
+## abicheck command
+
+```bash
+g++ -shared -fPIC -g v1.cpp -o libv1.so
+g++ -shared -fPIC -g v2.cpp -o libv2.so
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+vptr_introduced: 'Handle' gained a vtable pointer (became polymorphic).
+type_size_changed: Size changed: Handle (32 → 128 bits)
+type_field_offset_changed: Field offset changed: Handle::id_ (0 → 64 bits)
+```
+
+(`type_alignment_changed`, `type_vtable_changed` and `func_virtual_added`
+also fire, along with `imported_symbol_added` for the `type_info` vtable the
+new polymorphic class pulls in from `libstdc++`.)
+
+## Minimum evidence
+
+`min_evidence: L1` — a `-g` build records the record's size, its members'
+offsets and its vtable holder in DWARF, which is everything the finding
+rests on. L0 sees new `_ZTV`/`_ZTI` symbols appear but cannot attribute the
+member-offset shift to them.
+
+## Why abicheck catches it
+
+`diff_types.py` compares the matched `Handle` records' size, alignment and
+per-member offsets, and `vptr_introduced` is emitted specifically for the
+non-polymorphic → polymorphic transition so the *cause* of the shift is named
+rather than left as three unrelated layout findings. That distinction is what
+makes the finding actionable: the fix is not "pad the struct" but "do not add
+the first virtual function to a released non-polymorphic type."
+
+## Runtime failure demonstration
+
+**Severity: stack corruption / misread members.**
+
+```bash
+g++ -shared -fPIC -g v1.cpp -o libv1.so
+g++ -g app.cpp -L. -lv1 -Wl,-rpath,. -o app
+./app
+# → via factory: id() = 7
+
+g++ -shared -fPIC -g v2.cpp -o libv1.so   # swap in v2, no recompile
+./app
+# → via factory: id() = <garbage>, and the stack canary check may trip
+```
+
+## Safe redesign
+
+Decide polymorphism at the point a type is first published. If a type may
+ever need virtual dispatch, give it a virtual destructor from release one
+(paying the vptr cost up front); otherwise keep it non-polymorphic and add
+behaviour through free functions or a separate interface type.
+
+## Cross-tool comparison
+
+`abidiff` reports the size, alignment and member-offset changes plus the new
+vtable; ABICC reports "size of the type has changed" and the added virtual
+method. Neither names the non-polymorphic → polymorphic transition as its
+own finding, which is what `vptr_introduced` adds.

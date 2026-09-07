@@ -3900,6 +3900,184 @@
    "platforms": [
     "linux"
    ]
+  },
+  "case198_public_struct_field_reorder": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "The positive control paired with case120_internal_struct_reordered_scoped. A public struct's first two fields swap places: nothing is added or removed and sizeof(Record) is unchanged, so a size-only check reports a clean release, but every consumer compiled against v1 reads `id` from an offset that now holds `flags`. case120 applies the identical reorder to a type that is not on the public surface and must stay NO_CHANGE under --scope-public-headers; the pair is a positive/negative control for this one mechanism, not a corpus-wide claim.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "type_field_offset_changed"
+   ],
+   "min_evidence": "L1",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case199_public_function_parameter_added": {
+   "abi_break": true,
+   "api_break": true,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "The positive control for a parameter-count (arity) change, paired with case200_new_entry_point_instead_of_parameter_added. chan_open() gains a second parameter; the C export name carries no arity so the link still succeeds, but an already-compiled caller passes one argument to a callee that reads two. Every other signature case in the catalog changes a parameter's type -- this one changes the count.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "func_params_changed"
+   ],
+   "min_evidence": "L1",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case200_new_entry_point_instead_of_parameter_added": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "addition",
+   "description": "The negative control paired with case199_public_function_parameter_added: the same new `flags` capability is delivered as a second entry point (chan_open_ex) with chan_open()'s own arity left intact, so func_params_changed must not fire and the release is a pure addition.",
+   "expected": "COMPATIBLE",
+   "expected_absent_kinds": [
+    "func_params_changed"
+   ],
+   "expected_kinds": [
+    "func_added"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case201_public_function_parameters_reordered": {
+   "abi_break": true,
+   "api_break": true,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "The positive control for a parameter-order change, paired with case202_public_header_declaration_order_changed. plot_point()'s (int, double) parameters swap places: the C export name is unchanged so the link succeeds, but on x86-64 System V the integer and the double travel in different register files, so both arguments are read from slots the old caller never wrote. Deliberately uses two differently-typed parameters -- a same-typed reorder produces an identical signature at every evidence tier and is a documented blind spot for every static tool, not something this fixture claims to cover.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "func_params_changed"
+   ],
+   "min_evidence": "L1",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case202_public_header_declaration_order_changed": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "The negative control paired with case201_public_function_parameters_reordered: only the order of two declarations in the public header (and of their definitions in the .c file) changes, with no parameter list, type, or export touched. Separates the two things 'reordering' can mean in a header -- an ordered calling contract (case201, flagged) from a sequence of declarations (this case, not flagged). A diff keyed on source position rather than on declaration identity would report two spurious findings here.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "func_params_changed"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case203_class_gained_vtable_pointer": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "The positive control for the non-polymorphic to polymorphic transition, paired with case204_class_gained_non_virtual_method. Handle::close() becomes the class's first virtual member, so the compiler inserts a vtable pointer: sizeof grows from 4 to 16 bytes, alignment rises from 4 to 8, and id_ moves from offset 0 to 8. Every existing vtable case in the catalog starts from an already-polymorphic class and changes its slot set; this one crosses the boundary vptr_introduced names.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "vptr_introduced",
+    "type_size_changed",
+    "type_field_offset_changed"
+   ],
+   "min_evidence": "L1",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case204_class_gained_non_virtual_method": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "addition",
+   "description": "The negative control paired with case203_class_gained_vtable_pointer: the same class gains a member function that is NOT virtual, so no vtable pointer is inserted and the record's size, alignment and member offsets are unchanged. vptr_introduced, type_size_changed and type_field_offset_changed must all stay absent.",
+   "expected": "COMPATIBLE",
+   "expected_absent_kinds": [
+    "vptr_introduced",
+    "type_size_changed",
+    "type_field_offset_changed"
+   ],
+   "expected_kinds": [
+    "func_added"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case205_public_function_marked_deprecated": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "quality",
+   "description": "The positive control for a deprecation-attribute addition, paired with case206_deprecation_documented_without_attribute. legacy_open() gains __attribute__((deprecated)): the symbol and its signature are unchanged so nothing breaks, but the library has made a machine-readable scheduling statement that has to survive into a release report rather than being filtered out as 'no ABI change'. Visible only at L2 -- the attribute leaves no trace in the export table or DWARF.",
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
+    "func_deprecated_added"
+   ],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case206_deprecation_documented_without_attribute": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "no_change",
+   "description": "The negative control paired with case205_public_function_marked_deprecated: the same deprecation is announced only in a header comment, with no __attribute__((deprecated)) and no [[deprecated]]. The preprocessor discards the comment before any AST exists, so func_deprecated_added must not fire -- a text-scanning heuristic looking for the word 'deprecated' near a declaration would invent a finding no consumer can act on. bad_practice is true: the announcement reaches a human reading the header and nothing else in the toolchain.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "func_deprecated_added"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case207_pointer_parameter_gained_restrict": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "quality",
+   "description": "The positive control for a restrict-qualifier change on a published parameter, paired with case208_restrict_added_to_definition_only. blend()'s two pointer parameters gain restrict: the calling convention is untouched, but the CALLER's obligation is tightened -- passing overlapping buffers, legal under v1, is undefined under v2, and the callee may vectorise on that promise. The mirror image of case186_c_api_pointee_const_abi_neutral, where a qualifier change tightened what the callee promises (safe, and fully suppressed). bad_practice is true: strengthening a precondition on an already-published entry point is the hazard the finding exists to surface.",
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
+    "param_restrict_changed"
+   ],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case208_restrict_added_to_definition_only": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "The negative control paired with case207_pointer_parameter_gained_restrict: restrict is added to blend()'s DEFINITION while the declaration in the public header is left unchanged, so the contract consumers compile against is unchanged and param_restrict_changed must not fire. Pins which artifact abicheck treats as the contract -- the header a consumer compiles against, not the source file the library happens to build from.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "param_restrict_changed"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ]
   }
  },
  "version": "4",

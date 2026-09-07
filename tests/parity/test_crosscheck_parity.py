@@ -107,28 +107,17 @@ _SCENARIOS: dict[str, tuple[object, str]] = {
 }
 
 
-#: Checks already migrated onto the FindingEvolution model (plan §6 Phase
-#: 2a) -- no longer "scan-only", so they're excluded from the generic
-#: scan-only-capability loop below and covered by their own dedicated
-#: parity test instead (see ``test_migrated_checks_now_have_compare_
-#: parity``). Kept in lockstep with ``abicheck.workflows.
-#: crosscheck_evolution.MIGRATED_CROSSCHECKS`` by that test.
-_MIGRATED_CROSSCHECKS = {"private_header_leak"}
-
-
 def test_scenarios_cover_every_crosscheck() -> None:
     """Guard against silently dropping a check from the corpus above."""
     from abicheck.buildsource.crosscheck import ALL_CHECKS
 
     assert set(_SCENARIOS) == set(ALL_CHECKS)
-    # Every one of these NOT YET migrated must also be a registered,
-    # phase-owned gap -- otherwise a real loss here would (correctly) fail
-    # as "unexplained". A migrated check is deliberately excluded: it's no
-    # longer scan-only, so it has no EXPECTED_GAPS row to check against.
-    assert (set(_SCENARIOS) - _MIGRATED_CROSSCHECKS) <= set(EXPECTED_GAPS)
+    # Every one of these must also be a registered, phase-owned gap --
+    # otherwise a real loss here would (correctly) fail as "unexplained".
+    assert set(_SCENARIOS) <= set(EXPECTED_GAPS)
 
 
-@pytest.mark.parametrize("check_name", sorted(set(_SCENARIOS) - _MIGRATED_CROSSCHECKS))
+@pytest.mark.parametrize("check_name", sorted(_SCENARIOS))
 def test_crosscheck_is_scan_only(check_name: str, tmp_path: Path) -> None:
     factory, source = _SCENARIOS[check_name]
     snapshot = factory()
@@ -174,30 +163,3 @@ def test_findings_carry_resolved_identity_severity_and_evidence() -> None:
     assert finding.identity, "a crosscheck finding must resolve to a real symbol"
     assert finding.severity == "COMPATIBLE_WITH_RISK"
     assert finding.evidence_refs, "expected at least one corroborating provider"
-
-
-def test_migrated_checks_now_have_compare_parity(tmp_path: Path) -> None:
-    """plan §5 P2 / §6 Phase 2a: ``private_header_leak`` is no longer
-    ``scan``-only -- ``compare`` now reproduces it (evolution-stated) when
-    the same evidence is self-compared. See
-    ``tests/parity/test_evolution_state_gap.py`` for the real F-8/F-9
-    (introduced-vs-not_evaluated, resolved) acceptance tests; this is only
-    the parity-harness half: the *kind* is no longer scan-only.
-    """
-    from abicheck.workflows.crosscheck_evolution import MIGRATED_CROSSCHECKS
-
-    assert set(MIGRATED_CROSSCHECKS) == _MIGRATED_CROSSCHECKS
-    for check_name in MIGRATED_CROSSCHECKS:
-        factory, source = _SCENARIOS[check_name]
-        snapshot = factory()
-        scan_findings = crosscheck_finding_set(snapshot)
-        assert check_name in kinds_of(scan_findings), (
-            f"fixture regression: {source} no longer makes run_crosschecks "
-            f"produce {check_name!r}"
-        )
-        snap_path = write_snapshot(snapshot, tmp_path / f"{check_name}.abi.json")
-        compare_findings = compare_finding_set(snap_path, snap_path)
-        assert check_name in kinds_of(compare_findings), (
-            f"{check_name!r} should now be reproduced by `compare` "
-            f"(self-compared {source}) -- migration regression"
-        )

@@ -780,17 +780,7 @@ from typing import Any
 #:       a dedicated N>1-comparison caller (``policy.finding_evolution``,
 #:       not yet wired into any CLI command in this phase). Additive only:
 #:       no existing key changes shape or meaning, and no verdict, gate, or
-#:       exit code moves. Plan §5 P2 / ADR-068 D3 (a later PR, same schema
-#:       version -- no shape change) adds the *first* real, non-default
-#:       counts: a one-sided check migrated onto ``compare``'s OLD-vs-NEW
-#:       pipeline (``private_header_leak``, via
-#:       ``abicheck.workflows.crosscheck_evolution.MIGRATED_CROSSCHECKS``)
-#:       now stamps ``Change.evolution`` with a real
-#:       ``introduced``/``resolved``/``persistent``/``not_evaluated`` value
-#:       for its own findings, so this block's counts reflect that check's
-#:       real per-side evidence-evaluation outcome instead of always reading
-#:       ``not_evaluated: <total>``. Every other, unmigrated finding kind is
-#:       unaffected.
+#:       exit code moves.
 #: 3.6 -- Workstream E slice S3: optional ``contract_conflicts`` array
 #:       alongside ``contract_context`` -- multi-source contract conflicts,
 #:       both disagreeing sources' claims kept (ADR-067). Same opt-in gate
@@ -800,7 +790,46 @@ from typing import Any
 #:       ``finding_evolution`` object (same "renumber, don't reuse"
 #:       convention as the 2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2/3.4
 #:       entries above).
-REPORT_SCHEMA_VERSION = "3.6"
+#: 3.7 -- ADR-068 D3 / plan P2, merged onto Phase 1 item 2's already-landed
+#:       3.5 and workstream E slice S3's 3.6 (renumbered from a conflicting
+#:       3.6 this branch had independently claimed, same "renumber, don't
+#:       reuse" convention as the 2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2/
+#:       3.4/3.6 entries above): ``compare(..., cross_source_checks=True)``
+#:       stamps a ``change``'s ``cross_source_evolution`` (introduced/
+#:       resolved/persistent/not_evaluated -- ``CrossSourceEvolution``,
+#:       deliberately distinct from the cross-comparison-chain
+#:       ``FindingEvolution``/``finding_evolution`` object 3.5 above) and an
+#:       additive top-level ``cross_source_evolution`` per-state count
+#:       object; off by default, never changes the finding's default
+#:       verdict. A later PR (same schema version -- no shape change) adds
+#:       a second check onto this exact mechanism, ``private_header_leak``
+#:       (plan §5 P2 / §3 #3-#4), generalizing
+#:       ``workflows.cross_source_evolution``'s per-finding identity (a
+#:       check whose findings are not uniquely keyed by ``symbol`` alone --
+#:       e.g. one function leaking two distinct private types -- registers
+#:       its own identity function) in the process. The wire shape this
+#:       version already describes is unchanged; only the set of checks
+#:       populating it grows.
+#: 3.8 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2d
+#:       (ADR-068 D3): a ``changes[]`` entry may carry the additive, optional
+#:       boolean ``candidate_side_enrichment``, marking a finding produced by
+#:       a check that is meaningful only on the candidate (NEW) side -- today
+#:       ``compare --abi3``'s stable-ABI audit, which rides this same result
+#:       document rather than a second one. Omitted (never ``false``) for an
+#:       ordinary two-sided finding, so every existing report is unchanged.
+#:       The same phase makes 3.4's ``evidence_contract_error_contribution``
+#:       CLI-reachable for the first time: ``--abi3`` against a candidate
+#:       that is not a recognisable CPython extension module is an
+#:       evidence-contract abort (exit ``7``). Renumbered from a
+#:       conflicting 3.5 when the origin/main merge claimed that version
+#:       first for ADR-068 Phase 1's ``finding_evolution`` block (same
+#:       "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/
+#:       2.49/2.51/2.53/3.2/3.4 entries above), then from 3.6 to 3.7 on
+#:       the next merge, when workstream E slice S3's
+#:       ``contract_conflicts`` entry claimed 3.6 the same way, and
+#:       again from 3.7 to 3.8 on the next, when ADR-068 D3 / plan P2's
+#:       ``cross_source_evolution`` claimed 3.7.
+REPORT_SCHEMA_VERSION = "3.8"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

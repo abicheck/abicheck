@@ -303,6 +303,33 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "exploratory local diff), not a stable project default -- like "
         "--contract/--audit-suppressions above."
     ),
+    "--since": (
+        "ADR-068 Phase 2c (one-comparison-product.md SS3 #12): the git ref "
+        "this run's changed-path scope is computed against. A PR's own diff "
+        "is the archetypal per-run operand -- it differs on every single "
+        "invocation and is never a property of the project, so ADR-068 D5 "
+        "keeps it on the CLI (it is also the spelling `scan` has always "
+        "had). Scoping input only: it narrows which translation units the "
+        "L4/L5 replay examines and produces no finding of its own."
+    ),
+    "--changed-path": (
+        "ADR-068 Phase 2c: the explicit form of --since above, for a caller "
+        "that already knows the changed files (a CI job that computed the "
+        "diff itself, or a non-git checkout). Same per-run rationale, same "
+        "scoping-only effect; one of the two is redundant only if abicheck "
+        "assumes every consumer has a git working tree, which it does not."
+    ),
+    "--abi3": (
+        "ADR-068 Phase 2d (SS3 #15): activates the candidate-side stable-ABI "
+        "audit for this run and, when given, overrides the project's own "
+        "declared floor. The *floor* is the stable half and lives in "
+        "`.abicheck.yml`'s `python.abi3_floor` (ADR-068 D5) -- what stays "
+        "per-run is whether to audit at all and against which experimental "
+        'floor ("what would raising us to 3.12 cost?"). Deliberately '
+        "visible rather than hidden: ADR-068 D5 counts a hidden-but-accepted "
+        "option as public surface anyway, so hiding it would understate the "
+        "surface instead of documenting it here."
+    ),
 }
 
 #: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.

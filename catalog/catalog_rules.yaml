@@ -97,6 +97,12 @@ rules:
   class-became-final:
     title: Class became final
     definition: A class is marked final, so existing derived classes in consumer code no longer compile.
+  class-gained-non-virtual-method:
+    title: Class gained a non-virtual method
+    definition: A released class gains an ordinary member function, adding an export without touching the record's size, alignment, or member offsets.
+  class-gained-vtable-pointer:
+    title: Class gained a vtable pointer
+    definition: A non-polymorphic class gains its first virtual member, so the compiler inserts a vtable pointer and every data member's offset shifts by a pointer width.
   compat-addition:
     title: Compatible addition
     definition: The new release adds a declaration without touching anything that already existed, which existing binaries and sources are unaffected by.
@@ -133,6 +139,9 @@ rules:
   default-template-arg-changed:
     title: Default template argument changed
     definition: A template's default argument changes, so the same written specialization now names a different, differently-mangled instantiation.
+  deprecation-documented-without-attribute:
+    title: Deprecation announced only in a comment
+    definition: A declaration is described as deprecated in header prose with no deprecation attribute, so the preprocessor discards the announcement and no consumer's build ever sees it.
   dependency-leak:
     title: Dependency type leaks into layout
     definition: A public type embeds a type from a transitive dependency, so that dependency's own layout change propagates into this library's ABI.
@@ -289,6 +298,9 @@ rules:
   needed-added:
     title: New shared-library dependency added
     definition: The library gains a DT_NEEDED entry, so consumers must now be able to resolve a dependency they did not previously need.
+  new-entry-point-instead-of-parameter-added:
+    title: New entry point added instead of a changed arity
+    definition: A new capability that would have needed an extra parameter is delivered as an additional entry point, leaving the existing function's arity and every existing call site intact.
   no-change:
     title: No change
     definition: The two releases are ABI- and API-identical -- a control case asserting the tool reports nothing.
@@ -316,6 +328,9 @@ rules:
   pointer-level:
     title: Pointer indirection level changed
     definition: A parameter gains or loses a level of indirection, so existing callers pass a value the callee dereferences incorrectly.
+  pointer-parameter-gained-restrict:
+    title: Pointer parameter gained restrict
+    definition: A published pointer parameter gains `restrict`, tightening the caller's aliasing obligation without changing the calling convention -- overlapping arguments that were legal become undefined.
   polymorphic-nonvirtual-dtor:
     title: Polymorphic type has a non-virtual destructor
     definition: A type with virtual functions is destroyed through a base pointer without a virtual destructor, so derived state is never destroyed.
@@ -331,12 +346,27 @@ rules:
   public-class-private-base-class:
     title: Public class derives from a private class
     definition: A public class inherits from a class the public headers do not declare, putting an unpublished layout inside the supported surface.
+  public-function-marked-deprecated:
+    title: Public function marked deprecated
+    definition: A published function gains a deprecation attribute -- the signature and the export are unchanged, but the library has made a machine-readable statement that the entry point is scheduled for removal.
+  public-function-parameter-added:
+    title: Public function gained a parameter
+    definition: An exported function's arity changes, so an already-compiled caller passes fewer arguments than the callee now reads, and consumer source no longer compiles.
+  public-function-parameters-reordered:
+    title: Public function parameters reordered
+    definition: An exported function's parameter list is permuted, so arguments arrive in slots the callee does not read while the symbol still resolves.
   public-function-private-parameter-type:
     title: Public function takes a private parameter type
     definition: A public function's signature names a type the public headers do not declare, so consumers cannot legally form the call.
+  public-header-declaration-order-changed:
+    title: Public header declaration order changed
+    definition: Two declarations swap places in a public header with no signature, type, or export touched -- a formatting change that a position-keyed diff would misreport as a change to both.
   public-macro-removed:
     title: Public macro removed
     definition: A macro defined by a public header is deleted, so consumer source that uses it no longer compiles.
+  public-struct-field-reorder:
+    title: Public struct fields reordered
+    definition: A published record's fields are permuted, so every already-compiled consumer reads and writes members at offsets the new layout assigns to different fields -- often without any size change to notice it by.
   public-struct-private-field-type:
     title: Public struct has a private field type
     definition: A public struct holds a field whose type the public headers do not declare, hiding part of a supported type's layout.
@@ -355,6 +385,9 @@ rules:
   relro-weakened:
     title: RELRO hardening weakened
     definition: The library drops full or partial RELRO, leaving relocation data writable in processes that load it.
+  restrict-added-to-definition-only:
+    title: restrict added to the definition only
+    definition: An implementation gains `restrict` on its parameters while the declaration in the public header is untouched, so the contract consumers compile against is unchanged.
   return-type:
     title: Return type changed
     definition: A function's return type changes, so existing callers read the result from the wrong place or with the wrong width.

@@ -139,9 +139,6 @@ from .policy.disposition_ledger import (
     record_suppressed_change,
 )
 from .policy_file import PolicyFile
-from .workflows.crosscheck_evolution import (
-    compute_crosscheck_evolution as _compute_crosscheck_evolution,
-)
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -823,6 +820,7 @@ def compare(
     contract_mode: str | None = None,
     old_public_entity_ids: frozenset[EntityId] | None = None,
     new_public_entity_ids: frozenset[EntityId] | None = None,
+    cross_source_checks: bool = False,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -897,6 +895,11 @@ def compare(
         old_public_entity_ids: ADR-063 Phase 3 (D5) -- *old*'s resolved
             public-surface ``EntityId`` set; *new_public_entity_ids* is
             *new*'s (never swap). ``None`` (default) preserves prior behavior.
+        cross_source_checks: ADR-068 D3 / plan P2. Runs the migrated
+            cross-source hygiene check(s) (see ``workflows.
+            cross_source_evolution``) on *old*/*new* independently and
+            merges the evolution-stated result into ``changes``. Off by
+            default; never changes a finding's default verdict.
 
     Raises:
         ProfileMismatchError: *old* and *new* were extracted under
@@ -943,24 +946,18 @@ def compare(
     _detector_registry.ensure_loaded()
     changes, detector_results = _detector_registry.run_all(old, new)
 
-    # ADR-068 §3 rows 3-4 / plan §6 Phase 2a: the (so-far one-check)
-    # cross-source-check migration onto compare's OLD-vs-NEW pipeline,
-    # evolution-stated per abicheck.checker_policy.FindingEvolution (the
-    # same enum ADR-068 Phase 1 item 2's cross-run correspondence primitive,
-    # policy.finding_evolution, already uses -- one vocabulary, two matching
-    # algorithms for two different axes; see compare.finding_evolution's own
-    # module docstring). A COMPARE-STAGE, not an opt-in -- no flag gates it,
-    # matching every other detector. Genuinely a no-op ([]) whenever neither
-    # side has header/origin evidence, so no existing comparison's finding
-    # set changes just because this stage now runs.
-    changes.extend(_compute_crosscheck_evolution(old, new))
-
     # Merge externally-computed findings (e.g. build-configuration / probe-matrix
     # findings from diff_matrix(), which need multi-config inputs compare() does
     # not have). They join the normal pipeline so suppression, reporting, and
     # verdict composition treat them uniformly (G2: probe → compare).
     if extra_changes:
         changes.extend(extra_changes)
+
+    # ADR-068 D3 / plan P2 -- first cross-source check migrated onto compare().
+    if cross_source_checks:
+        from .workflows.cross_source_evolution import compute_cross_source_evolution
+
+        changes.extend(compute_cross_source_evolution(old, new))
 
     # ADR-067 C-S1: one conserved policy-disposition ledger per comparison,
     # built before the first disposition can be applied and threaded into every

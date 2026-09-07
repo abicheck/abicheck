@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Call-site proof that each scan-only analysis engine has exactly its
-expected production caller set.
+"""Call-site proof that the three scan-only analysis engines have exactly
+one production caller: ``scan_engine.py``.
 
-ADR-068 §1 originally stated this as "exactly one caller, `scan_engine.py`,
-for all three":
+ADR-068 §1 states the capability-loss defect by call site, not by import:
 
     Verified by call site, not by import: the only production callers of
     ``buildsource.crosscheck.run_crosschecks``, ``buildsource.pattern_scan.
@@ -14,17 +13,33 @@ for all three":
 
 This module makes that claim executable instead of only a prose citation --
 a real AST scan over every ``abicheck/**/*.py`` module, not a grep that a
-comment or an unrelated identifier could fool. **`run_crosschecks` now has a
-second, expected caller**: ``abicheck/workflows/crosscheck_evolution.py``,
-the one check (`private_header_leak`) migrated onto `compare`'s pipeline so
-far (plan §5 P2 / §6 Phase 2a). The other ten crosscheck checks, and the
-other two engines (`pattern_scan`/`preprocessor_scan`), are still reachable
-only from `scan_engine.py` -- this module is still their parity proof.
+comment or an unrelated identifier could fool. It is the parity harness's
+proof, for ``pattern_scan``/``preprocessor_scan`` (and a second angle on
+``crosscheck``, alongside ``test_crosscheck_parity.py``'s behavioral one),
+that ``compare``'s pipeline *cannot* reach them today -- not merely that it
+happens not to in the fixtures exercised elsewhere.
 
-Once Phase 2a/2b gives one of the still-scan-only functions an *unexpected*
-caller reachable from `compare`, this test starts failing -- the signal to
-delete the corresponding `tests/parity/gaps.py` entry (and add the new
-caller to `_ENGINE_PRIMITIVES` here) in that same PR.
+Once Phase 2a/2b (docs/contribute/plans/one-comparison-product.md §6) gives
+one of these functions a second caller reachable from `compare`, this test
+starts failing -- which is the point: it is the signal to delete the
+corresponding tests/parity/gaps.py entry in that same PR, *once the whole
+group of checks a primitive backs has actually reached parity through
+compare's real, user-facing entry point*.
+
+**Documented partial exception (ADR-068 D3 / plan P2):**
+``abicheck/workflows/cross_source_evolution.py`` is a second, legitimate
+caller of ``run_crosschecks`` -- the first, minimal slice of the migration,
+which folds exactly one check (``unversioned_exported_symbol``) into an
+evolution-stated finding via ``compare(..., cross_source_checks=True)``, an
+opt-in Python-API parameter with no CLI flag yet. This does not close the
+``unversioned_exported_symbol`` (or any other) ``tests/parity/gaps.py``
+entry: the real, user-facing ``compare`` CLI this parity harness's own
+``compare_finding_set``/``compare_json`` helpers invoke still never passes
+``cross_source_checks=True``, so its default finding set is unaffected and
+every crosscheck-backed gap entry stays exactly as red as before. Only the
+raw structural claim this module checks -- "nothing but scan_engine.py
+calls the primitive at all" -- needed updating to admit the one caller this
+slice deliberately adds.
 """
 
 from __future__ import annotations
@@ -38,14 +53,15 @@ from .gaps import EXPECTED_GAPS
 
 _ABICHECK_ROOT = Path(__file__).resolve().parent.parent.parent / "abicheck"
 
-#: function name -> (defining module, expected caller module(s), gap key)
+#: function name -> (defining module, expected caller module(s), gap key).
+#: `expected_callers` is usually a single module; `run_crosschecks` also
+#: allows `workflows/cross_source_evolution.py`, the documented ADR-068 D3
+#: partial-migration exception above.
 _ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str]] = {
     "run_crosschecks": (
         "buildsource/crosscheck.py",
-        # scan_engine.py (all 11 checks, under `scan`) + the one migrated
-        # check's own workflows-layer glue (plan §5 P2 / §6 Phase 2a).
-        ("scan_engine.py", "workflows/crosscheck_evolution.py"),
-        "odr_type_variant",  # any of the ten still-scan-only gap keys will do
+        ("scan_engine.py", "workflows/cross_source_evolution.py"),
+        "private_header_leak",  # any of the 11 crosscheck gap keys will do
     ),
     "scan_files": (
         "buildsource/pattern_scan.py",
@@ -162,9 +178,10 @@ def _call_sites(function_name: str, defining_module: str) -> dict[Path, int]:
 
 
 @pytest.mark.parametrize("function_name", sorted(_ENGINE_PRIMITIVES))
-def test_call_sites_match_expected_callers(function_name: str) -> None:
+def test_only_scan_engine_calls_it(function_name: str) -> None:
     defining_module, expected_callers, gap_key = _ENGINE_PRIMITIVES[function_name]
     assert gap_key in EXPECTED_GAPS, f"{gap_key!r} must be a registered parity gap"
+    expected = {f"abicheck/{m}" for m in expected_callers}
 
     sites = _call_sites(function_name, defining_module)
     # Drop the defining module itself (recursive helpers / the module's own
@@ -172,15 +189,13 @@ def test_call_sites_match_expected_callers(function_name: str) -> None:
     sites = {p: n for p, n in sites.items() if p != Path("abicheck") / defining_module}
 
     callers = {_posix(p) for p in sites}
-    expected = {f"abicheck/{c}" for c in expected_callers}
     if callers - expected:
         raise AssertionError(
             f"{function_name}() gained a caller outside {sorted(expected)}: "
             f"{sorted(callers)}. If this is Phase 2a/2b landing "
-            f"({EXPECTED_GAPS[gap_key].plan_phase}), delete the corresponding "
-            "tests/parity/gaps.py entry AND add the new caller to "
-            "_ENGINE_PRIMITIVES here in the same PR, instead of leaving "
-            "this assertion to rot."
+            f"({EXPECTED_GAPS[gap_key].plan_phase}), delete the "
+            f"{gap_key!r} entry from tests/parity/gaps.py in the same PR "
+            "instead of leaving this assertion to rot."
         )
     assert callers == expected, (
         f"{function_name}() has no production caller at all under abicheck/ "

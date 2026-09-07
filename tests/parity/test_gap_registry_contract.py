@@ -1,30 +1,34 @@
 # SPDX-License-Identifier: Apache-2.0
 """Structural checks on the expected-gap registry itself.
 
-done (plan §6 Phase 0): it must name exactly the fourteen remaining
-capabilities ADR-068 §1 and the plan's requirements enumerate, each with a
-real reason and a real plan-phase reference -- never an empty placeholder,
-and never silently missing an entry. A fifteenth, differently-shaped entry
-(``finding_evolution``, F-8/F-9's "neither tool has this vocabulary at all"
-gap) used to live in ``NOT_YET_IMPLEMENTED_ANYWHERE`` alongside this set;
-ADR-068 Phase 1 item 2 closed the generic vocabulary itself, and a later PR
-(plan §5 P2 / §6 Phase 2a) closed ``private_header_leak`` too -- the first
-real check migrated onto it. Both are asserted absent below, not merely
-renamed.
+The registry (``tests/parity/gaps.py``) *is* the migration's definition of
+done (plan §6 Phase 0): it must name exactly the capabilities ADR-068 §1 and
+the plan's requirements enumerate *that are still open*, each with a real
+reason and a real plan-phase reference -- never an empty placeholder, never
+silently missing an entry, and never still listing one a phase has closed.
+Two of the original fifteen scan-only capabilities are already closed
+(changed-path localization and the abi3 audit, Phase 2c/2d), and so is the
+sixteenth, differently-shaped ``finding_evolution`` entry that used to live
+in ``NOT_YET_IMPLEMENTED_ANYWHERE`` -- ADR-068 Phase 1 item 2 landed the
+vocabulary (see ``test_evolution_state_gap.py``), so that registry is empty
+today.
 """
 
 from __future__ import annotations
 
 from .gaps import ALL_EXPECTED_GAPS, EXPECTED_GAPS, NOT_YET_IMPLEMENTED_ANYWHERE
 
-#: The ten remaining cross-source checks (crosscheck.ALL_CHECKS minus the
-#: one migrated so far) + pattern_scan + preprocessor_scan +
-#: changed_path_localization + abi3_audit -- exactly the list this task's
-#: own requirements name as the still-red set.
+#: The eleven cross-source checks (crosscheck.ALL_CHECKS) + pattern_scan +
+#: preprocessor_scan -- what is left of the red set. changed_path_localization
+#: and abi3_audit were deleted from the registry by the PR that landed Phase
+#: 2c/2d (`compare --since/--changed-path`, `compare --abi3`): a closed gap is
+#: removed, never left listed, which is what makes this registry the
+#: migration's own definition of done (plan §6 Phase 0/3).
 _REQUIRED_SCAN_ONLY_KEYS = {
     "exported_not_public",
     "public_not_exported",
     "header_build_context_mismatch",
+    "private_header_leak",
     "odr_type_variant",
     "public_to_internal_dependency",
     "unversioned_exported_symbol",
@@ -34,16 +38,7 @@ _REQUIRED_SCAN_ONLY_KEYS = {
     "source_surface_dso_mismatch",
     "pattern_scan",
     "preprocessor_scan",
-    "changed_path_localization",
-    "abi3_audit",
 }
-
-#: Checks already migrated onto the FindingEvolution model (plan §6 Phase
-#: 2a) -- kept in lockstep with
-#: ``abicheck.workflows.crosscheck_evolution.MIGRATED_CROSSCHECKS`` by
-#: ``test_crosscheck_keys_match_all_checks`` below, so the two registries
-#: (this one and the real migration switch) cannot silently drift apart.
-_MIGRATED_CROSSCHECKS = {"private_header_leak"}
 
 
 def test_registry_names_exactly_the_required_scan_only_capabilities() -> None:
@@ -69,29 +64,10 @@ def test_finding_evolution_gap_has_closed() -> None:
     assert ALL_EXPECTED_GAPS == EXPECTED_GAPS
 
 
-def test_private_header_leak_gap_is_closed() -> None:
-    """The first cross-source check migrated onto FindingEvolution (plan
-    §5 P2 / §6 Phase 2a) -- its EXPECTED_GAPS row must be deleted, not
-    merely marked closed, per ``gaps.py``'s own contract."""
-    assert "private_header_leak" not in EXPECTED_GAPS
-    assert "private_header_leak" not in ALL_EXPECTED_GAPS
-
-
 def test_crosscheck_keys_match_all_checks() -> None:
     from abicheck.buildsource.crosscheck import ALL_CHECKS
-    from abicheck.workflows.crosscheck_evolution import MIGRATED_CROSSCHECKS
-
-    assert set(MIGRATED_CROSSCHECKS) == _MIGRATED_CROSSCHECKS
 
     crosscheck_keys = {
-        k
-        for k in EXPECTED_GAPS
-        if k
-        not in {
-            "pattern_scan",
-            "preprocessor_scan",
-            "changed_path_localization",
-            "abi3_audit",
-        }
+        k for k in EXPECTED_GAPS if k not in {"pattern_scan", "preprocessor_scan"}
     }
-    assert crosscheck_keys | _MIGRATED_CROSSCHECKS == set(ALL_CHECKS)
+    assert crosscheck_keys == set(ALL_CHECKS)

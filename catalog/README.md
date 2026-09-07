@@ -11,7 +11,7 @@ the same cases by rule, scenario kind, ecosystem, operation, evidence level,
 language, and verdict.
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **197 cases** (192 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **208 cases** (203 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -41,12 +41,12 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 107 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 111 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 31 | `RISK_KINDS` | 🟡 |
-| COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
-| COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 7 | — | ✅ |
+| COMPATIBLE (addition) | 11 | `ADDITION_KINDS` | 🟢 |
+| COMPATIBLE (quality) | 23 | `QUALITY_KINDS` | 🟡 |
+| NO_CHANGE | 10 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -97,11 +97,11 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 209 integration items | gcc: 149 passed / 55 skipped / 5 xfailed; clang: 149 passed / 54 skipped / 6 xfailed | Green default single-library build lane. `case115_bit_int_width_changed` needs a `_BitInt`-capable CastXML-bundled Clang; a sandbox with an older bundled Clang (unrelated to the fix in this catalog) sees it fail there instead of building — see `docs/contribute/examples-validation-runbook.md` |
-| Full example proof matrix | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + dedicated bundle/G20/L3-L5/BTF proofs | CI aggregation | 197 catalog cases | 197/197 COVERED; 196 direct; 0 FAILED / 0 UNRESOLVED | Canonical full-catalog status; a lane-local `SKIP` is accepted only when a dedicated proof covers that case |
-| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 197 catalog cases | gcc: 153 PASS / 5 XFAIL / 39 SKIP; clang: 153 PASS / 6 XFAIL / 38 SKIP | Green default/debug verdict lane |
-| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 197 catalog cases | 88 DEMONSTRATED / 69 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 39 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
-| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 197 catalog cases | 146 PASS / 5 XFAIL / 46 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override |
-| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 197 catalog cases | 141 PASS / 5 FAIL / 5 XFAIL / 46 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
+| Full example proof matrix | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + dedicated bundle/G20/L3-L5/BTF proofs | CI aggregation | 208 catalog cases | 208/208 COVERED; 207 direct; 0 FAILED / 0 UNRESOLVED | Canonical full-catalog status; a lane-local `SKIP` is accepted only when a dedicated proof covers that case |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 208 catalog cases | gcc: 164 PASS / 5 XFAIL / 39 SKIP; clang: 164 PASS / 6 XFAIL / 38 SKIP | Green default/debug verdict lane |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 208 catalog cases | 90 DEMONSTRATED / 78 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 39 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
+| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 208 catalog cases | 157 PASS / 5 XFAIL / 46 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override |
+| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 208 catalog cases | 152 PASS / 5 FAIL / 5 XFAIL / 46 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
 | Build/source proof | `python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Required release proof; includes L3 C++ floor and L4 concept/template regressions. Not full L3-L5 catalog coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
@@ -468,6 +468,17 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [195](cases/case195_header_graph_ambiguous_rename_not_reconciled/README.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [196](cases/case196_header_graph_move_reconciled/README.md) | Declaration Reconciled as Moved Across a Compound Edit | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [197](cases/case197_header_graph_identity_reconciled/README.md) | Declaration Reconciled as Identity-Reconciled (Header Unchanged) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [198](cases/case198_public_struct_field_reorder/README.md) | Public Struct Field Reorder | Breaking | 🔴 BREAKING |
+| [199](cases/case199_public_function_parameter_added/README.md) | Parameter Added to an Exported Function | Breaking | 🔴 BREAKING |
+| [200](cases/case200_new_entry_point_instead_of_parameter_added/README.md) | New Entry Point Instead of a Changed Arity | Addition | 🟢 COMPATIBLE |
+| [201](cases/case201_public_function_parameters_reordered/README.md) | Public Function Parameters Reordered | Breaking | 🔴 BREAKING |
+| [202](cases/case202_public_header_declaration_order_changed/README.md) | Public Header Declaration Order Changed | No Change | ✅ NO_CHANGE |
+| [203](cases/case203_class_gained_vtable_pointer/README.md) | Class Gained a Vtable Pointer | Breaking | 🔴 BREAKING |
+| [204](cases/case204_class_gained_non_virtual_method/README.md) | Class Gained a Non-Virtual Method | Addition | 🟢 COMPATIBLE |
+| [205](cases/case205_public_function_marked_deprecated/README.md) | Public Function Marked Deprecated | Quality | 🟢 COMPATIBLE |
+| [206](cases/case206_deprecation_documented_without_attribute/README.md) | Deprecation Documented Without the Attribute | No Change | ✅ NO_CHANGE (bad practice) |
+| [207](cases/case207_pointer_parameter_gained_restrict/README.md) | Pointer Parameter Gained `restrict` | Quality | 🟢 COMPATIBLE (bad practice) |
+| [208](cases/case208_restrict_added_to_definition_only/README.md) | `restrict` Added to the Definition Only | No Change | ✅ NO_CHANGE |
 <!-- END GENERATED: case-index -->
 
 ---

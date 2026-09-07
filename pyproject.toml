@@ -464,6 +464,24 @@ pytest_add_cli_args = [
     # ignored, so the rest of that file still runs.
     "--deselect=tests/test_ai_readiness.py::test_no_hard_file_size_violations",
     "--deselect=tests/test_ai_readiness.py::test_main_returns_zero_on_clean_tree",
+    # Same "validates the tree it runs in" class as the two entries directly
+    # above (PR #1115's own diff -- discovered the same way as the
+    # `test_action_check_target*`/`test_agent_evals.py`/`test_engine_
+    # primitive_call_sites.py` entries elsewhere in this list: touching
+    # enough `tests/` paths trips `--scope-run-to-diff`'s "refuse to scope"
+    # fallback to a full, unscoped run, exercising a pre-existing gap this
+    # PR's own diff did not create). `test_docs_contract_has_no_ownership_
+    # errors_on_real_repo` walks `docs/_meta/topics.yaml`'s `fact_sources`
+    # entries and asserts each resolves under the repo root -- one entry is
+    # `vision.md`, a repo-root file outside `abicheck/` (this file's own
+    # `only_mutate`/`also_copy` lists) that a `mutants/` copy therefore never
+    # contains, so the assertion legitimately (and correctly, for a
+    # `mutants/` tree) fails there. Deselected rather than ignored, so the
+    # rest of the file still runs. No mutation-kill cost: this test imports
+    # no `only_mutate` module (confirmed by grep) -- it dynamically loads
+    # `scripts/check_docs_contract.py` via `importlib`, itself PyYAML/stdlib
+    # only.
+    "--deselect=tests/test_docs_contract.py::test_docs_contract_has_no_ownership_errors_on_real_repo",
     "--ignore=tests/test_action_check_target.py",
     # Split out of the file directly above for a `no_growth` file-size
     # reason (its own docstring), inheriting the identical re-entrant-
@@ -582,6 +600,29 @@ pytest_add_cli_args = [
     # stdlib, `jsonschema`, `pytest`, and `agent-evals/run_task.py` loaded
     # by path, none of which is mutated.
     "--ignore=tests/test_agent_evals.py",
+    # Same "reads the real repository" class as `test_fact_field_readers.py`/
+    # `test_fact_detector_misuse.py` above, a fifth independent trigger site
+    # (this PR's own diff -- discovered the same way as the `test_action_
+    # check_target*`/`test_agent_evals.py` entries above: this PR's diff
+    # touches enough `tests/` paths, this file among them, to trip
+    # `--scope-run-to-diff`'s "refuse to scope" fallback to a full, unscoped
+    # run, exercising a pre-existing gap the file's own addition -- by an
+    # earlier, independently-merged PR -- created but never exercised under
+    # mutmut before). `_call_sites()` does an unconditional
+    # `_ABICHECK_ROOT.rglob("*.py")` + `ast.parse(...)` walk over every file
+    # in `abicheck/`, parametrized three times (once per `_ENGINE_PRIMITIVES`
+    # entry) -- exactly the same shape as the two entries above, and a
+    # `mutants/` tree is, by the same `test_ai_readiness.py` comment those
+    # two entries cite, "by construction full of 1M-line generated files":
+    # parsing that many, that large, three times over is what plausibly
+    # blows past pytest-timeout's 600s ceiling here, aborting the whole `-x`
+    # lane before a single mutant is measured (matching PR #1036's identical
+    # failure shape for `test_fact_detector_misuse.py`, not a fixed-content
+    # traceback this repo's own truncated 5-line `mutmut run` tail can ever
+    # show). No mutation-kill cost: this file imports no `only_mutate`
+    # module (confirmed by grep) -- only stdlib `ast`/`pathlib` and this
+    # module's own sibling `tests/parity/gaps.py`.
+    "--ignore=tests/parity/test_engine_primitive_call_sites.py",
 ]
 
 # ---------------------------------------------------------------------------

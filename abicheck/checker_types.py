@@ -28,6 +28,7 @@ from typing import Literal
 from .checker_policy import (
     ChangeKind,
     Confidence,
+    CrossSourceEvolution,
     EvidenceTier,
     FindingEvolution,
     ReachabilityState,
@@ -403,22 +404,34 @@ class Change:
     # ADR-068 Phase 1 item 2 (`one-comparison-product.md`): where this
     # finding sits across a chain of more than one comparison -- see
     # `checker_policy.FindingEvolution`'s own docstring for the full
-    # contract. Originally documented as "`compare()` itself never sets
-    # this" -- plan §5 P2 / ADR-068 D3 adds the first exception: a one-sided
-    # check migrated onto compare's OLD-vs-NEW pipeline (e.g.
-    # `private_header_leak`) stamps this via
-    # `compare.finding_evolution.evolve_check_findings`, reusing this exact
-    # enum rather than a second one, so the two mechanisms (cross-run chain
-    # vs. same-comparison per-side evidence) share one wire vocabulary. Every
-    # other, unmigrated finding kind still keeps the NOT_EVALUATED default --
-    # a finding nobody classified is not silently assumed unchanged (ADR-067
-    # D3's `not_evaluated` convention).
+    # contract. `compare()` itself never sets this; it is populated by a
+    # dedicated N>1-comparison consumer (`workflows/history.py` and future
+    # siblings), which is also why it defaults to NOT_EVALUATED rather than
+    # PERSISTENT -- a finding nobody classified is not silently assumed
+    # unchanged (ADR-067 D3's `not_evaluated` convention).
     # `compare=False` like `entity_id`/`disambiguator` above: two otherwise
     # identical findings stay the "same" finding for dedup/equality purposes
-    # regardless of which context annotated their evolution.
+    # regardless of which comparison-chain context annotated their evolution.
     evolution: FindingEvolution = field(
         default=FindingEvolution.NOT_EVALUATED, kw_only=True, compare=False
     )
+    # ADR-068 D3 / plan P2 -- OLD->NEW evolution for a one-sided cross-source
+    # finding *within this one compare() call* (see CrossSourceEvolution --
+    # not the cross-comparison-chain `evolution` field above). None for
+    # every ordinary finding.
+    cross_source_evolution: CrossSourceEvolution | None = field(
+        default=None, kw_only=True
+    )
+    # ADR-068 D3 (plan §6 Phase 2d): this finding comes from a check that is
+    # meaningful only on the *candidate* (NEW) side -- today the ``--abi3``
+    # stable-ABI audit (workflows/abi3_audit.py) -- so it rides the same
+    # result document as the comparison it enriches, "marked as such" rather
+    # than split into a second result. Never set for a two-sided finding.
+    # Same field(kw_only=True)-appended-last convention as
+    # `cross_source_evolution` above: it is the newest field, so it goes
+    # after it, never between two existing ones
+    # (`tests/test_evidence_provenance_completeness.py` pins the order).
+    candidate_side_enrichment: bool = field(default=False, kw_only=True)
 
 
 @dataclass
