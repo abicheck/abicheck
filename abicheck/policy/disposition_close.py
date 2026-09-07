@@ -113,22 +113,28 @@ def record_consumer_overlay(
     *,
     rule: object | None = None,
     suppression: object | None = None,
+    application_point: str = "consumer_overlay",
 ) -> None:
-    """Record one ``--used-by`` consumer overlay, deduped across consumers.
+    """Record one ``--used-by``/``--required-symbol(s)`` overlay, deduped
+    across consumers/hosts sharing one observation.
 
-    ``appcompat.scope_diff_to_app`` runs once per consumer, and two consumers
-    needing the same missing export each synthesize their own
-    equal-but-not-identical overlay for the *one* observation. The
-    orchestrator dedupes its scoped view by finding id; the ledger is
-    identity-keyed, so without the same key it recorded two detections for
-    what the report shows as one (ADR-067 D1 -- the raw total counts
-    observations, and a second consumer asking about the same export is not a
-    second observation).
+    ``appcompat.scope_diff_to_app``/``scope_diff_to_required_symbols`` each
+    run once per consumer/host, and two of them needing the same missing
+    export each synthesize their own equal-but-not-identical overlay for the
+    *one* observation. The orchestrator dedupes its scoped view by finding
+    id; the ledger is identity-keyed, so without the same key it recorded two
+    detections for what the report shows as one (ADR-067 D1 -- the raw total
+    counts observations, and a second consumer/host asking about the same
+    export is not a second observation).
 
     Both branches record, since adding a rule must move a finding between
     dispositions rather than change how many were detected; *rule* is the
     ``SuppressionOutcome.matched_rule`` that fired, or ``None`` for a kept
-    overlay.
+    overlay. *application_point* names which overlay mechanism produced the
+    change -- ``"consumer_overlay"`` (default, ``--used-by``) or
+    ``"required_symbol_overlay"`` (``--required-symbol(s)``) -- so the audit
+    can tell the two apart the same way it already names every other
+    suppression application point.
     """
     from ..finding_identity import report_finding_id
 
@@ -138,7 +144,7 @@ def record_consumer_overlay(
             ledger,
             change,
             result,
-            application_point="consumer_overlay",
+            application_point=application_point,
             dedupe_key=key,
         )
         return
@@ -146,10 +152,77 @@ def record_consumer_overlay(
         ledger,
         change,
         rule=rule,  # type: ignore[arg-type]
-        application_point="consumer_overlay",
+        application_point=application_point,
         suppression=suppression,
         dedupe_key=key,
     )
+
+
+def record_and_maybe_suppress_overlay(
+    ledger: DispositionLedger | None,
+    change: Change,
+    result: DiffResult,
+    *,
+    suppression: object | None,
+    application_point: str = "consumer_overlay",
+) -> tuple[bool, Change | None]:
+    """Evaluate *change* against *suppression* (if any), record the outcome
+    into *ledger*, and report what the caller should do with it.
+
+    The shared body of ``scope_diff_to_app``'s and
+    ``scope_diff_to_required_symbols``'s otherwise-identical missing-symbol
+    overlay loops (ADR-067 C-S2): evaluate the same suppression rule set
+    already used to compute the underlying comparison (a consumer/host
+    overlay is synthesized fresh *after* that pass already ran, so it is
+    otherwise unsuppressible even by an exact rule -- ADR-044 P2), record
+    either the suppression or the kept finding through
+    :func:`record_consumer_overlay`, and build the
+    ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic when a broad rule
+    matched but the reachability/``allow_public_break`` gate withheld it.
+
+    Returns ``(kept, overreach)``: *kept* is ``False`` when suppression
+    withheld the finding (the caller drops the symbol from its own missing
+    list and does not add *change* to its relevant-changes set); *overreach*
+    is the withheld-rule diagnostic to additionally add to that set, or
+    ``None`` when no such rule fired. Never returns ``(False, <not None>)``:
+    an overreach diagnostic only exists for a *kept* finding whose narrower
+    reachability rule was itself withheld (see
+    ``SuppressionOutcome.withheld_rule``), never for one this call actually
+    suppressed.
+    """
+    if suppression is None:
+        record_consumer_overlay(
+            ledger, change, result, application_point=application_point
+        )
+        return True, None
+    outcome = suppression.evaluate(change)  # type: ignore[attr-defined]
+    if outcome.suppressed:
+        record_consumer_overlay(
+            ledger,
+            change,
+            result,
+            rule=outcome.matched_rule,
+            suppression=suppression,
+            application_point=application_point,
+        )
+        return False, None
+    # Recorded on *both* branches, not only when a rule fires (ADR-067 D1):
+    # the overlay is an atomically detected finding either way, so recording
+    # it only when suppressed would make adding a matching rule change the
+    # *detected* total rather than move the finding between dispositions --
+    # exactly the conservation the audit exists to make checkable.
+    record_consumer_overlay(
+        ledger, change, result, application_point=application_point
+    )
+    # `withheld_unknown_rule` never applies here: every caller of this helper
+    # constructs its overlay with `reachability_state=PROVEN_REACHABLE` (it is
+    # by construction consumer/host-proven), and
+    # `would_withhold_unknown_reachability` only ever fires on `UNKNOWN`.
+    if outcome.withheld_rule is None:
+        return True, None
+    from ..post_processing import _build_suppression_overreach_change
+
+    return True, _build_suppression_overreach_change(change, outcome.withheld_rule)
 
 
 def _record_bucket(

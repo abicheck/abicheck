@@ -1,16 +1,15 @@
 # ADR-067: Change-Intent Acknowledgment and the Policy-Disposition Audit
 
 **Date:** 2026-09-05
-**Status:** Accepted — **slice S1 implemented** for the scalar single-pair
-`compare` path; **S2 partially implemented** (release/aggregate audit
-folding, reclassification recording, and scope-reason accounting have
-landed — see below); S3–S4 not implemented. Design record for the vision's
-"intent and configuration accountability" decisions (`vision.md`). The
-audit half (D1–D4) extends ADR-013/024/044/049/063/064 and the report
-owners and is sequenced *first*, without waiting for history (ADR-066);
-the acknowledgment half (D5–D7) is the one genuinely new mechanism and
-remains unimplemented. What S1 landed: one conserved disposition ledger
-(`abicheck/policy/disposition_ledger.py`) that all five suppression
+**Status:** Accepted — **slices S1 and S2 implemented**; S3–S4 not
+implemented. Design record for the vision's "intent and configuration
+accountability" decisions (`vision.md`). The audit half (D1–D4) extends
+ADR-013/024/044/049/063/064 and the report owners and is sequenced *first*,
+without waiting for history (ADR-066); the acknowledgment half (D5–D7) is
+the one genuinely new mechanism and remains unimplemented (S3). What S1
+landed, for the scalar single-pair `compare` path: one conserved
+disposition ledger (`abicheck/policy/disposition_ledger.py`,
+`abicheck/policy/disposition_close.py`) that all five suppression
 application points record into
 (`abicheck/post_processing.py`, `abicheck/checker.py`,
 `abicheck/appcompat.py`); the raw-versus-effective counts and rule
@@ -25,25 +24,34 @@ review digest, PR comment, SARIF, JUnit and HTML
 `abicheck/detectors.py`); and `abicheck/semver.py`'s release
 recommendation reading the conserved delta instead of the
 post-suppression change list — the one behavior change, carried with a
-migration note. What S2 has landed so far (2026-09-06): the release/bundle
-fan-out's primary JSON/Markdown report and `--output-dir` `summary.json`
-sidecar gain a top-level `disposition_audit` block folding every library's
-own per-comparison audit (`report/disposition_audit.py`'s
-`fold_disposition_audits`, report schema 3.1); `abicheck aggregate --format
-json` gains the same folded block across every analyzed/unexpected target
-that reports one, plus a `disposition_audit_missing_targets` list (aggregate
-schema 1.9); reclassification is now actually recorded through the ledger
-(`DispositionLedger.resolve_reclassifications`); and a contract/scope
-exclusion gains a `scope_reasons` breakdown by contract-relevance reason
-code. **Remaining S2 gaps, explicitly not closed by the above:**
-`appcompat.py`'s own `scope_diff_to_required_symbols` ledger accounting is
-excluded (that file is at its `no_growth` line-count baseline with no
-headroom for the audit hookup); and `scan` reports carry no
-`disposition_audit` block at all, so `aggregate`'s own fold can only
-distinguish "no block present" (a `scan`-sourced or pre-schema-2.51 target,
-listed in `disposition_audit_missing_targets`) from "an audit exists" —
-`aggregate` does not itself supply the missing block for `scan`.
-Implementation is sequenced in
+migration note. What S2 added on top: the release/bundle fan-out's JSON/
+Markdown reports and `--output-dir` `summary.json` sidecar gain a folded
+`disposition_audit` block over every library
+(`abicheck/cli_compare_receipt.py`'s `release_disposition_audit_block`,
+`abicheck/report/disposition_audit.py`'s `fold_disposition_audits`);
+`abicheck aggregate --format json` gains the same folded block plus a
+`disposition_audit_missing_targets` list (aggregate schema 1.9,
+`abicheck/workflows/aggregate/disposition_axis.py`); reclassification is
+now actually recorded through the ledger
+(`DispositionLedger.resolve_reclassifications`, surfaced as
+`reclassified_total`/`reclassifications`); an `out_of_contract`/
+`unresolved_relevance` scope exclusion gains a `scope_reasons` breakdown by
+contract-relevance reason code; and the consumer-scoped path
+(`abicheck/appcompat.py`) reaches full parity with the other four
+application points — both `scope_diff_to_app` (`--used-by`) and
+`scope_diff_to_required_symbols` (`--required-symbol(s)`) now synthesize
+the same suppressible, ledger-recorded `CONSUMER_REQUIRED_SYMBOL_REMOVED`
+overlay for a missing symbol/entrypoint no diff `Change` names, sharing one
+recording primitive
+(`abicheck/policy/disposition_close.record_and_maybe_suppress_overlay`).
+Report schema 3.0 -> 3.1. **One S2-adjacent gap remains, outside S2's own
+scope:** `scan` reports carry no `disposition_audit` block at all (that
+command has no scalar `compare`-shaped audit to fold from), so
+`aggregate`'s own fold can only distinguish "no block present" (a
+`scan`-sourced or pre-schema-2.51 target, listed in
+`disposition_audit_missing_targets`) from "an audit exists" — `aggregate`
+does not itself supply the missing block for `scan`. Implementation is
+sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
 (workstream "Policy-disposition audit and change acknowledgment").
 **Decision maker:** maintainer (product decision recorded in `vision.md`);

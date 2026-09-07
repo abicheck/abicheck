@@ -84,6 +84,22 @@ either abort via `cli_scan._emit_scan_abort_report` (`--format text` is
 unaffected, per that design's own account of what remained genuinely open).
 See ADR-064's own "Stage 1b, further split" section for the full account.
 The atomic `--exit-code-scheme` removal remains stage 2.
+
+`docs/contribute/plans/one-comparison-product.md` P3: native `compare` gains
+the same `evidence_contract_error`/`budget_overflow` axes. The sibling
+:mod:`abicheck.policy.exit_decision_precedence` module's
+`resolve_compare_exit_decision_with_abort_axes` reads `DiffResult.evidence_
+contract_error`/`.budget_overflow` and, when either is set, folds the
+decision through `resolve_scan_exit_decision` -- reusing `scan`'s own
+precedence rule rather than a second copy (it lives there, not in this
+module's own `resolve_compare_exit_decision`, purely to avoid a fresh
+import cycle -- see that function's own docstring). Both fields default
+`False` for every `DiffResult` any current caller builds, so every
+pre-existing `compare` invocation's exit code and JSON `exit` block are
+unchanged; a real trigger (an auto-strict `--depth`/`--source-method`
+contract, a `--budget` flag) is deferred to the plan's Phase 2/7 -- this
+prerequisite only retires the "`compare` cannot even carry the signal" gap
+`scan`'s eventual deletion would otherwise reopen.
 """
 
 from __future__ import annotations
@@ -139,19 +155,27 @@ class ExitReason(str, Enum):
     #: avoid.
     PROMOTED_CROSSCHECK = "promoted_crosscheck"
 
-    #: `scan` only (ADR-037 D5). A pinned, non-`auto` `--depth`/
-    #: `--source-method` had no source evidence to satisfy it
-    #: (`scan_engine._EvidenceContractError`) -- raised during evidence
-    #: collection, before a candidate/baseline comparison is even attempted.
-    #: Dominates every other axis below it in ADR-064's precedence order,
-    #: since none of them were ever computed for this run.
+    #: `scan` today; native `compare` gains the identical axis as of
+    #: `one-comparison-product.md` P3 (ADR-037 D5). A pinned, non-`auto`
+    #: `--depth`/`--source-method` had no source evidence to satisfy it
+    #: (`scan_engine._EvidenceContractError` for `scan`;
+    #: `DiffResult.evidence_contract_error` for `compare`, currently never
+    #: set by any CLI-reachable path -- see that field's own docstring) --
+    #: raised during evidence collection, before a candidate/baseline
+    #: comparison is even attempted. Dominates every other axis below it in
+    #: ADR-064's precedence order, since none of them were ever computed for
+    #: this run.
     EVIDENCE_CONTRACT_ERROR = "evidence_contract_error"
-    #: `scan` only. `--budget` overflowed (`scan_engine._BudgetOverflow`).
-    #: Checked *after* a `not_comparable` result may already have been
-    #: decided for the same run, and -- per ADR-064's "budget dominates
-    #: not-comparable" rule, reproducing `scan_engine.run_scan_core`'s own
-    #: unconditional post-comparison budget check -- discards that result
-    #: rather than losing to it.
+    #: `scan` today; native `compare` gains the identical axis as of
+    #: `one-comparison-product.md` P3. `--budget` overflowed
+    #: (`scan_engine._BudgetOverflow` for `scan`; `DiffResult.budget_overflow`
+    #: for `compare`, currently never set by any CLI-reachable path -- `compare`
+    #: has no `--budget` flag yet, see that field's own docstring). Checked
+    #: *after* a `not_comparable` result may already have been decided for
+    #: the same run, and -- per ADR-064's "budget dominates not-comparable"
+    #: rule, reproducing `scan_engine.run_scan_core`'s own unconditional
+    #: post-comparison budget check -- discards that result rather than
+    #: losing to it.
     BUDGET_OVERFLOW = "budget_overflow"
     #: OLD and NEW (or, for a release, at least one library pair) were not
     #: extracted under a comparable profile/scope contract (ADR-050 D2), so
@@ -298,14 +322,19 @@ class ExitDecision:
     #: `resolve_release_exit_decision`. See :class:`ExitReason.
     #: OPERATIONAL_ERROR` and this class's own docstring above.
     operational_error_contribution: int = 0
-    #: `scan` only. Nonzero (always equal to `code`) exactly when
-    #: :func:`resolve_scan_exit_decision` returned this decision because
-    #: `_EvidenceContractError` fired. `0` for every decision built any
+    #: `scan`, and native `compare` since P3. Nonzero (always equal to
+    #: `code`) exactly when :func:`resolve_scan_exit_decision` returned this
+    #: decision because `_EvidenceContractError` fired (`scan`) or
+    #: `DiffResult.evidence_contract_error` was set (`compare`, currently
+    #: unreachable from any CLI flag). `0` for every decision built any
     #: other way.
     evidence_contract_error_contribution: int = 0
-    #: `scan` only. Nonzero (always equal to `code`) exactly when
-    #: :func:`resolve_scan_exit_decision` returned this decision because
-    #: `_BudgetOverflow` fired. `0` for every decision built any other way.
+    #: `scan`, and native `compare` since P3. Nonzero (always equal to
+    #: `code`) exactly when :func:`resolve_scan_exit_decision` returned this
+    #: decision because `_BudgetOverflow` fired (`scan`) or
+    #: `DiffResult.budget_overflow` was set (`compare`, currently
+    #: unreachable -- no `--budget` flag yet). `0` for every decision built
+    #: any other way.
     budget_overflow_contribution: int = 0
     #: Nonzero (always equal to `code`) exactly when
     #: :func:`resolve_scan_exit_decision`/:func:`resolve_release_exit_
@@ -568,6 +597,22 @@ def resolve_compare_exit_decision(
     run with no `--used-by`/`--required-symbol` at all. `ExitReason.
     SCOPED_GATE` is kept as a reason value (still reachable from historical
     persisted reports/tests) but is no longer produced by this resolver.
+
+    **Does not by itself cover `one-comparison-product.md` P3's
+    `evidence_contract_error`/`budget_overflow` axes** -- this module may
+    not import :mod:`abicheck.policy.exit_decision_precedence` (that module
+    already imports *this* one, so the reverse edge would be a real,
+    freshly-introduced import cycle the AI-readiness `import-cycle-growth`
+    gate rejects). :func:`~abicheck.policy.exit_decision_precedence.
+    resolve_compare_exit_decision_with_abort_axes` in that sibling module is
+    the P3 call site: it calls this function for the ordinary fold, then
+    folds `result.evidence_contract_error`/`.budget_overflow` through
+    `resolve_scan_exit_decision`, reusing that rule rather than a second
+    copy. Every real production caller of *this* function
+    (`reporter_contract_blocks.add_contract_context`, `cli._exit_with_
+    severity_or_verdict`) calls the P3-aware wrapper instead as of that
+    change -- this function itself is unchanged, still exactly the ordinary
+    gate/coverage/assurance fold with no knowledge of either axis.
     """
     from ..analysis_assurance import analysis_assurance_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor

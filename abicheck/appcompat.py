@@ -29,6 +29,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .appcompat_consumer_impact import (
+    attach_consumer_impact,
+    consumer_impact_explanations,
+    enrich_covered_changes,
+)
 from .checker import Change, DiffResult
 from .checker_policy import ChangeKind, ReachabilityState, Verdict, compute_verdict
 from .diff_helpers import make_change
@@ -43,16 +48,14 @@ from .model.consumer_spec import (
 from .policy.disposition_close import (
     close_consumer_scope,
     ledger_for,
-    record_consumer_overlay,
+    record_and_maybe_suppress_overlay,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from .elf_metadata import ElfMetadata
-    from .impact.consumer_graph import ConsumerImpactPath
     from .macho_metadata import MachoMetadata
-    from .model.source_graph import SourceGraphSummary
     from .pe_metadata import PeMetadata
     from .policy.disposition_ledger import DispositionLedger
     from .policy_file import PolicyFile
@@ -945,483 +948,51 @@ def _finalize_consumer_scope_diff(
     policy: str | None,
     policy_file: PolicyFile | None,
 ) -> None:
-    """The one finalization boundary for :func:`scope_diff_to_app`'s
-    mutation of the already-returned, already-finalized *diff* it was
-    handed (ADR-063 T10).
+    """The one finalization boundary for :func:`scope_diff_to_app`'s and
+    :func:`scope_diff_to_required_symbols`'s mutation of the already-returned,
+    already-finalized *diff* each was handed (ADR-063 T10; shared between
+    both call sites since ADR-067 C-S2, the same rationale that moved their
+    overlay-loop body into :func:`~abicheck.policy.disposition_close.
+    record_and_maybe_suppress_overlay`).
 
-    ``scope_diff_to_app`` runs after ``checker.compare()`` already finalized
-    ``diff`` and handed it back to its caller. Attaching this run's
-    disposition ledger, promoting consumer-proven findings onto the
-    compatibility axis, and recomputing the verdict that promotion leaves
-    stale are all instances of the same thing: a second producer joining
-    ``diff`` after ``compare()``'s own close -- exactly what
+    Both functions run after ``checker.compare()`` already finalized ``diff``
+    and handed it back to their caller. Attaching this run's disposition
+    ledger, promoting consumer-proven findings onto the compatibility axis,
+    and recomputing the verdict that promotion leaves stale are all instances
+    of the same thing: a second producer joining ``diff`` after
+    ``compare()``'s own close -- exactly what
     :func:`~abicheck.policy.disposition_close.close_consumer_scope`'s own
-    docstring names for the *aggregate* union this function's caller later
-    assembles from every consumer's ``breaking_for_app``. This function
-    collects the *per-consumer* half of that same concern into one named,
-    called-once boundary, rather than a ``diff.disposition_ledger = ...``
-    assignment before the overlay loop and a bare ``_promote_scoped_
-    contract(...)`` call after it, as two free-standing statements with the
-    dependency between them left implicit.
+    docstring names for the *aggregate* union each function's caller later
+    assembles from every consumer's/host's own relevant-changes list. This
+    function collects the *per-consumer* (or *per-host*) half of that same
+    concern into one named, called-once boundary, rather than a
+    ``diff.disposition_ledger = ...`` assignment before the overlay loop and
+    a bare ``_promote_scoped_contract(...)`` call after it, as two
+    free-standing statements with the dependency between them left implicit.
 
     Order is fixed here rather than left to the call site: the ledger must
     be attached before promotion runs (a later reader of
-    ``diff.disposition_ledger`` must see the same object this consumer
+    ``diff.disposition_ledger`` must see the same object this consumer/host
     recorded into), and promotion must run before the verdict recompute
     (the recompute reads the very ``contract_relevance``/verdict-bucket
     fields promotion just stamped). *overlay_ledger* is the exact object
-    every ``record_consumer_overlay`` call above already recorded into --
-    passed in rather than re-resolved via ``ledger_for(diff)`` here, since
-    ``diff.disposition_ledger`` may still be unset at this point and a
-    fresh resolve would build a second, disconnected ledger instead of
-    publishing the one this run actually populated.
+    every ``record_consumer_overlay``/``record_and_maybe_suppress_overlay``
+    call above already recorded into -- passed in rather than re-resolved via
+    ``ledger_for(diff)`` here, since ``diff.disposition_ledger`` may still be
+    unset at this point and a fresh resolve would build a second,
+    disconnected ledger instead of publishing the one this run actually
+    populated. Without this attachment, a later ``ledger_for(diff)`` call
+    (e.g. ``check_plugin_host_contract``'s own closing ``close_consumer_
+    scope`` call) would rebuild yet another fresh, disconnected ledger from
+    *diff*'s own change buckets and silently lose every overlay finding this
+    run recorded (review finding on the PR that added the required-symbol
+    call site).
     """
     if getattr(diff, "disposition_ledger", None) is None:
         diff.disposition_ledger = overlay_ledger
     _promote_scoped_contract(
         breaking_for_app, policy=policy, policy_file=policy_file, diff=diff
     )
-
-
-def _library_source_graph(
-    lib: Path | AbiSnapshot, snapshot: AbiSnapshot | None = None
-) -> SourceGraphSummary | None:
-    """The L5 source graph for the old library, or ``None``.
-
-    Only an :class:`~abicheck.model.AbiSnapshot` can carry one (``dump
-    --sources``/``--build-info``/``--old-sources``, or the always-on
-    header-only graph) — a bare library ``Path`` is a real binary this module
-    reads an export/version table from, with no graph attached.
-
-    Hence *snapshot*, the ADR-057 follow-up (Codex review, fresh evidence):
-    when OLD is a real binary, every caller passes the ``Path`` as *lib* even
-    though it is holding the snapshot it just dumped or loaded from that same
-    path (``cli_compare_helpers._apply_used_by_scoping``'s
-    ``old_input if detect_binary_format(...) else old_snapshot``,
-    ``mcp_server``'s identical line, :func:`check_appcompat`'s own ``dump``).
-    Reading the graph only off *lib* therefore made the consumer join fire
-    **only** when OLD happened to be a saved JSON snapshot — the inverse of
-    the primary usage, and it silently skipped exactly the runs that asked for
-    the richest evidence (``--old-sources``/``--old-build-info``). *snapshot*
-    is consulted first and is for graph lookup only; *lib* keeps owning every
-    binary/export/version read, so the two can never disagree about what is
-    exported. It must describe the same library as *lib* — at all three call
-    sites it is the snapshot of that exact path.
-    """
-    for candidate in (snapshot, lib):
-        build_source = getattr(candidate, "build_source", None)
-        if build_source is None:
-            continue
-        graph: SourceGraphSummary | None = getattr(build_source, "source_graph", None)
-        if graph is not None and graph.nodes:
-            return graph
-    return None
-
-
-def _consumer_impact_explanations(
-    app_path: Path,
-    app_reqs: AppRequirements,
-    old_lib: Path | AbiSnapshot,
-    symbols: list[str],
-    old_snapshot: AbiSnapshot | None = None,
-) -> tuple[SourceGraphSummary | None, dict[str, ConsumerImpactPath]]:
-    """Explain each of *symbols* through the joined consumer/source graph
-    (G29 Phase 4, ADR-057).
-
-    The *old* library's graph, not the new one: the symbol is missing from the
-    new library by definition, so only the old side still carries the
-    declaration and call edges that say why the consumer depended on it.
-
-    Returns ``(joined_graph, {symbol: ConsumerImpactPath})`` — both empty/
-    ``None`` whenever no graph is available or nothing could be explained, in
-    which case every finding keeps exactly the shape it had before this join
-    existed.
-    """
-    library_graph = _library_source_graph(old_lib, old_snapshot)
-    if library_graph is None or not symbols:
-        return None, {}
-    from .impact.consumer_graph import (
-        build_consumer_graph,
-        explain_required_symbols,
-        join_consumer_graph,
-    )
-
-    # No `symbols=` narrowing needed: _scope_app_symbols_to_library already
-    # reduced app_reqs.undefined_symbols to what this library actually
-    # exports, which is exactly the scoping that parameter exists to apply.
-    consumer_graph = build_consumer_graph(app_path.name, app_reqs)
-    joined = join_consumer_graph(library_graph, consumer_graph)
-    return joined, explain_required_symbols(joined, symbols, consumer=app_path.name)
-
-
-def _format_consumer_impact(
-    explained: ConsumerImpactPath,
-    graph: SourceGraphSummary,
-    *,
-    name_consumer: bool = True,
-) -> str:
-    """The human-readable half of a consumer impact explanation — the string
-    that replaces "requires missing symbol X" with why it was required.
-
-    Reuses ``source_graph_findings._format_dependency_path`` for the chain
-    itself rather than formatting edges here, so a consumer proof path reads
-    identically to an internal-leak one for the same edges.
-
-    *name_consumer* picks which of the two facts the sentence leads with, and
-    the distinction is not cosmetic (ADR-057 D8). "``training-service``
-    requires X" is a fact about *one* consumer; "X is reachable from public
-    entry ``train``" is a fact about the *library*, true of every consumer and
-    of no consumer. The first belongs on the
-    ``CONSUMER_REQUIRED_SYMBOL_REMOVED`` overlay, which exists per app; the
-    second is what may be written onto a shared library-diff finding that the
-    unscoped report also renders.
-    """
-    entry = explained.public_entries[0] if explained.public_entries else "?"
-    if explained.is_direct():
-        if name_consumer:
-            return f"{explained.consumer} requires public entry {entry} directly"
-        return f"{explained.symbol} is declared by public entry {entry}"
-    from .buildsource.source_graph_findings import _format_dependency_path
-
-    chain = _format_dependency_path(graph, explained.entry_path)
-    if name_consumer:
-        return (
-            f"{explained.consumer} requires {explained.symbol} "
-            f"via public entry {entry}: {chain}"
-        )
-    return f"{explained.symbol} is reachable from public entry {entry}: {chain}"
-
-
-def _has_impact_evidence(change: Change) -> bool:
-    """Whether *change* already carries reachability/impact evidence from one
-    of its own producers (``internal_leak``, ``source_graph_findings``,
-    ``post_processing``).
-
-    The guard on enriching a *shared* library-diff finding: those `Change`
-    objects are the same ones in ``DiffResult.changes``, so overwriting
-    evidence a producer already computed would corrupt the unscoped report,
-    and ``attach_impact_metadata`` assigns its whole field set
-    unconditionally (``None`` included). It also makes the multi-``--used-by``
-    case first-writer-wins and therefore deterministic in app order, rather
-    than silently last-writer-wins.
-
-    ``impact_assessment.proof_path is not None`` (a *cached assessment that
-    actually carries a proof path*), not merely "a cached assessment
-    exists" (Codex review, fresh evidence): since ADR-052 Slice 10,
-    ``post_processing.MarkReachability`` caches an ``ImpactAssessment`` on
-    *every* change it tags -- including a change it leaves
-    ``ReachabilityState.UNKNOWN`` with no proof path at all (an ordinary,
-    otherwise-unexplained ``FUNC_REMOVED``), and one it tags
-    ``PROVEN_REACHABLE`` via a direct-symbol/public-source-ABI-surface match
-    with no walked path either (see that step's own two early-continue
-    branches). Treating either of those as "evidence of its own" would skip
-    :func:`_enrich_covered_changes` for the exact common case this join
-    exists to explain, silently dropping ``affected_public_roots``/
-    ``impact_proof_path``/the consumer-neutral prose for a covered removed
-    export. Reading ``.proof_path`` instead makes this check equivalent to
-    the two flat-field checks below regardless of whether the evidence
-    reached this change via the cache or directly.
-    """
-    assessment = getattr(change, "impact_assessment", None)
-    return (
-        (assessment is not None and assessment.proof_path is not None)
-        or getattr(change, "impact_proof_path", None) is not None
-        or getattr(change, "reachability_proof_path", None) is not None
-    )
-
-
-def _enrich_covered_changes(
-    changes: list[Change],
-    explanations: dict[str, ConsumerImpactPath],
-    graph: SourceGraphSummary,
-) -> None:
-    """Attach the graph explanation to library-diff findings that already
-    cover a missing symbol (ADR-057 D8, Codex review).
-
-    Without this the join reached only *uncovered* symbols: an ordinary
-    removed export produces its own ``FUNC_REMOVED``, which
-    :func:`uncovered_missing_symbols` then excludes from the overlay — so the
-    common case, including the internal-dispatcher one this join was built
-    for, got no proof path at all.
-
-    These `Change` objects are shared with ``DiffResult.changes``, so the
-    prose written here is deliberately consumer-neutral (see
-    :func:`_format_consumer_impact`) and only findings with no evidence of
-    their own are touched.
-
-    Refreshes ``change.impact_assessment`` after attaching (Codex review,
-    fresh evidence): a change reaching this point with a *cached but
-    pathless* assessment (``MarkReachability``'s blanket Slice 10 cache —
-    the case :func:`_has_impact_evidence` now lets through) still has that
-    stale, path-less object sitting on ``change.impact_assessment`` after
-    :func:`_attach_consumer_impact` sets the flat proof-path fields —
-    ``impact.engine.assess_change`` prefers any non-``None`` cached
-    assessment over re-deriving from those flat fields, so without this
-    refresh the newly attached consumer explanation would never actually
-    reach a JSON/SARIF render. Mirrors the overlay-change path a few lines
-    below (``overlay_change.impact_assessment = assess_change(overlay_change)``),
-    which already does this correctly for the *uncovered*-symbol case
-    because that ``Change`` is always freshly constructed with no
-    pre-existing cache to go stale — this shared-``Change`` counterpart
-    must clear the stale cache *first*: ``assess_change`` reads
-    ``change.impact_assessment`` as its own cache, so recomputing while the
-    old object is still assigned would just hand back that same stale
-    object unchanged.
-
-    Aggregates *every* matching explanation, not just the first
-    (:func:`_merge_consumer_impact_paths`) — a single shared ``Change`` can
-    cover more than one missing export at once via ``affected_symbols``
-    (e.g. one type-size change breaking several removed functions), and
-    :func:`_change_covers_symbol` treats all of them as covered. Keeping
-    only the first match's ``next(...)`` pick (Codex review, fresh
-    evidence) silently discarded every other symbol's own public root and
-    proof path, reporting a narrower explanation than the same logic
-    already claims this finding accounts for.
-    """
-    for change in changes:
-        if _has_impact_evidence(change):
-            continue
-        matches = [
-            e for sym, e in explanations.items() if _change_covers_symbol(change, sym)
-        ]
-        if not matches:
-            continue
-        explained = _merge_consumer_impact_paths(matches)
-        _attach_consumer_impact(change, explained, graph, name_consumer=False)
-        change.impact_assessment = None
-        change.impact_assessment = assess_change(change)
-
-
-def _merge_consumer_impact_paths(
-    matches: list[ConsumerImpactPath],
-) -> ConsumerImpactPath:
-    """Combine every symbol-level explanation one shared ``Change`` covers
-    (via ``affected_symbols`` naming more than one missing export) into a
-    single :class:`~abicheck.impact.consumer_graph.ConsumerImpactPath`,
-    instead of silently keeping only the first and discarding the rest
-    (Codex review, fresh evidence).
-
-    All of ``consumer``/``symbol``/``entry_path``/the primary (first)
-    ``public_entries`` entry come from the **same** match — the one
-    :func:`_choose_primary_match` picks — never from independently-chosen
-    fields (Codex review, fresh evidence): an earlier version picked
-    ``symbol``/``public_entries`` from ``matches[0]`` but ``entry_path``
-    from the first match that happened to carry a non-empty (indirect)
-    path, which are not necessarily the same match when the first match is
-    itself *direct* (``entry_path == []``) and a later one is indirect.
-    ``_format_consumer_impact`` reads ``explained.symbol``/
-    ``explained.public_entries[0]`` together with ``explained.entry_path``
-    as one coherent story ("*symbol* is reachable from public entry
-    *entry*: *chain*"); mixing fields from two different matches produced
-    an internally contradictory sentence — symbol A "reachable from" A's
-    own entry, followed by a chain that actually starts at (and explains)
-    a completely different symbol B's entry and target.
-
-    ``public_entries``/``declarations`` are still the order-preserving
-    deduped union across every match (so a finding covering several
-    requirements reports every public root/declaration that explains it,
-    not just the primary's), just with the primary's own values ordered
-    first. A *same-rooted* other match's ``entry_path``/
-    ``alternative_entry_paths`` is folded into the merged
-    ``alternative_entry_paths`` instead of dropped outright, so no
-    explanation is lost even though only one match can be primary
-    (``attach_impact_metadata`` caps how many of these are actually kept).
-    A *differently-rooted* other match's own path is deliberately left out
-    (Codex review, fresh evidence) — ``impact.engine._build_alternative_path``
-    stamps every merged ``GraphProofPath`` with the SAME single primary
-    root, so including a path that actually starts at a different public
-    entry would misrepresent it in JSON/SARIF as a variant of the primary's
-    own root; that entry is still reported via ``public_entries``, just not
-    smuggled in as a same-rooted alternative.
-
-    Deliberately does **not** early-return ``matches[0]`` unchanged when
-    ``len(matches) == 1`` (Codex review, fresh evidence): the single-symbol
-    case is the *ordinary* one, not a degenerate special case that can skip
-    the root filter below.
-    :func:`~abicheck.impact.consumer_graph.explain_required_symbols` can
-    itself return one ``ConsumerImpactPath`` whose own
-    ``alternative_entry_paths`` already mixes candidates from more than one
-    consumer-compiled entry (every entry that reaches the target
-    declaration, not just the ``select_preferred_graph_path``-chosen one) —
-    so a lone match can carry a differently-rooted alternative exactly like
-    the primary-match case below, and skipping this function's filtering
-    for it would let ``impact.engine._build_proof_path``'s single
-    ``affected_public_roots[0]`` mislabel that alternative's root the same
-    way an unfiltered multi-match merge would.
-    """
-    primary = _choose_primary_match(matches)
-    ordered = [primary, *(m for m in matches if m is not primary)]
-    entries: list[str] = []
-    seen_entries: set[str] = set()
-    declarations: list[str] = []
-    seen_decls: set[str] = set()
-    for m in ordered:
-        for e in m.public_entries:
-            if e not in seen_entries:
-                seen_entries.add(e)
-                entries.append(e)
-        for d in m.declarations:
-            if d not in seen_decls:
-                seen_decls.add(d)
-                declarations.append(d)
-    # A non-primary match's own entry_path/alternative_entry_paths is only
-    # folded in when it shares the primary's own root (Codex review, fresh
-    # evidence): impact.engine._build_alternative_path stamps every merged
-    # GraphProofPath.root from the SAME single primary root
-    # (impact.engine._build_proof_path's affected_roots[0]) -- it has no
-    # per-alternative root field at all. Including a differently-rooted
-    # match's own path here would have it serialized in JSON/SARIF as
-    # though it started at the primary's entry, when it actually starts at
-    # (and explains) a different public entry entirely -- the exact
-    # "confident but wrong" shape this module otherwise never allows, so a
-    # differently-rooted match's own path is left out of the merged
-    # alternatives rather than mislabeled.
-    #
-    # Compares by the actual graph node id (entry_path[0].src) whenever BOTH
-    # sides have a walked path, not by display label (Codex review, fresh
-    # evidence): distinct public-entry nodes can share one display label --
-    # C++ overloads are the common case -- so a label match alone does not
-    # prove m's path starts at the SAME node primary's does. Falls back to
-    # the label comparison only when one side has no entry_path at all (a
-    # *direct* match, whose declaration-is-the-entry "path" has no edge to
-    # read a node id from) -- the label is the only signal available then,
-    # same as before this fix.
-    primary_root = primary.public_entries[0] if primary.public_entries else None
-
-    def _same_root(m: ConsumerImpactPath) -> bool:
-        if m.entry_path and primary.entry_path:
-            return m.entry_path[0].src == primary.entry_path[0].src
-        return bool(m.public_entries) and m.public_entries[0] == primary_root
-
-    # A non-primary match's OWN alternative_entry_paths need the identical
-    # per-alt filter the primary's own alternatives get below (Codex
-    # review, fresh evidence): _same_root(m) only proves m's PREFERRED
-    # entry_path shares the primary's root -- explain_required_symbols
-    # builds m.alternative_entry_paths from every candidate path across
-    # every consumer-compiled entry that reached the target, not just the
-    # entry m's own preferred path happens to start at, so one of m's own
-    # alternatives can start at yet another, third entry. Bulk-extending
-    # all of them once m's preferred path passes the root check would
-    # still let a differently-rooted path through and have it serialized
-    # under the primary's single root. Filtered against m's own verified
-    # entry_path[0].src (equal to primary's by construction once same_root
-    # is True) rather than re-deriving it from primary directly, so the
-    # comparison reads as "does this alt start where m's OWN already-
-    # verified path starts" -- the same question the primary-side filter
-    # answers about primary's own alternatives.
-    alternatives = []
-    for m in matches:
-        if m is primary:
-            continue
-        same_root = _same_root(m)
-        if m.entry_path and same_root:
-            alternatives.append(m.entry_path)
-            m_start = m.entry_path[0].src
-            alternatives.extend(
-                alt for alt in m.alternative_entry_paths if alt and alt[0].src == m_start
-            )
-    # primary's OWN alternative_entry_paths need the identical guard (Codex
-    # review, fresh evidence): explain_required_symbols builds these from
-    # every candidate path across every consumer-compiled entry the walk
-    # reached, not just ones starting at the SAME entry select_preferred_graph_path
-    # chose as primary -- so an entry in here can legitimately start at a
-    # different node than primary.entry_path's own first hop. There is no
-    # per-alternative root field to compare by label (unlike the
-    # cross-match case above), so this compares each alternative's actual
-    # first-edge source node against primary.entry_path's own first-edge
-    # source directly -- the same underlying question ("does this
-    # alternative start where the primary path starts"), answered without
-    # needing graph/label access this function doesn't have.
-    if primary.entry_path:
-        primary_start = primary.entry_path[0].src
-        alternatives.extend(
-            alt
-            for alt in primary.alternative_entry_paths
-            if alt and alt[0].src == primary_start
-        )
-    from .impact.consumer_graph import ConsumerImpactPath as _ConsumerImpactPath
-
-    return _ConsumerImpactPath(
-        consumer=primary.consumer,
-        symbol=primary.symbol,
-        declarations=tuple(declarations),
-        public_entries=tuple(entries),
-        entry_path=primary.entry_path,
-        alternative_entry_paths=alternatives,
-    )
-
-
-def _choose_primary_match(
-    matches: list[ConsumerImpactPath],
-) -> ConsumerImpactPath:
-    """The one match :func:`_merge_consumer_impact_paths` derives
-    ``consumer``/``symbol``/``entry_path``/the primary public entry from.
-
-    Prefers the first match that carries an actual walked ``entry_path``
-    (an indirect, graph-proven chain) over a direct one — a direct match's
-    own ``entry_path`` is ``[]`` by construction (its "path" is the trivial
-    zero-hop declaration-is-the-entry case), so preferring it as primary
-    when a genuinely indirect match also exists would silently discard the
-    only real path this merged explanation could have shown. Falls back to
-    the first match when every match is direct — there is no path to
-    prefer among them, so display order is the only remaining tiebreaker.
-    """
-    return next((m for m in matches if m.entry_path), matches[0])
-
-
-def _attach_consumer_impact(
-    change: Change,
-    explained: ConsumerImpactPath,
-    graph: SourceGraphSummary,
-    *,
-    name_consumer: bool = True,
-) -> None:
-    """Attach one :class:`ConsumerImpactPath` to *change* in place.
-
-    Enrichment only — never constructs a finding, never changes a verdict or
-    a severity. The overlay call site already stamps ``PROVEN_REACHABLE``/
-    ``consumer_proven`` on its freshly-built ``Change`` before calling this
-    (see its own comment) — this function stamps the identical three fields
-    itself too (Codex review, fresh evidence), a no-op there, but load-bearing
-    for :func:`_enrich_covered_changes`'s *shared*-``Change`` caller: that
-    change's ``reachability_state``/``public_reachable`` are whatever
-    ``MarkReachability`` left them (``UNKNOWN``/``False`` by default when no
-    reachability-aware suppression rule is even configured, so that step never
-    ran at all) — attaching a concrete proof path here without also raising
-    those fields would otherwise leave the *same* internal contradiction the
-    overlay's own comment already reasons its way out of: a real consumer
-    requirement resolving to a real, walked call chain is not a "maybe
-    internal, maybe not" ambiguity, by construction, for either caller.
-    """
-    from .buildsource.graph_impact import attach_impact_metadata
-
-    attach_impact_metadata(
-        change,
-        affected_public_roots=list(explained.public_entries),
-        path=explained.entry_path,
-        graph=graph,
-        alternative_paths=explained.alternative_entry_paths,
-    )
-    change.reachability_proof_path = _format_consumer_impact(
-        explained, graph, name_consumer=name_consumer
-    )
-    change.public_reachable = True
-    change.reachability_kind = "consumer_proven"
-    # Unconditionally overrides whatever reachability_state MarkReachability
-    # (or nothing) already left here, including a prior PROVEN_UNREACHABLE
-    # from its own layout/type-graph closure walk (CodeRabbit review): that
-    # walk reasons about *potential* reachability from the public API
-    # surface as the library's own source declares it, while this evidence
-    # is a real --used-by consumer binary's own undefined-symbol resolution
-    # -- an empirically stronger, more direct signal than a structural
-    # closure inference, and this function only ever runs when that real
-    # requirement was found. Deliberately not treated as a recorded
-    # conflict between two disagreeing verdicts: an actual observed
-    # dependency is not "in tension" with an inference about the surface
-    # that dependency turned out to route around (an alias, a compiler
-    # intrinsic call, or any other path the closure walk doesn't model) --
-    # it settles the question the walk could only approximate.
-    change.reachability_state = ReachabilityState.PROVEN_REACHABLE
 
 
 def scope_diff_to_app(
@@ -1464,7 +1035,8 @@ def scope_diff_to_app(
     is a real binary ``Path``: a caller that resolved OLD to both a path and a
     snapshot should pass the snapshot here so the join can explain *why* a
     consumer required a removed symbol. It never affects which symbols,
-    exports, or versions are read — see :func:`_library_source_graph`.
+    exports, or versions are read — see
+    :func:`~abicheck.appcompat_consumer_impact._library_source_graph`.
 
     *app_path* (Workstream D-S1) may be a bare :class:`~pathlib.Path` or a
     :class:`~abicheck.model.consumer_spec.ConsumerSpec` (digest/platform/
@@ -1574,7 +1146,7 @@ def scope_diff_to_app(
     # then excludes from the overlay below -- so scoping the walk to
     # `uncovered` left the common case (the internal-dispatcher one this join
     # was built for) with no explanation at all (ADR-057 D8, Codex review).
-    joined_graph, consumer_impact = _consumer_impact_explanations(
+    joined_graph, consumer_impact = consumer_impact_explanations(
         app_path, app_reqs, old_lib, missing_symbols, old_snapshot
     )
     for sym in uncovered:
@@ -1601,7 +1173,7 @@ def scope_diff_to_app(
         # proof path would never reach the report.
         explained = consumer_impact.get(sym)
         if explained is not None and joined_graph is not None:
-            _attach_consumer_impact(overlay_change, explained, joined_graph)
+            attach_consumer_impact(overlay_change, explained, joined_graph)
         # ADR-052 D2 follow-up (G29 Phase 3, scoped implementation): cache
         # this overlay's ImpactAssessment right away. Safe here because
         # suppression.evaluate() below is a pure read of change's fields
@@ -1610,66 +1182,39 @@ def scope_diff_to_app(
         # cache read in impact.engine.assess_change touches the evidence
         # fields just set above.
         overlay_change.impact_assessment = assess_change(overlay_change)
-        if suppression is None:
-            record_consumer_overlay(overlay_ledger, overlay_change, diff)
-            breaking_for_app.append(overlay_change)
-            continue
         # evaluate() (not the cheaper is_suppressed) so a broad rule whose
         # selectors matched but was withheld by the reachability/
         # allow_public_break gate still emits the same
         # SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK diagnostic ApplySuppression
         # produces for changes it sees directly (mirrors checker.py's
         # _filter_suppressed_changes / post_processing.py's
-        # _merge_findings_respecting_suppression).
-        outcome = suppression.evaluate(overlay_change)
-        if outcome.suppressed:
-            # Codex review (fresh evidence): missing_symbols independently
-            # forces Verdict.BREAKING in _compute_appcompat_verdict below
-            # regardless of breaking_for_app, and feeds the scoped exit-code
-            # floor / missing-label text output the same way -- dropping only
-            # the synthesized Change left the suppression cosmetic. This
-            # overlay IS the suppressible representation of a missing symbol
-            # (that was the point of promoting it out of a bespoke string),
-            # so a suppressed overlay must also remove its raw string from
-            # every one of those consumers.
-            # ADR-067 C-S1's fourth application point. This overlay's *input*
-            # shape is a raw ``missing_symbols`` string rather than a detected
-            # change, but what suppression acts on here is a real ``Change``,
-            # so it records through the identical primitive the library-diff
-            # points use -- one record type, one query surface (D2), with the
-            # consumer overlay named as its own application point.
-            record_consumer_overlay(
-                overlay_ledger,
-                overlay_change,
-                diff,
-                rule=outcome.matched_rule,
-                suppression=suppression,
-            )
+        # _merge_findings_respecting_suppression). Codex review (fresh
+        # evidence): missing_symbols independently forces Verdict.BREAKING in
+        # _compute_appcompat_verdict below regardless of breaking_for_app, and
+        # feeds the scoped exit-code floor / missing-label text output the
+        # same way -- dropping only the synthesized Change left the
+        # suppression cosmetic, so a suppressed overlay must also remove its
+        # raw string from every one of those consumers (below).
+        #
+        # ADR-067 C-S2: the evaluate/record/overreach sequence itself is
+        # shared with scope_diff_to_required_symbols's identical loop, in
+        # record_and_maybe_suppress_overlay -- one record type, one query
+        # surface (D2), with the consumer overlay named as its own
+        # application point.
+        kept, overreach = record_and_maybe_suppress_overlay(
+            overlay_ledger, overlay_change, diff, suppression=suppression,
+        )
+        if not kept:
             suppressed_missing.add(sym)
             continue
-        # Recorded on *both* branches, not only when a rule fires (ADR-067
-        # D1): the overlay is an atomically detected consumer finding either
-        # way, so recording it only when suppressed would make adding a
-        # matching rule change the *detected* total rather than move the
-        # finding between dispositions -- exactly the conservation the audit
-        # exists to make checkable.
-        record_consumer_overlay(overlay_ledger, overlay_change, diff)
         breaking_for_app.append(overlay_change)
-        # outcome.withheld_unknown_rule is never set here: overlay_change is
-        # always constructed with reachability_state=PROVEN_REACHABLE above
-        # (it is by construction consumer-proven), and
-        # would_withhold_unknown_reachability only ever fires on UNKNOWN.
-        if outcome.withheld_rule is not None:
-            from .post_processing import _build_suppression_overreach_change
-
-            breaking_for_app.append(
-                _build_suppression_overreach_change(overlay_change, outcome.withheld_rule)
-            )
+        if overreach is not None:
+            breaking_for_app.append(overreach)
     # After the overlay loop: an overlay already carries its own (consumer-
     # named) explanation and a cached ImpactAssessment, so _has_impact_evidence
     # skips it here and only the shared library-diff findings are considered.
     if joined_graph is not None and consumer_impact:
-        _enrich_covered_changes(breaking_for_app, consumer_impact, joined_graph)
+        enrich_covered_changes(breaking_for_app, consumer_impact, joined_graph)
 
     if suppressed_missing:
         missing_symbols = [s for s in missing_symbols if s not in suppressed_missing]
@@ -1904,6 +1449,7 @@ def scope_diff_to_required_symbols(
     *,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
+    suppression: SuppressionList | None = None,
 ) -> PluginHostContractResult:
     """Scope an already-computed diff to an explicit required-symbol contract.
 
@@ -1913,22 +1459,78 @@ def scope_diff_to_required_symbols(
     only intersects the given ``required_entrypoints`` with that diff. See
     :func:`check_plugin_host_contract` for the standalone convenience wrapper
     that also runs the comparison itself.
+
+    *suppression* (ADR-067 C-S2, mirrors :func:`scope_diff_to_app`'s own
+    *suppression* parameter — ADR-044 P2): the same rule set already used to
+    compute *diff*, evaluated again here because the missing-entrypoint
+    overlay below is synthesized fresh *after* that pass already ran, so it
+    would otherwise be unsuppressible even by an exact rule.
     """
     required = set(required_entrypoints)
     new_exports = _snapshot_export_names(new_plugin)
     missing = sorted(e for e in required if e not in new_exports)
+    # Coverage is an objective fact about the export table, computed from the
+    # raw (pre-suppression) missing count -- mirrors scope_diff_to_app's own
+    # `coverage = _compute_symbol_coverage(...)` call above its overlay loop
+    # (see that call's comment). A suppressed missing entrypoint must not
+    # make the reported coverage number lie by shrinking the denominator.
+    raw_missing_count = len(missing)
 
     # Reuse the app-scoping machinery: the contract is a set of required
     # ("undefined") symbols, identical in shape to an app's symbol needs.
     host_reqs = AppRequirements(undefined_symbols=set(required))
     breaking_for_host, _ = _partition_app_changes(diff, host_reqs)
 
+    # ADR-067 C-S2: the host-contract mirror of scope_diff_to_app's own
+    # CONSUMER_REQUIRED_SYMBOL_REMOVED overlay loop (ADR-044 P2 item 1) --
+    # promote a missing entrypoint not already represented by a diff Change
+    # into the same first-class, suppressible, ledger-recorded finding,
+    # instead of leaving it as a bespoke string only special-cased by the
+    # CLI's own `_apply_required_symbol_scoping`/reporter code. Without this
+    # the ledger's raw-versus-effective totals never accounted for a
+    # required-symbol contract's missing entrypoints at all -- exactly the
+    # gap the C-S1 slice already closed for `--used-by`.
+    overlay_ledger = ledger_for(diff)
+    suppressed_missing: set[str] = set()
+    for sym in uncovered_missing_symbols(missing, breaking_for_host):
+        # public_reachable=True/PROVEN_REACHABLE, mirroring
+        # scope_diff_to_app's identical overlay: this finding only ever
+        # exists because a real declared entrypoint contract's own required
+        # symbol genuinely resolved to nothing in the new plugin -- there is
+        # no "maybe internal, maybe not" ambiguity a broad namespace/
+        # source_location suppression rule's default "unreachable-only"
+        # reachability should be allowed to read as unreachable.
+        overlay_change = make_change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol=sym,
+            name=new_plugin.library or "new",
+            public_reachable=True,
+            reachability_kind="consumer_proven",
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
+        )
+        overlay_change.impact_assessment = assess_change(overlay_change)
+        kept, overreach = record_and_maybe_suppress_overlay(
+            overlay_ledger,
+            overlay_change,
+            diff,
+            suppression=suppression,
+            application_point="required_symbol_overlay",
+        )
+        if not kept:
+            suppressed_missing.add(sym)
+            continue
+        breaking_for_host.append(overlay_change)
+        if overreach is not None:
+            breaking_for_host.append(overreach)
+    if suppressed_missing:
+        missing = [s for s in missing if s not in suppressed_missing]
+
     verdict = _compute_appcompat_verdict(
         missing, [], breaking_for_host, len(required), policy, policy_file,
     )
-    coverage = _compute_symbol_coverage(new_exports, len(required), len(missing))
-    _promote_scoped_contract(
-        breaking_for_host, policy=policy, policy_file=policy_file, diff=diff
+    coverage = _compute_symbol_coverage(new_exports, len(required), raw_missing_count)
+    _finalize_consumer_scope_diff(
+        diff, overlay_ledger, breaking_for_host, policy=policy, policy_file=policy_file
     )
 
     return PluginHostContractResult(
@@ -1971,7 +1573,7 @@ def check_plugin_host_contract(
 
     scoped = scope_diff_to_required_symbols(
         diff, old_plugin, new_plugin, required_entrypoints,
-        policy=policy, policy_file=policy_file,
+        policy=policy, policy_file=policy_file, suppression=suppression,
     )
     # ADR-067: the standalone plugin-host entry point is the orchestrator for
     # its own single host contract, exactly as `check_appcompat` is for its

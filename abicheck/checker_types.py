@@ -714,6 +714,19 @@ class DiffResult(ReportSideFacts):
     # recommend_release`` reads the *conserved* delta from it, so a suppressed
     # major-class break can no longer read as "no bump needed".
     disposition_ledger: object | None = field(default=None, kw_only=True)
+    # one-comparison-product.md P3 / ADR-064: `scan`'s two exit axes
+    # (`_EvidenceContractError`/`_BudgetOverflow`, exit 7/5), reserved so
+    # native `compare` can carry the identical signal via `policy.exit_
+    # decision_precedence.resolve_compare_exit_decision_with_abort_axes`,
+    # reusing ADR-064's precedence rule rather than a second copy. `False`
+    # for every `DiffResult` any current caller builds -- `compare` has no
+    # CLI-level source for either condition yet (no `--budget` flag, ADR-037
+    # D5's auto-strict `--depth`/`--source-method` enforcement is scan-only);
+    # that CLI wiring is deferred to the plan's Phase 2/7. Appended at the
+    # true end (positional-field-safety convention, see `effective_config`
+    # above).
+    evidence_contract_error: bool = field(default=False, kw_only=True)
+    budget_overflow: bool = field(default=False, kw_only=True)
 
     def _effective_kind_sets(
         self,
