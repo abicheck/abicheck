@@ -1,6 +1,6 @@
 # CLAUDE.md — `catalog/`
 
-This is the **calibration and compatibility-knowledge tree** — the 197
+This is the **calibration and compatibility-knowledge tree** — the 208
 `caseNN_*` fixtures the FP-rate, tier-accuracy, mutation, and
 full-catalog-coverage gates all run against, physically split out of
 `examples/` (Phase 4 of the [examples/catalog split]
@@ -156,7 +156,7 @@ loads and validates it), and a case missing from it fails
 
 **Every rule slug — a `rule_slug` or a `related_rules` entry — must resolve
 to an entry in [`catalog_rules.yaml`](catalog_rules.yaml)**, the canonical
-rule registry: one hand-authored title and definition per rule, all 177 of
+rule registry: one hand-authored title and definition per rule, all 188 of
 them. `scripts/catalog_rule_registry.py` joins it against the taxonomy to
 derive each rule's canonical case, variants, duplicates, composing
 scenarios and demonstrated-vs-referenced-only status (all *derived*, never

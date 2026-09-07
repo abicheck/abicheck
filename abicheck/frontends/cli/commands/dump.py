@@ -251,7 +251,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              _resolved_compile_context: CompileContext | None = None,
              _resolved_collect_mode: str | None = None,
              _resolved_include_labels: dict[Path, str] | None = None,
-             _resolved_lang_explicit: bool | None = None) -> None:
+             _resolved_lang_explicit: bool | None = None,
+             _resolved_changed_paths: tuple[str, ...] = ()) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -570,6 +571,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             legacy_compile_db_matched=_preview_matched,
             seed_collect_mode=_resolved.collect_mode,
             source_frontend_from_folded_context=True,
+            # `_resolved_changed_paths` (ADR-068 Phase 2c): the changed-path
+            # seed `compare`'s own inline `--sources` embed resolved, so this
+            # nested dump's L4/L5 collection narrows by the same seed the
+            # caller narrowed its collect mode by. `()` -- every direct `dump`
+            # invocation -- is the pre-existing behaviour unchanged.
+            changed_paths=_resolved_changed_paths,
         ),
     )
 

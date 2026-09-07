@@ -3,7 +3,7 @@
 
 ABI breaks: existing consumers will fail at runtime.
 
-_111 case(s)._ [← back to all examples](../index.md)
+_115 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -118,3 +118,7 @@ _111 case(s)._ [← back to all examples](../index.md)
 | [case191_header_only_graph_field_type](../case191_header_only_graph_field_type.md) | Public Struct Gains a Field of a Private Type (Header-Only Graph) | 🔴 BREAKING | Breaking |
 | [case192_call_graph_break_survives_suppression](../case192_call_graph_break_survives_suppression.md) | Call-Graph-Reachable Break Survives Suppression | 🔴 BREAKING | Breaking |
 | [case193_ordinary_exported_fn_call_not_reachable](../case193_ordinary_exported_fn_call_not_reachable.md) | Ordinary Exported Function's Internal Call Is Not Public-Reachable | 🔴 BREAKING | Breaking |
+| [case198_public_struct_field_reorder](../case198_public_struct_field_reorder.md) | Public Struct Field Reorder | 🔴 BREAKING | Breaking |
+| [case199_public_function_parameter_added](../case199_public_function_parameter_added.md) | Parameter Added to an Exported Function | 🔴 BREAKING | Breaking |
+| [case201_public_function_parameters_reordered](../case201_public_function_parameters_reordered.md) | Public Function Parameters Reordered | 🔴 BREAKING | Breaking |
+| [case203_class_gained_vtable_pointer](../case203_class_gained_vtable_pointer.md) | Class Gained a Vtable Pointer | 🔴 BREAKING | Breaking |

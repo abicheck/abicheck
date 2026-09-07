@@ -3,7 +3,7 @@
 
 A change to a class's virtual-method set, order, or inheritance reshapes its vtable, VTT, or dispatch thunks -- silent misdispatch or a crash, not a link error.
 
-_12 case(s)._ [← back to all subjects](index.md)
+_13 case(s)._ [← back to all subjects](index.md)
 
 ## Cases
 
@@ -21,3 +21,4 @@ _12 case(s)._ [← back to all subjects](index.md)
 | [case173_vtt_slot_count_changed](../case173_vtt_slot_count_changed.md) | VTT Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
 | [case174_secondary_vtable_group_changed](../case174_secondary_vtable_group_changed.md) | Secondary Vtable Group Changed | 🔴 BREAKING | Breaking |
 | [case185_inherited_override_reuses_slot](../case185_inherited_override_reuses_slot.md) | Inherited override reuses the base's vtable slot | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case203_class_gained_vtable_pointer](../case203_class_gained_vtable_pointer.md) | Class Gained a Vtable Pointer | 🔴 BREAKING | Breaking |

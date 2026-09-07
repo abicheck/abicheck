@@ -47,6 +47,10 @@ STR_SUBKEYS: dict[str, frozenset[str]] = {
     "source": frozenset({"method"}),
     "compile": frozenset({"frontend", "std", "sysroot"}),
     "debug": frozenset({"format", "debuginfod_url"}),
+    # ADR-068 D5: the project's declared abi3 floor, e.g. "3.9" (quoted --
+    # a bare 3.9 is a YAML float, which this type check rejects outright
+    # rather than coercing it into a version spelling).
+    "python": frozenset({"abi3_floor"}),
 }
 # `_strs()` accepts either a list of strings or a single bare string (folded
 # to a 1-element list), so both shapes are valid here — anything else isn't.

@@ -285,6 +285,41 @@ def _reject_depth_for_set_inputs(ctx: click.Context) -> str | None:
     )
 
 
+#: ADR-068 Phase 2c/2d flags that only a *single-pair* compare implements
+#: (param dest -> flag). Both are per-run inputs to one library's own
+#: analysis: the changed-path seed scopes that library's L4/L5 replay, and
+#: the abi3 audit judges one candidate artifact. The directory/package
+#: fan-out neither collects inline source evidence nor audits members as
+#: extension modules, so accepting either there would be a flag that
+#: silently does nothing -- exactly the failure `_reject_evidence_flags_
+#: for_set_inputs` above exists to prevent.
+_SINGLE_PAIR_ONLY_SET_INPUT_FLAGS: dict[str, str] = {
+    "since": "--since",
+    "changed_paths_opt": "--changed-path",
+    "abi3": "--abi3",
+}
+
+
+def _reject_single_pair_flags_for_set_inputs(ctx: click.Context) -> None:
+    """Reject the Phase 2c/2d single-pair-only flags on a release compare."""
+    used = sorted(
+        flag
+        for dest, flag in _SINGLE_PAIR_ONLY_SET_INPUT_FLAGS.items()
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+    )
+    if not used:
+        return
+    raise click.UsageError(
+        ", ".join(used)
+        + " "
+        + ("is" if len(used) == 1 else "are")
+        + " not supported for directory/package (release) comparisons: "
+        "--since/--changed-path scope one library's own source-evidence "
+        "replay, and --abi3 audits one candidate extension module. Compare "
+        "the library (or the extension module) individually to use them."
+    )
+
+
 def _reject_bundle_facts_out_for_single_pair(bundle_facts_out: Path | None) -> None:
     """Reject ``--bundle-facts-out`` on a single-file/snapshot comparison.
 

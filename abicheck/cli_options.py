@@ -1246,6 +1246,87 @@ def verbose_option(func: F) -> F:
     return func
 
 
+def changed_path_options(func: F) -> F:
+    """Changed-path localization: ``--since`` / ``--changed-path`` (ADR-068,
+    plan §3 #12).
+
+    A per-run input by construction -- a PR's own diff -- so it stays a CLI
+    flag rather than a ``.abicheck.yml`` property (ADR-068 D5). Scoping only:
+    neither flag produces a finding of its own; together they seed the
+    points-of-interest set a ``--depth source`` run replays, per ADR-043 D7
+    (changed-path scope when a seed exists, else the current library target --
+    never a zero-TU no-op). The seed itself is resolved by the one shared
+    owner, :func:`abicheck.workflows.changed_paths.resolve_changed_seed`, so
+    ``compare`` and ``scan`` cannot drift on what a seed is.
+    """
+    func = click.option(
+        "--changed-path",
+        "changed_paths_opt",
+        multiple=True,
+        help="Changed path to focus this run's source-evidence scope on "
+        "(repeatable; alternative to --since). Narrows the L4/L5 "
+        "points of interest a --depth source run examines; produces no "
+        "finding of its own and never changes a verdict.",
+    )(func)
+    func = click.option(
+        "--since",
+        "since",
+        default=None,
+        help="Focus this run's source-evidence scope on the files changed "
+        "vs a git ref (e.g. origin/main), resolved with `git diff "
+        "--name-only <ref>...HEAD`. Same scoping-only effect as "
+        "--changed-path, which wins when both are given; a ref that "
+        "cannot be resolved warns and leaves the scope broad.",
+    )(func)
+    return func
+
+
+def parse_abi3_floor(value: str | None) -> tuple[int, int] | None:
+    """Parse a ``--abi3 VERSION`` ``Py_LIMITED_API`` floor, ``None`` when off.
+
+    The front-end half of the audit (the engine half is
+    :mod:`abicheck.workflows.abi3_audit`, which may not import
+    ``abicheck.stable_abi``): one accepted spelling for both ``compare`` and
+    ``scan``, so an invalid floor (non-3 major, implausible minor, trailing
+    junk) is the same usage error on either command.
+    """
+    if value is None:
+        return None
+    from . import stable_abi
+
+    floor = stable_abi.parse_abi3_version(value)
+    if floor is None:
+        raise click.BadParameter(f"invalid --abi3 version: {value!r}")
+    return floor
+
+
+def abi3_option(func: F) -> F:
+    """The ``--abi3 VERSION`` stable-ABI audit floor (ADR-068 D3, plan §3 #15).
+
+    On ``compare`` this selects the candidate-side (NEW) enrichment stage: the
+    audit is meaningful only on the candidate, so its findings ride the same
+    result document, marked, and are never evaluated on the baseline side. The
+    floor is also a stable project property, so ``.abicheck.yml``'s
+    ``python.abi3_floor`` supplies a default this flag overrides per run
+    (ADR-068 D5).
+    """
+    func = click.option(
+        "--abi3",
+        "abi3",
+        default=None,
+        metavar="VERSION",
+        help="Audit the candidate (NEW) against a Py_LIMITED_API floor, e.g. "
+        "`3.9`. Classifies the module's imported CPython C-API against the "
+        "stable ABI and flags private/unstable imports and stable symbols "
+        "newer than the floor as `python_stable_abi_violation` (advisory; "
+        "gate it through --policy/.abicheck.yml policy.overrides). Requires "
+        "the candidate to be a CPython extension module -- anything else is "
+        "an evidence-contract error (exit 7). Overrides .abicheck.yml's "
+        "python.abi3_floor for this run.",
+    )(func)
+    return func
+
+
 def env_matrix_option(func: F) -> F:
     """The ``--env-matrix`` option: declared deployment constraints (ADR-020b).
 

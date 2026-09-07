@@ -4586,5 +4586,258 @@
   "subjects": [
    "internal-dependency-reachability"
   ]
+ },
+ "case198_public_struct_field_reorder": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "types"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "public-struct-field-reorder",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "struct-and-type-layout-changes"
+  ]
+ },
+ "case199_public_function_parameter_added": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "public-function-parameter-added",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "function-signature-and-source-api-changes"
+  ]
+ },
+ "case200_new_entry_point_instead_of_parameter_added": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "new-entry-point-instead-of-parameter-added",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "safe-changes-correctly-not-flagged"
+  ]
+ },
+ "case201_public_function_parameters_reordered": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "public-function-parameters-reordered",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "function-signature-and-source-api-changes"
+  ]
+ },
+ "case202_public_header_declaration_order_changed": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "public-header-declaration-order-changed",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "safe-changes-correctly-not-flagged"
+  ]
+ },
+ "case203_class_gained_vtable_pointer": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "types"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "class-gained-vtable-pointer",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "vtable-and-virtual-dispatch"
+  ]
+ },
+ "case204_class_gained_non_virtual_method": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "class-gained-non-virtual-method",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "safe-changes-correctly-not-flagged"
+  ]
+ },
+ "case205_public_function_marked_deprecated": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "public-function-marked-deprecated",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "api-design-and-hygiene-anti-patterns"
+  ]
+ },
+ "case206_deprecation_documented_without_attribute": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "deprecation-documented-without-attribute",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "safe-changes-correctly-not-flagged"
+  ]
+ },
+ "case207_pointer_parameter_gained_restrict": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "pointer-parameter-gained-restrict",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "function-signature-and-source-api-changes"
+  ]
+ },
+ "case208_restrict_added_to_definition_only": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "restrict-added-to-definition-only",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "safe-changes-correctly-not-flagged"
+  ]
  }
 }

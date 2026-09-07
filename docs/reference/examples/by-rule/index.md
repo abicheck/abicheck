@@ -29,6 +29,8 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`char-signedness-flip`](char-signedness-flip.md) | [case155_char_signedness_flip](../case155_char_signedness_flip.md) | — | — | — |
 | [`char8t-migration`](char8t-migration.md) | [case114_char8t_migration](../case114_char8t_migration.md) | — | — | — |
 | [`class-became-final`](class-became-final.md) | [case125_class_became_final](../case125_class_became_final.md) | — | — | — |
+| [`class-gained-non-virtual-method`](class-gained-non-virtual-method.md) | [case204_class_gained_non_virtual_method](../case204_class_gained_non_virtual_method.md) | — | — | — |
+| [`class-gained-vtable-pointer`](class-gained-vtable-pointer.md) | [case203_class_gained_vtable_pointer](../case203_class_gained_vtable_pointer.md) | — | — | — |
 | [`compat-addition`](compat-addition.md) | [case03_compat_addition](../case03_compat_addition.md) | — | — | [case107_task_scheduler_init_removed](../case107_task_scheduler_init_removed.md), [case108_task_class_removed](../case108_task_class_removed.md), [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md), [case78_task_arena_attach_tag](../case78_task_arena_attach_tag.md), [case92_bundle_provider_changed](../case92_bundle_provider_changed.md) |
 | [`compatible-type-added`](compatible-type-added.md) | — | — | — | [case108_task_class_removed](../case108_task_class_removed.md), [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md), [case191_header_only_graph_field_type](../case191_header_only_graph_field_type.md), [case78_task_arena_attach_tag](../case78_task_arena_attach_tag.md) |
 | [`concept-tightening`](concept-tightening.md) | [case105_concept_tightening](../case105_concept_tightening.md) | — | — | — |
@@ -44,6 +46,7 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`default-argument-removed`](default-argument-removed.md) | [case123_default_argument_removed](../case123_default_argument_removed.md) | — | — | — |
 | [`default-template-arg-changed`](default-template-arg-changed.md) | [case87_default_template_arg_changed](../case87_default_template_arg_changed.md) | — | — | — |
 | [`dependency-leak`](dependency-leak.md) | [case18_dependency_leak](../case18_dependency_leak.md) | — | — | — |
+| [`deprecation-documented-without-attribute`](deprecation-documented-without-attribute.md) | [case206_deprecation_documented_without_attribute](../case206_deprecation_documented_without_attribute.md) | — | — | — |
 | [`detail-base-class-changed`](detail-base-class-changed.md) | [case74_detail_base_class_changed](../case74_detail_base_class_changed.md) | — | — | — |
 | [`detail-embedded-by-value`](detail-embedded-by-value.md) | [case75_detail_embedded_by_value](../case75_detail_embedded_by_value.md) | — | — | — |
 | [`detail-pimpl-vtable-changed`](detail-pimpl-vtable-changed.md) | [case76_detail_pimpl_vtable_changed](../case76_detail_pimpl_vtable_changed.md) | — | — | — |
@@ -102,6 +105,7 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`multi-dim-array-change`](multi-dim-array-change.md) | [case45_multi_dim_array_change](../case45_multi_dim_array_change.md) | — | — | — |
 | [`namespace-pollution`](namespace-pollution.md) | [case53_namespace_pollution](../case53_namespace_pollution.md) | — | — | — |
 | [`needed-added`](needed-added.md) | [case138_needed_added](../case138_needed_added.md) | — | — | — |
+| [`new-entry-point-instead-of-parameter-added`](new-entry-point-instead-of-parameter-added.md) | [case200_new_entry_point_instead_of_parameter_added](../case200_new_entry_point_instead_of_parameter_added.md) | — | — | — |
 | [`no-change`](no-change.md) | [case04_no_change](../case04_no_change.md) | — | — | — |
 | [`no-unique-address`](no-unique-address.md) | [case117_no_unique_address](../case117_no_unique_address.md) | — | — | — |
 | [`noexcept-change`](noexcept-change.md) | [case15_noexcept_change](../case15_noexcept_change.md) | — | — | — |
@@ -113,21 +117,28 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`pimpl-shared-to-unique`](pimpl-shared-to-unique.md) | [case80_pimpl_shared_to_unique](../case80_pimpl_shared_to_unique.md) | — | — | — |
 | [`pointer-chain-type-change`](pointer-chain-type-change.md) | [case46_pointer_chain_type_change](../case46_pointer_chain_type_change.md) | — | — | — |
 | [`pointer-level`](pointer-level.md) | [case33_pointer_level](../case33_pointer_level.md) | — | — | — |
+| [`pointer-parameter-gained-restrict`](pointer-parameter-gained-restrict.md) | [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | — | — | — |
 | [`polymorphic-nonvirtual-dtor`](polymorphic-nonvirtual-dtor.md) | [case165_polymorphic_nonvirtual_dtor](../case165_polymorphic_nonvirtual_dtor.md) | — | — | — |
 | [`preproc-conditional-field`](preproc-conditional-field.md) | [case164_preproc_conditional_field](../case164_preproc_conditional_field.md) | — | — | — |
 | [`protected-visibility`](protected-visibility.md) | [case51_protected_visibility](../case51_protected_visibility.md) | — | — | — |
 | [`public-api-gains-internal-dependency`](public-api-gains-internal-dependency.md) | [case160_public_api_internal_dep_added](../case160_public_api_internal_dep_added.md) | — | [case190_public_inline_function_references_internal_constant](../case190_public_inline_function_references_internal_constant.md) | [case191_header_only_graph_field_type](../case191_header_only_graph_field_type.md), [case194_header_graph_rename_reconciled](../case194_header_graph_rename_reconciled.md), [case195_header_graph_ambiguous_rename_not_reconciled](../case195_header_graph_ambiguous_rename_not_reconciled.md), [case196_header_graph_move_reconciled](../case196_header_graph_move_reconciled.md), [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) |
 | [`public-class-private-base-class`](public-class-private-base-class.md) | [case188_public_class_private_base_class](../case188_public_class_private_base_class.md) | — | — | — |
 | [`public-class-representation-changed`](public-class-representation-changed.md) | — | — | — | [case126_sycl_device_impl_ptr](../case126_sycl_device_impl_ptr.md) |
+| [`public-function-marked-deprecated`](public-function-marked-deprecated.md) | [case205_public_function_marked_deprecated](../case205_public_function_marked_deprecated.md) | — | — | — |
+| [`public-function-parameter-added`](public-function-parameter-added.md) | [case199_public_function_parameter_added](../case199_public_function_parameter_added.md) | — | — | — |
+| [`public-function-parameters-reordered`](public-function-parameters-reordered.md) | [case201_public_function_parameters_reordered](../case201_public_function_parameters_reordered.md) | — | — | — |
 | [`public-function-private-parameter-type`](public-function-private-parameter-type.md) | [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type.md) | — | — | — |
+| [`public-header-declaration-order-changed`](public-header-declaration-order-changed.md) | [case202_public_header_declaration_order_changed](../case202_public_header_declaration_order_changed.md) | — | — | — |
 | [`public-integer-model-width-changed`](public-integer-model-width-changed.md) | — | — | — | [case112_lp64_ilp64](../case112_lp64_ilp64.md) |
 | [`public-macro-removed`](public-macro-removed.md) | [case156_public_macro_removed](../case156_public_macro_removed.md) | — | — | — |
+| [`public-struct-field-reorder`](public-struct-field-reorder.md) | [case198_public_struct_field_reorder](../case198_public_struct_field_reorder.md) | — | — | — |
 | [`public-struct-private-field-type`](public-struct-private-field-type.md) | [case187_public_struct_private_field_type](../case187_public_struct_private_field_type.md) | — | — | [case126_sycl_device_impl_ptr](../case126_sycl_device_impl_ptr.md) |
 | [`public-typedef-removed`](public-typedef-removed.md) | [case158_public_typedef_removed](../case158_public_typedef_removed.md) | — | — | [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) |
 | [`pure-virtual-added`](pure-virtual-added.md) | [case23_pure_virtual_added](../case23_pure_virtual_added.md) | — | — | — |
 | [`python-kwarg-renamed`](python-kwarg-renamed.md) | [case163_python_kwarg_renamed](../case163_python_kwarg_renamed.md) | — | — | — |
 | [`ref-qualifier-added`](ref-qualifier-added.md) | [case166_ref_qualifier_added](../case166_ref_qualifier_added.md) | — | — | — |
 | [`relro-weakened`](relro-weakened.md) | [case134_relro_weakened](../case134_relro_weakened.md) | — | — | — |
+| [`restrict-added-to-definition-only`](restrict-added-to-definition-only.md) | [case208_restrict_added_to_definition_only](../case208_restrict_added_to_definition_only.md) | — | — | — |
 | [`return-type`](return-type.md) | [case10_return_type](../case10_return_type.md) | — | — | [case91_bundle_intra_signature_drift](../case91_bundle_intra_signature_drift.md) |
 | [`rpath-leak`](rpath-leak.md) | [case52_rpath_leak](../case52_rpath_leak.md) | — | — | — |
 | [`rtti-mode-flip`](rtti-mode-flip.md) | [case131_rtti_mode_flip](../case131_rtti_mode_flip.md) | — | — | — |

@@ -11,7 +11,8 @@ generated: false
 **Status:** Proposed — planning document, largely unimplemented. Verified
 against `main` at `309c8a82` on 2026-09-06 by Click introspection and
 call-site inspection, not by help text or status prose. Phase 1 item 2
-(`FindingEvolution`) has since landed; see that item below.
+(`FindingEvolution`) and Phase 1 item 3's exit axes have since landed, as
+have Phase 2c, 2d and 2e; see those items below.
 **Effort:** XL · **Risk:** high — this deletes a public command and moves
 capabilities between analysis paths. Phase ordering is the safety mechanism.
 
@@ -433,8 +434,17 @@ One PR per capability group, each landing with parity tests going green:
 - **2a** cross-source checks (§3 #3–#5), per side, evolution-stated;
 - **2b** pattern + preprocessor scans (#6, #8);
 - **2c** changed-path localization `--since`/`--changed-path` (#12) and POI
-  scoping parity for `--depth source` (#10, #11);
-- **2d** `abi3` candidate-side enrichment (#15);
+  scoping parity for `--depth source` (#10, #11) — **landed**: the seed and
+  ADR-043 D7's scoping rule now have one owner (`workflows/changed_paths.py`)
+  that both commands resolve through, and the `changed_path_localization`
+  gap entry is gone from `tests/parity/gaps.py`;
+- **2d** `abi3` candidate-side enrichment (#15) — **landed**: `compare
+  --abi3` folds the audit's findings into the same result document, marked
+  `candidate_side_enrichment`, through the pre-classification
+  `extra_changes` channel so policy/suppression/verdict score them; its
+  precondition failure reuses Phase 1's evidence-contract exit axis (`7`).
+  The floor is `.abicheck.yml`'s `python.abi3_floor` with the flag as the
+  per-run override (ADR-068 D5). `abi3_audit` is gone from the gap registry;
 - **2e** `--no-baseline` (#2) — the audit-only comparison, on top of Phase 1.1;
 - **2f** dry-run/cost preview parity (#35).
 

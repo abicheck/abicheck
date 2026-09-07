@@ -39,10 +39,12 @@ from .impact import assess_change
 from .policy.disposition_close import ledger_for
 from .policy.disposition_ledger import RuleProvenance
 from .policy.gate_decision import gate_decision_for_result
+from .report.change_annotations import (
+    change_annotation_fields as _change_annotation_fields,
+)
 from .report.contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
 )
-from .report.cross_source_evolution import change_cross_source_evolution_field as _cse
 from .report.dispatch_markdown import (
     _to_markdown_leaf as _to_markdown_leaf,
     _to_markdown_root_cause as _to_markdown_root_cause,
@@ -1326,51 +1328,6 @@ def _reviewer_action_for_change(
     kind = getattr(c, "kind", None)
     kind_val = kind.value if kind else ""
     return _ADDITION_REVIEWER_ACTION.get(kind_val, _DEFAULT_ADDITION_REVIEWER_ACTION)
-
-
-def _change_annotation_fields(c: Any) -> dict[str, Any]:
-    """Optional per-change attribution/annotation fields for the JSON report.
-
-    Each is omitted rather than emitted as ``null`` when it carries nothing, so
-    a consumer can tell "not applicable" from "empty". The reasoning behind the
-    individual entries is kept with them below.
-    """
-    out: dict[str, Any] = {}
-    # Source location
-    loc = getattr(c, "source_location", None)
-    if loc:
-        out["source_location"] = loc
-    # Affected symbols
-    affected = getattr(c, "affected_symbols", None)
-    if affected:
-        out["affected_symbols"] = affected
-    # Redundancy annotation
-    caused_by = getattr(c, "caused_by_type", None)
-    if caused_by:
-        out["caused_by_type"] = caused_by
-    caused_count = getattr(c, "caused_count", 0)
-    if caused_count > 0:
-        out["caused_count"] = caused_count
-    # ADR-027 A4 — disclose a pattern-aware modulation on the finding itself.
-    mod_reason = getattr(c, "modulation_reason", None)
-    if mod_reason:
-        out["modulation_reason"] = mod_reason
-        out["modulation_rule"] = getattr(c, "modulation_rule", None)
-        eff = getattr(c, "effective_verdict", None)
-        if isinstance(eff, Verdict):
-            out["effective_verdict"] = eff.value
-    # ADR-041 P0 roadmap item 2 — this finding correlates with another
-    # finding (currently: PUBLIC_API_INTERNAL_DEPENDENCY_ADDED correlating
-    # with the same entry's own body/type-hash change), named by ChangeKind
-    # value so a machine consumer can act on it without parsing description.
-    correlated = getattr(c, "correlated_change_kind", None)
-    if correlated:
-        out["correlated_change_kind"] = correlated
-    if getattr(c, "symbol_binding", None):
-        out["symbol_binding"] = c.symbol_binding
-    if (cse := _cse(c)) is not None:
-        out["cross_source_evolution"] = cse
-    return out
 
 
 def _change_reachability_fields(c: Any) -> dict[str, Any]:
