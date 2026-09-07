@@ -202,14 +202,6 @@ class Acknowledgment:
                 "source_location) is a suppression, not an acknowledgment "
                 "(ADR-067 D5)."
             )
-        if (
-            self.change_kind is not None
-            and self.symbol is None
-            and self.finding_id is None
-        ):
-            raise ValueError(
-                "'change_kind' narrows 'symbol' or 'finding_id' and cannot stand alone"
-            )
         # `finding_id`/`symbol`/`change_kind` are exactly the bounded subset
         # of SelectorSet's grammar this record type permits — see the module
         # docstring. SelectorSet's own "at least one selector" validation is

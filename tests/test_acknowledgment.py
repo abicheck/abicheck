@@ -213,6 +213,186 @@ def test_record_id_shared_scheme_reads_component_baseline_candidate() -> None:
     assert bare.record_id() == "*::*::*::bar"
 
 
+def test_is_expired_reads_through_to_the_selector() -> None:
+    from datetime import date
+
+    from abicheck.policy.acknowledgment import Acknowledgment
+
+    record = Acknowledgment(symbol="bar", reason="x", expires=date(2000, 1, 1))
+    assert record.is_expired() is True
+    assert record.is_expired(today=date(1999, 1, 1)) is False
+
+
+def test_expires_datetime_is_normalized_to_a_date_on_direct_construction() -> None:
+    """`__post_init__` also normalizes a `datetime` passed directly (not just
+    one that arrived through YAML's own date parsing) -- exercised because a
+    caller constructing `Acknowledgment` in code (not via `.load()`) can pass
+    either."""
+    from datetime import date, datetime
+
+    from abicheck.policy.acknowledgment import Acknowledgment
+
+    record = Acknowledgment(
+        symbol="bar", reason="x", expires=datetime(2026, 1, 1, 12, 30)
+    )
+    assert record.expires == date(2026, 1, 1)
+
+
+def test_matches_via_finding_id_selector(tmp_path: Path) -> None:
+    """The `finding_id`-selector branch of `matches()` (as opposed to every
+    other test here, which matches via `symbol`)."""
+    from abicheck.finding_identity import report_canonical_finding_id
+
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
+    fid = report_canonical_finding_id(change)
+    p = tmp_path / "ack.yml"
+    p.write_text(
+        f"version: 1\nacknowledgments:\n  - finding_id: {fid!r}\n    reason: x\n"
+    )
+    acks = AcknowledgmentList.load(p)
+    assert acks.evaluate(change) is not None
+    other = Change(kind=ChangeKind.FUNC_REMOVED, symbol="unrelated", description="x")
+    assert acks.evaluate(other) is None
+
+
+def test_acknowledgment_to_dict_round_trips_every_optional_field() -> None:
+    from datetime import date
+
+    from abicheck.policy.acknowledgment import Acknowledgment
+
+    full = Acknowledgment(
+        finding_id="abc123",
+        symbol="bar",
+        change_kind="func_added",
+        component="libfoo",
+        baseline="1.0.0",
+        candidate="2.0.0",
+        reason="planned",
+        reference="https://example.com/482",
+        expires=date(2026, 12, 31),
+    )
+    assert full.to_dict() == {
+        "reason": "planned",
+        "finding_id": "abc123",
+        "symbol": "bar",
+        "change_kind": "func_added",
+        "component": "libfoo",
+        "baseline": "1.0.0",
+        "candidate": "2.0.0",
+        "reference": "https://example.com/482",
+        "expires": "2026-12-31",
+    }
+    bare = Acknowledgment(symbol="bar", reason="x")
+    assert bare.to_dict() == {"reason": "x", "symbol": "bar"}
+    finding_id_only = Acknowledgment(finding_id="abc123", reason="x")
+    assert finding_id_only.to_dict() == {"reason": "x", "finding_id": "abc123"}
+
+
+def test_acknowledgment_list_len_and_iter(tmp_path: Path) -> None:
+    p = tmp_path / "ack.yml"
+    p.write_text(
+        "version: 1\n"
+        "acknowledgments:\n"
+        "  - symbol: foo\n    reason: x\n"
+        "  - symbol: bar\n    reason: y\n"
+    )
+    acks = AcknowledgmentList.load(p)
+    assert len(acks) == 2
+    assert {a.symbol for a in acks} == {"foo", "bar"}
+
+
+def test_load_missing_file_raises_oserror(tmp_path: Path) -> None:
+    with pytest.raises(OSError, match="Cannot read acknowledgment file"):
+        AcknowledgmentList.load(tmp_path / "does-not-exist.yml")
+
+
+def test_load_rejects_invalid_yaml(tmp_path: Path) -> None:
+    p = tmp_path / "ack.yml"
+    p.write_text("version: 1\nacknowledgments: [\n")
+    with pytest.raises(ValueError, match="Invalid YAML"):
+        AcknowledgmentList.load(p)
+
+
+def test_load_empty_file_returns_empty_list(tmp_path: Path) -> None:
+    p = tmp_path / "ack.yml"
+    p.write_text("")
+    acks = AcknowledgmentList.load(p)
+    assert len(acks) == 0
+
+
+def test_load_rejects_non_mapping_document(tmp_path: Path) -> None:
+    p = tmp_path / "ack.yml"
+    p.write_text("- just\n- a\n- list\n")
+    with pytest.raises(ValueError, match="must be a YAML mapping"):
+        AcknowledgmentList.load(p)
+
+
+def test_load_rejects_wrong_version(tmp_path: Path) -> None:
+    p = tmp_path / "ack.yml"
+    p.write_text("version: 2\nacknowledgments: []\n")
+    with pytest.raises(ValueError, match="Unsupported acknowledgment file version"):
+        AcknowledgmentList.load(p)
+
+
+def test_load_with_no_acknowledgments_key_returns_empty_list(tmp_path: Path) -> None:
+    p = tmp_path / "ack.yml"
+    p.write_text("version: 1\n")
+    acks = AcknowledgmentList.load(p)
+    assert len(acks) == 0
+
+
+def test_load_rejects_non_list_acknowledgments(tmp_path: Path) -> None:
+    p = tmp_path / "ack.yml"
+    p.write_text("version: 1\nacknowledgments: 'not a list'\n")
+    with pytest.raises(ValueError, match="must be a list"):
+        AcknowledgmentList.load(p)
+
+
+def test_load_rejects_non_mapping_entry(tmp_path: Path) -> None:
+    p = tmp_path / "ack.yml"
+    p.write_text("version: 1\nacknowledgments:\n  - just a string\n")
+    with pytest.raises(ValueError, match="must be a mapping"):
+        AcknowledgmentList.load(p)
+
+
+def test_load_accepts_a_native_yaml_date_for_expires(tmp_path: Path) -> None:
+    """An *unquoted* YAML date (`expires: 2026-12-31`) is parsed by PyYAML
+    into a real `date` object before this module ever sees it -- as opposed
+    to the quoted-string form every other expiry test here uses, which goes
+    through `date.fromisoformat` instead."""
+    p = tmp_path / "ack.yml"
+    p.write_text(
+        "version: 1\nacknowledgments:\n  - symbol: bar\n    reason: x\n    expires: 2026-12-31\n"
+    )
+    acks = AcknowledgmentList.load(p)
+    record = next(iter(acks))
+    assert record.expires is not None
+    assert record.expires.isoformat() == "2026-12-31"
+
+
+def test_load_rejects_an_unparseable_expires_string(tmp_path: Path) -> None:
+    p = tmp_path / "ack.yml"
+    p.write_text(
+        "version: 1\nacknowledgments:\n  - symbol: bar\n    reason: x\n    expires: 'not-a-date'\n"
+    )
+    with pytest.raises(ValueError, match="invalid 'expires' date"):
+        AcknowledgmentList.load(p)
+
+
+def test_load_accepts_a_native_yaml_datetime_for_expires(tmp_path: Path) -> None:
+    """PyYAML parses an unquoted full timestamp into a `datetime`, not a bare
+    `date` -- `_parse_expires`'s own `datetime`-narrowing branch."""
+    p = tmp_path / "ack.yml"
+    p.write_text(
+        "version: 1\nacknowledgments:\n  - symbol: bar\n    reason: x\n"
+        "    expires: 2026-12-31 10:00:00\n"
+    )
+    acks = AcknowledgmentList.load(p)
+    record = next(iter(acks))
+    assert record.expires is not None
+    assert record.expires.isoformat() == "2026-12-31"
+
+
 # --- ledger overlay (D2/D5) ------------------------------------------------
 
 
@@ -287,6 +467,15 @@ def test_additions_review_default_policy_is_allow_and_never_gates() -> None:
     assert len(result.unacknowledged) == 1
 
 
+def test_additions_review_skips_changes_that_are_not_additions() -> None:
+    """Only `ADDITION_KINDS` are reviewed at all -- a removal mixed into the
+    same change list is neither reported nor gated on."""
+    addition = Change(kind=ChangeKind.FUNC_ADDED, symbol="bar", description="x")
+    removal = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
+    result = evaluate_unacknowledged_additions([removal, addition], None, None)
+    assert [u.symbol for u in result.unacknowledged] == ["bar"]
+
+
 def test_additions_review_warn_reports_but_never_gates() -> None:
     change = Change(kind=ChangeKind.FUNC_ADDED, symbol="bar", description="x")
     policy = AcknowledgmentPolicy(unacknowledged_additions="warn")
@@ -349,6 +538,58 @@ def test_fold_additions_review_exit_is_zero_when_never_evaluated() -> None:
     assert fold_additions_review_exit(4, diff) == 4
 
 
+def test_unacknowledged_addition_to_dict_and_from_dict() -> None:
+    from abicheck.policy.acknowledgment_gate import UnacknowledgedAddition
+
+    original = UnacknowledgedAddition(kind="func_added", symbol="bar", finding_id="abc")
+    d = original.to_dict()
+    assert d == {"kind": "func_added", "symbol": "bar", "finding_id": "abc"}
+    assert UnacknowledgedAddition.from_dict(d) == original
+
+
+def test_additions_review_result_to_dict_and_from_dict() -> None:
+    from abicheck.policy.acknowledgment_gate import (
+        AdditionsReviewResult,
+        UnacknowledgedAddition,
+    )
+
+    original = AdditionsReviewResult(
+        policy="block",
+        unacknowledged=(
+            UnacknowledgedAddition(kind="func_added", symbol="bar", finding_id="abc"),
+        ),
+        gate_contribution=1,
+    )
+    d = original.to_dict()
+    assert d == {
+        "policy": "block",
+        "unacknowledged": [
+            {"kind": "func_added", "symbol": "bar", "finding_id": "abc"}
+        ],
+        "gate_contribution": 1,
+    }
+    assert AdditionsReviewResult.from_dict(d) == original
+
+
+def test_additions_review_exit_contribution_reads_the_persisted_review() -> None:
+    from abicheck.policy.acknowledgment_gate import additions_review_exit_contribution
+
+    diff_never_evaluated = DiffResult(
+        changes=[], old_version="1", new_version="2", library="l"
+    )
+    assert additions_review_exit_contribution(diff_never_evaluated) == 0
+
+    diff_evaluated = DiffResult(
+        changes=[], old_version="1", new_version="2", library="l"
+    )
+    diff_evaluated.unacknowledged_additions_review = evaluate_unacknowledged_additions(
+        [Change(kind=ChangeKind.FUNC_ADDED, symbol="bar", description="x")],
+        None,
+        AcknowledgmentPolicy(unacknowledged_additions="block"),
+    )
+    assert additions_review_exit_contribution(diff_evaluated) == 1
+
+
 # --- policy file wiring (D6 config) ---------------------------------------
 
 
@@ -392,6 +633,20 @@ def test_policy_file_rejects_non_string_acknowledgment_action(
         f"base_policy: strict_abi\nacknowledgment:\n  unacknowledged_additions: {bad_yaml}\n"
     )
     with pytest.raises(Exception, match="invalid value"):
+        PolicyFile.load(p)
+
+
+def test_policy_file_rejects_non_mapping_acknowledgment_block(tmp_path: Path) -> None:
+    p = tmp_path / "policy.yml"
+    p.write_text("base_policy: strict_abi\nacknowledgment: 'not a mapping'\n")
+    with pytest.raises(Exception, match="must be a YAML mapping"):
+        PolicyFile.load(p)
+
+
+def test_policy_file_rejects_unknown_acknowledgment_key(tmp_path: Path) -> None:
+    p = tmp_path / "policy.yml"
+    p.write_text("base_policy: strict_abi\nacknowledgment:\n  bogus: 1\n")
+    with pytest.raises(Exception, match="unknown key"):
         PolicyFile.load(p)
 
 
@@ -572,6 +827,171 @@ def test_fold_disposition_audits_preserves_unacknowledged_entries() -> None:
     assert review["policy"] == "mixed"
     symbols = {entry["symbol"] for entry in review["unacknowledged"]}
     assert symbols == {"a", "b"}
+
+
+def test_resolving_acknowledgments_twice_is_idempotent(tmp_path: Path) -> None:
+    """`_resolve_acknowledgments`'s "already resolved" branch: a late
+    producer (`close_consumer_scope`) re-closing a ledger `ledger_for()`
+    already resolved must not re-evaluate (or disturb) an already-stamped
+    `acknowledged_by`."""
+    from abicheck.policy.disposition_close import close_consumer_scope
+
+    p = tmp_path / "ack.yml"
+    p.write_text("version: 1\nacknowledgments:\n  - symbol: foo\n    reason: 'x'\n")
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
+    diff = DiffResult(
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
+        acknowledgments=AcknowledgmentList.load(p),
+    )
+    ledger = ledger_for(diff)  # resolves acknowledged_by once
+    before = ledger.record_for(change)
+    assert before is not None and before.acknowledged_by == "*::*::*::foo"
+
+    close_consumer_scope(ledger, diff, gating=[change])  # resolves again
+    after = ledger.record_for(change)
+    assert after is not None
+    assert after.acknowledged_by == before.acknowledged_by
+
+
+def test_ledger_acknowledgments_tallies_multiple_findings_under_one_record(
+    tmp_path: Path,
+) -> None:
+    """`acknowledgments()`'s "already in tally" branch: two distinct findings
+    matched by the same acknowledgment record are tallied together, not
+    reported as two separate record ids."""
+    p = tmp_path / "ack.yml"
+    p.write_text("version: 1\nacknowledgments:\n  - symbol: foo\n    reason: 'x'\n")
+    change_a = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="a")
+    change_b = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="b")
+    diff = DiffResult(
+        changes=[change_a, change_b],
+        old_version="1",
+        new_version="2",
+        library="l",
+        acknowledgments=AcknowledgmentList.load(p),
+    )
+    ledger = ledger_for(diff)
+    assert acknowledged_total(ledger) == 2
+    assert ledger_acknowledgments(ledger) == (("*::*::*::foo", 2),)
+
+
+def test_disposition_record_to_dict_includes_acknowledged_by() -> None:
+    from abicheck.policy.disposition_ledger import Disposition
+    from abicheck.policy.disposition_types import DispositionRecord
+
+    record = DispositionRecord(
+        kind="func_removed",
+        symbol="foo",
+        disposition=Disposition.GATING,
+        application_point="verdict",
+        acknowledged_by="*::*::*::foo",
+    )
+    assert record.to_dict()["acknowledged_by"] == "*::*::*::foo"
+
+    unacknowledged = DispositionRecord(
+        kind="func_removed",
+        symbol="foo",
+        disposition=Disposition.GATING,
+        application_point="verdict",
+    )
+    assert "acknowledged_by" not in unacknowledged.to_dict()
+
+
+def test_render_disposition_audit_note_and_lines_cover_acknowledgment_state() -> None:
+    from abicheck.report.disposition_audit import (
+        DispositionAudit,
+        render_disposition_audit_lines,
+        render_disposition_audit_note,
+    )
+
+    audit = DispositionAudit(
+        detected_total=2,
+        effective_total=2,
+        counts=(),
+        rules=(),
+        not_evaluated_detectors=(),
+        acknowledged_total=1,
+        acknowledgments=(("*::*::*::foo", 1),),
+        unacknowledged_additions_review={
+            "policy": "warn",
+            "unacknowledged": [
+                {"kind": "func_added", "symbol": "bar", "finding_id": "1"}
+            ],
+            "gate_contribution": 0,
+        },
+    )
+    note = render_disposition_audit_note(audit)
+    assert "1 acknowledged" in note
+    assert "1 unacknowledged addition(s)" in note
+
+    lines = render_disposition_audit_lines(audit)
+    text = "\n".join(lines)
+    assert "**Acknowledged:** 1" in text
+    assert "`*::*::*::foo` — 1 finding(s)" in text
+    assert "**Unacknowledged public additions (warn):** 1" in text
+    assert "`func_added`: `bar`" in text
+
+
+def test_render_disposition_audit_note_and_lines_omit_empty_additions_review() -> None:
+    """A `warn`/`allow` run where nothing is unacknowledged still carries the
+    review dict (`policy` is real), but the empty `unacknowledged` list means
+    neither view should print an "unacknowledged addition(s)" line."""
+    from abicheck.report.disposition_audit import (
+        DispositionAudit,
+        render_disposition_audit_lines,
+        render_disposition_audit_note,
+    )
+
+    audit = DispositionAudit(
+        detected_total=1,
+        effective_total=1,
+        counts=(),
+        rules=(),
+        not_evaluated_detectors=(),
+        unacknowledged_additions_review={
+            "policy": "warn",
+            "unacknowledged": [],
+            "gate_contribution": 0,
+        },
+    )
+    assert "unacknowledged addition" not in render_disposition_audit_note(audit)
+    text = "\n".join(render_disposition_audit_lines(audit))
+    assert "Unacknowledged public additions" not in text
+
+
+def test_fold_disposition_audits_tallies_acknowledgments_across_members() -> None:
+    """The `acknowledgments` tuple-folding branch: two members reporting the
+    same acknowledgment record id are combined into one tallied entry, not
+    kept as two."""
+    from abicheck.report.disposition_audit import (
+        DispositionAudit,
+        fold_disposition_audits,
+    )
+
+    member_a = DispositionAudit(
+        detected_total=1,
+        effective_total=0,
+        counts=(),
+        rules=(),
+        not_evaluated_detectors=(),
+        acknowledged_total=1,
+        acknowledgments=(("*::*::*::foo", 1),),
+    )
+    member_b = DispositionAudit(
+        detected_total=1,
+        effective_total=0,
+        counts=(),
+        rules=(),
+        not_evaluated_detectors=(),
+        acknowledged_total=1,
+        acknowledgments=(("*::*::*::foo", 1),),
+    )
+    folded = fold_disposition_audits([member_a, member_b])
+    assert folded.acknowledged_total == 2
+    assert folded.acknowledgments == (("*::*::*::foo", 2),)
 
 
 def test_fold_disposition_audits_reports_none_when_no_member_evaluated() -> None:
