@@ -757,6 +757,27 @@ to read from `build_report_document`'s result instead of re-deriving from
 particular have no whole-document `ReportDocument` build today, only JSON,
 HTML, and Markdown do).
 
+**Scope decision: JSON's own `leaf`/`root-cause`/`--stat` report modes stay
+out of gap C.** Gap C, as this ADR states it, is one full-mode evaluation
+shared *across formats* (JSON-full vs. Markdown-full vs. HTML vs. SARIF vs.
+JUnit) — not a format's own internal alternate *views* collapsing into one
+shape. This section's "Landed" paragraph already treats Markdown's four
+views (full, review digest, leaf, root-cause) as four separate, legitimate
+document builds; JSON's `leaf`/`root-cause`/`--stat` modes are the same
+kind of thing, not the same fact set wearing different clothes —
+`_to_json_leaf` groups changes into a `leaf_changes`/`non_type_changes`
+split with its own per-entry shape, and `_to_json_root_cause` groups
+`changes` under `root_causes[]` by a computed `root_cause_id`. Forcing
+either onto `report_mode="full"`'s shape would either lose that grouping or
+require `build_report_document` to carry every mode's shape at once, which
+is not what "one document, many projections" means. `--stat`'s own
+separateness was already named by the duplication-and-convergence-
+assessment plan's `EvaluationSummary`-vs-full-document distinction;
+`leaf`/`root-cause` earn the same treatment by the same reasoning. What
+remains gap C is the default/full view specifically, across formats: JSON-
+full now converges through `build_report_document`; Markdown-full, HTML,
+SARIF, and JUnit's own default views do not yet.
+
 **Durable lessons.**
 
 - A renderer that performs a registry lookup (`report_classifications`,
