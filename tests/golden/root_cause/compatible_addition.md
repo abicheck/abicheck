@@ -43,6 +43,21 @@
 
 **Not evaluated:** 20 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 14 more
 
+
+## Surface changes
+
+**Additions** (1)
+
+- **_Z6helperi** — `helper`
+
+**Removals** (0)
+
+- none
+
+**Modifications** (0)
+
+- none
+
 ## Root Causes (1)
 
 ### `_Z6helperi` (1 finding)

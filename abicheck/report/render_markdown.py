@@ -47,6 +47,7 @@ from typing import Any
 from ..checker_policy import impact_for
 from ..checker_types import Change
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
+from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
 
 
 def _contract_decision_text(
@@ -735,6 +736,11 @@ class ReviewDigest:
     #: digest by hand (several tests do) is not forced to build one; a real
     #: ``compute_review_digest`` always supplies it.
     disposition_audit: DispositionAudit | None = None
+    #: Workstream G S1's "what changed / review actions" surface-first
+    #: section (additions/removals/modifications, each with its old/new
+    #: declaration). Optional for the same reason as ``disposition_audit``
+    #: above.
+    surface_changes: SurfaceChangeSection | None = None
 
 
 def render_review_digest(digest: ReviewDigest) -> str:
@@ -784,6 +790,12 @@ def render_review_digest(digest: ReviewDigest) -> str:
     if digest.disposition_audit is not None:
         lines += ["**Disposition audit:**", ""]
         lines += render_disposition_audit_lines(digest.disposition_audit)
+
+    # Workstream G's "Compatible additions are visible changes" invariant:
+    # the digest states what was added, removed, and modified even when the
+    # verdict above reads clean.
+    if digest.surface_changes is not None and digest.surface_changes.total:
+        lines += render_surface_changes_lines(digest.surface_changes)
 
     if digest.impacted:
         lines += ["**Top impacted symbols:**", ""]

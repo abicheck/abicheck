@@ -627,6 +627,41 @@
         }
       }
     },
+    "surface_changes": {
+      "type": "object",
+      "description": "Workstream G slice S1 (schema 3.9): the \"what changed / review actions\" grouping over every already-detected, currently-visible finding (report.finding.report_findings_for -- no new detection, no new policy decision). `additions` is `policy.severity.IssueCategory.ADDITION`, the same category every other view resolves; `removals` is any change kind following the model layer's `*_removed` naming convention; everything else is a `modification`. Unconditional, like disposition_audit -- the executable form of \"compatible additions are visible changes\": a fully-compatible run still carries a non-empty `additions` list here.",
+      "required": [
+        "total",
+        "additions",
+        "removals",
+        "modifications"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "additions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/surface_change_entry"
+          }
+        },
+        "removals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/surface_change_entry"
+          }
+        },
+        "modifications": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/surface_change_entry"
+          }
+        }
+      }
+    },
     "suppression": {
       "type": "object",
       "required": [
@@ -1712,6 +1747,52 @@
     }
   },
   "$defs": {
+    "surface_change_entry": {
+      "type": "object",
+      "description": "One reviewable surface change (workstream G slice S1, schema 3.9).",
+      "required": [
+        "kind",
+        "symbol",
+        "verdict",
+        "category"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "old_declaration": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "new_declaration": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
     "summary": {
       "type": "object",
       "required": [

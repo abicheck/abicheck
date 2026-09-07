@@ -713,6 +713,23 @@ workflow validation over the existing fixtures and harnesses, including a
 real Action run in an authorized lab workflow where available; any item
 that cannot be executed is marked unverified in the receipt.
 
+**S1 landed.** The raw-versus-effective row (ADR-067 C-S1/C-S2's
+`disposition_audit`) was already carried through every compact view
+(`--stat`, review digest, PR comment) by the time this slice started; what
+S1 added is the "what changed / review actions" surface-first section
+itself — a new, additive `surface_changes` JSON block (report schema 3.9)
+and its Markdown counterpart (`## Surface changes`) grouping every
+already-detected finding into additions/removals/modifications with each
+entry's old/new declaration, wired into the full report, both `--report-mode`
+alternate views, and the `--format review` digest (`abicheck/report/
+surface_changes.py`). Makes the "compatible additions are visible changes"
+invariant executable: a fully-compatible run still itemizes its additions.
+`tests/test_surface_changes.py` and `TestHundredSuppressedRemovals` in
+`tests/test_disposition_audit.py` cover it, including the "100 suppressed
+deletions" acceptance scenario from the Tests table below. Scope/
+completeness, consumer, versioning, and history/relationship blocks (S2-S4)
+remain open, as scoped above.
+
 ## Files & surfaces
 
 Owners per ADR-061; new code goes to the target package, never a new root

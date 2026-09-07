@@ -61,6 +61,21 @@
 
 **Not evaluated:** 20 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 14 more
 
+
+## Surface changes
+
+**Additions** (0)
+
+- none
+
+**Removals** (0)
+
+- none
+
+**Modifications** (1)
+
+- **Color::GREEN** — `1` → `5`
+
 ---
 ## Legend
 

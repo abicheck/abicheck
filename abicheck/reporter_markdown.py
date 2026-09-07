@@ -1397,10 +1397,12 @@ def compute_review_digest(
     # impacted (Codex review). The excluded finding keeps its own disclosed
     # section elsewhere in the report; this list is the digest of what gated.
     from .report.finding import report_findings_for
+    from .report.surface_changes import compute_surface_changes
 
+    findings = report_findings_for(result)
     impacted = [
         f.change
-        for f in report_findings_for(result)
+        for f in findings
         if is_evaluated(f.change)
         if f.verdict in (Verdict.BREAKING, Verdict.API_BREAK)
     ]
@@ -1428,6 +1430,7 @@ def compute_review_digest(
             for c in impacted
         ),
         disposition_audit=compute_disposition_audit(result, severity_config),
+        surface_changes=compute_surface_changes(result, findings),
     )
 
 

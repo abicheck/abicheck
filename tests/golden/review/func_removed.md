@@ -48,6 +48,18 @@
 
 **Not evaluated:** 20 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 14 more
 
+**Additions** (0)
+
+- none
+
+**Removals** (1)
+
+- **_Z6helperi** — `helper`
+
+**Modifications** (0)
+
+- none
+
 **Top impacted symbols:**
 
 - `_Z6helperi` — func_removed
