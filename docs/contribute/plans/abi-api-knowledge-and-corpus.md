@@ -24,7 +24,22 @@ detector, or default changes — this plan only produces a taxonomy, a
 coverage matrix, and the paired-control cases and page cross-links that
 matrix identifies as missing).
 
-**Status:** Proposed; not started.
+**Status:** Phase 1 complete — Phases 2-4 not started. Phase 1's taxonomy is
+[`docs/contribute/abi-api-failure-taxonomy.md`](../abi-api-failure-taxonomy.md),
+a hand-authored Markdown document (not a structured JSON sibling manifest
+like `catalog/taxonomy.json`): the leaf mechanisms below are prose
+descriptions a human judgment call produced, not derived facts a generator
+could assemble from an existing registry, so a reviewable document — read
+top to bottom, revised in place as later phases find gaps — fits this
+content better than a machine-consumed manifest with no generator of its
+own. It refines the 13 top-level branches sketched below into 88 leaf
+mechanisms, each carrying a stable `<branch-slug>.<leaf-slug>` id, a short
+description, and its applicable platforms/languages, following exactly the
+per-leaf contract this section specifies. It is deliberately independent of
+`ChangeKind`, `catalog/`, and `docs/learn/` — no leaf here is mapped to any
+of the three, since that mapping is Phase 2's job, not Phase 1's. Phase 1
+touched no `catalog/`, `docs/learn/`, detector, or `ChangeKind` code, per
+this plan's own scope.
 
 ## The three surfaces, restated
 
