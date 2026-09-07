@@ -731,6 +731,32 @@ completed semantic report document → every format* — is gap C below, and is
 [`duplication-and-convergence-assessment.md`](../plans/duplication-and-convergence-assessment.md)
 Phase 4's `ReportEnvelope` target rather than a second design.
 
+**Gap C status (2026-09-07): JSON converged onto the shared choke point;
+Markdown/HTML/SARIF/JUnit not yet.** `report/build.py`'s
+`build_report_document(result, ...)` is now the single function that
+performs the full `report_mode="full"` build (`_build_json_base`,
+`_add_abi_surface_breakdown`, `_add_changes_block`, the gate decision, the
+side-facts fold, etc.) — moved out of `reporter.to_json`'s own inline body
+(now a thin `build -> render_json` wrapper) and out of
+`service_render._render_json_output` (which calls it directly for
+`report_mode="full"`, bypassing `to_json` entirely). Verified against the
+pre-refactor path via `tests/unit/report/test_build_report_document.py`
+(byte-identical JSON for both the default and `show_only`-filtered cases,
+plus a mock-based assertion that `render_output("json", ...)` calls the
+shared build exactly once and never falls back to the legacy `to_json`
+pipeline for full-mode JSON). `to_json`'s `--stat`/`leaf`/`root-cause`
+report modes are **not** routed through this choke point yet — they remain
+each their own independent build, same as before this change; only
+`report_mode="full"` (the default, and what SARIF/HTML/JUnit/Markdown's own
+default views would need) is covered so far. Markdown, HTML, SARIF, and
+JUnit still each build and freeze their own document independently, exactly
+as this section already described — that part of gap C remains fully open;
+closing it means routing each of those formats' own `compute_*`/build step
+to read from `build_report_document`'s result instead of re-deriving from
+`DiffResult`, which is real, separate work per format (SARIF and JUnit in
+particular have no whole-document `ReportDocument` build today, only JSON,
+HTML, and Markdown do).
+
 **Durable lessons.**
 
 - A renderer that performs a registry lookup (`report_classifications`,

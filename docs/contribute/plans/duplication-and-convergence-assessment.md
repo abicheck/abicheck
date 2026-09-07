@@ -1723,6 +1723,24 @@ same way, once per `Change`, in the same envelope-construction pass; every
 renderer reads both pre-resolved fields instead of any one of them
 re-deriving the other.
 
+**Progress update (2026-09-07, later same day): JSON's `report_mode="full"`
+build is now the first format routed through one shared choke point.**
+`report/build.py`'s `build_report_document(result, ...)` performs the
+`report_mode="full"` JSON build exactly once (previously inlined in
+`reporter.to_json`) and `service_render._render_json_output` calls it
+directly, bypassing `to_json`'s own independent pipeline for that mode.
+`tests/unit/report/test_build_report_document.py` proves byte-identical
+output against the pre-refactor path and that `render_output("json", ...)`
+invokes the shared build exactly once. This is a real, if partial, step
+toward `ReportEnvelope`/gap C — it establishes the intended shape (one
+build function, called once, every consuming format projects its result)
+using the existing `ReportDocument` container rather than a new envelope
+type, per this ADR's own preference to build on existing immutable
+containers first. **Not yet done:** Markdown, HTML, SARIF, and JUnit still
+build their own documents independently; `to_json`'s `--stat`/`leaf`/
+`root-cause` modes are still their own separate builds too. See ADR-061's
+own gap C status note (same date) for the precise scope.
+
 ### Phase 5 — Migrate compatibility and multi-artifact operations
 
 1. Make ABICC descriptors adapters into typed requests.

@@ -51,6 +51,7 @@ from .report.dispatch_markdown import (
 )
 from .report.disposition_audit import add_disposition_audit as _add_disposition_audit
 from .report.finding_evolution import add_finding_evolution as _add_finding_evolution
+from .report.render_json import render_json
 from .report.scoped_gate import ScopedGateChangeHelpers
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
@@ -1209,63 +1210,16 @@ def to_json(
             require_complete_analysis=require_complete_analysis,
             include_exit_decision=include_exit_decision, contract_evaluation=contract_evaluation)
 
-    changes = list(result.changes)
-    if show_only:
-        changes = apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-        changes = _suppress_dangling_correlation_notes(changes)
-
-    d = _build_json_base(result)
-    _add_abi_surface_breakdown(d, result)
-    _add_evidence_fields(d, result)
-    effective_policy = result.policy or "strict_abi"
-    d["policy"] = effective_policy
-    eff_sets = result._effective_kind_sets()
-
-    if show_only:
-        _add_show_only_filter(d, result, changes, show_only)
-
-    # Severity-categorized summary when severity config is provided
-    gate = gate_decision_for_result(result, severity_config)
-    if gate is not None:
-        assert severity_config is not None  # gate is None otherwise
-        d["severity"] = _build_severity_json(
-            changes,
-            severity_config,
-            gate=gate,
-            policy=result.policy,
-            kind_sets=eff_sets,
-            policy_file=result.policy_file,
-        )
-
-    _add_changes_block(
-        d,
-        result,
-        changes,
-        effective_policy,
-        eff_sets,
-        show_only,
-        severity_config=severity_config,
-    )
-    _add_suppression(d, result)
-    _add_disposition_audit(d, result, severity_config)
-    _add_finding_evolution(d, result)
-    _add_surface_scope(d, result)
-    _add_reconciled(d, result)
-    _add_contract_context(
-        d, result, _displayed_with_scoped_only(result, changes, show_only),
+    # report.build statically imports this module's own private `_add_*`
+    # helpers; reaching back via a plain `from .report.build import ...`
+    # would close a real import cycle, so this side goes through
+    # `importlib` -- same pattern `scoped_gate.py` uses for a legacy sibling.
+    import importlib
+    doc = importlib.import_module(".report.build", __package__).build_report_document(
+        result, show_only=show_only, show_impact=show_impact, severity_config=severity_config,
         require_complete_analysis=require_complete_analysis,
-        severity_config=severity_config, include_exit_decision=include_exit_decision)
-    _add_detectors(d, result)
-    _add_confidence_evidence(d, result)
-    _add_policy_overrides(d, result)
-    _add_trailing_fields(d, result, show_impact, show_only)
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, helpers=_SCOPED_GATE_HELPERS, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
+        include_exit_decision=include_exit_decision, contract_evaluation=contract_evaluation)
+    return render_json(doc, indent=indent)
 
 
 _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {

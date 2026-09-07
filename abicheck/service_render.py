@@ -252,15 +252,33 @@ def _render_json_output(
     contract_evaluation: bool = False,
 ) -> str:
     """Render comparison result as JSON, optionally including dependency info."""
-    base = to_json(
-        result,
-        show_only=show_only,
-        report_mode=report_mode,
-        show_impact=show_impact,
-        severity_config=severity_config,
-        require_complete_analysis=require_complete_analysis,
-        contract_evaluation=contract_evaluation,
-    )
+    if report_mode == "full":
+        # ADR-061 Phase 2 gap C: the full-mode JSON report is built through
+        # the one shared document choke point (report.build.
+        # build_report_document) rather than to_json's own independent
+        # dict-building pass -- see report/build.py's module docstring.
+        from .report.build import build_report_document
+        from .report.render_json import render_json
+
+        doc = build_report_document(
+            result,
+            show_only=show_only,
+            show_impact=show_impact,
+            severity_config=severity_config,
+            require_complete_analysis=require_complete_analysis,
+            contract_evaluation=contract_evaluation,
+        )
+        base = render_json(doc)
+    else:
+        base = to_json(
+            result,
+            show_only=show_only,
+            report_mode=report_mode,
+            show_impact=show_impact,
+            severity_config=severity_config,
+            require_complete_analysis=require_complete_analysis,
+            contract_evaluation=contract_evaluation,
+        )
     if follow_deps and (old.dependency_info or (new and new.dependency_info)):
         import json
         from dataclasses import asdict
