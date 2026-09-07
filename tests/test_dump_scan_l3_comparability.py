@@ -315,7 +315,18 @@ def _build_library(
         "    int y;\n"
         f"{dep_field}"
         "    int sum() const { return x + y; }\n"
-        "};\n",
+        "};\n"
+        # Declared here (not just defined in widget.cpp below): `compute` is
+        # a genuine, exported, external-linkage free function -- undeclared
+        # in any public header, it is exactly the "accidental ABI" shape
+        # `exported_not_public` (abicheck/buildsource/crosscheck.py) exists
+        # to catch, and since Phase 2a (`workflows/cross_source_evolution.py`)
+        # wired that check into `compare`'s/`scan`'s automatic pipeline
+        # whenever a public-header set is supplied, an undeclared export now
+        # surfaces as a real per-snapshot risk finding on this fixture's own
+        # self-comparison -- not a comparability/profile_fingerprint defect,
+        # which is what every test using this fixture actually exercises.
+        "int compute(const Widget& w);\n",
         encoding="utf-8",
     )
     src = tmp_path / "widget.cpp"

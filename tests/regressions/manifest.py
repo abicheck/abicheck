@@ -1153,6 +1153,30 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="extraction.language_mode_export_evidence",
+        invariant=(
+            "Whole-TU C/C++ language-mode auto-detection must not rely on "
+            "header syntax alone: a header with no structural C++ syntax "
+            "gives that heuristic nothing to key on. A real Itanium/Mach-O/"
+            "MSVC mangled name in the binary's export table is direct proof "
+            "of C++ linkage and must resolve the WHOLE TU to C++, not patch "
+            "one symbol after the fact -- a wrong mode corrupts `mangled`/"
+            "`is_extern_c`/`visibility` together. An explicit `--lang` or "
+            "real C++ syntax still wins; a bare-name export is not evidence."
+        ),
+        fixed_by=(1138,),
+        seed_tests=(
+            "tests/test_dumper_language_mode_export_evidence.py",
+            "tests/test_crosscheck_language_mode_export_evidence.py",
+        ),
+        public_surfaces=("python-api", "cli"),
+        axes={
+            "frontend": ("castxml", "clang"),
+            "declaration_shape": ("function", "ns_function", "extern_c", "variable"),
+            "export_mangling": ("itanium", "macho_itanium", "msvc", "bare_c"),
+        },
+    ),
 )
 
 

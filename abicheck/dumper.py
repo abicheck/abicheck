@@ -179,14 +179,21 @@ def _resolve_clang_langmode(
     clang_bin: str,
     gcc_options: str | None = None,
     gcc_option_tokens: tuple[str, ...] = (),
+    exported_symbols: frozenset[str] = frozenset(),
 ) -> tuple[bool, bool, bool, str]:
     """Return ``(force_cpp, force_cpp20, explicit_c_request, cc_id)`` for the TU.
 
     ``explicit_c_request`` records whether C was *explicitly* requested
     (``--lang c``) vs auto-detected — both leave ``force_cpp`` False, but the
     C→C++ self-heal treats them differently (warning vs debug; Codex review).
+
+    ``exported_symbols``: see :func:`_resolve_force_cpp`'s own docstring —
+    the binary's already-observed export table, checked as C++ evidence when
+    the header content alone gives no signal.
     """
-    force_cpp = _resolve_force_cpp(lang, headers, gcc_options, gcc_option_tokens)
+    force_cpp = _resolve_force_cpp(
+        lang, headers, gcc_options, gcc_option_tokens, exported_symbols
+    )
     force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
     explicit_c_request = bool(lang) and not force_cpp
     cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
@@ -229,6 +236,7 @@ def _clang_header_dump(
     frontend_context: str = "host",
     memoize: bool | None = None,
     pruning_header_roots: tuple[str, ...] | None = None,
+    exported_symbols: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Any], str | None, bool]:
     """Run clang over *headers* and return ``(root, resolved_kind, resolved_force_cpp)``.
 
@@ -282,6 +290,7 @@ def _clang_header_dump(
         clang_bin,
         gcc_options,
         gcc_option_tokens,
+        exported_symbols,
     )
 
     # castxml↔clang parity: probe the host GNU compiler for its ``-isystem`` dirs
@@ -602,6 +611,7 @@ def _header_ast_parser(
             extra_hash_dirs=extra_hash_dirs,
             frontend_context=frontend_context,
             pruning_header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(public_header_paths + public_dir_paths),
+            exported_symbols=frozenset(exported_dynamic | exported_static),
         )
         parser = _ClangAstParser(
             ast_root,
@@ -652,6 +662,7 @@ def _header_ast_parser(
             extra_hash_dirs=extra_hash_dirs,
             _selected_tool_out=selected_castxml,
             _selected_meta_out=selected_meta,
+            exported_symbols=frozenset(exported_dynamic | exported_static),
         )
     except SnapshotError as exc:
         fallback_reason = _castxml_fallback_reason(
@@ -803,6 +814,7 @@ def _castxml_dump(
     castxml_bin: str | None = None,
     _selected_tool_out: list[str] | None = None,
     _selected_meta_out: list[tuple[str, bool]] | None = None,
+    exported_symbols: frozenset[str] = frozenset(),
 ) -> Element:
     """Run castxml on headers and return parsed XML root.
 
@@ -834,7 +846,9 @@ def _castxml_dump(
     # Determine language before selecting the emulated compiler: C mode uses
     # gcc/cc, not g++, and both cache identity and execution must describe the
     # same driver.
-    force_cpp = _resolve_force_cpp(lang, headers, gcc_options, gcc_option_tokens)
+    force_cpp = _resolve_force_cpp(
+        lang, headers, gcc_options, gcc_option_tokens, exported_symbols
+    )
     # Same expression _run_castxml_attempt uses for its (non-retry) call below —
     # folded into the cache key ahead of time so the resolved dialect decision,
     # not just the explicit --lang, invalidates a stale cache entry (Codex

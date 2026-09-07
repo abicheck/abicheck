@@ -30,7 +30,7 @@ from typing import Any, TypedDict
 
 from ._compiler_options import has_explicit_cpp_std, has_explicit_std, split_gcc_options
 from .buildsource.redaction import DEFAULT_REDACTION
-from .dumper_ast_config import _detect_cpp_headers
+from .dumper_ast_config import _detect_cpp_headers, _exported_symbols_indicate_cpp
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 
 # E-S1: relocated to extract/toolchain_identity.py (ADR-061's extract
@@ -491,6 +491,7 @@ def _resolve_force_cpp(
     headers: list[Path],
     gcc_options: str | None,
     gcc_option_tokens: tuple[str, ...],
+    exported_symbols: frozenset[str] = frozenset(),
 ) -> bool:
     """Decide whether the TU is C++ when no ``lang`` was explicitly given.
 
@@ -502,6 +503,19 @@ def _resolve_force_cpp(
     syntax stayed auto-detected as C (Codex review). Shared by both the clang
     and castxml frontends so the auto-detection rule cannot drift between
     them.
+
+    *exported_symbols* (the binary's own already-computed
+    ``exported_dynamic | exported_static`` union, empty for a header-only
+    dump with no binary at all) is checked last, via
+    :func:`abicheck.dumper_ast_config._exported_symbols_indicate_cpp`: a
+    real C++/MSVC mangled export is direct, unambiguous proof the compile
+    used C++ linkage even when the header itself carries no structural C++
+    syntax at all (a plain, unnamespaced top-level function declaration —
+    see that function's own docstring for the full account of the bug this
+    closes). Checked only when *lang* is unset and the header-content
+    heuristics above found nothing, so an explicit ``--lang c`` still always
+    wins and a header that already has real C++ syntax needs no export
+    evidence at all.
 
     ``for_language_mode_decision=True`` (Codex review): a
     ``#if __cplusplus``/``#ifdef __cplusplus``-guarded C++20 construct
@@ -533,6 +547,7 @@ def _resolve_force_cpp(
         _detect_cpp_headers(headers)
         or _detect_cpp20_headers(headers, for_language_mode_decision=True)
         or has_explicit_cpp_std(gcc_options, gcc_option_tokens)
+        or _exported_symbols_indicate_cpp(exported_symbols)
     )
 
 
