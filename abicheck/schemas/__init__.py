@@ -753,7 +753,21 @@ from typing import Any
 #:      ``--used-by-manifest`` consumer, present under the same condition as
 #:      ``used_by``. Additive only: no existing key changes shape or
 #:      meaning, and no verdict, gate, or exit code moves.
-REPORT_SCHEMA_VERSION = "3.3"
+#: 3.4 -- ``docs/contribute/plans/one-comparison-product.md`` P3 (ADR-064):
+#:       the ``exit`` block's ``evidence_contract_error_contribution``/
+#:       ``budget_overflow_contribution`` are no longer ``const: 0`` on a
+#:       native compare report -- ``resolve_compare_exit_decision_with_
+#:       abort_axes`` now folds ``DiffResult.evidence_contract_error``/
+#:       ``.budget_overflow`` through the same precedence ``scan --against``
+#:       already uses, and ``reasons`` gains the matching
+#:       ``evidence_contract_error``/``budget_overflow`` enum values. Both
+#:       stay ``0``/unused on every existing report -- no CLI-reachable
+#:       `compare` trigger exists yet (Phase 2/7). Renumbered from a
+#:       conflicting 3.3 when the origin/main merge claimed that version
+#:       first for workstream D-S1's ``used_by[]``/``consumer_impact_
+#:       summary`` fields (same "renumber, don't reuse" convention as the
+#:       2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2 entries above).
+REPORT_SCHEMA_VERSION = "3.4"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

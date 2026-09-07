@@ -440,6 +440,11 @@ def _exit_with_severity_or_verdict(
     identical decision. The diagnostics below still read each axis's own
     contribution straight off the resolved `ExitDecision`, so their wording
     (and the final exit code) are unchanged from before this delegation.
+    `one-comparison-product.md` P3 layered `resolve_compare_exit_decision_
+    with_abort_axes` on top of that same resolver (`evidence_contract_error`/
+    `budget_overflow`) -- this function calls the wrapper so its own real
+    process exit stays in lockstep with the report's `exit` block for those
+    two axes too, exactly as it already was for the three PR G1 axes.
     """
     # ADR-061 Phase 4 item 4: one workflow-layer surface for the whole
     # process response, not three policy imports a frontend could fold two of
@@ -447,10 +452,10 @@ def _exit_with_severity_or_verdict(
     from ...workflows.gate import (
         announce_coverage_floor,
         assurance_floor_diagnostic,
-        resolve_compare_exit_decision,
+        resolve_compare_exit_decision_with_abort_axes,
     )
 
-    decision = resolve_compare_exit_decision(
+    decision = resolve_compare_exit_decision_with_abort_axes(
         result, sev_config, scheme,
         require_complete_analysis=require_complete_analysis,
     )

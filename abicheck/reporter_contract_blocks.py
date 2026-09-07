@@ -106,9 +106,14 @@ def add_contract_context(
 
     scheme = gate_exit_code_scheme(severity_config is not None)
     if include_exit_decision:
-        from .exit_decision import resolve_compare_exit_decision
+        # one-comparison-product.md P3: the abort-axes-aware wrapper, not the
+        # bare ordinary fold -- see its own docstring in
+        # policy/exit_decision_precedence.py for why it lives there.
+        from .policy.exit_decision_precedence import (
+            resolve_compare_exit_decision_with_abort_axes,
+        )
 
-        d["exit"] = resolve_compare_exit_decision(
+        d["exit"] = resolve_compare_exit_decision_with_abort_axes(
             result,
             severity_config,
             scheme,
