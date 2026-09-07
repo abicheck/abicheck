@@ -585,12 +585,27 @@ Every PR in this phase meets the merge criteria recorded in
 a machine contract changes, and verdict/gate/exit/coverage/assurance asserted
 separately. That list is carried forward unchanged; it is not restated here.
 
-### Phase 8 — `deps` convergence (ADR-068 D6)
+### Phase 8 — `deps` convergence (ADR-068 D6) — done
 
-`StackVerdict` → `RunOutcome`/`ExitDecision`; the stack report becomes a
-`ReportDocument` projection; `cli_stack.py`'s inline `0/1/4/5` exits are
-replaced. No user-visible flag change. A later `compare`/`deps` unification
-is recorded as **future direction**, not scoped here.
+`StackVerdict` → `ExitDecision`: `stack_checker.exit_decision_for_stack_compare`/
+`exit_decision_for_stack_tree` fold `deps`'s loadability/ABI-risk/
+not-comparable axes through `policy.exit_decision.resolve_exit_decision`
+(a new `ExitReason.LOADABILITY`/`ExitDecision.loadability_contribution`
+axis, plus the pre-existing `NOT_COMPARABLE` reason reused as-is for
+ADR-050 D2's profile/scope mismatch). `cli_stack.py`'s inline
+`sys.exit(1)`/`sys.exit(4)`/`sys.exit(5)` chain is replaced by
+`sys.exit(decision.code)`; every documented exit code is unchanged and
+pinned by tests (`tests/test_cli_deps_stack.py`,
+`TestExitDecisionForStackCompare`/`TestExitDecisionForStackTree` in
+`tests/test_stack_checker_unit.py`). The stack JSON report is now a
+`report.stack.compute_stack_report_document` → `ReportDocument` →
+`render_json` projection (Markdown/HTML formatting is unchanged — out of
+this phase's "internal convergence only" scope). `deps compare`'s
+per-library ABI diff was already routed through `service.run_dump`/
+`compare_snapshots` (ADR-037 D10.1); `TestRunAbiDiff.
+test_success_path_routes_through_the_canonical_service_module` pins that it
+still is. No user-visible flag or exit-code change. A later `compare`/`deps`
+unification is recorded as **future direction**, not scoped here.
 
 ### Phase 9 — Contract-mechanism consolidation (gated, may not start early)
 

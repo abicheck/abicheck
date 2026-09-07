@@ -24,7 +24,7 @@ summary, `render_stat_document`), `render_xml.py` (JUnit),
 `render_markdown.py` (Markdown prose), `render_html.py`/`render_html_document.py`
 (HTML's per-section formatters/whole-document projection),
 `render_markdown_document.py` (Markdown's `to_review_digest`/`to_markdown`
-default view), and `render_markdown_alternate.py` (Markdown's `--report-mode leaf`/`root-cause`). `scoped_gate.py` (below) mutates a JSON `dict`, not a result.
+default view), and `render_markdown_alternate.py` (Markdown's `--report-mode leaf`/`root-cause`). `scoped_gate.py` (below) mutates a JSON `dict`, not a result. `stack.py` (ADR-068 D6) is `deps compare`/`deps tree`'s JSON compute half (`compute_stack_report_document` -> `ReportDocument`, rendered by `stack_report.stack_to_json`; Markdown/HTML stay in `stack_report.py`/`stack_html.py`, out of scope).
 
 **Every format now crosses the canonical `ReportDocument` boundary — ADR-061
 Phase 2's Markdown item is closed in full.** JSON, SARIF, JUnit, `--stat`,

@@ -32,6 +32,11 @@ from abicheck.workflows.aggregate.contracts import TargetReport
 _S2_EXIT_FIELDS = (
     "incomplete_scope_contribution",
     "no_comparison_completed_contribution",
+    # ADR-068 D6 / one-comparison-product.md Phase 8: appended after the S2
+    # fields for the identical reason -- a positional caller written before
+    # this field existed keeps binding the older tail rather than silently
+    # feeding it into this one.
+    "loadability_contribution",
 )
 _S2_BUNDLE_FIELDS = ("scope_record", "extraction_failures", "not_comparable_members")
 _S2_TARGET_FIELDS = (
@@ -49,7 +54,7 @@ def _names(cls: type) -> list[str]:
 
 
 def test_the_s2_fields_are_the_tail_of_each_type() -> None:
-    assert _names(ExitDecision)[-2:] == list(_S2_EXIT_FIELDS)
+    assert _names(ExitDecision)[-len(_S2_EXIT_FIELDS) :] == list(_S2_EXIT_FIELDS)
     assert _names(BundleDiffResult)[-3:] == list(_S2_BUNDLE_FIELDS)
     assert _names(TargetReport)[-len(_S2_TARGET_FIELDS) :] == list(_S2_TARGET_FIELDS)
 
@@ -67,6 +72,7 @@ def test_exit_decision_positional_tail_binds_the_older_fields() -> None:
         assert getattr(decision, name) == values[name]
     assert decision.incomplete_scope_contribution == 0
     assert decision.no_comparison_completed_contribution == 0
+    assert decision.loadability_contribution == 0
 
 
 def test_bundle_result_seventh_positional_argument_is_still_the_policy_file() -> None:

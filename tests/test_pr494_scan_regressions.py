@@ -252,6 +252,7 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(
             "removed_required_library_contribution": 0,
             "incomplete_scope_contribution": 0,
             "no_comparison_completed_contribution": 0,
+            "loadability_contribution": 0,
         },
     }
     assert "findings" not in summary
