@@ -14,40 +14,47 @@ cross-comparison-*chain* correspondence primitive — `checker_policy.
 FindingEvolution`, `Change.evolution`/`DiffResult.resolved_findings`,
 `policy/finding_evolution.py`, `report/finding_evolution.py`; not yet wired
 into any CLI command, see that item's own entry below), and Phases 2c/2d/2e
-have all landed. §5 P2's own evolution-state prerequisite is **partially**
-landed too, under a second, deliberately distinct enum
+have all landed. §5 P2's own evolution-state prerequisite is **landed**
+too, under a second, deliberately distinct enum
 (`checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution`)
 for the *same-comparison* per-side axis `FindingEvolution` does not cover:
-six of the eleven cross-source checks are migrated onto it so far —
-`unversioned_exported_symbol` and `private_header_leak` landed first, and
+all eleven cross-source checks are migrated onto it now —
+`unversioned_exported_symbol` and `private_header_leak` landed first,
 `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, and
-`public_to_internal_dependency` (§3 #3-#5) join them in this slice — proving
+`public_to_internal_dependency` (§3 #3-#5) joined next, and
+`header_build_context_mismatch`, `odr_type_variant`,
+`identity_collision_detected`, `compile_context_conflict`, and
+`source_surface_dso_mismatch` close out the row in this slice — proving
 out the **correctness crux** (a pre-existing problem never reads as newly
 introduced when one side's evidence is insufficient) via a property test for
-each. All six checks now run **automatically** on every `compare()`
+each. All eleven checks now run **automatically** on every `compare()`
 invocation (`cross_source_checks` defaults to `True`, no front end exposes a
 way to disable it — ADR-068 D4/D5 reject "a flag that merely enables useful
-analysis"), so all six checks' `tests/parity/gaps.py` rows are deleted — the
-scan-vs-compare parity harness confirms `compare` now finds them too. This
-slice also solves §5 P4 for its two directory/config sources: a project's
-`.abicheck.yml` `scope.public_header_dirs` list (a new key, distinct from
-the pre-existing boolean `scope.public`) is now folded, additively, into the
-same `-H`-directory-derived public/internal boundary
+analysis"), so all eleven checks' `tests/parity/gaps.py` rows are deleted —
+the scan-vs-compare parity harness confirms `compare` now finds them too.
+`scan --against`'s own older, separate advisory mechanism for these checks
+(the `crosscheck` report block + `--crosscheck KEY=error` promotion) is
+preserved: `cli_scan_baseline._strip_automatic_cross_source_findings` strips
+the automatic stage's findings back out of that one baseline diff before
+scoring it, so a clean, unpromoted `scan --against` baseline still exits 0
+even though `compare()` itself now finds these checks unconditionally. An
+earlier slice also solved §5 P4 for its two directory/config sources: a
+project's `.abicheck.yml` `scope.public_header_dirs` list (a new key,
+distinct from the pre-existing boolean `scope.public`) is folded,
+additively, into the same `-H`-directory-derived public/internal boundary
 (`provenance.apply_provenance`) `compare`'s live-binary dumping already
 built from a `-H` *directory* argument — see `workflows/
 cross_source_evolution.py`'s own module docstring for the exact wiring and
-the directory-vs-file asymmetry it preserves verbatim. The remaining five
-cross-source checks (`header_build_context_mismatch`, `odr_type_variant`,
-`identity_collision_detected`, `compile_context_conflict`,
-`source_surface_dso_mismatch`), the pattern/preprocessor scans, and the
-abi3 audit's `scan`-only enrichment paths are unaffected; `scan` itself is
-untouched and not yet retired. Originally verified against `main` at
-`309c8a82` on 2026-09-06 by Click introspection and call-site inspection,
-not by help text or status prose; re-verified against `main` at `f7b4fdcc`
-on 2026-09-07, again against `main` at `2a64dc3c` on 2026-09-07 after
-merging the automatic-default change with #1125's `private_header_leak`
-migration, and again on 2026-09-07 after this PR's four-check slice —
-re-verify again against current `main`
+the directory-vs-file asymmetry it preserves verbatim. The pattern/
+preprocessor scans and the abi3 audit's `scan`-only enrichment paths are
+unaffected; `scan` itself is untouched and not yet retired. Originally
+verified against `main` at `309c8a82` on 2026-09-06 by Click introspection
+and call-site inspection, not by help text or status prose; re-verified
+against `main` at `f7b4fdcc` on 2026-09-07, again against `main` at
+`2a64dc3c` on 2026-09-07 after merging the automatic-default change with
+#1125's `private_header_leak` migration, again on 2026-09-07 after the
+four-check slice, and again on 2026-09-07 after this PR's five-check slice
+closed out all eleven checks — re-verify again against current `main`
 (`git log -1 --format=%H origin/main`) before trusting any capability-loss
 table row above as still accurate.
 **Effort:** XL · **Risk:** high — this deletes a public command and moves
@@ -93,10 +100,15 @@ calls neither. The eleven cross-source checks —
 `identity_collision_detected`
 
 — plus the lexical pattern pre-scan, the preprocessor scan, changed-path
-localization and the `abi3` audit are **`scan`-only**. The command the vision
-names as the product owns the smaller check set. This is a correctness and
-discoverability defect, not a tidiness one, and it is what makes this
-migration a capability *gain* rather than a cleanup.
+localization and the `abi3` audit were **`scan`-only** at the time of this
+original audit. The command the vision names as the product owned the
+smaller check set. This was a correctness and discoverability defect, not a
+tidiness one, and it is what made this migration a capability *gain* rather
+than a cleanup. **This finding is now closed for all eleven cross-source
+checks** — see the page's own `Status:` line above and §3 #3 for current,
+maintained status; this section stays as the original audit record rather
+than being rewritten in place, since a corrected historical finding would
+misstate what the audit actually found at the time.
 
 **2. Two of everything.** `scan` owns ~10,000 lines across
 `cli_scan.py` (1981), `cli_scan_baseline.py` (1380), `cli_scan_helpers.py`
