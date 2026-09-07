@@ -94,6 +94,11 @@ from typing import Any
 # it always had, just resolved through this module-level import.
 import abicheck.reporter_markdown as _reporter_markdown_module
 
+from .contract_conflicts_markdown import (
+    ContractConflictRow,
+    ContractConflictsSection,
+    render_contract_conflicts_section,
+)
 from .disposition_audit import (
     DispositionAudit,
     compute_disposition_audit,
@@ -434,6 +439,9 @@ def build_markdown_document(
         "headline": asdict(rm.compute_headline_table(result, emoji, label)),
         "rtti_note": _opt_asdict(rm.compute_rtti_note(breaking)),
         "confidence": _opt_asdict(rm.compute_confidence_section(result)),
+        "contract_conflicts": _opt_asdict(
+            rm.compute_contract_conflicts_section(result)
+        ),
         "policy": asdict(rm.compute_policy_section(result)),
         "recommendation": (
             asdict(rm.compute_recommendation_section(result))
@@ -499,6 +507,16 @@ def build_markdown_document(
     return ReportDocument.from_mapping(d)
 
 
+def _contract_conflicts_section_from_mapping(
+    d: Mapping[str, Any] | None,
+) -> ContractConflictsSection | None:
+    if d is None:
+        return None
+    return ContractConflictsSection(
+        rows=tuple(ContractConflictRow(**row) for row in d.get("rows", ()))
+    )
+
+
 def _render_disposition_audit_from_mapping(d: Any) -> list[str]:
     """Rebuild and render the audit section from a document mapping.
 
@@ -549,6 +567,9 @@ def render_markdown_document(doc: ReportDocument) -> str:
     )
     lines += render_confidence_section(
         None if d["confidence"] is None else ConfidenceSection(**d["confidence"])
+    )
+    lines += render_contract_conflicts_section(
+        _contract_conflicts_section_from_mapping(d.get("contract_conflicts"))
     )
     lines += render_policy_section(PolicySection(**d["policy"]))
     if d["recommendation"] is not None:

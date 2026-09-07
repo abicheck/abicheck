@@ -66,6 +66,7 @@ from .cli_compare_release_helpers import (
     _format_release_summary,
     _match_release_keys,
     _resolve_release_headers,
+    debian_symbols_release_conflict_lines as _debian_symbols_release_conflict_lines,
 )
 from .frontends.cli.options.params import (
     DEFAULT_POLICY_PROFILE,
@@ -731,6 +732,13 @@ def _prepare_compare_release_inputs(
     debian_symbols_note = _debian_symbols_warning(old_symbols_file, new_symbols_file)
     if debian_symbols_note is not None:
         warning_msgs.append(debian_symbols_note)
+    # E-S3 case 3: each side's own declared symbols contract vs. its own
+    # contained binary (distinct from the old-vs-new diff just above).
+    warning_msgs.extend(
+        _debian_symbols_release_conflict_lines(
+            old_symbols_file, old_lib_dir, new_symbols_file, new_lib_dir
+        )
+    )
     old_h, new_h = _resolve_release_headers(
         headers,
         old_headers_only,
