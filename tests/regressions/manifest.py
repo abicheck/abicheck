@@ -341,12 +341,22 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "TestBatchShapedChangeIgnoresTheSample), and order-invariance "
             "for unordered inputs."
         ),
-        fixed_by=(753, 759, 879, 905),
+        fixed_by=(753, 759, 879, 905, 1125),
         seed_tests=(
             "tests/test_cross_tier_dedup_unhashable_value.py",
             "tests/test_finding_identity_properties.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
+            # workflows/cross_source_evolution.py's own per-side OLD/NEW
+            # lookup was keyed by a bare `Change.symbol` -- non-injective
+            # for `private_header_leak`, whose findings are keyed by
+            # `(mangled_or_name, leaked_type)` in crosscheck.py, so one
+            # function leaking two distinct private types silently
+            # collided into one `Change`. Fixed by generalizing to a
+            # per-check identity function (`_IDENTITY_FUNCS`), defaulting
+            # to `symbol` (still correct for `unversioned_exported_symbol`)
+            # and registering `(symbol, new_value)` for `private_header_leak`.
+            "tests/test_cross_source_evolution.py",
         ),
         # Phase 5's own two originally-tracked gaps here (a compare()-level
         # collision test, and an adversarial generator over the shapes
