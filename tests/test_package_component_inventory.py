@@ -475,3 +475,55 @@ class TestReleaseScopeWarnings:
         messages = release_scope_warnings(record)
         named = [m for m in messages if "libfoo.so" in m]
         assert len(named) <= 1
+
+
+class TestDeclaredAbsentAcquisitionState:
+    """ADR-068 D2/D3 (`one-comparison-product.md` Phase 1 item 1):
+    ``declared_absent`` is a fourth kind of gap in ADR-065's vocabulary,
+    with two safety properties stated here as invariants rather than as one
+    worked example -- "never a removal, never a pass" -- plus the
+    accessor `declared_absent_members` itself."""
+
+    @pytest.mark.parametrize(
+        "new_completeness",
+        [InventoryCompleteness.UNPROVEN, InventoryCompleteness.PROVEN],
+    )
+    def test_never_a_removal_however_complete_the_other_side_is(
+        self, new_completeness: InventoryCompleteness
+    ) -> None:
+        """Unlike `not_supplied`, a `declared_absent` member can never
+        surface as a proven removal -- there is no prior release for it to
+        have been removed from -- regardless of NEW's inventory proof."""
+        record = _record(
+            _member("libfoo.so", AcquisitionState.DECLARED_ABSENT, old=False),
+            new=new_completeness,
+        )
+        assert record.proven_removed_members == ()
+        assert record.proven_added_members == ()
+
+    def test_never_a_pass_when_the_whole_scope_is_declared_absent(self) -> None:
+        """A record built entirely from `declared_absent` members never
+        completes a comparison -- the vision's "zero comparisons is never a
+        clean pass" rule applies to a declared audit scope exactly as it
+        does to any other scope that compared nothing."""
+        record = _record(
+            _member("liba.so", AcquisitionState.DECLARED_ABSENT, old=False),
+            _member("libb.so", AcquisitionState.DECLARED_ABSENT, old=False),
+        )
+        assert record.completed_members == ()
+        assert record.no_comparison_completed
+        assert record.is_incomplete
+
+    def test_never_an_accidental_gap(self) -> None:
+        """A declared audit scope is not an unresolved gap: excluded from
+        `unchecked_members`, distinguishing it from `not_supplied`."""
+        record = _record(
+            _member("libfoo.so", AcquisitionState.DECLARED_ABSENT, old=False)
+        )
+        assert record.unchecked_members == ()
+
+    def test_declared_absent_members_selects_exactly_that_state(self) -> None:
+        declared = _member("libfoo.so", AcquisitionState.DECLARED_ABSENT, old=False)
+        available = _member("libbar.so", AcquisitionState.AVAILABLE)
+        record = _record(declared, available)
+        assert record.declared_absent_members == (declared,)
