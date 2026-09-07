@@ -1184,77 +1184,29 @@ class _ClangAstParser:
             # un-gated `mangled == name` heuristic below wrongly read that
             # fallback collision as C linkage.
             raw_mangled = node.get("mangledName")
-            # See `context.strip_darwin_itanium_decoration`'s docstring.
-            mangled = _clang_context.strip_darwin_itanium_decoration(
-                raw_mangled, raw_mangled or name, self._target_triple
-            )
-            if not mangled:
-                continue
-            type_name = _qualtype(node)
+            # Hoisted here (from just before its original use, near the
+            # `Variable(...)` call below) so `strip_darwin_itanium_
+            # decoration` can reuse this exact boolean for its own
+            # extern-"C" bare-name normalization -- see that function's
+            # own docstring, and `functions.parse_functions`'s identical,
+            # more-fully-commented computation.
+            #
             # The plain `raw_mangled == name` case stays UNGATED -- it
             # holds on every platform for a plain-C declaration clang
             # mangles as its own bare name, with no leading-underscore
             # stripping involved at all. The Darwin-gated `symbol_
             # candidates` de-prefixing is a SEPARATE, additional fallback
-            # layered on top (Codex review, ADR-063 Phase 6, fifteenth AND
-            # sixteenth rounds, fresh evidence each time): a genuinely
-            # plain-C compilation unit has no `LinkageSpecDecl` at all
-            # (that node only exists in C++'s grammar), so `entry.
-            # extern_c` never becomes True for it, and Darwin's linker
-            # prepends a leading underscore to clang's own `mangledName`
-            # ("_foo" for source-level "foo") that castxml's own "pure"
-            # convention never carries -- so the bare-equality check alone
-            # always failed on this platform even though castxml correctly
-            # recognizes the identical declaration as extern "C". Left
-            # unfixed, this variable's `entity_id` stayed tagged
-            # `("mangled", "_foo")` (never retagged by `dumper_hybrid.py`'s
-            # own Mach-O underscore-stripping rewrite, which only
-            # re-spells the mangled tag's VALUE, not its KIND) while
-            # castxml's tags the same declaration `("extern_c",)`, so a
-            # hybrid merge's bare-`EntityId` matching never recognized the
-            # two as one declaration and retained it twice in
-            # `semantic_ir` even though the flat `variables` list (which
-            # matches on the bare mangled string, not `EntityId`) already
-            # unified it.
-            #
-            # The Darwin gate on the de-prefixed fallback is NOT optional
-            # (sixteenth round, fresh evidence, a real regression an
-            # earlier, UNGATED revision of this same fallback introduced):
-            # on a NON-Darwin target, a real, explicit `asm("_foo")` label
-            # genuinely produces `raw_mangled == "_foo"` while `name ==
-            # "foo"` and `entry.extern_c` stays False -- that IS a real,
-            # distinct mangled identity (an asm label), not a linker-
-            # decoration artifact, and castxml's own resolver keeps it
-            # tagged `("mangled", "_foo")` for the identical declaration.
-            # Gating the de-prefixed fallback ALONE on Darwin -- rather
-            # than the whole check, which would also have broken the
-            # plain-equality case above on every non-Darwin platform -- is
-            # what fixes this without reintroducing a different
-            # regression. `symbol_candidates` itself stays
-            # target-agnostic (it is the identical tolerant-match helper
-            # `_visibility` already uses for pure export-table membership,
-            # where trying the de-prefixed form is always safe); the
-            # identity decision built on top of it is what needs the
-            # platform gate.
-            #
-            # The Darwin gate ALONE is still not enough (nineteenth
-            # round, fresh evidence): a real, explicit `asm("_foo")`
-            # label is just as possible ON Darwin as off it, and this
-            # fallback's whole justification -- "a genuinely plain-C
-            # compilation unit has no `LinkageSpecDecl`" -- only holds
-            # for a declaration with NO enclosing scope at all; C has no
-            # namespaces, so a plain-C variable is always global-scope. A
-            # NAMESPACED Darwin C++ declaration is never plain C
-            # regardless of platform, so `entry.scope` gates the
-            # fallback the same way `entry.extern_c`/`raw_mangled ==
-            # name` already implicitly are for a real extern-"C" block.
-            # Requiring `not entry.scope` also preserves both the
-            # genuine asm-label identity AND the namespace
-            # `dumper_hybrid.py`'s Mach-O rewrite would otherwise have
-            # silently dropped by retagging the declaration
-            # `("extern_c",)` (whose own `entity_id_for_variable`
-            # contract always resolves `scope=()`, discarding it
-            # outright).
+            # layered on top: a genuinely plain-C compilation unit has no
+            # `LinkageSpecDecl` at all, so `entry.extern_c` never becomes
+            # True for it, and Darwin's linker prepends a leading
+            # underscore to clang's own `mangledName` that castxml's own
+            # "pure" convention never carries. `entry.scope` gates that
+            # fallback the same way `entry.extern_c`/`raw_mangled == name`
+            # already implicitly are for a real extern-"C" block, which
+            # also preserves a genuine, distinct `asm("_foo")` label's
+            # own identity: see `functions.parse_functions`'s comment for
+            # the full multi-round account of why each gate is load-
+            # bearing.
             is_extern_c = (
                 entry.extern_c
                 or raw_mangled == name
@@ -1265,6 +1217,17 @@ class _ClangAstParser:
                     and name in _clang_context.symbol_candidates(raw_mangled)
                 )
             )
+            # See `context.strip_darwin_itanium_decoration`'s docstring.
+            mangled = _clang_context.strip_darwin_itanium_decoration(
+                raw_mangled,
+                raw_mangled or name,
+                self._target_triple,
+                name=name,
+                is_extern_c=is_extern_c,
+            )
+            if not mangled:
+                continue
+            type_name = _qualtype(node)
             variables.append(
                 Variable(
                     name=name,

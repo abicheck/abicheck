@@ -324,10 +324,16 @@ def is_darwin_target(target_triple: str | None) -> bool:
 
 
 def strip_darwin_itanium_decoration(
-    raw_mangled: str | None, mangled: str, target_triple: str | None
+    raw_mangled: str | None,
+    mangled: str,
+    target_triple: str | None,
+    *,
+    name: str = "",
+    is_extern_c: bool = False,
 ) -> str:
-    """Strip a still-present Darwin linker-decoration underscore from a
-    real Itanium mangled name (``"__Z..."`` -> ``"_Z..."``).
+    """Strip a still-present Darwin linker-decoration underscore, for
+    either a real Itanium mangled name (``"__Z..."`` -> ``"_Z..."``) or a
+    plain C-linkage bare name (``"_foo"`` -> ``"foo"``).
 
     Darwin decorates every global symbol with one leading underscore; for
     a real Itanium name (always starting ``"_Z"``) that produces
@@ -340,22 +346,39 @@ def strip_darwin_itanium_decoration(
     dump on Darwin gets it too, not only a castxml+clang hybrid merge --
     macOS CI review, fresh evidence).
 
-    Gated on the doubly-underscore-decorated shape (``"__Z..."``)
-    specifically, not "any leading underscore": that shape is unambiguous
-    (a real Itanium name always starts with a single ``"_Z"``), whereas a
-    bare, single-underscore-prefixed name (``"_foo"``) is left untouched --
-    it is indistinguishable from a real, explicit ``asm("_foo")`` label
-    naming a distinct identity (see
+    The Itanium case is gated on the doubly-underscore-decorated shape
+    (``"__Z..."``) specifically, not "any leading underscore": that shape
+    is unambiguous (a real Itanium name always starts with a single
+    ``"_Z"``), whereas a bare, single-underscore-prefixed name (``"_foo"``)
+    is generally indistinguishable from a real, explicit ``asm("_foo")``
+    label naming a distinct identity (see
     ``tests/test_dumper_clang_extern_c_identity.py``; an earlier, ungated
     version of this strip broke that established, deliberately
     conservative distinction).
+
+    The plain-C-linkage case (macOS CI, fresh evidence: a real Darwin
+    ``extern "C"`` declaration's decorated ``mangledName`` -- ``"_c_func"``
+    for source-level ``c_func`` -- was left unstripped, disagreeing with
+    castxml's undecorated spelling and the real Mach-O export table alike,
+    for the identical reason the Itanium case above was fixed) needs an
+    extra, narrower gate: *is_extern_c*, the caller's own already-computed
+    boolean (``entry.extern_c``, ``raw_mangled == name``, or the existing
+    Darwin/no-scope bare-name fallback -- see either caller's own
+    docstring). Reusing that exact boolean, rather than re-deriving a
+    separate condition here, means this only strips when the caller has
+    ALREADY concluded -- from a real, explicit ``extern "C"`` AST node or
+    an already-vetted heuristic -- that this declaration's true identity
+    IS its bare name; it does not widen what counts as evidence. Still
+    requires *mangled* to be EXACTLY ``"_" + name`` (not merely
+    underscore-prefixed) so a real, distinct asm-label spelling that
+    happens to differ from the bare name is never touched.
     """
-    if (
-        raw_mangled is not None
-        and mangled.startswith("__Z")
-        and is_darwin_target(target_triple)
-    ):
+    if raw_mangled is None or not is_darwin_target(target_triple):
+        return mangled
+    if mangled.startswith("__Z"):
         return mangled[1:]
+    if is_extern_c and name and mangled == "_" + name:
+        return name
     return mangled
 
 

@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ._compiler_options import has_explicit_std, split_gcc_options
+from .dumper_ast_config_cpp20 import _preprocessed_header_content
 from .dumper_clang import _needs_sycl_host_only
 from .header_utils import (
     drop_include_tokens_duplicating_paths,
@@ -243,28 +244,51 @@ _IDENTIFIER_RE = re.compile(rb"\b[A-Za-z_]\w*\b")
 
 
 def _header_declared_identifiers(headers: Sequence[Path]) -> frozenset[str]:
-    """Every plausible declared-name token appearing in *headers*' own text.
+    """Every plausible declared-name token appearing in *headers*' own
+    ACTIVE, non-comment, non-literal text.
 
     A cheap, pre-parse (regex) substitute for "what does this header
     declare" -- at the point :func:`_resolve_force_cpp` runs, the header
     hasn't been parsed yet (that's what this function's language-mode
     decision feeds into), so there is no real declaration list to check
-    against. Deliberately broad (every identifier-shaped token, keywords
-    excluded) rather than trying to regex-parse real declaration syntax:
-    the caller only ever uses this to *correlate* a candidate export
-    against something this header's own text actually mentions, so a wider
-    candidate set only widens what can be confirmed, never what can be
-    wrongly promoted -- correctness comes from the correlation step
-    requiring an exact Itanium length-prefixed substring match, not from
-    this set being minimal.
+    against. Deliberately broad (every identifier-shaped token in the
+    scanned text, keywords excluded) rather than trying to regex-parse real
+    declaration syntax: the caller only ever uses this to *correlate* a
+    candidate export against something this header's own text actually
+    mentions, so a wider candidate set only widens what can be confirmed,
+    never what can be wrongly promoted -- correctness comes from the
+    correlation step requiring an exact Itanium length-prefixed substring
+    match, not from this set being minimal.
+
+    "Actually mentions", though, means real source text -- not a comment, a
+    string/char literal, or a permanently-unreachable ``#if 0``/``#if
+    false`` arm (CodeRabbit review, fresh evidence: an incidental name match
+    in `// TODO: compute this differently` or `"compute"` must not
+    correlate against a real, unrelated exported ``compute`` symbol from
+    elsewhere in the binary -- the same whole-binary-over-correlation bug
+    this function's own correlation step was written to close, one level
+    less obvious). Reuses :func:`dumper_ast_config_cpp20.
+    _preprocessed_header_content`'s existing comment/string/raw-string/
+    inactive-``#if 0``-block stripping (already exercised by the C++20
+    detector on this exact file set) rather than a second, independent
+    stripper. **Known residual limitation, matching this repo's own
+    documented-gap convention:** a general preprocessor/macro-expansion
+    evaluator is out of scope here (as it is for the C++20 detector this
+    reuses) -- an identifier appearing only as a macro parameter name or
+    inside an ``#ifdef``/``#ifndef`` branch this heuristic can't evaluate
+    (anything other than a literal ``0``/``1``/``false``/``true`` guard)
+    still counts as a candidate. That is the conservative direction: it can
+    only widen what the correlation step *might* confirm against a real
+    export, never fabricate one, since correlation still requires the
+    exact Itanium length-prefixed substring match.
     """
     names: set[str] = set()
     for p in headers:
-        try:
-            content = p.read_bytes()
-        except OSError:
+        prepared = _preprocessed_header_content(p, for_language_mode_decision=True)
+        if prepared is None:
             continue
-        for m in _IDENTIFIER_RE.finditer(content):
+        scan_content, _shadow_content = prepared
+        for m in _IDENTIFIER_RE.finditer(scan_content):
             name = m.group().decode("ascii", errors="ignore")
             if name and name not in _C_CXX_KEYWORDS:
                 names.add(name)

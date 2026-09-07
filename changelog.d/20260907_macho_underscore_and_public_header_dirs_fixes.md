@@ -13,7 +13,20 @@
   parse time too, via a new shared `extract.headers.clang.context.
   strip_darwin_itanium_decoration` helper; `dumper_hybrid.
   _macho_normalize_mangled` was made idempotent so it no longer
-  double-strips a name that already arrives pre-normalized.
+  double-strips a name that already arrives pre-normalized. **The same
+  helper also normalizes a genuine `extern "C"`/plain-C bare-name
+  declaration's Darwin decoration** (`_c_func` -> `c_func`), a narrower
+  residual real compiled Mach-O output on macOS CI caught after the
+  Itanium-only fix above: an explicit `extern "C"` block's decorated
+  `mangledName` was still left unstripped in the stored `mangled` field
+  even though `is_extern_c` detection was already correct, so a self-
+  comparison of a library exposing a plain `extern "C"` function alongside
+  C++ symbols still reported the same contradictory pair, just for the
+  C-linkage declaration instead of the C++ one. Gated on the caller's own
+  already-computed `is_extern_c` boolean (`entry.extern_c` or the
+  existing bare-name-equality heuristic) so it only fires when that
+  determination has already concluded the true identity is the bare
+  name — a bare `_foo` with no such evidence is still left untouched.
 - **The export-evidence C++ language-mode fallback (added in the prior
   fragment above) now correlates the mangled export with an identifier the
   specific header under parse actually declares**, instead of accepting any
@@ -22,6 +35,16 @@
   `struct options { int new; };`, valid C but a parse error in C++) could
   be wrongly forced into C++ mode by an unrelated C++ export from a
   different header in the same multi-header binary.
+- **That same correlation's candidate-identifier collection now only looks
+  at active declaration text**, not a comment, a string/char literal, or an
+  unreachable `#if 0`/`#if false` block. Without this, a name that only
+  appears in `// TODO: compute this differently` or `"compute"` could
+  still wrongly correlate against a real, unrelated `compute(...)` export
+  elsewhere in the binary — the same over-correlation bug one level less
+  obviously. Reuses the existing comment/string/raw-string/inactive-block
+  stripper already used for C++20 construct detection
+  (`dumper_ast_config_cpp20._preprocessed_header_content`) rather than a
+  second stripper.
 - **`dumper_ast_config._cache_key` now hashes the resolved `force_cpp`
   decision**, closing a stale-cache risk where a header previously parsed
   in C mode could keep serving that cached AST after later export evidence

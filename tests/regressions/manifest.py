@@ -1164,9 +1164,11 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "resolve the WHOLE TU to C++, not patch one symbol after the "
             "fact -- a wrong mode corrupts `mangled`/`is_extern_c`/"
             "`visibility` together. An explicit `--lang`, real C++ syntax, "
-            "a bare-name export, or an UNRELATED header's own export "
-            "elsewhere in the same multi-header binary are all not "
-            "evidence for THIS header."
+            "a bare-name export, an UNRELATED header's own export "
+            "elsewhere in the same multi-header binary, or a name that "
+            "only appears in a COMMENT/STRING LITERAL/inactive `#if 0` "
+            "block are all not evidence for THIS header -- only active "
+            "declaration text correlates."
         ),
         fixed_by=(1138,),
         seed_tests=(
@@ -1178,21 +1180,41 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "frontend": ("castxml", "clang"),
             "declaration_shape": ("function", "ns_function", "extern_c", "variable"),
             "export_mangling": ("itanium", "macho_itanium", "msvc", "bare_c"),
+            "excluded_text_source": ("comment", "string_literal", "if_zero_block"),
         },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "No general preprocessor/macro-expansion evaluator: an "
+                    "identifier appearing only as a macro parameter name, "
+                    "or inside an #ifdef/#ifndef branch not a literal "
+                    "0/1/false/true guard, still counts as a correlation "
+                    "candidate -- conservative (widens what might confirm, "
+                    "never fabricates), but not fully precise."
+                ),
+                reference="PR #1138 follow-up, second CodeRabbit round",
+            ),
+        ),
     ),
     BugClass(
         id="extraction.macho_mangled_identity_normalization",
         invariant=(
-            "On Darwin, a real Itanium name's linker-decorated spelling "
-            "(`__Z...`) must be stripped to the pure spelling (`_Z...`) at "
-            "the POINT OF ORIGIN in every header-AST backend's own parse "
-            "step, not only inside the castxml+clang hybrid-merge path -- "
+            "On Darwin, a linker-decorated spelling must be stripped to "
+            "the pure spelling at the POINT OF ORIGIN in every header-AST "
+            "backend's own parse step, not only inside the castxml+clang "
+            "hybrid-merge path, for BOTH shapes decoration takes: a real "
+            "Itanium name (`__Z...` -> `_Z...`, unconditional -- that "
+            'shape is unambiguous) and a genuine extern "C"/plain-C bare '
+            "name (`_foo` -> `foo`, gated on the caller's own already-"
+            "computed `is_extern_c` -- entry.extern_c or the existing "
+            "bare-name-equality heuristic -- reusing that exact boolean "
+            "rather than re-deriving a separate, less precise condition). "
             "`Function.mangled`/`Variable.mangled` must match on every "
             "platform/frontend combination, including a bare "
-            "`--ast-frontend clang` dump with no castxml side. Gated on "
-            "the unambiguous `__Z...` shape only: a bare `_foo` stays "
-            'untouched (indistinguishable from a real `asm("_foo")` '
-            "label). A name already pure must not be stripped again."
+            "`--ast-frontend clang` dump with no castxml side. A `_foo` "
+            "with NO extern-C evidence stays untouched (indistinguishable "
+            'from a real `asm("_foo")` label). A name already pure must '
+            "not be stripped again."
         ),
         fixed_by=(1138,),
         seed_tests=(
@@ -1203,7 +1225,12 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         axes={
             "frontend": ("clang",),
             "declaration_shape": ("function", "variable"),
-            "mangled_shape": ("macho_decorated", "already_pure", "bare_asm_label"),
+            "mangled_shape": (
+                "macho_decorated_itanium",
+                "macho_decorated_extern_c",
+                "already_pure",
+                "bare_asm_label",
+            ),
         },
         known_gaps=(
             KnownGap(
@@ -1211,12 +1238,16 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "No Mach-O toolchain in this dev environment to verify "
                     "end to end -- verified via code inspection + synthetic "
                     "AST-JSON unit tests only; macOS CI is the only real-"
-                    "binary signal."
+                    "binary signal (which is what caught this class's own "
+                    "second, narrower residual: the extern-C/plain-C bare-"
+                    "name shape was originally missed, only the Itanium "
+                    "shape was fixed in the first pass)."
                 ),
                 reference=(
                     "PR #1138 follow-up: CI's integration-tests "
                     "(macos-latest) job reported 4 failures from this exact "
-                    "mismatch for a bare --ast-frontend clang dump"
+                    "mismatch for a bare --ast-frontend clang dump, twice "
+                    "(Itanium shape, then the narrower extern-C shape)"
                 ),
             ),
         ),
