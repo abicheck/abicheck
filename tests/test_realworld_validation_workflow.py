@@ -118,8 +118,12 @@ class TestContractEvaluationStepAgainstARealPackage:
         assert "--contract public" in run
 
     def test_the_step_asserts_a_compatible_verdict(self) -> None:
+        # ADR-068 D3/D4/D5: compare()'s automatic unversioned_exported_symbol
+        # stage reports COMPATIBLE_WITH_RISK for zlib's own base-version-bound
+        # API symbols (real, advisory, never BREAKING -- ADR-035 D4) -- widened
+        # alongside the workflow's own assertion, not narrowed back.
         run = self._step()["run"]
-        assert 'in {"NO_CHANGE", "COMPATIBLE"}' in run
+        assert 'in {"NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"}' in run
 
     def test_the_step_asserts_clean_contract_coverage(self) -> None:
         """A self-compare has complete evidence on both sides -- the
