@@ -1696,10 +1696,7 @@ def run_compare(
     )
     # ADR-068 Phase 2c/2d (plan §3 #12/#15): the changed-path seed (scoping input
     # only, narrowing the L4/L5 points of interest per ADR-043 D7) + abi3 floor.
-    _enrich = _enrichment.resolve_compare_enrichment_inputs(
-        since=since, changed_paths_opt=changed_paths_opt, abi3=abi3,
-        project_cfg=project_cfg, sources=new_sources or old_sources,
-    )
+    _enrich = _enrichment.resolve_compare_enrichment_inputs(since=since, changed_paths_opt=changed_paths_opt, abi3=abi3, project_cfg=project_cfg, sources=new_sources or old_sources)
     collect_mode = _enrich.localize_collect_mode(collect_mode)
 
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
@@ -1927,6 +1924,9 @@ def run_compare(
         )
     )
 
+    # ADR-068 D3 (Phase 2d): the candidate-only --abi3 audit rides the same extra_changes channel every other externally-produced finding uses, so policy/suppression/verdict score it (security review of PR #1123).
+    extra_changes, _abi3_failure = _enrichment.fold_abi3_into_extra_changes(extra_changes, new, _enrich.abi3_floor, new_input.name)
+
     # --post-manifest: scope the comparison to the POST manifest's committed
     # `pp_*`/ufunc-loop surface (private __pp_* kernel churn is demoted).
     post_manifest_allowlist = _resolve_post_manifest_allowlist(
@@ -1969,7 +1969,7 @@ def run_compare(
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
         sys.exit(_EXIT_NOT_COMPARABLE)
-    _enrichment.apply_compare_abi3_audit(result, new, _enrich.abi3_floor, new_input.name)  # ADR-068 D3 (Phase 2d)
+    _enrichment.report_abi3_evidence_contract_error(result, _abi3_failure)  # ADR-068 exit-7 axis
     _report_compare_result(
         ctx, result, old, new,
         old_input=old_input, new_input=new_input,

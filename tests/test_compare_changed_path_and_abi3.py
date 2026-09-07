@@ -343,6 +343,123 @@ class TestCompareAbi3:
         ]
 
 
+class TestAbi3FindingsReachPolicy:
+    """Security review of PR #1123: the audit's findings must enter the
+    change set *before* classification, so policy/suppression/verdict/exit
+    all act on them. "Advisory" is the kind's own RISK default verdict, not
+    a finding rendered after the verdict was already fixed.
+
+    Parametrized over the whole severity vocabulary a policy `overrides:`
+    entry accepts, against an independently-stated oracle (the verdict a
+    finding of that class produces for any other kind), rather than the one
+    "break" case the review reported.
+    """
+
+    def _policy(self, tmp_path: Path, severity: str) -> Path:
+        path = tmp_path / f"policy-{severity}.yaml"
+        path.write_text(
+            f"overrides:\n  python_stable_abi_violation: {severity}\n",
+            encoding="utf-8",
+        )
+        return path
+
+    @pytest.mark.parametrize(
+        ("severity", "verdict", "exit_code"),
+        [
+            ("break", "BREAKING", 4),
+            ("warn", "API_BREAK", 2),
+            ("risk", "COMPATIBLE_WITH_RISK", 0),
+            ("ignore", "COMPATIBLE", 0),
+        ],
+    )
+    def test_a_policy_override_moves_the_verdict_and_the_exit_code(
+        self, severity: str, verdict: str, exit_code: int, tmp_path: Path
+    ) -> None:
+        path = _write(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(path),
+                str(path),
+                "--abi3",
+                "3.9",
+                "--policy",
+                str(self._policy(tmp_path, severity)),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == exit_code, result.output
+        report = json.loads(result.stdout)
+        assert report["verdict"] == verdict
+        assert report["exit"]["code"] == exit_code
+
+    def test_the_default_stays_advisory(self, tmp_path: Path) -> None:
+        """The negative control for the parametrization above: with no
+        policy in effect the same findings still gate nothing."""
+        path = _write(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
+        result = CliRunner().invoke(
+            main, ["compare", str(path), str(path), "--abi3", "3.9", "--format", "json"]
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["verdict"] == "COMPATIBLE_WITH_RISK"
+
+    def test_a_suppression_rule_can_reach_them(self, tmp_path: Path) -> None:
+        """The other half of "before classification": suppression sees them
+        too, so they land in the disposition ledger rather than the change
+        list -- impossible for a finding appended after the fact."""
+        path = _write(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
+        suppress = tmp_path / "suppress.yaml"
+        suppress.write_text(
+            "version: 1\nsuppressions:\n"
+            "  - change_kind: python_stable_abi_violation\n"
+            "    symbol: python:foo\n"
+            "    reachability: any\n"
+            "    reason: accepted for this release\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(path),
+                str(path),
+                "--abi3",
+                "3.9",
+                "--suppress",
+                str(suppress),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        report = json.loads(result.stdout)
+        assert not [
+            c for c in report["changes"] if c["kind"] == "python_stable_abi_violation"
+        ]
+        # ADR-067's conserved ledger accounts for it -- "detected, then
+        # suppressed by rule X", not silently absent.
+        audit = report["disposition_audit"]
+        assert audit["detected_total"] == 1 and audit["effective_total"] == 0
+        assert audit["counts"]["suppressed"] == 1, audit
+
+    def test_the_typed_api_folds_them_the_same_way(self, tmp_path: Path) -> None:
+        """Front-end parity: the fold is one shared rule, so a typed caller
+        cannot silently get the pre-fix ordering."""
+        from abicheck.model import AbiSnapshot as _S
+        from abicheck.workflows import abi3_audit
+
+        folded, failure = abi3_audit.fold(None, _abi3_snapshot(), (3, 9))
+        assert failure is None
+        assert folded and all(c.candidate_side_enrichment for c in folded)
+        # A non-extension candidate contributes no finding, only the abort.
+        folded2, failure2 = abi3_audit.fold(
+            ["pre-existing"], _S(library="libfoo.so", version="1.0"), (3, 9)
+        )
+        assert folded2 == ["pre-existing"] and failure2 is not None
+
+
 class TestAbi3FloorConfigDefault:
     """ADR-068 D5: the floor is a stable project property with a per-run
     CLI override; the changed-path seed is per-run only."""

@@ -98,21 +98,30 @@ def resolve_compare_enrichment_inputs(
     return CompareEnrichmentInputs(seed.paths, seed.source, floor)
 
 
-def apply_compare_abi3_audit(
-    result: Any, candidate: Any, abi3_floor: tuple[int, int] | None, name: str
-) -> None:
-    """Run the candidate-side audit and report a precondition failure.
+def fold_abi3_into_extra_changes(
+    extra_changes: Any,
+    candidate: Any,
+    abi3_floor: tuple[int, int] | None,
+    name: str,
+) -> tuple[Any, str | None]:
+    """Fold the candidate-side audit into this run's ``extra_changes``.
 
-    The failure is *not* raised: ADR-064 models it as the
-    ``evidence_contract_error`` exit axis (exit ``7``), which
-    ``apply_abi3_candidate_audit`` records on the ``DiffResult`` so the
-    report's own ``exit`` block and the process exit agree. The message goes
-    to stderr so it survives ``--format json`` on stdout.
+    A thin bind of :func:`~abicheck.workflows.abi3_audit.fold` (the
+    shared rule that both front ends call) to the CLI's own
+    candidate name. Returns ``(extra_changes, precondition_failure)``; the
+    findings go in *before* ``compare_snapshots`` so policy, suppression,
+    the disposition ledger and the verdict all score them.
     """
-    from ...workflows.abi3_audit import apply_abi3_candidate_audit
+    from ...workflows import abi3_audit
 
-    failure = apply_abi3_candidate_audit(
-        result, candidate, abi3_floor, candidate_name=name
-    )
+    return abi3_audit.fold(extra_changes, candidate, abi3_floor, candidate_name=name)
+
+
+def report_abi3_evidence_contract_error(result: Any, failure: str | None) -> None:
+    """Stamp ADR-064's exit-7 axis for a failed ``--abi3`` precondition and
+    say so on stderr (so the message survives ``--format json`` on stdout)."""
+    from ...workflows.abi3_audit import record_abi3_evidence_contract_error
+
+    record_abi3_evidence_contract_error(result, failure)
     if failure is not None:
         click.echo(f"error: {failure}", err=True)

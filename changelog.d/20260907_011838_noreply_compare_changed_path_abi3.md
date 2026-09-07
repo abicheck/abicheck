@@ -12,8 +12,13 @@
   check is meaningful only on NEW, so its `python_stable_abi_violation`
   findings ride the same result document marked
   `candidate_side_enrichment` (report schema 3.5) instead of a second
-  result, and are never evaluated on OLD. They stay advisory (`RISK`), gated
-  only through policy. `--abi3` against a candidate that is not a
+  result, and are never evaluated on OLD. They enter the change set through
+  the same `extra_changes` channel every other externally-computed finding
+  uses — *before* classification — so policy, suppression, the disposition
+  ledger, the verdict and the exit code all act on them: they stay advisory
+  because `python_stable_abi_violation` is a `RISK` kind, and a project that
+  maps it to a breaking verdict in `--policy` actually fails the build.
+  `--abi3` against a candidate that is not a
   recognisable CPython extension module is an evidence-contract error —
   exit `7`, reusing the `ExitDecision` axis `compare` already had.
 - **`.abicheck.yml` `python.abi3_floor`** — the abi3 floor is a stable

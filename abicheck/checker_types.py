@@ -398,14 +398,16 @@ class Change:
     # findings stay equal regardless of identity coverage (Codex review).
     # Same field(kw_only=True)-appended-last convention as evidence_provenance.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+    disambiguator: str | None = field(default=None, kw_only=True, compare=False)
     # ADR-068 D3 (plan §6 Phase 2d): this finding comes from a check that is
     # meaningful only on the *candidate* (NEW) side -- today the ``--abi3``
     # stable-ABI audit (workflows/abi3_audit.py) -- so it rides the same
     # result document as the comparison it enriches, "marked as such" rather
     # than split into a second result. Never set for a two-sided finding.
-    # Same field(kw_only=True)-appended-last convention as entity_id.
+    # Same field(kw_only=True)-appended-last convention as disambiguator: it
+    # is the newest field, so it goes after it, never between two existing
+    # ones (`tests/test_evidence_provenance_completeness.py` pins the order).
     candidate_side_enrichment: bool = field(default=False, kw_only=True)
-    disambiguator: str | None = field(default=None, kw_only=True, compare=False)
 
 
 @dataclass

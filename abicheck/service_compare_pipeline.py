@@ -66,7 +66,7 @@ from .policy.depth_projection import (
     project_pair_to_depth,
     project_snapshot_to_depth,
 )
-from .workflows.abi3_audit import apply_abi3_candidate_audit
+from .workflows import abi3_audit, gate as gate_workflow
 from .workflows.artifact.compile_context_gate import (
     SideCompileInput,
     resolved_pair_compile_contexts,
@@ -447,7 +447,7 @@ def classify_compare_pair(
     build-source evidence the snapshots carry into ``extra_changes`` (without
     it a source-only change reads as artifact-only compatible), classifies
     through the Tier-2 ``compare_snapshots`` chokepoint, and attaches the
-    coverage/metrics the diff itself does not produce -- plus ADR-068 D3's candidate-only ``--abi3`` enrichment of this same result document (Phase 2d; a no-op unless ``CompareRequest.abi3_floor`` is set).
+    coverage/metrics the diff itself does not produce -- plus ADR-068 D3's candidate-only ``--abi3`` enrichment (Phase 2d), folded into ``extra_changes`` *before* classification so policy scores it; a no-op unless ``CompareRequest.abi3_floor`` is set.
 
     A front end that must configure the run between the two phases (the native
     ``compare`` CLI's ADR-049 ``resolve_and_apply``, which can move the policy
@@ -514,6 +514,7 @@ def classify_compare_pair(
         None,
         policy_file=pf,
     )
+    extra_changes, _fail = abi3_audit.fold(extra_changes, new, request.abi3_floor)
     result = service.compare_snapshots(
         old,
         new,
@@ -540,7 +541,7 @@ def classify_compare_pair(
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
-    apply_abi3_candidate_audit(result, new, request.abi3_floor)
+    abi3_audit.record_abi3_evidence_contract_error(result, _fail)
     # Hash through the full GNU ld linker-script chain to its final resolved
     # target -- resolve_side_snapshot() already followed the identical chain
     # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
@@ -594,8 +595,6 @@ def classify_compare_pair(
     # exit-code-scheme selector to pass any more -- the algorithm is purely
     # derived from whether `severity_preset` (or a resolved gate pack) put a
     # severity setting in effect.
-    from .workflows import gate as gate_workflow
-
     gate = gate_workflow.resolve_release_gate_options(
         None,
         severity_preset=request.severity_preset,
