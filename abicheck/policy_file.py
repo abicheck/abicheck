@@ -623,10 +623,10 @@ class PolicyFile:
     # False, so nothing that builds one in code starts claiming a statement it
     # never made.
     internal_namespaces_stated: bool = False
-    # ADR-066 D4/S2 — the project's versioning policy; `versioning_stated`
-    # mirrors `internal_namespaces_stated`'s own semantics.
-    versioning: VersioningPolicy = field(default_factory=built_in_default_versioning_policy)
-    versioning_stated: bool = False
+    # ADR-066 D4/S2 -- versioning policy; `versioning_stated` mirrors `internal_namespaces_stated`.
+    # `kw_only=True` for the same reason `reclassify` above is (CodeRabbit review; see its comment).
+    versioning: VersioningPolicy = field(default_factory=built_in_default_versioning_policy, kw_only=True)
+    versioning_stated: bool = field(default=False, kw_only=True)
     # ADR-033 D7 — evidence-aware policy controls. ``None`` means "unset": the
     # finding keeps its default category (current behaviour). A set value maps
     # the whole category of build/source evidence findings to a verdict ceiling.

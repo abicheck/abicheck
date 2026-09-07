@@ -1,7 +1,9 @@
 ### Added
 
-- **Versioning policy model and support/deprecation evaluation (ADR-066
-  S2).** A new `versioning:` namespace in a `--policy` YAML document
+- **Versioning policy model and deprecation-window evaluation (ADR-066
+  S2).** `support_window` is declared and type-validated but not yet
+  evaluated for conformance (that needs S3's real baseline resolution). A
+  new `versioning:` namespace in a `--policy` YAML document
   declares five independent controls — `scheme`, `promise`,
   `support_window`, `deprecation_window`, `enforcement`
   (`abicheck.policy.versioning_policy.VersioningPolicy`), resolved through

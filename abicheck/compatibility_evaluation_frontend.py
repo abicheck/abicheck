@@ -1817,7 +1817,7 @@ def compatibility_config_from_compare_request(
 # Phase 1's gate, as an executable comparison.
 # --------------------------------------------------------------------------
 
-_SECTIONS = ("contract", "evidence", "surface", "assurance", "policy", "gate")
+_SECTIONS = ("contract", "evidence", "surface", "assurance", "policy", "gate", "versioning")
 
 
 def _normalized_provenance(prov: ValueProvenance) -> tuple[Any, ...]:

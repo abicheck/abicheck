@@ -133,6 +133,43 @@ class TestPolicyFileParsesVersioning:
         with pytest.raises(PolicyError):
             PolicyFile.load(path)
 
+    def test_misspelled_enforcement_key_is_a_hard_load_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A misspelled `enforcment:` (missing "e") must not silently fall
+        # back to the WARN default instead of erroring -- a
+        # `promise: abi_within_major` + intended `enforcement: block` policy
+        # that types this typo must not silently accept a breaking release
+        # (CodeRabbit review).
+        path = tmp_path / "policy.yml"
+        path.write_text(
+            "versioning:\n  promise: abi_within_major\n  enforcment: block\n"
+        )
+        with pytest.raises(PolicyError):
+            PolicyFile.load(path)
+
+    def test_unknown_support_window_key_is_a_hard_load_error(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "policy.yml"
+        path.write_text("versioning:\n  support_window:\n    knid: last_n_minors\n")
+        with pytest.raises(PolicyError):
+            PolicyFile.load(path)
+
+    def test_scalar_support_window_versions_is_a_hard_load_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A bare string is iterable, so `tuple("1.2.3")` would silently
+        # split it into a tuple of single characters instead of raising
+        # (CodeRabbit review).
+        path = tmp_path / "policy.yml"
+        path.write_text(
+            "versioning:\n  support_window:\n    kind: explicit\n"
+            "    versions: '1.2.3'\n"
+        )
+        with pytest.raises(PolicyError):
+            PolicyFile.load(path)
+
 
 class TestResolveVersioningPolicy:
     def test_no_policy_file_falls_back_to_built_in_default(self) -> None:

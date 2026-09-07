@@ -959,8 +959,8 @@ class CompatibilityEvaluationConfig:
     #: ``None`` means no suppression source was selected at all; a
     #: ``SuppressionConfig`` (empty ``rules`` or not) means one was.
     suppressions: SuppressionConfig | None = None
-    #: ADR-066 D4: the project's versioning policy.
-    versioning: VersioningPolicy = field(default_factory=built_in_default_versioning_policy)
+    #: ADR-066 D4. `kw_only=True`: every real call site is keyword-based (CodeRabbit review).
+    versioning: VersioningPolicy = field(default_factory=built_in_default_versioning_policy, kw_only=True)
     provenance: Mapping[str, ValueProvenance] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

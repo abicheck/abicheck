@@ -253,6 +253,13 @@ class LongitudinalHistoryResult:
     #: feeds back into ``events``, ``gaps``, or any pairwise ``compare()``
     #: verdict (ADR-066's "orthogonal axis" requirement).
     deprecation_compliance: tuple[DeprecationComplianceFinding, ...] = ()
+    #: Every ``*_DEPRECATED_REMOVED`` transition observed while building
+    #: ``events``, as ``(entity_key, index)`` -- plumbing for
+    #: :func:`evaluate_deprecation_compliance`, not a sixth D2 lifecycle-
+    #: event kind (see :func:`_events_from_pair`'s own comment). Not part
+    #: of ``to_dict()``'s published shape: it is an internal correctness
+    #: signal for this module's own evaluator, not a new report fact.
+    deprecation_resets: tuple[tuple[str, int], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -363,6 +370,7 @@ def _events_from_pair(
     ever_seen: set[str],
     removed: set[str],
     deprecated: set[str],
+    deprecation_resets: list[tuple[str, int]],
     display_names: dict[str, str],
     is_initial: bool,
 ) -> list[LifecycleEvent]:
@@ -453,8 +461,15 @@ def _events_from_pair(
         if entity_kind is not None:
             # No "un-deprecated" event in D2's vocabulary -- just clear the
             # running flag so a later re-deprecation is reported again.
+            # The transition is still recorded (not as a LifecycleEvent, to
+            # keep D2's five-word vocabulary intact) so
+            # evaluate_deprecation_compliance can tell a plain -> deprecated
+            # -> plain -> removed entity apart from one still deprecated at
+            # removal, rather than attributing stale deprecation evidence to
+            # a later removal (CodeRabbit review).
             key = _correspondence_key(entity_kind, change)
             deprecated.discard(key)
+            deprecation_resets.append((key, to_entry.index))
 
     return events
 
@@ -490,6 +505,7 @@ def build_longitudinal_history(
     ever_seen: set[str] = set()
     removed: set[str] = set()
     deprecated: set[str] = set()
+    deprecation_resets: list[tuple[str, int]] = []
     display_names: dict[str, str] = {}
 
     # Seed entry 0 via a synthetic empty predecessor, reusing the identical
@@ -509,6 +525,7 @@ def build_longitudinal_history(
             ever_seen=ever_seen,
             removed=removed,
             deprecated=deprecated,
+            deprecation_resets=deprecation_resets,
             display_names=display_names,
             is_initial=True,
         )
@@ -535,6 +552,7 @@ def build_longitudinal_history(
                 ever_seen=ever_seen,
                 removed=removed,
                 deprecated=deprecated,
+                deprecation_resets=deprecation_resets,
                 display_names=display_names,
                 is_initial=False,
             )
@@ -549,6 +567,7 @@ def build_longitudinal_history(
         events=tuple(events),
         gaps=tuple(gaps),
         pairwise=tuple(pairwise),
+        deprecation_resets=tuple(deprecation_resets),
     )
     if versioning_policy is not None:
         history_result = replace(
@@ -668,6 +687,12 @@ def evaluate_deprecation_compliance(
     :func:`~abicheck.workflows.history.build_longitudinal_history` appends
     strictly in release-chain order), tracking the most recent ``deprecated``
     event per entity key and closing a finding on each ``removed`` event.
+    ``history.deprecation_resets`` -- a plain -> deprecated -> plain
+    transition, which carries no ``LifecycleEvent`` of its own (see
+    ``_events_from_pair``'s comment) -- is also consulted, so a removal that
+    follows such a reset with no subsequent re-``deprecated`` event is not
+    attributed stale deprecation evidence from before the reset
+    (CodeRabbit review).
 
     This is a pure, read-only projection over already-computed lifecycle
     facts -- it adds a new finding list, never mutates ``history.events``,
@@ -678,6 +703,10 @@ def evaluate_deprecation_compliance(
     deprecated_at: dict[str, tuple[int, str]] = {}
     findings: list[DeprecationComplianceFinding] = []
 
+    resets_by_key: dict[str, list[int]] = {}
+    for key, index in history.deprecation_resets:
+        resets_by_key.setdefault(key, []).append(index)
+
     for ev in history.events:
         if ev.event == "deprecated":
             deprecated_at[ev.entity_key] = (ev.index, ev.version)
@@ -685,6 +714,18 @@ def evaluate_deprecation_compliance(
             deprecated_at.pop(ev.entity_key, None)
         elif ev.event == "removed":
             dep = deprecated_at.pop(ev.entity_key, None)
+            if dep is not None and any(
+                dep[0] < reset_index <= ev.index
+                for reset_index in resets_by_key.get(ev.entity_key, ())
+            ):
+                # A reset strictly between the tracked deprecation and this
+                # removal, with no later "deprecated" event overwriting
+                # `deprecated_at` in between (dict assignment above already
+                # happens in chronological order, so a later re-deprecation
+                # would have replaced `dep` before we get here) -- the
+                # deprecation in force at removal time is unobserved, not
+                # the one recorded before the reset.
+                dep = None
             if dep is None:
                 if min_releases <= 0:
                     status, observed = "conforming", None

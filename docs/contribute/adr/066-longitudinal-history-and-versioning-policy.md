@@ -369,7 +369,9 @@ from measured fixtures in S1, not promised here.
 > projection exist yet; S2-S4 remain as scoped above.
 >
 > **Amendment (2026-09-07, S2 landed): the versioning policy model,
-> support/deprecation evaluation, and SemVer/SONAME integration.**
+> deprecation evaluation, and SemVer/SONAME integration.** (`support_window`
+> is declared and type-validated but not yet evaluated for conformance --
+> see the D4 entry below.)
 >
 > - **D4's model landed as `abicheck/policy/versioning_policy.py`.**
 >   `VersioningPolicy` composes the five independent controls verbatim

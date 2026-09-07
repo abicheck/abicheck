@@ -283,6 +283,25 @@ _NON_BREAKING_VERDICTS = frozenset(
 )
 
 
+def _verdict_deviates_from_promise(
+    verdict: Verdict, promise: CompatibilityPromise
+) -> bool:
+    """Does *verdict* violate *promise*, once ``promise`` is not ``NONE``?
+
+    ``Verdict.API_BREAK`` is a source-level break with no observed ABI
+    break; ``Verdict.BREAKING`` is an ABI break. ``ABI_WITHIN_MAJOR`` only
+    promises ABI stability, so a source-only ``API_BREAK`` never deviates
+    from it -- only ``BREAKING`` does (CodeRabbit review). ``API_WITHIN_MINOR``
+    and ``SOURCE_WITHIN_MINOR`` promise source stability too, so either
+    non-compatible verdict deviates from them.
+    """
+    if verdict in _NON_BREAKING_VERDICTS:
+        return False
+    if promise is CompatibilityPromise.ABI_WITHIN_MAJOR:
+        return verdict is Verdict.BREAKING
+    return True
+
+
 @dataclass(frozen=True)
 class PolicyAcceptance:
     """D5's *unmet release policy* axis: whether this release is acceptable
@@ -326,18 +345,25 @@ def evaluate_release_acceptance(
     * ``promise=NONE`` (the default -- "no compatibility guarantee",
       e.g. a pre-1.0 project) means a break is *never* a policy deviation,
       whatever ``enforcement`` says: there is no promise to violate.
-    * Any other promise makes a breaking/API-break verdict a genuine
-      deviation. ``enforcement=WARN`` (default) still accepts it
+    * ``promise=ABI_WITHIN_MAJOR`` only promises ABI stability, so a
+      source-only ``API_BREAK`` (no observed ABI break) is not a
+      deviation from it -- only ``BREAKING`` is (CodeRabbit review; see
+      :func:`_verdict_deviates_from_promise`). ``API_WITHIN_MINOR`` and
+      ``SOURCE_WITHIN_MINOR`` make either non-compatible verdict a genuine
+      deviation. ``enforcement=WARN`` (default) still accepts a deviation
       (advisory only, matching D4's "no existing run changes" default);
       ``enforcement=BLOCK`` does not.
     """
-    if result.verdict in _NON_BREAKING_VERDICTS:
+    if not _verdict_deviates_from_promise(result.verdict, policy.promise):
         return PolicyAcceptance(
             accepted=True,
             enforcement=policy.enforcement,
             promise=policy.promise,
             detail="no breaking or API-break verdict was observed -- no "
-            "compatibility promise was tested.",
+            "compatibility promise was tested."
+            if result.verdict in _NON_BREAKING_VERDICTS
+            else "the observed verdict does not fall within the declared "
+            f"promise's scope ({policy.promise.value}) -- not a deviation.",
         )
 
     if policy.promise is CompatibilityPromise.NONE:

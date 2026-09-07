@@ -40,6 +40,24 @@ from .policy.versioning_policy import (
     built_in_default_versioning_policy,
 )
 
+#: `PolicyFile`'s own `reclassify` parser rejects an unrecognized key rather
+#: than silently ignoring it (see its own `RECLASSIFY_KNOWN_KEYS`) -- the
+#: same convention applies here: a misspelled ``enforcment:`` key must not
+#: silently fall back to the default instead of erroring (CodeRabbit review).
+_SUPPORT_WINDOW_KNOWN_KEYS = frozenset({"kind", "last_n", "line", "versions"})
+_DEPRECATION_WINDOW_KNOWN_KEYS = frozenset({"min_releases"})
+_VERSIONING_KNOWN_KEYS = frozenset(
+    {"scheme", "promise", "support_window", "deprecation_window", "enforcement"}
+)
+
+
+def _reject_unknown_keys(raw: dict[str, Any], known: frozenset[str], where: str) -> None:
+    unknown = set(raw) - known
+    if unknown:
+        raise PolicyError(
+            f"{where}: unknown key(s) {sorted(unknown)}. Valid keys: {sorted(known)}"
+        )
+
 
 def _parse_support_window(raw: Any, path: Path) -> SupportWindow:
     """Validate and parse the ``versioning.support_window`` sub-block."""
@@ -50,7 +68,22 @@ def _parse_support_window(raw: Any, path: Path) -> SupportWindow:
             f"'versioning.support_window' must be a YAML mapping in {path}, "
             f"got {type(raw).__name__}"
         )
+    _reject_unknown_keys(
+        raw, _SUPPORT_WINDOW_KNOWN_KEYS, f"versioning.support_window in {path}"
+    )
     versions = raw.get("versions", ())
+    # A scalar (e.g. a bare string `versions: "1.2.3"`) is iterable, so
+    # `tuple(versions)` would silently split it into a tuple of one
+    # character per element instead of raising (CodeRabbit review) --
+    # require a real list/tuple of strings first.
+    if versions and (
+        not isinstance(versions, (list, tuple))
+        or not all(isinstance(v, str) for v in versions)
+    ):
+        raise PolicyError(
+            f"'versioning.support_window.versions' must be a YAML list of "
+            f"strings in {path}, got {versions!r}"
+        )
     try:
         return SupportWindow(
             kind=raw.get("kind", "none"),
@@ -71,6 +104,9 @@ def _parse_deprecation_window(raw: Any, path: Path) -> DeprecationWindow:
             f"'versioning.deprecation_window' must be a YAML mapping in "
             f"{path}, got {type(raw).__name__}"
         )
+    _reject_unknown_keys(
+        raw, _DEPRECATION_WINDOW_KNOWN_KEYS, f"versioning.deprecation_window in {path}"
+    )
     try:
         return DeprecationWindow(min_releases=raw.get("min_releases", 0))
     except (TypeError, ValueError) as exc:
@@ -90,6 +126,7 @@ def parse_versioning_policy(raw: Any, path: Path) -> VersioningPolicy:
         raise PolicyError(
             f"'versioning' must be a YAML mapping in {path}, got " + type(raw).__name__
         )
+    _reject_unknown_keys(raw, _VERSIONING_KNOWN_KEYS, f"versioning in {path}")
     default = built_in_default_versioning_policy()
     scheme_raw = raw.get("scheme")
     promise_raw = raw.get("promise")

@@ -164,6 +164,28 @@ class TestReleaseAcceptance:
         acceptance = evaluate_release_acceptance(_breaking_result(), policy)
         assert acceptance.accepted is False
 
+    def test_abi_within_major_accepts_a_source_only_api_break(self) -> None:
+        # ABI_WITHIN_MAJOR only promises ABI stability; Verdict.API_BREAK is
+        # a source-level break with no observed ABI break, so it must not
+        # be treated as a deviation from this promise -- only
+        # Verdict.BREAKING (an actual ABI break) is (CodeRabbit review).
+        policy = VersioningPolicy(
+            promise=CompatibilityPromise.ABI_WITHIN_MAJOR,
+            enforcement=VersioningEnforcement.BLOCK,
+        )
+        acceptance = evaluate_release_acceptance(_diff_result(Verdict.API_BREAK), policy)
+        assert acceptance.accepted is True
+
+    def test_api_within_minor_rejects_an_api_break(self) -> None:
+        # Unlike ABI_WITHIN_MAJOR, API_WITHIN_MINOR promises source
+        # stability too, so an API_BREAK genuinely deviates from it.
+        policy = VersioningPolicy(
+            promise=CompatibilityPromise.API_WITHIN_MINOR,
+            enforcement=VersioningEnforcement.BLOCK,
+        )
+        acceptance = evaluate_release_acceptance(_diff_result(Verdict.API_BREAK), policy)
+        assert acceptance.accepted is False
+
     def test_strict_promise_with_warn_accepts_but_notes_deviation(self) -> None:
         policy = VersioningPolicy(
             promise=CompatibilityPromise.ABI_WITHIN_MAJOR,
@@ -176,6 +198,7 @@ class TestReleaseAcceptance:
     def test_relaxed_vs_strict_same_result_different_acceptance(self) -> None:
         """The exact fixed-example version of the plan's mandated property."""
         result = _breaking_result()
+        changes_before = list(result.changes)
         strict = VersioningPolicy(
             promise=CompatibilityPromise.ABI_WITHIN_MAJOR,
             enforcement=VersioningEnforcement.BLOCK,
@@ -192,8 +215,11 @@ class TestReleaseAcceptance:
         assert strict_rec.soname == relaxed_rec.soname
         assert strict_rec.state == relaxed_rec.state
         assert strict_rec.rationale == relaxed_rec.rationale
-        # Same raw finding set: recommend_release never touches result.changes.
-        assert result.changes == result.changes
+        # Same raw finding set: recommend_release never touches result.changes
+        # (compared against a snapshot taken before either call, not against
+        # itself -- a self-comparison can never catch a mutation; CodeRabbit
+        # review).
+        assert result.changes == changes_before
 
         # Different acceptance.
         assert strict_rec.policy_acceptance is not None
@@ -448,6 +474,34 @@ class TestDeprecationCompliance:
         assert len(flappy_findings) == 2
         assert flappy_findings[0].status == "conforming"
         assert flappy_findings[1].status == "unknown"
+
+    def test_undeprecation_without_a_later_redeprecation_is_unknown_not_stale(
+        self, tmp_path: Path
+    ) -> None:
+        """plain -> deprecated -> plain (deprecation attribute removed,
+        entity still present) -> removed must not let the *first* cycle's
+        stale ``deprecated`` record satisfy a removal that in fact followed
+        an un-deprecation with no fresh ``deprecated`` event (CodeRabbit
+        review) -- the correct status is ``unknown``, the same as if no
+        deprecation had ever been observed."""
+        keep = _fn("keep")
+        flappy = _fn("flappy")
+        flappy_dep = _fn("flappy", deprecated="going away")
+
+        p1 = _save(tmp_path, "1.0.0", [keep, flappy])
+        p2 = _save(tmp_path, "1.1.0", [keep, flappy_dep])  # deprecated
+        p3 = _save(tmp_path, "1.2.0", [keep, flappy])  # un-deprecated, still present
+        p4 = _save(tmp_path, "1.3.0", [keep])  # removed, no fresh deprecation
+
+        policy = VersioningPolicy(deprecation_window=DeprecationWindow(min_releases=1))
+        result = run_history_request([p1, p2, p3, p4], versioning_policy=policy)
+
+        flappy_findings = [
+            f for f in result.deprecation_compliance if f.display_name == "flappy"
+        ]
+        assert len(flappy_findings) == 1
+        assert flappy_findings[0].status == "unknown"
+        assert flappy_findings[0].deprecated_at_version is None
 
     def test_to_dict_includes_deprecation_compliance(self, tmp_path: Path) -> None:
         add = _fn("add")
