@@ -110,25 +110,31 @@ EXPECTED_GAPS: dict[str, ExpectedGap] = {
     ),
 }
 
-#: F-8/F-9 (plan §7)'s `not_evaluated`/`resolved` evolution axis was tracked
-#: here, separately from EXPECTED_GAPS, while `FindingEvolution` did not
-#: exist on either tool at all ("not implemented anywhere", not "scan has
-#: it, compare doesn't"). Plan §5 P2 / ADR-068 D3 landed it (this PR) —
-#: `Change.evolution` exists, `private_header_leak` is migrated onto it, and
-#: `tests/parity/test_evolution_state_gap.py` carries the real F-8/F-9
-#: acceptance tests plus the `not_evaluated` correctness-crux property test.
-#: Deliberately left as an empty dict, not deleted outright, so a *future*
-#: "not implemented anywhere" gap (of which this was the first) has a
-#: precedented home rather than needing this module's structure reinvented.
+#: F-8/F-9 (plan §7) used to be tracked here as `finding_evolution`: the
+#: `not_evaluated`/`resolved` evolution axis existed under neither tool.
+#: ADR-068 Phase 1 item 2 landed the generic vocabulary (`checker_policy.
+#: FindingEvolution`, `Change.evolution`/`DiffResult.resolved_findings`,
+#: `policy.finding_evolution`'s cross-run correspondence primitive), and a
+#: later PR (plan §5 P2 / §6 Phase 2a) wired the first real check onto it --
+#: `private_header_leak` now runs per side inside `compare`'s own pipeline,
+#: evolution-stated via a second, same-comparison matcher
+#: (`compare.finding_evolution.evolve_check_findings`) -- see
+#: `test_evolution_state_gap.py` for the now-real F-8/F-9 demonstration --
+#: so this registry is empty until a genuinely new "neither tool has this at
+#: all" gap appears. Kept as its own dict (rather than deleted outright)
+#: because it is a structurally different kind of gap from EXPECTED_GAPS
+#: (which is specifically "scan has it, compare doesn't") and a future gap
+#: of this second kind should have an obvious place to register, per this
+#: module's own docstring.
 NOT_YET_IMPLEMENTED_ANYWHERE: dict[str, ExpectedGap] = {}
 
 
-#: The complete *tracked* set: every remaining scan-only capability (the
-#: separately-tracked evolution gap closed this PR — see
-#: `NOT_YET_IMPLEMENTED_ANYWHERE`'s own comment). `test_gap_registry_
-#: contract.py` pins this at exactly fourteen (10 remaining crosscheck
-#: checks + pattern_scan + preprocessor_scan + changed_path_localization +
-#: abi3_audit). Used only for that registry-completeness bookkeeping --
+#: The complete *tracked* set: every remaining scan-only capability, plus
+#: whatever NOT_YET_IMPLEMENTED_ANYWHERE holds (currently nothing -- see its
+#: own comment). `test_gap_registry_contract.py` pins this at exactly
+#: fourteen (10 remaining crosscheck checks + pattern_scan +
+#: preprocessor_scan + changed_path_localization + abi3_audit). Used only
+#: for that registry-completeness bookkeeping --
 #: `runner.py`'s scan-vs-compare diff checks against `EXPECTED_GAPS` alone
 #: (see this module's docstring).
 ALL_EXPECTED_GAPS: dict[str, ExpectedGap] = {

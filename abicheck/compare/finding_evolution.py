@@ -48,10 +48,19 @@ evidence was insufficient to have produced it:
 Import contract (ADR-061 D1): this module is ``compare``-classified per
 ``architecture/modules.yaml`` (``may_import: [model]`` only) — it imports
 :class:`~abicheck.checker_types.Change` (a ``model``-classified legacy
-module) and :class:`~abicheck.model.finding_evolution.FindingEvolution`,
-nothing else. It knows nothing about ``buildsource.crosscheck`` or any
-other check's own evidence/finding shape — that per-check glue (running the
-check twice and calling this matcher) is a ``workflows``-layer concern; see
+module) and :class:`~abicheck.checker_policy.FindingEvolution` (an
+unclassified flat legacy module every layer may still reach, the same way
+``policy/finding_evolution.py`` -- ADR-068 Phase 1 item 2's already-landed
+correspondence primitive for an *N>1-comparison chain* -- reaches it), and
+nothing else. This module solves a different axis of the same vocabulary:
+where that primitive answers "does this finding's identity persist across
+two separate `compare()` runs", this one answers "was one check's own
+per-side result already known, within a *single* `compare()` call, given
+each side's own evidence-sufficiency signal" -- hence a distinct matching
+algorithm reusing the identical four-state enum rather than a second one.
+This module knows nothing about ``buildsource.crosscheck`` or any other
+check's own evidence/finding shape — that per-check glue (running the check
+twice and calling this matcher) is a ``workflows``-layer concern; see
 :mod:`abicheck.workflows.crosscheck_evolution`.
 
 Authority is unchanged (ADR-028 D3 / ADR-035 D1): this module only ever
@@ -67,8 +76,8 @@ from __future__ import annotations
 from collections.abc import Callable, Hashable, Sequence
 from dataclasses import replace
 
+from ..checker_policy import FindingEvolution
 from ..checker_types import Change
-from ..model.finding_evolution import FindingEvolution
 
 
 def default_check_identity(change: Change) -> Hashable:

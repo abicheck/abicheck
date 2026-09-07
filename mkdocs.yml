@@ -309,6 +309,7 @@ nav:
       - Python Build Ecosystem Positioning: contribute/python-build-ecosystem-positioning.md
     - Parity & Reports:
       - Catalog Coverage: contribute/catalog-coverage.md
+      - ABI/API Taxonomy Coverage: contribute/abi-taxonomy-coverage.md
       - ABICC Parity Status: contribute/abicc-parity-status.md
       - ABICC Test Coverage Comparison: contribute/abicc-test-coverage-comparison.md
       - ABICC Format Compliance: reference/abicc-format-compliance.md

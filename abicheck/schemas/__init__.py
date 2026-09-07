@@ -767,20 +767,40 @@ from typing import Any
 #:       first for workstream D-S1's ``used_by[]``/``consumer_impact_
 #:       summary`` fields (same "renumber, don't reuse" convention as the
 #:       2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2 entries above).
-#: 3.5 -- ``docs/contribute/plans/one-comparison-product.md`` P2 (ADR-068
-#:       D3): the FindingEvolution prerequisite. Each ``changes[]`` entry
-#:       gains an additive, optional ``evolution`` string
-#:       (``introduced``/``resolved``/``persistent``/``not_evaluated``) --
-#:       present only for a finding produced by a check migrated onto this
-#:       model (``private_header_leak``, the first and so-far only one; see
-#:       ``abicheck.workflows.crosscheck_evolution.MIGRATED_CROSSCHECKS``).
-#:       Absent (not present at all, never ``null``) for every other
-#:       finding kind, which is every existing report unchanged. Additive
-#:       only: no existing key changes shape or meaning, and no verdict,
-#:       gate, or exit code moves -- authority is unchanged (ADR-028 D3 /
-#:       ADR-035 D1), a migrated check's findings stay exactly the
-#:       ``RISK``/``API_BREAK`` category they always were.
-REPORT_SCHEMA_VERSION = "3.5"
+#: 3.5 -- ADR-068 Phase 1 item 2 (``docs/contribute/plans/
+#:       one-comparison-product.md`` "Phase 1"): a new additive top-level
+#:       ``finding_evolution`` object -- ``counts`` (one entry per
+#:       ``FindingEvolution`` state: ``introduced``/``resolved``/
+#:       ``persistent``/``not_evaluated``) and ``resolved`` (findings from an
+#:       earlier comparison in a chain that no longer appear in this one).
+#:       Unconditional, the same "never omitted, only stated" rule
+#:       ``disposition_audit`` follows -- a plain, single ``compare()`` run
+#:       reports every finding ``not_evaluated`` and an empty ``resolved``
+#:       list, since evolution across a comparison chain is only computed by
+#:       a dedicated N>1-comparison caller (``policy.finding_evolution``,
+#:       not yet wired into any CLI command in this phase). Additive only:
+#:       no existing key changes shape or meaning, and no verdict, gate, or
+#:       exit code moves. Plan §5 P2 / ADR-068 D3 (a later PR, same schema
+#:       version -- no shape change) adds the *first* real, non-default
+#:       counts: a one-sided check migrated onto ``compare``'s OLD-vs-NEW
+#:       pipeline (``private_header_leak``, via
+#:       ``abicheck.workflows.crosscheck_evolution.MIGRATED_CROSSCHECKS``)
+#:       now stamps ``Change.evolution`` with a real
+#:       ``introduced``/``resolved``/``persistent``/``not_evaluated`` value
+#:       for its own findings, so this block's counts reflect that check's
+#:       real per-side evidence-evaluation outcome instead of always reading
+#:       ``not_evaluated: <total>``. Every other, unmigrated finding kind is
+#:       unaffected.
+#: 3.6 -- Workstream E slice S3: optional ``contract_conflicts`` array
+#:       alongside ``contract_context`` -- multi-source contract conflicts,
+#:       both disagreeing sources' claims kept (ADR-067). Same opt-in gate
+#:       as ``contract_context``; omitted otherwise, so no existing report
+#:       changes. Renumbered from a conflicting 3.5 when the origin/main
+#:       merge claimed that version first for ADR-068 Phase 1's
+#:       ``finding_evolution`` object (same "renumber, don't reuse"
+#:       convention as the 2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2/3.4
+#:       entries above).
+REPORT_SCHEMA_VERSION = "3.6"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

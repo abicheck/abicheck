@@ -126,7 +126,7 @@ class TestFieldDefaultsToNone:
         which would have silently shifted every later field's position for
         such a caller). `entity_id` (ADR-063 Phase 2) is appended immediately
         after this one, `disambiguator` (ADR-063 Track T3) immediately after
-        that, and `evolution` (ADR-068 D3 / plan §5 P2) is the newest field,
+        that, and `evolution` (ADR-068 Phase 1 item 2) is the newest field,
         appended immediately after `disambiguator` -- all four must stay
         keyword-only, and `evolution` must stay last until some still-newer
         field is appended after it in turn."""

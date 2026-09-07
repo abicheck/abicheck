@@ -150,6 +150,30 @@ can be demoted. Only legacy output without a gate block falls back from
 compatibility verdict to `2`/`4`. Existing command-specific `5`, `8`, and `64`
 behavior is as documented below.
 
+## `compare --no-baseline` (ADR-068 D2, single artifact)
+
+`abicheck compare --no-baseline NEW` declares that no prior surface exists
+for `NEW` and runs a candidate-side audit instead of a comparison — the
+first replacement for `scan`'s audit-only mode (no `--against`) and
+ADR-047 §8's S5. `--no-baseline` is an explicit declaration, never inferred
+from argument count: `compare NEW` (one operand, no flag) and
+`compare --no-baseline OLD NEW` (the flag plus two operands) are both usage
+errors, exit `64`. Only a single artifact is supported today; a
+directory/package operand is also a usage error until ADR-065 S3's package
+component inventories land (plan §5 P5).
+
+The OLD side is recorded with ADR-065's `declared_absent`
+`MemberAcquisition` state — distinct from `not_supplied` (an *unproven*
+absence that can leave the scope reading incomplete): the user declared
+there is no prior surface, so `run_outcome.scope` reads `complete` and the
+`comparison_scope` block names the one `declared_absent` member. The run
+never emits an addition, a removal, or a compatibility verdict —
+`run_outcome.compatibility` and the top-level `verdict` are JSON `null`,
+and `changes` is always `[]`. The compatibility axis therefore always
+contributes `0` to the exit code; the orthogonal analysis-assurance and
+contract-coverage axes below still apply exactly as they would for a
+two-sided run, folded with the same `max` discipline.
+
 ## Analysis-assurance contribution (P0.4)
 
 `compare`, and `scan --against`, always compute and report

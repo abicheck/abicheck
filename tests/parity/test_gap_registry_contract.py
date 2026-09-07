@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Structural checks on the expected-gap registry itself.
 
-The registry (``tests/parity/gaps.py``) *is* the migration's definition of
 done (plan §6 Phase 0): it must name exactly the fourteen remaining
 capabilities ADR-068 §1 and the plan's requirements enumerate, each with a
 real reason and a real plan-phase reference -- never an empty placeholder,
-and never silently missing an entry. ``private_header_leak`` and
-``finding_evolution`` were the first two entries closed (plan §5 P2 / ADR-068
-D3, this PR) and are asserted absent, not merely renamed.
+and never silently missing an entry. A fifteenth, differently-shaped entry
+(``finding_evolution``, F-8/F-9's "neither tool has this vocabulary at all"
+gap) used to live in ``NOT_YET_IMPLEMENTED_ANYWHERE`` alongside this set;
+ADR-068 Phase 1 item 2 closed the generic vocabulary itself, and a later PR
+(plan §5 P2 / §6 Phase 2a) closed ``private_header_leak`` too -- the first
+real check migrated onto it. Both are asserted absent below, not merely
+renamed.
 """
 
 from __future__ import annotations
@@ -54,11 +57,12 @@ def test_every_gap_has_a_non_empty_reason_and_phase() -> None:
         assert "Phase" in gap.plan_phase, f"{key}: plan_phase must name a phase"
 
 
-def test_finding_evolution_gap_is_closed() -> None:
-    """Plan §5 P2 / ADR-068 D3 landed ``FindingEvolution`` (this PR) -- the
-    "not implemented anywhere" tracking entry is gone, and it must never
-    reappear in ``EXPECTED_GAPS`` either (it was never a scan-vs-compare
-    capability gap to begin with -- see ``gaps.py``'s own docstring)."""
+def test_finding_evolution_gap_has_closed() -> None:
+    """ADR-068 Phase 1 item 2 landed the generic `FindingEvolution`
+    primitive (`checker_policy.FindingEvolution`, `policy.finding_evolution`),
+    so `finding_evolution` is no longer tracked anywhere in this registry --
+    see `test_evolution_state_gap.py` for the real demonstration that
+    replaced the old absence-of-the-vocabulary test."""
     assert "finding_evolution" not in EXPECTED_GAPS
     assert "finding_evolution" not in NOT_YET_IMPLEMENTED_ANYWHERE
     assert NOT_YET_IMPLEMENTED_ANYWHERE == {}
@@ -66,9 +70,9 @@ def test_finding_evolution_gap_is_closed() -> None:
 
 
 def test_private_header_leak_gap_is_closed() -> None:
-    """The first cross-source check migrated onto FindingEvolution (this
-    PR) -- its EXPECTED_GAPS row must be deleted, not merely marked closed,
-    per ``gaps.py``'s own contract."""
+    """The first cross-source check migrated onto FindingEvolution (plan
+    §5 P2 / §6 Phase 2a) -- its EXPECTED_GAPS row must be deleted, not
+    merely marked closed, per ``gaps.py``'s own contract."""
     assert "private_header_leak" not in EXPECTED_GAPS
     assert "private_header_leak" not in ALL_EXPECTED_GAPS
 

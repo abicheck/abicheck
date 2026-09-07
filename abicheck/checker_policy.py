@@ -136,6 +136,48 @@ class ReachabilityState(str, Enum):
     UNKNOWN = "unknown"
 
 
+class FindingEvolution(str, Enum):
+    """Where one finding sits across a chain of more than one comparison
+    (ADR-068 Phase 1 item 2, ``one-comparison-product.md``).
+
+    A single :func:`~abicheck.checker.compare` call only ever sees *one*
+    pair of snapshots, so it has no way to know whether a finding it just
+    emitted also appeared in a previous comparison, or whether a finding a
+    previous comparison reported has since disappeared. This field exists
+    for a caller that *does* have that context — a longitudinal chain
+    (``workflows/history.py``, ADR-066 S1), a CI job comparing today's PR
+    findings against the base branch's own last recorded run, or any other
+    N>1-comparison consumer — to record that context on the canonical
+    finding model rather than inventing a side channel per consumer.
+
+    ``compare()`` itself never sets this field: every ordinary, single-
+    comparison ``Change`` keeps the ``NOT_EVALUATED`` default. Reusing
+    ADR-067 D3's ``not_evaluated`` convention (see
+    ``report.disposition_audit.NotEvaluatedDetector``) deliberately, rather
+    than inventing a second "capability never exercised" vocabulary: a
+    finding whose evolution nobody computed reads as *not evaluated*, never
+    as a silently-assumed ``persistent`` or an omitted field.
+
+    - ``INTRODUCED`` — this finding's identity (see
+      :func:`abicheck.finding_identity.report_finding_id`) did not appear in
+      the previous comparison in the chain.
+    - ``PERSISTENT`` — this finding's identity already appeared in the
+      previous comparison and still appears now.
+    - ``RESOLVED`` — a finding's identity that appeared in the previous
+      comparison but no longer appears in the current one. Never carried as
+      a member of ``DiffResult.changes`` (there is no current-side ``Change``
+      to attach it to); see ``DiffResult.resolved_findings`` instead.
+    - ``NOT_EVALUATED`` — no previous comparison was supplied to compare
+      against, so evolution could not be determined. The default for every
+      ``Change`` a plain, single comparison produces.
+    """
+
+    INTRODUCED = "introduced"
+    RESOLVED = "resolved"
+    PERSISTENT = "persistent"
+    NOT_EVALUATED = "not_evaluated"
+
+
 class EvidenceStatus(str, Enum):
     """The epistemic status of a single finding — *how* it was proven, not just
     *what* it is (its ``Verdict``/severity already say that).

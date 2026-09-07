@@ -1,0 +1,678 @@
+{
+  "schema_version": 1,
+  "description": "Phase 2/3 of docs/contribute/plans/abi-api-knowledge-and-corpus.md: the hand-maintained mapping from every leaf of docs/contribute/abi-api-failure-taxonomy.md onto the docs/learn/ page(s) that explain it, the catalog/cases/ case(s) that demonstrate it, and the ChangeKind(s) that would produce a finding for it, plus each leaf's Phase 3 coverage status. This file is the single source of truth: scripts/gen_abi_taxonomy_coverage.py renders it and scripts/check_abi_taxonomy_coverage.py gates it. Nothing here is recomputed by heuristics -- the generator only derives each ChangeKind's owning abicheck/model/change_catalog/ module and its minimum evidence tier (scripts/evidence_tiers.py) from those authoritative sources, so a kind's module/tier can never drift from this file.",
+  "status_order": [
+    "NOT_APPLICABLE",
+    "KNOWN_UNDETECTABLE",
+    "NOT_IMPLEMENTED",
+    "MISSING_CASE",
+    "PARTIALLY_COVERED",
+    "COVERED"
+  ],
+  "leaves": {
+    "symbol-identity.removal": {
+      "learn_pages": ["learn/abi-series/02-symbol-contracts.md", "learn/abi-cheat-sheet.md"],
+      "topics": ["public-surface"],
+      "catalog_cases": ["case01_symbol_removal", "case12_function_removed", "case58_var_removed", "case182_accidental_export_removed_still_breaking"],
+      "detector_kinds": ["func_removed", "func_removed_elf_only", "var_removed", "type_removed"],
+      "status": "COVERED"
+    },
+    "symbol-identity.rename": {
+      "learn_pages": ["learn/abi-series/02-symbol-contracts.md"],
+      "topics": [],
+      "catalog_cases": ["case194_header_graph_rename_reconciled", "case86_tag_struct_renamed"],
+      "detector_kinds": ["func_likely_renamed", "symbol_renamed_batch", "declaration_renamed", "tag_type_renamed"],
+      "status": "PARTIALLY_COVERED",
+      "reason": "The catalog demonstrates rename reconciliation at the L5 source-graph tier (case194) and a tag-type rename, but no case exercises the flat exported-symbol rename detectors (`func_likely_renamed`/`symbol_renamed_batch`) on a binary pair."
+    },
+    "symbol-identity.mangling-scheme-change": {
+      "learn_pages": ["learn/modern-cpp-toolchain-hazards.md", "learn/system-library-discipline.md", "learn/msvc-pe-abi-model.md", "learn/abi-series/04-cpp-abi.md"],
+      "topics": ["modern-cpp-toolchain-hazards", "system-library-discipline", "msvc-pe-abi-model"],
+      "catalog_cases": ["case104_glibcxx_dual_abi_flip", "case113_abi_tag_changed"],
+      "detector_kinds": ["glibcxx_dual_abi_flip_detected", "abi_tag_changed", "libcpp_abi_version_changed"],
+      "status": "COVERED"
+    },
+    "symbol-identity.mangling-signature-change": {
+      "learn_pages": ["learn/abi-series/02-symbol-contracts.md", "learn/abi-series/04-cpp-abi.md"],
+      "topics": [],
+      "catalog_cases": ["case02_param_type_change", "case10_return_type", "case22_method_const_changed", "case166_ref_qualifier_added"],
+      "detector_kinds": ["func_params_changed", "func_return_changed", "func_cv_changed", "func_ref_qual_changed"],
+      "status": "COVERED"
+    },
+    "symbol-identity.linkage-change": {
+      "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/abi-series/02-symbol-contracts.md"],
+      "topics": [],
+      "catalog_cases": ["case66_language_linkage_changed", "case59_func_became_inline", "case157_inline_function_removed"],
+      "detector_kinds": ["func_language_linkage_changed", "func_became_inline", "func_lost_inline", "inline_function_removed", "func_removed_elf_only"],
+      "status": "COVERED"
+    },
+    "symbol-identity.visibility-change": {
+      "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/elf-symbol-filtering.md", "learn/abi-surface.md"],
+      "topics": ["elf-symbol-filtering", "public-surface"],
+      "catalog_cases": ["case06_visibility", "case51_protected_visibility"],
+      "detector_kinds": ["func_visibility_changed", "func_visibility_protected_changed", "symbol_elf_visibility_changed", "protected_visibility_changed", "type_visibility_changed", "visibility_leak"],
+      "status": "COVERED"
+    },
+    "symbol-identity.version-node-change": {
+      "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/system-library-discipline.md"],
+      "topics": ["system-library-discipline"],
+      "catalog_cases": ["case13_symbol_versioning", "case65_symbol_version_removed", "case139_symbol_version_node_removed", "case183_internal_version_node_churn"],
+      "detector_kinds": ["symbol_version_node_removed", "symbol_moved_version_node", "symbol_version_defined_added", "symbol_version_defined_removed", "symbol_version_required_added", "symbol_version_required_removed"],
+      "status": "COVERED"
+    },
+    "symbol-identity.weak-strong-binding-change": {
+      "learn_pages": ["learn/abi-cheat-sheet.md"],
+      "topics": [],
+      "catalog_cases": ["case27_symbol_binding_weakened", "case128_symbol_binding_strengthened", "case180_symbol_binding_lost_unique"],
+      "detector_kinds": ["symbol_binding_changed", "symbol_binding_strengthened", "symbol_binding_became_unique", "symbol_binding_lost_unique", "common_symbol_risk"],
+      "status": "PARTIALLY_COVERED",
+      "reason": "Detection and cases are complete, but the only docs/learn/ material is a pair of cheat-sheet table rows -- no narrative page explains weak/strong binding, interposition, or when relaxing it matters."
+    },
+    "symbol-identity.alias-change": {
+      "learn_pages": ["learn/abi-series/02-symbol-contracts.md", "learn/system-library-discipline.md"],
+      "topics": [],
+      "catalog_cases": [],
+      "detector_kinds": ["symbol_version_alias_changed", "pe_forwarder_changed", "macho_reexport_changed"],
+      "status": "MISSING_CASE",
+      "reason": "Detection exists for the `.symver` alias half (plus the PE forwarder and Mach-O re-export analogues), but no catalog case exercises any of them, and no detector claims a plain `__attribute__((alias))` repoint."
+    },
+    "symbol-identity.ifunc-resolver-change": {
+      "learn_pages": ["learn/modern-cpp-toolchain-hazards.md", "learn/dependency-floors.md", "learn/verdicts.md"],
+      "topics": [],
+      "catalog_cases": ["case29_ifunc_transition"],
+      "detector_kinds": ["ifunc_introduced", "ifunc_removed"],
+      "status": "KNOWN_UNDETECTABLE",
+      "reason": "abicheck observes ifunc *adoption and removal* (`ifunc_introduced`/`ifunc_removed`, case29), but the mechanism as stated is a change inside the resolver's own selection logic: which implementation binds is decided at load time from CPU features, so no static evidence from two artifacts distinguishes an unchanged resolver from one that now selects differently.",
+      "limitations_ref": "Indirect-function (`ifunc`) resolver selection"
+    },
+
+    "calling-contract.parameter-type-change": {
+      "learn_pages": ["learn/abi-series/02-symbol-contracts.md"],
+      "topics": [],
+      "catalog_cases": ["case02_param_type_change", "case33_pointer_level", "case46_pointer_chain_type_change", "case189_public_function_private_parameter_type"],
+      "detector_kinds": ["func_params_changed", "param_pointer_level_changed", "template_param_type_changed"],
+      "status": "COVERED"
+    },
+    "calling-contract.parameter-count-change": {
+      "learn_pages": ["learn/abi-series/02-symbol-contracts.md"],
+      "topics": [],
+      "catalog_cases": [],
+      "detector_kinds": ["func_params_changed", "mandatory_template_param_added"],
+      "status": "MISSING_CASE",
+      "reason": "`func_params_changed` covers an arity change, but every signature case in the catalog changes a parameter's *type* -- none adds or drops a parameter, so the arity path is demonstrated nowhere."
+    },
+    "calling-contract.parameter-order-change": {
+      "learn_pages": ["learn/abi-series/02-symbol-contracts.md"],
+      "topics": [],
+      "catalog_cases": [],
+      "detector_kinds": ["func_params_changed"],
+      "status": "MISSING_CASE",
+      "reason": "A reorder of two differently-typed parameters reaches `func_params_changed`, but no case demonstrates it -- and the same-type reorder (the silent, ABI-identical-signature variant) has no case either."
+    },
+    "calling-contract.return-type-change": {
+      "learn_pages": ["learn/abi-series/02-symbol-contracts.md"],
+      "topics": [],
+      "catalog_cases": ["case10_return_type", "case46_pointer_chain_type_change", "case102_frozen_runtime_signature_changed"],
+      "detector_kinds": ["func_return_changed", "return_pointer_level_changed", "template_return_type_changed", "unspecified_return_now_named"],
+      "status": "COVERED"
+    },
+    "calling-contract.calling-convention-change": {
+      "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/msvc-pe-abi-model.md"],
+      "topics": ["msvc-pe-abi-model"],
+      "catalog_cases": ["case64_calling_convention_changed"],
+      "detector_kinds": ["calling_convention_changed"],
+      "status": "COVERED"
+    },
+    "calling-contract.exception-specification-abi-change": {
+      "learn_pages": ["learn/exception-unwinding-abi.md", "learn/abi-series/04-cpp-abi.md"],
+      "topics": ["exception-unwinding-abi"],
+      "catalog_cases": ["case15_noexcept_change", "case130_exceptions_mode_flip"],
+      "detector_kinds": ["func_noexcept_added", "func_noexcept_removed", "func_exception_spec_changed", "exceptions_mode_changed"],
+      "status": "COVERED"
+    },
+    "calling-contract.variadic-change": {
+      "learn_pages": [],
+      "topics": [],
+      "catalog_cases": [],
+      "detector_kinds": ["func_variadic_added", "func_variadic_removed", "param_became_va_list", "param_lost_va_list"],
+      "status": "MISSING_CASE",
+      "reason": "Four detectors claim the fixed-arity/variadic transition, none has a case, and no docs/learn/ page mentions variadic functions at all -- so this leaf is a corpus gap and a documentation gap at once."
+    },
+    "calling-contract.implicit-this-change": {
+      "learn_pages": ["learn/abi-series/04-cpp-abi.md"],
+      "topics": [],
+      "catalog_cases": ["case21_method_became_static"],
+      "detector_kinds": ["func_static_changed"],
+      "status": "COVERED"
+    },
+    "calling-contract.aggregate-classification-change": {
+      "learn_pages": ["learn/abi-series/04-cpp-abi.md", "learn/class-layout-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": ["case69_trivial_to_nontrivial", "case129_struct_return_convention"],
+      "detector_kinds": ["value_abi_trait_changed", "trivially_copyable_lost", "standard_layout_lost", "struct_return_convention_changed"],
+      "status": "COVERED"
+    },
+    "calling-contract.pass-by-value-threshold-change": {
+      "learn_pages": ["learn/abi-series/04-cpp-abi.md", "learn/class-layout-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": ["case129_struct_return_convention"],
+      "detector_kinds": ["struct_return_convention_changed"],
+      "status": "PARTIALLY_COVERED",
+      "reason": "Detection covers the *return*-value register-vs-memory transition only. A by-value aggregate *parameter* growing across the same platform threshold is reported as an ordinary size change, with no finding stating that the argument moved from registers to an invisible reference."
+    },
+
+    "data-layout.size-change": {
+      "learn_pages": ["learn/abi-series/03-type-layout.md", "learn/class-layout-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": ["case07_struct_layout", "case14_cpp_class_size", "case17_template_abi", "case40_field_layout", "case48_leaf_struct_through_pointer"],
+      "detector_kinds": ["type_size_changed", "struct_size_changed", "symbol_size_changed", "symbol_size_changed_const_object"],
+      "status": "COVERED"
+    },
+    "data-layout.alignment-change": {
+      "learn_pages": ["learn/abi-series/03-type-layout.md", "learn/class-layout-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": ["case42_type_alignment_changed"],
+      "detector_kinds": ["type_alignment_changed", "struct_alignment_changed", "var_alignment_changed", "exported_object_alignment_reduced"],
+      "status": "COVERED"
+    },
+    "data-layout.field-offset-change": {
+      "learn_pages": ["learn/abi-series/03-type-layout.md", "learn/class-layout-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": ["case43_base_class_member_added", "case77_detail_templated_base_changed", "case117_no_unique_address"],
+      "detector_kinds": ["type_field_offset_changed", "struct_field_offset_changed", "base_class_offset_changed"],
+      "status": "COVERED"
+    },
+    "data-layout.field-reorder": {
+      "learn_pages": ["learn/abi-series/03-type-layout.md"],
+      "topics": [],
+      "catalog_cases": ["case120_internal_struct_reordered_scoped"],
+      "cases_demonstrate": false,
+      "detector_kinds": ["type_field_offset_changed", "field_renamed", "struct_field_type_changed"],
+      "status": "MISSING_CASE",
+      "reason": "The only reorder case is the internal/scoped *negative* control (case120, which must stay NO_CHANGE). No case reorders the fields of a public struct, which is exactly the positive control Phase 4 pairs with case120."
+    },
+    "data-layout.padding-change": {
+      "learn_pages": ["learn/abi-series/03-type-layout.md", "learn/class-layout-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": ["case56_struct_packing_changed", "case153_struct_packing_flip"],
+      "detector_kinds": ["struct_packing_changed", "struct_packing_mode_changed"],
+      "status": "COVERED"
+    },
+    "data-layout.bitfield-allocation-change": {
+      "learn_pages": ["learn/abi-series/03-type-layout.md", "learn/class-layout-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": ["case63_bitfield_changed"],
+      "detector_kinds": ["field_bitfield_changed"],
+      "status": "COVERED"
+    },
+    "data-layout.enum-underlying-type-change": {
+      "learn_pages": ["learn/abi-series/03-type-layout.md"],
+      "topics": [],
+      "catalog_cases": ["case57_enum_underlying_size_changed", "case152_enum_size_flag_flip"],
+      "detector_kinds": ["enum_underlying_size_changed", "enum_size_flag_changed", "enum_became_scoped", "enum_lost_scoped"],
+      "status": "COVERED"
+    },
+    "data-layout.union-active-member-change": {
+      "learn_pages": ["learn/abi-series/03-type-layout.md"],
+      "topics": [],
+      "catalog_cases": ["case24_union_field_removed", "case26_union_field_added", "case26b_union_field_added_compatible"],
+      "detector_kinds": ["union_field_added", "union_field_removed", "union_field_type_changed"],
+      "status": "COVERED"
+    },
+    "data-layout.embedded-array-dimension-change": {
+      "learn_pages": ["learn/abi-series/03-type-layout.md"],
+      "topics": [],
+      "catalog_cases": ["case45_multi_dim_array_change"],
+      "detector_kinds": ["type_field_type_changed", "type_size_changed"],
+      "status": "COVERED"
+    },
+    "data-layout.flexible-array-member-change": {
+      "learn_pages": ["learn/abi-series/03-type-layout.md"],
+      "topics": [],
+      "catalog_cases": ["case70_flexible_array_member_changed"],
+      "detector_kinds": ["flexible_array_member_changed"],
+      "status": "COVERED"
+    },
+    "data-layout.tail-padding-reuse-change": {
+      "learn_pages": ["learn/class-layout-abi.md", "learn/abi-series/03-type-layout.md", "learn/modern-cpp-toolchain-hazards.md"],
+      "topics": ["class-layout", "modern-cpp-toolchain-hazards"],
+      "catalog_cases": ["case140_empty_base_optimization_lost", "case117_no_unique_address"],
+      "detector_kinds": ["tail_padding_reuse_changed", "base_class_offset_changed", "type_field_offset_changed"],
+      "status": "COVERED"
+    },
+
+    "cpp-object-model.base-class-addition-removal": {
+      "learn_pages": ["learn/abi-series/04-cpp-abi.md", "learn/class-layout-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": ["case37_base_class", "case60_base_class_position_changed", "case188_public_class_private_base_class"],
+      "detector_kinds": ["type_base_changed", "base_class_position_changed", "base_class_offset_changed"],
+      "status": "COVERED"
+    },
+    "cpp-object-model.virtual-function-insertion-reorder": {
+      "learn_pages": ["learn/abi-series/04-cpp-abi.md", "learn/class-layout-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": ["case09_cpp_vtable", "case38_virtual_methods", "case68_virtual_method_added", "case142_vtable_slot_count_binary_only", "case185_inherited_override_reuses_slot"],
+      "detector_kinds": ["func_virtual_added", "virtual_method_added", "type_vtable_changed", "vtable_slot_count_changed", "vtable_symbol_identity_changed"],
+      "status": "COVERED"
+    },
+    "cpp-object-model.virtual-function-removal": {
+      "learn_pages": ["learn/abi-series/04-cpp-abi.md", "learn/class-layout-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": ["case168_virtual_method_devirtualized"],
+      "detector_kinds": ["func_virtual_removed", "vtable_slot_count_changed"],
+      "status": "COVERED"
+    },
+    "cpp-object-model.pure-virtual-transition": {
+      "learn_pages": ["learn/abi-series/04-cpp-abi.md"],
+      "topics": [],
+      "catalog_cases": ["case23_pure_virtual_added"],
+      "detector_kinds": ["func_virtual_became_pure", "func_pure_virtual_added", "type_became_abstract", "type_lost_abstract"],
+      "status": "COVERED"
+    },
+    "cpp-object-model.multiple-inheritance-thunk-change": {
+      "learn_pages": ["learn/class-layout-abi.md", "learn/abi-series/04-cpp-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": ["case172_vtable_thunk_offset_changed", "case173_vtt_slot_count_changed", "case174_secondary_vtable_group_changed"],
+      "detector_kinds": ["vtable_thunk_offset_changed", "vtable_thunk_set_changed", "vtt_slot_count_changed", "secondary_vtable_group_changed"],
+      "status": "COVERED"
+    },
+    "cpp-object-model.rtti-representation-change": {
+      "learn_pages": ["learn/class-layout-abi.md", "learn/abi-series/04-cpp-abi.md", "learn/msvc-pe-abi-model.md"],
+      "topics": ["class-layout", "msvc-pe-abi-model"],
+      "catalog_cases": ["case131_rtti_mode_flip", "case146_audit_rtti_for_internal"],
+      "detector_kinds": ["rtti_mode_changed", "rtti_inheritance_changed", "rtti_for_internal_type"],
+      "status": "PARTIALLY_COVERED",
+      "reason": "Detection covers RTTI being switched on/off (`rtti_mode_changed`), an inheritance-shape change reflected in the RTTI records, and RTTI emitted for an internal type. The `type_info` record's own layout or mangled type-name representation changing -- the Itanium-vs-MSVC representation question this leaf names -- has no detector and no case."
+    },
+    "cpp-object-model.virtual-base-layout-change": {
+      "learn_pages": ["learn/abi-series/04-cpp-abi.md", "learn/msvc-pe-abi-model.md"],
+      "topics": ["msvc-pe-abi-model"],
+      "catalog_cases": ["case167_base_became_virtual"],
+      "detector_kinds": ["base_class_virtual_changed", "virtual_base_offset_changed"],
+      "status": "COVERED"
+    },
+    "cpp-object-model.covariant-return-type-change": {
+      "learn_pages": ["learn/abi-series/04-cpp-abi.md"],
+      "topics": [],
+      "catalog_cases": ["case72_covariant_return_changed"],
+      "detector_kinds": ["func_return_changed", "type_vtable_changed", "vtable_thunk_set_changed"],
+      "status": "COVERED"
+    },
+    "cpp-object-model.vptr-presence-change": {
+      "learn_pages": ["learn/abi-series/03-type-layout.md", "learn/class-layout-abi.md"],
+      "topics": ["class-layout"],
+      "catalog_cases": [],
+      "detector_kinds": ["vptr_introduced", "type_size_changed", "type_field_offset_changed"],
+      "status": "MISSING_CASE",
+      "reason": "`vptr_introduced` claims exactly this mechanism, and both learn pages explain it, but no catalog case gives a plain class its first virtual function -- the vtable cases all start from an already-polymorphic class."
+    },
+
+    "source-abi.inline-function-body-change": {
+      "learn_pages": ["learn/static-and-header-only.md", "learn/abi-series/04-cpp-abi.md", "learn/limitations.md"],
+      "topics": ["static-and-header-only"],
+      "catalog_cases": ["case16_inline_to_non_inline", "case47_inline_to_outlined", "case89_inline_accessor_renamed_pimpl_member", "case157_inline_function_removed"],
+      "detector_kinds": ["inline_body_changed", "inline_body_references_renamed_member", "inline_function_removed", "func_became_inline", "func_lost_inline"],
+      "status": "COVERED"
+    },
+    "source-abi.template-instantiation-set-change": {
+      "learn_pages": ["learn/template-heavy-libraries.md", "learn/limitations.md", "learn/abi-series/04-cpp-abi.md"],
+      "topics": ["template-library-contract"],
+      "catalog_cases": ["case79_missing_template_instantiation", "case93_bundle_manifest_drift", "case122_template_signature_uninstantiated"],
+      "detector_kinds": ["instantiation_missing_from_binary", "uninstantiated_template_removed", "template_body_changed", "bundle_manifest_instantiation_added", "bundle_manifest_instantiation_removed"],
+      "status": "COVERED"
+    },
+    "source-abi.odr-violation": {
+      "learn_pages": ["learn/static-and-header-only.md", "learn/abi-series/04-cpp-abi.md", "learn/consumer-models.md"],
+      "topics": ["static-and-header-only", "consumer-models"],
+      "catalog_cases": ["case149_xcheck_odr_variant"],
+      "detector_kinds": ["odr_type_variant", "odr_source_conflict", "identity_collision_detected"],
+      "status": "COVERED"
+    },
+    "source-abi.constexpr-evaluation-change": {
+      "learn_pages": ["learn/abi-series/06-transitive-breaks.md", "learn/abi-surface.md", "learn/limitations.md"],
+      "topics": ["public-surface"],
+      "catalog_cases": ["case124_header_constant_value_changed", "case190_public_inline_function_references_internal_constant"],
+      "detector_kinds": ["constexpr_value_changed", "constant_changed", "constant_added", "constant_removed"],
+      "status": "COVERED"
+    },
+    "source-abi.macro-driven-layout-change": {
+      "learn_pages": ["learn/build-profile-comparability.md", "learn/build-source-data.md", "learn/limitations.md"],
+      "topics": ["build-profile-comparability", "build-target-scoping"],
+      "catalog_cases": ["case164_preproc_conditional_field"],
+      "cases_demonstrate": false,
+      "detector_kinds": ["header_parse_context_drift", "header_build_context_mismatch", "header_binary_context_mismatch", "compile_context_conflict", "public_macro_value_changed"],
+      "status": "MISSING_CASE",
+      "reason": "case164 is the *false-positive* control (a `#ifdef`-guarded field where both releases define the macro, so the correct answer is NO_CHANGE). No case demonstrates the positive mechanism -- two consumers compiling the same header under different macro state and getting different layouts -- which the context-mismatch detectors claim."
+    },
+    "source-abi.default-template-argument-change": {
+      "learn_pages": ["learn/template-heavy-libraries.md", "learn/abi-series/04-cpp-abi.md"],
+      "topics": ["template-library-contract"],
+      "catalog_cases": ["case87_default_template_arg_changed"],
+      "detector_kinds": ["default_template_arg_changed", "mandatory_template_param_added"],
+      "status": "COVERED"
+    },
+
+    "export-surface.header-export-divergence": {
+      "learn_pages": ["learn/abi-surface.md", "learn/graph-coverage.md", "learn/evidence-and-detectability.md"],
+      "topics": ["public-surface", "evidence-model"],
+      "catalog_cases": ["case150_xcheck_export_public_pair", "case144_audit_private_header_leak", "case151_xcheck_provider_matrix"],
+      "detector_kinds": ["exported_not_public", "public_not_exported", "private_header_leak", "source_surface_dso_mismatch", "source_decl_binary_symbol_mismatch"],
+      "status": "COVERED"
+    },
+    "export-surface.visibility-demotion-without-header-change": {
+      "learn_pages": ["learn/abi-surface.md", "learn/abi-series/07-designing-for-stability.md", "learn/elf-symbol-filtering.md"],
+      "topics": ["public-surface", "elf-symbol-filtering"],
+      "catalog_cases": ["case182_accidental_export_removed_still_breaking", "case59_func_became_inline"],
+      "detector_kinds": ["func_removed_elf_only", "link_export_policy_changed", "func_visibility_changed", "visibility_leak"],
+      "status": "COVERED"
+    },
+    "export-surface.accidental-export": {
+      "learn_pages": ["learn/abi-surface.md", "learn/surface-growth.md", "learn/abi-series/07-designing-for-stability.md"],
+      "topics": ["public-surface", "surface-growth"],
+      "catalog_cases": ["case143_audit_accidental_export", "case145_audit_unversioned_export"],
+      "detector_kinds": ["exported_not_public", "unversioned_exported_symbol", "undocumented_export_ratio_increased"],
+      "status": "COVERED"
+    },
+    "export-surface.version-script-map-change": {
+      "learn_pages": ["learn/abi-series/07-designing-for-stability.md", "learn/system-library-discipline.md", "learn/abi-series/05-linker-elf.md"],
+      "topics": ["system-library-discipline"],
+      "catalog_cases": [],
+      "detector_kinds": ["version_script_missing", "link_export_policy_changed", "pe_ordinal_retargeted"],
+      "status": "MISSING_CASE",
+      "reason": "Three detectors claim the export-map surface (an absent version script, a changed export policy, a retargeted PE ordinal), but the corpus has no case where a version script or `.def` file -- and nothing else -- changes the export set."
+    },
+    "export-surface.documented-contract-drift": {
+      "learn_pages": ["learn/surface-growth.md", "learn/rollout-and-governance.md", "learn/abi-surface.md"],
+      "topics": ["surface-growth", "compatibility-governance", "public-surface"],
+      "catalog_cases": [],
+      "detector_kinds": ["public_surface_grew", "public_surface_shrank", "undocumented_export_ratio_increased", "abi_surface_explosion"],
+      "status": "MISSING_CASE",
+      "reason": "The surface-growth detectors exist and `learn/surface-growth.md` explains the mechanism, but no case exercises accretion of an undocumented surface across releases."
+    },
+
+    "dynamic-linker.soname-change": {
+      "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/compatibility-direction.md", "learn/system-library-discipline.md"],
+      "topics": ["compatibility-direction", "system-library-discipline"],
+      "catalog_cases": ["case05_soname", "case50_soname_inconsistent", "case84_bundle_soname_skew"],
+      "detector_kinds": ["soname_changed", "soname_missing", "soname_bump_recommended", "soname_bump_unnecessary", "compat_version_changed"],
+      "status": "COVERED"
+    },
+    "dynamic-linker.symbol-versioning-scheme-change": {
+      "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/system-library-discipline.md"],
+      "topics": ["system-library-discipline"],
+      "catalog_cases": ["case141_versioned_symbol_scheme", "case139_symbol_version_node_removed"],
+      "detector_kinds": ["versioned_symbol_scheme_detected", "symbol_version_node_removed", "unversioned_exported_symbol"],
+      "status": "COVERED"
+    },
+    "dynamic-linker.dt-needed-change": {
+      "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/environment-drift.md", "learn/abi-cheat-sheet.md"],
+      "topics": [],
+      "catalog_cases": ["case138_needed_added"],
+      "detector_kinds": ["needed_added", "needed_removed", "needed_order_changed", "imported_symbol_added", "imported_symbol_removed"],
+      "status": "COVERED"
+    },
+    "dynamic-linker.rpath-runpath-change": {
+      "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/environment-drift.md"],
+      "topics": [],
+      "catalog_cases": ["case52_rpath_leak", "case137_runpath_changed"],
+      "detector_kinds": ["rpath_changed", "runpath_changed", "rpath_type_changed", "wheel_rpath_not_portable"],
+      "status": "COVERED"
+    },
+    "dynamic-linker.binding-mode-change": {
+      "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/abi-cheat-sheet.md"],
+      "topics": [],
+      "catalog_cases": ["case134_relro_weakened"],
+      "detector_kinds": ["bind_now_disabled", "relro_weakened", "symbolic_binding_mode_changed", "pe_import_load_mode_changed", "dynamic_loading_flags_changed"],
+      "status": "COVERED"
+    },
+    "dynamic-linker.plt-got-representation-change": {
+      "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/abi-series/01-foundations.md"],
+      "topics": [],
+      "catalog_cases": ["case29_ifunc_transition"],
+      "detector_kinds": ["dt_relr_introduced", "dt_relr_removed", "text_relocation_introduced", "text_relocation_removed", "hash_style_removed", "ifunc_introduced"],
+      "status": "PARTIALLY_COVERED",
+      "reason": "Six detectors cover the relocation/hash-table representation surface, but the only case is the ifunc transition -- the `DT_RELR`, text-relocation and hash-style changes the same leaf names have no case, and no learn page explains what changing the relocation representation costs a consumer."
+    },
+
+    "dependency-abi.transitive-break": {
+      "learn_pages": ["learn/abi-series/06-transitive-breaks.md", "learn/dependency-floors.md", "learn/packages-and-consumers.md"],
+      "topics": ["packages-and-consumers"],
+      "catalog_cases": ["case18_dependency_leak", "case91_bundle_intra_signature_drift"],
+      "detector_kinds": ["symbol_leaked_from_dependency_changed", "bundle_intra_dep_signature_changed", "bundle_intra_type_changed", "runtime_symbol_provider_changed"],
+      "status": "COVERED"
+    },
+    "dependency-abi.version-range-widening": {
+      "learn_pages": ["learn/dependency-floors.md", "learn/packages-and-consumers.md"],
+      "topics": ["packages-and-consumers"],
+      "catalog_cases": [],
+      "detector_kinds": ["library_version_downgraded", "bundle_intra_dep_resolved_to_different_version", "wheel_closure_dependency_violation", "numpy_metadata_understates_required_version"],
+      "status": "MISSING_CASE",
+      "reason": "Four detectors reason about a dependency constraint admitting an incompatible version, and `learn/dependency-floors.md` explains the mechanism, but no case widens a range and shows the consequence."
+    },
+    "dependency-abi.incompatible-substitution": {
+      "learn_pages": ["learn/products-not-libraries.md", "learn/environment-drift.md", "learn/system-library-discipline.md"],
+      "topics": ["bundle-analysis", "system-library-discipline"],
+      "catalog_cases": ["case92_bundle_provider_changed"],
+      "detector_kinds": ["bundle_provider_changed", "bundle_duplicate_provider", "runtime_symbol_provider_changed", "stdlib_implementation_changed"],
+      "status": "COVERED"
+    },
+    "dependency-abi.linking-mode-change": {
+      "learn_pages": ["learn/static-and-header-only.md", "learn/abi-series/01-foundations.md"],
+      "topics": ["static-and-header-only"],
+      "catalog_cases": [],
+      "detector_kinds": [],
+      "status": "NOT_IMPLEMENTED",
+      "reason": "No ChangeKind states that a dependency moved between static and dynamic linking. The consequences are partly observable through unrelated kinds (`needed_removed` when the dependency leaves `DT_NEEDED`, `symbol_leaked_from_dependency_changed` when its symbols appear in the artifact's own export table), but nothing names the transition itself, so a reader gets two unexplained findings instead of one that says what happened. Tractable: both sides' `DT_NEEDED`/import tables and export sets are already collected at L0.",
+      "known_gaps_ref": "Dependency static/dynamic linking-mode change has no ChangeKind"
+    },
+
+    "toolchain-platform.compiler-abi-epoch-change": {
+      "learn_pages": ["learn/modern-cpp-toolchain-hazards.md", "learn/system-library-discipline.md", "learn/build-profile-comparability.md"],
+      "topics": ["modern-cpp-toolchain-hazards", "system-library-discipline", "build-profile-comparability"],
+      "catalog_cases": ["case104_glibcxx_dual_abi_flip", "case113_abi_tag_changed", "case98_cxx_standard_floor_raised"],
+      "detector_kinds": ["glibcxx_dual_abi_flip_detected", "libcpp_abi_version_changed", "toolchain_version_changed", "stdlib_implementation_changed", "cxx_standard_floor_raised"],
+      "status": "COVERED"
+    },
+    "toolchain-platform.target-triple-change": {
+      "learn_pages": ["learn/build-profile-comparability.md", "learn/modern-cpp-toolchain-hazards.md"],
+      "topics": ["build-profile-comparability"],
+      "catalog_cases": ["case112_lp64_ilp64"],
+      "detector_kinds": ["elf_machine_changed", "elf_class_changed", "elf_osabi_changed", "elf_abi_flags_changed", "macho_cpu_type_changed", "pe_machine_changed", "integer_model_changed", "wheel_tag_architecture_mismatch"],
+      "status": "COVERED"
+    },
+    "toolchain-platform.abi-relevant-flag-change": {
+      "learn_pages": ["learn/build-profile-comparability.md", "learn/build-source-data.md", "learn/environment-drift.md"],
+      "topics": ["build-profile-comparability", "build-target-scoping"],
+      "catalog_cases": ["case103_toolchain_flag_drift", "case98_cxx_standard_floor_raised", "case152_enum_size_flag_flip", "case153_struct_packing_flip", "case154_lto_mode_flip", "case155_char_signedness_flip"],
+      "detector_kinds": ["abi_relevant_build_flag_changed", "toolchain_flag_drift", "enum_size_flag_changed", "struct_packing_mode_changed", "lto_mode_changed", "char_signedness_changed", "float_abi_changed", "sanitizer_mode_changed", "build_option_reaches_public_symbol"],
+      "status": "COVERED"
+    },
+    "toolchain-platform.libc-runtime-abi-change": {
+      "learn_pages": ["learn/dependency-floors.md", "learn/environment-drift.md", "learn/system-library-discipline.md"],
+      "topics": ["system-library-discipline"],
+      "catalog_cases": ["case170_env_runtime_floor_raised", "case97_api_depends_on_consumer_env"],
+      "detector_kinds": ["runtime_floor_raised", "os_deployment_floor_raised", "macos_deployment_target_raised", "musllinux_glibc_dependency_detected", "time64_abi_changed", "platform_baseline_floor_raised"],
+      "status": "COVERED"
+    },
+    "toolchain-platform.endianness-change": {
+      "learn_pages": ["learn/build-profile-comparability.md", "learn/data-wire-compatibility.md"],
+      "topics": ["build-profile-comparability", "data-wire-compatibility"],
+      "catalog_cases": [],
+      "detector_kinds": ["elf_endianness_changed"],
+      "status": "MISSING_CASE",
+      "reason": "`elf_endianness_changed` claims the mechanism outright, but no case pairs a little-endian and a big-endian build -- the catalog's build fixtures are all produced on one host."
+    },
+    "toolchain-platform.word-size-change": {
+      "learn_pages": ["learn/modern-cpp-toolchain-hazards.md", "learn/build-profile-comparability.md", "learn/abi-cheat-sheet.md"],
+      "topics": ["modern-cpp-toolchain-hazards", "build-profile-comparability"],
+      "catalog_cases": ["case112_lp64_ilp64"],
+      "detector_kinds": ["integer_model_changed", "elf_class_changed", "wchar_model_changed", "long_double_abi_changed"],
+      "status": "COVERED"
+    },
+    "toolchain-platform.hardening-flag-change": {
+      "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/abi-cheat-sheet.md"],
+      "topics": [],
+      "catalog_cases": ["case49_executable_stack", "case134_relro_weakened", "case135_stack_canary_removed", "case136_executable_stack_removed", "case179_cet_protection_weakened"],
+      "detector_kinds": ["stack_canary_removed", "fortify_source_weakened", "cet_protection_weakened", "cet_protection_improved", "branch_protection_weakened", "branch_protection_improved", "pie_disabled", "executable_stack", "executable_stack_removed", "pe_hardening_weakened", "pe_hardening_improved"],
+      "status": "COVERED"
+    },
+
+    "product-abi.cross-component-contract-break": {
+      "learn_pages": ["learn/products-not-libraries.md", "learn/abi-series/06-transitive-breaks.md"],
+      "topics": ["bundle-analysis"],
+      "catalog_cases": ["case90_bundle_intra_dep_removed", "case91_bundle_intra_signature_drift"],
+      "detector_kinds": ["bundle_intra_dep_signature_changed", "bundle_intra_type_changed", "bundle_intra_dep_removed", "bundle_unresolved_intra_dependency", "bundle_intra_dep_signature_unverified"],
+      "status": "COVERED"
+    },
+    "product-abi.version-skew-within-release": {
+      "learn_pages": ["learn/products-not-libraries.md", "learn/rollout-and-governance.md"],
+      "topics": ["bundle-analysis", "compatibility-governance"],
+      "catalog_cases": ["case84_bundle_soname_skew", "case93_bundle_manifest_drift"],
+      "detector_kinds": ["bundle_soname_skew", "bundle_manifest_entry_unsatisfied", "bundle_variant_coverage_regressed", "bundle_library_added", "bundle_library_removed"],
+      "status": "COVERED"
+    },
+    "product-abi.plugin-interface-break": {
+      "learn_pages": ["learn/consumer-models.md", "learn/abi-series/07-designing-for-stability.md", "learn/products-not-libraries.md"],
+      "topics": ["consumer-models", "bundle-analysis"],
+      "catalog_cases": ["case82_sycl_overload_set_removed"],
+      "detector_kinds": ["consumer_required_symbol_removed", "sycl_plugin_added", "sycl_plugin_removed", "sycl_pi_entrypoint_added", "sycl_pi_entrypoint_removed", "sycl_overload_set_removed"],
+      "status": "PARTIALLY_COVERED",
+      "reason": "The one demonstrated plugin boundary is SYCL's. A generic host/plugin ABI break -- third-party plugins outside the release, which is the case this leaf is about -- is reachable only through the explicit `--used-by`/`--required-symbol` consumer path (`consumer_required_symbol_removed`), with no case demonstrating it."
+    },
+
+    "source-api.signature-change-source-only": {
+      "learn_pages": ["learn/abi-series/06-transitive-breaks.md", "learn/limitations.md", "learn/verdicts.md"],
+      "topics": ["verdicts"],
+      "catalog_cases": ["case186_c_api_pointee_const_abi_neutral"],
+      "cases_demonstrate": false,
+      "detector_kinds": ["removed_const_overload", "source_level_kind_changed", "param_renamed", "func_params_changed", "func_cv_changed"],
+      "status": "MISSING_CASE",
+      "reason": "case186 is the ABI-neutral *negative* control (a `char*` parameter becoming `const char*`, which must stay NO_CHANGE). No case demonstrates the positive mechanism: a binary-identical change that still breaks recompilation of consumer source."
+    },
+    "source-api.header-macro-removal": {
+      "learn_pages": ["learn/abi-surface.md", "learn/abi-series/06-transitive-breaks.md"],
+      "topics": ["public-surface"],
+      "catalog_cases": ["case156_public_macro_removed"],
+      "detector_kinds": ["public_macro_removed", "public_macro_value_changed"],
+      "status": "COVERED"
+    },
+    "source-api.deprecation-attribute-addition": {
+      "learn_pages": ["learn/abi-series/02-symbol-contracts.md", "learn/rollout-and-governance.md"],
+      "topics": ["compatibility-governance"],
+      "catalog_cases": [],
+      "detector_kinds": ["func_deprecated_added", "func_deprecated_removed", "type_deprecated_added", "var_deprecated_added", "field_deprecated_added", "enum_deprecated_added"],
+      "status": "MISSING_CASE",
+      "reason": "Six detectors cover deprecation attributes across every declaration kind, and the deprecation *workflow* is documented, but no case adds `[[deprecated]]` to a previously plain declaration."
+    },
+    "source-api.default-argument-value-change": {
+      "learn_pages": ["learn/abi-series/06-transitive-breaks.md", "learn/abi-cheat-sheet.md"],
+      "topics": [],
+      "catalog_cases": ["case32_param_defaults", "case123_default_argument_removed"],
+      "detector_kinds": ["param_default_value_changed", "param_default_value_removed", "default_argument_changed", "python_api_default_removed"],
+      "status": "COVERED"
+    },
+    "source-api.overload-resolution-change": {
+      "learn_pages": ["learn/abi-series/06-transitive-breaks.md", "learn/modern-cpp-toolchain-hazards.md"],
+      "topics": ["modern-cpp-toolchain-hazards"],
+      "catalog_cases": ["case169_overload_added", "case111_enumerable_thread_specific_lambda_ambiguity"],
+      "detector_kinds": ["overload_added", "overload_set_rerouted", "ctor_overload_ambiguity_risk", "removed_const_overload", "ctor_explicit_added", "ctor_explicit_removed"],
+      "status": "COVERED"
+    },
+
+    "header-only.multiple-version-odr": {
+      "learn_pages": ["learn/static-and-header-only.md", "learn/consumer-models.md", "learn/limitations.md"],
+      "topics": ["static-and-header-only", "consumer-models"],
+      "catalog_cases": ["case149_xcheck_odr_variant"],
+      "detector_kinds": ["odr_type_variant", "odr_source_conflict"],
+      "status": "PARTIALLY_COVERED",
+      "reason": "The ODR detectors compare translation units *within one analyzed build* (case149). Two different releases of the same header-only library being included by different TUs of one consumer program is a whole-program property of an artifact abicheck is not given, so only the narrower sub-case is detected."
+    },
+    "header-only.include-guard-macro-collision": {
+      "learn_pages": ["learn/static-and-header-only.md", "learn/limitations.md"],
+      "topics": ["static-and-header-only"],
+      "catalog_cases": [],
+      "detector_kinds": [],
+      "status": "KNOWN_UNDETECTABLE",
+      "reason": "A collision only exists relative to some *other* library's macro namespace in a consumer's include closure. abicheck compares two versions of one library; nothing in either snapshot -- at any evidence tier -- can establish that an unrelated third party defines the same guard, and the symptom (one definition silently suppressed) leaves no trace in the compared artifacts.",
+      "limitations_ref": "Include-guard / configuration-macro collisions"
+    },
+    "header-only.inline-namespace-version-stamp-change": {
+      "learn_pages": ["learn/abi-series/07-designing-for-stability.md", "learn/modern-cpp-toolchain-hazards.md", "learn/system-library-discipline.md"],
+      "topics": ["modern-cpp-toolchain-hazards", "system-library-discipline"],
+      "catalog_cases": ["case101_inline_namespace_version_bumped", "case71_inline_namespace_moved", "case100_experimental_removed_without_replacement"],
+      "detector_kinds": ["inline_namespace_version_bumped", "inline_namespace_moved", "experimental_removed_without_replacement", "experimental_graduated"],
+      "status": "COVERED"
+    },
+    "header-only.template-heavy-recompilation-drift": {
+      "learn_pages": ["learn/template-heavy-libraries.md", "learn/static-and-header-only.md", "learn/limitations.md"],
+      "topics": ["template-library-contract", "static-and-header-only"],
+      "catalog_cases": ["case122_template_signature_uninstantiated"],
+      "detector_kinds": ["template_body_changed", "layout_unverifiable", "header_binary_context_mismatch"],
+      "status": "KNOWN_UNDETECTABLE",
+      "reason": "The mechanism is defined by the absence of the thing abicheck compares: with no compiled artifact, each consumer TU's own instantiation is the ABI, and abicheck never sees those TUs. The header-side signature change is observable (case122, `template_body_changed`), but per-TU drift across consumers abicheck is not given cannot be established from any evidence tier.",
+      "limitations_ref": "Template Instantiation"
+    },
+
+    "ecosystem-specific.c-restrict-qualifier-change": {
+      "learn_pages": ["learn/impact-analysis.md"],
+      "topics": [],
+      "catalog_cases": [],
+      "detector_kinds": ["param_restrict_changed"],
+      "status": "MISSING_CASE",
+      "reason": "`param_restrict_changed` claims the mechanism, but no case adds or drops `restrict` on a pointer parameter, and no learn page explains what the aliasing-contract change costs a caller."
+    },
+    "ecosystem-specific.cpp-stdlib-abi-variant": {
+      "learn_pages": ["learn/system-library-discipline.md", "learn/modern-cpp-toolchain-hazards.md", "learn/build-profile-comparability.md"],
+      "topics": ["system-library-discipline", "modern-cpp-toolchain-hazards", "build-profile-comparability"],
+      "catalog_cases": ["case104_glibcxx_dual_abi_flip"],
+      "detector_kinds": ["glibcxx_dual_abi_flip_detected", "stdlib_implementation_changed", "libcpp_abi_version_changed", "stdlib_debug_mode_changed", "public_api_exposes_stl_by_value"],
+      "status": "COVERED"
+    },
+    "ecosystem-specific.cpython-limited-api-tag-change": {
+      "learn_pages": ["learn/packages-and-consumers.md"],
+      "topics": ["packages-and-consumers"],
+      "catalog_cases": [],
+      "detector_kinds": ["python_abi3_dropped", "python_abi3_floor_raised", "python_stable_abi_violation"],
+      "status": "MISSING_CASE",
+      "reason": "Three detectors (plus the vendored Stable-ABI membership set) claim the limited-API contract, and `learn/packages-and-consumers.md` explains abi3, but no catalog case is a CPython extension module changing its stable-ABI tag."
+    },
+    "ecosystem-specific.cpython-object-layout-change": {
+      "learn_pages": ["learn/packages-and-consumers.md"],
+      "topics": ["packages-and-consumers"],
+      "catalog_cases": [],
+      "detector_kinds": ["python_gil_abi_changed", "python_stable_abi_violation", "numpy_abi_major_incompatible", "numpy_target_floor_raised"],
+      "status": "MISSING_CASE",
+      "reason": "`python_gil_abi_changed` covers the free-threaded/no-GIL build split and `python_stable_abi_violation` covers reaching into a non-guaranteed field, but no case exercises either, and CPython's own object-layout evolution across interpreter versions has no fixture."
+    },
+    "ecosystem-specific.sycl-kernel-abi-change": {
+      "learn_pages": ["learn/abi-series/06-transitive-breaks.md", "learn/packages-and-consumers.md"],
+      "topics": ["packages-and-consumers"],
+      "catalog_cases": ["case82_sycl_overload_set_removed", "case126_sycl_device_impl_ptr"],
+      "detector_kinds": ["sycl_overload_set_removed", "sycl_implementation_changed", "sycl_pi_entrypoint_added", "sycl_pi_entrypoint_removed", "sycl_pi_version_changed"],
+      "status": "COVERED"
+    },
+    "ecosystem-specific.sycl-device-binary-format-change": {
+      "learn_pages": ["learn/packages-and-consumers.md", "learn/environment-drift.md"],
+      "topics": ["packages-and-consumers"],
+      "catalog_cases": [],
+      "detector_kinds": ["sycl_backend_driver_req_changed", "sycl_plugin_search_path_changed", "sycl_runtime_version_changed", "sycl_plugin_added", "sycl_plugin_removed"],
+      "status": "MISSING_CASE",
+      "reason": "The SYCL plugin/runtime detectors exist, but the two SYCL cases in the catalog are host-side (an overload set and a device-impl pointer field); no case changes the packaged device-binary format or target list."
+    },
+    "ecosystem-specific.kernel-symbol-versioning-crc-change": {
+      "learn_pages": ["learn/system-library-discipline.md", "learn/packages-and-consumers.md"],
+      "topics": ["system-library-discipline", "packages-and-consumers"],
+      "catalog_cases": ["case175_kabi_crc_changed", "case176_kabi_symbol_namespace_changed"],
+      "detector_kinds": ["kabi_crc_changed", "kabi_export_type_changed", "kabi_symbol_namespace_changed", "kabi_symbol_added", "kabi_symbol_removed"],
+      "status": "COVERED"
+    },
+    "ecosystem-specific.kernel-btf-type-id-change": {
+      "learn_pages": ["learn/packages-and-consumers.md", "learn/evidence-and-detectability.md"],
+      "topics": ["packages-and-consumers", "evidence-model"],
+      "catalog_cases": ["case121_kernel_btf_struct_field_added"],
+      "detector_kinds": ["struct_size_changed", "struct_field_offset_changed", "struct_field_type_changed"],
+      "status": "PARTIALLY_COVERED",
+      "reason": "abicheck reads BTF and reports the underlying struct layout change (case121), which is the cause. It does not model BTF type IDs, the type graph's own shape, or which CO-RE relocations a BPF program would have to be re-relocated for -- the effect this leaf names has no detector."
+    }
+  }
+}

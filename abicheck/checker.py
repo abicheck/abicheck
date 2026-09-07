@@ -945,11 +945,14 @@ def compare(
 
     # ADR-068 §3 rows 3-4 / plan §6 Phase 2a: the (so-far one-check)
     # cross-source-check migration onto compare's OLD-vs-NEW pipeline,
-    # evolution-stated per abicheck.model.finding_evolution.FindingEvolution.
-    # A COMPARE-STAGE, not an opt-in -- no flag gates it, matching every
-    # other detector. Genuinely a no-op ([]) whenever neither side has
-    # header/origin evidence, so no existing comparison's finding set
-    # changes just because this stage now runs.
+    # evolution-stated per abicheck.checker_policy.FindingEvolution (the
+    # same enum ADR-068 Phase 1 item 2's cross-run correspondence primitive,
+    # policy.finding_evolution, already uses -- one vocabulary, two matching
+    # algorithms for two different axes; see compare.finding_evolution's own
+    # module docstring). A COMPARE-STAGE, not an opt-in -- no flag gates it,
+    # matching every other detector. Genuinely a no-op ([]) whenever neither
+    # side has header/origin evidence, so no existing comparison's finding
+    # set changes just because this stage now runs.
     changes.extend(_compute_crosscheck_evolution(old, new))
 
     # Merge externally-computed findings (e.g. build-configuration / probe-matrix
@@ -1221,6 +1224,12 @@ def compare(
             internal_namespaces=_internal_namespaces(policy_file),
         )
 
+    # E-S3: `[]` (never omitted) when the stage ran and found nothing;
+    # `None` only when contract evaluation never ran at all (`stage is None`).
+    contract_conflicts: object | None = (
+        [c.to_dict() for c in stage.conflicts] if stage is not None else None
+    )
+
     from .contract_context import suppression_config_for
 
     # `suppression.source_sha256` alone is `None` for a digest-less but
@@ -1323,6 +1332,7 @@ def compare(
         assurance=assurance,
         comparability_assurance=comparability_assurance,
         contract_context=contract_context,
+        contract_conflicts=contract_conflicts,
     )
     # ADR-067 C-S1/D3, see `finalize_ledger`: `verdict_scored` is the redundant
     # subset the verdict was scored over, so the audit agrees with the gate.

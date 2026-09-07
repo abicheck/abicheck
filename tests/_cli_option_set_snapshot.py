@@ -72,6 +72,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--lang",
         "--ld-library-path",
         "--max-json-object-nodes",
+        "--no-baseline",
         "--no-bundle-analysis",
         "--no-debuginfod",
         "--no-demangle",

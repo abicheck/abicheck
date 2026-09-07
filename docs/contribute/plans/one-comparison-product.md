@@ -11,20 +11,31 @@ generated: false
 **Status:** In progress. Phase 0 (the parity harness, `tests/parity/`, #1114)
 and Phase 1's exit-axes prerequisite (P3 — `compare` emitting the
 budget-overflow/evidence-contract `ExitDecision` axes, #1116) have landed.
-This PR closes Phase 1's other prerequisite, P2: `FindingEvolution`
-(`introduced`/`resolved`/`persistent`/`not_evaluated`, ADR-068 D3) exists on
-the canonical `Change` model, with `report/`'s compute/render pair, and the
-first cross-source check (`private_header_leak`, §3 rows 3-4) is migrated
-onto it end to end as Phase 2a's opening slice — its `tests/parity/gaps.py`
-row is deleted, and `tests/parity/test_evolution_state_gap.py` carries the
-F-8/F-9 acceptance tests plus the `not_evaluated` correctness-crux property
-test. The other ten cross-source checks, the pattern/preprocessor scans,
-changed-path localization, and the `abi3` audit remain scan-only (§3's
-`EXPECTED_GAPS` red set) — `scan` itself is untouched and not yet retired.
+Phase 1 item 2, `FindingEvolution` (`introduced`/`resolved`/`persistent`/
+`not_evaluated`, ADR-068 D3) itself — `checker_policy.FindingEvolution`,
+`Change.evolution`/`DiffResult.resolved_findings`, the cross-run
+correspondence primitive (`policy/finding_evolution.py`), and the JSON
+projection (`report/finding_evolution.py`) — has separately landed too; see
+that item's own entry below for its "not yet wired into any CLI command"
+scope note. This PR is Phase 2a's opening slice: the first cross-source
+check (`private_header_leak`, §3 rows 3-4) is migrated onto that
+already-landed primitive end to end, reusing its exact enum rather than a
+second one — `compare()` now populates `Change.evolution` with a real,
+non-default value for this one check's own findings, given each side's own
+per-check evidence-sufficiency signal (the `not_evaluated` correctness
+crux this plan's own §5 P2 names as "the migration's single largest
+correctness risk"). Its `tests/parity/gaps.py` row is deleted, and
+`tests/parity/test_evolution_state_gap.py` carries the F-8/F-9 acceptance
+tests plus the `not_evaluated` correctness-crux property test. The other
+ten cross-source checks, the pattern/preprocessor scans, changed-path
+localization, and the `abi3` audit remain scan-only (§3's `EXPECTED_GAPS`
+red set) — `scan` itself is untouched and not yet retired.
 Originally verified against `main` at `309c8a82` on 2026-09-06 by Click
 introspection and call-site inspection, not by help text or status prose;
-re-verify against current `main` (`git log -1 --format=%H origin/main`)
-before trusting any capability-loss table row above as still accurate.
+re-verified against `main` at `1a59fdb0` on 2026-09-07 (this PR's own merge
+base) — re-verify again against current `main`
+(`git log -1 --format=%H origin/main`) before trusting any capability-loss
+table row above as still accurate.
 **Effort:** XL · **Risk:** high — this deletes a public command and moves
 capabilities between analysis paths. Phase ordering is the safety mechanism.
 
@@ -365,7 +376,7 @@ per-row prerequisites in §3 and §4 are the detail beneath these.
 | # | Prerequisite | Gates | State today |
 |---|---|---|---|
 | P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2), and therefore the whole audit half of the retirement | Not started; ADR-065 S2's record exists to extend |
-| P2 | A `FindingEvolution` state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | Not started. **The correctness crux** — without it, a pre-existing problem reads as newly introduced |
+| P2 | A `FindingEvolution` state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | Primitive landed (Phase 1 item 2 below). First real wiring landed too, this PR: `private_header_leak` (§3 #3-#4) migrated, proving out the **correctness crux** — a pre-existing problem never reads as newly introduced when one side's evidence is insufficient. The remaining checks (§3 #5-#8, #15) are still open |
 | P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion (they are `scan`-only today; `cli_stack.py`'s own `5` is unrelated) | ADR-064 already models the precedence; `compare` does not emit them |
 | P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public` | The leakage and public-vs-exported checks (§3 #4, #5, #22) | `scan --public-header-dir` has the rule; it must survive the move verbatim, file-vs-directory asymmetry included |
 | P5 | ADR-065 S3's package component inventories | Folding `--artifact-set`'s members into the one selection model (§3 #16, #17) | Not started — workstream A's next slice |
@@ -374,6 +385,35 @@ per-row prerequisites in §3 and §4 are the detail beneath these.
 Two of these (P1, P5) are ADR-065 work this plan consumes rather than owns;
 starting them here would fork the model workstream A is building. P2 and P3
 are this plan's own Phase 1.
+
+**Where the implementation lands is ADR-061's question, not this plan's.**
+[ADR-061](../adr/061-responsibility-package-architecture.md) owns
+responsibility ownership and dependency boundaries; this plan owns
+capability topology. Three of its remaining acceptance gaps meet this plan
+directly, and each has one owner rather than two:
+
+- **No `workflows/scan` package, ever.** ADR-061's own `Request ->
+  ResolvedPlan -> Result` examples were written around `ScanRequest`/
+  `ResolvedScanPlan`/`ScanResult`; they now name the compare shapes instead,
+  precisely because migrating a command scheduled for retirement into a
+  permanent typed contract is work this plan's Phase 6 would then have to
+  undo. `scan`'s surviving capabilities route to the compare workflow.
+- **The canonical report replaces the scan schema** (§3, Phase 5) only once
+  ADR-061's [gap C](../adr/061-responsibility-package-architecture.md#c-one-result-one-document-several-projections)
+  closes — one completed evaluation producing one document that every format
+  projects. "One analysis, several artifacts" is not deliverable while six
+  formats each build their own document from a `DiffResult`.
+- **One operand driver** (Phase 7d, re-homed from `cli-cleanup-phase-two.md`
+  as PR I) is the frontend half of ADR-061's
+  [gap D](../adr/061-responsibility-package-architecture.md#d-typed-requestplan-and-operand-convergence):
+  selection, inventory and acquisition state belong on the shared
+  request/plan, not in command-level orchestration. Do it once, in the
+  shared contract.
+
+The sequencing constraint runs the other way too: ADR-061's own closure
+package 6 (facade and legacy retirement) may not delete a `scan`-related
+surface ahead of this plan's Phase 6. A shorter facade is never a reason to
+lose a capability.
 
 ## 6. PR sequence
 
@@ -395,7 +435,16 @@ refs) while both commands still exist. It starts red on every check in
    its completeness/outcome consequences (never a removal, never a pass).
 2. **`FindingEvolution`** (`introduced`/`resolved`/`persistent`/
    `not_evaluated`) on the canonical finding model, with `report/`
-   compute/render support.
+   compute/render support. **Done** — `checker_policy.FindingEvolution`,
+   `Change.evolution`/`DiffResult.resolved_findings`, the correspondence
+   primitive (`policy/finding_evolution.py`:
+   `compute_finding_evolution`/`compute_resolved_findings`/
+   `apply_finding_evolution`), and the JSON projection
+   (`report/finding_evolution.py`, `report_schema_version` 3.5). Not yet
+   wired into any CLI command or into `workflows/history.py` (that consumer
+   wiring, and Markdown/HTML rendering, are follow-up work, matching this
+   phase's own "No CLI change" scope) — the primitive itself is what this
+   item asked for.
 3. **Evidence-contract abort (exit `7`)** and **budget overflow (exit `5`)**
    become `compare` `ExitDecision` axes (ADR-064's precedence already models
    them; `compare` does not emit them yet).
@@ -405,7 +454,15 @@ refs) while both commands still exist. It starts red on every check in
 
 One PR per capability group, each landing with parity tests going green:
 
-- **2a** cross-source checks (§3 #3–#5), per side, evolution-stated;
+- **2a** cross-source checks (§3 #3–#5), per side, evolution-stated.
+  **Opened** (this PR): `private_header_leak` (§3 #3-#4) migrated onto
+  Phase 1 item 2's `checker_policy.FindingEvolution` via a dedicated
+  same-comparison matcher (`compare/finding_evolution.py`'s
+  `evolve_check_findings`, distinct from that item's own cross-run
+  `policy/finding_evolution.py` primitive — see that module's docstring for
+  the two axes' relationship) and `workflows/crosscheck_evolution.py`'s
+  per-side glue. The remaining checks in this group stay `scan`-only;
+
 - **2b** pattern + preprocessor scans (#6, #8);
 - **2c** changed-path localization `--since`/`--changed-path` (#12) and POI
   scoping parity for `--depth source` (#10, #11);

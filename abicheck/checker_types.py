@@ -29,6 +29,7 @@ from .checker_policy import (
     ChangeKind,
     Confidence,
     EvidenceTier,
+    FindingEvolution,
     ReachabilityState,
     Verdict,
     apply_policy_file_overrides as _apply_policy_file_overrides,
@@ -42,7 +43,6 @@ from .contract_relevance_types import (
 from .detectors import DetectorResult
 from .impact.model import ImpactAssessment
 from .model import AbiSnapshot
-from .model.finding_evolution import FindingEvolution
 from .model.identity import EntityId
 from .model.policy_file_protocol import PolicyFileProtocol
 from .report_side_facts import ReportSideFacts
@@ -400,12 +400,24 @@ class Change:
     # Same field(kw_only=True)-appended-last convention as evidence_provenance.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
     disambiguator: str | None = field(default=None, kw_only=True, compare=False)
-    # ADR-068 D3 / plan §5 P2: a one-sided check migrated onto compare's
-    # OLD-vs-NEW pipeline (e.g. private_header_leak) stamps this via
-    # compare.finding_evolution.evolve_check_findings. None for every
-    # unmigrated finding kind. See model.finding_evolution.FindingEvolution.
-    evolution: FindingEvolution | None = field(
-        default=None, kw_only=True, compare=False
+    # ADR-068 Phase 1 item 2 (`one-comparison-product.md`): where this
+    # finding sits across a chain of more than one comparison -- see
+    # `checker_policy.FindingEvolution`'s own docstring for the full
+    # contract. Originally documented as "`compare()` itself never sets
+    # this" -- plan §5 P2 / ADR-068 D3 adds the first exception: a one-sided
+    # check migrated onto compare's OLD-vs-NEW pipeline (e.g.
+    # `private_header_leak`) stamps this via
+    # `compare.finding_evolution.evolve_check_findings`, reusing this exact
+    # enum rather than a second one, so the two mechanisms (cross-run chain
+    # vs. same-comparison per-side evidence) share one wire vocabulary. Every
+    # other, unmigrated finding kind still keeps the NOT_EVALUATED default --
+    # a finding nobody classified is not silently assumed unchanged (ADR-067
+    # D3's `not_evaluated` convention).
+    # `compare=False` like `entity_id`/`disambiguator` above: two otherwise
+    # identical findings stay the "same" finding for dedup/equality purposes
+    # regardless of which context annotated their evolution.
+    evolution: FindingEvolution = field(
+        default=FindingEvolution.NOT_EVALUATED, kw_only=True, compare=False
     )
 
 
@@ -561,6 +573,12 @@ class DiffResult(ReportSideFacts):
     # fold_coverage_exit`` derives the orthogonal coverage contribution from
     # it, so a run carrying one can exit ``1`` on that axis (ADR-049 §7).
     contract_context: object | None = None
+    # E-S3 — multi-source contract conflicts (exported-but-undeclared,
+    # manifest narrowing since baseline), each a serialized
+    # ``model.contract_conflicts.ContractSourceConflict``. Same gate/``None``/
+    # omission/``object``-typing rules as ``contract_context`` above.
+    # Advisory only — never changes a verdict, severity, or exit code.
+    contract_conflicts: object | None = None
     # P0.4 — the orthogonal "how complete/trustworthy was the evidence"
     # answer (analysis_assurance.py), sitting beside `verdict` (what changed)
     # and the severity/gate exit code (whether to fail the build) as the
@@ -731,6 +749,19 @@ class DiffResult(ReportSideFacts):
     # above).
     evidence_contract_error: bool = field(default=False, kw_only=True)
     budget_overflow: bool = field(default=False, kw_only=True)
+    # ADR-068 Phase 1 item 2 (`one-comparison-product.md`): findings from a
+    # *previous* comparison in an N>1-comparison chain that no longer appear
+    # in this result's own `changes` -- `FindingEvolution.RESOLVED`'s home,
+    # mirroring `out_of_surface_changes`/`redundant_changes`'s own
+    # audit-trail-list-plus-verdict-exclusion shape above. A resolved
+    # finding is never a member of `changes` (there is no current-side
+    # `Change` for policy to score), so it is recorded here rather than
+    # folded into the main list with a special-cased kind. Always empty for
+    # a plain, single `compare()` call -- populated only by a dedicated
+    # N>1-comparison consumer (`workflows/history.py` and future siblings),
+    # same as `Change.evolution`. Appended at the true end, same convention
+    # as `evidence_contract_error`/`budget_overflow` above.
+    resolved_findings: list[Change] = field(default_factory=list, kw_only=True)
 
     def _effective_kind_sets(
         self,
