@@ -37,9 +37,12 @@ def compute_cross_source_evolution_summary(
 ) -> CrossSourceEvolutionSummary | None:
     """Summarize *changes* by ``cross_source_evolution``, or ``None`` if none carry it.
 
-    ``None`` (never an all-zero summary) means "this run didn't opt into
-    ``compare(..., cross_source_checks=True)``" -- omitted from the JSON
-    report entirely, matching every other optional block's own convention.
+    ``None`` (never an all-zero summary) means the migrated stage found
+    nothing to report on either side -- ``compare()`` runs it automatically
+    (``cross_source_checks``, on by default; ADR-068 D4/D5), so an absent
+    block is a genuinely clean result, not "didn't run". Omitted from the
+    JSON report entirely, matching every other optional block's own
+    convention.
     """
     counts = dict.fromkeys(CrossSourceEvolution, 0)
     total = 0

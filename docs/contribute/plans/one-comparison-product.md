@@ -9,10 +9,13 @@ generated: false
 
 **Owner ADR:** [ADR-068](../adr/068-one-comparison-product-and-scan-retirement.md).
 **Status:** Proposed — planning document, largely unimplemented. Verified
-against `main` at `309c8a82` on 2026-09-06 by Click introspection and
-call-site inspection, not by help text or status prose. Phase 1 item 2
-(`FindingEvolution`) and Phase 1 item 3's exit axes have since landed, as
-have Phase 2c, 2d and 2e; see those items below.
+against `main` at `f7b4fdcc` on 2026-09-07 by Click introspection and
+call-site inspection, not by help text or status prose. Phase 0 (parity
+harness), Phase 1 items 2 and 3 (`FindingEvolution`; the budget-overflow/
+evidence-contract exit axes), and Phase 2c/2d/2e (changed-path
+localization, `--abi3`, `--no-baseline`) have since landed; the first
+check of Phase 2a (`unversioned_exported_symbol`, §3 row 3) has now landed
+too — see those items below.
 **Effort:** XL · **Risk:** high — this deletes a public command and moves
 capabilities between analysis paths. Phase ordering is the safety mechanism.
 
@@ -133,7 +136,7 @@ identity; **DELETE** — leaves the product.
 |---|---|---|---|---|---|
 | 1 | Baseline comparison (`--against`) | `cli_scan_baseline.py`, `scan_engine.run_scan_core` | `compare OLD NEW` | DELETE (it *is* `compare`) | Parity suite (Phase 3) |
 | 2 | Audit-only mode (no `--against`) | `scan_engine._audit_exit_code` | `compare --no-baseline` | COMPARE-STAGE | ADR-065 `declared_absent` acquisition state (Phase 1) |
-| 3 | Cross-source checks (11) | `buildsource/crosscheck.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | Evolution-state model (Phase 1); `not_evaluated` correctness (F-7) |
+| 3 | Cross-source checks (11) | `buildsource/crosscheck.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | Evolution-state model (Phase 1); `not_evaluated` correctness (F-7). **1 of 11 landed**: `unversioned_exported_symbol` runs automatically inside `compare()` (`cross_source_checks`, default `True`, no flag — ADR-068 D4/D5); the other 10 remain scan-only |
 | 4 | Private-header leakage | `crosscheck.private_header_leak` | as #3 | COMPARE-STAGE | Public/internal boundary from `-H` provenance (#22) |
 | 5 | public-vs-exported (`public_not_exported`, `exported_not_public`) | `crosscheck` | as #3 | COMPARE-STAGE | as #4 |
 | 6 | Pattern checks (lexical pre-scan) | `buildsource/pattern_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | Phase 2 |
@@ -353,7 +356,7 @@ per-row prerequisites in §3 and §4 are the detail beneath these.
 | # | Prerequisite | Gates | State today |
 |---|---|---|---|
 | P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2), and therefore the whole audit half of the retirement | Not started; ADR-065 S2's record exists to extend |
-| P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Partially landed**: a second, deliberately distinct enum from Phase 1 item 2's cross-comparison-chain `FindingEvolution` above — `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution` state how a cross-source check behaves across OLD/NEW *within one* `compare()` call, with `workflows.cross_source_evolution.compute_cross_source_evolution` as the model's first real producer (`compare(..., cross_source_checks=True)`, opt-in) and `report.cross_source_evolution`'s compute/render pair as its first real JSON projection (schema 3.7) — scoped to exactly one check, `unversioned_exported_symbol` (§3 #3). **The correctness crux** — a pre-existing problem must never read as newly introduced when a side's evidence can't confirm it — is exercised as a property test. The other cross-source checks (§3 #4-#5, #15) remain unmigrated |
+| P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Partially landed**: a second, deliberately distinct enum from Phase 1 item 2's cross-comparison-chain `FindingEvolution` above — `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution` state how a cross-source check behaves across OLD/NEW *within one* `compare()` call, with `workflows.cross_source_evolution.compute_cross_source_evolution` as the model's first real producer and `report.cross_source_evolution`'s compute/render pair as its first real JSON projection (schema 3.7) — scoped to exactly one check, `unversioned_exported_symbol` (§3 #3). That one check is now reachable by every front end: `compare()` runs it automatically (`cross_source_checks` defaults to `True`), no opt-in flag anywhere (ADR-068 D4/D5). **The correctness crux** — a pre-existing problem must never read as newly introduced when a side's evidence can't confirm it — is exercised as a property test. The other cross-source checks (§3 #4-#5, #15) remain unmigrated |
 | P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion (they are `scan`-only today; `cli_stack.py`'s own `5` is unrelated) | ADR-064 already models the precedence; `compare` does not emit them |
 | P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public` | The leakage and public-vs-exported checks (§3 #4, #5, #22) | `scan --public-header-dir` has the rule; it must survive the move verbatim, file-vs-directory asymmetry included |
 | P5 | ADR-065 S3's package component inventories | Folding `--artifact-set`'s members into the one selection model (§3 #16, #17) | Not started — workstream A's next slice |
@@ -431,7 +434,18 @@ refs) while both commands still exist. It starts red on every check in
 
 One PR per capability group, each landing with parity tests going green:
 
-- **2a** cross-source checks (§3 #3–#5), per side, evolution-stated;
+- **2a** cross-source checks (§3 #3–#5), per side, evolution-stated —
+  **1 of 11 landed**: `unversioned_exported_symbol` runs automatically
+  inside `compare()`'s pipeline (`checker.compare`'s `cross_source_checks`,
+  default `True`, no CLI/API/Action opt-in flag — ADR-068 D4/D5), with
+  `tests/parity/gaps.py`'s entry for it deleted in the same PR. The other
+  ten checks (`exported_not_public`, `public_not_exported`,
+  `header_build_context_mismatch`, `private_header_leak`,
+  `odr_type_variant`, `public_to_internal_dependency`,
+  `rtti_for_internal_type`, `identity_collision_detected`,
+  `compile_context_conflict`, `source_surface_dso_mismatch`) remain
+  scan-only and blocked on P4 (public/internal boundary) for the two that
+  need it;
 - **2b** pattern + preprocessor scans (#6, #8);
 - **2c** changed-path localization `--since`/`--changed-path` (#12) and POI
   scoping parity for `--depth source` (#10, #11) — **landed**: the seed and

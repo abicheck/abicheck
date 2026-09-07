@@ -191,7 +191,8 @@ class CrossSourceEvolution(str, Enum):
     carries no baseline of its own, behaves when that check is run
     independently on OLD and NEW *inside the same* ``compare()`` call. Same
     four state names, deliberately narrower scope; `compare()` itself DOES
-    set this field (opt-in, see ``cross_source_checks=True``), unlike
+    set this field, automatically (ADR-068 D3/D4/D5 -- see
+    ``cross_source_checks``, on by default, not a user-facing flag), unlike
     ``FindingEvolution``.
 
     - ``INTRODUCED``: absent on OLD (with OLD evidence sufficient to say

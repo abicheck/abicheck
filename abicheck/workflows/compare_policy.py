@@ -172,6 +172,7 @@ def compare_snapshots(
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    cross_source_checks: bool = True,
 ) -> DiffResult:
     """Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 
@@ -189,6 +190,13 @@ def compare_snapshots(
     (``policy/`` -> ``compare/`` stays a one-way edge), so this Tier-2
     chokepoint is where it happens for every caller that reaches ``compare()``
     through here, ``service_compare_pipeline.classify_compare_pair`` included.
+
+    *cross_source_checks* mirrors :func:`~abicheck.checker.compare`'s own
+    keyword of the same name (ADR-068 D3/D4/D5) -- **on by default** here
+    too, so every front end reaching ``compare()`` through this chokepoint
+    (CLI, typed API, Action) runs the migrated cross-source stage
+    automatically, with no flag of its own. Kept as a real, forwarded
+    parameter (rather than dropped) only so a test can isolate the stage.
 
     Raises:
         ValidationError: *contract_mode* is not one of ``public``/``exports``/
@@ -233,6 +241,7 @@ def compare_snapshots(
         contract_mode=contract_mode,
         old_public_entity_ids=query.resolve(old),
         new_public_entity_ids=query.resolve(new),
+        cross_source_checks=cross_source_checks,
     )
 
 

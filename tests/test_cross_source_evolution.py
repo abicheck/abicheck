@@ -197,23 +197,17 @@ def test_authority_unchanged_finding_stays_risk_regardless_of_evolution():
 
 
 # --------------------------------------------------------------------------- #
-# Wired into compare(): off by default, opt-in via cross_source_checks=True.
+# Wired into compare(): automatic (ADR-068 D3/D4/D5) -- no opt-in flag, on
+# by default, evidence-gated per side/check rather than a user-facing
+# switch. ``cross_source_checks=False`` survives only as an internal Tier-1
+# knob so a test can isolate the stage -- no front end ever sets it.
 # --------------------------------------------------------------------------- #
 
 
-def test_compare_off_by_default():
-    old = _snap(_versioned_elf(("_Z6leakyv",)), version="1.0")
-    new = _snap(_versioned_elf(("_Z6leakyv",)), version="1.1")
-    result = compare(old, new)
-    assert not any(
-        getattr(c, "cross_source_evolution", None) is not None for c in result.changes
-    )
-
-
-def test_compare_opt_in_merges_evolution_stated_finding():
+def test_compare_runs_the_stage_by_default():
     old = _snap(None, version="1.0")  # no ELF at all -> not evaluated
     new = _snap(_versioned_elf(("_Z6leakyv",)), version="1.1")
-    result = compare(old, new, cross_source_checks=True)
+    result = compare(old, new)
     evolved = [
         c
         for c in result.changes
@@ -222,6 +216,31 @@ def test_compare_opt_in_merges_evolution_stated_finding():
     assert len(evolved) == 1
     assert evolved[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED
     assert evolved[0].kind == ChangeKind.UNVERSIONED_EXPORTED_SYMBOL
+
+
+def test_compare_no_finding_is_a_true_no_op():
+    """When neither side's evidence flags anything, running the stage
+    unconditionally must not add so much as an empty marker -- the exact
+    invariant that keeps every pre-existing invocation exiting identically
+    (plan §7 F-19/F-20's output-invariance principle, applied here)."""
+    old = _snap(_no_evidence_elf(), version="1.0")
+    new = _snap(_no_evidence_elf(), version="1.1")
+    result = compare(old, new)
+    assert not any(
+        getattr(c, "cross_source_evolution", None) is not None for c in result.changes
+    )
+
+
+def test_compare_stage_can_still_be_disabled_internally():
+    """``cross_source_checks=False`` is kept as a real Tier-1 keyword purely
+    so a test can isolate the stage -- never exposed as a user-facing
+    opt-out (ADR-068 D5)."""
+    old = _snap(_versioned_elf(("_Z6leakyv",)), version="1.0")
+    new = _snap(_versioned_elf(("_Z6leakyv",)), version="1.1")
+    result = compare(old, new, cross_source_checks=False)
+    assert not any(
+        getattr(c, "cross_source_evolution", None) is not None for c in result.changes
+    )
 
 
 def test_compare_result_cross_source_evolution_default_none() -> None:
