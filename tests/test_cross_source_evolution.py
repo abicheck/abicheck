@@ -88,6 +88,27 @@ def test_no_finding_when_neither_side_flags_anything():
     assert compute_cross_source_evolution(old, new) == []
 
 
+def test_capped_default_finding_count_never_reads_as_not_evaluated():
+    """CodeRabbit review, fresh evidence: ``run_crosschecks``'s default
+    ``max_per_check=200`` cap truncates a check's own ``findings`` list once
+    exceeded, but still records a ``providers`` entry (evaluated) for it --
+    the crux (plan §7 F-8/F-9) also has a *volume* shape, not just a
+    *missing-evidence* one. A side whose real finding count exceeds the
+    default cap must still resolve every one of them as PERSISTENT/
+    INTRODUCED/RESOLVED, never NOT_EVALUATED purely because the count is
+    large -- ``_run_one_side`` disables the cap (``max_per_check=0``) for
+    exactly this reason. 250 unversioned exports on both sides comfortably
+    exceeds the 200 default.
+    """
+    names = tuple(f"_Z{i}leakyv" for i in range(250))
+    old = _snap(_versioned_elf(names), version="1.0")
+    new = _snap(_versioned_elf(names), version="1.1")
+    results = compute_cross_source_evolution(old, new)
+    assert len(results) == 250
+    assert {r.symbol for r in results} == set(names)
+    assert all(r.finding_evolution == FindingEvolution.PERSISTENT for r in results)
+
+
 # --------------------------------------------------------------------------- #
 # TestNotEvaluatedCrux -- the correctness crux (plan §7 F-8/F-9), stated as a
 # property over several evidence combinations, not one fixed fixture.

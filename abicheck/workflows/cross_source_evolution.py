@@ -56,16 +56,23 @@ def _run_one_side(snapshot: AbiSnapshot) -> tuple[bool, dict[str, Change]]:
     """Run the migrated check(s) on one snapshot.
 
     Returns ``(evaluated, findings_by_symbol)``. ``evaluated`` is True iff
-    the check actually ran against this snapshot's evidence (``crosscheck``
-    only records a ``providers`` entry for a check whose own status is
-    ``"present"`` -- a check that returned ``"skipped"`` -- e.g. no ELF
-    symbol table at all -- leaves no entry, which is exactly "the evidence
-    could not answer the question" that :data:`FindingEvolution.
-    NOT_EVALUATED` exists to state). ``findings_by_symbol`` is empty when
-    the check ran and found nothing to flag -- that is a real, evaluated
-    "clean" result, not the same as not having run at all.
+    the check actually ran against this snapshot's evidence *and* saw every
+    finding, not just some of them: ``run_crosschecks`` records a
+    ``providers`` entry once a check's own status is ``"present"`` even when
+    its own ``coverage`` row is later downgraded to ``"partial"`` (its
+    ``max_per_check`` cap truncated the finding list) -- a check that
+    returned ``"skipped"`` outright (e.g. no ELF symbol table at all) leaves
+    no ``providers`` entry either way. Trusting ``providers`` alone would
+    read a capped side as fully evaluated, letting a symbol beyond the cap
+    misclassify as ``INTRODUCED``/``RESOLVED`` instead of the correct
+    ``NOT_EVALUATED`` (Codex review). ``max_per_check=0`` disables the cap
+    outright for this workflow instead of reading the coverage row, since a
+    single migrated check's own finding count is not the unbounded, whole-
+    snapshot volume the cap exists to bound. ``findings_by_symbol`` is empty
+    when the check ran and found nothing to flag -- that is a real,
+    evaluated "clean" result, not the same as not having run at all.
     """
-    cfg = CrosscheckConfig(enabled=CROSS_SOURCE_EVOLUTION_CHECKS)
+    cfg = CrosscheckConfig(enabled=CROSS_SOURCE_EVOLUTION_CHECKS, max_per_check=0)
     result = run_crosschecks(snapshot, cfg)
     evaluated = CHECK_UNVERSIONED_EXPORTED_SYMBOL in result.providers
     by_symbol = {c.symbol: c for c in result.findings}
