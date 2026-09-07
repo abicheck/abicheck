@@ -19,17 +19,17 @@
 ``scan --dry-run`` already projects L0-L5 evidence-collection cost via
 :func:`abicheck.service_scan.estimate_scan` (see ``cli_scan.py``'s own
 ``--dry-run`` branch); ``compare --dry-run`` had no equivalent preview. This
-module reuses :func:`~abicheck.service_scan.estimate_scan`/
-:func:`~abicheck.service_scan.estimate_compare_cost` directly -- no new cost
-model -- and adds only the compare-specific glue: resolving compare's own
-``--depth``/``.abicheck.yml`` ``source.method``/``--sources``/``--build-info``
-precedence into the ``(SourceMethod, EvidenceDepth)`` pair
-``estimate_scan``'s ``resolved_level`` takes, and building one
-:class:`~abicheck.service_scan.ScanRequest` per side (a real ``compare`` run
-with live source/build evidence extracts *both* operands, so the preview
-sums each side's own projection -- the same per-operand aggregation
-:func:`~abicheck.service_scan.estimate_artifact_set` already applies across
-a scan set's members).
+module reuses :func:`~abicheck.service_scan.estimate_scan` directly -- no
+new cost model -- and adds only the compare-specific glue: resolving
+compare's own ``--depth``/``.abicheck.yml`` ``source.method``/
+``--sources``/``--build-info`` precedence into the
+``(SourceMethod, EvidenceDepth)`` pair ``estimate_scan``'s ``resolved_level``
+takes, building one :class:`~abicheck.service_scan.ScanRequest` per side, and
+summing both sides' rows layer-by-layer (:func:`_merge_layer_estimates`) --
+a real ``compare`` run with live source/build evidence extracts *both*
+operands, so the preview sums each side's own projection, the same
+per-operand aggregation :func:`~abicheck.service_scan.estimate_artifact_set`
+already applies across a scan set's members.
 
 A new, dedicated leaf module rather than an addition to
 :mod:`abicheck.cli_compare_helpers` or :mod:`abicheck.service_scan`: both
