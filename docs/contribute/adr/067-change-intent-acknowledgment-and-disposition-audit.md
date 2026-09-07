@@ -1,12 +1,13 @@
 # ADR-067: Change-Intent Acknowledgment and the Policy-Disposition Audit
 
 **Date:** 2026-09-05
-**Status:** Accepted — **slices S1 and S2 implemented**; S3–S4 not
-implemented. Design record for the vision's "intent and configuration
-accountability" decisions (`vision.md`). The audit half (D1–D4) extends
+**Status:** Accepted — **S1, S2 and S3 implemented**; S4 not implemented.
+Design record for the vision's "intent and configuration accountability"
+decisions (`vision.md`). The audit half (D1–D4) extends
 ADR-013/024/044/049/063/064 and the report owners and is sequenced *first*,
 without waiting for history (ADR-066); the acknowledgment half (D5–D7) is
-the one genuinely new mechanism and remains unimplemented (S3). What S1
+the one genuinely new mechanism, landed by S3 (see below); S4's base/head
+policy-delta and suppression-growth warnings remain unimplemented. What S1
 landed, for the scalar single-pair `compare` path: one conserved
 disposition ledger (`abicheck/policy/disposition_ledger.py`,
 `abicheck/policy/disposition_close.py`) that all five suppression
@@ -50,8 +51,51 @@ command has no scalar `compare`-shaped audit to fold from), so
 `aggregate`'s own fold can only distinguish "no block present" (a
 `scan`-sourced or pre-schema-2.51 target, listed in
 `disposition_audit_missing_targets`) from "an audit exists" — `aggregate`
-does not itself supply the missing block for `scan`. Implementation is
-sequenced in
+does not itself supply the missing block for `scan`.
+
+**What S3 landed:** D5's acknowledgment records — a distinct disposition
+from suppression (an acknowledgment is intentional acceptance; a
+suppression is a claimed false positive or scope exclusion), sharing the
+same `SelectorSet` grammar and YAML loader shape suppression already uses
+(`abicheck/policy/acknowledgment.py`'s `Acknowledgment`/
+`AcknowledgmentList`), but restricted to a *bounded* selector subset
+(`finding_id`/exact `symbol`, optionally narrowed by `change_kind`, plus a
+`component`/`baseline`/`candidate` release scope) — every suppression-only
+broad selector (`symbol_pattern`, `namespace`, `source_location`, ...) is a
+hard load error, and an ambiguous match across two loaded records is a hard
+error too, never a silent nearest-match (both directly enforce D5 and
+`vision.md`'s "a baseline refresh or a broad ignore rule is not an
+acknowledgment" invariant). Acknowledgment is recorded through the
+identical ledger primitive suppression already uses
+(`DispositionLedger.resolve_acknowledgments`, `DispositionRecord.
+acknowledged_by` — a D2 overlay attribute, exactly like `reclassified_by`,
+never a seventh terminal disposition), surfaced in the `disposition_audit`
+report block (schema 3.10: `acknowledged_total`/`acknowledgments`) the same
+way reclassification already is. D6's additions review gate
+(`abicheck/policy/acknowledgment_gate.py`) is a policy file `acknowledgment:`
+block (`unacknowledged_additions: allow|warn|block`, default `allow` — no
+existing run changes; `abicheck/policy_file_acknowledgment.py`), evaluated
+as a fourth orthogonal `0`/`1` exit axis folded with `max()` beside contract
+coverage and analysis assurance
+(`policy.acknowledgment_gate.fold_additions_review_exit`) — it never
+reclassifies an addition's `ChangeKind` or verdict, per D6's own "policy
+acceptance, never reclassification" requirement. Record ids share B's
+component/release-label scheme (`Acknowledgment.record_id`, built from the
+same `component`/`baseline`/`candidate` strings
+`workflows.history.HistoryEntry.version` already carries), without waiting
+on B-S2's own versioning-policy resolution. **Engine-level wiring only in
+this slice:** `checker.compare(acknowledgments=...)` (the typed Python API)
+and the CLI's own exit-code fold (`frontends.cli.runtime.
+_exit_with_severity_or_verdict`) both honor a supplied
+`AcknowledgmentList`; no native `compare`/`scan` CLI flag to *load* an
+acknowledgment document from a path exists yet — that front-end wiring is
+left to a follow-up, the same staged "engine primitive, then CLI surface"
+sequencing ADR-049's own contract-coverage axis used (Phase 5 landed the
+ledger; Phase 7 wired the exit). See
+[Change acknowledgment](../../use/acknowledgments.md) for the user-facing
+format and gate contract.
+
+Implementation is sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
 (workstream "Policy-disposition audit and change acknowledgment").
 **Decision maker:** maintainer (product decision recorded in `vision.md`);
@@ -336,10 +380,10 @@ contract; amend the owning ADRs' status notes. S1: conserve changes and
 expose raw-versus-effective counts with rule provenance on the native
 `compare` path, including a 100-suppressed-removals fixture. S2: carry the
 audit through bundle/consumer/aggregate and every projection; cover
-reclassification, scoping, and upstream-disabled detectors. S3: explicit
-acknowledgment records and the additions review gate; share records with
-history. S4: base/head policy-delta analysis and suppression-growth
-warnings.
+reclassification, scoping, and upstream-disabled detectors. **S3 landed:**
+explicit acknowledgment records and the additions review gate; share
+records with history (see "What S3 landed" above). S4: base/head
+policy-delta analysis and suppression-growth warnings.
 
 ## Tests (contract)
 

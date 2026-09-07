@@ -476,8 +476,18 @@ def _exit_with_severity_or_verdict(
     )
     if diagnostic is not None:
         click.echo(diagnostic, err=True)
-    if decision.code != 0:
-        sys.exit(decision.code)
+    # ADR-067 D6: the additions-review gate is a fourth orthogonal axis, not
+    # yet folded into `exit_decision.ExitDecision` itself (it is `0` for
+    # every run that never supplied `acknowledgments=...` to
+    # `checker.compare()`, so this can never move an existing invocation's
+    # exit code). Reached through `workflows.gate` (ADR-061 Phase 4 item 4),
+    # never `policy.acknowledgment_gate` directly -- `frontends` may only
+    # import `model`/`report`/`workflows`.
+    from ...workflows.gate import fold_additions_review_exit
+
+    code = fold_additions_review_exit(decision.code, result)
+    if code != 0:
+        sys.exit(code)
 
 
 def _log_one_side_debug(

@@ -423,9 +423,29 @@ topics:
       - abicheck/schemas/compare_report.schema.json
     task_pages:
       - use/suppressions.md
+      - use/acknowledgments.md
     allowed_summaries:
       - use/output-formats.md
       - use/contract-evaluation.md
+
+  # ADR-067 D5/D6 (plan workstream C-S3): a distinct disposition from
+  # suppression (AGENTS.md "Record before disposing" -- acknowledgment is
+  # intentional acceptance, suppression is a claimed false positive/scope
+  # exclusion). Its own topic rather than a `disposition-audit`/
+  # `suppressions` section: it introduces a genuinely new user workflow (an
+  # acknowledgment document) and a new config namespace (the additions
+  # review gate), per this file's own "new fact needs a new page" rule.
+  change-acknowledgment:
+    canonical_page: use/acknowledgments.md
+    fact_sources:
+      - abicheck/policy/acknowledgment.py
+      - abicheck/policy/acknowledgment_policy.py
+      - abicheck/policy/acknowledgment_gate.py
+      - abicheck/policy_file_acknowledgment.py
+    allowed_summaries:
+      - use/suppressions.md
+      - use/disposition-audit.md
+      - learn/rollout-and-governance.md
 
   # GitHub Actions workflow-command annotations (stderr rendering) and,
   # since report schema 2.43, the same classification persisted as a
@@ -639,6 +659,8 @@ topics:
       # two evaluators (release acceptance, deprecation-window compliance).
       - abicheck/policy/versioning_policy.py
       - abicheck/workflows/history.py
+      # ADR-067 D6/C-S3: the `acknowledgment:` namespace's typed policy.
+      - abicheck/policy_file_acknowledgment.py
     allowed_summaries:
       - learn/abi-api-handling.md
       - use/output-formats.md

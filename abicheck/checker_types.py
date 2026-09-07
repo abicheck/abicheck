@@ -749,6 +749,24 @@ class DiffResult(ReportSideFacts):
     # recommend_release`` reads the *conserved* delta from it, so a suppressed
     # major-class break can no longer read as "no bump needed".
     disposition_ledger: object | None = field(default=None, kw_only=True)
+    # ADR-067 D5/C-S3: the loaded acknowledgment records this comparison was
+    # given, if any (`checker.compare(acknowledgments=...)`). Read generically
+    # (duck-typed `.evaluate`) by `policy.disposition_close.finalize_ledger`/
+    # `close_consumer_scope` to resolve each finding's `acknowledged_by`
+    # overlay -- typed `object` for the same circular-import reason as
+    # `disposition_ledger` above (`policy.acknowledgment` is a `policy`-layer
+    # module; `checker_types` is `model`-layer and may not import it).
+    # `None` for every pre-existing caller, which is a no-op (AGENTS.md's
+    # "optional inputs stay optional").
+    acknowledgments: object | None = field(default=None, kw_only=True)
+    # ADR-067 D6/C-S3: the additions-review gate's own evaluated result
+    # (`policy.acknowledgment_gate.AdditionsReviewResult`), computed by
+    # `checker.compare()` only when `acknowledgments` above was supplied.
+    # `None` otherwise -- the same "capability never exercised" state
+    # `report.disposition_audit`'s `not_evaluated_detectors` already uses,
+    # so a run that never asked the question reads as "never evaluated",
+    # not as "zero unacknowledged additions found".
+    unacknowledged_additions_review: object | None = field(default=None, kw_only=True)
     # one-comparison-product.md P3 / ADR-064: `scan`'s two exit axes
     # (`_EvidenceContractError`/`_BudgetOverflow`, exit 7/5), reserved so
     # native `compare` can carry the identical signal via `policy.exit_

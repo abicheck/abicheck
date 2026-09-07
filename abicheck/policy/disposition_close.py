@@ -37,6 +37,7 @@ points one way only — closing reads recording, never the reverse.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from .disposition_ledger import (
@@ -98,6 +99,67 @@ _POLICY_OVERLAY_KINDS = frozenset(
         "suppression_reachability_unknown",
     }
 )
+
+
+def _resolve_acknowledgments(
+    ledger: DispositionLedger,
+    acknowledgments: object | None,
+    *,
+    component: str | None = None,
+    baseline: str | None = None,
+    release_label: str | None = None,
+    strict: bool = False,
+) -> None:
+    """Fill in ``acknowledged_by`` (ADR-067 D5/C-S3) -- the acknowledgment
+    counterpart of ``DispositionLedger.resolve_reclassifications``, living
+    here rather than there purely for that leaf's own 800-line production
+    cap (same reason :func:`conservation_holds` lives here). Reaches
+    ``ledger``'s private record/anchor lists directly, the same private
+    access this module's other helpers already use (``_GateContext``/
+    ``_kept_disposition``). Duck-typed (only ``.evaluate`` is called); a
+    no-op when *acknowledgments* is ``None``/empty (every pre-existing
+    caller).
+
+    *strict* controls what happens on an ambiguous match
+    (:class:`~abicheck.policy.acknowledgment.AmbiguousAcknowledgmentError`,
+    D5: "an ambiguous or unknown identity requires review"). This function
+    runs from two different contexts that need two different answers:
+    ``checker.compare()`` (via :func:`finalize_ledger`, ``strict=True``) is
+    the run that *owns* the comparison, and must let the error propagate
+    for every finding kind, not only the additions-review gate's own direct
+    ``evaluate()`` call covers. ``ledger_for()``'s reconciliation fallback
+    (a report projection over an already-produced, hand-built
+    ``DiffResult`` with no persisted ledger, ``strict=False``) must still be
+    able to state D3's counts rather than take the whole render down over
+    one unresolved overlay fact — the run that could have raised already
+    had its chance (CodeRabbit review, PR #1137).
+    """
+    from .acknowledgment import AmbiguousAcknowledgmentError
+
+    evaluate = getattr(acknowledgments, "evaluate", None)
+    if not callable(evaluate):
+        return
+    for index, (record, change) in enumerate(
+        zip(ledger._records, ledger._anchors)  # noqa: SLF001
+    ):
+        if record.acknowledged_by is not None:
+            continue  # already resolved (e.g. a re-closed scoped record)
+        try:
+            ack = evaluate(
+                change,
+                component=component,
+                baseline=baseline,
+                release_label=release_label,
+            )
+        except AmbiguousAcknowledgmentError:
+            if strict:
+                raise
+            continue  # unresolved -- see the docstring's non-strict note above
+        if ack is None:
+            continue
+        record_id_fn = getattr(ack, "record_id", None)
+        acknowledged_by = record_id_fn() if callable(record_id_fn) else str(ack)
+        ledger._records[index] = replace(record, acknowledged_by=acknowledged_by)  # noqa: SLF001
 
 
 def _is_policy_overlay(change: object) -> bool:
@@ -211,9 +273,7 @@ def record_and_maybe_suppress_overlay(
     # it only when suppressed would make adding a matching rule change the
     # *detected* total rather than move the finding between dispositions --
     # exactly the conservation the audit exists to make checkable.
-    record_consumer_overlay(
-        ledger, change, result, application_point=application_point
-    )
+    record_consumer_overlay(ledger, change, result, application_point=application_point)
     # `withheld_unknown_rule` never applies here: every caller of this helper
     # constructs its overlay with `reachability_state=PROVEN_REACHABLE` (it is
     # by construction consumer/host-proven), and
@@ -247,6 +307,7 @@ def finalize_ledger(
     severity_config: object | None = None,
     *,
     verdict_scored: Iterable[Change] = (),
+    strict_acknowledgments: bool = False,
 ) -> DispositionLedger:
     """Close *ledger* over *result*, labelling every not-yet-recorded change.
 
@@ -257,6 +318,12 @@ def finalize_ledger(
     that reached ``result`` without passing one of the recording call sites
     (a ``DiffResult`` assembled by a caller other than ``checker.compare``).
     After it returns, the per-disposition counts sum to the detected total.
+
+    *strict_acknowledgments* is threaded straight to
+    :func:`_resolve_acknowledgments` -- see that function's own docstring.
+    ``checker.compare()`` (the run that owns the comparison) passes
+    ``True``; ``ledger_for()``'s reconciliation fallback leaves the default
+    ``False`` (ADR-067 D5, CodeRabbit review, PR #1137).
     """
 
     # Every bucket read defensively, for the same reason ``_kept_disposition``
@@ -363,6 +430,19 @@ def finalize_ledger(
         )
     ledger.resolve_verdict_classes(result)
     ledger.resolve_reclassifications(result)
+    # ADR-067 D5/C-S3: read generically off `result` -- a run that never
+    # supplied `acknowledgments` (every pre-existing caller) is a no-op.
+    # Mutates only `ledger`, never `result` -- `ledger_for()`'s fallback path
+    # (a hand-built `DiffResult` with no persisted ledger) reaches this too,
+    # and its own contract is "never mutates *result*" (Codex review).
+    _resolve_acknowledgments(
+        ledger,
+        getattr(result, "acknowledgments", None),
+        component=getattr(result, "library", None),
+        baseline=getattr(result, "old_version", None),
+        release_label=getattr(result, "new_version", None),
+        strict=strict_acknowledgments,
+    )
     return ledger
 
 
@@ -451,6 +531,13 @@ def close_consumer_scope(
     ledger.apply_scope(result, gating)
     ledger.resolve_verdict_classes(result)
     ledger.resolve_reclassifications(result)
+    _resolve_acknowledgments(
+        ledger,
+        getattr(result, "acknowledgments", None),
+        component=getattr(result, "library", None),
+        baseline=getattr(result, "old_version", None),
+        release_label=getattr(result, "new_version", None),
+    )
 
 
 def ledger_for(
@@ -530,6 +617,40 @@ def reclassified_total(ledger: DispositionLedger) -> int:
     is still ``suppressed``.
     """
     return sum(1 for r in ledger.records if r.reclassified_by is not None)
+
+
+def acknowledgments(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:
+    """ADR-067 D5/C-S3: distinct acknowledgment record ids with the number of
+    findings each covered, ordered by first appearance -- the acknowledgment
+    counterpart of :func:`reclassifications` (and :meth:`DispositionLedger.
+    rules`'s rule tally for suppression), for the overlay attribute a finding
+    carries independently of its terminal disposition (an acknowledged
+    finding keeps its own disposition and verdict class; only the
+    acknowledgment overlay is new).
+    """
+    ordered: list[str] = []
+    tally: dict[str, int] = {}
+    for record in ledger.records:
+        if record.acknowledged_by is None:
+            continue
+        if record.acknowledged_by not in tally:
+            ordered.append(record.acknowledged_by)
+            tally[record.acknowledged_by] = 0
+        tally[record.acknowledged_by] += 1
+    return tuple((record_id, tally[record_id]) for record_id in ordered)
+
+
+def acknowledged_total(ledger: DispositionLedger) -> int:
+    """Findings an :class:`~abicheck.policy.acknowledgment.Acknowledgment`
+    record matched.
+
+    Not part of :meth:`DispositionLedger.counts` or
+    :attr:`DispositionLedger.detected_total`: like ``acknowledged_by``
+    itself, this is an overlay fact about a finding that still carries its
+    own terminal disposition (D2) -- an acknowledged-and-suppressed finding
+    is still ``suppressed``.
+    """
+    return sum(1 for r in ledger.records if r.acknowledged_by is not None)
 
 
 #: The two dispositions a contract/scope decision -- as opposed to
