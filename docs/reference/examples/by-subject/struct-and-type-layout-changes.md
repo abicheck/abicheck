@@ -3,7 +3,7 @@
 
 A struct, union, or opaque record's own size, field order, offsets, packing, alignment, or bitfield widths change -- the core "does the compiled layout still match" family.
 
-_20 case(s)._ [← back to all subjects](index.md)
+_21 case(s)._ [← back to all subjects](index.md)
 
 ## Cases
 
@@ -29,3 +29,4 @@ _20 case(s)._ [← back to all subjects](index.md)
 | [case70_flexible_array_member_changed](../case70_flexible_array_member_changed.md) | Flexible Array Member Element Type Changed | 🔴 BREAKING | Breaking |
 | [case121_kernel_btf_struct_field_added](../case121_kernel_btf_struct_field_added.md) | Kernel BTF Struct Field Growth | 🔴 BREAKING | Breaking |
 | [case126_sycl_device_impl_ptr](../case126_sycl_device_impl_ptr.md) | SYCL `device` Impl Pointer — `shared_ptr` → Raw Pointer | 🔴 BREAKING | Breaking |
+| [case198_public_struct_field_reorder](../case198_public_struct_field_reorder.md) | Public Struct Field Reorder | 🔴 BREAKING | Breaking |

@@ -38,7 +38,7 @@ item 4 — a second, broader semantic dedup pass was run and confirmed zero
 new duplicate/variant pairs beyond Phase 2's original seven; item 3 —
 benchmark reporting gained its own rule-family accuracy dimension
 alongside the existing flat per-case table; item 2 — a 25-subject
-by-subject view and two hand-authored pattern pages now cover all 197
+by-subject view and two hand-authored pattern pages now cover all 208
 cases, the one navigation dimension the original external review asked
 for that the taxonomy alone couldn't project. See the table below for
 per-phase detail.

@@ -24,7 +24,8 @@ detector, or default changes — this plan only produces a taxonomy, a
 coverage matrix, and the paired-control cases and page cross-links that
 matrix identifies as missing).
 
-**Status:** Phases 1-3 complete — Phase 4 not started.
+**Status:** Phases 1-3 complete — Phase 4 in progress (first batch landed: 6
+of 17 `MISSING_CASE` leaves closed, 11 remain).
 
 Phases 2 and 3 landed together, as one mapping-and-classification pass over
 all 88 leaves: the mapping lives in `docs/_meta/abi-taxonomy-coverage.json`
@@ -33,35 +34,100 @@ all 88 leaves: the mapping lives in `docs/_meta/abi-taxonomy-coverage.json`
 (`scripts/gen_abi_taxonomy_coverage.py`), and the structural gate this plan's
 "Tests" section asks for is `check_ai_readiness.py`'s `abi-taxonomy-coverage`
 check (rules in `scripts/abi_taxonomy_coverage.py`, shared with the
-generator). The resulting distribution:
+generator). The distribution those two phases produced, and where Phase 4's
+first batch has moved it:
 
-| Status | Leaves |
-|---|--:|
-| `COVERED` | 59 |
-| `PARTIALLY_COVERED` | 8 |
-| `MISSING_CASE` | 17 |
-| `NOT_IMPLEMENTED` | 1 |
-| `KNOWN_UNDETECTABLE` | 3 |
-| `NOT_APPLICABLE` | 0 |
-| **Total** | **88** |
+| Status | After Phases 2-3 | After Phase 4 batch 1 |
+|---|--:|--:|
+| `COVERED` | 59 | 65 |
+| `PARTIALLY_COVERED` | 8 | 8 |
+| `MISSING_CASE` | 17 | 11 |
+| `NOT_IMPLEMENTED` | 1 | 1 |
+| `KNOWN_UNDETECTABLE` | 3 | 3 |
+| `NOT_APPLICABLE` | 0 | 0 |
+| **Total** | **88** | **88** |
 
-So the headline this plan asked for reads **59 of 88 known mechanisms
-COVERED**, not "197 cases". The **17 `MISSING_CASE` leaves are Phase 4's
-backlog** — each one already has a detector, so each is a corpus gap closable
-through the ordinary case-authoring path; the report lists them with the
-reason each is open. Three of those seventeen already have their *negative*
-control in the catalog and need only the positive half
-(`data-layout.field-reorder` next to case120,
-`source-api.signature-change-source-only` next to case186,
-`source-abi.macro-driven-layout-change` next to case164), which is exactly
-the paired-control shape Phase 4 describes. Nothing else moved: the single
+So the headline this plan asked for reads **65 of 88 known mechanisms
+COVERED**, not "208 cases". The remaining **11 `MISSING_CASE` leaves are
+Phase 4's remaining backlog** — each one already has a detector, so each is a
+corpus gap closable through the ordinary case-authoring path; the report
+lists them with the reason each is open. Nothing else moved: the single
 `NOT_IMPLEMENTED` leaf (`dependency-abi.linking-mode-change`) is recorded in
 [known gaps](../known-gaps.md), not fixed, and the three
 `KNOWN_UNDETECTABLE` leaves are cross-referenced from
-[Limitations](../../learn/limitations.md) — two of them added there by this
-phase, the third (`header-only.template-heavy-recompilation-drift`) already
+[Limitations](../../learn/limitations.md) — two of them added there by
+Phase 3, the third (`header-only.template-heavy-recompilation-drift`) already
 documented under "Template Instantiation". Phases 2-3 touched no `catalog/`
 case, detector, or `ChangeKind`, per this plan's own scope.
+
+### Phase 4, batch 1 — what landed
+
+Six leaves closed, each with a paired positive/negative control. Eleven new
+cases (`case198`–`case208`); no existing case was renumbered, renamed, or
+removed, and no detector, default, or `ChangeKind` changed.
+
+| Leaf closed | Positive control | Negative control |
+|---|---|---|
+| `data-layout.field-reorder` | case198_public_struct_field_reorder | case120_internal_struct_reordered_scoped *(existing)* |
+| `calling-contract.parameter-count-change` | case199_public_function_parameter_added | case200_new_entry_point_instead_of_parameter_added |
+| `calling-contract.parameter-order-change` | case201_public_function_parameters_reordered | case202_public_header_declaration_order_changed |
+| `cpp-object-model.vptr-presence-change` | case203_class_gained_vtable_pointer | case204_class_gained_non_virtual_method |
+| `source-api.deprecation-attribute-addition` | case205_public_function_marked_deprecated | case206_deprecation_documented_without_attribute |
+| `ecosystem-specific.c-restrict-qualifier-change` | case207_pointer_parameter_gained_restrict | case208_restrict_added_to_definition_only |
+
+**What a pair does and does not claim.** Each pair is a positive and a
+negative control *for that one fixture pair*: the breaking sibling is a
+fixture abicheck must flag, and its nearest-safe sibling is a fixture
+abicheck must not flag. Two fixtures cannot establish recall or precision for
+a taxonomy leaf, and nothing here should be read as a corpus-wide statistical
+claim — the same caveat this plan's Phase 4 section already states.
+
+Two support files moved with the cases, both outside `abicheck/`:
+`scripts/evidence_tiers.py` gained tier entries for `vptr_introduced` (L1)
+and `param_restrict_changed` (L2) — two kinds no case had exercised before —
+plus `KINDLESS_CASE_TIER` rows for the three `NO_CHANGE` negative controls,
+whose claim is the *absence* of a finding and which therefore carry no
+`expected_kinds` to derive a tier from.
+
+### Phase 4, batch 2 — suggested scope for the follow-up
+
+The eleven leaves still open split cleanly into three groups, which is the
+suggested shape of the next one or two PRs rather than one large batch:
+
+1. **Ordinary C/C++ fixture pairs, same shape as batch 1** —
+   `calling-contract.variadic-change` and
+   `symbol-identity.alias-change` (a `.symver` alias repoint plus its
+   unchanged-alias sibling). `calling-contract.variadic-change` reaches
+   `PARTIALLY_COVERED` rather than `COVERED` on a case alone: no
+   `docs/learn/` page mentions variadic functions at all, so closing it fully
+   also needs a paragraph on the page that owns calling contracts.
+2. **Needs a build-system or link-step fixture, not just a source pair** —
+   `export-surface.version-script-map-change` (a version script or `.def`
+   file as the only change), `source-abi.macro-driven-layout-change` (the
+   positive half next to case164, which needs two build contexts rather than
+   two sources), and `export-surface.documented-contract-drift`.
+3. **Needs an ecosystem or platform the current fixtures do not build** —
+   `ecosystem-specific.cpython-limited-api-tag-change`,
+   `ecosystem-specific.cpython-object-layout-change`,
+   `ecosystem-specific.sycl-device-binary-format-change`,
+   `dependency-abi.version-range-widening`, and
+   `toolchain-platform.endianness-change` (which needs a genuine big-endian
+   build, so a committed cross-built or hand-authored snapshot fixture rather
+   than a compile-on-the-host pair).
+
+`source-api.signature-change-source-only` — one of the three leaves Phase 3
+flagged as needing only its positive half — is **deliberately still open**,
+and batch 1 did not close it. The obvious positive control (a `char *` return
+value gaining pointee `const`: binary-identical, but consumer source
+assigning the result to a `char *` no longer compiles) was built and run
+against `compare`, and abicheck reports `NO_CHANGE`. That is not a corpus gap
+this plan may close by authoring a fixture around it; it is a detection gap.
+Per this plan's own non-goals, the honest disposition is to record it rather
+than manufacture a case, so the leaf keeps its `MISSING_CASE` status and its
+Phase 3 reason until either a *different* positive control that abicheck does
+observe is found, or the leaf is reclassified to `NOT_IMPLEMENTED` with a
+[known-gaps](../known-gaps.md) entry — a judgement the follow-up batch should
+make explicitly rather than inherit.
 
 Phase 1's taxonomy is
 [`docs/contribute/abi-api-failure-taxonomy.md`](../abi-api-failure-taxonomy.md),

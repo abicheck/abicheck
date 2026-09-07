@@ -142,6 +142,17 @@ rules:
   - case189_public_function_private_parameter_type
   - case18_dependency_leak
   - case190_public_inline_function_references_internal_constant
+  - case198_public_struct_field_reorder
+  - case199_public_function_parameter_added
+  - case200_new_entry_point_instead_of_parameter_added
+  - case201_public_function_parameters_reordered
+  - case202_public_header_declaration_order_changed
+  - case203_class_gained_vtable_pointer
+  - case204_class_gained_non_virtual_method
+  - case205_public_function_marked_deprecated
+  - case206_deprecation_documented_without_attribute
+  - case207_pointer_parameter_gained_restrict
+  - case208_restrict_added_to_definition_only
   - case19_enum_member_removed
   - case20_enum_member_value_changed
   - case21_method_became_static

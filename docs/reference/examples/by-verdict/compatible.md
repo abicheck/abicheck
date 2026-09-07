@@ -3,7 +3,7 @@
 
 Backward-compatible changes (additions or quality-only).
 
-_30 case(s)._ [← back to all examples](../index.md)
+_34 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -37,3 +37,7 @@ _30 case(s)._ [← back to all examples](../index.md)
 | [case151_xcheck_provider_matrix](../case151_xcheck_provider_matrix.md) | Provider-Agreement Matrix (Corroboration Grows With Evidence) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case181_xcheck_public_to_internal_dependency](../case181_xcheck_public_to_internal_dependency.md) | Public API Reaches an Internal Declaration | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case185_inherited_override_reuses_slot](../case185_inherited_override_reuses_slot.md) | Inherited override reuses the base's vtable slot | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case200_new_entry_point_instead_of_parameter_added](../case200_new_entry_point_instead_of_parameter_added.md) | New Entry Point Instead of a Changed Arity | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case204_class_gained_non_virtual_method](../case204_class_gained_non_virtual_method.md) | Class Gained a Non-Virtual Method | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case205_public_function_marked_deprecated](../case205_public_function_marked_deprecated.md) | Public Function Marked Deprecated | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟢 COMPATIBLE | Quality (Compatible) |

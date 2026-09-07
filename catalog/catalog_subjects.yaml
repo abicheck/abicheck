@@ -35,13 +35,14 @@
 subjects:
   api-design-and-hygiene-anti-patterns:
     title: "API design and hygiene anti-patterns"
-    blurb: "The change is technically compatible (or a correctly-labelled risk) but represents a design smell -- namespace pollution, an unnamed type in the public ABI, a polymorphic type with no virtual destructor, or the experimental-API graduation/removal lifecycle."
+    blurb: "The change is technically compatible (or a correctly-labelled risk) but represents a design smell -- namespace pollution, an unnamed type in the public ABI, a polymorphic type with no virtual destructor, a deprecation announcement, or the experimental-API graduation/removal lifecycle."
     cases:
       - case53_namespace_pollution
       - case99_experimental_graduated
       - case100_experimental_removed_without_replacement
       - case165_polymorphic_nonvirtual_dtor
       - case178_unnamed_type_in_public_abi
+      - case205_public_function_marked_deprecated
 
   build-flag-and-toolchain-mode-drift:
     title: "Build-flag and toolchain-mode drift"
@@ -157,6 +158,9 @@ subjects:
       - case163_python_kwarg_renamed
       - case166_ref_qualifier_added
       - case169_overload_added
+      - case199_public_function_parameter_added
+      - case201_public_function_parameters_reordered
+      - case207_pointer_parameter_gained_restrict
 
   inheritance-layout-and-base-subobjects:
     title: "Inheritance layout and base subobjects"
@@ -263,6 +267,11 @@ subjects:
       - case164_preproc_conditional_field
       - case184_internal_enum_churn_scoped
       - case186_c_api_pointee_const_abi_neutral
+      - case200_new_entry_point_instead_of_parameter_added
+      - case202_public_header_declaration_order_changed
+      - case204_class_gained_non_virtual_method
+      - case206_deprecation_documented_without_attribute
+      - case208_restrict_added_to_definition_only
 
   struct-and-type-layout-changes:
     title: "Struct and type layout changes"
@@ -288,6 +297,7 @@ subjects:
       - case70_flexible_array_member_changed
       - case121_kernel_btf_struct_field_added
       - case126_sycl_device_impl_ptr
+      - case198_public_struct_field_reorder
 
   symbol-versioning-and-kabi:
     title: "Symbol versioning and kABI"
@@ -357,3 +367,4 @@ subjects:
       - case173_vtt_slot_count_changed
       - case174_secondary_vtable_group_changed
       - case185_inherited_override_reuses_slot
+      - case203_class_gained_vtable_pointer
