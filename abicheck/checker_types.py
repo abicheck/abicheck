@@ -28,6 +28,7 @@ from typing import Literal
 from .checker_policy import (
     ChangeKind,
     Confidence,
+    CrossSourceEvolution,
     EvidenceTier,
     FindingEvolution,
     ReachabilityState,
@@ -400,9 +401,27 @@ class Change:
     # Same field(kw_only=True)-appended-last convention as evidence_provenance.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
     disambiguator: str | None = field(default=None, kw_only=True, compare=False)
+    # ADR-068 Phase 1 item 2 (`one-comparison-product.md`): where this
+    # finding sits across a chain of more than one comparison -- see
+    # `checker_policy.FindingEvolution`'s own docstring for the full
+    # contract. `compare()` itself never sets this; it is populated by a
+    # dedicated N>1-comparison consumer (`workflows/history.py` and future
+    # siblings), which is also why it defaults to NOT_EVALUATED rather than
+    # PERSISTENT -- a finding nobody classified is not silently assumed
+    # unchanged (ADR-067 D3's `not_evaluated` convention).
+    # `compare=False` like `entity_id`/`disambiguator` above: two otherwise
+    # identical findings stay the "same" finding for dedup/equality purposes
+    # regardless of which comparison-chain context annotated their evolution.
+    evolution: FindingEvolution = field(
+        default=FindingEvolution.NOT_EVALUATED, kw_only=True, compare=False
+    )
     # ADR-068 D3 / plan P2 -- OLD->NEW evolution for a one-sided cross-source
-    # finding (see FindingEvolution). None for every ordinary finding.
-    finding_evolution: FindingEvolution | None = field(default=None, kw_only=True)
+    # finding *within this one compare() call* (see CrossSourceEvolution --
+    # not the cross-comparison-chain `evolution` field above). None for
+    # every ordinary finding.
+    cross_source_evolution: CrossSourceEvolution | None = field(
+        default=None, kw_only=True
+    )
 
 
 @dataclass
@@ -727,6 +746,19 @@ class DiffResult(ReportSideFacts):
     # above).
     evidence_contract_error: bool = field(default=False, kw_only=True)
     budget_overflow: bool = field(default=False, kw_only=True)
+    # ADR-068 Phase 1 item 2 (`one-comparison-product.md`): findings from a
+    # *previous* comparison in an N>1-comparison chain that no longer appear
+    # in this result's own `changes` -- `FindingEvolution.RESOLVED`'s home,
+    # mirroring `out_of_surface_changes`/`redundant_changes`'s own
+    # audit-trail-list-plus-verdict-exclusion shape above. A resolved
+    # finding is never a member of `changes` (there is no current-side
+    # `Change` for policy to score), so it is recorded here rather than
+    # folded into the main list with a special-cased kind. Always empty for
+    # a plain, single `compare()` call -- populated only by a dedicated
+    # N>1-comparison consumer (`workflows/history.py` and future siblings),
+    # same as `Change.evolution`. Appended at the true end, same convention
+    # as `evidence_contract_error`/`budget_overflow` above.
+    resolved_findings: list[Change] = field(default_factory=list, kw_only=True)
 
     def _effective_kind_sets(
         self,

@@ -24,7 +24,61 @@ detector, or default changes — this plan only produces a taxonomy, a
 coverage matrix, and the paired-control cases and page cross-links that
 matrix identifies as missing).
 
-**Status:** Proposed; not started.
+**Status:** Phases 1-3 complete — Phase 4 not started.
+
+Phases 2 and 3 landed together, as one mapping-and-classification pass over
+all 88 leaves: the mapping lives in `docs/_meta/abi-taxonomy-coverage.json`
+(hand-maintained, the single source of truth), the report it renders is
+[`docs/contribute/abi-taxonomy-coverage.md`](../abi-taxonomy-coverage.md)
+(`scripts/gen_abi_taxonomy_coverage.py`), and the structural gate this plan's
+"Tests" section asks for is `check_ai_readiness.py`'s `abi-taxonomy-coverage`
+check (rules in `scripts/abi_taxonomy_coverage.py`, shared with the
+generator). The resulting distribution:
+
+| Status | Leaves |
+|---|--:|
+| `COVERED` | 59 |
+| `PARTIALLY_COVERED` | 8 |
+| `MISSING_CASE` | 17 |
+| `NOT_IMPLEMENTED` | 1 |
+| `KNOWN_UNDETECTABLE` | 3 |
+| `NOT_APPLICABLE` | 0 |
+| **Total** | **88** |
+
+So the headline this plan asked for reads **59 of 88 known mechanisms
+COVERED**, not "197 cases". The **17 `MISSING_CASE` leaves are Phase 4's
+backlog** — each one already has a detector, so each is a corpus gap closable
+through the ordinary case-authoring path; the report lists them with the
+reason each is open. Three of those seventeen already have their *negative*
+control in the catalog and need only the positive half
+(`data-layout.field-reorder` next to case120,
+`source-api.signature-change-source-only` next to case186,
+`source-abi.macro-driven-layout-change` next to case164), which is exactly
+the paired-control shape Phase 4 describes. Nothing else moved: the single
+`NOT_IMPLEMENTED` leaf (`dependency-abi.linking-mode-change`) is recorded in
+[known gaps](../known-gaps.md), not fixed, and the three
+`KNOWN_UNDETECTABLE` leaves are cross-referenced from
+[Limitations](../../learn/limitations.md) — two of them added there by this
+phase, the third (`header-only.template-heavy-recompilation-drift`) already
+documented under "Template Instantiation". Phases 2-3 touched no `catalog/`
+case, detector, or `ChangeKind`, per this plan's own scope.
+
+Phase 1's taxonomy is
+[`docs/contribute/abi-api-failure-taxonomy.md`](../abi-api-failure-taxonomy.md),
+a hand-authored Markdown document (not a structured JSON sibling manifest
+like `catalog/taxonomy.json`): the leaf mechanisms below are prose
+descriptions a human judgment call produced, not derived facts a generator
+could assemble from an existing registry, so a reviewable document — read
+top to bottom, revised in place as later phases find gaps — fits this
+content better than a machine-consumed manifest with no generator of its
+own. It refines the 13 top-level branches sketched below into 88 leaf
+mechanisms, each carrying a stable `<branch-slug>.<leaf-slug>` id, a short
+description, and its applicable platforms/languages, following exactly the
+per-leaf contract this section specifies. It is deliberately independent of
+`ChangeKind`, `catalog/`, and `docs/learn/` — no leaf here is mapped to any
+of the three, since that mapping is Phase 2's job, not Phase 1's. Phase 1
+touched no `catalog/`, `docs/learn/`, detector, or `ChangeKind` code, per
+this plan's own scope.
 
 ## The three surfaces, restated
 

@@ -6,7 +6,7 @@
 Follows this package's compute/render split (see ``abicheck/report/
 AGENTS.md``): :func:`compute_cross_source_evolution_summary` reads
 ``DiffResult.changes`` for any :class:`~abicheck.checker_types.Change`
-carrying a non-``None`` ``finding_evolution`` and returns a small frozen
+carrying a non-``None`` ``cross_source_evolution`` and returns a small frozen
 fact; :func:`render_cross_source_evolution_json` turns it into the JSON
 block. Neither computes anything the changes list does not already state,
 and neither depends on ``--format``/``--write``/demangling/any filter --
@@ -18,13 +18,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from ..checker_policy import FindingEvolution
+from ..checker_policy import CrossSourceEvolution
 from ..checker_types import Change
 
 
 @dataclass(frozen=True, slots=True)
 class CrossSourceEvolutionSummary:
-    """Per-state counts of ``Change.finding_evolution``-stamped findings."""
+    """Per-state counts of ``Change.cross_source_evolution``-stamped findings."""
 
     introduced: int
     resolved: int
@@ -35,16 +35,16 @@ class CrossSourceEvolutionSummary:
 def compute_cross_source_evolution_summary(
     changes: Sequence[Change],
 ) -> CrossSourceEvolutionSummary | None:
-    """Summarize *changes* by ``finding_evolution``, or ``None`` if none carry it.
+    """Summarize *changes* by ``cross_source_evolution``, or ``None`` if none carry it.
 
     ``None`` (never an all-zero summary) means "this run didn't opt into
     ``compare(..., cross_source_checks=True)``" -- omitted from the JSON
     report entirely, matching every other optional block's own convention.
     """
-    counts = dict.fromkeys(FindingEvolution, 0)
+    counts = dict.fromkeys(CrossSourceEvolution, 0)
     total = 0
     for c in changes:
-        evolution = getattr(c, "finding_evolution", None)
+        evolution = getattr(c, "cross_source_evolution", None)
         if evolution is None:
             continue
         counts[evolution] += 1
@@ -52,10 +52,10 @@ def compute_cross_source_evolution_summary(
     if total == 0:
         return None
     return CrossSourceEvolutionSummary(
-        introduced=counts[FindingEvolution.INTRODUCED],
-        resolved=counts[FindingEvolution.RESOLVED],
-        persistent=counts[FindingEvolution.PERSISTENT],
-        not_evaluated=counts[FindingEvolution.NOT_EVALUATED],
+        introduced=counts[CrossSourceEvolution.INTRODUCED],
+        resolved=counts[CrossSourceEvolution.RESOLVED],
+        persistent=counts[CrossSourceEvolution.PERSISTENT],
+        not_evaluated=counts[CrossSourceEvolution.NOT_EVALUATED],
     )
 
 
@@ -71,3 +71,9 @@ def render_cross_source_evolution_json(
         "persistent": summary.persistent,
         "not_evaluated": summary.not_evaluated,
     }
+
+
+def change_cross_source_evolution_field(c: Change) -> str | None:
+    """The per-``Change`` JSON field value for ``cross_source_evolution``, or ``None``."""
+    cse = getattr(c, "cross_source_evolution", None)
+    return cse.value if cse is not None else None

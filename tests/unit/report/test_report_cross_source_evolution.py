@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 
-from abicheck.checker_policy import ChangeKind, FindingEvolution
+from abicheck.checker_policy import ChangeKind, CrossSourceEvolution
 from abicheck.checker_types import Change, DiffResult
 from abicheck.report.cross_source_evolution import (
     compute_cross_source_evolution_summary,
@@ -16,12 +16,12 @@ from abicheck.report.cross_source_evolution import (
 from abicheck.reporter import to_json
 
 
-def _evolved_change(evolution: FindingEvolution, symbol: str) -> Change:
+def _evolved_change(evolution: CrossSourceEvolution, symbol: str) -> Change:
     return Change(
         kind=ChangeKind.UNVERSIONED_EXPORTED_SYMBOL,
         symbol=symbol,
         description="desc",
-        finding_evolution=evolution,
+        cross_source_evolution=evolution,
     )
 
 
@@ -33,11 +33,11 @@ def test_compute_summary_none_when_no_change_carries_evolution():
 
 def test_compute_summary_counts_each_state():
     changes = [
-        _evolved_change(FindingEvolution.INTRODUCED, "a"),
-        _evolved_change(FindingEvolution.INTRODUCED, "b"),
-        _evolved_change(FindingEvolution.RESOLVED, "c"),
-        _evolved_change(FindingEvolution.PERSISTENT, "d"),
-        _evolved_change(FindingEvolution.NOT_EVALUATED, "e"),
+        _evolved_change(CrossSourceEvolution.INTRODUCED, "a"),
+        _evolved_change(CrossSourceEvolution.INTRODUCED, "b"),
+        _evolved_change(CrossSourceEvolution.RESOLVED, "c"),
+        _evolved_change(CrossSourceEvolution.PERSISTENT, "d"),
+        _evolved_change(CrossSourceEvolution.NOT_EVALUATED, "e"),
         Change(kind=ChangeKind.FUNC_ADDED, symbol="f", description="d"),  # not counted
     ]
     summary = compute_cross_source_evolution_summary(changes)
@@ -55,7 +55,7 @@ def test_json_report_carries_summary_and_per_change_field():
         old_version="1.0",
         new_version="1.1",
         library="libfoo.so",
-        changes=[_evolved_change(FindingEvolution.INTRODUCED, "_Z6leakyv")],
+        changes=[_evolved_change(CrossSourceEvolution.INTRODUCED, "_Z6leakyv")],
     )
     doc = json.loads(to_json(result))
     assert doc["cross_source_evolution"] == {
@@ -66,7 +66,7 @@ def test_json_report_carries_summary_and_per_change_field():
     }
     change_entries = [c for c in doc["changes"] if c["symbol"] == "_Z6leakyv"]
     assert len(change_entries) == 1
-    assert change_entries[0]["finding_evolution"] == "introduced"
+    assert change_entries[0]["cross_source_evolution"] == "introduced"
 
 
 def test_json_report_omits_block_when_nothing_evolved():
@@ -75,7 +75,7 @@ def test_json_report_omits_block_when_nothing_evolved():
     assert "cross_source_evolution" not in doc
 
 
-def test_finding_evolution_stable_across_report_modes():
+def test_cross_source_evolution_stable_across_report_modes():
     """ADR-068 D4 (plan F-19): presentation never changes analysis -- the
     same evolution-stated finding appears identically across every JSON
     report_mode, not just the default 'full' one."""
@@ -83,7 +83,7 @@ def test_finding_evolution_stable_across_report_modes():
         old_version="1.0",
         new_version="1.1",
         library="libfoo.so",
-        changes=[_evolved_change(FindingEvolution.PERSISTENT, "_Z6leakyv")],
+        changes=[_evolved_change(CrossSourceEvolution.PERSISTENT, "_Z6leakyv")],
     )
     for mode in ("full", "leaf", "root-cause"):
         doc = json.loads(to_json(result, report_mode=mode))

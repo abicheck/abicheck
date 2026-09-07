@@ -296,6 +296,7 @@ nav:
     - Contributing:
       - Codebase Overview: contribute/codebase-overview.md
       - Writing Documentation: contribute/documentation.md
+      - ABI/API Failure Taxonomy: contribute/abi-api-failure-taxonomy.md
       - Testing: contribute/testing.md
       - Detector Impact Contract: contribute/detector-impact-contract.md
       - Use-Case Impact: contribute/use-case-impact.md
@@ -308,6 +309,7 @@ nav:
       - Python Build Ecosystem Positioning: contribute/python-build-ecosystem-positioning.md
     - Parity & Reports:
       - Catalog Coverage: contribute/catalog-coverage.md
+      - ABI/API Taxonomy Coverage: contribute/abi-taxonomy-coverage.md
       - ABICC Parity Status: contribute/abicc-parity-status.md
       - ABICC Test Coverage Comparison: contribute/abicc-test-coverage-comparison.md
       - ABICC Format Compliance: reference/abicc-format-compliance.md

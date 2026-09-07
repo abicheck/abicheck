@@ -10,7 +10,7 @@ only runs from ``scan_engine.py`` against the candidate binary alone. This
 module is the first, minimal slice of moving that class of check onto
 ``compare()``'s own pipeline: it runs a check independently on OLD and NEW
 and folds the two one-sided results into a single, evolution-stated finding
-set (:class:`~abicheck.checker_policy.FindingEvolution`).
+set (:class:`~abicheck.checker_policy.CrossSourceEvolution`).
 
 **Scope of this slice**: exactly one check,
 ``unversioned_exported_symbol`` (``buildsource.crosscheck.
@@ -37,7 +37,7 @@ from ..buildsource.crosscheck import (
     CrosscheckConfig,
     run_crosschecks,
 )
-from ..checker_policy import FindingEvolution
+from ..checker_policy import CrossSourceEvolution
 from ..checker_types import Change
 from ..model import AbiSnapshot
 
@@ -112,23 +112,23 @@ def compute_cross_source_evolution(old: AbiSnapshot, new: AbiSnapshot) -> list[C
         new_hit = symbol in new_findings
         if old_evaluated and new_evaluated:
             if old_hit and new_hit:
-                evolution = FindingEvolution.PERSISTENT
+                evolution = CrossSourceEvolution.PERSISTENT
                 change = new_findings[symbol]
             elif new_hit:
-                evolution = FindingEvolution.INTRODUCED
+                evolution = CrossSourceEvolution.INTRODUCED
                 change = new_findings[symbol]
             else:
-                evolution = FindingEvolution.RESOLVED
+                evolution = CrossSourceEvolution.RESOLVED
                 change = old_findings[symbol]
         elif new_hit and not old_evaluated:
             # NEW flags it; OLD's evidence could not confirm or deny it was
             # already present -- never claim INTRODUCED on that basis.
-            evolution = FindingEvolution.NOT_EVALUATED
+            evolution = CrossSourceEvolution.NOT_EVALUATED
             change = new_findings[symbol]
         elif old_hit and not new_evaluated:
             # Symmetric case: OLD flagged it; NEW's evidence could not
             # confirm or deny whether it persists or was resolved.
-            evolution = FindingEvolution.NOT_EVALUATED
+            evolution = CrossSourceEvolution.NOT_EVALUATED
             change = old_findings[symbol]
         else:
             # Neither evaluated side flagged this symbol -- unreachable in
@@ -137,6 +137,6 @@ def compute_cross_source_evolution(old: AbiSnapshot, new: AbiSnapshot) -> list[C
             # assertion so a future check reuse can't turn this into a hard
             # crash on an evidence shape this module hasn't seen yet.
             continue
-        change.finding_evolution = evolution
+        change.cross_source_evolution = evolution
         results.append(change)
     return results

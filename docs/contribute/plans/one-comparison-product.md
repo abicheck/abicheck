@@ -8,9 +8,10 @@ generated: false
 # One comparison product — retiring `scan`, consolidating the CLI
 
 **Owner ADR:** [ADR-068](../adr/068-one-comparison-product-and-scan-retirement.md).
-**Status:** Proposed — planning document, nothing implemented. Verified
+**Status:** Proposed — planning document, largely unimplemented. Verified
 against `main` at `309c8a82` on 2026-09-06 by Click introspection and
-call-site inspection, not by help text or status prose.
+call-site inspection, not by help text or status prose. Phase 1 item 2
+(`FindingEvolution`) has since landed; see that item below.
 **Effort:** XL · **Risk:** high — this deletes a public command and moves
 capabilities between analysis paths. Phase ordering is the safety mechanism.
 
@@ -351,7 +352,7 @@ per-row prerequisites in §3 and §4 are the detail beneath these.
 | # | Prerequisite | Gates | State today |
 |---|---|---|---|
 | P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2), and therefore the whole audit half of the retirement | Not started; ADR-065 S2's record exists to extend |
-| P2 | A `FindingEvolution` state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Partially landed**: `checker_policy.FindingEvolution` + `Change.finding_evolution` exist, with `workflows.cross_source_evolution.compute_cross_source_evolution` as the model's first real producer (`compare(..., cross_source_checks=True)`, opt-in) and `report.cross_source_evolution`'s compute/render pair as its first real JSON projection (schema 3.5) — scoped to exactly one check, `unversioned_exported_symbol` (§3 #3). **The correctness crux** — a pre-existing problem must never read as newly introduced when a side's evidence can't confirm it — is exercised as a property test. The other cross-source checks (§3 #4-#5, #15) remain unmigrated |
+| P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Partially landed**: a second, deliberately distinct enum from Phase 1 item 2's cross-comparison-chain `FindingEvolution` above — `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution` state how a cross-source check behaves across OLD/NEW *within one* `compare()` call, with `workflows.cross_source_evolution.compute_cross_source_evolution` as the model's first real producer (`compare(..., cross_source_checks=True)`, opt-in) and `report.cross_source_evolution`'s compute/render pair as its first real JSON projection (schema 3.6) — scoped to exactly one check, `unversioned_exported_symbol` (§3 #3). **The correctness crux** — a pre-existing problem must never read as newly introduced when a side's evidence can't confirm it — is exercised as a property test. The other cross-source checks (§3 #4-#5, #15) remain unmigrated |
 | P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion (they are `scan`-only today; `cli_stack.py`'s own `5` is unrelated) | ADR-064 already models the precedence; `compare` does not emit them |
 | P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public` | The leakage and public-vs-exported checks (§3 #4, #5, #22) | `scan --public-header-dir` has the rule; it must survive the move verbatim, file-vs-directory asymmetry included |
 | P5 | ADR-065 S3's package component inventories | Folding `--artifact-set`'s members into the one selection model (§3 #16, #17) | Not started — workstream A's next slice |
@@ -360,6 +361,35 @@ per-row prerequisites in §3 and §4 are the detail beneath these.
 Two of these (P1, P5) are ADR-065 work this plan consumes rather than owns;
 starting them here would fork the model workstream A is building. P2 and P3
 are this plan's own Phase 1.
+
+**Where the implementation lands is ADR-061's question, not this plan's.**
+[ADR-061](../adr/061-responsibility-package-architecture.md) owns
+responsibility ownership and dependency boundaries; this plan owns
+capability topology. Three of its remaining acceptance gaps meet this plan
+directly, and each has one owner rather than two:
+
+- **No `workflows/scan` package, ever.** ADR-061's own `Request ->
+  ResolvedPlan -> Result` examples were written around `ScanRequest`/
+  `ResolvedScanPlan`/`ScanResult`; they now name the compare shapes instead,
+  precisely because migrating a command scheduled for retirement into a
+  permanent typed contract is work this plan's Phase 6 would then have to
+  undo. `scan`'s surviving capabilities route to the compare workflow.
+- **The canonical report replaces the scan schema** (§3, Phase 5) only once
+  ADR-061's [gap C](../adr/061-responsibility-package-architecture.md#c-one-result-one-document-several-projections)
+  closes — one completed evaluation producing one document that every format
+  projects. "One analysis, several artifacts" is not deliverable while six
+  formats each build their own document from a `DiffResult`.
+- **One operand driver** (Phase 7d, re-homed from `cli-cleanup-phase-two.md`
+  as PR I) is the frontend half of ADR-061's
+  [gap D](../adr/061-responsibility-package-architecture.md#d-typed-requestplan-and-operand-convergence):
+  selection, inventory and acquisition state belong on the shared
+  request/plan, not in command-level orchestration. Do it once, in the
+  shared contract.
+
+The sequencing constraint runs the other way too: ADR-061's own closure
+package 6 (facade and legacy retirement) may not delete a `scan`-related
+surface ahead of this plan's Phase 6. A shorter facade is never a reason to
+lose a capability.
 
 ## 6. PR sequence
 
@@ -381,7 +411,16 @@ refs) while both commands still exist. It starts red on every check in
    its completeness/outcome consequences (never a removal, never a pass).
 2. **`FindingEvolution`** (`introduced`/`resolved`/`persistent`/
    `not_evaluated`) on the canonical finding model, with `report/`
-   compute/render support.
+   compute/render support. **Done** — `checker_policy.FindingEvolution`,
+   `Change.evolution`/`DiffResult.resolved_findings`, the correspondence
+   primitive (`policy/finding_evolution.py`:
+   `compute_finding_evolution`/`compute_resolved_findings`/
+   `apply_finding_evolution`), and the JSON projection
+   (`report/finding_evolution.py`, `report_schema_version` 3.5). Not yet
+   wired into any CLI command or into `workflows/history.py` (that consumer
+   wiring, and Markdown/HTML rendering, are follow-up work, matching this
+   phase's own "No CLI change" scope) — the primitive itself is what this
+   item asked for.
 3. **Evidence-contract abort (exit `7`)** and **budget overflow (exit `5`)**
    become `compare` `ExitDecision` axes (ADR-064's precedence already models
    them; `compare` does not emit them yet).

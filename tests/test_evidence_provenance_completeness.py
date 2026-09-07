@@ -126,20 +126,22 @@ class TestFieldDefaultsToNone:
         which would have silently shifted every later field's position for
         such a caller). `entity_id` (ADR-063 Phase 2) is appended immediately
         after this one, `disambiguator` (ADR-063 Track T3) immediately after
-        `entity_id`, and `finding_evolution` (ADR-068 D3 / plan P2) is the
-        newest field, appended immediately after `disambiguator` -- all four
-        must stay keyword-only, and `finding_evolution` must stay last until
-        some still-newer field is appended after it in turn."""
+        `entity_id`, `evolution` (ADR-068 Phase 1 item 2) immediately after
+        `disambiguator`, and `cross_source_evolution` (ADR-068 D3 / plan P2)
+        is the newest field, appended immediately after `evolution` -- all
+        five must stay keyword-only, and `cross_source_evolution` must stay
+        last until some still-newer field is appended after it in turn."""
         import dataclasses
 
         by_name = {f.name: f for f in dataclasses.fields(Change)}
         assert by_name["evidence_provenance"].kw_only is True
         assert by_name["entity_id"].kw_only is True
         assert by_name["disambiguator"].kw_only is True
-        assert by_name["finding_evolution"].kw_only is True
+        assert by_name["evolution"].kw_only is True
+        assert by_name["cross_source_evolution"].kw_only is True
         all_names = [f.name for f in dataclasses.fields(Change)]
-        assert all_names[-1] == "finding_evolution", (
-            "finding_evolution must be the last-declared field on Change"
+        assert all_names[-1] == "cross_source_evolution", (
+            "cross_source_evolution must be the last-declared field on Change"
         )
         assert (
             all_names.index("entity_id") == all_names.index("evidence_provenance") + 1
@@ -147,9 +149,13 @@ class TestFieldDefaultsToNone:
         assert all_names.index("disambiguator") == all_names.index("entity_id") + 1, (
             "disambiguator must be appended immediately after entity_id"
         )
+        assert all_names.index("evolution") == all_names.index("disambiguator") + 1, (
+            "evolution must be appended immediately after disambiguator"
+        )
         assert (
-            all_names.index("finding_evolution") == all_names.index("disambiguator") + 1
-        ), "finding_evolution must be appended immediately after disambiguator"
+            all_names.index("cross_source_evolution")
+            == all_names.index("evolution") + 1
+        ), "cross_source_evolution must be appended immediately after evolution"
 
 
 class TestVerifiedBucketsHaveProducerCoverage:

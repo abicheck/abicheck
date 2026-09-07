@@ -25,11 +25,7 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from .severity import GateDecision, KindSets, SeverityConfig
 from . import reporter_contract_blocks as _reporter_contract_blocks
-from .checker import (
-    Change,
-    DiffResult,
-    Verdict,
-)
+from .checker import Change, DiffResult, Verdict
 from .checker_policy import (
     ChangeKind,
     EvidenceStatus,
@@ -46,6 +42,7 @@ from .policy.gate_decision import gate_decision_for_result
 from .report.contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
 )
+from .report.cross_source_evolution import change_cross_source_evolution_field as _cse
 from .report.dispatch_markdown import (
     _to_markdown_leaf as _to_markdown_leaf,
     _to_markdown_root_cause as _to_markdown_root_cause,
@@ -53,6 +50,7 @@ from .report.dispatch_markdown import (
     to_review_digest as to_review_digest,
 )
 from .report.disposition_audit import add_disposition_audit as _add_disposition_audit
+from .report.finding_evolution import add_finding_evolution as _add_finding_evolution
 from .report.scoped_gate import ScopedGateChangeHelpers
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
@@ -203,6 +201,7 @@ def to_stat_json(
     # ADR-067 D3: a compact view may collapse detail; it may not omit the
     # raw-versus-effective counts.
     _add_disposition_audit(d, result, severity_config)
+    _add_finding_evolution(d, result)
     _add_check_identity(d, result)
     gate = gate_decision_for_result(result, severity_config)
     if gate is not None:
@@ -542,6 +541,7 @@ def _to_json_leaf(
     # ADR-067 D3: a compact view may collapse detail; it may not omit the
     # raw-versus-effective counts.
     _add_disposition_audit(d, result, severity_config)
+    _add_finding_evolution(d, result)
     _add_check_identity(d, result)
     gate = gate_decision_for_result(result, severity_config)
     if gate is not None:
@@ -772,6 +772,7 @@ def _to_json_root_cause(
         d["pattern_modulations"] = result.pattern_modulations
     _add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config)
+    _add_finding_evolution(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(
@@ -1253,6 +1254,7 @@ def to_json(
     )
     _add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config)
+    _add_finding_evolution(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(
@@ -1412,8 +1414,8 @@ def _change_annotation_fields(c: Any) -> dict[str, Any]:
         out["correlated_change_kind"] = correlated
     if getattr(c, "symbol_binding", None):
         out["symbol_binding"] = c.symbol_binding
-    if (fe := getattr(c, "finding_evolution", None)) is not None:  # ADR-068 D3 (3.3)
-        out["finding_evolution"] = fe.value
+    if (cse := _cse(c)) is not None:
+        out["cross_source_evolution"] = cse
     return out
 
 

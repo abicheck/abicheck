@@ -1,8 +1,8 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for ADR-068 D3 / plan P2's ``FindingEvolution`` state and the first
-cross-source check (``unversioned_exported_symbol``) migrated onto it.
+"""Tests for ADR-068 D3 / plan P2's ``CrossSourceEvolution`` state and the
+first cross-source check (``unversioned_exported_symbol``) migrated onto it.
 
 The crux (plan §7 F-8/F-9): a pre-existing problem must never read as
 ``introduced`` merely because one side's evidence couldn't confirm it. This
@@ -18,7 +18,7 @@ import itertools
 import pytest
 
 from abicheck.checker import compare
-from abicheck.checker_policy import ChangeKind, FindingEvolution
+from abicheck.checker_policy import ChangeKind, CrossSourceEvolution
 from abicheck.checker_types import Change
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot
@@ -60,7 +60,7 @@ def test_persistent_when_flagged_on_both_evaluated_sides():
     results = compute_cross_source_evolution(old, new)
     assert len(results) == 1
     assert results[0].symbol == "_Z6leakyv"
-    assert results[0].finding_evolution == FindingEvolution.PERSISTENT
+    assert results[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
     assert results[0].kind == ChangeKind.UNVERSIONED_EXPORTED_SYMBOL
 
 
@@ -70,7 +70,7 @@ def test_introduced_when_flagged_only_on_new_both_evaluated():
     results = compute_cross_source_evolution(old, new)
     assert len(results) == 1
     assert results[0].symbol == "_Z6leakyv"
-    assert results[0].finding_evolution == FindingEvolution.INTRODUCED
+    assert results[0].cross_source_evolution == CrossSourceEvolution.INTRODUCED
 
 
 def test_resolved_when_flagged_only_on_old_both_evaluated():
@@ -79,7 +79,7 @@ def test_resolved_when_flagged_only_on_old_both_evaluated():
     results = compute_cross_source_evolution(old, new)
     assert len(results) == 1
     assert results[0].symbol == "_Z6leakyv"
-    assert results[0].finding_evolution == FindingEvolution.RESOLVED
+    assert results[0].cross_source_evolution == CrossSourceEvolution.RESOLVED
 
 
 def test_no_finding_when_neither_side_flags_anything():
@@ -106,7 +106,9 @@ def test_capped_default_finding_count_never_reads_as_not_evaluated():
     results = compute_cross_source_evolution(old, new)
     assert len(results) == 250
     assert {r.symbol for r in results} == set(names)
-    assert all(r.finding_evolution == FindingEvolution.PERSISTENT for r in results)
+    assert all(
+        r.cross_source_evolution == CrossSourceEvolution.PERSISTENT for r in results
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -152,10 +154,10 @@ class TestNotEvaluatedCrux:
         assert len(results) == 1
         finding = results[0]
         assert finding.symbol == "_Z6leakyv"
-        assert finding.finding_evolution == FindingEvolution.NOT_EVALUATED
-        assert finding.finding_evolution not in (
-            FindingEvolution.INTRODUCED,
-            FindingEvolution.RESOLVED,
+        assert finding.cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED
+        assert finding.cross_source_evolution not in (
+            CrossSourceEvolution.INTRODUCED,
+            CrossSourceEvolution.RESOLVED,
         )
 
     def test_present_on_both_but_only_one_side_evaluated_is_not_evaluated(self):
@@ -166,7 +168,7 @@ class TestNotEvaluatedCrux:
         new = _snap(_versioned_elf(("_Z6leakyv",)), version="1.1")
         results = compute_cross_source_evolution(old, new)
         assert len(results) == 1
-        assert results[0].finding_evolution == FindingEvolution.NOT_EVALUATED
+        assert results[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED
 
     def test_resolved_scenario_f9_visible_when_both_evaluated(self):
         """Plan F-9: leak present in OLD, fixed in NEW -- RESOLVED, and
@@ -175,7 +177,7 @@ class TestNotEvaluatedCrux:
         new = _snap(_no_evidence_elf(), version="1.1")
         results = compute_cross_source_evolution(old, new)
         assert len(results) == 1
-        assert results[0].finding_evolution == FindingEvolution.RESOLVED
+        assert results[0].cross_source_evolution == CrossSourceEvolution.RESOLVED
 
 
 # --------------------------------------------------------------------------- #
@@ -204,7 +206,7 @@ def test_compare_off_by_default():
     new = _snap(_versioned_elf(("_Z6leakyv",)), version="1.1")
     result = compare(old, new)
     assert not any(
-        getattr(c, "finding_evolution", None) is not None for c in result.changes
+        getattr(c, "cross_source_evolution", None) is not None for c in result.changes
     )
 
 
@@ -213,15 +215,17 @@ def test_compare_opt_in_merges_evolution_stated_finding():
     new = _snap(_versioned_elf(("_Z6leakyv",)), version="1.1")
     result = compare(old, new, cross_source_checks=True)
     evolved = [
-        c for c in result.changes if getattr(c, "finding_evolution", None) is not None
+        c
+        for c in result.changes
+        if getattr(c, "cross_source_evolution", None) is not None
     ]
     assert len(evolved) == 1
-    assert evolved[0].finding_evolution == FindingEvolution.NOT_EVALUATED
+    assert evolved[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED
     assert evolved[0].kind == ChangeKind.UNVERSIONED_EXPORTED_SYMBOL
 
 
-def test_compare_result_finding_evolution_default_none() -> None:
+def test_compare_result_cross_source_evolution_default_none() -> None:
     """A ``Change`` never touched by this module carries ``None`` -- keeps
     every pre-existing producer's output unchanged."""
     c = Change(kind=ChangeKind.FUNC_ADDED, symbol="foo", description="added")
-    assert c.finding_evolution is None
+    assert c.cross_source_evolution is None

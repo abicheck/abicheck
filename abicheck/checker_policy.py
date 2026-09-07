@@ -137,16 +137,62 @@ class ReachabilityState(str, Enum):
 
 
 class FindingEvolution(str, Enum):
+    """Where one finding sits across a chain of more than one comparison
+    (ADR-068 Phase 1 item 2, ``one-comparison-product.md``).
+
+    A single :func:`~abicheck.checker.compare` call only ever sees *one*
+    pair of snapshots, so it has no way to know whether a finding it just
+    emitted also appeared in a previous comparison, or whether a finding a
+    previous comparison reported has since disappeared. This field exists
+    for a caller that *does* have that context — a longitudinal chain
+    (``workflows/history.py``, ADR-066 S1), a CI job comparing today's PR
+    findings against the base branch's own last recorded run, or any other
+    N>1-comparison consumer — to record that context on the canonical
+    finding model rather than inventing a side channel per consumer.
+
+    ``compare()`` itself never sets this field: every ordinary, single-
+    comparison ``Change`` keeps the ``NOT_EVALUATED`` default. Reusing
+    ADR-067 D3's ``not_evaluated`` convention (see
+    ``report.disposition_audit.NotEvaluatedDetector``) deliberately, rather
+    than inventing a second "capability never exercised" vocabulary: a
+    finding whose evolution nobody computed reads as *not evaluated*, never
+    as a silently-assumed ``persistent`` or an omitted field.
+
+    - ``INTRODUCED`` — this finding's identity (see
+      :func:`abicheck.finding_identity.report_finding_id`) did not appear in
+      the previous comparison in the chain.
+    - ``PERSISTENT`` — this finding's identity already appeared in the
+      previous comparison and still appears now.
+    - ``RESOLVED`` — a finding's identity that appeared in the previous
+      comparison but no longer appears in the current one. Never carried as
+      a member of ``DiffResult.changes`` (there is no current-side ``Change``
+      to attach it to); see ``DiffResult.resolved_findings`` instead.
+    - ``NOT_EVALUATED`` — no previous comparison was supplied to compare
+      against, so evolution could not be determined. The default for every
+      ``Change`` a plain, single comparison produces.
+    """
+
+    INTRODUCED = "introduced"
+    RESOLVED = "resolved"
+    PERSISTENT = "persistent"
+    NOT_EVALUATED = "not_evaluated"
+
+
+class CrossSourceEvolution(str, Enum):
     """How a one-sided (candidate-side) finding behaves across OLD → NEW
+    *within a single* :func:`~abicheck.checker.compare` **call**
     (ADR-068 D3; ``docs/contribute/plans/one-comparison-product.md`` P2).
 
-    A cross-source hygiene check (``buildsource.crosscheck.run_crosschecks``
-    and siblings) evaluates one snapshot's evidence sources against each
-    other — it carries no baseline of its own. Migrating such a check onto
-    ``compare()`` means running it independently on OLD and NEW and stating
-    how the two runs relate, rather than reporting NEW's run alone (which
-    would silently lose "this was already broken" / "this got fixed"
-    information the two-sided comparison is uniquely positioned to state).
+    Not to be confused with :class:`FindingEvolution` above, which tracks a
+    finding's identity across a *chain* of separate ``compare()`` calls over
+    time — this enum instead states how a cross-source hygiene check
+    (``buildsource.crosscheck.run_crosschecks`` and siblings), which
+    evaluates one snapshot's evidence sources against each other and
+    carries no baseline of its own, behaves when that check is run
+    independently on OLD and NEW *inside the same* ``compare()`` call. Same
+    four state names, deliberately narrower scope; `compare()` itself DOES
+    set this field (opt-in, see ``cross_source_checks=True``), unlike
+    ``FindingEvolution``.
 
     - ``INTRODUCED``: absent on OLD (with OLD evidence sufficient to say
       so), present on NEW.

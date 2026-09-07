@@ -767,8 +767,33 @@ from typing import Any
 #:       first for workstream D-S1's ``used_by[]``/``consumer_impact_
 #:       summary`` fields (same "renumber, don't reuse" convention as the
 #:       2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2 entries above).
-#: 3.5 -- ADR-068 D3 / plan P2: ``compare(..., cross_source_checks=True)`` stamps a ``change``'s ``finding_evolution`` (introduced/resolved/persistent/not_evaluated) and an additive top-level ``cross_source_evolution`` per-state count object; off by default, never changes the finding's default verdict. Renumbered from a conflicting 3.4 claimed first by the P3/ADR-064 exit-block slice above (same "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2/3.4 entries above).
-REPORT_SCHEMA_VERSION = "3.5"
+#: 3.5 -- ADR-068 Phase 1 item 2 (``docs/contribute/plans/
+#:       one-comparison-product.md`` "Phase 1"): a new additive top-level
+#:       ``finding_evolution`` object -- ``counts`` (one entry per
+#:       ``FindingEvolution`` state: ``introduced``/``resolved``/
+#:       ``persistent``/``not_evaluated``) and ``resolved`` (findings from an
+#:       earlier comparison in a chain that no longer appear in this one).
+#:       Unconditional, the same "never omitted, only stated" rule
+#:       ``disposition_audit`` follows -- a plain, single ``compare()`` run
+#:       reports every finding ``not_evaluated`` and an empty ``resolved``
+#:       list, since evolution across a comparison chain is only computed by
+#:       a dedicated N>1-comparison caller (``policy.finding_evolution``,
+#:       not yet wired into any CLI command in this phase). Additive only:
+#:       no existing key changes shape or meaning, and no verdict, gate, or
+#:       exit code moves.
+#: 3.6 -- ADR-068 D3 / plan P2, merged onto Phase 1 item 2's already-landed
+#:       3.5 (renumbered from a conflicting 3.5 this branch had
+#:       independently claimed, same "renumber, don't reuse" convention as
+#:       the 2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2/3.4 entries above):
+#:       ``compare(..., cross_source_checks=True)`` stamps a ``change``'s
+#:       ``cross_source_evolution`` (introduced/resolved/persistent/
+#:       not_evaluated -- ``CrossSourceEvolution``, deliberately distinct
+#:       from the cross-comparison-chain ``FindingEvolution``/
+#:       ``finding_evolution`` object 3.5 above just introduced) and an
+#:       additive top-level ``cross_source_evolution`` per-state count
+#:       object; off by default, never changes the finding's default
+#:       verdict.
+REPORT_SCHEMA_VERSION = "3.6"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
