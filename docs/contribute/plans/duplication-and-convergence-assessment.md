@@ -1916,6 +1916,87 @@ and a build-called-exactly-once assertion for both `report_mode="full"` and
 code regression tripwire), and the usual ruff/mypy/ai-readiness/
 architecture gates, all clean.
 
+**Progress update (2026-09-07, JUnit slice -- the fifth and last of the
+named formats): JUnit's default view now also routes through the one
+shared build, same structural depth as SARIF's own slice.**
+`service_render.render_output()`'s `junit` branch now calls
+`build_report_document(result, show_only=show_only,
+severity_config=severity_config)` once, unconditionally (independent of
+`report_mode`, same reasoning as SARIF's own branch: JUnit's
+`"root-cause"` mode only adds `rootCauseId`/`rootCause` attributes to each
+`<failure>` on top of the same shape), and forwards the resulting
+`ReportDocument` into `junit_report.to_junit_xml`/`_build_testsuite` (both
+gained an optional `report_document` parameter, additive only).
+`_add_disposition_audit_properties` reuses the shared document's
+`disposition_audit` field via `disposition_audit_dict_reusing_document`
+(the identical helper SARIF's own slice introduced, this time round-tripped
+through `DispositionAudit.from_dict` since JUnit needs the typed struct's
+attributes to emit individual `<property>` elements, the same round-trip
+HTML's/Markdown's own `report_document` handling already established)
+instead of an independent `compute_disposition_audit` call.
+
+This slice's own re-read of JUnit's remaining facts confirms this
+assessment's own JUnit bullet above with one refinement: JUnit's per-finding
+verdict/category resolution (`_is_failure`/`_failure_type`) was *already*
+routed through `report.finding`'s `ReportFinding`/`build_report_findings`
+primitive by an earlier slice (ADR-061 Phase 2 item 4b, the fix this
+assessment's own Phase 4 status section above specifically motivated) --
+but as its *own* separate call, not a value read off the shared document,
+because `build_report_document`'s `_add_changes_block` does not itself
+build a `ReportFinding` set (JSON's `changes[]` resolves each change's
+verdict inline via `effective_verdict_for_change`, with no per-finding
+`IssueCategory` anywhere in the JSON shape today). Threading that through
+for real would mean either rewriting JSON's own `_change_to_dict` to also
+compute and carry `IssueCategory` -- a change to a format this slice must
+leave byte-identical -- or inventing a new, `finding_id`-keyed field on
+`ReportDocument` for a fact only JUnit needs today; both are the
+genuinely-new-shared-document-design category of work this assessment
+already named for HTML's and SARIF's own remaining facts, deliberately not
+attempted here. JUnit's symbol/testcase tree and root-cause grouping remain
+its own computation, same reasoning.
+
+Verified via the JUnit test suite (156 tests), a new
+`TestJunitReusesSharedDocument` class in `tests/unit/report/
+test_build_report_document.py` (byte-identical `to_junit_xml` output with
+and without a supplied `report_document`, equal disposition-audit testsuite
+properties, and build-called-exactly-once assertions for both
+`report_mode="full"` and `"root-cause"`), the full golden suite, the HTML
+template golden, and the usual ruff/mypy/ai-readiness/architecture gates,
+all clean. Two acceptance tests named by the original gap-C task were added
+in this slice (only meaningful now that all five formats cross the shared
+boundary): `TestRendererOrderIndependence` (render one `DiffResult` through
+json/html/sarif/junit/markdown in two orders; each format's own output is
+byte-identical regardless of order, and `build_report_document` is called
+exactly once per format render in either order, verified via
+`mock.patch(..., wraps=build_report_document)` call-count) and
+`TestSarifAndJunitDecisionBoundary` (the honest, narrower sibling of
+`test_render_html.test_render_html_imports_no_decision_making_module` for
+`sarif.py`/`junit_report.py`, which have no HTML-shaped compute/render
+module split today -- see that test class's own docstring for the exact,
+current boundary it asserts instead: the disposition-audit reuse path is
+what's actually converged, verified by both a call-count guard and an AST
+scan of the real call site rather than an import-list check that would be
+either false or vacuous for these two files as structured today).
+
+**Gap C closure summary across all five named formats (2026-09-07, JUnit
+slice).** Converged, for real, across JSON, Markdown-full/`review`, HTML,
+SARIF, and JUnit: the decision layer -- per-finding verdict/category, the
+gate decision, and the disposition audit -- is resolved exactly once per
+render via `build_report_document` and *reused*, never re-derived, by every
+format for every fact it actually reuses today. Left open, precisely: each
+format's own remaining presentation-shaped computation named in its own
+progress update above (Markdown's `severity_groups`/leaf/root-cause; HTML's
+bucketing/sections/compat-mode; SARIF's rule catalog/level-derivation/
+root-cause/scoped-gate blocks; JUnit's per-finding verdict/category
+resolution, testcase tree, and root-cause grouping) -- each would need a
+genuinely new `ReportDocument` field designed and added first, which this
+five-slice initiative deliberately did not attempt, matching the standard
+this section's own prior updates already set for HTML and SARIF. "Converged"
+in this ADR's sense means *cannot disagree on a decision*, not *byte-
+identical internal implementation* -- most of what remains per format was,
+on inspection, never a second independently-decided value at risk of
+drifting, just presentation computed over already-agreed facts.
+
 ### Phase 5 — Migrate compatibility and multi-artifact operations
 
 1. Make ABICC descriptors adapters into typed requests.

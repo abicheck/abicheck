@@ -217,14 +217,34 @@ def render_output(
         )
 
     if fmt == "junit":
+        # ADR-061 Phase 2 gap C: JUnit now builds through the one shared
+        # document choke point (report.build.build_report_document), same
+        # structural depth as the markdown/review/html/sarif branches above
+        # -- see report/build.py's module docstring. JUnit's own compute
+        # step (junit_report._build_testsuite) reuses only the shared
+        # document's disposition_audit field today; its per-finding verdict/
+        # category resolution (already routed through report.finding's
+        # ReportFinding, ADR-061 Phase 2 item 4b), symbol/testcase tree, and
+        # root-cause grouping remain its own computation -- see that
+        # function's own docstring for why. Built unconditionally,
+        # independent of report_mode, for the same reason as SARIF's own
+        # branch above: JUnit's "root-cause" mode only adds extra <failure>
+        # attributes on top of the same shape.
         from .junit_report import to_junit_xml
+        from .report.build import build_report_document
 
+        junit_doc = build_report_document(
+            result,
+            show_only=show_only,
+            severity_config=severity_config,
+        )
         return to_junit_xml(
             result,
             old,
             show_only=show_only,
             severity_config=severity_config,
             report_mode=report_mode,
+            report_document=junit_doc,
         )
 
     if fmt == "review":

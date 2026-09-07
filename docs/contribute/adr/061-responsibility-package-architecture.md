@@ -731,10 +731,14 @@ completed semantic report document → every format* — is gap C below, and is
 [`duplication-and-convergence-assessment.md`](../plans/duplication-and-convergence-assessment.md)
 Phase 4's `ReportEnvelope` target rather than a second design.
 
-**Gap C status (2026-09-07): JSON, Markdown-full/review, HTML's default
-view, and SARIF's default view converged onto the shared choke point (HTML
-and SARIF only partially — see their own progress updates below);
-Markdown-leaf/root-cause and JUnit not yet.** `report/build.py`'s
+**Gap C status (2026-09-07, updated through the JUnit slice — all five
+named formats now converged): JSON, Markdown-full/review, HTML's default
+view, SARIF's default view, and JUnit's default view all converge onto the
+shared choke point (HTML, SARIF, and JUnit only partially — see their own
+progress updates below, and the JUnit slice's overall closure summary
+further down this section); Markdown-leaf/root-cause stays its own
+separate, legitimate document by design (see the scope decision below).**
+`report/build.py`'s
 `build_report_document(result, ...)` is now the
 single function that performs the full `report_mode="full"` build
 (`_build_json_base`, `_add_abi_surface_breakdown`, `_add_changes_block`, the
@@ -858,42 +862,119 @@ shared-build-exactly-once assertion for both `report_mode="full"` and
 code regression tripwire), and the usual ruff/mypy/ai-readiness/architecture
 gates, all clean.
 
+**Progress update (2026-09-07, JUnit slice — the last of the five named
+formats): JUnit now also routes through the one shared build, same
+structural depth as HTML's/SARIF's own slices.**
+`service_render.render_output()`'s `junit` branch now calls
+`build_report_document(result, show_only=show_only,
+severity_config=severity_config)` once, unconditionally (independent of
+`report_mode`, matching SARIF's own reasoning: JUnit's own `"root-cause"`
+mode only adds `rootCauseId`/`rootCause` attributes to each `<failure>` on
+top of the same shape, it does not restructure the per-symbol `<testcase>`
+tree), and forwards the resulting `ReportDocument` into `junit_report.
+to_junit_xml`/`_build_testsuite` (both gained an optional `report_document`
+parameter, additive only — a direct caller with none keeps the prior,
+independent-build behaviour). `_add_disposition_audit_properties` reuses
+the shared document's `disposition_audit` field via the same
+`disposition_audit_dict_reusing_document` helper SARIF's slice introduced,
+instead of an independent `compute_disposition_audit` call for its
+`abicheck.detected_total`/`abicheck.effective_total`/
+`abicheck.disposition.*` testsuite properties.
+
+JUnit's own remaining facts were re-read in full during this slice and
+confirmed to be exactly the gap the prior assessment recorded, with one
+addition the prior assessment did not have available to check yet: JUnit's
+per-finding verdict/category resolution (`_is_failure`/`_failure_type`) was
+*already* routed through `report.finding`'s `ReportFinding`/
+`build_report_findings` primitive by an earlier slice (ADR-061 Phase 2 item
+4b) — the same canonical primitive a full convergence would want — but as a
+*separate* call from what `build_report_document` computes, not a value
+read off the shared document, because `build_report_document`'s own
+`_add_changes_block` does not itself build a `ReportFinding` set at all
+(JSON's `changes[]` entries resolve each change's verdict inline via
+`effective_verdict_for_change`, with no per-finding `IssueCategory` in the
+JSON shape at all today). Threading that through would mean either (a)
+rewriting JSON's own `_change_to_dict` to compute and carry `IssueCategory`
+too — a change to a format whose output this slice must leave
+byte-identical — or (b) inventing a second, JSON-object-external field on
+`ReportDocument` keyed by `finding_id` for a fact only JUnit needs; neither
+is the safely-mechanical, already-shaped substitution this slice's own
+scope is (see "What remains open" below). JUnit's symbol/testcase tree and
+its root-cause grouping are, as before, its own SARIF/JUnit-shaped
+computation with no shared-document counterpart.
+
+Verified via the JUnit test suite (156 passed), a new
+`TestJunitReusesSharedDocument` class in `tests/unit/report/
+test_build_report_document.py` (byte-identical `to_junit_xml` output with
+and without a supplied `report_document`, equal disposition-audit testsuite
+properties, and build-called-exactly-once assertions for both
+`report_mode="full"` and `"root-cause"`), the full golden suite, the HTML
+template golden (shared-code regression tripwire), and the usual
+ruff/mypy/ai-readiness/architecture gates, all clean.
+
+Two acceptance tests from the original gap-C task were added in this
+slice, now that all five formats cross the shared-document boundary: a
+`TestRendererOrderIndependence` class rendering the same completed
+`DiffResult` through json/html/sarif/junit/markdown in two different
+orders and asserting each format's own output is byte-identical regardless
+of order, with `build_report_document` (mock-spied, `wraps=` the real
+function) called exactly once per format render in either order; and a
+`TestSarifAndJunitDecisionBoundary` class, the honest, narrower sibling of
+`test_render_html.test_render_html_imports_no_decision_making_module` for
+these two formats — see that class's own docstring for why an import-based
+"no decision module reached at all" guard would be false for `sarif.py`/
+`junit_report.py` as currently structured (neither has HTML's real
+compute/render module split yet), and what the real, current boundary it
+asserts instead is (the disposition-audit reuse path specifically, checked
+both by call-count and by an AST scan of the actual call site).
+
 **What remains open.** Markdown's `leaf`/`root-cause` alternate views (see
 the scope decision immediately below — these are separate, legitimate
 documents, same reasoning as JSON's own `leaf`/`root-cause`/`--stat`, not an
-oversight left out of this slice), HTML's own bucketing/section/compat-mode
-computation and SARIF's own rule-catalog/level-derivation/root-cause/
-scoped-gate computation (see the respective progress updates above — each
-format's shared build call itself has landed, only `disposition_audit` reuse
-was safely available beyond that), and JUnit in full still builds no
-`ReportDocument` at all — that part of gap C remains open; closing it for
-JUnit means giving its own `compute_*`/build step a first `ReportDocument`
-build of its own (unlike JSON, HTML, Markdown, and now SARIF, none exists
-today).
+oversight left out of any slice), HTML's own bucketing/section/compat-mode
+computation, SARIF's own rule-catalog/level-derivation/root-cause/
+scoped-gate computation, and JUnit's own per-finding verdict/category
+resolution, symbol/testcase tree, and root-cause grouping (see the
+respective progress updates above — every format's shared build call itself
+has now landed; only `disposition_audit` reuse was safely available beyond
+that for any of the three non-JSON/Markdown formats). None of this is an
+oversight: each is genuinely format-specific presentation, or would require
+a genuinely new shared-document field this initiative deliberately declined
+to invent mid-slice — see each progress update's own reasoning.
 
-**Scope decision: JSON's own `leaf`/`root-cause`/`--stat` report modes stay
-out of gap C.** Gap C, as this ADR states it, is one full-mode evaluation
-shared *across formats* (JSON-full vs. Markdown-full vs. HTML vs. SARIF vs.
-JUnit) — not a format's own internal alternate *views* collapsing into one
-shape. This section's "Landed" paragraph already treats Markdown's four
-views (full, review digest, leaf, root-cause) as four separate, legitimate
-document builds; JSON's `leaf`/`root-cause`/`--stat` modes are the same
-kind of thing, not the same fact set wearing different clothes —
-`_to_json_leaf` groups changes into a `leaf_changes`/`non_type_changes`
-split with its own per-entry shape, and `_to_json_root_cause` groups
-`changes` under `root_causes[]` by a computed `root_cause_id`. Forcing
-either onto `report_mode="full"`'s shape would either lose that grouping or
-require `build_report_document` to carry every mode's shape at once, which
-is not what "one document, many projections" means. `--stat`'s own
-separateness was already named by the duplication-and-convergence-
-assessment plan's `EvaluationSummary`-vs-full-document distinction;
-`leaf`/`root-cause` earn the same treatment by the same reasoning. What
-remains gap C is the default/full view specifically, across formats:
-JSON-full, Markdown-full/`review`, HTML's default view, and SARIF's default
-view now converge through `build_report_document` (see the progress updates
-above; HTML and SARIF only partially — their shared-document reuse is
-`disposition_audit` alone, not every fact the view needs); JUnit's own
-default view does not yet.
+**Gap C overall closure state, across all five named formats (JSON,
+Markdown-full/`review`, HTML, SARIF, JUnit) — 2026-09-07, JUnit slice, the
+last of the five.** What is genuinely converged: the *decision* layer —
+per-finding verdict/category (`report/finding.py`'s `ReportFinding`, used
+directly by JSON's severity JSON and by JUnit, wherever it is used, computed
+via the one canonical primitive), the gate decision
+(`policy/gate_decision.gate_decision_for_result`), and the disposition audit
+(`report/disposition_audit.py`'s `compute_disposition_audit`) — is resolved
+exactly once per render via `build_report_document` and *reused*, never
+re-derived, by JSON, Markdown/`review`, HTML, SARIF, and JUnit alike, for
+every fact each format actually reuses today. What remains legitimately
+format-specific presentation, precisely stated per format (not overclaimed):
+Markdown's `severity_groups` headed-section grouping and its `leaf`/
+`root-cause` alternate views; HTML's `removed`/`added`/`changed` bucketing,
+per-section `ChangeRow` tables, `compat_html`'s ABICC severity-band
+bucketing, and its `nav_bar`/`summary_table`/`gate_card`/`scoped_verdict`
+dataclasses; SARIF's rule catalog, per-result `level`/location derivation,
+root-cause grouping, and `scopedGate`/`severityGate`/coverage-notification
+blocks; and JUnit's per-finding verdict/category resolution (itself already
+routed through the canonical `ReportFinding` primitive, just not read off
+the shared document — see the JUnit progress update above for exactly why),
+symbol/testcase tree, and root-cause grouping. As the HTML and Markdown
+slices' own reports already found and this slice reconfirms for SARIF and
+JUnit: most of each format's own section/layout logic was never actually a
+second, independently-*decided* value at risk of drifting from another
+format's — it is presentation-only computation over already-agreed facts,
+which is what "converged" means in this ADR's sense (*cannot disagree on a
+decision*), not "byte-identical internal implementation" across formats.
+Closing any of the items in the paragraph above for real would mean adding
+a new field to `ReportDocument` for that format's own shape first (as each
+format's own progress update says), which is deliberately out of scope for
+this initiative's five slices — a further, separately-scoped piece of work
+if a future session judges it worth doing.
 
 **Durable lessons.**
 
