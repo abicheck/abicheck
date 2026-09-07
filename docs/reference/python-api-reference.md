@@ -333,7 +333,6 @@ Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
 | `contract_mode` | `str \| None` | `None` |
-| `cross_source_checks` | `bool` | `True` |
 
 **Returns:** `DiffResult`
 

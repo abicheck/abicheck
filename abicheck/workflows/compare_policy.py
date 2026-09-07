@@ -172,7 +172,6 @@ def compare_snapshots(
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
-    cross_source_checks: bool = True,
 ) -> DiffResult:
     """Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 
@@ -191,12 +190,18 @@ def compare_snapshots(
     chokepoint is where it happens for every caller that reaches ``compare()``
     through here, ``service_compare_pipeline.classify_compare_pair`` included.
 
-    *cross_source_checks* mirrors :func:`~abicheck.checker.compare`'s own
-    keyword of the same name (ADR-068 D3/D4/D5) -- **on by default** here
-    too, so every front end reaching ``compare()`` through this chokepoint
-    (CLI, typed API, Action) runs the migrated cross-source stage
-    automatically, with no flag of its own. Kept as a real, forwarded
-    parameter (rather than dropped) only so a test can isolate the stage.
+    The migrated cross-source stage (ADR-068 D3/D4/D5, see
+    :func:`~abicheck.checker.compare`'s own ``cross_source_checks``
+    keyword) always runs here -- every front end reaching ``compare()``
+    through this Tier-2 chokepoint (CLI, typed API, Action) gets it
+    automatically, with no flag of any kind. Deliberately **not**
+    forwarded as a parameter of this public wrapper (unlike the Tier-1
+    core, which keeps it as an internal keyword purely so a test can
+    isolate the stage): this function is generated into
+    ``docs/reference/python-api-reference.md`` as the documented public
+    Python API, so exposing a way to disable it here would be exactly the
+    "flag that merely enables useful analysis" D5 rejects, reachable by
+    every real caller of this module.
 
     Raises:
         ValidationError: *contract_mode* is not one of ``public``/``exports``/
@@ -241,7 +246,6 @@ def compare_snapshots(
         contract_mode=contract_mode,
         old_public_entity_ids=query.resolve(old),
         new_public_entity_ids=query.resolve(new),
-        cross_source_checks=cross_source_checks,
     )
 
 

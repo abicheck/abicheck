@@ -223,6 +223,30 @@ def test_compare_runs_the_stage_by_default():
     assert evolved[0].kind == ChangeKind.UNVERSIONED_EXPORTED_SYMBOL
 
 
+def test_compare_snapshots_runs_the_stage_by_default_too():
+    """The Tier-2 public wrapper (``workflows.compare_policy.
+    compare_snapshots``, re-exported as ``service.compare_snapshots``) does
+    not expose ``cross_source_checks`` at all -- unlike the Tier-1 core, it
+    is generated into ``docs/reference/python-api-reference.md`` as the
+    documented public Python API, so a caller here can never suppress the
+    automatic stage (ADR-068 D5). Same assertion as
+    ``test_compare_runs_the_stage_by_default`` above, through the public
+    wrapper instead of the core verb directly."""
+    from abicheck.workflows.compare_policy import compare_snapshots
+
+    old = _snap(None, version="1.0")  # no ELF at all -> not evaluated
+    new = _snap(_versioned_elf(("_Z6leakyv",)), version="1.1")
+    result = compare_snapshots(old, new)
+    evolved = [
+        c
+        for c in result.changes
+        if getattr(c, "cross_source_evolution", None) is not None
+    ]
+    assert len(evolved) == 1
+    assert evolved[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED
+    assert evolved[0].kind == ChangeKind.UNVERSIONED_EXPORTED_SYMBOL
+
+
 def test_compare_no_finding_is_a_true_no_op():
     """When neither side's evidence flags anything, running the stage
     unconditionally must not add so much as an empty marker -- the exact
