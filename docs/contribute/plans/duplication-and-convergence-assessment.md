@@ -1743,13 +1743,48 @@ documented scope exclusion, not an oversight — see ADR-061's own gap C
 status note, same date, for why). See that same note for the precise
 JSON-full scope.
 
-**Assessment of the remaining four formats (2026-09-07, same session): each
-needs its own real, per-field convergence work, not a mechanical swap.**
+**Progress update (2026-09-07, later same day): Markdown-full and `review`
+now also route through the one shared build.**
+`service_render.render_output()`'s markdown branch (`report_mode == "full"`
+only) and its `review` branch each call `build_report_document(result,
+...)` once and thread the resulting `ReportDocument` into
+`to_markdown`/`to_review_digest` -> `report/render_markdown_document.py`'s
+`build_markdown_document`/`build_review_digest_document` (both gained an
+optional `report_document` parameter; omitting it keeps the prior,
+independent-build behaviour for any existing direct caller). Those two
+functions reuse the shared document's `disposition_audit` field instead of
+independently calling `compute_disposition_audit` a second time. This closes
+the *structural* half of the Markdown-full bullet below (one build call,
+not two) but deliberately does **not** attempt the bullet's own harder
+half — giving `severity_groups`' per-group `oneline`/`note_lines` shape a
+home on the shared document so Markdown could read it instead of deriving
+it. On inspection that remaining piece, and every other Markdown-full
+section (`headline`, `policy`, `confidence`, etc.), was never actually a
+*second, independently decided* value at risk of drifting from JSON's own:
+every classification it depends on (`categorize_changes`,
+`gate_eligible_changes`, `apply_show_only`,
+`_suppress_dangling_correlation_notes`, `impact_for`) is already the
+identical shared pure function JSON's build calls — calling the same
+deterministic function of `(result, ...)` twice cannot disagree, only
+costs a redundant call. So the genuinely available, byte-for-byte-safe
+convergence in this slice was routing-plus-`disposition_audit`, not a
+rewrite of every section to read a JSON-shaped field with no matching
+presentation shape. `review` converges the same way (it already used
+`report_findings_for` for its own impacted-symbol list, unchanged here).
+Markdown's `leaf`/`root-cause` alternate views are untouched by this slice
+and remain their own separate, legitimate documents, same reasoning as
+before. Verified against the pre-change output via the markdown/review test
+suites plus the full golden suite (byte-identical).
+
+**Assessment of the remaining formats (2026-09-07, same session; Markdown-full/
+`review` partially closed later the same day -- see the progress update
+above): each needs its own real, per-field convergence work, not a
+mechanical swap.**
 Before stopping this slice of work, each remaining format's own build
 function was read in full to judge whether reading from
 `build_report_document`'s JSON-shaped mapping would be a safe, close-to-
-mechanical substitution or genuinely new engineering. All four are the
-latter:
+mechanical substitution or genuinely new engineering. All four were the
+latter at the time of this assessment:
 
 - **Markdown-full** (`report/render_markdown_document.py`'s
   `build_markdown_document`) groups changes into `severity_groups` --
@@ -1762,7 +1797,11 @@ latter:
   decision, but the display grouping itself is a fact `build_report_document`
   would need to gain (once, as a shared field) before Markdown could read
   it instead of deriving it; that is genuinely new shared-document design,
-  not a substitution in the existing build.
+  not a substitution in the existing build. **Update, later the same day:**
+  the structural half (one shared build call, `disposition_audit` reused
+  from it) landed -- see the progress update above; `severity_groups` itself
+  still has no shared-document field and stays a Markdown-side derivation,
+  for the reason just given.
 - **HTML** (`html_report.build_html_document`) has the same shape of gap,
   one level further: `removed`/`added`/`changed` buckets, per-section
   `_build_sections_data` rows, `compat_html`'s ABICC 2-way verdict
@@ -1800,11 +1839,12 @@ deliberately not attempted in this session beyond JSON: the risk of an
 unverified, rushed rewrite of any of these four (1200+ line files, in
 SARIF's/JUnit's case, with no golden-checked intermediate shape yet) regressing
 already-pinned output was judged higher than the value of a partial,
-unverified attempt. Left for a following, similarly-scoped session per
-format, in the order this codebase's own machinery makes least risky:
-Markdown-full first (already has the closest-shaped `compute_*`/`render_*`
-split and shares `ReportFinding` with JSON already), then HTML, then SARIF,
-then JUnit.
+unverified attempt at the time. Left for a following, similarly-scoped
+session per format, in the order this codebase's own machinery makes least
+risky: Markdown-full first (already had the closest-shaped `compute_*`/
+`render_*` split and shares `ReportFinding` with JSON already) -- **done for
+its structural half, later the same day, see the progress update above** --
+then HTML, then SARIF, then JUnit (still open).
 
 ### Phase 5 — Migrate compatibility and multi-artifact operations
 

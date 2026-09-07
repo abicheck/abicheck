@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..severity import SeverityConfig
+    from .document import ReportDocument
 
 
 def to_markdown(
@@ -64,7 +65,14 @@ def to_markdown(
     show_recommendation: bool = False,
     demangle: bool = False,
     contract_evaluation: bool = False,
+    report_document: ReportDocument | None = None,
 ) -> str:
+    """See :func:`~abicheck.report.render_markdown_document.
+    build_markdown_document`'s own docstring for *report_document* (ADR-061
+    gap C) -- forwarded unchanged to the full-mode (``report_mode="full"``)
+    document build only; ``--stat`` and the ``leaf``/``root-cause`` alternate
+    views ignore it, since those stay their own separate documents."""
+
     # Human-facing only: optionally demangle Itanium C++ symbols in the rendered
     # output. Machine formats (JSON/SARIF/JUnit) keep the raw mangled symbols.
     def _out(text: str) -> str:
@@ -105,6 +113,7 @@ def to_markdown(
             severity_config=severity_config,
             show_recommendation=show_recommendation,
             demangle=demangle,
+            report_document=report_document,
         )
     )
 
@@ -224,6 +233,7 @@ def to_review_digest(
     result: DiffResult,
     *,
     severity_config: SeverityConfig | None = None,
+    report_document: ReportDocument | None = None,
 ) -> str:
     """Compact GitHub-facing review digest (Markdown).
 
@@ -237,6 +247,12 @@ def to_review_digest(
     item 1: crosses the canonical ``ReportDocument`` boundary via
     ``report/render_markdown_document.py`` — the same fact/formatting split
     JSON/SARIF/JUnit/``--stat``/HTML already use.
+
+    *report_document* (ADR-061 gap C) is the one shared
+    ``report_mode="full"`` document ``service_render.render_output``'s
+    ``review`` branch builds once via ``report.build.build_report_document``
+    and forwards here -- see ``build_review_digest_document``'s own
+    docstring for exactly what it is reused for.
     """
     from .render_markdown_document import (
         build_review_digest_document,
@@ -244,5 +260,9 @@ def to_review_digest(
     )
 
     return render_review_digest_document(
-        build_review_digest_document(result, severity_config=severity_config)
+        build_review_digest_document(
+            result,
+            severity_config=severity_config,
+            report_document=report_document,
+        )
     )

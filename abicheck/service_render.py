@@ -192,9 +192,16 @@ def render_output(
         )
 
     if fmt == "review":
+        # ADR-061 Phase 2 gap C: review is unconditional-recommendation
+        # markdown over the same one shared document JSON's full mode
+        # already builds -- see report/build.py's module docstring.
+        from .report.build import build_report_document
         from .reporter import to_review_digest
 
-        txt = to_review_digest(result, severity_config=severity_config)
+        review_doc = build_report_document(result, severity_config=severity_config)
+        txt = to_review_digest(
+            result, severity_config=severity_config, report_document=review_doc
+        )
         if demangle:
             from .demangle import demangle_text
 
@@ -220,6 +227,25 @@ def render_output(
     # explicitly) still gets it suppressed here, same as before this PR
     # (Codex review, fresh evidence -- an earlier revision hard-coded True
     # regardless of the caller's own value).
+    # ADR-061 Phase 2 gap C: the default (full) view is built through the
+    # one shared document choke point (report.build.build_report_document),
+    # the same as JSON's report_mode="full" build -- see report/build.py's
+    # module docstring. --stat (handled above) and the leaf/root-cause
+    # alternate views stay their own separate, legitimate documents (this
+    # ADR's own scoping), so the shared build only runs for report_mode ==
+    # "full", not wastefully for a report_mode that would ignore it.
+    markdown_doc = None
+    if report_mode == "full":
+        from .report.build import build_report_document
+
+        markdown_doc = build_report_document(
+            result,
+            show_only=show_only,
+            show_impact=show_impact,
+            severity_config=severity_config,
+            require_complete_analysis=require_complete_analysis,
+            contract_evaluation=contract_evaluation,
+        )
     md = to_markdown(
         result,
         show_only=show_only,
@@ -228,6 +254,7 @@ def render_output(
         severity_config=severity_config,
         show_recommendation=show_recommendation,
         contract_evaluation=contract_evaluation,
+        report_document=markdown_doc,
     )
     if follow_deps and (old.dependency_info or (new and new.dependency_info)):
         md += _render_deps_section_md(old, new)
