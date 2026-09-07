@@ -204,7 +204,9 @@ class TestRunDumpRequest:
         def _boom(*args, **kwargs):  # pragma: no cover - must never run
             raise AssertionError("resolve_input reached despite an invalid request")
 
-        monkeypatch.setattr(service, "resolve_input", _boom)
+        import abicheck.workflows.input_resolution as _input_resolution
+
+        monkeypatch.setattr(_input_resolution, "resolve_input", _boom)
         with pytest.raises(ValidationError):
             service.run_dump_request(
                 DumpRequest(input=InputSpec(path=snap_path), lang="rust")
@@ -248,7 +250,9 @@ class TestRunDumpRequest:
             captured["public_headers"] = list(kwargs.get("public_headers") or [])
             return original(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service, "resolve_input", _spy)
+        import abicheck.workflows.input_resolution as _input_resolution
+
+        monkeypatch.setattr(_input_resolution, "resolve_input", _spy)
         service.run_dump_request(
             DumpRequest(input=InputSpec(path=snap_path, headers=(hdr,)), depth="binary")
         )
@@ -277,7 +281,9 @@ class TestRunDumpRequest:
             )
             return original(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service, "resolve_input", _spy)
+        import abicheck.workflows.input_resolution as _input_resolution
+
+        monkeypatch.setattr(_input_resolution, "resolve_input", _spy)
         service.run_dump_request(
             DumpRequest(
                 input=InputSpec(
@@ -303,7 +309,9 @@ class TestRunDumpRequest:
             captured["include_dependencies"] = kwargs.get("include_dependencies")
             return original(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service, "resolve_input", _spy)
+        import abicheck.workflows.input_resolution as _input_resolution
+
+        monkeypatch.setattr(_input_resolution, "resolve_input", _spy)
         service.run_dump_request(
             DumpRequest(
                 input=InputSpec(
@@ -337,7 +345,9 @@ class TestRunDumpRequest:
             captured["debug_format"] = kwargs.get("debug_format")
             return original(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service, "resolve_input", _spy)
+        import abicheck.workflows.input_resolution as _input_resolution
+
+        monkeypatch.setattr(_input_resolution, "resolve_input", _spy)
         service.run_dump_request(
             DumpRequest(input=InputSpec(path=snap_path), debug_format="AUTO")
         )
@@ -446,13 +456,14 @@ class TestResolveExecuteDumpRequestSplit:
     """
 
     def test_resolve_never_invokes_resolve_input(self, snap_path: Path, monkeypatch):
-        from abicheck import service
         from abicheck.service_dump_pipeline import resolve_dump_request
 
         def _boom(*args, **kwargs):  # pragma: no cover - must never run
             raise AssertionError("resolve_input reached during resolve-only step")
 
-        monkeypatch.setattr(service, "resolve_input", _boom)
+        import abicheck.workflows.input_resolution as _input_resolution
+
+        monkeypatch.setattr(_input_resolution, "resolve_input", _boom)
         resolved = resolve_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
         assert resolved.request.input.path == snap_path
 
@@ -798,7 +809,9 @@ class TestAndroidFrontendIsNotAHeaderBackend:
             captured["frontend"] = None if ctx is None else ctx.frontend
             return original(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service, "resolve_input", _spy)
+        import abicheck.workflows.input_resolution as _input_resolution
+
+        monkeypatch.setattr(_input_resolution, "resolve_input", _spy)
         return captured
 
     def test_dump_request_downgrades_android_to_auto(
@@ -901,7 +914,9 @@ class TestBuildDerivedIncludeSeeding:
             captured["includes"] = list(includes or [])
             return original(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service, "resolve_input", _spy)
+        import abicheck.workflows.input_resolution as _input_resolution
+
+        monkeypatch.setattr(_input_resolution, "resolve_input", _spy)
         service.run_dump_request(
             DumpRequest(
                 input=InputSpec(path=snap_path, headers=(header,), build_info=tmp_path)
@@ -954,7 +969,9 @@ class TestBuildDerivedIncludeSeeding:
             order.append("resolve")
             return original(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(service, "resolve_input", _spy)
+        import abicheck.workflows.input_resolution as _input_resolution
+
+        monkeypatch.setattr(_input_resolution, "resolve_input", _spy)
         service.run_dump_request(
             DumpRequest(
                 input=InputSpec(path=snap_path, headers=(header,), build_info=tmp_path)
@@ -1302,9 +1319,10 @@ def test_resolve_side_snapshot_impl_forwards_gated_build_inputs_to_embed(
     builds. _resolve_side_snapshot_impl computes the allow_build_query gate
     once and forwards the identical (gated) values to both."""
     # ADR-061 Phase 3: patch the implementation owner
-    # (`workflows.artifact.execute`), not the `service_input_resolution`
-    # facade -- the caller reads the owner's reference, never the facade's.
-    from abicheck import service
+    # (`workflows.artifact.execute`/`workflows.input_resolution`), not the
+    # `service`/`service_input_resolution` facades -- the caller reads the
+    # owner's reference, never the facade's.
+    import abicheck.workflows.input_resolution as _input_resolution
     from abicheck.model import AbiSnapshot
     from abicheck.service_compare_evidence import SideEvidence
     from abicheck.workflows.artifact import execute as sir
@@ -1323,7 +1341,9 @@ def test_resolve_side_snapshot_impl_forwards_gated_build_inputs_to_embed(
         lambda *a, **k: ([], None, False, []),
     )
     monkeypatch.setattr(
-        service, "resolve_input", lambda *a, **k: AbiSnapshot(library="x", version="1")
+        _input_resolution,
+        "resolve_input",
+        lambda *a, **k: AbiSnapshot(library="x", version="1"),
     )
 
     embed_captured: dict[str, object] = {}
@@ -1407,8 +1427,8 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
     def test_collector_populates_defines_and_conditional_fields(
         self, monkeypatch, tmp_path: Path
     ) -> None:
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import (
-            service,
             service_input_resolution as sir,
         )
         from abicheck.service_compare_evidence import SideEvidence
@@ -1423,7 +1443,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         db = self._compile_db(tmp_path, src, "-DGUARD=1")
 
         monkeypatch.setattr(
-            service,
+            _input_resolution,
             "resolve_input",
             lambda *a, **k: AbiSnapshot(
                 library="lib", version="1", from_headers=True, elf=ElfMetadata()
@@ -1462,8 +1482,8 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         here by passing `fmt=None` (what the caller would have computed
         for the raw linker-script text) while the resolved snapshot is a
         real ELF one."""
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import (
-            service,
             service_input_resolution as sir,
         )
         from abicheck.service_compare_evidence import SideEvidence
@@ -1478,7 +1498,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         db = self._compile_db(tmp_path, src, "-DGUARD=1")
 
         monkeypatch.setattr(
-            service,
+            _input_resolution,
             "resolve_input",
             lambda *a, **k: AbiSnapshot(
                 library="lib", version="1", from_headers=True, elf=ElfMetadata()
@@ -1511,8 +1531,8 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         (``Path(dir).read_text()`` raises ``OSError``, silently caught and
         skipped by ``collect_build_context``, leaving ``conditional_fields``
         empty for the common directory-``-H`` case)."""
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import (
-            service,
             service_input_resolution as sir,
         )
         from abicheck.service_compare_evidence import SideEvidence
@@ -1529,7 +1549,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         db = self._compile_db(tmp_path, src, "-DGUARD=1")
 
         monkeypatch.setattr(
-            service,
+            _input_resolution,
             "resolve_input",
             lambda *a, **k: AbiSnapshot(
                 library="lib", version="1", from_headers=True, elf=ElfMetadata()
@@ -1565,9 +1585,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         P0.3 L3->L2-folded ``CompileContext`` this function also resolves
         internally -- else a build-derived define would be unioned
         snapshot-wide (the ninth finding in AGENTS.md's L3->L2-fold entry)."""
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import (
             header_conditionals as _hc,
-            service,
             service_input_resolution as sir,
         )
         from abicheck.service_compare_evidence import SideEvidence
@@ -1579,7 +1599,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         db = self._compile_db(tmp_path, src, "-DL3ONLY=1")
 
         monkeypatch.setattr(
-            service,
+            _input_resolution,
             "resolve_input",
             lambda *a, **k: AbiSnapshot(
                 library="lib", version="1", from_headers=True, elf=ElfMetadata()
@@ -1633,9 +1653,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
     ) -> None:
         """No ``build_info`` at all: the collector must not run (and must not
         raise) -- a plain context-free dump is still the common case."""
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import (
             header_conditionals as _hc,
-            service,
             service_input_resolution as sir,
         )
         from abicheck.service_compare_evidence import SideEvidence
@@ -1644,7 +1664,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
 
         monkeypatch.setattr(
-            service,
+            _input_resolution,
             "resolve_input",
             lambda *a, **k: AbiSnapshot(
                 library="lib", version="1", from_headers=True, elf=ElfMetadata()
@@ -1681,9 +1701,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         shared pipeline must not attach build-context evidence to a PE/
         Mach-O snapshot, or it would silently disagree with the native
         PE/Mach-O dump path."""
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import (
             header_conditionals as _hc,
-            service,
             service_input_resolution as sir,
         )
         from abicheck.service_compare_evidence import SideEvidence
@@ -1695,7 +1715,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         db = self._compile_db(tmp_path, src, "-DGUARD=1")
 
         monkeypatch.setattr(
-            service,
+            _input_resolution,
             "resolve_input",
             lambda *a, **k: AbiSnapshot(library="lib", version="1", from_headers=True),
         )
@@ -1733,9 +1753,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         pipeline always calls the ADR-039 collector with the default,
         unfiltered ``source_filter=None`` for a real compile database +
         headers, rather than raising or narrowing."""
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import (
             header_conditionals as _hc,
-            service,
             service_input_resolution as sir,
         )
         from abicheck.service_compare_evidence import SideEvidence
@@ -1747,7 +1767,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         db = self._compile_db(tmp_path, src, "-DGUARD=1")
 
         monkeypatch.setattr(
-            service,
+            _input_resolution,
             "resolve_input",
             lambda *a, **k: AbiSnapshot(
                 library="lib", version="1", from_headers=True, elf=ElfMetadata()
@@ -1791,9 +1811,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         loaded snapshot's own recorded build-context evidence with
         unrelated data -- ``side.path`` here is a JSON file, not an ELF
         binary or a followed linker script, so the collector must not run."""
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import (
             header_conditionals as _hc,
-            service,
             service_input_resolution as sir,
         )
         from abicheck.service_compare_evidence import SideEvidence
@@ -1808,7 +1828,7 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         snapshot_path.write_text('{"schema_version": 25}\n', encoding="utf-8")
 
         monkeypatch.setattr(
-            service,
+            _input_resolution,
             "resolve_input",
             lambda *a, **k: AbiSnapshot(
                 library="lib", version="1", from_headers=True, elf=ElfMetadata()
@@ -1862,7 +1882,6 @@ class TestSeedCleanupsDrainBeforeTheEmbedStep:
     def test_cleanups_run_after_the_parse_and_before_the_embed(
         self, monkeypatch, tmp_path: Path
     ) -> None:
-        from abicheck import service
         from abicheck.service_compare_evidence import SideEvidence
         from abicheck.workflows.artifact import execute as sir
 
@@ -1883,7 +1902,9 @@ class TestSeedCleanupsDrainBeforeTheEmbedStep:
             events.append("parse")
             return AbiSnapshot(library="lib", version="1", from_headers=True)
 
-        monkeypatch.setattr(service, "resolve_input", _fake_resolve)
+        import abicheck.workflows.input_resolution as _input_resolution
+
+        monkeypatch.setattr(_input_resolution, "resolve_input", _fake_resolve)
         monkeypatch.setattr(
             sir,
             "embed_side_build_source",
@@ -1917,7 +1938,6 @@ class TestSeedCleanupsDrainBeforeTheEmbedStep:
         backstop. Neither may run the same already-handed-off thunk twice."""
         import pytest
 
-        from abicheck import service
         from abicheck.service_compare_evidence import SideEvidence
         from abicheck.workflows.artifact import execute as sir
 
@@ -1934,8 +1954,9 @@ class TestSeedCleanupsDrainBeforeTheEmbedStep:
         def _boom(*_a, **_k):
             raise SnapshotError("nope")
 
-        monkeypatch.setattr(service, "resolve_input", _boom)
+        import abicheck.workflows.input_resolution as _input_resolution
 
+        monkeypatch.setattr(_input_resolution, "resolve_input", _boom)
         side = InputSpec(path=tmp_path / "lib.so", headers=(hdr,))
         evidence = SideEvidence(
             headers=[hdr], compile=None, collect_mode="off", dump_manifest=None

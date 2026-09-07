@@ -981,40 +981,131 @@ shorter.
 
 ### A. Real dependency violations, not their visibility to the checker
 
-`service.py` (`workflows`) calls `workflows/render.py` (`workflows`), which
-resolves `service_render.py` (`frontends`) through
-`importlib.import_module` inside each function body — explicitly, because a
-static import would expose the forbidden `workflows -> frontends` edge and,
-with the allowed `frontends -> report -> workflows` edges, a cycle. The
-checker walks `ast.Import`/`ast.ImportFrom` and does not see it. Deferring
-an import changes when a dependency resolves, not which layer depends on
-which; D6 says imports expose ownership, and a bridge introduced to evade
-that is unresolved debt, not a completed migration.
+**Closure package 2 re-measured this gap rather than trusting the list
+above** (this ADR's own repeatedly-learned lesson): a real, repo-wide AST
+scan for every first-party `importlib.import_module("...")` call found 21
+call sites, not the 6 this section used to name — ADR-063 track T10 had
+already closed `report/render_markdown_document.py`'s and
+`report/scoped_gate.py`'s bridges before this package started, and the
+remaining 21 sort into three groups, not one:
 
-The same audit covers the other first-party dynamic bridges introduced for
-this reason: `service.py`'s `service_header_scoped` binding,
-`workflows/input_resolution.py`'s `service_dump_native` binding, and
-`report/render_markdown_document.py`'s and `report/scoped_gate.py`'s edges
-back into the flat `reporter`/`reporter_markdown` modules. Not every dynamic
-import is wrong — a genuinely dynamic or plugin-style load is a legitimate,
-documented exception — but a literal `import_module("...")` of a known
-first-party module counts as an edge. These four are recorded *here*, not as
-`architecture/debt.yaml` entries: that ledger's schema is keyed to
-file-size/no-growth baselines, and an architectural exception tracked by
-line count is exactly the mismatch gap F names. Closure package 2 either
-removes each edge or gives the ledger a shape that can hold it.
+- **A real, forbidden-direction evasion** (`workflows -> frontends`,
+  workflows may not import frontends): `workflows/render.py` resolving
+  `service_render.py` through `importlib.import_module("..service_render",
+  __package__)` inside each function body — the exact shape this section
+  used to describe. **Closed**: `workflows/render.py` retired; `service.py`
+  (a flat, `workflows`-legacy-classified module, the one real caller) now
+  imports `service_render` directly and statically. The edge itself is
+  real and still crosses `workflows -> frontends` — retiring the bridge
+  module made it visible, it did not make the direction legal — so it is
+  recorded as a reviewed `dependency-direction` exception in
+  `architecture/debt.yaml`'s new `dependency_direction_exceptions` (see
+  below), not silently passing.
+- **A second real, forbidden-direction evasion this re-measurement
+  found that the original gap A text never named**:
+  `cli_dump_helpers.py` (`frontends`) resolving `header_conditionals.py`
+  (`extract`) the same way — frontends may only reach extract through
+  workflows. **Closed the same way**: now a plain static re-export,
+  recorded as a second `dependency_direction_exceptions` entry.
+- **Legitimate same-layer or already-legal-direction bridges** — the
+  other 19 call sites, all of the shape D6 already carves out
+  ("genuinely dynamic or plugin-style loading is the narrow, documented
+  exception") or the same-layer back-compat re-export shim
+  `AGENTS.md`'s own "Moving helpers out of a module that re-exports
+  them?" guidance recommends: `service.py`'s `service_header_scoped`
+  binding, `workflows/input_resolution.py`'s `service_dump_native`
+  binding, `comparability.py` <-> `comparability_profile.py`,
+  `type_reachability.py` <-> `type_reachability_stdlib_spellings.py`,
+  `serialization.py` <-> `bundle_facts_serialization.py`,
+  `model/snapshot.py`'s `semantic_ir_legacy_adapter` assertion,
+  `policy/public_surface.py`'s two split-module re-exports,
+  `buildsource/source_graph.py`/`inline.py`/`template_graph.py`'s own
+  split-module shims, `reporter_markdown.py` -> `report/
+  dispatch_markdown.py`, `annotations.py` -> `annotations_step_summary.py`,
+  `cli_buildsource.py` -> `cli_graph.py`/`cli_buildsource_helpers.py`,
+  `cli.py`'s `MOVED`-table facade `__getattr__`, and
+  `frontends/cli/commands/compare_bundle_facts.py`'s two bindings into
+  `workflows`. Each one either stays inside one layer (so no direction is
+  even at stake — the bridge exists purely to avoid growing the
+  pre-existing, already-baselined `cli_buildsource`/`scan_engine` import
+  cycle, or a same-layer back-compat split-module cycle) or crosses an
+  *already-legal* direction (`frontends -> workflows`). None evades
+  `check_architecture.py`'s direction check in the sense this gap is
+  about; each evades only `check_ai_readiness.py`'s `import-cycle-growth`
+  scan, which is deliberately a *different*, broader question (see the
+  completion test below for why that scan is not widened here).
+  `detector_registry.py`'s plugin-discovery loop and
+  `policy/public_surface.py`'s dict-keyed target (a `Name`, not a string
+  literal) are D6's own named "genuinely dynamic" exception outright — no
+  literal target to resolve at all.
 
-**The fix is composition at the outer boundary, not a better bridge.** A
-supported `service.render_output()` can stay available: `workflows` returns
-completed results and a `frontends`/API adapter invokes reporting, so the
-public path survives while the dependency direction becomes legal with the
-import *visible*. `workflows/render.py` retires with it.
+**The fix is composition at the outer boundary, not a better bridge** —
+for the `service.py -> service_render` edge specifically, this remains the
+correct target, not yet fully reachable in one pass. `workflows/render.py`
+has retired, and the import is real, static, and visible; what has *not*
+yet happened is `service.py` itself ceasing to be `workflows`-classified
+for this one responsibility, since `service.py` is also imported, directly
+off the flat facade, by three other `workflows`-classified modules
+(`abicheck/l0_export_delta.py`, `abicheck/appcompat.py`,
+`abicheck/service_scan.py`) that would need their own D6 migration onto
+the real workflow owner first — reclassifying `service.py` today would
+just move today's invisible-bridge problem into three *new*, real
+`workflows -> frontends` edges at those call sites instead of closing it.
+That migration is recorded as the accepted exception's own stated
+follow-up, not attempted in this pass. The `cli_dump_helpers.py ->
+header_conditionals.py` edge has the same shape: closing it for real needs
+a `workflows`-owned wrapper `cli.py`'s and `frontends/cli/commands/
+dump.py`'s call sites route through instead of naming the `extract`-owned
+functions directly.
 
-**Completion test:** `scripts/check_architecture.py` and
-`import-cycle-growth` resolve literal `importlib.import_module` calls (and
-simple module-level aliases of them) as import edges; the tree passes with
-those edges visible; every remaining dynamic first-party load is either
-allowed by direction or carries an explicit, reviewed exception.
+**Completion test — met for the direction check, deliberately not
+extended to `import-cycle-growth`:** `scripts/check_architecture.py`'s
+`_imports()` now resolves a literal `importlib.import_module("...")` call
+(including a module-level alias such as `_importlib = importlib`, and the
+`__import__("importlib").import_module(...)` chained form) as a real
+import edge for the `dependency-direction` check, with focused unit tests
+over miniature trees proving both directions: an evasion of a forbidden
+direction fails, a same-layer or already-legal-direction bridge does not,
+and a genuinely dynamic (non-literal) target is left alone rather than
+guessed at. Every one of the 21 real call sites was re-checked against the
+strengthened tool; the only two that turned into `dependency-direction`
+findings are the two named above, both now resolved via the reviewed
+`dependency_direction_exceptions` mechanism below rather than left dynamic
+and unlisted.
+
+`check_ai_readiness.py`'s `import-cycle-growth` scan is **deliberately not
+widened** the same way, on reconsideration of the task as originally
+framed: that scan's own docstring already documents the identical
+`cli_buildsource -> cli_graph` shim as its intended, narrow escape hatch
+("If you switch a shim like that to a static import, expect this gate to
+flag the cycle... Fix the direction... instead"), and `AGENTS.md`'s own
+"Moving helpers out of a module that re-exports them?" guidance
+prescribes exactly this `importlib.import_module` pattern as the
+*correct* way to preserve a back-compat re-export path without
+recreating a real two-way file-level import cycle. Making that scan see
+these edges would not surface a new architectural problem — every one of
+the 19 legitimate bridges above is a deliberate, reviewed answer to a
+real two-file cycle a split-for-file-size already created — it would
+instead flag ~19 already-accepted, already-documented patterns across the
+codebase as new cycle growth, which `AGENTS.md`'s own "Don't extend
+`IMPORT_CYCLE_ALLOWLIST`... as a routine step" rule and this closure
+package's "no new `IMPORT_CYCLE_ALLOWLIST` entries" constraint together
+rule out fixing by allowlisting. Widening that scan is not this gap's
+target (gap A is about *layer-direction* violations hidden from
+`check_architecture.py`, D6's own framing); doing so anyway would trade a
+closed gap for a large, unrelated wave of allowlist churn against a
+policy this repository has already, deliberately, decided the other way.
+
+**`architecture/debt.yaml`'s new shape**: `dependency_direction_exceptions`
+is the ledger shape this section previously said closure package 2 owed —
+distinct from the `files`/`no_growth` schema (`rule: "dependency-direction"`,
+keyed by `(path, target)`, not a line-count baseline), holding exactly the
+two edges above, each with an owner, a dated review, and a rationale
+naming the follow-up migration that would close it for real.
+`scripts/check_architecture.py` validates the new list's own schema (a
+malformed entry suppresses nothing) and consults it only for the exact
+`(path, target)` pair it names — every other`dependency-direction` finding
+still fails the gate.
 
 ### B. Public compatibility surfaces separated from ownership exemptions
 
@@ -1169,7 +1260,7 @@ failure that plan's phase ordering exists to prevent.
 | Order | Work package | Completion condition |
 |---|---|---|
 | 1 | Reconcile ADR scope and tracking | Status, acceptance gaps, and the links to ADR-062/063/068 agree; `scan` no longer appears as a future architecture example |
-| 2 | Close enforcement escapes and the rendering back-edge (gap A) | Dynamic first-party dependencies are visible to the checks; `workflows` no longer reaches frontend rendering; the public path stays, composed at an outer adapter |
+| 2 | Close enforcement escapes and the rendering back-edge (gap A) | A literal `importlib.import_module` call naming a first-party module is visible to `check_architecture.py`'s direction check as a real edge; `workflows/render.py` retires; the remaining `workflows -> frontends`/`frontends -> extract` edges this re-measurement found are real, static, visible, and recorded as reviewed `dependency_direction_exceptions` (not silently dynamic) pending the further migration each names; the public path stays, composed at an outer adapter |
 | 3 | Converge completed results and report projections (gap C) | One evaluated result supplies every format; no renderer derives a competing gate, disposition, or assurance decision |
 | 4 | Finish typed request/plan and operand convergence (gap D) | Equivalent CLI/API inputs produce equivalent resolved scope, configuration, acquisition records, and outcomes; coordinated with ADR-068's shared-driver work |
 | 5 | Close the storage/model splits (gap E) | Bundle values, persistence, evidence backfill, and orchestration have explicit owners; legacy-reader behavior is tested |

@@ -1292,8 +1292,9 @@ def test_run_compare_request_normalizes_lang(
         seen_langs.append(lang)
         return AbiSnapshot(library="liblang", version=version)
 
-    monkeypatch.setattr(service, "resolve_input", _spy_resolve_input)
+    import abicheck.workflows.input_resolution as _input_resolution
 
+    monkeypatch.setattr(_input_resolution, "resolve_input", _spy_resolve_input)
     req = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p), lang="C")
     service.run_compare_request(req)
 

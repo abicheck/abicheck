@@ -314,6 +314,109 @@ def _validate_debt(
     return baselines
 
 
+#: Fields every ``dependency_direction_exceptions`` entry must carry.
+DEPENDENCY_DIRECTION_EXCEPTION_FIELDS = frozenset(
+    {
+        "path",
+        "target",
+        "source_layer",
+        "target_layer",
+        "rule",
+        "owner",
+        "rationale",
+        "review_by",
+    }
+)
+
+
+def _validate_dependency_direction_exceptions(
+    config: dict[str, Any],
+    layers: Mapping[str, dict[str, Any]],
+    findings: list[Finding],
+) -> set[tuple[str, str]]:
+    """Validate ``architecture/debt.yaml``'s ``dependency_direction_exceptions``.
+
+    ADR-061 gap A: "these four are recorded here [ADR prose], not as
+    architecture/debt.yaml entries: that ledger's schema is keyed to
+    file-size/no-growth baselines... Closure package 2 either removes each
+    edge or gives the ledger a shape that can hold it." This is that shape --
+    a real, reviewed exception to the ``dependency-direction`` check itself
+    (never to ``no_growth``), each naming the exact ``(path, target)`` static
+    edge it accepts, not merely a file. Returns the accepted ``(path,
+    target)`` pairs; an entry that fails validation contributes nothing (a
+    malformed exception must not silently suppress a real finding).
+    """
+    raw_list = config.get("dependency_direction_exceptions", [])
+    if not isinstance(raw_list, list):
+        findings.append(
+            Finding(
+                "schema",
+                "architecture/debt.yaml: dependency_direction_exceptions must be a list",
+            )
+        )
+        return set()
+    accepted: set[tuple[str, str]] = set()
+    for index, raw in enumerate(raw_list):
+        where = f"architecture/debt.yaml dependency_direction_exceptions[{index}]"
+        if not isinstance(raw, dict):
+            findings.append(Finding("schema", f"{where}: must be a mapping"))
+            continue
+        missing = DEPENDENCY_DIRECTION_EXCEPTION_FIELDS - raw.keys()
+        if missing:
+            findings.append(
+                Finding("schema", f"{where}: missing {', '.join(sorted(missing))}")
+            )
+            continue
+        if raw.get("rule") != "dependency-direction":
+            findings.append(
+                Finding(
+                    "schema",
+                    f"{where}.rule: only 'dependency-direction' is supported",
+                )
+            )
+            continue
+        path = raw.get("path")
+        target = raw.get("target")
+        source_layer = raw.get("source_layer")
+        target_layer = raw.get("target_layer")
+        ok = True
+        for field, value in (
+            ("path", path),
+            ("target", target),
+            ("owner", raw.get("owner")),
+            ("rationale", raw.get("rationale")),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                findings.append(
+                    Finding("schema", f"{where}.{field}: must be non-empty")
+                )
+                ok = False
+        if source_layer not in layers:
+            findings.append(
+                Finding(
+                    "schema", f"{where}.source_layer: unknown layer {source_layer!r}"
+                )
+            )
+            ok = False
+        if target_layer not in layers:
+            findings.append(
+                Finding(
+                    "schema", f"{where}.target_layer: unknown layer {target_layer!r}"
+                )
+            )
+            ok = False
+        try:
+            dt.date.fromisoformat(raw.get("review_by", ""))
+        except (TypeError, ValueError):
+            findings.append(
+                Finding("schema", f"{where}.review_by: must be an ISO date")
+            )
+            ok = False
+        if ok and isinstance(path, str) and isinstance(target, str):
+            accepted.add((path, target))
+    return accepted
+
+
 def _line_count(path: Path) -> int:
     with path.open(encoding="utf-8") as stream:
         return sum(1 for _ in stream)
@@ -356,6 +459,108 @@ def _module_name(root: Path, path: Path) -> str:
     return ".".join(parts)
 
 
+def _importlib_aliases(tree: ast.Module) -> set[str]:
+    """Every local name that is bound to the ``importlib`` module itself.
+
+    ADR-061 D6: "a dynamic import is still a dependency" -- ``import
+    importlib`` / ``import importlib as _importlib`` are the two shapes
+    every first-party ``importlib.import_module(...)`` bridge in this
+    codebase actually uses (a bare ``from importlib import import_module``
+    does not occur here, so it is deliberately not modeled). A plain
+    ``X = importlib`` re-alias (the task's own worked example) is resolved
+    with one fixed-point pass over module-level assignments, since a
+    dynamic-bridge module rebinding its own already-imported ``importlib``
+    name is the only shape seen in practice -- not a general alias-tracking
+    dataflow analysis.
+    """
+    aliases = {"importlib"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "importlib":
+                    aliases.add(alias.asname or "importlib")
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in aliases
+            ):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id not in aliases:
+                        aliases.add(target.id)
+                        changed = True
+    return aliases
+
+
+def _is_import_module_call(node: ast.Call, importlib_aliases: set[str]) -> bool:
+    func = node.func
+    if isinstance(func, ast.Attribute) and func.attr == "import_module":
+        if isinstance(func.value, ast.Name) and func.value.id in importlib_aliases:
+            return True
+        # ``__import__("importlib").import_module(...)`` -- the one other
+        # shape a real first-party bridge in this codebase uses
+        # (``model/snapshot.py``'s cycle-avoiding assertion call).
+        if (
+            isinstance(func.value, ast.Call)
+            and isinstance(func.value.func, ast.Name)
+            and func.value.func.id == "__import__"
+            and len(func.value.args) == 1
+            and isinstance(func.value.args[0], ast.Constant)
+            and func.value.args[0].value == "importlib"
+        ):
+            return True
+    return False
+
+
+def _resolve_import_module_target(node: ast.Call, package: list[str]) -> str | None:
+    """Resolve a literal ``importlib.import_module(name[, package])`` call to
+    the absolute dotted module it names, or ``None`` when *name* is not a
+    string literal (a genuinely dynamic target -- see D6's own "genuinely
+    dynamic or plugin-style loading is the narrow, documented exception").
+
+    Mirrors :func:`_imports`'s own ``ast.ImportFrom`` relative-import
+    resolution: a leading-dot count of *n* plays the identical role
+    ``ast.ImportFrom.level`` plays there, and the anchor package is either
+    the call's own literal ``package``/second-positional argument, or (the
+    ``__package__`` shape every real call site in this codebase uses) this
+    module's own enclosing package -- the same ``package`` list ``_imports``
+    already computes for its own ``ImportFrom`` handling, passed in here
+    rather than recomputed.
+    """
+    if not node.args or not (
+        isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+    ):
+        return None
+    name = node.args[0].value
+    if not name.startswith("."):
+        return name or None
+    level = len(name) - len(name.lstrip("."))
+    rest = name[level:]
+    package_arg: ast.expr | None = None
+    if len(node.args) > 1:
+        package_arg = node.args[1]
+    else:
+        for kw in node.keywords:
+            if kw.arg == "package":
+                package_arg = kw.value
+    if isinstance(package_arg, ast.Name) and package_arg.id == "__package__":
+        anchor = package
+    elif isinstance(package_arg, ast.Constant) and isinstance(package_arg.value, str):
+        anchor = package_arg.value.split(".")
+    else:
+        # No resolvable anchor (omitted ``package``, or a variable) -- at
+        # runtime this either fails immediately or the anchor is itself
+        # dynamic; neither is a literal first-party edge we can name.
+        return None
+    keep = len(anchor) - (level - 1)
+    prefix = anchor[: max(keep, 0)]
+    target = ".".join([*prefix, *(rest.split(".") if rest else [])])
+    return target.rstrip(".") or None
+
+
 def _imports(
     path: Path, module: str, findings: list[Finding]
 ) -> Iterable[tuple[int, str]]:
@@ -372,8 +577,21 @@ def _imports(
     package = (
         module.split(".") if path.name == "__init__.py" else module.split(".")[:-1]
     )
+    importlib_aliases = _importlib_aliases(tree)
     result: list[tuple[int, str]] = []
     for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _is_import_module_call(
+            node, importlib_aliases
+        ):
+            # ADR-061 D6: "a dynamic import is still a dependency" -- a
+            # literal ``importlib.import_module("...")`` call naming a
+            # known first-party module is an import edge, whatever an
+            # ``ast.Import``/``ast.ImportFrom`` walk alone can see.
+            target = _resolve_import_module_target(node, package)
+            if target is not None and (
+                target == "abicheck" or target.startswith("abicheck.")
+            ):
+                result.append((node.lineno, target))
         if isinstance(node, ast.Import):
             result.extend((node.lineno, alias.name) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
@@ -594,6 +812,9 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
         )
         package_agents_limit = 150
     baselines = _validate_debt(debt, production_limit, test_limit, findings)
+    dependency_direction_exceptions = _validate_dependency_direction_exceptions(
+        debt, layers, findings
+    )
 
     base_has_contract = (
         _base_has_architecture_contract(root, base_revision) if base_revision else None
@@ -839,15 +1060,32 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
                         )
                     )
                 continue
-            graph[source_layer].add(target_layer)
             allowed = set(layers[source_layer]["may_import"])
             if target_layer not in allowed:
+                relative_path = path.relative_to(root).as_posix()
+                exempted = (
+                    relative_path,
+                    target,
+                ) in dependency_direction_exceptions or any(
+                    relative_path == exc_path
+                    and (target == exc_target or target.startswith(exc_target + "."))
+                    for exc_path, exc_target in dependency_direction_exceptions
+                )
+                if exempted:
+                    # ADR-061 gap A: a real, reviewed exception
+                    # (architecture/debt.yaml's dependency_direction_exceptions)
+                    # -- the edge is visible and legal-looking but its
+                    # direction stays accepted debt, not silently legal, so
+                    # it contributes to neither this finding nor the
+                    # responsibility-cycle graph below.
+                    continue
                 findings.append(
                     Finding(
                         "dependency-direction",
                         f"{path.relative_to(root)}:{lineno}: {source_layer} -> {target_layer} is forbidden; allowed: {', '.join(sorted(allowed)) or '(none)'}",
                     )
                 )
+            graph[source_layer].add(target_layer)
     cycle = _find_cycle(graph)
     if cycle:
         findings.append(

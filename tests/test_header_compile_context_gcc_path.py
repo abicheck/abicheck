@@ -855,9 +855,9 @@ def test_resolve_side_snapshot_seeds_clang_cl_gcc_path_end_to_end(
         captured.update(kwargs)
         return AbiSnapshot(library="lib", version="1.0", from_headers=True)
 
-    import abicheck.service as service_mod
+    import abicheck.workflows.input_resolution as input_resolution_mod
 
-    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+    monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
 
     side = InputSpec(path=so, headers=(header,), version="1.0", sources=tmp_path)
     evidence = SideEvidence(

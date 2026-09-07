@@ -2153,22 +2153,22 @@
     },
     {
       "path": "tests/test_scan_compare_parity.py",
-      "baseline_lines": 1697,
+      "baseline_lines": 1699,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +2 lines (ADR-061 closure package 2, gap A): workflows/artifact/execute.py's resolve_side_snapshot now calls workflows.input_resolution.resolve_input directly (its real owner) instead of through the flat abicheck.service facade, so this test's own monkeypatch moved from abicheck.service.resolve_input to abicheck.workflows.input_resolution.resolve_input -- one extra import line.",
       "review_by": "2026-11-30"
     },
     {
       "path": "tests/test_service_unit.py",
-      "baseline_lines": 5593,
+      "baseline_lines": 5599,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 5554 -> 5558 (2026-09-03): TestContractEvaluationThreading.test_contract_evaluation_appended_last_preserves_positional_order updated for run_compare's two new trailing severity_preset/exit_code_scheme parameters (Codex review, PR #1032: run_compare had no way to forward CompareRequest's ADR-064/PR G2 gate fields). Raised 5558 -> 5578 (2026-09-03, CodeRabbit review, fresh evidence, PR #1032): added test_trailing_params_are_actually_keyword_only, a regression test for run_compare's `*` separator fix (severity_preset/exit_code_scheme silently accepted positional binding, contradicting the docstring's own \"keyword-only\" claim for every param from debuginfod_url onward). Raised 5578 -> 5593 (2026-09-03, Codex P1 review, fresh evidence, PR #1032): that fix over-enforced -- the `*` landed before debuginfod_url, retroactively making every pre-existing param from there on keyword-only too, a public-API break for any real caller still passing one positionally. Renamed/rewrote the test as test_new_gate_params_are_keyword_only_without_breaking_older_ones: asserts severity_preset/exit_code_scheme are KEYWORD_ONLY and every older trailing param (debuginfod_url through depth) stays POSITIONAL_OR_KEYWORD.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 5554 -> 5558 (2026-09-03): TestContractEvaluationThreading.test_contract_evaluation_appended_last_preserves_positional_order updated for run_compare's two new trailing severity_preset/exit_code_scheme parameters (Codex review, PR #1032: run_compare had no way to forward CompareRequest's ADR-064/PR G2 gate fields). Raised 5558 -> 5578 (2026-09-03, CodeRabbit review, fresh evidence, PR #1032): added test_trailing_params_are_actually_keyword_only, a regression test for run_compare's `*` separator fix (severity_preset/exit_code_scheme silently accepted positional binding, contradicting the docstring's own \"keyword-only\" claim for every param from debuginfod_url onward). Raised 5578 -> 5593 (2026-09-03, Codex P1 review, fresh evidence, PR #1032): that fix over-enforced -- the `*` landed before debuginfod_url, retroactively making every pre-existing param from there on keyword-only too, a public-API break for any real caller still passing one positionally. Renamed/rewrote the test as test_new_gate_params_are_keyword_only_without_breaking_older_ones: asserts severity_preset/exit_code_scheme are KEYWORD_ONLY and every older trailing param (debuginfod_url through depth) stays POSITIONAL_OR_KEYWORD. Raised 5593 -> 5599 (ADR-061 closure package 2, gap A): workflows/artifact/execute.py's resolve_side_snapshot now calls workflows.input_resolution.resolve_input directly (its real owner) instead of through the flat abicheck.service facade, so the several existing monkeypatch.setattr(service_mod, \"resolve_input\", ...) call sites that exercise that path moved to abicheck.workflows.input_resolution.resolve_input -- one extra import line per call site.",
       "review_by": "2026-11-30"
     },
     {
@@ -2323,12 +2323,12 @@
     },
     {
       "path": "tests/test_typed_dump_request.py",
-      "baseline_lines": 1954,
+      "baseline_lines": 1975,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +21 lines (ADR-061 closure package 2, gap A): workflows/artifact/execute.py's resolve_side_snapshot now calls workflows.input_resolution.resolve_input directly (its real owner) instead of through the flat abicheck.service facade, so every one of this file's monkeypatch.setattr(service, \"resolve_input\", ...) call sites that exercises that path moved to abicheck.workflows.input_resolution.resolve_input -- one extra import line per call site, several call sites in this file.",
       "review_by": "2026-11-30"
     },
     {
@@ -2350,6 +2350,28 @@
       "owner": "abicheck maintainers",
       "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +1 line (2026-08-31): the BuildSourcePack storage/model split (Phase 5 residual) moved load/write/content_hash/verify_integrity/to_ref off the class into abicheck.buildsource.pack_io free functions; this module has no existing BuildSourcePack import to merge the new pack_io symbol onto.",
       "review_by": "2026-11-30"
+    }
+  ],
+  "dependency_direction_exceptions": [
+    {
+      "path": "abicheck/service.py",
+      "target": "abicheck.service_render",
+      "source_layer": "workflows",
+      "target_layer": "frontends",
+      "rule": "dependency-direction",
+      "owner": "abicheck maintainers",
+      "rationale": "ADR-061 gap A: abicheck.service.render_output is a documented public Python-API path (service.py's own __all__) whose implementation (service_render.py) genuinely needs report.py, so it is frontends-classified -- workflows may not import frontends. Previously bridged via workflows/render.py resolving importlib.import_module(\"..service_render\", __package__) inside each function body specifically so the workflows -> frontends edge stayed invisible to check_architecture.py's direction check (and, combined with the already-allowed frontends -> report -> workflows edges, a dependency cycle). workflows/render.py has been retired and service.py now imports service_render directly and statically -- the edge is real, visible, and unchanged in shape; only its invisibility is gone. Closing it for real means service.py itself stopping being workflows-classified for this responsibility (the ADR's own \"composition at the outer boundary\" language), which is a real, separate migration slice (service.py is imported by several other workflows-classified modules -- abicheck/l0_export_delta.py, abicheck/appcompat.py, abicheck/service_scan.py -- each of which would need to move off the abicheck.service facade onto the real workflows owner first, per D6, before service.py's own classification could change without creating new workflows -> frontends edges there instead) rather than a same-PR fix. Tracked as an accepted, reviewed exception rather than left dynamic and unlisted.",
+      "review_by": "2026-12-31"
+    },
+    {
+      "path": "abicheck/cli_dump_helpers.py",
+      "target": "abicheck.header_conditionals",
+      "source_layer": "frontends",
+      "target_layer": "extract",
+      "rule": "dependency-direction",
+      "owner": "abicheck maintainers",
+      "rationale": "ADR-061 gap A: compile_db_from_build_info/compile_db_for_filter_scope_check/compile_db_filter_scope_error/attach_build_context/user_define_flags moved to header_conditionals.py (extract-classified, PR C / ADR-039) but stayed reachable under their original names from cli_dump_helpers.py (frontends-classified) for cli.py's and frontends/cli/commands/dump.py's own `from .cli_dump_helpers import ...` call sites and existing tests. frontends may only reach extract through workflows, not directly -- previously bridged via a module-level __getattr__ resolving importlib.import_module(\"abicheck.header_conditionals\") lazily so the frontends -> extract edge stayed invisible to check_architecture.py. Now a plain static re-export (visible, unchanged in shape). Closing it for real needs a workflows-owned wrapper these two CLI call sites route through instead of importing the extract-owned functions by name, which is a real, separate migration slice, not a same-PR fix. Tracked as an accepted, reviewed exception rather than left dynamic and unlisted.",
+      "review_by": "2026-12-31"
     }
   ]
 }

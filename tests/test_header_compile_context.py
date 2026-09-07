@@ -1504,9 +1504,9 @@ def test_resolve_side_snapshot_stamps_parsed_with_build_context(
         captured.update(kwargs)
         return AbiSnapshot(library="lib", version="1.0", from_headers=True)
 
-    import abicheck.service as service_mod
+    import abicheck.workflows.input_resolution as input_resolution_mod
 
-    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+    monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
 
     side = InputSpec(path=so, headers=(header,), version="1.0", sources=tmp_path)
     evidence = SideEvidence(
@@ -1554,9 +1554,9 @@ def test_resolve_side_snapshot_forwards_symbols_only_and_debug_presence_only(
         captured.update(kwargs)
         return AbiSnapshot(library="lib", version="1.0", from_headers=False)
 
-    import abicheck.service as service_mod
+    import abicheck.workflows.input_resolution as input_resolution_mod
 
-    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+    monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
 
     side = InputSpec(path=so, version="1.0")
     evidence = SideEvidence(
@@ -1618,9 +1618,9 @@ def test_resolve_side_snapshot_forwards_only_explicit_includes_as_public_include
         captured.update(kwargs)
         return AbiSnapshot(library="lib", version="1.0", from_headers=False)
 
-    import abicheck.service as service_mod
+    import abicheck.workflows.input_resolution as input_resolution_mod
 
-    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+    monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
 
     side = InputSpec(path=so, version="1.0", includes=(explicit_dir,))
     evidence = SideEvidence(
@@ -1672,9 +1672,9 @@ def test_resolve_side_snapshot_omits_conflicting_c_standard_when_cxx_forced(
         captured.update(kwargs)
         return AbiSnapshot(library="lib", version="1.0", from_headers=True)
 
-    import abicheck.service as service_mod
+    import abicheck.workflows.input_resolution as input_resolution_mod
 
-    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+    monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
 
     side = InputSpec(path=so, headers=(header,), version="1.0", sources=tmp_path)
     evidence = SideEvidence(
@@ -1718,9 +1718,9 @@ def test_resolve_side_snapshot_does_not_stamp_when_unmatched(
     def _fake_resolve_input(*args: object, **kwargs: object) -> AbiSnapshot:
         return AbiSnapshot(library="lib", version="1.0", from_headers=True)
 
-    import abicheck.service as service_mod
+    import abicheck.workflows.input_resolution as input_resolution_mod
 
-    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+    monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
 
     side = InputSpec(path=so, headers=(header,), version="1.0", sources=tmp_path)
     evidence = SideEvidence(
@@ -1775,9 +1775,9 @@ def test_resolve_side_snapshot_propagates_ambiguous_error(
     def _fake_resolve_input(*args: object, **kwargs: object) -> AbiSnapshot:
         raise AssertionError("must not be reached: ambiguity fails closed first")
 
-    import abicheck.service as service_mod
+    import abicheck.workflows.input_resolution as input_resolution_mod
 
-    monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+    monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
 
     side = InputSpec(path=so, headers=(header,), version="1.0", sources=tmp_path)
     evidence = SideEvidence(

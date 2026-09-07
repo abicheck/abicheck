@@ -87,7 +87,9 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
         "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
-    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", fake_resolve
+    )
     monkeypatch.setattr("abicheck.buildsource.embed.embed_build_source", fake_embed)
 
     sources = tmp_path / "src"
@@ -127,7 +129,9 @@ def test_scan_candidate_filters_dependency_scope_by_default(monkeypatch, tmp_pat
         resolve_kwargs.update(kwargs)
         return _stub_snapshot()
 
-    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", fake_resolve
+    )
 
     _build_new_snapshot(
         binary=tmp_path / "lib.so",
@@ -191,7 +195,9 @@ def test_scan_candidate_folds_l3_compile_context_into_header_parse(
         captured["compile"] = kwargs["compile"]
         return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
 
-    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", fake_resolve
+    )
     monkeypatch.setattr(
         "abicheck.buildsource.embed.embed_build_source", lambda *a, **k: None
     )
@@ -249,7 +255,9 @@ def test_scan_candidate_lang_c_omits_conflicting_derived_cxx_standard(
         captured["compile"] = kwargs["compile"]
         return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
 
-    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", fake_resolve
+    )
     monkeypatch.setattr(
         "abicheck.buildsource.embed.embed_build_source", lambda *a, **k: None
     )
@@ -285,7 +293,8 @@ def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
         fake_seed_and_fold,
     )
     monkeypatch.setattr(
-        "abicheck.service.resolve_input", lambda *a, **k: _stub_snapshot()
+        "abicheck.workflows.input_resolution.resolve_input",
+        lambda *a, **k: _stub_snapshot(),
     )
     monkeypatch.setattr(
         "abicheck.buildsource.embed.embed_build_source", lambda *a, **k: None
@@ -336,7 +345,8 @@ def test_scan_candidate_expands_public_header_dirs_before_embed(monkeypatch, tmp
     pub_file.write_text("void standalone(void);\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        "abicheck.service.resolve_input", lambda *a, **k: _stub_snapshot()
+        "abicheck.workflows.input_resolution.resolve_input",
+        lambda *a, **k: _stub_snapshot(),
     )
 
     embed_kwargs: dict = {}
@@ -400,7 +410,8 @@ def test_scan_candidate_widens_l4_roots_with_a_lone_header_file(monkeypatch, tmp
     lone_header.write_text("struct Widget { int x; };\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        "abicheck.service.resolve_input", lambda *a, **k: _stub_snapshot()
+        "abicheck.workflows.input_resolution.resolve_input",
+        lambda *a, **k: _stub_snapshot(),
     )
 
     embed_kwargs: dict = {}
@@ -447,7 +458,9 @@ def test_scan_l2_seed_cleanup_runs_even_when_resolve_raises(monkeypatch, tmp_pat
         "abicheck.buildsource.l2_seed.seed_includes_and_fold_compile_context",
         fake_seed_and_fold,
     )
-    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", fake_resolve
+    )
 
     import click
     import pytest

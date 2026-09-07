@@ -85,7 +85,7 @@ class TestResolveSidesSequentially:
         import time
         from types import SimpleNamespace
 
-        from abicheck import service as service_mod
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck.service import resolve_compare_request
 
         monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
@@ -97,7 +97,7 @@ class TestResolveSidesSequentially:
             spans.append((version, start, time.monotonic()))
             return AbiSnapshot(library="libtest", version=version)
 
-        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve)
+        monkeypatch.setattr(_input_resolution, "resolve_input", _fake_resolve)
         old_p = tmp_path / "old.so"
         new_p = tmp_path / "new.so"
         old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
@@ -138,13 +138,13 @@ class TestResolvedExecutionContextWiring:
         )
 
     def _resolve(self, request, monkeypatch):
-        from abicheck import service as service_mod
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck.service import resolve_compare_request
 
         def _fake_resolve(path, headers, includes, version, lang, **kwargs):
             return AbiSnapshot(library="libtest", version=version)
 
-        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve)
+        monkeypatch.setattr(_input_resolution, "resolve_input", _fake_resolve)
         return resolve_compare_request(request)
 
     def test_pair_carries_a_populated_resolved_execution_context(
