@@ -22,7 +22,24 @@ happens not to in the fixtures exercised elsewhere.
 Once Phase 2a/2b (docs/contribute/plans/one-comparison-product.md §6) gives
 one of these functions a second caller reachable from `compare`, this test
 starts failing -- which is the point: it is the signal to delete the
-corresponding tests/parity/gaps.py entry in that same PR.
+corresponding tests/parity/gaps.py entry in that same PR, *once the whole
+group of checks a primitive backs has actually reached parity through
+compare's real, user-facing entry point*.
+
+**Documented partial exception (ADR-068 D3 / plan P2):**
+``abicheck/workflows/cross_source_evolution.py`` is a second, legitimate
+caller of ``run_crosschecks`` -- the first, minimal slice of the migration,
+which folds exactly one check (``unversioned_exported_symbol``) into an
+evolution-stated finding via ``compare(..., cross_source_checks=True)``, an
+opt-in Python-API parameter with no CLI flag yet. This does not close the
+``unversioned_exported_symbol`` (or any other) ``tests/parity/gaps.py``
+entry: the real, user-facing ``compare`` CLI this parity harness's own
+``compare_finding_set``/``compare_json`` helpers invoke still never passes
+``cross_source_checks=True``, so its default finding set is unaffected and
+every crosscheck-backed gap entry stays exactly as red as before. Only the
+raw structural claim this module checks -- "nothing but scan_engine.py
+calls the primitive at all" -- needed updating to admit the one caller this
+slice deliberately adds.
 """
 
 from __future__ import annotations
@@ -36,17 +53,24 @@ from .gaps import EXPECTED_GAPS
 
 _ABICHECK_ROOT = Path(__file__).resolve().parent.parent.parent / "abicheck"
 
-#: function name -> (defining module, expected sole-caller module, gap key)
-_ENGINE_PRIMITIVES: dict[str, tuple[str, str, str]] = {
+#: function name -> (defining module, expected caller module(s), gap key).
+#: `expected_callers` is usually a single module; `run_crosschecks` also
+#: allows `workflows/cross_source_evolution.py`, the documented ADR-068 D3
+#: partial-migration exception above.
+_ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str]] = {
     "run_crosschecks": (
         "buildsource/crosscheck.py",
-        "scan_engine.py",
+        ("scan_engine.py", "workflows/cross_source_evolution.py"),
         "private_header_leak",  # any of the 11 crosscheck gap keys will do
     ),
-    "scan_files": ("buildsource/pattern_scan.py", "scan_engine.py", "pattern_scan"),
+    "scan_files": (
+        "buildsource/pattern_scan.py",
+        ("scan_engine.py",),
+        "pattern_scan",
+    ),
     "run_preprocessor_scan": (
         "buildsource/preprocessor_scan.py",
-        "scan_engine.py",
+        ("scan_engine.py",),
         "preprocessor_scan",
     ),
 }
@@ -155,8 +179,9 @@ def _call_sites(function_name: str, defining_module: str) -> dict[Path, int]:
 
 @pytest.mark.parametrize("function_name", sorted(_ENGINE_PRIMITIVES))
 def test_only_scan_engine_calls_it(function_name: str) -> None:
-    defining_module, expected_caller, gap_key = _ENGINE_PRIMITIVES[function_name]
+    defining_module, expected_callers, gap_key = _ENGINE_PRIMITIVES[function_name]
     assert gap_key in EXPECTED_GAPS, f"{gap_key!r} must be a registered parity gap"
+    expected = {f"abicheck/{m}" for m in expected_callers}
 
     sites = _call_sites(function_name, defining_module)
     # Drop the defining module itself (recursive helpers / the module's own
@@ -164,17 +189,17 @@ def test_only_scan_engine_calls_it(function_name: str) -> None:
     sites = {p: n for p, n in sites.items() if p != Path("abicheck") / defining_module}
 
     callers = {_posix(p) for p in sites}
-    if callers - {f"abicheck/{expected_caller}"}:
+    if callers - expected:
         raise AssertionError(
-            f"{function_name}() gained a caller outside {expected_caller!r}: "
+            f"{function_name}() gained a caller outside {sorted(expected)}: "
             f"{sorted(callers)}. If this is Phase 2a/2b landing "
             f"({EXPECTED_GAPS[gap_key].plan_phase}), delete the "
             f"{gap_key!r} entry from tests/parity/gaps.py in the same PR "
             "instead of leaving this assertion to rot."
         )
-    assert callers == {f"abicheck/{expected_caller}"}, (
+    assert callers == expected, (
         f"{function_name}() has no production caller at all under abicheck/ "
-        f"-- expected exactly {expected_caller!r} (ADR-068 §1)"
+        f"-- expected exactly {sorted(expected)} (ADR-068 §1)"
     )
 
 

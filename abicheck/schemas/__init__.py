@@ -790,7 +790,19 @@ from typing import Any
 #:       ``finding_evolution`` object (same "renumber, don't reuse"
 #:       convention as the 2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2/3.4
 #:       entries above).
-REPORT_SCHEMA_VERSION = "3.6"
+#: 3.7 -- ADR-068 D3 / plan P2, merged onto Phase 1 item 2's already-landed
+#:       3.5 and workstream E slice S3's 3.6 (renumbered from a conflicting
+#:       3.6 this branch had independently claimed, same "renumber, don't
+#:       reuse" convention as the 2.32/2.36/2.38/2.48/2.49/2.51/2.53/3.2/
+#:       3.4/3.6 entries above): ``compare(..., cross_source_checks=True)``
+#:       stamps a ``change``'s ``cross_source_evolution`` (introduced/
+#:       resolved/persistent/not_evaluated -- ``CrossSourceEvolution``,
+#:       deliberately distinct from the cross-comparison-chain
+#:       ``FindingEvolution``/``finding_evolution`` object 3.5 above) and an
+#:       additive top-level ``cross_source_evolution`` per-state count
+#:       object; off by default, never changes the finding's default
+#:       verdict.
+REPORT_SCHEMA_VERSION = "3.7"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

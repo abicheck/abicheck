@@ -466,12 +466,23 @@ def render_json_with_side_facts(
     already holds all six names, so building the bundle costs nothing new
     there (``reporter._SCOPED_GATE_HELPERS``).
     """
+    from .report.cross_source_evolution import (
+        compute_cross_source_evolution_summary,
+        render_cross_source_evolution_json,
+    )
     from .report.run_outcome import run_outcome_dict_for_diff_result
     from .report.scoped_gate import apply_scoped_gate
 
     d["run_outcome"] = run_outcome_dict_for_diff_result(result, severity_config, gate)
     add_suppression_audit(d, result)
     add_evidence_depth(d, result)
+    # ADR-068 D3 / plan P2 (schema 3.3) -- one shared fold point, so every
+    # JSON mode (full/leaf/root-cause/--stat) carries it identically.
+    evolution_summary = compute_cross_source_evolution_summary(result.changes)
+    if evolution_summary is not None:
+        d["cross_source_evolution"] = render_cross_source_evolution_json(
+            evolution_summary
+        )
     apply_scoped_gate(
         d,
         result,

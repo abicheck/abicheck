@@ -25,11 +25,7 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from .severity import GateDecision, KindSets, SeverityConfig
 from . import reporter_contract_blocks as _reporter_contract_blocks
-from .checker import (
-    Change,
-    DiffResult,
-    Verdict,
-)
+from .checker import Change, DiffResult, Verdict
 from .checker_policy import (
     ChangeKind,
     EvidenceStatus,
@@ -46,6 +42,7 @@ from .policy.gate_decision import gate_decision_for_result
 from .report.contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
 )
+from .report.cross_source_evolution import change_cross_source_evolution_field as _cse
 from .report.dispatch_markdown import (
     _to_markdown_leaf as _to_markdown_leaf,
     _to_markdown_root_cause as _to_markdown_root_cause,
@@ -1417,6 +1414,8 @@ def _change_annotation_fields(c: Any) -> dict[str, Any]:
         out["correlated_change_kind"] = correlated
     if getattr(c, "symbol_binding", None):
         out["symbol_binding"] = c.symbol_binding
+    if (cse := _cse(c)) is not None:
+        out["cross_source_evolution"] = cse
     return out
 
 

@@ -28,6 +28,7 @@ from typing import Literal
 from .checker_policy import (
     ChangeKind,
     Confidence,
+    CrossSourceEvolution,
     EvidenceTier,
     FindingEvolution,
     ReachabilityState,
@@ -413,6 +414,13 @@ class Change:
     # regardless of which comparison-chain context annotated their evolution.
     evolution: FindingEvolution = field(
         default=FindingEvolution.NOT_EVALUATED, kw_only=True, compare=False
+    )
+    # ADR-068 D3 / plan P2 -- OLD->NEW evolution for a one-sided cross-source
+    # finding *within this one compare() call* (see CrossSourceEvolution --
+    # not the cross-comparison-chain `evolution` field above). None for
+    # every ordinary finding.
+    cross_source_evolution: CrossSourceEvolution | None = field(
+        default=None, kw_only=True
     )
 
 
